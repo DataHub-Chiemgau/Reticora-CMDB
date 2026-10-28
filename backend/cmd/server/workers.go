@@ -104,7 +104,6 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		exportWorker := export.NewJobWorker(d.repos.ExportJobs, d.repos.CI, d.blobs)
 		if d.repos.Jobs != nil {
 			exportWorker.Tracker = jobs.NewService(d.repos.Jobs)
-			exportWorker.Events = emitterOf(d.pool)
 		}
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
@@ -120,6 +119,9 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		// Subscribed events become notifications (NTF-05).
 		publisher := events.NewPublisher(d.pool, d.eventStream, d.dispatcher,
 			notify.NewEventConsumer(notify.NewPGResolver(d.pool, permission.NewPGRepository(d.pool)), d.notifier))
+		// The stream retention of the installation (EVT-01, NFR-06); the
+		// outbox keeps published event data as long.
+		publisher.MaxAge, publisher.MaxBytes = d.cfg.EventsMaxAge, d.cfg.EventsMaxBytes
 		setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
 		err := publisher.Setup(setupCtx)
 		cancelSetup()
@@ -375,7 +377,7 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// Jobs whose worker was lost (crash, rolling deploy) do not stay
 		// running (JOB-01, TEC-14).
 		if d.repos.Jobs != nil {
-			systemJobs = append(systemJobs, jobs.NewReaper(jobs.NewService(d.repos.Jobs).WithEvents(emitterOf(pool)),
+			systemJobs = append(systemJobs, jobs.NewReaper(jobs.NewService(d.repos.Jobs),
 				jobRequeues(d.jobQueue)).Schedule())
 		}
 		// Digests of the non-critical notification categories (NTF-04,

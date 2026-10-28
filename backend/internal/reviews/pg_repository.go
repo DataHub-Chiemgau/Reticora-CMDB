@@ -107,7 +107,8 @@ func (r *PGRepository) ListReviewItems(ctx context.Context, orgID string, filter
 }
 
 // CreateReviewItem implements Repository. With an ObjectKey an open item of
-// the same object and type is returned instead of a second one.
+// the same object and type is returned instead of a second one. A new item
+// writes review.created in its transaction (recordCreated).
 func (r *PGRepository) CreateReviewItem(ctx context.Context, item *Item) error {
 	return database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Payload == nil {
@@ -149,7 +150,26 @@ func (r *PGRepository) CreateReviewItem(ctx context.Context, item *Item) error {
 		}
 		*item = *stored
 		item.Deduplicated = deduplicated
-		return nil
+		if deduplicated {
+			return nil
+		}
+		return recordCreated(ctx, tx, stored)
+	})
+}
+
+// recordCreated writes review.created of a newly opened item in the
+// transaction that inserts it (NTF-05, EVT-01), like recordResolved: a
+// rolled back item is never announced. The data carries the client and site
+// of the item (review_item.client_id/site_id, derived from the candidate CIs
+// or set by the producer), so that the notification reaches the reviewers
+// of that client and site (F-323); empty for an org-wide item.
+func recordCreated(ctx context.Context, tx pgx.Tx, item *Item) error {
+	data := map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey,
+		"candidate_ci_ids": item.CandidateCIIDs, "client_id": item.ClientID, "site_id": item.SiteID}
+	return database.BeforeCommit(ctx, func() error {
+		_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated,
+			EntityID: item.ID, Data: data})
+		return err
 	})
 }
 

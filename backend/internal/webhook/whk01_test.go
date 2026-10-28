@@ -72,15 +72,10 @@ func TestWHK01HeadersDeactivationAndRetry(t *testing.T) {
 	}
 	subID := subscriptionID(t, repo)
 	store := NewMemoryDeliveryStore()
-	emitter := &fakeEmitter{}
-	d := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: store, MaxAttempts: 1, PollInterval: -1, Events: emitter})
+	d := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: store, MaxAttempts: 1, PollInterval: -1})
 	defer func() { _ = d.Shutdown(context.Background()) }()
 
-	dead := func() int {
-		emitter.mu.Lock()
-		defer emitter.mu.Unlock()
-		return len(emitter.events)
-	}
+	dead := func() int { return len(deadEvents(store)) }
 	for i := 1; i <= 3; i++ {
 		d.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
 		waitFor(t, func() bool { return dead() == i })
@@ -96,14 +91,12 @@ func TestWHK01HeadersDeactivationAndRetry(t *testing.T) {
 	}
 	mu.Unlock()
 
-	emitter.mu.Lock()
-	for i, e := range emitter.events {
+	for i, e := range deadEvents(store) {
 		disabled, _ := e.Data.(map[string]any)["subscription_disabled"].(bool)
 		if disabled != (i == 2) {
 			t.Errorf("dead delivery %d: subscription_disabled %v", i+1, disabled)
 		}
 	}
-	emitter.mu.Unlock()
 	sub, err := repo.GetByID(context.Background(), "org-1", subID)
 	if err != nil || sub.IsActive {
 		t.Fatalf("subscription active after three dead deliveries: %+v (err %v)", sub, err)

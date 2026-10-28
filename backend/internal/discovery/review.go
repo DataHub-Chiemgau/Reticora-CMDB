@@ -2,7 +2,9 @@ package discovery
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -79,9 +81,10 @@ func (h *Handler) WithReviewJobs(tracker jobs.Tracker) *Handler {
 }
 
 // CIMerger merges a victim CI into a survivor as the CI-12 merge, a job of
-// kind ci.merge with a tombstone and a snapshot; ci.Service implements it.
+// kind ci.merge with a tombstone and a snapshot, under the id of the merge
+// row and its job; ci.Service implements it.
 type CIMerger interface {
-	Merge(ctx context.Context, orgID, survivorID, victimID string) (*ci.MergeResult, error)
+	MergeAs(ctx context.Context, orgID, survivorID, victimID, mergeID string) (*ci.MergeResult, error)
 }
 
 // WithMerger attaches the CI-12 merge the resolution merge of a
@@ -94,12 +97,16 @@ func (h *Handler) WithMerger(m CIMerger) *Handler {
 
 // mergeDuplicate merges the duplicate of a probable_duplicate item into the
 // chosen CI (CI-12). A refused merge leaves the item open: a CI another
-// merge holds is 409, a CI that is gone 404.
-func (h *Handler) mergeDuplicate(ctx context.Context, orgID, survivorID, dupID string) error {
+// merge holds is 409, a CI that is gone 404. Every attempt of the item runs
+// under the merge id of the item (reviewMergeID): a retry after a failed
+// attempt continues its ci.merge job, which the review.merge job of the
+// item mirrors (E-89, F-330); no failed ci.merge job stays beside the
+// merge that succeeded.
+func (h *Handler) mergeDuplicate(ctx context.Context, orgID, itemID, survivorID, dupID string) error {
 	if h.merger == nil {
 		return refused(http.StatusNotImplemented, "this server cannot merge CIs")
 	}
-	_, err := h.merger.Merge(ctx, orgID, survivorID, dupID)
+	_, err := h.merger.MergeAs(ctx, orgID, survivorID, dupID, reviewMergeID(itemID))
 	switch {
 	case err == nil:
 		return nil
@@ -111,6 +118,16 @@ func (h *Handler) mergeDuplicate(ctx context.Context, orgID, survivorID, dupID s
 		return refused(http.StatusNotFound, "the duplicate or the chosen CI was not found")
 	}
 	return err
+}
+
+// reviewMergeID is the id of the CI-12 merge of the review item itemID and
+// of its ci.merge job: a UUID (version 8, RFC 9562) derived from the item,
+// the same for every attempt and different from the item's own id.
+func reviewMergeID(itemID string) string {
+	b := sha256.Sum256([]byte("review_item merge:" + strings.ToLower(itemID)))
+	b[6] = b[6]&0x0f | 0x80
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // WithReviewNotifier attaches the notification of opened review items
@@ -255,7 +272,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			// references to the chosen CI and leaves the duplicate as a
 			// tombstone with a snapshot for the unmerge (CH29, F-096).
 			if dup := payloadString(item.Payload, "ci_id"); dup != "" && dup != res.CIID {
-				if err := h.mergeDuplicate(ctx, orgID, res.CIID, dup); err != nil {
+				if err := h.mergeDuplicate(ctx, orgID, item.ID, res.CIID, dup); err != nil {
 					return false, err
 				}
 				res.Note = "merged " + dup + " into " + res.CIID

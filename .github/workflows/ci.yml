@@ -129,10 +129,31 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # TEC-12 (WP-534): the scope filters of the OpenSearch backend are
+      # tested against a real OpenSearch, the version of deploy/ (single
+      # node, security plugin off; internal/search/
+      # opensearch_real_integration_test.go).
+      opensearch:
+        image: opensearchproject/opensearch:2.13.0
+        env:
+          discovery.type: single-node
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+          DISABLE_SECURITY_PLUGIN: "true"
+          # The runner's disk fill level must not block the test index.
+          cluster.routing.allocation.disk.threshold_enabled: "false"
+          OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 18
     env:
       PGPASSWORD: reticora
       DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_migrations?sslmode=disable
       TEST_REDIS_URL: redis://localhost:6379/0
+      TEST_OPENSEARCH_URL: http://localhost:9200
     steps:
       - uses: actions/checkout@v4
 
@@ -207,6 +228,20 @@ jobs:
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 
+      # OPS-04/NFR-05 (WP-544): setupObjectStorage creates the buckets and
+      # switches on their versioning against a real MinIO, the image of
+      # deploy/docker-compose (cmd/server/objectstorage_integration_test.go).
+      # Service containers cannot pass arguments ("server /data"), so MinIO
+      # is started here.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=reticora -e MINIO_ROOT_PASSWORD=reticora_dev \
+            pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 \
+            server /data
+          for _ in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:9000/minio/health/live && exit 0; sleep 1; done
+          docker logs minio; exit 1
+
       # Every PostgreSQL test activates itself through TEST_DATABASE_URL, so the
       # whole module runs without a name filter. -p 1 runs packages one after
       # another: they share this database and some fixtures are not isolated.
@@ -218,6 +253,9 @@ jobs:
           TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
           TEST_APP_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora_migrations?sslmode=disable
           TEST_NATS_URL: nats://localhost:4222
+          TEST_S3_ENDPOINT: http://localhost:9000
+          TEST_S3_ACCESS_KEY: reticora
+          TEST_S3_SECRET_KEY: reticora_dev
         run: gotestsum --format testname --jsonfile test-db.json -- -count=1 -p 1 ./...
 
       # ABN-02/NFR-10 (WP-436, retest of F-115 and F-280): the plan budget of
@@ -1051,3 +1089,104 @@ jobs:
             exit 1
           fi
           echo "fixture overlay without the component postgres: rejected ($(tr '\n' ';' <<<"$problems"))"
+
+  # COL-06/TEC-15 (WP-546, open evidence of WP-148): the updater's
+  # CosignVerifier against the real cosign and a real keyless Sigstore bundle
+  # (edgecore/update/cosign_real_test.go, tools per E-31). The job signs a
+  # test artifact and a second file in the same directory (the foreign bundle
+  # of the negative case) with the OIDC identity of this workflow, then runs
+  # the test twice: with that identity the signed artifact is accepted and the
+  # changed artifact and the foreign bundle are refused; with the pinned
+  # release identity (no COSIGN_EXPECT_IDENTITY) the signature is refused for
+  # the identity. Release bundles are checked in release.yml (WP-545).
+  cosign-verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # keyless signing (Fulcio) with the identity of this workflow
+    env:
+      COSIGN_VERSION: v2.4.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: edgecore/go.mod
+
+      - uses: sigstore/cosign-installer@v3.7.0
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Sign a test artifact and a foreign artifact (cosign keyless)
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/cosign-verify"
+          mkdir -p "$dir"
+          printf 'reticora cosign-verify artifact %s run %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$dir/reticora-test-artifact"
+          printf 'reticora cosign-verify foreign artifact %s run %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$dir/reticora-foreign-artifact"
+          for file in reticora-test-artifact reticora-foreign-artifact; do
+            cosign sign-blob --yes --bundle "$dir/$file.sigstore.json" "$dir/$file"
+          done
+          # The certificate names this workflow at the ref of the run
+          # (owner/repo/.github/workflows/ci.yml@refs/...), as a regexp.
+          identity="^https://github\.com/$(printf '%s' "$GITHUB_WORKFLOW_REF" | sed 's/[*.+?^$(){}|[\\]/\\&/g')\$"
+          echo "CI workflow identity: $identity"
+          {
+            echo "COSIGN_DIR=$dir"
+            echo "CI_IDENTITY=$identity"
+          } >> "$GITHUB_ENV"
+
+      - name: Real cosign with the identity of this workflow (accepted; changed artifact and foreign bundle refused)
+        working-directory: edgecore
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/cosign-ci-identity.log"
+          COSIGN_BIN="$(command -v cosign)" \
+            RELEASE_ARTIFACT="$COSIGN_DIR/reticora-test-artifact" \
+            RELEASE_BUNDLE="$COSIGN_DIR/reticora-test-artifact.sigstore.json" \
+            COSIGN_EXPECT_IDENTITY="$CI_IDENTITY" \
+            go test -tags cosignreal -count=1 -v -run '^TestCosignVerifierWithRealCosign$' ./update/ 2>&1 | tee "$log"
+          for name in 'TestCosignVerifierWithRealCosign' \
+            'TestCosignVerifierWithRealCosign/signed_artifact_with_the_expected_identity_is_accepted' \
+            'TestCosignVerifierWithRealCosign/artifact_changed_by_one_byte_is_refused' \
+            'TestCosignVerifierWithRealCosign/foreign_bundle_is_refused' \
+            'TestCosignVerifierWithRealCosign/another_identity_is_refused'; do
+            if ! grep -qE -- "--- PASS: ${name} \(" "$log"; then
+              echo "::error::$name did not pass with the identity of this workflow"
+              exit 1
+            fi
+          done
+          if grep -qE -- '--- (SKIP|FAIL)|no tests to run' "$log"; then
+            echo "::error::TestCosignVerifierWithRealCosign skipped or failed a case"
+            exit 1
+          fi
+
+      - name: Real cosign with the pinned release identity (refused for the identity)
+        working-directory: edgecore
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/cosign-release-identity.log"
+          # The test is expected to fail here: keep its exit code.
+          rc=0
+          COSIGN_BIN="$(command -v cosign)" \
+            RELEASE_ARTIFACT="$COSIGN_DIR/reticora-test-artifact" \
+            RELEASE_BUNDLE="$COSIGN_DIR/reticora-test-artifact.sigstore.json" \
+            go test -tags cosignreal -count=1 -v -run '^TestCosignVerifierWithRealCosign$' ./update/ > "$log" 2>&1 || rc=$?
+          cat "$log"
+          positive='TestCosignVerifierWithRealCosign/signed_artifact_with_the_expected_identity_is_accepted'
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::a signature of this workflow was accepted for the pinned release identity"
+            exit 1
+          fi
+          if ! grep -qE -- "--- FAIL: ${positive} \(" "$log" \
+            || ! grep -q 'none of the expected identities matched' "$log"; then
+            echo "::error::exit $rc, but not refused for the identity"
+            exit 1
+          fi
+          # Only the positive case fails; every refusal case still passes.
+          if grep -E -- '--- FAIL: TestCosignVerifierWithRealCosign/' "$log" | grep -qvF -- "--- FAIL: ${positive} ("; then
+            echo "::error::another case than the identity check failed"
+            exit 1
+          fi
+          echo "refused for the pinned release identity (exit $rc): identity mismatch"

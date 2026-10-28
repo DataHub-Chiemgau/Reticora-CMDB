@@ -83,12 +83,20 @@ export interface ReviewResolution {
   ci_type_id?: string;
 }
 
-function query(filter: ReviewFilter) {
-  const params = new URLSearchParams({ limit: '100' });
+/** REVIEW_PAGE_SIZE is the number of items one page of the inbox lists. */
+export const REVIEW_PAGE_SIZE = 100;
+
+function query(filter: ReviewFilter, offset = 0) {
+  const params = new URLSearchParams({ limit: String(REVIEW_PAGE_SIZE) });
+  if (offset > 0) params.set('offset', String(offset));
   if (filter.status) params.set('status', filter.status);
   if (filter.kind) params.set('kind', filter.kind);
   if (filter.escalated) params.set('escalated', 'true');
   return params.toString();
+}
+
+function reviewPage(filter: ReviewFilter, offset: number) {
+  return fetchAPI<PaginatedResponse<ReviewItem>>(`/review-items?${query(filter, offset)}`);
 }
 
 export function resolveReview(id: string, resolution: ReviewResolution): Promise<ReviewItem> {
@@ -98,12 +106,32 @@ export function resolveReview(id: string, resolution: ReviewResolution): Promise
   });
 }
 
-/** useReviewItems lists the review inbox (UI-16). */
-export function useReviewItems(filter: ReviewFilter) {
+/**
+ * useReviewItems lists one page of the review inbox (UI-16): offset is the
+ * first item of the page; total and has_more of the answer tell the inbox
+ * how many items match and whether another page follows (F-345).
+ */
+export function useReviewItems(filter: ReviewFilter, offset = 0) {
   return useQuery({
-    queryKey: ['review-items', filter],
-    queryFn: () => fetchAPI<PaginatedResponse<ReviewItem>>(`/review-items?${query(filter)}`),
+    queryKey: ['review-items', filter, offset],
+    queryFn: () => reviewPage(filter, offset),
   });
+}
+
+/**
+ * fetchAllReviewItems loads every item that matches the filter page by page,
+ * following has_more with the next offset, so a bulk resolution can cover
+ * all of them, not only the page shown (F-345).
+ */
+export async function fetchAllReviewItems(filter: ReviewFilter): Promise<ReviewItem[]> {
+  const all: ReviewItem[] = [];
+  for (let offset = 0; ;) {
+    const page = await reviewPage(filter, offset);
+    const rows = page.data ?? [];
+    all.push(...rows);
+    if (!page.has_more || rows.length === 0) return all;
+    offset += rows.length;
+  }
 }
 
 /** useResolveReview resolves one item. */

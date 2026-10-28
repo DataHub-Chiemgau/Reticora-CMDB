@@ -11,7 +11,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -28,11 +27,10 @@ var DefaultBackoff = ExponentialBackoff(30*time.Second, 15*time.Minute)
 // claim, progress, success, failure with retry and backoff, timeout,
 // cancel.
 type Service struct {
-	repo   Repository
-	now    func() time.Time
-	mu     sync.RWMutex
-	kinds  map[string]Kind
-	events events.Emitter
+	repo  Repository
+	now   func() time.Time
+	mu    sync.RWMutex
+	kinds map[string]Kind
 	// cancelPoll is how often the run context of a job asks for a cancel
 	// made by another replica (runContext).
 	cancelPoll time.Duration
@@ -49,12 +47,6 @@ var localRuns = struct {
 // DefaultCancelPoll is how often the run context of a job asks whether the
 // job was cancelled on another replica.
 const DefaultCancelPoll = 5 * time.Second
-
-// WithEvents reports finally failed jobs as job.failed (NTF-05).
-func (s *Service) WithEvents(e events.Emitter) *Service {
-	s.events = e
-	return s
-}
 
 // NewService creates a service on repo.
 func NewService(repo Repository) *Service {
@@ -256,19 +248,20 @@ func (s *Service) fail(ctx context.Context, orgID, id string, cause error, retry
 		return s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
 			&Update{Status: StatusQueued, Error: &msg, RunAfter: &next})
 	}
+	// The job fails for good: job.failed (NTF-05) is written with the
+	// change (WP-550).
 	failed, err := s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
-		&Update{Status: StatusFailed, Error: &msg, FinishedAt: &now})
+		&Update{Status: StatusFailed, Error: &msg, FinishedAt: &now, ReportFailed: true})
 	if err == nil {
 		observeEnd(failed)
 	}
-	if err == nil && s.events != nil {
-		if eerr := s.events.Emit(ctx, &events.Event{OrgID: orgID, Type: events.JobFailed, EntityID: failed.ID,
-			Data: map[string]any{"id": failed.ID, "kind": failed.Kind, "error": msg, "attempts": failed.Attempts,
-				"created_by": failed.CreatedBy}}); eerr != nil {
-			slog.Error("report failed job", "job", failed.ID, "error", eerr)
-		}
-	}
 	return failed, err
+}
+
+// MarkReverted records that user by reverted the succeeded job (F-329):
+// ErrAlreadyReverted when its revert is recorded already.
+func (s *Service) MarkReverted(ctx context.Context, orgID, id, by string) (*Job, error) {
+	return s.repo.MarkReverted(ctx, orgID, id, by, s.now())
 }
 
 // Cancellable reports whether Cancel would cancel the job now: a queued
@@ -514,7 +507,10 @@ func (s *Service) Track(ctx context.Context, orgID, kind, refTable, refID, creat
 
 // Mirror implements Tracker: the tracked job takes the status of its row.
 // Unknown rows (created before tracking) are tracked first; a change the
-// status model does not allow is ignored.
+// status model does not allow is ignored. A failed job whose row is tried
+// again (the retried merge of a review item, F-330) runs again: failed →
+// running counts the attempt and clears the error of the failed one
+// (mirrorRetry).
 func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, status Status, errMsg string) error {
 	job, err := s.repo.GetByRef(ctx, orgID, refTable, refID)
 	if errors.Is(err, ErrNotFound) {
@@ -532,7 +528,12 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 	now := s.now()
 	u := &Update{Status: status}
 	from := []Status{job.Status}
+	retry := mirrorRetry(job, status)
 	switch {
+	case retry:
+		// A new attempt: no error and no progress of the failed one.
+		none, zero := "", 0
+		u.StartedAt, u.IncAttempts, u.Error, u.Progress = &now, true, &none, &zero
 	case status == StatusRunning:
 		u.StartedAt, u.IncAttempts = &now, true
 	case status.Terminal():
@@ -549,7 +550,7 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 	if errMsg != "" {
 		u.Error = &errMsg
 	}
-	if !CanTransition(job.Status, status) && (job.Status != StatusQueued || !status.Terminal()) {
+	if !retry && !CanTransition(job.Status, status) && (job.Status != StatusQueued || !status.Terminal()) {
 		return nil
 	}
 	moved, err := s.repo.Transition(ctx, orgID, job.ID, from, u)
@@ -563,6 +564,15 @@ func (s *Service) Mirror(ctx context.Context, orgID, refTable, refID string, sta
 		observeEnd(moved)
 	}
 	return err
+}
+
+// mirrorRetry reports whether Mirror starts a new attempt of a failed job:
+// only a mirrored job, which follows a row of its reference, goes from
+// failed back to running, when its row is tried again (F-330). The status
+// model keeps failed terminal for every other job (CanTransition): a job
+// of the queue that failed for good is never run again.
+func mirrorRetry(job *Job, to Status) bool {
+	return job.Status == StatusFailed && to == StatusRunning && job.RefTable != "" && job.RefID != ""
 }
 
 // RunDetached enqueues a job of kind and runs it right away in the

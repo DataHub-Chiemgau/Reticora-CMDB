@@ -12,6 +12,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // PGRepository stores jobs in PostgreSQL. Jobs belong to the organization
@@ -30,7 +31,7 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{po
 const jobColumns = `id::text, COALESCE(organization_id::text, ''), kind, status, progress, params, result,
 	COALESCE(error, ''), COALESCE(idempotency_key, ''), COALESCE(created_by::text, ''), attempts, max_attempts,
 	run_after, COALESCE(timeout_seconds, 0), COALESCE(ref_table, ''), COALESCE(ref_id::text, ''),
-	created_at, updated_at, started_at, finished_at,
+	created_at, updated_at, started_at, finished_at, reverted_at, COALESCE(reverted_by::text, ''),
 	scope_recorded, scope_clients::text[], scope_sites::text[], scope_teams::text[]`
 
 // ownExport restricts request paths to the export jobs of the principal
@@ -84,7 +85,7 @@ func scanJob(row pgx.Row) (*Job, error) {
 	var scope Scope
 	if err := row.Scan(&j.ID, &j.OrganizationID, &j.Kind, &status, &j.Progress, &j.Params, &result,
 		&j.Error, &j.IdempotencyKey, &j.CreatedBy, &j.Attempts, &j.MaxAttempts, &j.RunAfter, &j.TimeoutSeconds,
-		&j.RefTable, &j.RefID, &j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.FinishedAt,
+		&j.RefTable, &j.RefID, &j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.FinishedAt, &j.RevertedAt, &j.RevertedBy,
 		&recorded, &scope.Clients, &scope.Sites, &scope.Teams); err != nil {
 		return nil, err
 	}
@@ -332,7 +333,9 @@ func (r *PGRepository) QueuedDue(ctx context.Context, now time.Time, limit int) 
 }
 
 // Transition implements Repository; the status check and the change are
-// one statement.
+// one statement. With u.ReportFailed a change to failed appends job.failed
+// to the outbox in its transaction (WP-550): a failed append rolls the
+// change back, the job stays running.
 func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []Status, u *Update) (*Job, error) {
 	if !isUUID(id) {
 		return nil, ErrNotFound
@@ -371,10 +374,56 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 		if err != nil {
 			return fmt.Errorf("update job: %w", err)
 		}
+		if u.ReportFailed && j.Status == StatusFailed {
+			if _, err := events.NewOutbox().Append(ctx, tx, failedEvent(j)); err != nil {
+				return fmt.Errorf("update job: %w", err)
+			}
+		}
 		out = j
 		return nil
 	})
 	return out, err
+}
+
+// MarkReverted implements Repository; the check and the change are one
+// statement, so of two concurrent reverts one records it.
+func (r *PGRepository) MarkReverted(ctx context.Context, orgID, id, by string, at time.Time) (*Job, error) {
+	if !isUUID(id) {
+		return nil, ErrNotFound
+	}
+	var out *Job
+	own := visible(ctx)
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		j, err := scanJob(tx.QueryRow(ctx, `
+			UPDATE job SET reverted_at = $3, reverted_by = $4::uuid
+			WHERE organization_id = $1 AND id = $2 AND status = 'succeeded' AND reverted_at IS NULL`+own+`
+			RETURNING `+jobColumns, orgID, id, at, surrogate(by)))
+		if errors.Is(err, pgx.ErrNoRows) {
+			var status string
+			var reverted bool
+			if gerr := tx.QueryRow(ctx, `SELECT status, reverted_at IS NOT NULL FROM job WHERE organization_id = $1 AND id = $2`+own,
+				orgID, id).Scan(&status, &reverted); gerr != nil {
+				return ErrNotFound
+			}
+			if reverted {
+				return ErrAlreadyReverted
+			}
+			return fmt.Errorf("%w: %s is not reverted", ErrTransition, status)
+		}
+		if err != nil {
+			return fmt.Errorf("record job revert: %w", err)
+		}
+		out = j
+		return nil
+	})
+	return out, err
+}
+
+// failedEvent is job.failed of a job that failed for good (NTF-05): its
+// creator is notified.
+func failedEvent(j *Job) *events.Event {
+	return &events.Event{OrgID: j.OrganizationID, Type: events.JobFailed, EntityID: j.ID,
+		Data: map[string]any{"id": j.ID, "kind": j.Kind, "error": j.Error, "attempts": j.Attempts, "created_by": j.CreatedBy}}
 }
 
 // RunningSince implements Repository.

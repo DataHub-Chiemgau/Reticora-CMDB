@@ -388,7 +388,7 @@ function LocationTreeItem({
   return (
     <li>
       <div
-        className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800"
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800"
         style={{ paddingLeft: `${depth * 1.25 + 0.5}rem` }}
       >
         {children.length > 0 ? (
@@ -404,9 +404,11 @@ function LocationTreeItem({
           <span className="w-4" />
         )}
         <span aria-hidden>{KIND_ICONS[node.kind]}</span>
-        <span className="font-medium text-gray-900 dark:text-gray-100">{node.name}</span>
+        <span className="min-w-0 font-medium text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100">
+          {node.name}
+        </span>
         <Badge variant="neutral">{kindLabel(node.kind)}</Badge>
-        <span className="ml-auto flex gap-2">
+        <span className="ml-auto flex flex-wrap gap-2">
           {canHaveChildren ? (
             <button
               className="text-xs text-primary hover:underline"

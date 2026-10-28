@@ -80,7 +80,7 @@ func t6NewEnv(t *testing.T, tag string, ra middleware.RouteAuditor) *t6Env {
 	policy := egress.Options{AllowPrivate: true}
 	emitter := events.NewPGEmitter(f.App)
 	dispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(policy), webhook.DispatcherOptions{
-		Deliveries: repos.WebhookDeliveries, PollInterval: -1, Events: emitter})
+		Deliveries: repos.WebhookDeliveries, PollInterval: -1})
 	entitlements := entitlement.NewService(repos.Entitlement, entitlement.Options{Enforce: false})
 	notifications := &notify.Center{
 		Channels:    notify.NewPGRepository(f.App, notify.NewSealer(encryptor)),

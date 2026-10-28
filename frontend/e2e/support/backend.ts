@@ -187,6 +187,17 @@ const DEFAULTS: Handler[] = [
       ),
     }),
   },
+  // The effective rights of the signed-in administrator (signIn): the review
+  // inbox offers its resolutions only with review:resolve (WP-557).
+  {
+    path: '/me/permissions',
+    reply: () => ({
+      body: {
+        user_id: '00000000-0000-0000-0000-000000000001',
+        permissions: ['ci:read', 'discovery:read', 'review:resolve'],
+      },
+    }),
+  },
   { path: '/ci-types', reply: () => ({ body: list(CI_TYPES) }) },
   {
     path: /^\/ci-types\/[0-9a-f-]{36}$/,

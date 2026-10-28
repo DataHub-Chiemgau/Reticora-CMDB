@@ -6,7 +6,8 @@
 #   go       test functions in files with "//go:build auditdefect"
 #   sh       cases of tests/audit/*.test.sh
 #   vitest   tests in frontend/src/**/*.auditdefect.ts(x)
-#   e2e-real tests of frontend/e2e-real/ (compared by install-smoke.yml)
+#   e2e-real tests of frontend/e2e-real/ (compared by install-smoke.yml), one
+#            result per test and Playwright project (WP-532)
 # tests/audit/expected-failures.txt lists every test that is red today. This
 # script runs the tests and compares each result with the list:
 #   listed and red          -> allowed
@@ -21,13 +22,15 @@
 # Usage:
 #   tests/audit/run-auditdefect.sh [--kinds go,sh,vitest] [--out DIR]
 #       run the tests of the given kinds, then compare
-#   tests/audit/run-auditdefect.sh compare --kinds KINDS --results FILE
+#   tests/audit/run-auditdefect.sh compare --kinds KINDS --results FILE [--projects P1,P2]
 #       compare an existing result file (lines "art;ort;test;status;detail",
-#       status pass|fail|skip|error)
+#       status pass|fail|skip|error); --projects restricts the e2e-real lines
+#       of both sides to these Playwright projects (one job of a matrix)
 #   tests/audit/run-auditdefect.sh sh-parse SCRIPT LOG RC
 #       print the result lines of one shell test log
 #   tests/audit/run-auditdefect.sh playwright --report report.json --results FILE
-#       convert a Playwright JSON report into result lines (kind e2e-real)
+#       convert a Playwright JSON report into result lines (kind e2e-real,
+#       ort "<projectName>:frontend/e2e-real/<spec file>")
 # Environment: EXPECTED (default tests/audit/expected-failures.txt). Go
 # defect tests need TEST_DATABASE_URL, TEST_NATS_URL, TEST_REDIS_URL and
 # TEST_NATS_SERVER_BIN like the CI job "migrations".
@@ -38,14 +41,25 @@ EXPECTED="${EXPECTED:-$ROOT/tests/audit/expected-failures.txt}"
 
 py() { python3 - "$@"; }
 
-compare() { # kinds results
-    py "$1" "$2" "$EXPECTED" <<'PY'
-import sys
+compare() { # kinds results [projects]
+    py "$1" "$2" "$EXPECTED" "${3:-}" <<'PY'
+import re, sys
 kinds = set(sys.argv[1].split(","))
 results_path, expected_path = sys.argv[2], sys.argv[3]
+projects = set(p for p in sys.argv[4].split(",") if p)
 
 def key(art, ort, test):
     return (art.strip(), ort.strip(), test.strip())
+
+# e2e-real: ort = "<project>:frontend/e2e-real/<spec file>" (WP-532); with
+# --projects only the lines of these projects take part, on both sides.
+E2E_ORT = re.compile(r"^([a-z0-9-]+):frontend/e2e-real/[A-Za-z0-9._-]+\.spec\.ts$")
+def in_scope(k):
+    if k[0] not in kinds:
+        return False
+    if k[0] == "e2e-real" and projects:
+        return k[1].split(":", 1)[0] in projects
+    return True
 
 expected = {}
 for n, line in enumerate(open(expected_path, encoding="utf-8"), 1):
@@ -61,6 +75,9 @@ for n, line in enumerate(open(expected_path, encoding="utf-8"), 1):
         print(f"FEHLER {expected_path}:{n}: unbekannte Art {art!r}")
         sys.exit(2)
     k = key(art, ort, test)
+    if art == "e2e-real" and not E2E_ORT.match(k[1]):
+        print(f"FEHLER {expected_path}:{n}: e2e-real braucht ort <projekt>:frontend/e2e-real/<datei>.spec.ts: {line}")
+        sys.exit(2)
     if k in expected:
         print(f"FEHLER {expected_path}:{n}: doppelte Zeile {line}")
         sys.exit(2)
@@ -76,7 +93,7 @@ for line in open(results_path, encoding="utf-8"):
 
 errors, allowed = [], 0
 for k, (status, detail) in sorted(results.items()):
-    if k[0] not in kinds:
+    if not in_scope(k):
         continue
     listed = k in expected
     label = ";".join(k)
@@ -91,11 +108,12 @@ for k, (status, detail) in sorted(results.items()):
     elif not listed and status == "fail":
         errors.append(f"Rückfall     {label}  (rot, aber nicht in der Erwartungsliste{': ' + detail if detail else ''})")
 for k, befund in sorted(expected.items()):
-    if k[0] in kinds and k not in results:
+    if in_scope(k) and k not in results:
         errors.append(f"verwaist     {';'.join(k)}  (kommt im Lauf nicht vor; Zeile löschen, {befund})")
 
-ran = sum(1 for k in results if k[0] in kinds)
-print(f"Ratchet ({','.join(sorted(kinds))}): {ran} Ergebnisse, {allowed} erwartet rot, {len(errors)} Fehler")
+ran = sum(1 for k in results if in_scope(k))
+scope = f"; Projekte {','.join(sorted(projects))}" if projects and "e2e-real" in kinds else ""
+print(f"Ratchet ({','.join(sorted(kinds))}{scope}): {ran} Ergebnisse, {allowed} erwartet rot, {len(errors)} Fehler")
 for e in errors:
     print("FEHLER " + e)
 sys.exit(1 if errors else 0)
@@ -241,14 +259,19 @@ for top in report.get("suites", []):
     for spec, titles, t in walk(top, []):
         f = spec.get("file") or top.get("file") or top.get("title")
         name = " ".join(titles + [spec["title"]]).replace(";", ",")
-        project = t.get("projectName") or "chromium"
+        # Every test runs in a project of playwright.real.config.ts (WP-532);
+        # a result without one cannot be compared per project.
+        project = t.get("projectName") or ""
         res = t.get("results") or []
         status = t.get("status")  # expected | unexpected | flaky | skipped
         last = res[-1]["status"] if res else "skipped"
         st = {"passed": "pass", "failed": "fail", "timedOut": "fail", "interrupted": "error", "skipped": "skip"}.get(last, "error")
         if status == "skipped":
             st = "skip"
-        print(f"e2e-real;{project}:frontend/e2e-real/{os.path.basename(f)};{name};{st};")
+        detail = ""
+        if not project:
+            project, st, detail = "ohne-projekt", "error", "kein projectName im Playwright-Bericht"
+        print(f"e2e-real;{project}:frontend/e2e-real/{os.path.basename(f)};{name};{st};{detail}")
 PY
 }
 
@@ -259,11 +282,11 @@ sh-parse)
     parse_sh "$2" "$3" "$4"; exit $?
     ;;
 compare)
-    shift; kinds=""; res=""
+    shift; kinds=""; res=""; projects=""
     while [ $# -gt 0 ]; do
-        case "$1" in --kinds) kinds="$2"; shift 2 ;; --results) res="$2"; shift 2 ;; *) echo "unknown argument $1" >&2; exit 2 ;; esac
+        case "$1" in --kinds) kinds="$2"; shift 2 ;; --results) res="$2"; shift 2 ;; --projects) projects="$2"; shift 2 ;; *) echo "unknown argument $1" >&2; exit 2 ;; esac
     done
-    compare "$kinds" "$res"; exit $?
+    compare "$kinds" "$res" "$projects"; exit $?
     ;;
 playwright)
     shift; rep=""; res="/dev/stdout"

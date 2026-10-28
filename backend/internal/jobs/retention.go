@@ -19,9 +19,11 @@ import (
 // chain verifiable: its oldest entries go, an audit.retention entry
 // anchors the rest (audit.Purge).
 //
-// Not here: events (stream MaxAge, 30 days), metrics (TimescaleDB retention
-// policy, 400 days, migration 000020), logs (30 days) and backups (35 days)
-// expire where they are kept; see docs/backup-dr.md.
+// Not here: events (stream MaxAge, RETICORA_EVENTS_MAX_AGE, at least 30
+// days; the outbox cleanup of the publisher), metrics (TimescaleDB
+// retention policies, 400 days, migrations 000020 and 000174), logs (30
+// days) and backups (35 days) expire where they are kept; see
+// docs/backup-dr.md and docs/ops/workers.md.
 
 // RetentionPolicy is how long each kind of data is kept.
 type RetentionPolicy struct {

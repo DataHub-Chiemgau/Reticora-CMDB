@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +21,11 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 )
 
 // recorder is a consumer that keeps what it receives and can fail.
@@ -49,7 +56,8 @@ func (r *recorder) Consume(_ context.Context, env *events.Envelope) error {
 //     stops an organization's batch at a failed delivery (order kept) and
 //     retries it; the stream RETICORA_EVENTS holds each event once under
 //     events.<org_id>.<type>;
-//   - cleanup removes old published events but keeps the newest ones.
+//   - cleanup removes old published events but keeps the newest ones as
+//     numbering anchors (their data: TestOutboxCleanupDropsAnchorData).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestOutboxAgainstPostgres(t *testing.T) {
@@ -260,7 +268,7 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 	}
 
 	// Cleanup keeps the newest event of the organization and of each entity.
-	pub.WithClock(func() time.Time { return time.Now().UTC().Add(events.KeepPublished + time.Hour) })
+	pub.WithClock(func() time.Time { return time.Now().UTC().Add(events.StreamMaxAge + time.Hour) })
 	if err = pub.Cleanup(bg); err != nil {
 		t.Fatal(err)
 	}
@@ -279,5 +287,161 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 		return appendErr
 	}); err != nil {
 		t.Error(err)
+	}
+}
+
+// TestOutboxCleanupDropsAnchorData covers NFR-06 and EVT-01 (WP-548,
+// F-318): 31 days after publishing, the cleanup leaves no old outbox row
+// with data. The newest event of the organization and of each entity
+// stays as a numbering anchor without data; sequence and entity_seq
+// continue from the anchors without gaps; younger events keep their data.
+// The events include an invitation.created of the user repository: after
+// 31 days no outbox row holds its acceptance link or token any more.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestOutboxCleanupDropsAnchorData(t *testing.T) {
+	f := scopetest.Seed(t, "98")
+	bg := context.Background()
+	key, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.NewEnvelopeEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Personal event data travels as vault surrogates (SEC-05), as in the
+	// server.
+	pii.SetDefault(pii.NewVault(f.App, enc))
+	t.Cleanup(func() { pii.SetDefault(nil) })
+
+	outbox := events.NewOutbox()
+	appendEvent := func(typ, entity string, data any) *events.Envelope {
+		t.Helper()
+		var env *events.Envelope
+		scope := database.OrgWideScope(f.OrgA, "")
+		if txErr := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			var appendErr error
+			env, appendErr = outbox.Append(ctx, tx, &events.Event{OrgID: f.OrgA, Type: typ, EntityID: entity, Data: data})
+			return appendErr
+		}); txErr != nil {
+			t.Fatal(txErr)
+		}
+		return env
+	}
+
+	// Old events: three of one CI, one of the organization without an
+	// entity, and the invitation.created of an issued invitation.
+	ciID := f.ID()
+	appendEvent(events.CICreated, ciID, map[string]any{"id": ciID, "name": "anchor-host"})
+	appendEvent(events.CIChanged, ciID, map[string]any{"id": ciID, "changed_fields": []string{"status"}})
+	appendEvent(events.CIDeleted, ciID, map[string]any{"id": ciID, "name": "anchor-host", "snapshot": map[string]any{"status": "retired"}})
+	appendEvent(events.JobFailed, "", map[string]any{"job": "export", "error": "disk full"})
+
+	var viewerRole string
+	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM role WHERE organization_id = $1 AND name = 'viewer'`, f.OrgA).Scan(&viewerRole); err != nil {
+		t.Fatal(err)
+	}
+	issuer := f.AppUser(t, f.OrgA, "outbox-anchor-issuer")
+	all := identity.ScopeSet{All: true}
+	orgWide := identity.Scope{Clients: all, Sites: all, Teams: all}
+	caller := identity.Principal{Subject: issuer, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
+		Permissions: identity.AllPermissions(), Scope: &orgWide, ClientScope: orgWide.LegacyClientScope()}
+	issueCtx := tenant.WithTenant(identity.WithPrincipal(f.OrgCtx(f.OrgA), caller), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: issuer})
+	token, tokenHash, err := user.NewInvitationToken(f.OrgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secret, _ := strings.Cut(token, ".")
+	acceptURL, err := url.Parse("https://cmdb.example.invalid/invitations/accept")
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := user.InvitationLink(acceptURL, token)
+	inv := &user.Invitation{OrganizationID: f.OrgA, Email: "anchor-invitee@example.org", RoleID: viewerRole,
+		InvitedBy: issuer, ExpiresAt: time.Now().UTC().Add(user.InvitationTTL)}
+	if err = user.NewPGInvitations(f.App).IssueInvitation(issueCtx, &caller, inv, tokenHash, link); err != nil {
+		t.Fatalf("issue invitation: %v", err)
+	}
+
+	// withSecret counts the rows of A whose data holds the link or the
+	// token of the invitation.
+	withSecret := func() int {
+		t.Helper()
+		var n int
+		if qErr := f.Admin.QueryRow(bg, `SELECT count(*) FROM event_outbox WHERE organization_id = $1
+			AND (data ? 'link' OR strpos(data::text, $2) > 0 OR strpos(data::text, $3) > 0)`, f.OrgA, secret, link).Scan(&n); qErr != nil {
+			t.Fatal(qErr)
+		}
+		return n
+	}
+	if n := withSecret(); n != 1 {
+		t.Fatalf("outbox rows with the invitation link before the cleanup: %d, want the invitation.created", n)
+	}
+
+	pub := events.NewPublisher(f.App, nil)
+	if _, err = pub.PublishPending(bg); err != nil {
+		t.Fatal(err)
+	}
+	// 31 days later a younger event is published; then the cleanup runs.
+	later := time.Now().UTC().Add(31 * 24 * time.Hour)
+	pub.WithClock(func() time.Time { return later })
+	young := appendEvent(events.ReviewCreated, "review-young", map[string]any{"id": "review-young", "kind": "probable_duplicate"})
+	if _, err = pub.PublishPending(bg); err != nil {
+		t.Fatal(err)
+	}
+	if err = pub.Cleanup(bg); err != nil {
+		t.Fatal(err)
+	}
+
+	type row struct {
+		Seq       int64
+		Type      string
+		Entity    string
+		EntitySeq int64
+		Data      string
+		Old       bool
+	}
+	rowsOfA := func() []row {
+		t.Helper()
+		rows, qErr := f.Admin.Query(bg, `SELECT sequence, type, COALESCE(entity_id, ''), COALESCE(entity_seq, 0), data::text,
+			published_at < $2 FROM event_outbox WHERE organization_id = $1 ORDER BY sequence`, f.OrgA, later.Add(-30*24*time.Hour))
+		if qErr != nil {
+			t.Fatal(qErr)
+		}
+		out, qErr := pgx.CollectRows(rows, pgx.RowToStructByPos[row])
+		if qErr != nil {
+			t.Fatal(qErr)
+		}
+		return out
+	}
+	got := rowsOfA()
+	for _, r := range got {
+		if r.Old && r.Data != "{}" {
+			t.Errorf("old row %d (%s) still holds data after 31 days: %s", r.Seq, r.Type, r.Data)
+		}
+	}
+	// Left: the anchor of the CI (ci.deleted, 3), the anchor of the
+	// invitation (5) and the young event (6).
+	if len(got) != 3 || got[0].Seq != 3 || got[0].Type != events.CIDeleted || got[0].EntitySeq != 3 ||
+		got[1].Seq != 5 || got[1].Type != events.InvitationCreated || got[1].Entity != inv.ID || got[1].EntitySeq != 1 ||
+		got[2].Seq != young.Sequence || got[2].Old {
+		t.Fatalf("rows after the cleanup: %+v, want the anchors 3 and 5 and the young event %d", got, young.Sequence)
+	}
+	var youngData map[string]any
+	if err = json.Unmarshal([]byte(got[2].Data), &youngData); err != nil || youngData["id"] != "review-young" {
+		t.Errorf("the young event lost its data: %s (%v)", got[2].Data, err)
+	}
+	if n := withSecret(); n != 0 {
+		t.Errorf("outbox rows with the invitation link or token after 31 days: %d", n)
+	}
+
+	// The numbering continues from the anchors without gaps.
+	next := appendEvent(events.CIRestored, ciID, map[string]any{"id": ciID})
+	again := appendEvent(events.InvitationCreated, inv.ID, map[string]any{"id": inv.ID})
+	org := appendEvent(events.JobFailed, "", map[string]any{"job": "import"})
+	if next.Sequence != 7 || next.EntitySeq != 4 || again.Sequence != 8 || again.EntitySeq != 2 || org.Sequence != 9 {
+		t.Errorf("numbering after the cleanup: CI %d/%d, invitation %d/%d, organization %d; want 7/4, 8/2, 9",
+			next.Sequence, next.EntitySeq, again.Sequence, again.EntitySeq, org.Sequence)
 	}
 }

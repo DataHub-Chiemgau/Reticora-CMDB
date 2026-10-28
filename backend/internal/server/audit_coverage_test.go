@@ -524,7 +524,7 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	mux, _, err := NewRouter(repos, Options{
 		Version: "audit-a5", Entitlements: entitlements,
 		Dispatcher: webhook.NewDispatcher(repos.Webhook, egress.NewClient(policy), webhook.DispatcherOptions{
-			Deliveries: repos.WebhookDeliveries, PollInterval: -1, Events: emitter}),
+			Deliveries: repos.WebhookDeliveries, PollInterval: -1}),
 		CIService:   ci.NewServiceWithLimits(repos.CI, entitlements).WithFieldResolver(repos.CIType),
 		Credentials: credential.NewService(repos.Credential, encryptor),
 		OIDC:        identity.NewOIDCProvider(identity.OIDCConfig{}),

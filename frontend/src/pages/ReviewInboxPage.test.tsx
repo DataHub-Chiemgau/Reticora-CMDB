@@ -2,6 +2,9 @@
  * Tests for the review inbox (UI-16): filter, diff, single and bulk
  * resolution; new of a device of an unknown type asks for the type, a
  * device recorded as generic_device is not offered new (WP-528, F-176).
+ * Paging with "x von total" and the selection of all open items beyond the
+ * page (F-345), merge candidates named by their CI (F-346) and no
+ * resolution without review:resolve (WP-557).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -95,7 +98,28 @@ function page(data: unknown[]) {
   return { data, total: data.length, limit: 100, offset: 0, has_more: false };
 }
 
-function stubServer(items: ReviewItem[], resolve?: (id: string, body: unknown) => Response) {
+/** reviewPage answers GET /review-items like the server: limit/offset of the query. */
+function reviewPage(items: ReviewItem[], url: string) {
+  const query = new URL(url, 'http://localhost').searchParams;
+  const limit = Number(query.get('limit') ?? '50');
+  const offset = Number(query.get('offset') ?? '0');
+  const data = items.slice(offset, offset + limit);
+  return {
+    data,
+    total: items.length,
+    limit,
+    offset,
+    has_more: offset + data.length < items.length,
+  };
+}
+
+const RESOLVER = ['discovery:read', 'review:resolve'];
+
+function stubServer(
+  items: ReviewItem[],
+  resolve?: (id: string, body: unknown) => Response,
+  permissions: string[] = RESOLVER,
+) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const match = url.match(/\/review-items\/([^/]+)\/resolve$/);
@@ -104,10 +128,18 @@ function stubServer(items: ReviewItem[], resolve?: (id: string, body: unknown) =
         ? resolve(match[1]!, JSON.parse(String(init.body)))
         : json({ id: match[1], status: 'resolved' });
     }
-    if (url.includes('/review-items')) return json(page(items));
+    if (url.includes('/me/permissions')) return json({ permissions });
+    if (url.includes('/review-items')) return json(reviewPage(items, url));
     if (url.includes('/ci-types')) return json(page(ciTypes));
     if (url.includes(`/cis/${CI_A}`)) return json(ciA);
-    if (url.includes(`/cis/${CI_B}`)) return json({ ...ciA, id: CI_B, name: 'sw-core-02' });
+    if (url.includes(`/cis/${CI_B}`))
+      return json({
+        ...ciA,
+        id: CI_B,
+        name: 'sw-core-02',
+        management_ip: '10.0.0.6',
+        serial_number: 'SN-B',
+      });
     return json({ detail: 'unexpected' }, 404);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -208,7 +240,7 @@ describe('ReviewInboxPage', () => {
     );
     renderWithProviders(<ReviewInboxPage />);
 
-    fireEvent.click(await screen.findByLabelText('Alle offenen auswählen'));
+    fireEvent.click(await screen.findByLabelText('Alle offenen auswählen (3 auf dieser Seite)'));
     expect(screen.getByText('3 ausgewählt')).toBeInTheDocument();
     const action = screen.getByLabelText('Aktion');
     // dismiss is the only action every selected type allows.
@@ -226,6 +258,28 @@ describe('ReviewInboxPage', () => {
     for (const post of posts) {
       expect(JSON.parse(String(post[1]?.body))).toEqual({ action: 'dismiss' });
     }
+  });
+
+  it('keeps the 409 of a second resolution visible after the item leaves the open list', async () => {
+    // Another session has dismissed the item meanwhile: the server answers
+    // 409 and the refetched open list no longer holds it (WP-557 (c)).
+    const twice: ReviewItem = { ...duplicateIP, id: 'rev-6', payload: { name: 'pv-twice' } };
+    const items = [twice];
+    stubServer(items, () => {
+      items.splice(0, items.length);
+      return json({ title: 'Conflict', status: 409, detail: 'review item already resolved' }, 409);
+    });
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /pv-twice/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Verwerfen' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /pv-twice/ })).not.toBeInTheDocument(),
+    );
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Das Item konnte nicht aufgelöst werden');
+    expect(alert).toHaveTextContent('review item already resolved');
   });
 
   it('asks for the type of a device of an unknown type and sends ci_type_id', async () => {
@@ -319,5 +373,94 @@ describe('ReviewInboxPage', () => {
       `/cmdb/${CI_A}`,
     );
     expect(screen.queryByLabelText('CI-Typ des neuen CIs')).not.toBeInTheDocument();
+  });
+
+  it('names the merge candidates by CI name, management IP and serial number (F-346)', async () => {
+    stubServer([ambiguous]);
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /sw-core-01/ }));
+    const select = await screen.findByLabelText('Kandidat');
+    await waitFor(() =>
+      expect(
+        within(select)
+          .getAllByRole('option')
+          .map((o) => o.textContent),
+      ).toEqual(['sw-core-01 (10.0.0.5, SN-OLD)', 'sw-core-02 (10.0.0.6, SN-B)']),
+    );
+    // The value stays the id of the CI the merge names.
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((o) => (o as HTMLOptionElement).value),
+    ).toEqual([CI_A, CI_B]);
+  });
+
+  it('pages with offset when has_more is true and shows x of total (F-345)', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => ({
+      ...duplicateIP,
+      id: `dup-${i}`,
+      payload: { management_ip: `10.1.${Math.floor(i / 250)}.${i}` },
+    }));
+    const fetchMock = stubServer(many);
+    renderWithProviders(<ReviewInboxPage />);
+
+    expect(await screen.findByText('1–100 von 150')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Vorherige Seite' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Nächste Seite' }));
+
+    expect(await screen.findByText('101–150 von 150')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /10\.1\.0\.149/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /10\.1\.0\.0$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nächste Seite' })).toBeDisabled();
+    const urls = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.includes('/review-items?'));
+    expect(urls[0]).toContain('limit=100');
+    expect(urls[0]).not.toContain('offset=');
+    expect(urls.some((url) => url.includes('limit=100') && url.includes('offset=100'))).toBe(true);
+  });
+
+  it('names the scope of the page selection and selects all open items beyond the page (F-345)', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => ({
+      ...duplicateIP,
+      id: `dup-${i}`,
+      payload: { management_ip: `10.1.0.${i}` },
+    }));
+    const fetchMock = stubServer(many);
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByLabelText('Alle offenen auswählen (100 auf dieser Seite)'));
+    expect(screen.getByText('100 ausgewählt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Alle 150 offenen auswählen' }));
+    expect(await screen.findByText('150 ausgewählt')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Aktion'), { target: { value: 'dismiss' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ausführen' }));
+    expect(await screen.findByText('150 erledigt, 0 fehlgeschlagen.')).toBeInTheDocument();
+    const posted = fetchMock.mock.calls
+      .filter((call) => call[1]?.method === 'POST')
+      .map((call) => String(call[0]));
+    expect(new Set(posted).size).toBe(150);
+    expect(posted).toContain('/api/v1/review-items/dup-149/resolve');
+  });
+
+  it('offers no resolution without review:resolve', async () => {
+    const fetchMock = stubServer([ambiguous, duplicateIP], undefined, ['discovery:read']);
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /sw-core-01/ }));
+    const table = await screen.findByRole('table', { name: 'Vergleich von Beobachtung und CI' });
+    await waitFor(() => expect(within(table).getByText('SN-OLD')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/me/permissions'))).toBe(
+        true,
+      ),
+    );
+    for (const name of ['Zusammenführen', 'Neu anlegen', 'Verwerfen']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole('checkbox', { name: /auswählen/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Alle offenen auswählen/)).not.toBeInTheDocument();
   });
 });

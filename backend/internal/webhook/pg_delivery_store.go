@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -309,12 +310,20 @@ func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscri
 	return records, total, err
 }
 
-// MoveToDeadLetter moves a failed delivery into the dead-letter queue and
-// marks the delivery record dead, atomically. Repeating the move for the same
-// delivery is a no-op.
-func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryRecord) error {
-	return database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `
+// MoveToDeadLetter implements DeliveryStore in one tenant transaction: the
+// dead letter, the dead delivery, the switch-off of the subscription
+// (WHK-01) and webhook.dead in the outbox (NTF-05, WP-550). A failed step
+// rolls back all of them; the delivery stays where it was. The
+// subscription row is locked first, so concurrent moves of its deliveries
+// count each other's dead letters. Repeating the move for the same delivery
+// is a no-op.
+func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec *DeliveryRecord, since time.Time) (bool, error) {
+	disabled := false
+	err := database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM webhook_subscription WHERE id = $1 FOR UPDATE`, rec.SubscriptionID); err != nil {
+			return fmt.Errorf("lock webhook subscription: %w", err)
+		}
+		moved, err := tx.Exec(ctx, `
 			INSERT INTO webhook_dead_letter (
 				delivery_id, organization_id, subscription_id, event, payload,
 				attempts, last_status_code, last_error, first_attempt_at
@@ -329,7 +338,8 @@ func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryReco
 			rec.Attempt,
 			nullableInt(rec.ResponseStatus),
 			nullableString(rec.Error),
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("insert webhook dead letter: %w", err)
 		}
 
@@ -357,8 +367,34 @@ func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryReco
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("delivery not found")
 		}
+		if moved.RowsAffected() == 0 {
+			// Moved before: reported then.
+			return nil
+		}
+
+		var dead int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM webhook_dead_letter
+			WHERE organization_id = $1 AND subscription_id = $2 AND dead_at >= $3`,
+			rec.OrganizationID, rec.SubscriptionID, since).Scan(&dead); err != nil {
+			return fmt.Errorf("count dead webhook deliveries: %w", err)
+		}
+		if dead >= deadLimit {
+			off, err := tx.Exec(ctx, `UPDATE webhook_subscription SET is_active = false, updated_at = now()
+				WHERE id = $1 AND organization_id = $2`, rec.SubscriptionID, rec.OrganizationID)
+			if err != nil {
+				return fmt.Errorf("deactivate webhook: %w", err)
+			}
+			disabled = off.RowsAffected() > 0
+		}
+		if _, err := events.NewOutbox().Append(ctx, tx, deadEvent(rec, disabled)); err != nil {
+			return fmt.Errorf("report dead webhook delivery: %w", err)
+		}
 		return nil
 	})
+	if err != nil {
+		return false, err
+	}
+	return disabled, nil
 }
 
 // ListDeadLetters returns the dead-letter queue of one tenant, newest first:

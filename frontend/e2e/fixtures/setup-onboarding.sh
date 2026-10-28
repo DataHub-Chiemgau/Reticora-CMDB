@@ -12,6 +12,15 @@
 # Usage: frontend/e2e/fixtures/setup-onboarding.sh <compose-dir> [env-file]
 # Writes the variables the suite reads to $GITHUB_ENV when set, else prints
 # them as export lines.
+#
+# WP-558 (INS-04, F-352): an installation with RETICORA_TLS_DOMAIN in the
+# env file is addressed over its TLS origin: BASE_URL is https://<domain>
+# (RETICORA_HTTPS_PORT unless 443), the frontend is checked there and
+# E2E_ISSUER_URL is the issuer of the installation. E2E_CA_CERT names the
+# root of a private CA (e.g. Pebble in the job tls-domain-pebble) that curl
+# trusts for that origin. Without a TLS domain BASE_URL stays
+# http://localhost:<RETICORA_FRONTEND_PORT>. The env file must name the
+# issuer (RETICORA_OIDC_ISSUER_URL).
 set -euo pipefail
 
 compose_dir="$(cd "${1:?usage: setup-onboarding.sh <compose-dir> [env-file]}" && pwd)"
@@ -28,6 +37,19 @@ admin_password="$(env_value KEYCLOAK_ADMIN_PASSWORD)"
 realm=reticora
 client_id=reticora-e2e-signup
 client_secret="$(openssl rand -hex 24)"
+issuer="$(env_value RETICORA_OIDC_ISSUER_URL)"
+[ -n "$issuer" ] || { echo "FAIL: RETICORA_OIDC_ISSUER_URL is not set in $compose_dir/$env_file"; exit 1; }
+frontend_port="$(env_value RETICORA_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
+tls_domain="$(env_value RETICORA_TLS_DOMAIN)"
+if [ -n "$tls_domain" ]; then
+    https_port="$(env_value RETICORA_HTTPS_PORT)"
+    base_url="https://${tls_domain}"
+    [ -z "$https_port" ] || [ "$https_port" = 443 ] || base_url="${base_url}:${https_port}"
+else
+    base_url="http://localhost:${frontend_port}"
+fi
+base_curl=(curl -fsS)
+[ -z "${E2E_CA_CERT:-}" ] || base_curl+=(--cacert "$E2E_CA_CERT")
 captcha_key="$(openssl rand -hex 32)"
 
 token=$(curl -fsS "$kc/realms/master/protocol/openid-connect/token" \
@@ -49,6 +71,7 @@ api -X POST "$kc/admin/realms/$realm/users/$service_user/role-mappings/clients/$
 
 echo "== Signup configuration and mail catcher"
 export E2E_CAPTCHA_KEY="$captcha_key" E2E_KC_CLIENT_ID="$client_id" E2E_KC_CLIENT_SECRET="$client_secret"
+export E2E_BASE_URL="$base_url"
 files=(-f docker-compose.yml)
 [ -f "$compose_dir/docker-compose.override.yml" ] && files+=(-f docker-compose.override.yml)
 files+=(-f "$here/docker-compose.e2e.yml")
@@ -71,13 +94,12 @@ curl -fsS "http://localhost:${server_port}/api/v1/signup/challenge" >/dev/null |
 # nginx in the frontend resolved the server at its start: the recreated
 # server container has a new address, so the frontend restarts too.
 (cd "$compose_dir" && docker compose --env-file "$env_file" "${files[@]}" restart frontend)
-frontend_port="$(env_value RETICORA_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
 for _ in $(seq 1 60); do
-    curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null 2>&1 && break
+    "${base_curl[@]}" "${base_url}/api/v1/auth/config" >/dev/null 2>&1 && break
     sleep 2
 done
-curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null || {
-    echo "FAIL: the frontend does not reach the server after the restart"
+"${base_curl[@]}" "${base_url}/api/v1/auth/config" >/dev/null || {
+    echo "FAIL: the frontend at $base_url does not reach the server after the restart"
     exit 1
 }
 
@@ -87,11 +109,11 @@ collector_bin="${RUNNER_TEMP:-/tmp}/reticora-collector"
 
 host_ip="$(hostname -I | awk '{print $1}')"
 vars=(
-    "BASE_URL=http://localhost:${frontend_port}"
+    "BASE_URL=${base_url}"
     "E2E_SERVER_URL=http://localhost:${server_port}"
     "E2E_MAILPIT_URL=http://localhost:8025"
     "E2E_INSECURE_URL=http://${host_ip}:${frontend_port}"
-    "E2E_ISSUER_URL=$(env_value RETICORA_OIDC_ISSUER_URL)"
+    "E2E_ISSUER_URL=${issuer}"
     "E2E_COLLECTOR_BIN=$collector_bin"
 )
 for v in "${vars[@]}"; do

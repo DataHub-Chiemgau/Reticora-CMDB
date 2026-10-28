@@ -146,6 +146,12 @@ func (r *MemoryRepository) NotifyClients(_ context.Context, orgID, windowID stri
 			continue
 		}
 		seen[clientID] = true
+		// One notification per window, client and channel (F-235): a
+		// repeated announcement returns the stored one.
+		if stored := r.findNotification(windowID, clientID, "webhook"); stored != nil {
+			out = append(out, *stored)
+			continue
+		}
 		n := &Notification{
 			ID:             r.nextID("mn"),
 			OrganizationID: orgID,
@@ -159,6 +165,15 @@ func (r *MemoryRepository) NotifyClients(_ context.Context, orgID, windowID stri
 		out = append(out, *n)
 	}
 	return out, nil
+}
+
+func (r *MemoryRepository) findNotification(windowID, clientID, channel string) *Notification {
+	for _, n := range r.notif[windowID] {
+		if n.ClientID == clientID && n.Channel == channel {
+			return n
+		}
+	}
+	return nil
 }
 
 func (r *MemoryRepository) ListNotifications(_ context.Context, orgID, windowID string) ([]Notification, error) {

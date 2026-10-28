@@ -877,3 +877,63 @@ NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-631
 JOB-01;[B];B;backend/internal/discovery/job_execution_integration_test.go;WP-632
 API-02;[B];C;frontend/src/api/listLimit.test.ts;WP-635
 API-02;[B];C;frontend/src/api/client.test.ts;WP-635
+TEC-15;[B];A;edgecore/update/cosign_real_test.go;WP-545
+COL-06;[B], Air-Gapped [O];A;edgecore/update/cosign_real_test.go;WP-545
+NFR-04;[B], Teilumfang [P5];D;backend/internal/maintenance/status_test.go;WP-540
+MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-540
+NTF-05;[B], Zusätze [P2], [P3];D;frontend/src/pages/MaintenancePage.test.tsx;WP-540
+NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-548
+EVT-01;[B];B;backend/internal/config/config_test.go;WP-548
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/events_integration_test.go;WP-549
+EVT-01;[B];B;backend/internal/notify/events_integration_test.go;WP-549
+COL-06;[B], Air-Gapped [O];D;tests/collector-selfupdate.test.sh;WP-546
+NFR-04;[B], Teilumfang [P5];D;frontend/e2e-real/maintenance.spec.ts;WP-541
+MGT-04;[P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
+NTF-05;[B], Zusätze [P2], [P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
+EVT-01;[B];B;backend/internal/events/emit_tx_integration_test.go;WP-550
+TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-534
+TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-532
+TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-533
+TEN-04;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-06;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-09;[Q];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-06;[B];B;backend/internal/movement/movement_scope_integration_test.go;WP-537
+AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;WP-537
+EVT-02;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+EVT-01;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-539
+TEN-04;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-536
+TEN-06;[B];B;backend/internal/tenant/rls/core_channels_integration_test.go;WP-536
+AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-536
+REL-03;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
+REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
+TEN-06;[B];B;backend/internal/ai/ai_scope_integration_test.go;WP-538
+MGT-03;[P4];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-538
+MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-538
+OPS-04;[B], [P5];A;backend/cmd/server/objectstorage_integration_test.go;WP-544
+NFR-05;[B];A;backend/cmd/server/objectstorage_integration_test.go;WP-544
+DIS-08;[Q];D;frontend/e2e-real/discovery-errors.spec.ts;WP-542
+API-09;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
+JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
+UI-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+IMP-05;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+IMP-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-554
+SEC-06;[B];B;backend/internal/jobs/rotation_integration_test.go;WP-547
+VIE-01;[B];C;frontend/e2e-real/saved-views.spec.ts;WP-555
+UI-01;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-02;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-03;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-04;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-05;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-07;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-08;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-09;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-10;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-16;[B];C;frontend/e2e-real/review-inbox.spec.ts;WP-557
+INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
+ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
+UI-18;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532
+NFR-07;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532

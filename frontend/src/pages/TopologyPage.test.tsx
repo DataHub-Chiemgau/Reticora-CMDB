@@ -272,42 +272,77 @@ describe('TopologyPage', () => {
       await screen.findByText(/Fällt „pdu-01“ aus, sind 2 weitere CIs betroffen/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Vorläufiges Ergebnis/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Vorschau')).not.toBeInTheDocument();
   });
 
-  it('falls back to the impact direction of the relationship types when /impact fails (F-254)', async () => {
-    stubFetchRoutes({
-      '/impact?ci_ids=': problem(500),
-      '/topology': powerGraph,
-      '/ci-types': ciTypes,
-      '/relationship-types': relationshipTypes,
-    });
+  // F-326: a failed server analysis is an error, never a client-side result.
+  // The relationship types load, so a client walk could compute a set; the
+  // page shows none, neither as badges nor as a count.
+  it('shows an error instead of a client-side impact when /impact fails', async () => {
+    const cases = [
+      {
+        status: 422,
+        response: new Response(
+          JSON.stringify({
+            type: 'urn:reticora:problem:invalid-field',
+            title: 'Unprocessable Entity',
+            status: 422,
+            detail: 'ci_ids: at most 100 CIs per analysis',
+            field: 'ci_ids',
+          }),
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+        message: /höchstens 100 CIs je Analyse/,
+      },
+      {
+        status: 500,
+        response: problem(500),
+        message: /Die Analyse des Servers ist nicht verfügbar/,
+      },
+    ];
+    for (const { status, response, message } of cases) {
+      const fetchMock = stubFetchRoutes({
+        '/impact?ci_ids=': response,
+        '/topology': powerGraph,
+        '/ci-types': ciTypes,
+        '/relationship-types': relationshipTypes,
+      });
 
-    const { unmount } = renderWithProviders(<TopologyPage />, {
-      route: '/topology?simulate=ci-pdu',
-    });
+      const { unmount } = renderWithProviders(<TopologyPage />, {
+        route: '/topology?simulate=ci-pdu',
+      });
 
-    expect(
-      await screen.findByText(/Fällt „pdu-01“ aus, sind 2 weitere CIs betroffen/),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Die Analyse des Servers ist nicht verfügbar/)).toBeInTheDocument();
-    const panel = screen
-      .getByRole('heading', { name: 'Ausfallsimulation' })
-      .closest('section') as HTMLElement;
-    const impacted = within(panel)
-      .getAllByRole('listitem')
-      .map((item) => item.textContent);
-    expect(impacted.sort()).toEqual(['srv-01', 'vm-01']);
-    unmount();
-
-    // The VM has no dependents: its failure impacts nothing, not its host.
-    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-vm' });
-    expect(
-      await screen.findByText(/Fällt „vm-01“ aus, sind 0 weitere CIs betroffen/),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Dieses CI hat keine abhängigen CIs/)).toBeInTheDocument();
+      const alert = await screen.findByRole('alert');
+      expect(alert, `/impact ${status}`).toHaveTextContent(
+        'Die Auswirkung konnte nicht berechnet werden.',
+      );
+      expect(alert, `/impact ${status}`).toHaveTextContent(message);
+      // The English detail of the server stays out of the page.
+      expect(alert, `/impact ${status}`).not.toHaveTextContent(/per analysis|failed/);
+      // The relationship types are there: a client walk could have run.
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.some((call) => String(call[0]).includes('/relationship-types')),
+        ).toBe(true),
+      );
+      const panel = screen
+        .getByRole('heading', { name: 'Ausfallsimulation' })
+        .closest('section') as HTMLElement;
+      expect(within(panel).queryAllByRole('listitem'), `/impact ${status}`).toEqual([]);
+      expect(within(panel).queryByText('srv-01'), `/impact ${status}`).not.toBeInTheDocument();
+      expect(within(panel).queryByText('vm-01'), `/impact ${status}`).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/weitere CIs betroffen/),
+        `/impact ${status}`,
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/Vorschau|Vorläufig/), `/impact ${status}`).not.toBeInTheDocument();
+      expect(within(alert).getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument();
+      unmount();
+      vi.unstubAllGlobals();
+    }
   });
 
-  it('marks the result as provisional while the server analysis loads', async () => {
+  it('marks the client-side result as a preview while the server analysis loads (F-254)', async () => {
     const pending = new Promise<Response>(() => {});
     const respond = (body: unknown) =>
       new Response(JSON.stringify(body), {
@@ -326,12 +361,66 @@ describe('TopologyPage', () => {
       }),
     );
 
-    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-server' });
+    const first = renderWithProviders(<TopologyPage />, {
+      route: '/topology?simulate=ci-server',
+    });
 
     expect(
       await screen.findByText(/Fällt „srv-01“ aus, sind 1 weitere CIs betroffen/),
     ).toBeInTheDocument();
     expect(screen.getByText(/die Analyse des Servers läuft noch/)).toBeInTheDocument();
+    expect(screen.getByText('Vorschau')).toBeInTheDocument();
+    first.unmount();
+
+    // The preview follows the impact direction: a PDU failure reaches the
+    // server and the VM on it.
+    const second = renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-pdu' });
+    expect(
+      await screen.findByText(/Fällt „pdu-01“ aus, sind 2 weitere CIs betroffen/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Vorschau')).toBeInTheDocument();
+    const panel = screen
+      .getByRole('heading', { name: 'Ausfallsimulation' })
+      .closest('section') as HTMLElement;
+    const impacted = within(panel)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(impacted.sort()).toEqual(['srv-01', 'vm-01']);
+    second.unmount();
+
+    // The VM has no dependents: its failure impacts nothing, not its host.
+    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-vm' });
+    expect(
+      await screen.findByText(/Fällt „vm-01“ aus, sind 0 weitere CIs betroffen/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Dieses CI hat keine abhängigen CIs/)).toBeInTheDocument();
+  });
+
+  it('renders the type label of a node', async () => {
+    stubFetchRoutes({
+      '/topology': {
+        nodes: [
+          { id: 'ci-1', name: 'core-sw-01', ci_type: 'type-switch', status: 'active' },
+          { id: 'ci-2', name: 'srv-01', ci_type: 'type-server', status: 'active' },
+          { id: 'ci-3', name: 'odd-01', ci_type: 'type-unknown', status: 'active' },
+        ],
+        edges: [],
+      },
+      '/ci-types': ciTypes,
+    });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology' });
+
+    const list = (await screen.findByRole('heading', { name: 'Knotenliste' })).closest(
+      'section',
+    ) as HTMLElement;
+    const row = (name: string) =>
+      within(list).getByRole('button', { name }).closest('li') as HTMLElement;
+    await waitFor(() => expect(within(row('srv-01')).getByText('Server')).toBeInTheDocument());
+    expect(within(row('core-sw-01')).getByText('Switch')).toBeInTheDocument();
+    expect(within(row('srv-01')).queryByText('type-server')).not.toBeInTheDocument();
+    // A type the catalogue does not list keeps its id.
+    expect(within(row('odd-01')).getByText('type-unknown')).toBeInTheDocument();
   });
 
   it('says that the impact cannot be computed without /impact and relationship types', async () => {

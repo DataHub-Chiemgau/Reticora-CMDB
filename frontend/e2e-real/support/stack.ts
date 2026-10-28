@@ -1,10 +1,10 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
 import { keycloakOtp } from '../../e2e/support/totp';
 
 // Shared helpers of the real-stack specs (Phase-1 acceptance audit). They
@@ -82,6 +82,132 @@ export async function api<T = unknown>(
     // keep the raw text (exports, plain errors)
   }
   return { status: res.status(), body: body as T };
+}
+
+/**
+ * expectModuleServed asserts that the stack serves the late module `key` (WP-541): GET
+ * /modules reports it enabled. Late modules are off in the G1 default (E-03, WP-214) and their
+ * routes answer 404; the specs of such a module run only in the module run of install-smoke.yml
+ * against a server started with RETICORA_MODULES naming it (README.md). A spec never skips
+ * itself: against a G1 default stack it fails here with the reason.
+ */
+export async function expectModuleServed(request: APIRequestContext, token: string, key: string) {
+  const res = await api<{ data?: { key: string; enabled: boolean }[] }>(
+    request,
+    token,
+    'GET',
+    '/modules',
+  );
+  expect(res.status, `GET /modules: ${JSON.stringify(res.body)}`).toBe(200);
+  expect(
+    res.body?.data?.find((m) => m.key === key)?.enabled,
+    `module ${key} served (start the server with RETICORA_MODULES=${key}, e2e-real/README.md)`,
+  ).toBe(true);
+}
+
+/** A user of a tenant holding exactly one role assignment in a client or site scope. */
+export interface ScopedUser {
+  email: string;
+  password: string;
+  userId: string;
+  /** The assignment made with POST /role-assignments. */
+  assignmentId: string;
+}
+
+/**
+ * scopedUser creates a Keycloak user of the administrator's organization holding exactly
+ * one standard role (`role`, e.g. client_technician or viewer) in the scope of one client
+ * or site (WP-535). An invitation carries a standard role, so the user is invited as
+ * viewer of the client `inviteClientId` and accepts it through the API (the server
+ * creates the Keycloak user); the role is then assigned with POST /api/v1/role-assignments
+ * {user_id, role_id, scope_type, scope_id} and the viewer assignment of the invitation is
+ * deleted. GET /role-assignments afterwards lists exactly the new assignment. Every call
+ * goes through the API with the administrator's token; a refused call fails the setup.
+ */
+export async function scopedUser(
+  request: APIRequestContext,
+  adminToken: string,
+  opts: {
+    label: string;
+    role: string;
+    scope_type: 'client' | 'site';
+    scope_id: string;
+    inviteClientId: string;
+  },
+): Promise<ScopedUser> {
+  const call = async <T>(
+    method: 'GET' | 'POST' | 'DELETE',
+    path: string,
+    data?: unknown,
+  ): Promise<T> => {
+    const res = await api<T>(request, adminToken, method, path, data);
+    expect(res.status, `${method} ${path}: ${JSON.stringify(res.body)}`).toBeGreaterThanOrEqual(
+      200,
+    );
+    expect(res.status, `${method} ${path}: ${JSON.stringify(res.body)}`).toBeLessThan(300);
+    return res.body;
+  };
+  type Assignment = { id: string; role_id?: string; scope_type: string; scope_id?: string };
+  const roles = await call<{ data: { id: string; name: string }[] | null }>(
+    'GET',
+    '/roles?limit=100',
+  );
+  const roleId = (name: string) => {
+    const id = (roles.data ?? []).find((r) => r.name === name)?.id ?? '';
+    expect(id, `system role ${name} (RBA-02)`).not.toBe('');
+    return id;
+  };
+  const viewer = roleId('viewer');
+  const target = roleId(opts.role);
+  // The assignment of the invitation must differ from the target one, or deleting it
+  // would delete the target assignment (the server returns an existing assignment).
+  expect(
+    target === viewer && opts.scope_type === 'client' && opts.scope_id === opts.inviteClientId,
+    'target assignment differs from the viewer assignment of the invitation',
+  ).toBe(false);
+
+  const s = stamp();
+  const email = `${opts.label}-${s}@audit-e2e.de`;
+  const password = `Audit-${opts.label}-${s}!aA`;
+  const invitation = await call<{ token?: string }>('POST', '/invitations', {
+    email,
+    role_id: viewer,
+    scope_type: 'client',
+    scope_id: opts.inviteClientId,
+  });
+  expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+  const accept = await request.post(`${BASE}/api/v1/invitations/accept`, {
+    data: { token: invitation.token, password, display_name: `Audit ${opts.label}` },
+    failOnStatusCode: false,
+  });
+  expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);
+  const userId = ((await accept.json()) as { user_id?: string }).user_id ?? '';
+  expect(userId, 'the accepted user').not.toBe('');
+
+  const assigned = await call<Assignment>('POST', '/role-assignments', {
+    user_id: userId,
+    role_id: target,
+    scope_type: opts.scope_type,
+    scope_id: opts.scope_id,
+  });
+  const listed = async () =>
+    (await call<{ data: Assignment[] | null }>('GET', `/role-assignments?user_id=${userId}`))
+      .data ?? [];
+  const invited = (await listed()).filter(
+    (a) => a.role_id === viewer && a.scope_type === 'client' && a.scope_id === opts.inviteClientId,
+  );
+  expect(invited, 'the viewer assignment of the invitation').toHaveLength(1);
+  await call('DELETE', `/role-assignments/${invited[0]!.id}`);
+  const left = (await listed()).map((a) => ({
+    id: a.id,
+    role_id: a.role_id,
+    scope_type: a.scope_type,
+    scope_id: a.scope_id,
+  }));
+  expect(left, `the only assignment of ${email}`).toEqual([
+    { id: assigned.id, role_id: target, scope_type: opts.scope_type, scope_id: opts.scope_id },
+  ]);
+  return { email, password, userId, assignmentId: assigned.id };
 }
 
 /**
@@ -441,7 +567,9 @@ export interface OperatorSession {
  * SPA callback, which would redeem the code as a tenant login. It is taken
  * from Keycloak's answer instead: every form post to Keycloak goes through
  * route.fetch without following redirects, and the answer that redirects to
- * the redirect URI is replaced by a placeholder page. A redirect target is
+ * the redirect URI is replaced by a placeholder page; any other redirect
+ * answer becomes a page that loads the redirect target (WebKit cannot fulfill
+ * a route with a redirect status). A redirect target is
  * not intercepted reliably (Chromium does not hand Playwright the redirect
  * from the Keycloak host to the loopback SPA of an installed stack). It
  * returns the server's answer without asserting the status.
@@ -473,6 +601,22 @@ export async function operatorLogin(
           status: 200,
           contentType: 'text/html',
           body: '<p id="operator-login-done">operator login</p>',
+        });
+        return;
+      }
+      if (response.status() >= 300 && response.status() < 400 && target) {
+        // Any other Keycloak redirect (e.g. to the OTP step) is followed by
+        // the browser itself: WebKit cannot fulfill a route with a 3xx status
+        // ("Cannot fulfill with redirect status"), and route.continue() would
+        // post the consumed form a second time. A placeholder page sends the
+        // browser to the same target with a GET, as a 302/303 after a POST
+        // does; route.fetch shares the cookie jar of the browser context, so
+        // the cookies of the redirect answer are already set.
+        const next = new URL(target, route.request().url()).href;
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: `<script>location.replace(${JSON.stringify(next)});</script>`,
         });
         return;
       }
@@ -515,6 +659,134 @@ export async function operatorLogin(
   return { status: res.status(), body: body as OperatorSession };
 }
 
+/**
+ * raiseCILimit lets an operator raise the max_cis quota of an organization
+ * (POST /admin/orgs/{id}/entitlements, ENT-04): a trial tenant holds 100 CIs.
+ * The operator is a new Keycloak user of the group operators (Keycloak admin
+ * API) who signs in with operatorLogin; a refused step fails the setup.
+ */
+export async function raiseCILimit(
+  browser: Browser,
+  request: APIRequestContext,
+  orgId: string,
+  maxCIs: number,
+): Promise<void> {
+  const run = stamp();
+  const operator = {
+    email: `ci-limit-operator-${run}@audit-e2e.de`,
+    password: `Audit-op-${run}!aA`,
+  };
+  const admin = await keycloakAdminToken(request);
+  const created = await request.post(`${KEYCLOAK}/admin/realms/reticora/users`, {
+    headers: { Authorization: `Bearer ${admin}` },
+    data: {
+      username: operator.email,
+      email: operator.email,
+      emailVerified: true,
+      enabled: true,
+      firstName: 'Audit',
+      lastName: 'Operator',
+      groups: ['/operators'],
+      credentials: [{ type: 'password', value: operator.password, temporary: false }],
+    },
+    failOnStatusCode: false,
+  });
+  expect(created.status(), `create the operator account: ${await created.text()}`).toBe(201);
+  const context = await browser.newContext({ locale: 'de-DE' });
+  try {
+    const login = await operatorLogin(await context.newPage(), context.request, operator);
+    expect(login.status, `operator callback: ${JSON.stringify(login.body)}`).toBe(200);
+    const granted = await api(
+      request,
+      login.body.token,
+      'POST',
+      `/admin/orgs/${orgId}/entitlements`,
+      {
+        feature_key: 'cmdb_core',
+        plan: 'standard',
+        enabled: true,
+        limits: { max_cis: maxCIs },
+      },
+    );
+    expect(granted.status, `raise max_cis: ${JSON.stringify(granted.body)}`).toBe(200);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * grantFeature lets an operator grant a module feature to organizations
+ * (POST /admin/orgs/{id}/entitlements, ENT-04) that their plan lacks: a
+ * self-signup tenant holds the trial plan standard (ENT-07), which has no
+ * monitoring, so e.g. /maintenance-windows answers 403 feature-not-entitled
+ * (backend/internal/entitlement/middleware.go). The operator is a new Keycloak
+ * user of the group operators who signs in with operatorLogin; a refused step
+ * fails the setup. Afterwards each organization's own check
+ * (GET /entitlements/check/{feature}) must report the feature enabled.
+ */
+export async function grantFeature(
+  browser: Browser,
+  request: APIRequestContext,
+  orgs: { orgId: string; token: string }[],
+  featureKey: string,
+  plan: string,
+): Promise<void> {
+  const run = stamp();
+  const operator = {
+    email: `grant-operator-${run}@audit-e2e.de`,
+    password: `Audit-op-${run}!aA`,
+  };
+  const admin = await keycloakAdminToken(request);
+  const created = await request.post(`${KEYCLOAK}/admin/realms/reticora/users`, {
+    headers: { Authorization: `Bearer ${admin}` },
+    data: {
+      username: operator.email,
+      email: operator.email,
+      emailVerified: true,
+      enabled: true,
+      firstName: 'Audit',
+      lastName: 'Operator',
+      groups: ['/operators'],
+      credentials: [{ type: 'password', value: operator.password, temporary: false }],
+    },
+    failOnStatusCode: false,
+  });
+  expect(created.status(), `create the operator account: ${await created.text()}`).toBe(201);
+  const context = await browser.newContext({ locale: 'de-DE' });
+  try {
+    const login = await operatorLogin(await context.newPage(), context.request, operator);
+    expect(login.status, `operator callback: ${JSON.stringify(login.body)}`).toBe(200);
+    for (const org of orgs) {
+      const granted = await api(
+        request,
+        login.body.token,
+        'POST',
+        `/admin/orgs/${org.orgId}/entitlements`,
+        { feature_key: featureKey, plan, enabled: true },
+      );
+      expect(
+        granted.status,
+        `grant ${featureKey} to ${org.orgId}: ${JSON.stringify(granted.body)}`,
+      ).toBe(200);
+    }
+  } finally {
+    await context.close();
+  }
+  for (const org of orgs) {
+    const check = await api<{ enabled?: boolean }>(
+      request,
+      org.token,
+      'GET',
+      `/entitlements/check/${featureKey}`,
+    );
+    expect(
+      check.status,
+      `GET /entitlements/check/${featureKey}: ${JSON.stringify(check.body)}`,
+    ).toBe(200);
+    expect(check.body?.enabled, `${featureKey} of ${org.orgId} after the grant`).toBe(true);
+  }
+}
+
 /** A request the SNMP fake received (collector/internal/fakesnmp, Request). */
 export interface FakeSnmpRequest {
   at: string;
@@ -522,16 +794,36 @@ export interface FakeSnmpRequest {
   /** "1", "2c" or "3"; empty for a packet that is no SNMP message. */
   version: string;
   community: string;
+  /** USM user name of an SNMPv3 message (empty for the engine discovery). */
+  user?: string;
   pdu?: string;
   oids?: string[];
+  /** usmStats report the SNMPv3 mode answered with, e.g. usmStatsWrongDigests. */
+  report?: string;
   answered: boolean;
+}
+
+/** The one SNMPv3 user (authPriv) of the fake's SNMPv3 mode (WP-542). */
+export interface FakeSnmpV3User {
+  user: string;
+  /** SHA, SHA224, SHA256, SHA384 or SHA512 (default SHA256). */
+  authProtocol?: string;
+  authPassword: string;
+  /** AES, AES192 or AES256 (default AES). */
+  privProtocol?: string;
+  privPassword: string;
 }
 
 export interface FakeSnmpOptions {
   /** Address the fake listens on; the collector's SNMP plugin queries port 161. */
   ip: string;
-  /** The only community the fake answers. */
-  community: string;
+  /** The only community the fake answers (SNMPv2c); omit for the SNMPv3 mode. */
+  community?: string;
+  /**
+   * SNMPv3 mode: the fake answers only this user with its keys, reports a wrong key with
+   * usmStatsWrongDigests and an unknown user with usmStatsUnknownUserNames (RFC 3414 3.2).
+   */
+  v3?: FakeSnmpV3User;
   sysName: string;
   sysDescr: string;
   sysObjectId: string;
@@ -565,26 +857,45 @@ function fakeSnmpBinary(): string {
 }
 
 /**
- * startFakeSnmp builds and starts the SNMPv2c fake of collector/cmd/fakesnmp (WP-384) on
- * <ip>:161. It answers sysDescr, sysObjectID and sysName only to requests with its
- * community and records every request it receives with the community it carried, so a
+ * startFakeSnmp builds and starts the SNMP fake of collector/cmd/fakesnmp on <ip>:161. As
+ * SNMPv2c fake (WP-384) it answers sysDescr, sysObjectID and sysName only to requests with
+ * its community; in the SNMPv3 mode (`v3`, WP-542) only to the authPriv requests of its user
+ * with the right keys, a wrong key gets the report usmStatsWrongDigests. It records every
+ * request it receives with the community or user it carried and the report it got, so a
  * test can prove which secret the collector sent. Port 161 needs
  * net.ipv4.ip_unprivileged_port_start <= 161 (fixtures/setup-real-stack.sh sets it on
  * GitHub Actions).
  */
 export async function startFakeSnmp(opts: FakeSnmpOptions): Promise<FakeSnmp> {
+  expect(
+    Boolean(opts.community) !== Boolean(opts.v3),
+    'the SNMP fake answers either a community (v2c) or an SNMPv3 user',
+  ).toBe(true);
   const bin = fakeSnmpBinary();
   const requestsFile = join(
     mkdtempSync(join(tmpdir(), 'reticora-fakesnmp-run-')),
     'requests.jsonl',
   );
+  const identity = opts.v3
+    ? [
+        '-v3-user',
+        opts.v3.user,
+        '-v3-auth-protocol',
+        opts.v3.authProtocol ?? 'SHA256',
+        '-v3-auth-password',
+        opts.v3.authPassword,
+        '-v3-priv-protocol',
+        opts.v3.privProtocol ?? 'AES',
+        '-v3-priv-password',
+        opts.v3.privPassword,
+      ]
+    : ['-community', opts.community!];
   const proc = spawn(
     bin,
     [
       '-listen',
       `${opts.ip}:161`,
-      '-community',
-      opts.community,
+      ...identity,
       '-sysname',
       opts.sysName,
       '-sysdescr',
@@ -626,4 +937,199 @@ export async function startFakeSnmp(opts: FakeSnmpOptions): Promise<FakeSnmp> {
       await exited;
     },
   };
+}
+
+// ─── The compose project of the installed stack (WP-547) ────────────────────
+
+/**
+ * The compose project the cloud installer set up: install-smoke.yml installs into
+ * deploy/docker-compose of the checkout with the configuration in .env. E2E_COMPOSE_DIR and
+ * E2E_COMPOSE_ENV_FILE point elsewhere.
+ */
+export const COMPOSE_DIR = process.env.E2E_COMPOSE_DIR || join(REPO, 'deploy', 'docker-compose');
+export const COMPOSE_ENV_FILE = process.env.E2E_COMPOSE_ENV_FILE || '.env';
+
+function composeEnvPath(): string {
+  return join(COMPOSE_DIR, COMPOSE_ENV_FILE);
+}
+
+/** readComposeEnv returns the variables of the installation's .env (last assignment wins). */
+export function readComposeEnv(): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const line of readFileSync(composeEnvPath(), 'utf8').split('\n')) {
+    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line);
+    if (match) vars[match[1]] = match[2].replace(/^["']|["']$/g, '');
+  }
+  return vars;
+}
+
+/**
+ * writeComposeEnv changes variables of the installation's .env the way an operator does
+ * (docs/ops/workers.md): a value replaces every assignment of the variable, undefined
+ * removes it. Other lines stay as they are.
+ */
+export function writeComposeEnv(changes: Record<string, string | undefined>) {
+  const path = composeEnvPath();
+  const lines = readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => !Object.keys(changes).some((key) => line.startsWith(`${key}=`)));
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  for (const [key, value] of Object.entries(changes)) {
+    if (value !== undefined) lines.push(`${key}=${value}`);
+  }
+  writeFileSync(path, `${lines.join('\n')}\n`);
+}
+
+/** The settings of the test overlays the server was started with (setup-real-stack.sh). */
+let overlayEnv: Record<string, string> | undefined;
+
+function composeFiles(): string[] {
+  const files = ['-f', 'docker-compose.yml'];
+  if (existsSync(join(COMPOSE_DIR, 'docker-compose.override.yml'))) {
+    files.push('-f', 'docker-compose.override.yml');
+  }
+  files.push(
+    '-f',
+    join(REPO, 'frontend', 'e2e', 'fixtures', 'docker-compose.e2e.yml'),
+    '-f',
+    join(REPO, 'frontend', 'e2e-real', 'fixtures', 'docker-compose.e2e-real.yml'),
+  );
+  return files;
+}
+
+function compose(args: string[]): string {
+  return execFileSync(
+    'docker',
+    ['compose', '--env-file', COMPOSE_ENV_FILE, ...composeFiles(), ...args],
+    {
+      cwd: COMPOSE_DIR,
+      env: { ...process.env, ...overlayEnv },
+      encoding: 'utf8',
+      timeout: 5 * 60_000,
+    },
+  );
+}
+
+/** A container of the compose project as docker reports it. */
+export interface ServiceContainer {
+  id: string;
+  startedAt: string;
+  restartCount: number;
+  running: boolean;
+  env: Record<string, string>;
+}
+
+/** serviceContainer inspects the (running or stopped) container of a compose service. */
+export function serviceContainer(service: string): ServiceContainer {
+  const id = execFileSync(
+    'docker',
+    ['compose', '--env-file', COMPOSE_ENV_FILE, 'ps', '-aq', service],
+    { cwd: COMPOSE_DIR, encoding: 'utf8', timeout: 60_000 },
+  )
+    .trim()
+    .split('\n')[0];
+  expect(id, `container of the compose service ${service} in ${COMPOSE_DIR}`).toBeTruthy();
+  const [state] = JSON.parse(
+    execFileSync('docker', ['inspect', id], { encoding: 'utf8', timeout: 60_000 }),
+  ) as {
+    Id: string;
+    RestartCount: number;
+    State: { StartedAt: string; Running: boolean };
+    Config: { Env: string[] };
+  }[];
+  const env: Record<string, string> = {};
+  for (const entry of state.Config.Env) {
+    const at = entry.indexOf('=');
+    env[entry.slice(0, at)] = entry.slice(at + 1);
+  }
+  return {
+    id: state.Id,
+    startedAt: state.State.StartedAt,
+    restartCount: state.RestartCount,
+    running: state.State.Running,
+    env,
+  };
+}
+
+/** serviceLogs returns what the current container of a service logged since `since`. */
+export function serviceLogs(service: string, since: Date): string {
+  const run = spawnSync(
+    'docker',
+    ['logs', '--since', since.toISOString(), serviceContainer(service).id],
+    {
+      encoding: 'utf8',
+      timeout: 60_000,
+    },
+  );
+  return `${run.stdout}${run.stderr}`;
+}
+
+async function waitFor(url: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return true;
+    } catch {
+      // not up yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  return false;
+}
+
+/** The outcome of restartServer. */
+export interface ServerRestart {
+  /** /readyz of the restarted server answered 200 within the wait. */
+  ready: boolean;
+  /** What the server logged since the restart. */
+  logs: string;
+  /** The restarted server container (its environment as the server got it). */
+  container: ServiceContainer;
+}
+
+/**
+ * restartServer changes the installation's .env as given (writeComposeEnv) and restarts
+ * only the server of the installed stack (k-e2e-real-ci, install-smoke.yml) with the
+ * compose files setup-real-stack.sh applied and the settings of their test overlays
+ * (signup secrets and nginx.conf, taken from the running server like the module run of
+ * install-smoke.yml does): `docker compose up -d --no-deps --force-recreate server` (also when
+ * only a variable changed that compose does not pass to the server). No other service is
+ * restarted; only the frontend container is recreated after a server that came up,
+ * because nginx resolves the server at its start (setup-real-stack.sh). It waits up to
+ * readyWithinMs for /readyz and reports the outcome, it does not assert it: a start that
+ * must fail is a test of its own.
+ */
+export async function restartServer(
+  changes: Record<string, string | undefined>,
+  readyWithinMs = 3 * 60_000,
+): Promise<ServerRestart> {
+  if (!overlayEnv) {
+    const env = serviceContainer('server').env;
+    overlayEnv = {
+      E2E_CAPTCHA_KEY: env.RETICORA_SIGNUP_CAPTCHA_KEY ?? '',
+      E2E_KC_CLIENT_ID: env.RETICORA_KEYCLOAK_ADMIN_CLIENT_ID ?? '',
+      E2E_KC_CLIENT_SECRET: env.RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET ?? '',
+      E2E_NGINX_CONF:
+        process.env.E2E_NGINX_CONF ||
+        join(process.env.RUNNER_TEMP || '/tmp', 'nginx-e2e-real.conf'),
+    };
+    expect(
+      overlayEnv.E2E_CAPTCHA_KEY && overlayEnv.E2E_KC_CLIENT_SECRET,
+      'the server runs with the overlays of setup-real-stack.sh (signup secrets)',
+    ).toBeTruthy();
+    expect(existsSync(overlayEnv.E2E_NGINX_CONF), overlayEnv.E2E_NGINX_CONF).toBe(true);
+  }
+  writeComposeEnv(changes);
+  const since = new Date(Date.now() - 1_000);
+  compose(['up', '-d', '--no-deps', '--force-recreate', 'server']);
+  const ready = await waitFor(`${SERVER}/readyz`, readyWithinMs);
+  if (ready) {
+    compose(['up', '-d', '--no-deps', '--force-recreate', 'frontend']);
+    expect(
+      await waitFor(`${BASE}/api/v1/auth/config`, 2 * 60_000),
+      'the recreated frontend reaches the restarted server',
+    ).toBe(true);
+  }
+  return { ready, logs: serviceLogs('server', since), container: serviceContainer('server') };
 }

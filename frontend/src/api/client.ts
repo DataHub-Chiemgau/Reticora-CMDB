@@ -409,14 +409,24 @@ export class ApiError extends Error {
 /**
  * SCOPED_LISTS are the list endpoints that filter by client and site; the
  * scope chosen in the layout (UI-01/UI-02) is added to their GET requests
- * unless the caller set the parameter itself.
+ * unless the caller set the parameter itself. They are exactly the GET routes
+ * of the API with the query parameter client_id or site_id (WP-556; checked
+ * against the generated schema in client.test.ts).
  */
-const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
+export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
   '/cis': ['client_id', 'site_id'],
+  '/export/cis': ['client_id'],
   '/topology': ['client_id', 'site_id'],
   '/assets': ['client_id'],
+  '/orders': ['client_id'],
+  '/consumables': ['client_id'],
   '/contacts': ['client_id'],
   '/sites': ['client_id'],
+  '/buildings': ['site_id'],
+  '/vlans': ['site_id'],
+  '/subnets': ['client_id', 'site_id'],
+  '/slas': ['client_id'],
+  '/forms': ['client_id'],
 };
 
 /** withScope adds the selected scope to a GET of a scoped list. */
@@ -2507,6 +2517,19 @@ export interface MaintenanceWindow {
   created_at: string;
 }
 
+/** Stored customer notification of a maintenance window (WP-540). */
+export interface MaintenanceNotification {
+  id: string;
+  organization_id: string;
+  maintenance_window_id: string;
+  client_id?: string;
+  channel: string;
+  /** pending until a channel has delivered it; then sent or failed. */
+  status: 'pending' | 'sent' | 'failed' | string;
+  sent_at?: string;
+  created_at: string;
+}
+
 export const maintenanceApi = {
   list(
     params: ListParams & { status?: string } = {},
@@ -2532,9 +2555,13 @@ export const maintenanceApi = {
   notify(id: string): Promise<{
     notified: number;
     queued: number;
-    notifications: { client_id?: string; status: string; sent_at?: string }[];
+    notifications: MaintenanceNotification[];
   }> {
     return fetchAPI(`/maintenance-windows/${id}/notify`, { method: 'POST', body: '{}' });
+  },
+  /** notifications lists the stored notifications of a window (one per client and channel). */
+  notifications(id: string): Promise<{ data: MaintenanceNotification[] }> {
+    return fetchAPI(`/maintenance-windows/${id}/notifications`);
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/maintenance-windows/${id}`, { method: 'DELETE' });

@@ -43,6 +43,8 @@ on:
       - 'backend/**'
       - 'frontend/src/**'
       - 'frontend/e2e-real/**'
+      # WP-532: playwright.real.config.ts takes its browser projects from here.
+      - 'frontend/playwright.config.ts'
       - 'frontend/e2e/support/**'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
@@ -50,6 +52,8 @@ on:
       - 'collector/**'
       - 'edgecore/**'
       - 'tests/audit/**'
+      # WP-546: the collector self-update with two builds (COL-06).
+      - 'tests/collector-selfupdate.test.sh'
       # WP-387: the installers verify what the release workflow publishes.
       - '.github/workflows/release.yml'
   pull_request:
@@ -80,6 +84,8 @@ on:
       - 'backend/**'
       - 'frontend/src/**'
       - 'frontend/e2e-real/**'
+      # WP-532: playwright.real.config.ts takes its browser projects from here.
+      - 'frontend/playwright.config.ts'
       - 'frontend/e2e/support/**'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
@@ -87,6 +93,8 @@ on:
       - 'collector/**'
       - 'edgecore/**'
       - 'tests/audit/**'
+      # WP-546: the collector self-update with two builds (COL-06).
+      - 'tests/collector-selfupdate.test.sh'
       # WP-387: the installers verify what the release workflow publishes.
       - '.github/workflows/release.yml'
   # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
@@ -180,6 +188,20 @@ jobs:
       - name: install-vm.sh cosign for the signed auto-updates (COL-06)
         run: ./tests/install-vm-cosign.test.sh
 
+      # COL-06 (WP-546, open evidence of WP-148): the self-update of the
+      # running collector with two builds (v0.0.1, v0.0.2), manifests and
+      # artifacts on a local HTTP server and a cosign stub that accepts only
+      # the fixture bundle: update and new version reported, wrong or missing
+      # signature, beta release on the channel stable, rollback after failed
+      # starts. The real cosign check runs in the ci.yml job cosign-verify.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - name: Collector self-update with two versions (COL-06)
+        run: ./tests/collector-selfupdate.test.sh
+
   # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
   # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the
   # installer in a debian:12 container that drives the runner's Docker daemon
@@ -188,9 +210,8 @@ jobs:
   install-cloud-smoke:
     needs: installer-script-tests
     runs-on: ${{ matrix.runner }}
-    # The real-stack suite (ubuntu-24.04) takes about 20 minutes: D08 of
-    # discovery-override.spec.ts watches a disabled, still running collector
-    # over two discovery cycles of 5 minutes (WP-381).
+    # The real-stack suite runs in the job e2e-real, one job per browser
+    # project (WP-532).
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -274,12 +295,100 @@ jobs:
           [ "$lines" -gt 0 ] || { echo "FAIL: docker compose logs server read nothing ($driver)"; exit 1; }
           echo "OK: the server logs with $driver; docker compose logs read $lines lines"
 
-      # WP-100 (OPS-04): WAL archiving works and a base backup exists.
+      # WP-100 (OPS-04, NFR-05), executed evidence of WP-544: the scheduler
+      # backs up only at RETICORA_BACKUP_HOUR, so the step triggers a full
+      # backup itself (retried while the scheduler's first backup holds the
+      # stanza lock). Then a WAL switch must reach the repository
+      # (pg_stat_archiver.archived_count rises within 120 s), 'pgbackrest
+      # info' must list one full backup more than before, health and
+      # verify-repo must pass, and the repository must not open with a wrong
+      # cipher passphrase. The
+      # pgBackRest commands run through reticora-pgbackrest-env.sh, which
+      # derives PGBACKREST_REPO1_CIPHER_PASS from RETICORA_BACKUP_CIPHER_PASS
+      # like the entrypoints of the postgres and backup containers.
       - name: Verify the backup chain
         run: |
+          set -euo pipefail
           cd deploy/docker-compose
-          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh pgbackrest --stanza=reticora check
-          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh reticora-backup.sh health
+          dc() { docker compose --env-file .env "$@"; }
+          backrest() { dc exec -T backup reticora-pgbackrest-env.sh "$@"; }
+          sql() { dc exec -T postgres psql -U reticora -d reticora -XAtv ON_ERROR_STOP=1 -c "$1"; }
+          full_backups() {
+            backrest pgbackrest --stanza=reticora --output=json info \
+              | jq '[.[] | select(.name == "reticora") | .backup[]? | select(.type == "full")] | length'
+          }
+
+          # The scheduler may already have taken its first backup; the
+          # triggered one must add a full backup of its own.
+          before_fulls="$(full_backups)"
+          for attempt in $(seq 1 30); do
+            if out="$(backrest pgbackrest --stanza=reticora --type=full backup 2>&1)"; then
+              printf '%s\n' "$out" | tail -n 3
+              break
+            fi
+            printf '%s\n' "$out" | tail -n 5
+            if ! grep -qE 'LockAcquireError|unable to acquire lock' <<<"$out" || [ "$attempt" -eq 30 ]; then
+              echo "FAIL: the triggered full backup failed (attempt $attempt)"; exit 1
+            fi
+            echo "the stanza is locked by a running backup, retrying in 10 s"; sleep 10
+          done
+
+          backrest pgbackrest --stanza=reticora check
+
+          before="$(sql 'SELECT archived_count FROM pg_stat_archiver')"
+          # A committed transaction id puts a record into the current segment,
+          # so pg_switch_wal() closes a segment that has to be archived.
+          sql 'SELECT txid_current()' >/dev/null
+          segment="$(sql 'SELECT pg_walfile_name(pg_switch_wal())')"
+          deadline=$((SECONDS + 120))
+          until after="$(sql 'SELECT archived_count FROM pg_stat_archiver')"; [ "$after" -gt "$before" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "FAIL: archived_count stayed at $after (before $before) for 120 s after the switch of $segment"
+              sql 'SELECT * FROM pg_stat_archiver'; exit 1
+            fi
+            sleep 2
+          done
+          echo "OK: archived_count $before -> $after after the switch of $segment"
+
+          fulls="$(full_backups)"
+          if [ "$fulls" -lt 1 ] || [ "$fulls" -le "$before_fulls" ]; then
+            echo "FAIL: pgbackrest info lists $fulls full backup(s), $before_fulls before the triggered backup"
+            backrest pgbackrest --stanza=reticora info; exit 1
+          fi
+          echo "OK: pgbackrest info lists $fulls full backup(s), $before_fulls before the triggered backup"
+
+          backrest reticora-backup.sh health
+          backrest reticora-backup.sh verify-repo
+
+          # Negative case: the repository is encrypted; with a wrong
+          # passphrase pgBackRest cannot read it (exec bypasses the entrypoint,
+          # so the variable is set directly). 'pgbackrest info' exits 0 even
+          # for a repository it cannot read and reports the error in the
+          # status of the stanza and the repository instead (code 99, the
+          # backup.info does not decrypt), so the step derives the result
+          # from rc and status: unreadable means rc != 0, or a status code
+          # != 0 for both with no backup listed. The JSON can carry the
+          # undecrypted bytes, hence the non-strict parser.
+          set +e
+          wrong="$(dc exec -T -e PGBACKREST_REPO1_CIPHER_PASS=wp544-wrong-passphrase backup pgbackrest --stanza=reticora --output=json info 2>&1)"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            status="$(python3 -c '
+          import json, sys
+          s = [x for x in json.loads(sys.stdin.read(), strict=False) if x.get("name") == "reticora"][0]
+          repo = [r["status"]["code"] for r in s.get("repo", [])]
+          print(s["status"]["code"], min(repo) if repo else 0, len(s.get("backup", [])))' <<<"$wrong")" \
+              || { echo "FAIL: pgbackrest info with a wrong cipher passphrase printed no stanza status"; exit 1; }
+            read -r stanza_code repo_code backups <<<"$status"
+            if [ "$stanza_code" -eq 0 ] || [ "$repo_code" -eq 0 ] || [ "$backups" -ne 0 ]; then
+              echo "FAIL: pgbackrest info read the repository with a wrong cipher passphrase (rc 0, stanza status $stanza_code, repository status $repo_code, $backups backups)"
+              exit 1
+            fi
+            echo "OK: with a wrong cipher passphrase the repository is unreadable (rc 0, stanza status $stanza_code, repository status $repo_code, no backup listed)"
+          else
+            echo "OK: pgbackrest info with a wrong cipher passphrase returned rc $rc"
+          fi
 
       - name: Verify backend health endpoint
         run: |
@@ -343,9 +452,8 @@ jobs:
           curl -sS -o /dev/null "http://minio:9000/minio/health/live" || { echo "FAIL: http://minio:9000 is not reachable from the host"; exit 1; }
 
       # WP-529: the report of the onboarding suite (JSON report, traces and
-      # screenshots in its own directory, which the real-stack suite below
-      # does not clear) is uploaded after every run, green or red; the
-      # suite keeps retries: 0 (playwright.install.config.ts).
+      # screenshots in its own directory) is uploaded after every run, green
+      # or red; the suite keeps retries: 0 (playwright.install.config.ts).
       - name: Run the onboarding E2E suite
         if: matrix.platform == 'ubuntu-24.04'
         working-directory: frontend
@@ -448,35 +556,208 @@ jobs:
             || { echo "FAIL: collector $id is not registered with a certificate in organization $org"; exit 1; }
           echo "OK: collector $id enrolled with the command of the UI over PATH"
 
-      # WP-338 (TST-03, TST-04): the real-stack suite frontend/e2e-real/ against
-      # the same installation, compared with the e2e-real lines of
-      # tests/audit/expected-failures.txt: a listed test that turned green, an
-      # unlisted red test, a skipped or missing test fail the job.
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          cd deploy/docker-compose
+          echo "=== docker compose ps ==="
+          docker compose --env-file .env ps || true
+          echo "=== server logs ==="
+          docker compose --env-file .env logs --tail 80 server || true
+          echo "=== keycloak logs ==="
+          docker compose --env-file .env logs --tail 80 keycloak || true
+          echo "=== frontend logs ==="
+          docker compose --env-file .env logs --tail 80 frontend || true
+          echo "=== mailpit logs ==="
+          docker ps -aq --filter name=mailpit | xargs -r docker logs --tail 40 || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env down -v --remove-orphans || true
+
+  # TST-03, TST-04 (WP-338, WP-532): the real-stack suite frontend/e2e-real/
+  # on the reference platform (ubuntu-24.04) in all six Playwright projects of
+  # playwright.real.config.ts, which takes them from frontend/playwright.config.ts
+  # (chromium, edge, firefox, webkit, mobile-chrome, mobile-safari). Every
+  # project runs in its own job with its own installation: the suite takes
+  # about 20 minutes per project (D08 of discovery-override.spec.ts watches a
+  # disabled, still running collector over two discovery cycles of 5 minutes,
+  # WP-381). Each job compares the results of its project with the e2e-real
+  # lines of tests/audit/expected-failures.txt for that project
+  # (<project>:<spec file>): a listed test that turned green, an unlisted red
+  # test, a skipped or missing test fail the job. The job e2e-real-ratchet
+  # compares the results of all projects together.
+  e2e-real:
+    needs: installer-script-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browser: chromium
+          - project: edge
+            browser: msedge
+          - project: firefox
+            browser: firefox
+          - project: webkit
+            browser: webkit
+          - project: mobile-chrome
+            browser: chromium
+          - project: mobile-safari
+            browser: webkit
+    env:
+      PROJECT: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make installer scripts executable
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
+
+      # The checked-out state is not published: local build, not
+      # signature-verified (E-69; the default path runs in release-mode).
+      - name: Run the cloud installer non-interactively (ubuntu-24.04)
+        run: ./install.sh --cloud --non-interactive --build-from-source
+        env:
+          RETICORA_SOURCE_DIR: ${{ github.workspace }}
+
+      - name: Verify all expected services are running and healthy
+        run: |
+          sleep 5
+          ./tests/install-smoke-health.sh deploy/docker-compose .env
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # Self-signup, mail catcher and collector as for the onboarding suite of
+      # install-cloud-smoke; the real-stack suite creates its own tenants.
+      - name: Prepare the onboarding fixtures (signup configuration, mail catcher, collector)
+        run: ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
+
       - name: Prepare the real-stack suite (X-Real-IP passthrough, database, Keycloak admin)
-        if: matrix.platform == 'ubuntu-24.04'
         run: |
           command -v psql >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
           ./frontend/e2e-real/fixtures/setup-real-stack.sh deploy/docker-compose .env
 
-      - name: Run the real-stack E2E suite against the expected-failure list
-        if: matrix.platform == 'ubuntu-24.04'
+      - name: Install the frontend dependencies and the browser of ${{ matrix.project }}
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps ${{ matrix.browser }}
+
+      # G1 default (RETICORA_MODULES unset): playwright.real.config.ts leaves
+      # the specs of late modules out (WP-541).
+      - name: Run the real-stack E2E suite (${{ matrix.project }}) against the expected-failure list
+        id: e2e-real-g1
         working-directory: frontend
         env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real.json
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real/e2e-real.json
         run: |
-          npx playwright test -c e2e-real/playwright.real.config.ts --reporter=list,json || true
-          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real.json" --results "$RUNNER_TEMP/e2e-real-results.txt"
-          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$RUNNER_TEMP/e2e-real-results.txt"
+          mkdir -p "$RUNNER_TEMP/e2e-real"
+          npx playwright test -c e2e-real/playwright.real.config.ts --project="$PROJECT" --reporter=list,json \
+            --output "$RUNNER_TEMP/e2e-real/test-results" || true
+          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real/e2e-real.json" --results "$RUNNER_TEMP/e2e-real/e2e-real-results.txt"
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --projects "$PROJECT" --results "$RUNNER_TEMP/e2e-real/e2e-real-results.txt"
 
-      - name: Upload the real-stack report
-        if: always() && matrix.platform == 'ubuntu-24.04'
+      # WP-541 (MGT-04, NTF-05, NFR-04): module run. The maintenance module is
+      # off in the G1 default (E-03); the server of the same installation is
+      # restarted with RETICORA_MODULES=maintenance (an overlay on top of the
+      # files setup-real-stack.sh applies, with the signup secrets of the
+      # running server) and the frontend recreated after it, as
+      # setup-real-stack.sh does. It runs whenever the G1 run ran, green or red.
+      - name: Restart the server with RETICORA_MODULES=maintenance (module run)
+        if: ${{ !cancelled() && steps.e2e-real-g1.outcome != 'skipped' }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_WORKSPACE"
+          cd deploy/docker-compose
+          value() { sed -n "s/^$1=//p" .env | tail -n 1 | tr -d "\"'"; }
+          overlay="$RUNNER_TEMP/docker-compose.e2e-real-maintenance.yml"
+          printf 'services:\n  server:\n    environment:\n      RETICORA_MODULES: maintenance\n' >"$overlay"
+          files=(-f docker-compose.yml)
+          [ -f docker-compose.override.yml ] && files+=(-f docker-compose.override.yml)
+          files+=(-f "$repo/frontend/e2e/fixtures/docker-compose.e2e.yml" -f "$repo/frontend/e2e-real/fixtures/docker-compose.e2e-real.yml" -f "$overlay")
+          server_id="$(docker compose --env-file .env ps -q server)"
+          container_env() { docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$server_id" | sed -n "s/^$1=//p"; }
+          E2E_CAPTCHA_KEY="$(container_env RETICORA_SIGNUP_CAPTCHA_KEY)"
+          E2E_KC_CLIENT_ID="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_ID)"
+          E2E_KC_CLIENT_SECRET="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)"
+          E2E_NGINX_CONF="$RUNNER_TEMP/nginx-e2e-real.conf"
+          if [ -z "$E2E_CAPTCHA_KEY" ] || [ -z "$E2E_KC_CLIENT_SECRET" ] || [ ! -f "$E2E_NGINX_CONF" ]; then
+            echo "FAIL: the real-stack setup (signup secrets, $E2E_NGINX_CONF) is missing"; exit 1
+          fi
+          export E2E_CAPTCHA_KEY E2E_KC_CLIENT_ID E2E_KC_CLIENT_SECRET E2E_NGINX_CONF
+          docker compose --env-file .env "${files[@]}" up -d server
+          server_port="$(value RETICORA_SERVER_PORT)"; server_port="${server_port:-8080}"
+          for _ in $(seq 1 60); do
+            curl -fsS "http://localhost:${server_port}/api/v1/signup/challenge" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker compose --env-file .env "${files[@]}" up -d --force-recreate frontend
+          frontend_port="$(value RETICORA_FRONTEND_PORT)"; frontend_port="${frontend_port:-3000}"
+          for _ in $(seq 1 60); do
+            curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS "http://localhost:${frontend_port}/api/v1/auth/config" >/dev/null \
+            || { echo "FAIL: the frontend does not reach the restarted server"; exit 1; }
+          modules="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose --env-file .env ps -q server)" | sed -n 's/^RETICORA_MODULES=//p')"
+          [ "$modules" = maintenance ] || { echo "FAIL: the server runs with RETICORA_MODULES='$modules'"; exit 1; }
+          echo "OK: server restarted with RETICORA_MODULES=$modules"
+
+      # Only the specs of the module (E2E_MODULE_RUN, playwright.real.config.ts)
+      # in the project of this job; the ratchet compares the results of both
+      # runs together with the e2e-real lines of that project.
+      - name: Run the real-stack module run (maintenance, ${{ matrix.project }}) against the expected-failure list
+        if: ${{ !cancelled() && steps.e2e-real-g1.outcome != 'skipped' }}
+        working-directory: frontend
+        env:
+          E2E_MODULE_RUN: maintenance
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real/e2e-real-maintenance.json
+        run: |
+          set -euo pipefail
+          npx playwright test -c e2e-real/playwright.real.config.ts --project="$PROJECT" --reporter=list,json \
+            --output "$RUNNER_TEMP/e2e-real/maintenance-test-results" || true
+          res="$RUNNER_TEMP/e2e-real/e2e-real-maintenance-results.txt"
+          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real/e2e-real-maintenance.json" --results "$res"
+          grep -q ";$PROJECT:frontend/e2e-real/maintenance.spec.ts;" "$res" \
+            || { echo "FAIL: the module run executed no test of maintenance.spec.ts in $PROJECT"; exit 1; }
+          if grep -v ";$PROJECT:frontend/e2e-real/maintenance.spec.ts;" "$res"; then
+            echo "FAIL: the module run executed other specs than maintenance.spec.ts or another project than $PROJECT"; exit 1
+          fi
+          cat "$RUNNER_TEMP/e2e-real/e2e-real-results.txt" "$res" >"$RUNNER_TEMP/e2e-real/e2e-real-all-results.txt"
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --projects "$PROJECT" --results "$RUNNER_TEMP/e2e-real/e2e-real-all-results.txt"
+
+      # Report, traces and comparison of the project, green or red.
+      - name: Upload the real-stack report (${{ matrix.project }})
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-real
-          path: |
-            frontend/test-results/
-            ${{ runner.temp }}/e2e-real.json
-            ${{ runner.temp }}/e2e-real-results.txt
+          name: e2e-real-${{ matrix.project }}
+          path: ${{ runner.temp }}/e2e-real/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # The result lines of both runs for e2e-real-ratchet; a project without
+      # them counts as not run there.
+      - name: Upload the real-stack results (${{ matrix.project }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-real-results-${{ matrix.project }}
+          path: ${{ runner.temp }}/e2e-real/e2e-real-all-results.txt
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Show logs on failure
@@ -500,6 +781,86 @@ jobs:
           cd deploy/docker-compose
           docker compose --env-file .env down -v --remove-orphans || true
 
+  # TST-03 (WP-532): the ratchet over the whole browser matrix. Every project
+  # of playwright.real.config.ts must have delivered its results (a project
+  # missing in the matrix or a job that ended before its runs fails here),
+  # every project lists the same tests (no project leaves a test out), no
+  # spec or support file decides by browser (no browser-dependent skip), and
+  # the results of all projects together are compared with every e2e-real
+  # line of tests/audit/expected-failures.txt: a line for a project that did
+  # not run is "verwaist".
+  e2e-real-ratchet:
+    needs: e2e-real
+    if: ${{ !cancelled() && needs.e2e-real.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Same tests in every project, no browser-dependent skip
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npx playwright test -c e2e-real/playwright.real.config.ts --list --reporter=json >"$RUNNER_TEMP/e2e-real-list.json"
+          python3 - "$RUNNER_TEMP/e2e-real-list.json" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          projects = [p["name"] for p in report["config"]["projects"]]
+          tests = {p: set() for p in projects}
+          def walk(suite, titles):
+              for s in suite.get("suites", []) or []:
+                  yield from walk(s, titles + [s["title"]])
+              for spec in suite.get("specs", []) or []:
+                  for t in spec.get("tests", []):
+                      yield " › ".join(titles + [spec["title"]]), t["projectName"]
+          for top in report["suites"]:
+              for name, project in walk(top, [top["title"]]):
+                  tests[project].add(name)
+          ref = tests[projects[0]]
+          bad = [p for p in projects if tests[p] != ref]
+          for p in bad:
+              print(f"FAIL: project {p} lists other tests than {projects[0]}: missing {sorted(ref - tests[p])[:5]}, extra {sorted(tests[p] - ref)[:5]}")
+          if bad or not ref:
+              sys.exit(1)
+          print(f"OK: {len(projects)} projects ({', '.join(projects)}), {len(ref)} tests each")
+          PY
+          if grep -rnE 'browserName|isMobile|defaultBrowserType|projectName|project\.name' e2e-real --include='*.ts' \
+              --exclude=playwright.real.config.ts; then
+            echo "FAIL: the real-stack suite decides by browser (above); no test may be skipped per browser"; exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-real-results-*
+          path: ${{ runner.temp }}/e2e-real-results
+
+      - name: Compare the results of all projects with the expected-failure list
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/e2e-real-results"
+          all="$RUNNER_TEMP/e2e-real-matrix-results.txt"
+          : >"$all"
+          missing=0
+          for p in $(jq -r '.config.projects[].name' "$RUNNER_TEMP/e2e-real-list.json"); do
+            f="$dir/e2e-real-results-$p/e2e-real-all-results.txt"
+            if [ ! -s "$f" ] || ! grep -q "^e2e-real;$p:" "$f"; then
+              echo "FAIL: no results of project $p (job e2e-real ($p))"; missing=1; continue
+            fi
+            cat "$f" >>"$all"
+          done
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$all"
+          exit "$missing"
+
   # INS-02/TEC-09 (WP-420, F-033/F-034/F-035): the TLS-domain path against a
   # real ACME server. Pebble with challtestsrv (tests/fixtures/pebble/)
   # issues, certbot/certbot:v2.11.0 requests and renews, the installer runs
@@ -511,25 +872,88 @@ jobs:
   # the renewed certificate is served without a frontend restart within the
   # reload interval (10 s here; the test waits up to 10 min), and an
   # unchanged certificate causes no reload.
+  # WP-558 (INS-04, F-352): the test keeps its installation with the Pebble
+  # certificate (RETICORA_PEBBLE_KEEP_STACK), and the INS-04 tests of the
+  # onboarding suite (tag @ins-04) run over its TLS origin https://<domain>:
+  # authorize URL, redirect_uri and issuer must not name localhost, and the
+  # self-test with a localhost redirect_uri must be recognised. The suite
+  # trusts the Pebble root (E2E_CA_CERT: NSS database, NODE_EXTRA_CA_CERTS)
+  # instead of ignoring certificate errors. The insecure-origin test
+  # (@plain-http) needs a plain-HTTP UI, which a TLS installation redirects
+  # to HTTPS; that redirect is checked instead.
   tls-domain-pebble:
     needs: installer-script-tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
 
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
-      - name: Installer against Pebble (issuance, re-run, uid 101 after issuance and renewal, renewal served without restart, issuer checks, failed challenge)
+      - name: Hand-off of the kept installation (WP-558)
+        run: |
+          echo "RETICORA_PEBBLE_KEEP_STACK=$RUNNER_TEMP/tls-origin" >>"$GITHUB_ENV"
+          echo "E2E_CA_CERT=$RUNNER_TEMP/tls-origin/pebble-root.pem" >>"$GITHUB_ENV"
+
+      - name: Installer against Pebble (issuance, re-run, uid 101 after issuance and renewal, renewal served without restart, issuer checks, failed challenge, installation kept)
         run: ./tests/install-acme-pebble.test.sh "$RUNNER_TEMP/tls-domain-pebble"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Prepare the onboarding suite on the TLS origin
+        run: |
+          [ -s "$E2E_CA_CERT" ] || { echo "FAIL: no kept installation ($E2E_CA_CERT missing)"; exit 1; }
+          ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
+          domain="$(sed -n 's/^RETICORA_TLS_DOMAIN=//p' deploy/docker-compose/.env | tail -n 1 | tr -d "\"'")"
+          base="$(sed -n 's/^BASE_URL=//p' "$GITHUB_ENV" | tail -n 1)"
+          issuer="$(sed -n 's/^E2E_ISSUER_URL=//p' "$GITHUB_ENV" | tail -n 1)"
+          echo "BASE_URL=$base E2E_ISSUER_URL=$issuer"
+          [ -n "$domain" ] && [ "$base" = "https://$domain" ] \
+            || { echo "FAIL: BASE_URL '$base' is not the TLS origin https://$domain"; exit 1; }
+          case "$base $issuer" in
+            *localhost*|*127.0.0.1*) echo "FAIL: BASE_URL or E2E_ISSUER_URL names localhost"; exit 1 ;;
+          esac
+          # The plain-HTTP origin redirects to the TLS origin.
+          location="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "http://$domain/login")"
+          [ "$location" = "301 https://$domain/login" ] \
+            || { echo "FAIL: http://$domain/login answers '$location', expected '301 https://$domain/login'"; exit 1; }
+
+      - name: Run the INS-04 tests of the onboarding suite over the TLS origin
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/tls-origin-e2e/report.json
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          command -v certutil >/dev/null || sudo apt-get install -y --no-install-recommends libnss3-tools
+          npx playwright test -c e2e/fixtures/playwright.install.config.ts \
+            --grep @ins-04 --grep-invert @plain-http \
+            --reporter=github,list,json --output "$RUNNER_TEMP/tls-origin-e2e/test-results"
+          # The authorize check and its self-test ran and passed.
+          for t in 'the authorization redirect targets the configured issuer with PKCE' \
+            'self-test: a localhost redirect_uri fails the redirect check'; do
+            jq -e --arg t "$t" '[.. | objects | select(.title? == $t) | .tests[]?.results[]?.status] | length > 0 and all(. == "passed")' \
+              "$PLAYWRIGHT_JSON_OUTPUT_NAME" >/dev/null || { echo "FAIL: '$t' did not pass"; exit 1; }
+          done
 
       - name: Upload the installer, Pebble and stack logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tls-domain-pebble
-          path: ${{ runner.temp }}/tls-domain-pebble/
+          path: |
+            ${{ runner.temp }}/tls-domain-pebble/
+            ${{ runner.temp }}/tls-origin-e2e/
           retention-days: 14
 
   # INS-05 (WP-386, F-125): a re-run of the installer applies rotated

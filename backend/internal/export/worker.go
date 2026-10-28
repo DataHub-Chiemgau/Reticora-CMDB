@@ -9,7 +9,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
@@ -67,11 +66,9 @@ type JobWorker struct {
 	// failures counts the errors of the current cycle (OPS-05).
 	failures int
 	// Tracker mirrors the export job into the generic job model (JOB-01);
-	// optional.
+	// optional. export.completed (NTF-05) is written by Jobs.CompleteJob
+	// in the transaction that completes the job (WP-550).
 	Tracker jobs.Tracker
-	// Events reports a completed export as export.completed (NTF-05);
-	// optional.
-	Events events.Emitter
 }
 
 // mirror follows the status of an export job in the generic job model; a
@@ -217,12 +214,6 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 		if err := tracker.MirrorResult(ctx, job.OrganizationID, "export_job", job.ID,
 			map[string]any{"export_id": job.ID, "row_count": rowCount}); err != nil {
 			slog.Warn("mirror export job result", "job", job.ID, "error", err)
-		}
-	}
-	if w.Events != nil {
-		if err := w.Events.Emit(ctx, &events.Event{OrgID: job.OrganizationID, Type: events.ExportCompleted, EntityID: job.ID,
-			Data: map[string]any{"id": job.ID, "format": job.Format, "row_count": rowCount, "initiated_by": job.InitiatedBy}}); err != nil {
-			slog.Error("report completed export", "job", job.ID, "error", err)
 		}
 	}
 }

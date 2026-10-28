@@ -1139,7 +1139,7 @@ export interface paths {
     put?: never;
     /**
      * Revert a succeeded job where the revert is defined (E-25)
-     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02.
+     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02. A successful revert is recorded on the job (reverted_at, reverted_by); a second revert is 409 "the job is already reverted" (F-329).
      */
     post: operations['revertJob'];
     delete?: never;
@@ -6654,7 +6654,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the type of the value (for in of the first element, all elements sharing it): a number only with numeric values, a boolean only with booleans, a time string with lt, lte, gt or gte only with values holding a time, other strings as text. An attribute value of another JSON type counts as missing: it matches neither eq, in nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); the results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write.
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the type of the value (for in of the first element, all elements sharing it): a number only with numeric values, a boolean only with booleans, a time string with lt, lte, gt or gte only with values holding a time, other strings as text. An attribute value of another JSON type counts as missing: it matches neither eq, in nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); the results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -7233,10 +7233,13 @@ export interface components {
       name?: string;
       /** @enum {string} */
       entity_kind?: 'ci' | 'asset';
+      /** @description The filter spec; it holds no sort or columns (422 on filter_spec.sort or filter_spec.columns), those are the view's own. */
       filter_spec?: {
         [key: string]: unknown;
       };
+      /** @description Sort keys of the view; a run sends them to /api/v1/search/query, which orders the rows by them. */
       sort?: components['schemas']['SavedViewSortKey'][];
+      /** @description Columns of the view; a run sends them to /api/v1/search/query, which returns their values per row. */
       columns?: string[];
       /** @description Shares the view org-wide. A PATCH without it keeps the current sharing. */
       shared?: boolean;
@@ -8289,6 +8292,13 @@ export interface components {
       started_at?: string;
       /** Format: date-time */
       finished_at?: string;
+      /**
+       * Format: date-time
+       * @description When the succeeded job was reverted (POST /jobs/{id}/revert); absent while it is not.
+       */
+      reverted_at?: string;
+      /** @description The user who reverted the job; absent while it is not reverted. */
+      reverted_by?: string;
       /** @description Whether DELETE /jobs/{id} cancels the job now: true for a queued job and for a running job of a kind that can be cancelled while running (ci.bulk, history.snapshot, export), false otherwise. */
       cancellable: boolean;
     };
@@ -13533,13 +13543,16 @@ export interface operations {
           'application/json': {
             job_id: string;
             reverted: boolean;
+            /** Format: date-time */
+            reverted_at?: string;
+            reverted_by?: string;
           };
         };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The kind defines no revert, the job did not succeed, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the merge kind has no unmerge, or the merge no longer exists. */
+      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -28341,13 +28354,15 @@ export interface operations {
           /** @enum {string} */
           entity_kind?: 'ci' | 'asset';
           where?: components['schemas']['FilterExpr'];
+          sort?: components['schemas']['SavedViewSortKey'][];
+          columns?: string[];
         } & {
           [key: string]: unknown;
         };
       };
     };
     responses: {
-      /** @description Filtered query results */
+      /** @description Filtered query results: id, entity_kind, name, summary, attributes and, when the request listed columns, columns (an object of the listed fields and their values). */
       200: {
         headers: {
           [name: string]: unknown;
@@ -28377,7 +28392,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value; field names it (where.<path> or the flat field). */
+      /** @description Invalid filter AST, filter value, sort key or column; field names it (where.<path>, the flat field, sort[<i>].field, sort[<i>].dir or columns[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;

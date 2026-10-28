@@ -11,8 +11,9 @@ import (
 )
 
 // TestWHK01AgainstPostgres covers the stores of WHK-01 against PostgreSQL:
-// dead deliveries are counted per subscription and window, a subscription
-// is deactivated in its own tenant context, and a dead delivery is queued
+// dead deliveries are counted per subscription and window, the third one
+// switches the subscription off with its move, a subscription is
+// deactivated in its own tenant context, and a dead delivery is queued
 // again (pending, fresh budget, out of the dead-letter queue) while a
 // pending one cannot be retried.
 //
@@ -36,8 +37,14 @@ func TestWHK01AgainstPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		rec.Attempt, rec.Error, rec.Status = 6, "unexpected status 502", webhook.StatusDead
-		if err := store.MoveToDeadLetter(bg, rec); err != nil {
+		disabled, err := store.MoveToDeadLetter(bg, &rec, time.Now().Add(-24*time.Hour))
+		if err != nil {
 			t.Fatal(err)
+		}
+		// The third dead delivery within 24 hours switches the
+		// subscription off in the move (WP-550).
+		if disabled != (i == 2) {
+			t.Errorf("dead delivery %d: subscription switched off %v, want %v", i+1, disabled, i == 2)
 		}
 		dead = append(dead, rec)
 	}

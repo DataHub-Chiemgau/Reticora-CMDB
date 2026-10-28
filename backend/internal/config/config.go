@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Environments accepted in RETICORA_ENVIRONMENT. Only development keeps the
@@ -186,6 +188,12 @@ type Config struct {
 	RetentionSoftDeleteDays int // soft-deleted CIs, 90 days
 	RetentionReviewItemDays int // resolved review items, 1 year
 
+	// Retention of the event stream RETICORA_EVENTS (EVT-01, NFR-06): the
+	// age and size its messages are kept; published outbox rows keep their
+	// data as long. An age below MinEventsMaxAge is a start error.
+	EventsMaxAge   time.Duration
+	EventsMaxBytes int64
+
 	// Search
 	SearchBackend      string
 	OpenSearchURL      string
@@ -294,6 +302,8 @@ func Load() *Config {
 		RetentionHistoryDays:    l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
 		RetentionSoftDeleteDays: l.integer("RETICORA_RETENTION_SOFT_DELETE_DAYS", MinRetentionSoftDeleteDays),
 		RetentionReviewItemDays: l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
+		EventsMaxAge:            l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
+		EventsMaxBytes:          l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
 		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
 		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
 		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
@@ -378,6 +388,14 @@ const (
 	MinRetentionHistoryDays    = 3 * 365
 	MinRetentionSoftDeleteDays = 90
 	MinRetentionReviewItemDays = 365
+)
+
+// Retention of the event stream RETICORA_EVENTS (EVT-01): 30 days and
+// 10 GB by default; the events are kept at least 30 days (NFR-06).
+const (
+	DefaultEventsMaxAge   = 30 * 24 * time.Hour
+	MinEventsMaxAge       = 30 * 24 * time.Hour
+	DefaultEventsMaxBytes = int64(10) << 30
 )
 
 // Ingest lanes per organization (RETICORA_INGEST_LANES, WP-334): the
@@ -553,6 +571,12 @@ func (c *Config) Validate(noDB bool) error {
 			errs = append(errs, fmt.Errorf("%s must be at least %d (NFR-06), got %d", r.key, r.min, r.value))
 		}
 	}
+	if c.EventsMaxAge < MinEventsMaxAge {
+		errs = append(errs, fmt.Errorf("RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06), got %s", c.EventsMaxAge))
+	}
+	if c.EventsMaxBytes <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_EVENTS_MAX_BYTES must be positive, got %d", c.EventsMaxBytes))
+	}
 	if c.RateLimitOrgRPM < c.RateLimitRPM {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_ORG_RPM (%d) must not be below RETICORA_RATE_LIMIT_RPM (%d)", c.RateLimitOrgRPM, c.RateLimitRPM))
 	}
@@ -680,6 +704,41 @@ func (l *loader) integer(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return i
+}
+
+func (l *loader) int64(key string, defaultValue int64) int64 {
+	v := l.str(key, "")
+	if v == "" {
+		return defaultValue
+	}
+	i, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		l.invalid = append(l.invalid, key)
+		return defaultValue
+	}
+	return i
+}
+
+// duration reads a Go duration ("720h") or a whole number of days ("30d").
+func (l *loader) duration(key string, defaultValue time.Duration) time.Duration {
+	v := l.str(key, "")
+	if v == "" {
+		return defaultValue
+	}
+	if days, ok := strings.CutSuffix(v, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 0 || int64(n) > math.MaxInt64/int64(24*time.Hour) {
+			l.invalid = append(l.invalid, key)
+			return defaultValue
+		}
+		return time.Duration(n) * 24 * time.Hour
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		l.invalid = append(l.invalid, key)
+		return defaultValue
+	}
+	return d
 }
 
 func (l *loader) boolean(key string, defaultValue bool) bool {

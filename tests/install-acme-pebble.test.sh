@@ -34,6 +34,14 @@
 #       nginx, so the served serial stayed unchanged for those 10 min. Negative
 #       case: while the certificate is unchanged the loop runs and nginx logs
 #       no reload over three intervals.
+#   (g) WP-558 (INS-04, F-352), only with RETICORA_PEBBLE_KEEP_STACK=<dir>:
+#       after (e) the A record is restored and a further installer run
+#       issues the Pebble certificate again; the stack, its .env and
+#       letsencrypt/ then stay for the onboarding suite, which the job
+#       tls-domain-pebble runs next over https://<domain>. <dir> receives
+#       pebble-root.pem (the root of the served chain, E2E_CA_CERT of the
+#       suite). Pebble and challtestsrv are removed; nothing is kept when a
+#       case failed.
 #
 # Name resolution: Pebble resolves the domain only through challtestsrv (A
 # record of the host IP, removed for (e)). The host and the containers (the
@@ -55,6 +63,7 @@
 # Usage: ./tests/install-acme-pebble.test.sh [log directory]
 #   The log directory receives the installer logs (install-*.log) and the
 #   logs of Pebble, challtestsrv and the stack.
+#   RETICORA_PEBBLE_KEEP_STACK=<dir> keeps the installation, see (g).
 set -uo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
@@ -73,6 +82,9 @@ HTTPS_ADDR="127.0.0.1:443"
 RELOAD_INTERVAL=10
 RELOAD_SLACK=10
 RENEWAL_WAIT=600
+# (g): hand-off directory of the kept installation; KEPT=1 once handed off.
+KEEP_DIR="${RETICORA_PEBBLE_KEEP_STACK:-}"
+KEPT=0
 
 PASS=0
 FAIL=0
@@ -302,6 +314,12 @@ wait_healthy() {
 restart_serves_live_chain() {
     stack restart frontend || return 1
     wait_healthy frontend || return 1
+    serves_live_chain
+}
+
+# serves_live_chain — the frontend serves the certificate of live/<domain>/
+# with a chain to the Pebble root.
+serves_live_chain() {
     local out served want
     out="$(openssl s_client -connect "$HTTPS_ADDR" -servername "$DOMAIN" -verify_hostname "$DOMAIN" \
         -CAfile "$PEBBLE_ROOT" -verify_return_error </dev/null 2>&1)" \
@@ -466,6 +484,35 @@ failed_challenge_keeps_placeholder() {
     done
 }
 
+# ─── (g) installation kept for the onboarding suite (WP-558) ─────────────────
+
+# kept_stack_serves_pebble <rc> — the further installer run issued the Pebble
+# certificate again and the healthy frontend serves it.
+kept_stack_serves_pebble() {
+    [ "$1" -eq 0 ] || { echo "installer rc $1"; return 1; }
+    log_has keep "Let's Encrypt certificate issued for $DOMAIN" "HTTPS is now active at https://$DOMAIN" || return 1
+    chain_is_pebble || return 1
+    no_second_lineage || return 1
+    wait_healthy frontend || return 1
+    serves_live_chain
+}
+
+# keep_stack — (g): restores the A record, runs the installer once more and
+# hands the installation off to the next step of the job.
+keep_stack() {
+    mkdir -p "$KEEP_DIR" || { fail "pebble: hand-off directory $KEEP_DIR"; return 1; }
+    challtest add-a "{\"host\":\"$DOMAIN\",\"addresses\":[\"$HOST_IP\"]}" >/dev/null \
+        || { fail "pebble: A record restored in challtestsrv"; return 1; }
+    local rc=0 before="$FAIL"
+    run_installer keep || rc=$?
+    check "pebble: kept installation: installer rc 0, Pebble chain issued again and served" kept_stack_serves_pebble "$rc"
+    check "pebble: kept installation logs both issuer checks" issuer_checks_logged keep
+    [ "$FAIL" -eq 0 ] || { echo "Not kept: $((FAIL - before)) case(s) of the kept installation and $before earlier failed."; return 1; }
+    cp "$PEBBLE_ROOT" "$KEEP_DIR/pebble-root.pem" || { fail "pebble: Pebble root handed off"; return 1; }
+    KEPT=1
+    echo "Installation kept for https://$DOMAIN (root: $KEEP_DIR/pebble-root.pem)."
+}
+
 # ─── cleanup ─────────────────────────────────────────────────────────────────
 
 collect_logs() {
@@ -478,6 +525,12 @@ collect_logs() {
 
 cleanup() {
     collect_logs
+    if [ "$KEPT" = 1 ]; then
+        # (g): the stack, .env, letsencrypt/ and the work files its .env
+        # names (CA bundles) stay; only the ACME side goes.
+        pebble down -v --remove-orphans >/dev/null 2>&1 || true
+        return 0
+    fi
     if [ -f "$ENV_FILE" ]; then
         stack down -v --remove-orphans >/dev/null 2>&1 || true
     fi
@@ -574,6 +627,11 @@ main() {
     run_installer failed-challenge || rc=$?
     check "pebble: failed challenge keeps the placeholder, installer rc 0 with the warning" failed_challenge_keeps_placeholder "$rc" "$invalid"
     check "pebble: run with the failed challenge logs both issuer checks"                  issuer_checks_logged failed-challenge
+
+    # (g): the installation stays for the onboarding suite.
+    if [ -n "$KEEP_DIR" ]; then
+        keep_stack || true
+    fi
 
     echo
     printf '%d passed, %d failed\n' "$PASS" "$FAIL"

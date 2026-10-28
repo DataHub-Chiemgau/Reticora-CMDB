@@ -28,6 +28,15 @@ import { keycloakOtp } from './support/totp';
 // progress at 3 and shows the error (F-177). The export file is loaded in
 // the browser over the signed download_url of the job; a tampered signature
 // is refused with 403 and fails the step (F-353).
+// WP-558 (F-352): the INS-04 error image "Localhost-Redirect" is told apart.
+// The install-smoke job tls-domain-pebble runs the tests tagged @ins-04 over
+// the TLS origin of its installation (https://<domain>, Pebble certificate):
+// authorize URL, redirect_uri and issuer must not name localhost and must
+// share the origin of BASE_URL when BASE_URL is not a loopback origin; the
+// test fails without E2E_ISSUER_URL. A self-test rewrites the redirect_uri of
+// the authorize redirect to localhost (page.route) and expects the check to
+// fail. @plain-http marks the test that needs a plain-HTTP origin of the UI,
+// which a TLS installation redirects to HTTPS.
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
 const SERVER = process.env.E2E_SERVER_URL || 'http://localhost:8080';
@@ -42,6 +51,70 @@ const password = `Onboarding-${stamp}!a`;
 const SIMULATED_DEVICES = 30;
 
 let collector: ChildProcess | undefined;
+
+/** isLoopback: the host of the URL is localhost or a loopback address. */
+function isLoopback(url: URL): boolean {
+  const host = url.hostname.toLowerCase();
+  return (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    /^127\.\d+\.\d+\.\d+$/.test(host) ||
+    host === '[::1]'
+  );
+}
+
+/**
+ * authorizeRedirectProblems is the INS-04 check of the authorization
+ * redirect (F-352): the authorize URL lies at the configured issuer and the
+ * redirect_uri at the origin of BASE_URL. When BASE_URL is not a loopback
+ * origin, none of authorize URL, redirect_uri and issuer names localhost or a
+ * loopback address, and all three share the origin of BASE_URL. It returns
+ * the violations, empty when the redirect is right.
+ */
+function authorizeRedirectProblems(authorize: URL): string[] {
+  if (!ISSUER) return ['E2E_ISSUER_URL is not set (setup-onboarding.sh)'];
+  const base = new URL(BASE);
+  const issuer = new URL(ISSUER);
+  const raw = authorize.searchParams.get('redirect_uri') ?? '';
+  const problems: string[] = [];
+  let redirect: URL | undefined;
+  try {
+    redirect = new URL(raw);
+  } catch {
+    problems.push(`redirect_uri is not a URL: '${raw}'`);
+  }
+  if (authorize.origin !== issuer.origin) {
+    problems.push(`authorize URL ${authorize.origin} is not at the issuer ${issuer.origin}`);
+  }
+  if (redirect && redirect.origin !== base.origin) {
+    problems.push(`redirect_uri ${redirect.origin} is not the origin of BASE_URL ${base.origin}`);
+  }
+  if (!isLoopback(base)) {
+    const named: [string, string, URL | undefined][] = [
+      ['authorize URL', authorize.href, authorize],
+      ['redirect_uri', raw, redirect],
+      ['issuer', ISSUER, issuer],
+    ];
+    for (const [name, value, url] of named) {
+      if (/localhost/i.test(value) || (url && isLoopback(url))) {
+        problems.push(`${name} names localhost: ${value}`);
+      }
+      // The origin of the redirect_uri is checked above in every case.
+      if (url && url !== redirect && url.origin !== base.origin) {
+        problems.push(`${name} ${url.origin} is not the origin of BASE_URL ${base.origin}`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** authorizeRedirect clicks "Anmelden" and returns the authorize URL. */
+async function authorizeRedirect(page: Page): Promise<URL> {
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Anmelden' }).click();
+  await page.waitForURL(/\/protocol\/openid-connect\/auth/);
+  return new URL(page.url());
+}
 
 test.afterAll(() => {
   collector?.kill('SIGTERM');
@@ -159,37 +232,87 @@ async function keycloakLogin(page: Page, landing: RegExp) {
 }
 
 test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)', () => {
-  test('the API answers through the frontend origin (no "failed to fetch")', async ({ page }) => {
-    const response = page.waitForResponse((r) => r.url().endsWith('/api/v1/auth/config'));
-    await page.goto('/login');
-    await page.getByRole('button', { name: 'Anmelden' }).click();
-    const config = await response;
-    expect(config.ok()).toBe(true);
-    expect(new URL(config.url()).origin).toBe(new URL(BASE).origin);
-    await page.waitForURL(/\/protocol\/openid-connect\/auth/);
-  });
+  test(
+    'the API answers through the frontend origin (no "failed to fetch")',
+    {
+      tag: '@ins-04',
+    },
+    async ({ page }) => {
+      const response = page.waitForResponse((r) => r.url().endsWith('/api/v1/auth/config'));
+      await page.goto('/login');
+      await page.getByRole('button', { name: 'Anmelden' }).click();
+      const config = await response;
+      expect(config.ok()).toBe(true);
+      expect(new URL(config.url()).origin).toBe(new URL(BASE).origin);
+      await page.waitForURL(/\/protocol\/openid-connect\/auth/);
+    },
+  );
 
-  test('the authorization redirect targets the configured issuer with PKCE', async ({ page }) => {
-    await page.goto('/login');
-    await page.getByRole('button', { name: 'Anmelden' }).click();
-    await page.waitForURL(/\/protocol\/openid-connect\/auth/);
-    const url = new URL(page.url());
-    if (ISSUER) {
-      expect(url.origin).toBe(new URL(ISSUER).origin);
-    }
-    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-    expect(url.searchParams.get('code_challenge')).toBeTruthy();
-    expect(new URL(url.searchParams.get('redirect_uri') ?? '').origin).toBe(new URL(BASE).origin);
-  });
+  test(
+    'the authorization redirect targets the configured issuer with PKCE',
+    {
+      tag: '@ins-04',
+    },
+    async ({ page }) => {
+      expect(ISSUER, 'E2E_ISSUER_URL (set by setup-onboarding.sh)').toBeTruthy();
+      const url = await authorizeRedirect(page);
+      expect(authorizeRedirectProblems(url), `authorize URL ${url.href}`).toEqual([]);
+      expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+      expect(url.searchParams.get('code_challenge')).toBeTruthy();
+    },
+  );
 
-  test('an insecure origin explains the secure-context requirement', async ({ page }) => {
-    expect(INSECURE, 'E2E_INSECURE_URL (set by setup-onboarding.sh)').toBeTruthy();
-    await page.goto(`${INSECURE}/login`);
-    await page.getByRole('button', { name: 'Anmelden' }).click();
-    await expect(page.getByText(/erfordert eine sichere Verbindung/)).toBeVisible();
-  });
+  test(
+    'self-test: a localhost redirect_uri fails the redirect check',
+    {
+      tag: '@ins-04',
+    },
+    async ({ page }) => {
+      expect(ISSUER, 'E2E_ISSUER_URL (set by setup-onboarding.sh)').toBeTruthy();
+      // The authorize redirect of the SPA is answered with a redirect to the
+      // same URL with a localhost redirect_uri (another port than BASE_URL, so
+      // that a loopback BASE_URL is told apart as well).
+      const injected = 'http://localhost:1/auth/callback';
+      const authorize = (url: URL) =>
+        url.pathname.endsWith('/protocol/openid-connect/auth') &&
+        url.searchParams.get('redirect_uri') !== injected;
+      let rewritten = 0;
+      await page.route(authorize, (route) => {
+        const url = new URL(route.request().url());
+        url.searchParams.set('redirect_uri', injected);
+        rewritten++;
+        return route.fulfill({ status: 302, headers: { location: url.toString() } });
+      });
+      const url = await authorizeRedirect(page);
+      expect(rewritten, 'the authorize redirect went through the rewriting route').toBe(1);
+      expect(url.searchParams.get('redirect_uri')).toBe(injected);
+      const problems = authorizeRedirectProblems(url);
+      expect(problems).toContainEqual(
+        expect.stringMatching(/^redirect_uri http:\/\/localhost:1 is not the origin of BASE_URL/),
+      );
+      if (!isLoopback(new URL(BASE))) {
+        expect(problems).toContainEqual(
+          expect.stringMatching(/^redirect_uri names localhost: http:\/\/localhost:1\//),
+        );
+        expect(problems).toContainEqual(expect.stringMatching(/^authorize URL names localhost: /));
+      }
+    },
+  );
 
-  test('an unreachable backend is explained', async ({ page }) => {
+  test(
+    'an insecure origin explains the secure-context requirement',
+    {
+      tag: ['@ins-04', '@plain-http'],
+    },
+    async ({ page }) => {
+      expect(INSECURE, 'E2E_INSECURE_URL (set by setup-onboarding.sh)').toBeTruthy();
+      await page.goto(`${INSECURE}/login`);
+      await page.getByRole('button', { name: 'Anmelden' }).click();
+      await expect(page.getByText(/erfordert eine sichere Verbindung/)).toBeVisible();
+    },
+  );
+
+  test('an unreachable backend is explained', { tag: '@ins-04' }, async ({ page }) => {
     await page.route('**/api/v1/auth/config', (route) => route.abort('connectionrefused'));
     await page.goto('/login');
     await page.evaluate(() => window.sessionStorage.clear());

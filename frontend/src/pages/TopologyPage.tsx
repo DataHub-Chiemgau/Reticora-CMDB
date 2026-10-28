@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ApiError, type TopologyGraphData } from '../api/client';
 import { localizedText, type RelationshipType } from '../api/cmdb';
 import { useCITypes, useRelationshipTypes } from '../api/cmdbHooks';
-import { useTopology, useImpactMany, useSites } from '../api/hooks';
+import { MAX_IMPACT_CIS, useTopology, useImpactMany, useSites } from '../api/hooks';
 import { TopologyGraph } from '../components/graph/TopologyGraph';
 import type { GraphEdge, GraphNode } from '../components/graph/TopologyGraph';
 import { Badge } from '../components/ui/Badge';
@@ -90,9 +90,9 @@ export function impactDirections(types: RelationshipType[]): Map<string, ImpactD
  * direction counts as source_depends_on_target, the server's reading. Edges
  * carry their relationship types in the label of buildGraphModel; relType
  * narrows the walk to one type (the facet filter). The failed nodes are not
- * part of the set (IMP-05). The page shows this set only, marked as
- * provisional, while the server analysis (/impact, with redundancy) loads
- * or fails.
+ * part of the set (IMP-05). The page shows this set only, marked as a
+ * preview, while the server analysis (/impact, with redundancy) loads; when
+ * the analysis fails it shows the error instead (F-326).
  */
 export function computeOutageImpact(
   failed: string | string[],
@@ -179,17 +179,30 @@ export function TopologyPage() {
     label: localizedText(type.display_name, i18n.language) || type.name,
   }));
   const siteOptions = (sites?.data ?? []).map((site) => ({ value: site.id, label: site.name }));
+  // A node carries its CI type id; the list shows the localized label of
+  // the type, the id only for a type the catalogue does not list (F-344).
+  const typeLabels = new Map(typeOptions.map((option) => [option.value, option.label]));
 
   const model = useMemo(() => (data ? buildGraphModel(data) : { nodes: [], edges: [] }), [data]);
 
   // Server-side impact analysis (spec §4): the backend computes the impacted
   // set authoritatively, faceted by the selected relationship class. The
   // client-side walk along the impact direction of the relationship types
-  // (F-254) is the provisional answer, marked as such, while it loads or
-  // when it fails; without the types the page shows the loading or error
-  // state only. Several CIs can fail together (IMP-05, maintenance windows
-  // and redundancy): the server evaluates them jointly.
-  const { data: impact, isError: impactFailed } = useImpactMany(simulated, relTypeFacet);
+  // (F-254) is a preview, marked as such, only while the analysis loads;
+  // without the types the page shows the loading state only. A failed
+  // analysis shows its error and no client-side set (F-326): the client walk
+  // knows neither redundancy nor the CIs outside the drawn graph. Several CIs
+  // can fail together (IMP-05, maintenance windows and redundancy): the
+  // server evaluates them jointly.
+  const {
+    data: impact,
+    error: impactError,
+    isError: impactFailed,
+    refetch: refetchImpact,
+  } = useImpactMany(simulated, relTypeFacet);
+  // More CIs than one analysis takes: 422 on ci_ids (IMP-05).
+  const tooManyFailed =
+    impactError instanceof ApiError && impactError.status === 422 && impactError.field === 'ci_ids';
   const { data: relationshipTypes } = useRelationshipTypes(simulated.length > 0);
   const directions = useMemo(
     () => (relationshipTypes ? impactDirections(relationshipTypes.data) : undefined),
@@ -197,16 +210,16 @@ export function TopologyPage() {
   );
 
   const outage = useMemo(() => {
-    if (simulated.length === 0) return undefined;
+    if (simulated.length === 0 || impactFailed) return undefined;
     if (impact && Array.isArray(impact.impacted)) {
-      return { impacted: new Set(impact.impacted.map((n) => n.id)), provisional: false };
+      return { impacted: new Set(impact.impacted.map((n) => n.id)), preview: false };
     }
     if (!directions) return undefined;
     return {
       impacted: computeOutageImpact(simulated, model.edges, directions, relTypeFacet),
-      provisional: true,
+      preview: true,
     };
-  }, [simulated, impact, directions, model.edges, relTypeFacet]);
+  }, [simulated, impact, impactFailed, directions, model.edges, relTypeFacet]);
   const outageImpact = outage?.impacted;
 
   // The facet filter also narrows the rendered edges to the selected
@@ -348,11 +361,22 @@ export function TopologyPage() {
               className="border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
               title={t('topology.simulation.active')}
             >
-              <p className="text-sm text-red-900 dark:text-red-100">
-                {impactFailed
-                  ? t('topology.simulation.unavailable')
-                  : t('topology.simulation.loading')}
-              </p>
+              {impactFailed ? (
+                <ErrorState
+                  title={t('topology.simulation.unavailable')}
+                  description={
+                    tooManyFailed
+                      ? t('topology.simulation.tooMany', { max: MAX_IMPACT_CIS })
+                      : t('topology.simulation.failedHint')
+                  }
+                  retryLabel={t('common.retry')}
+                  onRetry={() => void refetchImpact()}
+                />
+              ) : (
+                <p className="text-sm text-red-900 dark:text-red-100">
+                  {t('topology.simulation.loading')}
+                </p>
+              )}
             </Card>
           ) : null}
           {simulated.length > 0 && outageImpact ? (
@@ -360,11 +384,10 @@ export function TopologyPage() {
               className="border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
               title={t('topology.simulation.active')}
             >
-              {outage?.provisional ? (
-                <p className="mb-2 text-xs text-gray-700 dark:text-gray-300">
-                  {impactFailed
-                    ? t('topology.simulation.provisionalFailed')
-                    : t('topology.simulation.provisionalLoading')}
+              {outage?.preview ? (
+                <p className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
+                  <Badge variant="warning">{t('topology.simulation.preview')}</Badge>
+                  <span>{t('topology.simulation.provisionalLoading')}</span>
                 </p>
               ) : null}
               <p className="text-sm text-red-900 dark:text-red-100">
@@ -424,7 +447,7 @@ export function TopologyPage() {
                     {node.name}
                   </button>
                   <span className="flex flex-wrap items-center gap-2">
-                    <Badge variant="info">{node.ci_type}</Badge>
+                    <Badge variant="info">{typeLabels.get(node.ci_type) ?? node.ci_type}</Badge>
                     <Badge variant={getStatusBadgeVariant(node.status)}>
                       {t(getStatusTranslationKey(node.status))}
                     </Badge>

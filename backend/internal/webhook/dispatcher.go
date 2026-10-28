@@ -117,9 +117,6 @@ type DispatcherOptions struct {
 	// PollInterval controls how often the retry worker looks for due
 	// deliveries. A negative value disables the worker.
 	PollInterval time.Duration
-	// Events reports a delivery moved to the dead-letter queue as
-	// webhook.dead (NTF-05); optional.
-	Events events.Emitter
 	// Access decides for a subscription bound to a service account whether
 	// the account may read the event's object (RBA-08). Without it, bound
 	// subscriptions receive nothing (fail-closed).
@@ -252,6 +249,15 @@ func NewDispatcher(repo Repository, client *http.Client, opts ...DispatcherOptio
 	}
 	if options.PollInterval == 0 {
 		options.PollInterval = defaultPollInterval
+	}
+	// A memory delivery store switches the subscriptions of the dispatcher
+	// off itself (WHK-01), as the PostgreSQL store does in its transaction.
+	if mem, ok := options.Deliveries.(*MemoryDeliveryStore); ok {
+		if off, ok := repo.(deactivator); ok {
+			mem.mu.Lock()
+			mem.subscriptions = off
+			mem.mu.Unlock()
+		}
 	}
 
 	d := &Dispatcher{
@@ -704,27 +710,26 @@ func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCod
 	}
 
 	// A delivery that exhausted its retry budget leaves the active queue and
-	// is preserved in the dead-letter queue for operator inspection/replay.
+	// is preserved in the dead-letter queue for operator inspection/replay;
+	// webhook.dead is recorded with it (NTF-05, WP-550).
 	if rec.Status == StatusDead {
-		if dlqErr := d.store.MoveToDeadLetter(ctx, rec); dlqErr != nil {
-			slog.Error("move webhook delivery to dead-letter queue failed",
-				"error", dlqErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
-			// Fall back to marking the delivery dead so the outcome is still
-			// recorded even though the dead letter could not be written.
-			if updateErr := d.store.Update(ctx, rec); updateErr != nil {
-				slog.Error("update webhook delivery failed",
-					"error", updateErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
+		disabled, dlqErr := d.store.MoveToDeadLetter(ctx, &rec, now.Add(-deadWindow))
+		if dlqErr == nil {
+			if disabled {
+				slog.Warn("webhook subscription deactivated", "event", "webhook.subscription.disabled",
+					"organization_id", rec.OrganizationID, "subscription_id", rec.SubscriptionID)
 			}
+			return
 		}
-		disabled := d.deactivateOnRepeatedDeath(ctx, &rec, now)
-		if d.opts.Events != nil {
-			if err := d.opts.Events.Emit(ctx, &events.Event{OrgID: rec.OrganizationID, Type: events.WebhookDead, EntityID: rec.SubscriptionID,
-				Data: map[string]any{"delivery_id": rec.ID, "subscription_id": rec.SubscriptionID, "event": rec.Event,
-					"attempts": rec.Attempt, "last_error": rec.Error, "subscription_disabled": disabled}}); err != nil {
-				slog.Error("report dead webhook delivery", "error", err, "delivery_id", rec.ID)
-			}
-		}
-		return
+		slog.Error("move webhook delivery to dead-letter queue failed",
+			"error", dlqErr, "delivery_id", rec.ID, "organization_id", rec.OrganizationID)
+		// Nothing of the move was stored, so the delivery is never dead
+		// without its webhook.dead: it is recorded as failed and the retry
+		// worker tries it again after the first retry delay (and moves it
+		// then).
+		next := now.Add(d.backoff(1))
+		rec.Status = StatusFailed
+		rec.NextRetryAt = &next
 	}
 
 	if updateErr := d.store.Update(ctx, rec); updateErr != nil {
@@ -733,46 +738,11 @@ func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCod
 	}
 }
 
-// deadCounter counts the dead deliveries of a subscription (PostgreSQL and
-// memory store).
-type deadCounter interface {
-	CountDeadSince(ctx context.Context, orgID, subscriptionID string, since time.Time) (int, error)
-}
-
-// deactivator switches a subscription off (PostgreSQL and memory
-// repository).
+// deactivator switches a subscription off (memory repository): the memory
+// delivery store of a dispatcher uses it for WHK-01, as the PostgreSQL
+// store switches the subscription off in its transaction.
 type deactivator interface {
 	Deactivate(ctx context.Context, orgID, id string) error
-}
-
-// deactivateOnRepeatedDeath switches a subscription off once deadLimit of
-// its deliveries died within deadWindow (WHK-01); the webhook.dead event of
-// the last one tells the owners (webhook managers, NTF-05). It reports
-// whether the subscription was switched off.
-func (d *Dispatcher) deactivateOnRepeatedDeath(ctx context.Context, rec *DeliveryRecord, now time.Time) bool {
-	counter, ok := d.store.(deadCounter)
-	if !ok {
-		return false
-	}
-	off, ok := d.repo.(deactivator)
-	if !ok {
-		return false
-	}
-	dead, err := counter.CountDeadSince(ctx, rec.OrganizationID, rec.SubscriptionID, now.Add(-deadWindow))
-	if err != nil {
-		slog.Error("count dead webhook deliveries", "error", err, "subscription_id", rec.SubscriptionID)
-		return false
-	}
-	if dead < deadLimit {
-		return false
-	}
-	if err := off.Deactivate(ctx, rec.OrganizationID, rec.SubscriptionID); err != nil {
-		slog.Error("deactivate webhook subscription", "error", err, "subscription_id", rec.SubscriptionID)
-		return false
-	}
-	slog.Warn("webhook subscription deactivated", "event", "webhook.subscription.disabled",
-		"organization_id", rec.OrganizationID, "subscription_id", rec.SubscriptionID, "dead_deliveries", dead)
-	return true
 }
 
 // backoff returns the delay before the attempt following the given one.

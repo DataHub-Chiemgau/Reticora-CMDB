@@ -16,6 +16,20 @@ package rls_test
 //       principal sees them;
 //   (d) when the CI moves to another site, the rows' site_id follows.
 //
+// WP-533 (TEN-02) adds the tables left out above, each with insert and move
+// of the parent:
+//   - rack_mount and the matched discovery_result run through (a) to (d); the
+//     matched result's job belongs to a collector of client 2, so the CI and
+//     not the collector decides;
+//   - an unmatched discovery_result takes the client of its job's collector
+//     and no site; matched to the CI it follows the CI (and its move),
+//     unmatched again it returns to the collector's client;
+//   - relationship_suppression carries the scope of both endpoints: claims
+//     are overridden, a client-1 principal cannot suppress towards a client-2
+//     CI, and when the source moves to another site and the target to client
+//     2, source_site_id and target_client_id/target_site_id follow and the
+//     client-1 principal no longer sees the row.
+//
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \
 //     go test -count=1 -v -run 'TestAuditT1CIChildTableDerivation' ./internal/tenant/rls/
@@ -50,6 +64,10 @@ func TestAuditT1CIChildTableDerivation(t *testing.T) {
 	}
 	rule := scalar(`INSERT INTO compliance_rule (organization_id, name, severity, category) VALUES ($1, 't1-child-rule', 'low', 'hygiene') RETURNING id::text`, f.OrgA)
 	contact := scalar(`INSERT INTO contact (organization_id, client_id, display_name) VALUES ($1, $2, 't1-child-contact') RETURNING id::text`, f.OrgA, f.Client1)
+	// Discovery results run in a job of a client-2 collector.
+	collector2 := scalar(`INSERT INTO collector (organization_id, client_id, name, status) VALUES ($1, $2, 't1-child-collector-c2', 'active') RETURNING id::text`, f.OrgA, f.Client2)
+	job2 := scalar(`INSERT INTO discovery_job (organization_id, collector_id, job_type) VALUES ($1, $2, 'sweep') RETURNING id::text`, f.OrgA, collector2)
+	rack := scalar(`INSERT INTO rack (organization_id, room_id, name) VALUES ($1, $2, 't1-child-rack') RETURNING id::text`, f.OrgA, f.Room(t, f.Client1, "t1-child-rack"))
 
 	scope := func(clients ...string) *database.TenantScope {
 		s := database.OrgWideScope(f.OrgA, "")
@@ -77,16 +95,32 @@ func TestAuditT1CIChildTableDerivation(t *testing.T) {
 		}
 		return n
 	}
-
-	tables := []struct{ table, insert string }{
-		{"ci_change", `INSERT INTO ci_change (organization_id, ci_id, change_type, client_id, comment) VALUES ($1, $2, 'update', $3, $4) RETURNING id::text`},
-		{"ci_field_value", `INSERT INTO ci_field_value (organization_id, ci_id, field_name, client_id, override_reason) VALUES ($1, $2, 't1_field', $3, $4) RETURNING id::text`},
-		{"ci_instance_field_definition", `INSERT INTO ci_instance_field_definition (organization_id, ci_id, name, data_type, client_id, label) VALUES ($1, $2, 't1_def', 'string', $3, $4) RETURNING id::text`},
-		{"security_finding", `INSERT INTO security_finding (organization_id, ci_id, kind, title, client_id, detail) VALUES ($1, $2, 'vulnerability', 't1-finding', $3, $4) RETURNING id::text`},
-		{"compliance_result", `INSERT INTO compliance_result (organization_id, ci_id, status, client_id, rule_id) VALUES ($1, $2, 'pass', $3, $4::uuid) RETURNING id::text`},
-		{"ci_contact", `INSERT INTO ci_contact (organization_id, ci_id, client_id, contact_id) VALUES ($1, $2, $3, $4::uuid) RETURNING id::text`},
+	exec := func(s *database.TenantScope, query string, args ...any) {
+		t.Helper()
+		if err := database.WithTenant(bg, f.App, s, func(ctx context.Context, tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, query, args...)
+			return err
+		}); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
 	}
-	extra := map[string]string{"compliance_result": rule, "ci_contact": contact}
+	scopeOf := func(table, id string) string {
+		t.Helper()
+		return scalar(`SELECT COALESCE(client_id::text, '') || '|' || COALESCE(site_id::text, '') FROM `+table+` WHERE id = $1`, id)
+	}
+
+	// ciColumn is the column naming the CI ("" = ci_id).
+	tables := []struct{ table, insert, ciColumn string }{
+		{"ci_change", `INSERT INTO ci_change (organization_id, ci_id, change_type, client_id, comment) VALUES ($1, $2, 'update', $3, $4) RETURNING id::text`, ""},
+		{"ci_field_value", `INSERT INTO ci_field_value (organization_id, ci_id, field_name, client_id, override_reason) VALUES ($1, $2, 't1_field', $3, $4) RETURNING id::text`, ""},
+		{"ci_instance_field_definition", `INSERT INTO ci_instance_field_definition (organization_id, ci_id, name, data_type, client_id, label) VALUES ($1, $2, 't1_def', 'string', $3, $4) RETURNING id::text`, ""},
+		{"security_finding", `INSERT INTO security_finding (organization_id, ci_id, kind, title, client_id, detail) VALUES ($1, $2, 'vulnerability', 't1-finding', $3, $4) RETURNING id::text`, ""},
+		{"compliance_result", `INSERT INTO compliance_result (organization_id, ci_id, status, client_id, rule_id) VALUES ($1, $2, 'pass', $3, $4::uuid) RETURNING id::text`, ""},
+		{"ci_contact", `INSERT INTO ci_contact (organization_id, ci_id, client_id, contact_id) VALUES ($1, $2, $3, $4::uuid) RETURNING id::text`, ""},
+		{"rack_mount", `INSERT INTO rack_mount (organization_id, ci_id, client_id, rack_id, position_u) VALUES ($1, $2, $3, $4::uuid, 1) RETURNING id::text`, ""},
+		{"discovery_result", `INSERT INTO discovery_result (organization_id, matched_ci_id, client_id, job_id, raw_data) VALUES ($1, $2, $3, $4::uuid, '{}') RETURNING id::text`, "matched_ci_id"},
+	}
+	extra := map[string]string{"compliance_result": rule, "ci_contact": contact, "rack_mount": rack, "discovery_result": job2}
 	rows := map[string]string{}
 	for _, tb := range tables {
 		t.Run(tb.table, func(t *testing.T) {
@@ -94,20 +128,24 @@ func TestAuditT1CIChildTableDerivation(t *testing.T) {
 			if ex == "" {
 				ex = "t1"
 			}
+			ciColumn := tb.ciColumn
+			if ciColumn == "" {
+				ciColumn = "ci_id"
+			}
 			// (a) the writer's client claim is overridden by the CI's scope.
 			id, err := insert(scope(), tb.insert, ci1, f.Client2, ex)
 			if err != nil {
 				t.Fatalf("org-wide insert: %v", err)
 			}
 			rows[tb.table] = id
-			if got := scalar(`SELECT COALESCE(client_id::text, '') || '|' || COALESCE(site_id::text, '') FROM `+tb.table+` WHERE id = $1`, id); got != f.Client1+"|"+site1 {
+			if got := scopeOf(tb.table, id); got != f.Client1+"|"+site1 {
 				t.Errorf("(a) stored client|site = %s, want the CI's %s|%s", got, f.Client1, site1)
 			}
 			// (b) a client-1 principal cannot write a row of a client-2 CI.
 			if _, err := insert(scope(f.Client1), tb.insert, ci2, f.Client1, ex); err == nil {
 				t.Errorf("(b) a client-1 principal inserted a %s row for the client-2 CI", tb.table)
 			}
-			if n := scalar(`SELECT count(*)::text FROM `+tb.table+` WHERE ci_id = $1`, ci2); n != "0" {
+			if n := scalar(`SELECT count(*)::text FROM `+tb.table+` WHERE `+ciColumn+` = $1`, ci2); n != "0" {
 				t.Errorf("(b) %s rows of the client-2 CI: %s, want 0", tb.table, n)
 			}
 			// (c) visibility follows the CI's client.
@@ -119,13 +157,120 @@ func TestAuditT1CIChildTableDerivation(t *testing.T) {
 			}
 		})
 	}
+
+	// An unmatched discovery result belongs to the client of its job's
+	// collector and has no site; matching it to the client-1 CI moves it to
+	// the CI's scope (it then follows the CI's move in (d)).
+	unmatchedInsert := `INSERT INTO discovery_result (organization_id, job_id, client_id, site_id, raw_data) VALUES ($1, $2, $3, $4, '{}') RETURNING id::text`
+	var unmatched string
+	t.Run("discovery_result unmatched", func(t *testing.T) {
+		var err error
+		if err = database.WithTenant(bg, f.App, scope(), func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, unmatchedInsert, f.OrgA, job2, f.Client1, site1).Scan(&unmatched)
+		}); err != nil {
+			t.Fatalf("org-wide insert: %v", err)
+		}
+		if got := scopeOf("discovery_result", unmatched); got != f.Client2+"|" {
+			t.Errorf("stored client|site = %s, want the collector's %s|", got, f.Client2)
+		}
+		if err := database.WithTenant(bg, f.App, scope(f.Client1), func(ctx context.Context, tx pgx.Tx) error {
+			var id string
+			return tx.QueryRow(ctx, unmatchedInsert, f.OrgA, job2, f.Client1, nil).Scan(&id)
+		}); err == nil {
+			t.Errorf("a client-1 principal inserted an unmatched result of the client-2 collector")
+		}
+		if n := count(scope(f.Client1), "discovery_result", unmatched); n != 0 {
+			t.Errorf("a client-1 principal selects %d unmatched results of the client-2 collector, want 0", n)
+		}
+		if n := count(scope(f.Client2), "discovery_result", unmatched); n != 1 {
+			t.Errorf("a client-2 principal selects %d unmatched results of its collector, want 1", n)
+		}
+		exec(scope(), `UPDATE discovery_result SET matched_ci_id = $2 WHERE id = $1`, unmatched, ci1)
+		if got := scopeOf("discovery_result", unmatched); got != f.Client1+"|"+site1 {
+			t.Errorf("matched to the client-1 CI: client|site = %s, want the CI's %s|%s", got, f.Client1, site1)
+		}
+		rows["discovery_result (matched later)"] = unmatched
+	})
+
+	// relationship_suppression between ci1 (client 1, site 1) and ciT (client
+	// 1, site 1t); both endpoints' scope is derived.
+	siteT := siteOf(f.Room(t, f.Client1, "t1-child-s1t"))
+	site2 := siteOf(f.Room(t, f.Client2, "t1-child-s2"))
+	ciT := f.CI(t, f.OrgA, f.Client1, "t1-child-c1t")
+	if got := scalar(`UPDATE ci SET location_id = $2 WHERE id = $1 RETURNING COALESCE(site_id::text, '')`, ciT, siteT); got != siteT {
+		t.Fatalf("setup: target CI site %q, want site 1t", got)
+	}
+	relType := scalar(`SELECT id::text FROM relationship_type WHERE key = 'connected_to' AND organization_id IS NULL`)
+	suppressionInsert := `INSERT INTO relationship_suppression (organization_id, source_ci_id, target_ci_id, relationship_type_id, source_client_id, source_site_id, target_client_id, target_site_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $5, $6) RETURNING id::text`
+	edgeScope := func(id string) string {
+		t.Helper()
+		return scalar(`SELECT COALESCE(source_client_id::text, '') || '|' || COALESCE(source_site_id::text, '') || '>' ||
+			COALESCE(target_client_id::text, '') || '|' || COALESCE(target_site_id::text, '') FROM relationship_suppression WHERE id = $1`, id)
+	}
+	var suppression string
+	t.Run("relationship_suppression", func(t *testing.T) {
+		// (a) claims of client 2 / site 2 for both endpoints are overridden.
+		if err := database.WithTenant(bg, f.App, scope(), func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, suppressionInsert, f.OrgA, ci1, ciT, relType, f.Client2, site2).Scan(&suppression)
+		}); err != nil {
+			t.Fatalf("org-wide insert: %v", err)
+		}
+		if got, want := edgeScope(suppression), f.Client1+"|"+site1+">"+f.Client1+"|"+siteT; got != want {
+			t.Errorf("(a) stored source>target client|site = %s, want %s", got, want)
+		}
+		// (b) a client-1 principal cannot suppress towards the client-2 CI.
+		if err := database.WithTenant(bg, f.App, scope(f.Client1), func(ctx context.Context, tx pgx.Tx) error {
+			var id string
+			return tx.QueryRow(ctx, suppressionInsert, f.OrgA, ci1, ci2, relType, f.Client1, site1).Scan(&id)
+		}); err == nil {
+			t.Errorf("(b) a client-1 principal inserted a suppression towards the client-2 CI")
+		}
+		if n := scalar(`SELECT count(*)::text FROM relationship_suppression WHERE source_ci_id = $1 AND target_ci_id = $2`, ci1, ci2); n != "0" {
+			t.Errorf("(b) suppressions towards the client-2 CI: %s, want 0", n)
+		}
+		// (c) visibility follows both endpoints.
+		if n := count(scope(f.Client2), "relationship_suppression", suppression); n != 0 {
+			t.Errorf("(c) a client-2 principal selects %d suppressions between client-1 CIs, want 0", n)
+		}
+		if n := count(scope(f.Client1), "relationship_suppression", suppression); n != 1 {
+			t.Errorf("(c) a client-1 principal selects %d suppressions between its CIs, want 1", n)
+		}
+	})
+
 	// (d) the CI moves to another site of client 1; every child follows.
 	if got := scalar(`UPDATE ci SET location_id = $2 WHERE id = $1 RETURNING COALESCE(site_id::text, '')`, ci1, site1b); got != site1b {
 		t.Fatalf("move: CI site %q, want site 1b", got)
 	}
 	for table, id := range rows {
+		if table == "discovery_result (matched later)" {
+			table = "discovery_result"
+		}
 		if got := scalar(`SELECT COALESCE(site_id::text, '') FROM `+table+` WHERE id = $1`, id); got != site1b {
 			t.Errorf("(d) %s site_id after the CI moved = %s, want %s", table, got, site1b)
+		}
+	}
+	if unmatched != "" {
+		// Unmatched again, the result returns to the collector's client.
+		exec(scope(), `UPDATE discovery_result SET matched_ci_id = NULL WHERE id = $1`, unmatched)
+		if got := scopeOf("discovery_result", unmatched); got != f.Client2+"|" {
+			t.Errorf("unmatched again: client|site = %s, want the collector's %s|", got, f.Client2)
+		}
+	}
+	if suppression != "" {
+		// The source moved to site 1b above; the target moves to client 2.
+		if got := scalar(`UPDATE ci SET client_id = $2, location_id = $3 WHERE id = $1 RETURNING COALESCE(client_id::text, '') || '|' || COALESCE(site_id::text, '')`,
+			ciT, f.Client2, site2); got != f.Client2+"|"+site2 {
+			t.Fatalf("move: target CI client|site %q, want client 2/site 2", got)
+		}
+		if got, want := edgeScope(suppression), f.Client1+"|"+site1b+">"+f.Client2+"|"+site2; got != want {
+			t.Errorf("(d) suppression source>target client|site after both endpoints moved = %s, want %s", got, want)
+		}
+		if n := count(scope(f.Client1), "relationship_suppression", suppression); n != 0 {
+			t.Errorf("(d) a client-1 principal selects %d suppressions towards the moved client-2 CI, want 0", n)
+		}
+		if n := count(scope(f.Client1, f.Client2), "relationship_suppression", suppression); n != 1 {
+			t.Errorf("(d) a client-1+2 principal selects %d suppressions between its CIs, want 1", n)
 		}
 	}
 }

@@ -452,21 +452,17 @@ func TestDispatcherConsumesOutboxEvents(t *testing.T) {
 	}
 }
 
-// fakeEmitter records emitted events.
-type fakeEmitter struct {
-	mu     sync.Mutex
-	events []events.Event
-}
-
-func (e *fakeEmitter) Emit(_ context.Context, ev *events.Event) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.events = append(e.events, *ev)
-	return nil
+// deadEvents returns the webhook.dead events the memory store recorded with
+// its dead letters (WP-550).
+func deadEvents(s *MemoryDeliveryStore) []events.Event {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]events.Event(nil), s.outbox...)
 }
 
 // TestDeadDeliveryIsReported covers NTF-05 (WP-140): a delivery moved to
-// the dead-letter queue reports webhook.dead.
+// the dead-letter queue reports webhook.dead, recorded with the move
+// (WP-550).
 func TestDeadDeliveryIsReported(t *testing.T) {
 	repo := NewMemoryRepository()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
@@ -475,8 +471,8 @@ func TestDeadDeliveryIsReported(t *testing.T) {
 		Secret: "secret", Events: []string{"ci.created"}, IsActive: true}); err != nil {
 		t.Fatal(err)
 	}
-	emitter := &fakeEmitter{}
-	d := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: NewMemoryDeliveryStore(), MaxAttempts: 1, PollInterval: -1, Events: emitter})
+	store := NewMemoryDeliveryStore()
+	d := NewDispatcher(repo, server.Client(), DispatcherOptions{Deliveries: store, MaxAttempts: 1, PollInterval: -1})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -484,21 +480,14 @@ func TestDeadDeliveryIsReported(t *testing.T) {
 	}()
 	d.Dispatch(context.Background(), "org-1", "ci.created", map[string]any{"id": "ci-1"})
 	deadline := time.Now().Add(2 * time.Second)
-	for {
-		emitter.mu.Lock()
-		n := len(emitter.events)
-		emitter.mu.Unlock()
-		if n > 0 || time.Now().After(deadline) {
-			break
-		}
+	for len(deadEvents(store)) == 0 && !time.Now().After(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	emitter.mu.Lock()
-	defer emitter.mu.Unlock()
-	if len(emitter.events) != 1 || emitter.events[0].Type != events.WebhookDead || emitter.events[0].OrgID != "org-1" {
-		t.Fatalf("events: %+v", emitter.events)
+	got := deadEvents(store)
+	if len(got) != 1 || got[0].Type != events.WebhookDead || got[0].OrgID != "org-1" {
+		t.Fatalf("events: %+v", got)
 	}
-	data := emitter.events[0].Data.(map[string]any)
+	data := got[0].Data.(map[string]any)
 	if data["event"] != "ci.created" || data["attempts"] != 1 || data["subscription_id"] != subscriptionID(t, repo) {
 		t.Errorf("data: %v", data)
 	}

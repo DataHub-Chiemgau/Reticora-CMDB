@@ -312,22 +312,13 @@ func (failingCIRepo) List(context.Context, string, ci.FilterParams, api.Paginati
 
 var errBoom = errors.New("boom")
 
-// eventRecorder records emitted events.
-type eventRecorder struct{ got []events.Event }
-
-func (e *eventRecorder) Emit(_ context.Context, ev *events.Event) error {
-	e.got = append(e.got, *ev)
-	return nil
-}
-
 // TestCompletedExportIsReported covers NTF-05 (WP-140): a completed export
-// reports export.completed for its initiator.
+// reports export.completed for its initiator, recorded with the completion
+// (WP-550).
 func TestCompletedExportIsReported(t *testing.T) {
 	cis := ci.NewMemoryRepository()
 	seedCIs(t, cis, "org-1", 2)
-	_, worker, _, mux := newJobEnv(t, cis)
-	rec := &eventRecorder{}
-	worker.Events = rec
+	repo, worker, _, mux := newJobEnv(t, cis)
 	req := tenantCtx(httptest.NewRequest("POST", "/api/v1/export/jobs", strings.NewReader(`{"format":"json"}`)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -337,10 +328,11 @@ func TestCompletedExportIsReported(t *testing.T) {
 	if !worker.ProcessOne(context.Background()) {
 		t.Fatal("no job processed")
 	}
-	if len(rec.got) != 1 || rec.got[0].Type != events.ExportCompleted || rec.got[0].OrgID != "org-1" {
-		t.Fatalf("events: %+v", rec.got)
+	got := repo.outbox
+	if len(got) != 1 || got[0].Type != events.ExportCompleted || got[0].OrgID != "org-1" {
+		t.Fatalf("events: %+v", got)
 	}
-	data := rec.got[0].Data.(map[string]any)
+	data := got[0].Data.(map[string]any)
 	if data["format"] != "json" || data["row_count"] != 2 || data["initiated_by"] == "" {
 		t.Errorf("data: %v", data)
 	}

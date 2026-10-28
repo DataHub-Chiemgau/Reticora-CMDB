@@ -3,6 +3,7 @@ package savedview
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -63,22 +64,24 @@ func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec FilterSpec
 			summary = "concat_ws(' ', asset_tag, category, status, supplier, serial_number, location)"
 			attrsCol = "custom_fields"
 		}
+		columns, orderBy, args := presentationSQL(table, spec.Sort, spec.Columns, args)
 		args = append(args, page.Limit, page.Offset)
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT id::text, name, COALESCE(%s, ''), %s FROM %s WHERE %s ORDER BY name ASC LIMIT $%d OFFSET $%d",
-			summary, attrsCol, table, baseWhere, len(args)-1, len(args)), args...)
+			"SELECT id::text, name, COALESCE(%s, ''), %s, %s FROM %s WHERE %s ORDER BY %s LIMIT $%d OFFSET $%d",
+			summary, attrsCol, columns, table, baseWhere, orderBy, len(args)-1, len(args)), args...)
 		if err != nil {
 			return fmt.Errorf("run filter query: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var qr QueryResult
-			var attrs map[string]any
-			if scanErr := rows.Scan(&qr.ID, &qr.Name, &qr.Summary, &attrs); scanErr != nil {
+			var attrs, cols map[string]any
+			if scanErr := rows.Scan(&qr.ID, &qr.Name, &qr.Summary, &attrs, &cols); scanErr != nil {
 				return scanErr
 			}
 			qr.EntityKind = spec.entityKind()
 			qr.Attributes = attrs
+			qr.Columns = cols
 			out = append(out, qr)
 		}
 		return rows.Err()
@@ -87,6 +90,56 @@ func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec FilterSpec
 		return nil, 0, err
 	}
 	return out, total, nil
+}
+
+// presentationSQL renders the sort keys and columns of a run (VIE-01,
+// F-336) for table: columns is a jsonb_build_object of the requested
+// fields (NULL without columns), orderBy the ORDER BY list, by name
+// without sort keys and otherwise by the keys with NULLs last and the id
+// as tie-breaker, so that pages do not overlap. The fields passed
+// validatePresentation (CompileSQL validates the spec), so each one is a
+// whitelisted column, the id or a dynamic attribute; field names and
+// attribute keys reach the SQL as parameters appended to args.
+func presentationSQL(table string, sortKeys []SortKey, fields []string, args []any) (columns, orderBy string, outArgs []any) {
+	param := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	field := func(name string) string {
+		if name == "id" {
+			return table + ".id"
+		}
+		if key, ok := strings.CutPrefix(name, "attributes."); ok {
+			jsonb := table + ".attributes"
+			if table == "asset" {
+				jsonb = table + ".custom_fields"
+			}
+			// The JSON value orders numbers as numbers, strings as text.
+			return fmt.Sprintf("%s->%s::text", jsonb, param(key))
+		}
+		return fmt.Sprintf(astFields[table][name].expr, table)
+	}
+	columns = "NULL::jsonb"
+	if len(fields) > 0 {
+		pairs := make([]string, 0, len(fields))
+		for _, name := range fields {
+			pairs = append(pairs, param(name)+"::text, "+field(name))
+		}
+		columns = "jsonb_build_object(" + strings.Join(pairs, ", ") + ")"
+	}
+	if len(sortKeys) == 0 {
+		return columns, "name ASC", args
+	}
+	keys := make([]string, 0, len(sortKeys)+1)
+	for _, key := range sortKeys {
+		dir := "ASC"
+		if key.Dir == "desc" {
+			dir = "DESC"
+		}
+		keys = append(keys, field(key.Field)+" "+dir+" NULLS LAST")
+	}
+	keys = append(keys, table+".id ASC")
+	return columns, strings.Join(keys, ", "), args
 }
 
 // entityKind defaults the spec's entity kind to "ci".

@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
+import { ScrollRegion } from '../components/ScrollRegion';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -147,74 +148,79 @@ export function JobCenterPage() {
 
       {jobs.length > 0 ? (
         <Card>
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-muted">
-              <tr>
-                <th className="pb-2">{t('jobs.kind')}</th>
-                <th className="pb-2">{t('jobs.status')}</th>
-                <th className="pb-2">{t('jobs.progress')}</th>
-                <th className="pb-2">{t('jobs.created')}</th>
-                <th className="pb-2">{t('common.actions')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {jobs.map((job) => {
-                const counts = job.status === 'cancelled' ? reportCounts(job.result) : undefined;
-                return (
-                  <tr key={job.id} data-job-id={job.id}>
-                    <td className="py-2 font-mono text-xs">
-                      {t(`jobs.kinds.${job.kind}`, job.kind)}
-                    </td>
-                    <td className="py-2">
-                      <Badge variant={statusVariant[job.status] ?? 'neutral'}>
-                        {t(`jobs.statuses.${job.status}`, job.status)}
-                      </Badge>
-                      {job.error ? <p className="mt-1 text-xs text-danger">{job.error}</p> : null}
-                      {counts ? (
-                        <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
-                          {t('jobs.partialReportSummary', { ...counts })}
-                        </p>
-                      ) : null}
-                    </td>
-                    <td className="py-2">
-                      <div
-                        role="progressbar"
-                        aria-label={t('jobs.progressOf', { kind: job.kind })}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={job.progress}
-                        className="h-2 w-32 overflow-hidden rounded bg-gray-200 dark:bg-gray-700"
-                      >
-                        <div className="h-full bg-primary" style={{ width: `${job.progress}%` }} />
-                      </div>
-                    </td>
-                    <td className="py-2 text-xs">
-                      <time dateTime={job.created_at}>
-                        {new Date(job.created_at).toLocaleString(i18n.language)}
-                      </time>
-                    </td>
-                    <td className="py-2">
-                      {isCancellable(job) && mayControl(job) ? (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={cancel.isPending}
-                          onClick={() => cancelJob(job)}
+          <ScrollRegion label={t('jobs.title')}>
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs uppercase text-muted">
+                <tr>
+                  <th className="pb-2">{t('jobs.kind')}</th>
+                  <th className="pb-2">{t('jobs.status')}</th>
+                  <th className="pb-2">{t('jobs.progress')}</th>
+                  <th className="pb-2">{t('jobs.created')}</th>
+                  <th className="pb-2">{t('common.actions')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {jobs.map((job) => {
+                  const counts = job.status === 'cancelled' ? reportCounts(job.result) : undefined;
+                  return (
+                    <tr key={job.id} data-job-id={job.id}>
+                      <td className="py-2 font-mono text-xs">
+                        {t(`jobs.kinds.${job.kind}`, job.kind)}
+                      </td>
+                      <td className="py-2">
+                        <Badge variant={statusVariant[job.status] ?? 'neutral'}>
+                          {t(`jobs.statuses.${job.status}`, job.status)}
+                        </Badge>
+                        {job.error ? <p className="mt-1 text-xs text-danger">{job.error}</p> : null}
+                        {counts ? (
+                          <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                            {t('jobs.partialReportSummary', { ...counts })}
+                          </p>
+                        ) : null}
+                      </td>
+                      <td className="py-2">
+                        <div
+                          role="progressbar"
+                          aria-label={t('jobs.progressOf', { kind: job.kind })}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={job.progress}
+                          className="h-2 w-32 overflow-hidden rounded bg-gray-200 dark:bg-gray-700"
                         >
-                          {t('jobs.cancel')}
-                        </Button>
-                      ) : null}
-                      {hasResult(job) ? (
-                        <Button size="sm" variant="ghost" onClick={() => setResultId(job.id)}>
-                          {t(job.status === 'cancelled' ? 'jobs.partialReport' : 'jobs.result')}
-                        </Button>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          <div
+                            className="h-full bg-primary"
+                            style={{ width: `${job.progress}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="py-2 text-xs">
+                        <time dateTime={job.created_at}>
+                          {new Date(job.created_at).toLocaleString(i18n.language)}
+                        </time>
+                      </td>
+                      <td className="py-2">
+                        {isCancellable(job) && mayControl(job) ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={cancel.isPending}
+                            onClick={() => cancelJob(job)}
+                          >
+                            {t('jobs.cancel')}
+                          </Button>
+                        ) : null}
+                        {hasResult(job) ? (
+                          <Button size="sm" variant="ghost" onClick={() => setResultId(job.id)}>
+                            {t(job.status === 'cancelled' ? 'jobs.partialReport' : 'jobs.result')}
+                          </Button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </ScrollRegion>
         </Card>
       ) : null}
 

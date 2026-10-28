@@ -7,7 +7,7 @@
  * permanently empty and its empty-state string was unconditionally true.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '../test/utils';
 import { SavedViewsPage } from './SavedViewsPage';
 
@@ -44,8 +44,18 @@ const ownView = {
  * search answers the n-th POST /search/query (0-based); by default it is an
  * empty result.
  */
+const roles = [
+  { id: 'role-1', organization_id: 'org-1', name: 'Auditoren', is_system: false, permissions: [] },
+  { id: 'role-2', organization_id: 'org-1', name: 'Netzwerk', is_system: false, permissions: [] },
+];
+
 function mockApi(
-  overrides: { views?: unknown[]; search?: (n: number) => Response; me?: string | null } = {},
+  overrides: {
+    views?: unknown[];
+    search?: (n: number) => Response;
+    me?: string | null;
+    permissions?: string[];
+  } = {},
 ) {
   let searches = 0;
   return vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -54,11 +64,17 @@ function mockApi(
     if (url.includes('/me/permissions'))
       return overrides.me === null
         ? json({ title: 'Internal Server Error', status: 500 }, 500)
-        : json({ user_id: overrides.me ?? me, permissions: ['saved_view:write'] });
+        : json({
+            user_id: overrides.me ?? me,
+            permissions: overrides.permissions ?? ['saved_view:write', 'role:read'],
+          });
+    if (url.includes('/roles')) return json({ data: roles, total: roles.length });
     if (url.includes('/saved-views/presets')) return json({ data: [preset] });
     if (url.includes('/search/query'))
       return overrides.search ? overrides.search(searches++) : json({ data: [], total: 0 });
     if (url.includes('/saved-views') && method === 'POST') return json({ id: 'new' }, 201);
+    if (url.includes('/saved-views/') && method === 'PATCH')
+      return json({ ...ownView, ...JSON.parse(String(init?.body)) });
     if (url.includes('/saved-views') && method === 'DELETE')
       return new Response(null, { status: 204 });
     return json({ data: overrides.views ?? [], total: 0, limit: 50, offset: 0, has_more: false });
@@ -265,5 +281,228 @@ describe('SavedViewsPage', () => {
     renderWithProviders(<SavedViewsPage />);
 
     expect(await screen.findByText('für 2 Rollen')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Retest F-336 (WP-555, VIE-01): sort and columns of a view were stored but
+ * never used, the page saved only name, entity kind and filter, and sharing
+ * was possible through the API only.
+ */
+describe('SavedViewsPage sort, columns and sharing (F-336)', () => {
+  const searchBodies = (fetchMock: ReturnType<typeof mockApi>) =>
+    fetchMock.mock.calls
+      .filter((call) => String(call[0]).includes('/search/query'))
+      .map((call) => JSON.parse(String(call[1]!.body)) as Record<string, unknown>);
+
+  const sortedView = {
+    ...ownView,
+    name: 'Server absteigend',
+    sort: [{ field: 'name', dir: 'desc' }],
+    columns: ['name', 'status'],
+    shared: false,
+    shared_with_roles: ['role-1'],
+  };
+
+  // The server answers in the order of the saved sort; the rows carry the
+  // saved columns only.
+  const sortedRows = {
+    data: [
+      {
+        id: 'ci-c',
+        entity_kind: 'ci',
+        name: 'srv-c',
+        summary: 'summary-c',
+        columns: { name: 'srv-c', status: 'maintenance' },
+      },
+      {
+        id: 'ci-b',
+        entity_kind: 'ci',
+        name: 'srv-b',
+        summary: 'summary-b',
+        columns: { name: 'srv-b', status: 'active' },
+      },
+      {
+        id: 'ci-a',
+        entity_kind: 'ci',
+        name: 'srv-a',
+        summary: 'summary-a',
+        columns: { name: 'srv-a', status: 'active' },
+      },
+    ],
+    total: 3,
+  };
+
+  it('runs a saved view with its sort and columns and renders only those columns in that order', async () => {
+    const fetchMock = mockApi({ views: [sortedView], search: () => json(sortedRows) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Server absteigend/ }));
+
+    await waitFor(() =>
+      expect(searchBodies(fetchMock)).toEqual([
+        {
+          status: 'active',
+          entity_kind: 'ci',
+          sort: [{ field: 'name', dir: 'desc' }],
+          columns: ['name', 'status'],
+        },
+      ]),
+    );
+    const table = await screen.findByRole('table');
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toEqual(['Name', 'Status']);
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(
+      rows.map((r) =>
+        within(r)
+          .getAllByRole('cell')
+          .map((c) => c.textContent),
+      ),
+    ).toEqual([
+      ['srv-c', 'Wartung'],
+      ['srv-b', 'Aktiv'],
+      ['srv-a', 'Aktiv'],
+    ]);
+    // The first column links to the CI; the summary is no saved column.
+    expect(within(rows[0]!).getByRole('link', { name: 'srv-c' })).toHaveAttribute(
+      'href',
+      '/cmdb/ci-c',
+    );
+    expect(screen.queryByText('summary-c')).toBeNull();
+    // The presentation of the view is loaded into the form.
+    expect(screen.getByLabelText('Sortieren nach')).toHaveValue('name');
+    expect(screen.getByLabelText('Richtung')).toHaveValue('desc');
+    expect(screen.getByRole('checkbox', { name: 'Auditoren' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Netzwerk' })).not.toBeChecked();
+  });
+
+  it('sends a view without sort and columns as its filter alone and lists name and summary', async () => {
+    const fetchMock = mockApi({
+      views: [{ ...ownView, sort: [], columns: [] }],
+      search: () =>
+        json({ data: [{ id: 'ci-a', entity_kind: 'ci', name: 'srv-a', summary: 'sum-a' }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /^My servers/ }));
+
+    await waitFor(() =>
+      expect(searchBodies(fetchMock)).toEqual([{ status: 'active', entity_kind: 'ci' }]),
+    );
+    expect(await screen.findByRole('link', { name: 'srv-a' })).toBeInTheDocument();
+    expect(screen.getByText('sum-a')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it('saves sort, columns and sharing with a new view', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(window, 'prompt').mockReturnValue('Garantie absteigend');
+
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+
+    fireEvent.change(await screen.findByLabelText('Sortieren nach'), {
+      target: { value: 'warranty_end' },
+    });
+    fireEvent.change(screen.getByLabelText('Richtung'), { target: { value: 'desc' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Inventarnummer' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Garantieende' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Für die ganze Organisation freigeben' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Netzwerk' }));
+
+    // The changed presentation runs at once.
+    await waitFor(() =>
+      expect(searchBodies(fetchMock).slice(-1)[0]).toEqual({
+        warranty_within_days: 90,
+        entity_kind: 'asset',
+        sort: [{ field: 'warranty_end', dir: 'desc' }],
+        columns: ['asset_tag', 'warranty_end'],
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Als Ansicht speichern' }));
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(
+        (call) => call[1]?.method === 'POST' && String(call[0]).includes('/saved-views'),
+      );
+      expect(post).toBeTruthy();
+      expect(JSON.parse(String(post![1]!.body))).toEqual({
+        name: 'Garantie absteigend',
+        entity_kind: 'asset',
+        filter_spec: { warranty_within_days: 90 },
+        sort: [{ field: 'warranty_end', dir: 'desc' }],
+        columns: ['asset_tag', 'warranty_end'],
+        shared: true,
+        shared_with_roles: ['role-2'],
+      });
+    });
+  });
+
+  it('changes sort, columns and sharing of an own view through savedViewApi.update', async () => {
+    const fetchMock = mockApi({ views: [sortedView], search: () => json(sortedRows) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Server absteigend/ }));
+
+    fireEvent.change(await screen.findByLabelText('Richtung'), { target: { value: 'asc' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Status' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Hostname' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Auditoren' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Netzwerk' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Änderungen speichern' }));
+
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.find((call) => call[1]?.method === 'PATCH');
+      expect(patch).toBeTruthy();
+      expect(String(patch![0])).toContain(`/saved-views/${sortedView.id}`);
+      expect(JSON.parse(String(patch![1]!.body))).toEqual({
+        sort: [{ field: 'name', dir: 'asc' }],
+        columns: ['name', 'hostname'],
+        shared: false,
+        shared_with_roles: ['role-2'],
+      });
+    });
+    // Nothing else is created.
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => call[1]?.method === 'POST' && String(call[0]).includes('/saved-views'),
+      ),
+    ).toBe(false);
+  });
+
+  it('offers no update for a view shared by somebody else', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        views: [{ ...sortedView, owner_id: 'user-2' }],
+        search: () => json(sortedRows),
+      }),
+    );
+
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Server absteigend/ }));
+
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Änderungen speichern' })).toBeNull();
+    expect(screen.getByText(/wurde mit Ihnen geteilt/)).toBeInTheDocument();
+  });
+
+  it('does not ask for the roles without role:read and says why roles are missing', async () => {
+    const fetchMock = mockApi({ permissions: ['saved_view:write'] });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+
+    expect(await screen.findByText('Die Rollen können nicht geladen werden.')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/roles'))).toBe(false);
   });
 });

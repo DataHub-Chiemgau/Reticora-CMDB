@@ -105,6 +105,15 @@ func (s *Service) WithJobs(tracker jobs.Tracker) *Service {
 // merge is a job: queued, running and finished with the merge row as its
 // reference.
 func (s *Service) Merge(ctx context.Context, orgID, survivorID, victimID string) (*MergeResult, error) {
+	return s.MergeAs(ctx, orgID, survivorID, victimID, newMergeID())
+}
+
+// MergeAs is Merge under the id mergeID of the merge row and its job: a
+// merge that failed and is tried again under the same id runs again in the
+// one ci.merge job of that id instead of leaving a failed job beside a
+// succeeded one (the merge of a review item, F-330). A failed merge leaves
+// no merge row, so the id stays free until a merge under it succeeds.
+func (s *Service) MergeAs(ctx context.Context, orgID, survivorID, victimID, mergeID string) (*MergeResult, error) {
 	merger, ok := s.repo.(Merger)
 	if !ok {
 		return nil, ErrMergeUnsupported
@@ -113,9 +122,8 @@ func (s *Service) Merge(ctx context.Context, orgID, survivorID, victimID string)
 		return nil, ErrMergeSelf
 	}
 	if s.jobs == nil {
-		return merger.Merge(ctx, orgID, survivorID, victimID, "")
+		return merger.Merge(ctx, orgID, survivorID, victimID, mergeID)
 	}
-	mergeID := newMergeID()
 	actor := tenant.FromContext(ctx).UserID
 	if err := s.jobs.Track(ctx, orgID, MergeJobKind, "ci_merge", mergeID, actor); err != nil {
 		return nil, fmt.Errorf("track merge job: %w", err)
@@ -370,7 +378,7 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 			}
 			result.Moved[ref.key] += n
 		}
-		conflicts, err := mergeFieldValues(ctx, tx, orgID, survivorID, victimID, &snap)
+		conflicts, opened, err := mergeFieldValues(ctx, tx, orgID, survivorID, victimID, &snap)
 		if err != nil {
 			return err
 		}
@@ -418,8 +426,11 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 		if r.outbox == nil {
 			return nil
 		}
-		_, err = r.outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.CIMerged, EntityID: survivorID,
-			Data: map[string]any{"survivor_id": survivorID, "victim_id": victimID, "merge_id": result.MergeID}})
+		// ci.merged, then review.created of each conflict review the merge
+		// opened (F-324): they commit or roll back with the merge.
+		es := append([]*events.Event{{OrgID: orgID, Type: events.CIMerged, EntityID: survivorID,
+			Data: map[string]any{"survivor_id": survivorID, "victim_id": victimID, "merge_id": result.MergeID}}}, opened...)
+		_, err = r.outbox.AppendMany(ctx, tx, es)
 		return err
 	})
 	if err != nil {
@@ -502,8 +513,10 @@ type mergeFieldValue struct {
 // victim has move to the survivor; an override of the victim on a field
 // the survivor has without override passes to it; contradicting overrides
 // keep the survivor's and open an override_conflict review with the
-// victim's value. Victim rows that do not move are removed (snapshot).
-func mergeFieldValues(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimID string, snap *mergeSnapshot) ([]string, error) {
+// victim's value. Victim rows that do not move are removed (snapshot). It
+// returns the contradicting fields and the review.created events of the
+// conflict reviews it opened.
+func mergeFieldValues(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimID string, snap *mergeSnapshot) ([]string, []*events.Event, error) {
 	load := func(ciID string) (map[string]mergeFieldValue, error) {
 		rows, err := tx.Query(ctx, "SELECT id::text, field_name, override_value FROM ci_field_value WHERE ci_id = $1", ciID)
 		if err != nil {
@@ -523,11 +536,11 @@ func mergeFieldValues(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimI
 	}
 	survivorValues, err := load(survivorID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	victimValues, err := load(victimID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fields := make([]string, 0, len(victimValues))
 	for f := range victimValues {
@@ -535,6 +548,7 @@ func mergeFieldValues(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimI
 	}
 	sort.Strings(fields)
 	conflicts := []string{}
+	var opened []*events.Event
 	for _, field := range fields {
 		v := victimValues[field]
 		rowSnap := func(into *[]snapshotRow, id string) error {
@@ -546,33 +560,36 @@ func mergeFieldValues(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimI
 		switch {
 		case !onSurvivor:
 			if serr := rowSnap(&snap.Changed, v.id); serr != nil {
-				return nil, serr
+				return nil, nil, serr
 			}
 			_, err = tx.Exec(ctx, "UPDATE ci_field_value SET ci_id = $1 WHERE id = $2", survivorID, v.id)
 		case v.override != nil && s.override == nil:
 			if serr := rowSnap(&snap.Changed, s.id); serr != nil {
-				return nil, serr
+				return nil, nil, serr
 			}
 			_, err = tx.Exec(ctx, `UPDATE ci_field_value s SET override_value = v.override_value, override_author = v.override_author,
 					override_reason = v.override_reason, override_at = v.override_at, protected = s.protected OR v.protected
 				FROM ci_field_value v WHERE s.id = $1 AND v.id = $2`, s.id, v.id)
 		case v.override != nil && !sameJSON(v.override, s.override):
 			conflicts = append(conflicts, field)
-			err = openMergeConflict(ctx, tx, orgID, survivorID, victimID, field, v.override)
+			var event *events.Event
+			if event, err = openMergeConflict(ctx, tx, orgID, survivorID, victimID, field, v.override); event != nil {
+				opened = append(opened, event)
+			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("merge field value %s: %w", field, err)
+			return nil, nil, fmt.Errorf("merge field value %s: %w", field, err)
 		}
 		if onSurvivor {
 			if serr := rowSnap(&snap.Removed, v.id); serr != nil {
-				return nil, serr
+				return nil, nil, serr
 			}
 			if _, err = tx.Exec(ctx, "DELETE FROM ci_field_value WHERE id = $1", v.id); err != nil {
-				return nil, fmt.Errorf("remove field value %s: %w", field, err)
+				return nil, nil, fmt.Errorf("remove field value %s: %w", field, err)
 			}
 		}
 	}
-	return conflicts, nil
+	return conflicts, opened, nil
 }
 
 func sameJSON(a, b []byte) bool {
@@ -584,19 +601,36 @@ func sameJSON(a, b []byte) bool {
 }
 
 // openMergeConflict opens the override_conflict review of a field whose
-// overrides contradict (REC-12): the survivor's override stays.
-func openMergeConflict(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimID, field string, value []byte) error {
+// overrides contradict (REC-12): the survivor's override stays. It returns
+// the review.created event of the item (NTF-05, EVT-01), which the merge
+// writes in its transaction; nil when an open conflict review of the field
+// exists already and no item was inserted.
+func openMergeConflict(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimID, field string, value []byte) (*events.Event, error) {
 	payload, err := json.Marshal(map[string]any{
 		"ci_id": survivorID, "field": field, "observed_value": json.RawMessage(value), "source": "merge", "victim_id": victimID,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids, object_key)
+	objectKey := "ci:" + survivorID + "/" + field
+	var id, clientID, siteID string
+	err = tx.QueryRow(ctx, `INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids, object_key)
 		VALUES ($1, 'override_conflict', 'open', $2::jsonb, ARRAY[$3::uuid], $4)
-		ON CONFLICT (organization_id, kind, object_key) WHERE status = 'open' AND object_key IS NOT NULL DO NOTHING`,
-		orgID, payload, survivorID, "ci:"+survivorID+"/"+field)
-	return err
+		ON CONFLICT (organization_id, kind, object_key) WHERE status = 'open' AND object_key IS NOT NULL DO NOTHING
+		RETURNING id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')`,
+		orgID, payload, survivorID, objectKey).Scan(&id, &clientID, &siteID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The data of review.created as reviews.PGRepository writes it; client
+	// and site are those the item derived from the survivor.
+	return &events.Event{OrgID: orgID, Type: events.ReviewCreated, EntityID: id, Data: map[string]any{
+		"id": id, "kind": "override_conflict", "object_key": objectKey, "candidate_ci_ids": []string{survivorID},
+		"client_id": clientID, "site_id": siteID,
+	}}, nil
 }
 
 // MergedInto implements TombstoneReader.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -161,21 +162,35 @@ func (r *PGJobRepository) MarkRunning(ctx context.Context, orgID, id string, at 
 	})
 }
 
+// CompleteJob implements JobRepository. export.completed (NTF-05) is
+// appended to the outbox in the transaction that completes the job
+// (WP-550): a failed append rolls the completion back, the job stays
+// running and is resumed (ReclaimStale).
 func (r *PGJobRepository) CompleteJob(ctx context.Context, orgID, id string, objectKey string, rowCount int, fileSize int64, completedAt, expiresAt time.Time) error {
 	return database.WithTenant(ctx, r.pool, workerScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `
+		var format, initiatedBy string
+		err := tx.QueryRow(ctx, `
 			UPDATE export_job SET status = $1, object_key = $2, row_count = $3, file_size_bytes = $4,
 				completed_at = $5, expires_at = $6, updated_at = $5
-			WHERE organization_id = current_setting('app.org_id')::uuid AND id = $7 AND status = $8`,
-			JobStatusCompleted, objectKey, rowCount, fileSize, completedAt.UTC(), expiresAt.UTC(), id, JobStatusRunning)
+			WHERE organization_id = current_setting('app.org_id')::uuid AND id = $7 AND status = $8
+			RETURNING format, COALESCE(initiated_by::text, '')`,
+			JobStatusCompleted, objectKey, rowCount, fileSize, completedAt.UTC(), expiresAt.UTC(), id, JobStatusRunning).Scan(&format, &initiatedBy)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("export job not found")
+		}
 		if err != nil {
 			return fmt.Errorf("complete export job: %w", err)
 		}
-		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("export job not found")
-		}
-		return nil
+		_, err = events.NewOutbox().Append(ctx, tx, completedEvent(orgID, id, format, initiatedBy, rowCount))
+		return err
 	})
+}
+
+// completedEvent is export.completed of a completed job (NTF-05): the
+// initiator is notified.
+func completedEvent(orgID, id, format, initiatedBy string, rowCount int) *events.Event {
+	return &events.Event{OrgID: orgID, Type: events.ExportCompleted, EntityID: id,
+		Data: map[string]any{"id": id, "format": format, "row_count": rowCount, "initiated_by": initiatedBy}}
 }
 
 func (r *PGJobRepository) FailJob(ctx context.Context, orgID, id, message string, at time.Time) error {

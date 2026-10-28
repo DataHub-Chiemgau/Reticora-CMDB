@@ -248,14 +248,22 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 			return err
 		}
 		// Queued, not sent: no channel delivers yet, so neither status nor
-		// sent_at may claim a delivery.
+		// sent_at may claim a delivery. One notification per window, client
+		// and channel (migration 000173, F-235): a repeated announcement
+		// queues nothing new and returns the stored notification.
 		for _, clientID := range clientIDs {
-			n := Notification{OrganizationID: orgID, WindowID: windowID, ClientID: clientID, Channel: "webhook", Status: NotificationPending}
-			if err := tx.QueryRow(ctx, `
+			if _, err := tx.Exec(ctx, `
 				INSERT INTO maintenance_notification (organization_id, maintenance_window_id, client_id, channel, status)
 				VALUES ($1, $2, $3::uuid, 'webhook', $4)
-				RETURNING id::text, created_at
-			`, orgID, windowID, clientID, NotificationPending).Scan(&n.ID, &n.CreatedAt); err != nil {
+				ON CONFLICT (maintenance_window_id, client_id, channel) DO NOTHING
+			`, orgID, windowID, clientID, NotificationPending); err != nil {
+				return err
+			}
+			n := Notification{}
+			if err := tx.QueryRow(ctx, "SELECT "+notificationCols+` FROM maintenance_notification
+				WHERE organization_id = $1 AND maintenance_window_id = $2 AND client_id = $3::uuid AND channel = 'webhook'`,
+				orgID, windowID, clientID).
+				Scan(&n.ID, &n.OrganizationID, &n.WindowID, &n.ClientID, &n.Channel, &n.Status, &n.SentAt, &n.CreatedAt); err != nil {
 				return err
 			}
 			out = append(out, n)

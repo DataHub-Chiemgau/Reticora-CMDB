@@ -24,6 +24,7 @@ import {
   type AttributeIndexJob,
   type CITypeCreateRequest,
   type LocationUpdateRequest,
+  type SavedView,
 } from './cmdb';
 import type { FieldDefinition } from '../lib/fieldmeta';
 
@@ -470,6 +471,16 @@ export function useSaveView() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: savedViewApi.create,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views'] }),
+  });
+}
+
+/** Changes an own view (PATCH, owner only, E-86): sort, columns, sharing. */
+export function useUpdateSavedView() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<SavedView> }) =>
+      savedViewApi.update(id, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views'] }),
   });
 }

@@ -1021,7 +1021,10 @@ A version tag `v*` starts the release workflow. Tools follow E-31.
 4. Everything is signed keyless with cosign: a Fulcio certificate for the identity of the release workflow and an entry in the Rekor log.
    - Binaries and SBOMs get a Sigstore bundle (`<file>.sigstore.json`).
    - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`).
-5. The workflow verifies its own signatures. It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
+5. The workflow verifies its own signatures with the real cosign before anything is published (WP-545):
+   - For linux/amd64 and linux/arm64, `edgecore/update/cosign_real_test.go` (build tag `cosignreal`) runs the updater's `CosignVerifier` against the collector and its bundle: the signed binary passes with the pinned release identity; the binary changed by one byte, the bundle of another artifact and another identity are refused. A failing or skipped test stops the release.
+   - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` and `cosign verify-attestation --type spdxjson`. The release is published only after all four images passed.
+   - It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
 
 Mandatory signature check in the updater (`edgecore/update`):
 
@@ -1033,17 +1036,43 @@ Mandatory signature check in the updater (`edgecore/update`):
   - no verifier is configured.
 - `CosignVerifier` calls `cosign verify-blob --bundle`. It pins the signer to `release.yml` of this repository on a `v*` tag, with the GitHub Actions OIDC issuer.
 
-Check a signature by hand:
+Check a release by hand (operators, before an installation or an air-gapped transfer). Every command must exit 0 (`verify-blob` prints `Verified OK`, `verify` the verified signature payload); any other result means the file or image is not the one the release workflow signed. The signer is the release workflow of this repository on a version tag:
 
 ```bash
-cosign verify-blob --bundle reticora-collector-linux-amd64.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v.+$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  reticora-collector-linux-amd64
-cosign verify ghcr.io/datahub-chiemgau/reticora-server:<tag> \
-  --certificate-identity-regexp '…release\.yml@refs/tags/v.+$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+VERSION=v1.2.3   # the release tag
+IDENTITY='^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v.+$'
+ISSUER=https://token.actions.githubusercontent.com
 ```
+
+Binaries, their SBOMs and the release manifest (files of the GitHub release, each with its `<file>.sigstore.json`), here for `reticora-collector` and `reticora-agent` on both architectures:
+
+```bash
+for file in reticora-collector-linux-amd64 reticora-collector-linux-arm64 \
+    reticora-agent-linux-amd64 reticora-agent-linux-arm64 SHA256SUMS; do
+  cosign verify-blob --bundle "$file.sigstore.json" \
+    --certificate-identity-regexp "$IDENTITY" \
+    --certificate-oidc-issuer "$ISSUER" \
+    "$file"
+done
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+The same `verify-blob` call checks an SBOM (`<binary>.spdx.json`, `reticora-source.spdx.json`) and the source tarball (`reticora-source-<tag>.tar.gz`).
+
+Images: the signature (`cosign verify`) and the SPDX SBOM attestation (`cosign verify-attestation --type spdxjson`) of all four images `reticora-server`, `reticora-collector`, `reticora-frontend` and `reticora-postgres`:
+
+```bash
+for image in reticora-server reticora-collector reticora-frontend reticora-postgres; do
+  cosign verify "ghcr.io/datahub-chiemgau/$image:$VERSION" \
+    --certificate-identity-regexp "$IDENTITY" \
+    --certificate-oidc-issuer "$ISSUER"
+  cosign verify-attestation --type spdxjson "ghcr.io/datahub-chiemgau/$image:$VERSION" \
+    --certificate-identity-regexp "$IDENTITY" \
+    --certificate-oidc-issuer "$ISSUER" > /dev/null
+done
+```
+
+`cosign verify` prints the image digest (`docker-manifest-digest`); pin that digest (`ghcr.io/datahub-chiemgau/<image>@sha256:…`) instead of the tag, as the installers do in release mode. Without `> /dev/null`, `verify-attestation` prints the attestation; the SBOM is the `predicate` of the in-toto statement in its base64 `payload`.
 
 **Planned additions:**
 

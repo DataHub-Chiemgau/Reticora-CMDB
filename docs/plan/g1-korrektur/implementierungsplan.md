@@ -38,9 +38,10 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K4 Funktions-, Validierungs- und Bedienmängel](#k4-funktions--validierungs--und-bedienmängel) | WP-460 – WP-531 | 72 | 99,0 | Alle übrigen P2 behoben. |
 | [K4-Nachträge](#k4-nachträge) | WP-630 – WP-635 | 6 | 7,0 | Funde aus der Umsetzung von K4 behoben (F-355 bis F-362): Kontrast im dunklen Thema, Kartenmarker und Scrollbereiche per Tastatur (a11y-Prüfung in de-DE und en-US), Ausführung ad-hoc angelegter Discovery-Jobs, `PATCH /org` nur org-weit, Rackhöhe gegen alle Mounts, vollständige Listen statt Seitengrößen über 200. |
 | [K5 Nachweislücken](#k5-nachweislücken) | WP-532 – WP-558 | 27 | 32,5 | Jede offene Nachweislücke der Auditmatrix durch einen ausgeführten Test geschlossen. |
+| [K5-Nachträge](#k5-nachträge) | WP-636 – WP-646 | 11 | 10,5 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-375): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **283** | **385,5** | |
+| **Summe** | | **294** | **396,0** | |
 
 ```mermaid
 flowchart LR
@@ -53,6 +54,7 @@ flowchart LR
     K4["K4 Funktions-, Validierungs- und Bedienmängel<br/>72 WPs · 99,0 PT"]
     K4N["K4-Nachträge<br/>6 WPs · 7,0 PT"]
     K5["K5 Nachweislücken<br/>27 WPs · 32,5 PT"]
+    K5N["K5-Nachträge<br/>11 WPs · 10,5 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
@@ -69,6 +71,8 @@ flowchart LR
     K5 --> K7
     K3N --> K7
     K4N --> K7
+    K5 --> K5N
+    K5N --> K7
     K6 --> K7
 ```
 
@@ -126,6 +130,9 @@ Die Kanten zeigen die Priorität, keine harte Sperre: Ein WP darf beginnen, soba
 | [F-044](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-044) | P1 | Entitlement-Warnung/-Ablauf und Zertifikatsablauf: JOB-02-Läufe nicht eingeplant, Events entitlement.warning/expired und certificate.expiring nie erzeugt | [WP-425](#wp-425--job-02-läufe-entitlement-warnung-ablauf-und-zertifikatsablauf-mit-events) |
 | [F-045](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-045) | P1 | Werte mit Anführungszeichen oder Steuerzeichen (Zeilenumbruch, Tab) brechen jeden auditierten Write mit Wert-Snapshot (CI-Create/-Update/-Delete/-Restore, Metamodell) mit 400 ab: audit_entry_hash castet den JSON-Text nach bytea | [WP-423](#wp-423--audit_entry_hash-hasht-das-kanonische-json-als-utf-8-aud-04-abweichende-bestandsketten-neu-verkettet) |
 | [F-046](../../../audit/phase1-final/PHASE1_FINDINGS.md#f-046) | P1 | Collector-Metrik-Uploads (Sweep, UPS, SNMP-Poll) werden ohne Credential gesendet, mit 401 abgewiesen und erreichen den Server nie | [WP-426](#wp-426--collector-metriken-über-den-mtls-edge-metrics-statt-unauthentisiertem-http) |
+| [F-364](../../../audit/g1-reaudit/FINDINGS.md#f-364) | P0 | Login eines Nutzers ohne Rollenzuweisung vergibt die Standardrolle org-weit neu: entzogene Client-Zuweisung wird zu org-weitem Lesezugriff | [WP-637](#wp-637--standardrolle-nur-bei-der-erstanlage-login-ohne-zuweisung-ohne-session) |
+| [F-366](../../../audit/g1-reaudit/FINDINGS.md#f-366) | P1 | Arbeitsplatzbuchung, Schlüsselausgabe und Schulungszuweisung nehmen Nutzer und Kurse anderer Organisationen an | [WP-639](#wp-639--buchung-schlüsselausgabe-und-schulungszuweisung-nur-mit-referenzen-der-eigenen-organisation) |
+| [F-370](../../../audit/g1-reaudit/FINDINGS.md#f-370) | P1 | Compose und Kubernetes reichen `RETICORA_MASTER_KEY_PREVIOUS` nicht an den Server: die dokumentierte Master-Key-Rotation ist nicht durchführbar | [WP-642](#wp-642--reticora_master_key_previous-in-compose-und-kubernetes) |
 
 ### Stand der Entscheidungen
 
@@ -418,6 +425,17 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-633](#wp-633--patch-org-nur-für-org-weite-inhaber-von-usermanage) | `k4n-org-fields-scope` | PATCH /org nur für org-weite Inhaber von user:manage | K4N | 1,0 | F-359 | WP-463 |
 | [WP-634](#wp-634--rackhöhe-gegen-alle-mounts-prüfen-auch-gegen-die-für-den-aufrufer-unsichtbaren) | `k4n-rack-height-scope` | Rackhöhe gegen alle Mounts prüfen, auch gegen die für den Aufrufer unsichtbaren | K4N | 1,0 | F-360 | WP-500 |
 | [WP-635](#wp-635--vollständige-listen-für-dashboard-und-karte-keine-seitengröße-über-200) | `k4n-list-pages` | Vollständige Listen für Dashboard und Karte, keine Seitengröße über 200 | K4N | 0,5 | F-362 | WP-530 |
+| [WP-636](#wp-636--nicht-zugeordnete-discovery-ergebnisse-folgen-der-client-bindung-ihres-collectors) | `k5n-collector-result-scope` | Nicht zugeordnete Discovery-Ergebnisse folgen der Client-Bindung ihres Collectors | K5N | 1,0 | F-363 | WP-533 |
+| [WP-637](#wp-637--standardrolle-nur-bei-der-erstanlage-login-ohne-zuweisung-ohne-session) | `k5n-login-default-role` | Standardrolle nur bei der Erstanlage, Login ohne Zuweisung ohne Session | K5N | 1,0 | F-364 | WP-536 |
+| [WP-638](#wp-638--org-weite-inventur-nur-durch-org-weite-principals-ändern-abschließen-und-löschen) | `k5n-stocktake-org-writes` | Org-weite Inventur nur durch org-weite Principals ändern, abschließen und löschen | K5N | 1,0 | F-365 | WP-537 |
+| [WP-639](#wp-639--buchung-schlüsselausgabe-und-schulungszuweisung-nur-mit-referenzen-der-eigenen-organisation) | `k5n-module-org-refs` | Buchung, Schlüsselausgabe und Schulungszuweisung nur mit Referenzen der eigenen Organisation | K5N | 1,5 | F-366 | WP-538 |
+| [WP-640](#wp-640--ankündigung-und-benachrichtigungsliste-unsichtbarer-wartungsfenster-mit-404) | `k5n-maint-notify-hidden` | Ankündigung und Benachrichtigungsliste unsichtbarer Wartungsfenster mit 404 | K5N | 0,5 | F-367 | WP-538, WP-540 |
+| [WP-641](#wp-641--lauffehler-für-abgewiesene-tls-verbindungen-und-nicht-erreichbare-host-ziele) | `k5n-discovery-run-errors` | Lauffehler für abgewiesene TLS-Verbindungen und nicht erreichbare Host-Ziele | K5N | 1,5 | F-368, F-369 | WP-539, WP-542 |
+| [WP-642](#wp-642--reticora_master_key_previous-in-compose-und-kubernetes) | `k5n-master-key-previous` | RETICORA_MASTER_KEY_PREVIOUS in Compose und Kubernetes | K5N | 0,5 | F-370 | WP-547 |
+| [WP-643](#wp-643--review-merge-mit-404-für-gelöschte-kandidaten-und-bereinigten-jobfehlern) | `k5n-review-merge-errors` | Review-Merge mit 404 für gelöschte Kandidaten und bereinigten Jobfehlern | K5N | 1,0 | F-372 | WP-554 |
+| [WP-644](#wp-644--clientliste-für-client-gescopte-rollen-ohne-userread) | `k5n-clients-read` | Clientliste für client-gescopte Rollen ohne user:read | K5N | 0,5 | F-373 | WP-556 |
+| [WP-645](#wp-645--lldp-kanten-des-ersten-zyklus-unabhängig-von-der-reihenfolge-der-ingest-lanes) | `k5n-lldp-lane-order` | LLDP-Kanten des ersten Zyklus unabhängig von der Reihenfolge der Ingest-Lanes | K5N | 1,0 | F-374 | WP-498, WP-543 |
+| [WP-646](#wp-646--real-stack-e2e-für-webkit-und-mobile-safari-über-einen-tls-origin) | `k5n-e2e-webkit-tls` | Real-Stack-E2E für WebKit und Mobile Safari über einen TLS-Origin | K5N | 1,0 | F-375 | WP-532, WP-558 |
 
 ## Konventionen für alle WPs
 
@@ -13648,7 +13666,7 @@ EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-535
 **Akzeptanzkriterien:**
 
 - [ ] `identity/callback_scope_integration_test.go` (neu): OIDC-Callback mit Fake-IdP und `permission.NewPGRepository` gegen PG – Nutzer mit Client-Zuweisung C1 erhält Session mit `cls=[C1]`, `sts=null`; ohne Zuweisung keine Session.
-- [ ] `tenant/rls/core_channels_integration_test.go` (neu, PG-Router): Client 1 liest C2-History (geseedet) und C2-Credentials nicht (404, Zeilen unverändert); client-gescopte Collector-Verwaltung (Liste, Detail, PATCH, DELETE fremder Collector 404); Discovery/IPAM-Fehlerfälle der Auditor-Probes ohne `SQLSTATE` (Regression); geteilte Saved View liefert Client 1 nur C1-Zeilen.
+- [ ] `tenant/rls/core_channels_integration_test.go` (neu, PG-Router): Client 1 liest C2-History (geseedet) und C2-Credentials nicht (404, Zeilen unverändert); client-gescopte Collector-Verwaltung (Liste, Detail, PATCH, DELETE fremder Collector 404; Korrektur vom 2026-10-27, WP-536: Router und `api/openapi.yaml` kennen für `/collectors/{id}` nur PATCH, daher antworten GET und DELETE für jede ID 405; nachgewiesen wird, dass GET/DELETE den fremden Collector genauso abweisen wie den eigenen und eine unbekannte ID, nie 2xx, Zeile unverändert, und PATCH des fremden Collectors 404 wie eine unbekannte ID); Discovery/IPAM-Fehlerfälle der Auditor-Probes ohne `SQLSTATE` (Regression); geteilte Saved View liefert Client 1 nur C1-Zeilen.
 - [ ] `identity/apikey_scope_integration_test.go`: List/Revoke/Rotate mit Org-B-Scope → `ErrTenantMismatch` bzw. not found, Zeile unverändert; ohne Scope → `ErrNoTenantScope`.
 - [ ] `audit/audit_scope_integration_test.go`: Audit-Liste ohne Scope → `ErrNoTenantScope`.
 - [ ] Alle Tests vor und nach Merge grün (reine Nachweise); wird ein Test rot, entsteht ein neuer Befund mit eigenem WP (kein Abschwächen der Assertion).
@@ -13750,9 +13768,9 @@ AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;W
 
 **Akzeptanzkriterien:**
 
-- [ ] Handler-Tests (httptest mit PG) für desk, keymgmt, training und document (`desk/desk_scope_integration_test.go`, `keymgmt/keymgmt_scope_integration_test.go`, `training/training_scope_integration_test.go`, `document/document_scope_integration_test.go`): Die Fehlerfälle der Probes `TestVerifyB03desk`, `TestVerifyB03training`, `TestVerifyB03document`, `TestAuditProbeDeskRepoError` und `TestAuditProbeKeymgmtRepoError` (Fremdzeile, ungültige Referenz, ungültige id) liefern 404/400/422 ohne SQLSTATE-, Constraint- oder Policy-Text; Positivkontrolle eigene Zeile 2xx.
+- [ ] Handler-Tests (httptest mit PG) für desk, keymgmt, training und document (`desk/desk_scope_integration_test.go`, `keymgmt/keymgmt_scope_integration_test.go`, `training/training_scope_integration_test.go`, `document/document_scope_integration_test.go`): Die Fehlerfälle der Probes `TestVerifyB03desk`, `TestVerifyB03training`, `TestVerifyB03document`, `TestAuditProbeDeskRepoError` und `TestAuditProbeKeymgmtRepoError` (Fremdzeile, ungültige Referenz, ungültige id) liefern 404/400/422 ohne SQLSTATE-, Constraint- oder Policy-Text; Positivkontrolle eigene Zeile 2xx. (Korrektur vom 2026-10-27, WP-538: Anlegen oder Verknüpfen außerhalb des Client-1-Scopes – Raum, Client oder CI von Client 2, unbekannte Referenz, unzulässiger Entitätstyp – weist RLS einheitlich und bereinigt mit 403 ab, wie schon die Probe `C1-LINK-C2CI 403`; 403 verrät nicht, ob die Referenz existiert, und wird exakt geprüft; den FK-Fall belegt ein organisationsweiter Principal mit 422/404.)
 - [ ] `maintenance/maintenance_scope_integration_test.go`: `NotifyClients` eines gemischten Fensters (C1+C2) durch einen Client-1-Principal legt genau eine Benachrichtigung für C1 an und keine für C2; durch einen org-weiten Principal zwei.
-- [ ] `ai/ai_scope_integration_test.go`: Client 1 `UpsertChunk`/`DeleteChunks` für ein C2-CI abgewiesen, C2-Chunks unverändert; eigenes CI erfolgreich.
+- [ ] `ai/ai_scope_integration_test.go`: Client 1 `UpsertChunk`/`DeleteChunks` (Korrektur vom 2026-10-27, WP-538: die Methode heißt `DeleteChunk` und ist für einen C2-Chunk ein stiller No-op; geprüft wird, dass der Chunk unverändert bleibt) für ein C2-CI abgewiesen, C2-Chunks unverändert; eigenes CI erfolgreich.
 - [ ] Alle Tests grün (reine Nachweise); ein roter Test wird als neuer Befund mit eigenem WP erfasst.
 - [ ] Regression: bestehende Unit- und Integrationstests der geänderten Pakete (`go test` mit `TEST_DATABASE_URL`) grün; `go vet` und `golangci-lint` ohne neue Meldungen.
 
@@ -13856,7 +13874,7 @@ COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-539
 **Akzeptanzkriterien:**
 
 - [ ] Migration: Duplikate je (maintenance_window_id, client_id, channel) werden auf die älteste Zeile reduziert, danach UNIQUE-Index; Notify nutzt ON CONFLICT DO NOTHING und liefert die bestehenden Zeilen. PG-Test `maintenance/status_test.go` (Retest F-235, vor dem Fix rot): zweimal notify → eine pending-Zeile je Client, sent_at NULL.
-- [ ] Formular mit CI-Auswahl (Suche über /cis, mehrere CIs); POST und PATCH senden ci_ids; die Detailansicht des Fensters listet die gespeicherten Benachrichtigungen (Client, Kanal, Status, Zeit) aus GET /maintenance-windows/{id}/notifications, auch nach Reload.
+- [ ] Formular mit CI-Auswahl (Suche über /cis, mehrere CIs); POST und PATCH senden ci_ids (Korrektur vom 2026-10-27, WP-540: `PATCH /maintenance-windows/{id}` hat in API, Spezifikation und Backend kein Feld `ci_ids`, die Zuordnung der CIs geschieht bei der Anlage; das nachträgliche Ändern der CIs eines Fensters ist eine neue Funktion mit eigener Scope-Regel (E-09) und nicht Teil dieses Nachweis-WPs, daher sendet nur POST ci_ids); die Detailansicht des Fensters listet die gespeicherten Benachrichtigungen (Client, Kanal, Status, Zeit) aus GET /maintenance-windows/{id}/notifications, auch nach Reload.
 - [ ] Vitest `MaintenancePage.test.tsx` (neu, Retest F-236): ci_ids im POST; nach Notify und erneutem Laden zeigt die Liste 'ausstehend' je Client; kein Text behauptet eine Zustellung.
 - [ ] Texte de-DE/en-US; TestNotifyQueuesWithoutClaimingDelivery, TestNotifyQueuesInPostgres, Roundtrip und Vitest-Suite grün.
 
@@ -13963,7 +13981,7 @@ NTF-05;[B], Zusätze [P2], [P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
 **Akzeptanzkriterien:**
 
 - [ ] Real-Stack-Spec `frontend/e2e-real/discovery-errors.spec.ts`: nicht simulierter Collector, ein Host-Scope auf den SNMP-Fake aus WP-384 (`t4-e2e-onboarding-bundle`) (`collector/internal/fakesnmp`, erweitert um einen SNMPv3-Modus: Engine-Discovery und Report `usmStatsWrongDigests` bei falschem Schlüssel nach dem Agenten `startRFC3414Agent` in `v3_agent_test.go`, WP-492 (`t4-snmpv3-auth`)) mit falschem SNMPv3-Credential und ein Host-Scope auf eine nicht erreichbare Adresse (192.0.2.x); nach dem Lauf zeigt die Discovery-Seite je Scope das Fehler-Badge mit Ursache `auth_failed` bzw. `unreachable`, Protokoll und Ziel; `GET /discovery-scopes/{id}` liefert dieselbe Ursache in `last_result`. `fakesnmp_test.go`: falscher v3-Schlüssel → Report usmStatsWrongDigests, richtiger → Antwort.
-- [ ] `backend/internal/server/metrics_exposition_test.go`: nach einem gemeldeten Lauf mit Fehler enthält `GET /metrics` `reticora_discovery_scope_runs_total` mit Ergebnis error und `reticora_discovery_errors_total` mit `cause="auth_failed"` und `protocol="snmp"`; ohne Lauf keine Fehlerserie (Negativfall).
+- [ ] `backend/internal/server/metrics_exposition_test.go`: nach einem gemeldeten Lauf mit Fehler enthält `GET /metrics` `reticora_discovery_scope_runs_total` mit Ergebnis error (Korrektur vom 2026-10-27, WP-542: das Label heißt `state`, der Wert für einen Fehlerlauf ist `failed`) und `reticora_discovery_errors_total` mit `cause="auth_failed"` und `protocol="snmp"`; ohne Lauf keine Fehlerserie (Negativfall).
 - [ ] Nachweis: Lauf-ID des Real-Stack-Jobs im PR.
 
 **Dateien (6 Einträge, Migration = 2):**
@@ -14057,7 +14075,7 @@ REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
 
 **Akzeptanzkriterien:**
 
-- [ ] install-smoke, Schritt 'Verify the backup chain': der Schritt löst zuerst ein Full-Backup aus ('docker compose exec backup pgbackrest --stanza=reticora --type=full backup'); danach steigt pg_stat_archiver.archived_count nach SELECT pg_switch_wal() innerhalb von 120 s, 'pgbackrest info' zeigt mindestens ein Full-Backup, reticora-backup.sh health und verify-repo (aus WP-443 (`t5-backup-enforce`)) liefern rc 0; Negativfall: 'pgbackrest info' mit falschem PGBACKREST_REPO1_CIPHER_PASS → rc != 0.
+- [ ] install-smoke, Schritt 'Verify the backup chain': der Schritt löst zuerst ein Full-Backup aus ('docker compose exec backup pgbackrest --stanza=reticora --type=full backup'); danach steigt pg_stat_archiver.archived_count nach SELECT pg_switch_wal() innerhalb von 120 s, 'pgbackrest info' zeigt mindestens ein Full-Backup, reticora-backup.sh health und verify-repo (aus WP-443 (`t5-backup-enforce`)) liefern rc 0; Negativfall: 'pgbackrest info' mit falschem PGBACKREST_REPO1_CIPHER_PASS → rc != 0. (Korrektur vom 2026-10-27, WP-544: 'pgbackrest info' endet auch bei unlesbarem Repository mit rc 0 und meldet den Fehler nur im Status – Stanza- und Repository-Status 99, keine Backups –, lokal mit pgBackRest 2.50 gemessen; der Schritt wertet daher rc != 0 oder Stanza- und Repository-Status != 0 ohne gelistetes Backup als unlesbar. Ein Repository, das sich mit falscher Passphrase öffnen lässt, lässt den Schritt weiterhin scheitern. Alle pgBackRest-Aufrufe laufen über reticora-pgbackrest-env.sh, damit die Passphrase gesetzt ist.)
 - [ ] Integrationstest backend/cmd/server/objectstorage_integration_test.go (TEST_S3_ENDPOINT gegen MinIO): setupObjectStorage legt die Buckets an und schaltet Versionierung ein (GetBucketVersioning = Enabled); zweimaliges Schreiben desselben Schlüssels → 2 Versionen, Löschen → Delete-Marker; ohne TEST_S3_ENDPOINT Skip nur außerhalb von CI.
 - [ ] Der DB-Job in .github/workflows/ci.yml erhält einen MinIO-Service und TEST_S3_ENDPOINT; die Skip-Prüfung aus WP-499 (`t5-lint-baseline`) meldet keinen Skip dieses Tests.
 - [ ] Läufe des PR (install-smoke-Matrix, DB-Job) grün, Run-IDs im PR.
@@ -14497,7 +14515,7 @@ NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/server/evt02_producers_integr
 **Akzeptanzkriterien:**
 
 - [ ] Ursachenbestätigung F-326 auf dem Stand nach WP-491 (`t3-impact-ui`): Vitest „shows an error instead of a client-side impact when /impact fails“ mit 422- und 500-Stub, Ausgabe im PR. Ist er rot (Badges aus der Client-Berechnung sichtbar), behebt dieses WP die Ursache; ist er bereits grün, weil WP-491 (`t3-impact-ui`) die Berechnung entfernt hat, dokumentiert der PR das und der Test bleibt als Regressionstest.
-- [ ] Bei einem `/impact`-Fehler (422/500) rendert `TopologyPage` den Fehlerzustand von `useImpactMany` (422: „höchstens 100 CIs je Analyse“) und keine Impact-Badges aus einer Client-Berechnung, auch nicht aus der Variante von WP-491 (`t3-impact-ui`); während des Ladens höchstens eine als „Vorschau“ gekennzeichnete Anzeige; der von WP-491 (`t3-impact-ui`) umgeschriebene Test (`TopologyPage.test.tsx:70-95`) bleibt grün.
+- [ ] Bei einem `/impact`-Fehler (422/500) rendert `TopologyPage` den Fehlerzustand von `useImpactMany` (422: „höchstens 100 CIs je Analyse“) und keine Impact-Badges aus einer Client-Berechnung, auch nicht aus der Variante von WP-491 (`t3-impact-ui`); während des Ladens höchstens eine als „Vorschau“ gekennzeichnete Anzeige; der von WP-491 (`t3-impact-ui`) umgeschriebene Test (`TopologyPage.test.tsx:70-95`) bleibt grün. (Korrektur vom 2026-10-27, WP-552: Die Zeilenangabe 70-95 meint die `computeOutageImpact`-Tests, sie bleiben grün; der WP-491-Seitentest zum Fallback bei `/impact`-Fehler kodierte F-326 und wird durch den Fehlerzustandstest ersetzt, seine Richtungsprüfungen stehen jetzt im Vorschau-Test.)
 - [ ] Knoten-Badge rendert das lokalisierte Typlabel aus `typeOptions` (id → Label), Fallback ID; Vitest „renders the type label of a node“ (Retest F-344).
 - [ ] Real-Stack `frontend/e2e-real/topology.spec.ts` (neu), Seed über die API (≥ 2.001 CIs, zwei Standorte, zwei Typen, redundante Versorgung): (a) `/topology` ohne Root zeigt den Startdialog; Standortpfad sendet `site_id`, Typpfad sendet `ci_type=<Typ-UUID>` (kein Typschlüssel), Knotenzahl = API-Antwort; (b) `?simulate=a,b` zeigt genau die IDs aus `GET /api/v1/impact?ci_ids=a,b`, ein redundant versorgter Server nur bei Ausfall beider PDUs; (c) 101 IDs → sichtbare Fehlermeldung; (d) ein Client-2-Nutzer sieht im Startdialog keine Client-1-Standorte.
 - [ ] Retest: `cd frontend && npx vitest run src/pages/TopologyPage.test.tsx` und `npx playwright test -c e2e-real/playwright.real.config.ts topology` → PASS.
@@ -14621,6 +14639,8 @@ JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
 - [ ] PG-Test `TestReviewMergeRetryJobStatus` (`reviews/merge_job_integration_test.go`): Effekt schlägt fehl → Job `failed`; Retry mit Erfolg → Item resolved, Job `succeeded`, `attempts=2`; ein Job je Item und Art; probable_duplicate: der `review.merge`-Spiegel übernimmt den Status des `ci.merge`-Jobs (`failed` → `failed`, nach Retry beide `succeeded`), kein zweiter widersprüchlicher Job (verbindlicher Retest F-330).
 - [ ] Router-Test `TestReviewMergeJobThroughRouter` (`backend/internal/server/review_merge_job_integration_test.go`): `POST /api/v1/review-items/{id}/resolve {action:'merge', ci_id}` über den echten Router mit Discovery-Effekt und PG-Repositories → 200, Kandidat aktualisiert (Management-IP), `GET /api/v1/jobs?kind=review.merge` zeigt den Job `succeeded`; fremder Client → 404; Principal ohne Auflösungsrecht → 403.
 - [ ] Regression: bestehende Tests der berührten Pakete grün, `go vet`/golangci-lint bzw. `npm run lint` und `npm run typecheck` ohne neue Befunde.
+
+**Anmerkung 2026-10-27 (WP-554):** Dateiliste um `backend/internal/ci/merge.go` (`MergeAs`) und `backend/internal/discovery/review.go` (aus dem Item abgeleitete Merge-ID) ergänzt; ohne sie bleibt bei probable_duplicate je Fehlversuch ein failed ci.merge-Job neben dem gelungenen Merge. Für den Router-Test schlägt der Effekt über eine von der Datenbank abgewiesene IP-Adresse fehl (400), weil ein gelöschter Kandidat 500 liefert (neuer Fund).
 
 **Dateien (7 Einträge, Migration = 2):**
 
@@ -14856,7 +14876,7 @@ UI-16;[B];C;frontend/e2e-real/review-inbox.spec.ts;WP-557
 
 **Schließt Audit-WPs:** [WP-200](../../../audit/phase1-final/PHASE1_WP_AUDIT_MATRIX.md#wp-200) (TEILWEISE BESTANDEN, schließt)
 
-**Problem:** Das INS-04-Fehlerbild „Localhost-Redirect“ wird nicht diskriminiert (F-352): `setup-onboarding.sh:89` setzt `BASE_URL=http://localhost:<port>`, `onboarding.spec.ts:145` vergleicht den Origin der redirect_uri mit BASE (beide localhost), `:140-142` überspringt die Issuer-Prüfung ohne `E2E_ISSUER_URL`; in der Installation ist auch der Issuer localhost.
+**Problem:** Das INS-04-Fehlerbild „Localhost-Redirect“ wird nicht diskriminiert (F-352): `setup-onboarding.sh:89` setzt `BASE_URL=http://localhost:<port>`, `onboarding.spec.ts:145` vergleicht den Origin der redirect_uri mit BASE (beide localhost), `:140-142` überspringt die Issuer-Prüfung ohne `E2E_ISSUER_URL`; in der Installation ist auch der Issuer localhost. (Korrektur vom 2026-10-27, WP-558: Der Issuer der Loopback-Installation ist die Host-IP aus install-cloud.sh, nicht localhost; das Fehlerbild bleibt, die alte Spec bestand den Fall ohne `E2E_ISSUER_URL`. Der INS-04-Test „insecure origin“ läuft nur im Job install-cloud-smoke; im Job tls-domain-pebble wird stattdessen die 301-Umleitung von http://<Domain> auf https geprüft, weil eine TLS-Installation keinen unsicheren UI-Origin hat. Domain ist der sslip.io-Name des Pebble-Tests.)
 
 **Akzeptanzkriterien:**
 
@@ -14894,6 +14914,572 @@ ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:** ACME-Ausstellung (WP-419 (`t5-acme-lineage`)) sowie Pebble-Job `tls-domain-pebble` und `tests/install-acme-pebble.test.sh` selbst (WP-420 (`t5-acme-pebble`), Voraussetzung); Installer-Änderungen.
+
+## K5-Nachträge
+
+Funde aus der Umsetzung von K5, die kein K5-WP abdeckt (Konvention 16). Ein Nachweis-WP, dessen Test rot wurde, hat den Befund gemeldet, statt die Assertion abzuschwächen; fünf Kandidaten aus WP-533, WP-537, WP-554 und WP-556 wurden nachträglich durch einen ausgeführten Test bestätigt. Die Befunde F-363 bis F-373 stehen in der gemeinsamen Befundliste [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist mit einem Defekttest kodiert, der auf dem Stand `aa3b829` rot ausgeführt wurde, und hat seine Zeile in `tests/audit/expected-failures.txt`:
+- **Go-Defekttests** (`auditdefect`): F-363 bis F-369, F-371, F-372, F-373. Das WP überführt den Test in die genannte reguläre Testdatei und löscht die Zeile (Konvention 13).
+- **Shell-Defekttest** (`sh`): F-370, `tests/audit/master-key-rotation-deploy.test.sh`. Das WP nimmt das Skript in den regulären CI-Job seines Bereichs auf (oder verschiebt es nach `tests/`) und löscht die Zeilen.
+- **Real-Stack** (`e2e-real`, je Browserprojekt eine Zeile, nur in CI): F-369 (Fall E2 von `discovery-errors.spec.ts`) und F-370 (Fall K01 von `key-rotation.spec.ts`). Die vorläufigen IDs der K5-Commits (F-NEU-538-1, F-NEU-538-2, F-NEU-WP542, F-NEU-WP547) sind durch F-366, F-367, F-369 und F-370 ersetzt. Das WP löscht die sechs Zeilen erst nach einem grünen CI-Lauf von `install-smoke.yml` und nennt dessen Lauf-ID.
+
+Geprüft und nicht ohne Befund geschlossen: Alle fünf Kandidaten waren Defekte. F-363 ist einer, weil das Akzeptanzkriterium von WP-533 für jede Kindtabelle auch die Verschiebung des Elternobjekts verlangt; F-365, weil eine Inventur keinen Client hat und [E-09](../entscheidungen.md#e-09) das Schreiben solcher Zeilen org-weiten Principals vorbehält. Die Prioritäten folgen der Befundliste: F-364 ist P0 (Cross-Client-Exposition nach TEN-09), F-366 P1 (Cross-Org-Referenzen; die Module desk, key und training sind in G1 abgeschaltet, E-03), F-370 P1 (dokumentiertes Betriebsverfahren legt den Server lahm).
+
+Nachtrag aus der CI von PR #102 (K5, Konvention 16): F-374 (Real-Stack-Fall R01 von `relationships-suppression.spec.ts`, WP-543) ist mit dem Go-Defekttest `TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder` kodiert, der auf `c883c19` rot ausgeführt wurde; WP-645 überführt ihn (Konvention 13). F-375 (Browsermatrix von WP-532) ist geprüft: Der Verdacht, eine Plain-HTTP-Installation auf einem anderen Host verliere die Sitzung, weil das Refresh-Cookie immer `Secure` ist, trifft nicht zu, denn auf einem unsicheren Origin beginnt keine Anmeldung (SPA `InsecureContextError`, INS-04) und SEC-01 verlangt TLS. Es bleibt ein Artefakt der Testumgebung (P3): WebKit speichert das Secure-Cookie über `http://localhost` nicht. F-375 ist mit zwölf e2e-real-Zeilen kodiert (Fälle 07, 11, 14, 14a, 14b, 15 von `roles-authz.spec.ts`, Projekte webkit und mobile-safari); WP-646 löscht sie erst nach einem grünen CI-Lauf von `install-smoke.yml` und nennt dessen Lauf-ID.
+
+### WP-636 – Nicht zugeordnete Discovery-Ergebnisse folgen der Client-Bindung ihres Collectors
+
+**Schlüssel:** `k5n-collector-result-scope` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-533 (`t1-ev-child-derivation`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-363](../../../audit/g1-reaudit/FINDINGS.md#f-363) | P2 | Nicht zugeordnete Discovery-Ergebnisse folgen der Client-Bindung ihres Collectors nicht: frühere Ergebnisse bleiben org-weit sichtbar | schließt | WP-533 |
+
+**Problem:** Ein nicht zugeordnetes `discovery_result` erhält den Client des Collectors seines Jobs nur beim Schreiben (`derive_discovery_result_scope`, Migration 000061). Wird ein org-weiter Collector an eine Site von Client 2 gebunden (`PATCH /collectors/{id} {"site_id"}`, Trigger `collector_site_binding`), behalten seine früheren Ergebnisse `client_id` NULL und bleiben für Client-1-Principals lesbar; neue Ergebnisse gehören Client 2. Für CI-Verschiebungen propagiert Migration 000141 die Kindzeilen, für den Collector fehlt das.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ändert sich `collector.client_id` (Bindung an eine Site, Lösen, jeder andere Weg), werden die nicht zugeordneten Ergebnisse seiner Jobs im selben Statement neu abgeleitet (Trigger auf `collector` als SECURITY DEFINER mit festem `search_path` wie Migration 000141, oder Fortschreibung in `UpdateCollector`); zugeordnete Ergebnisse behalten den Scope ihres CI.
+- [ ] Backfill in der Migration: bestehende nicht zugeordnete Ergebnisse tragen den Client ihres Collectors.
+- [ ] Defekttest `TestAuditCollectorBindingMovesUnmatchedResults` grün und aus `tenant/rls/k5_collector_binding_auditdefect_test.go` nach `tenant/rls/audit_t1_child_derivation_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; ergänzt um das Lösen der Bindung (`site_id` NULL) gemäß der festgelegten Regel.
+- [ ] Prüfung als `reticora_app` mit Tenant-GUCs; Migration mit up/down, Roundtrip, `docs/schema-baseline.md` mit dem Generator; RLS-Katalogtests grün.
+- [ ] Retest F-363: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditCollectorBindingMovesUnmatchedResults|TestAuditT1CIChildTableDerivation' ./internal/tenant/rls/` → PASS.
+
+**Dateien (7 Einträge, Migration = 2):**
+
+- backend/migrations/ (nächste freie Nummer, up und down)
+- backend/internal/discovery/pg_repository.go (falls die Fortschreibung im Repository liegt)
+- backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go
+- backend/internal/tenant/rls/k5_collector_binding_auditdefect_test.go (entfernt)
+- docs/schema-baseline.md
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** eine Migration (Trigger oder Funktion, Backfill); Policy von `discovery_result` unverändert.
+
+**Tests:**
+
+- `tenant/rls/audit_t1_child_derivation_integration_test.go` (PG, App-Rolle).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-636
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Client-Spalte für `discovery_job` und Review-Items (eigene Ableitung, WP-342); Wechsel eines Collectors zwischen zwei Clients (heute 422).
+
+### WP-637 – Standardrolle nur bei der Erstanlage, Login ohne Zuweisung ohne Session
+
+**Schlüssel:** `k5n-login-default-role` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-536 (`t1-ev-core-isolation`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-364](../../../audit/g1-reaudit/FINDINGS.md#f-364) | P0 | Login eines Nutzers ohne Rollenzuweisung vergibt die Standardrolle org-weit neu: entzogene Client-Zuweisung wird zu org-weitem Lesezugriff | schließt | WP-536 |
+
+**Problem:** Der OIDC-Callback ruft bei jedem Login `EnsureRole` (`identity/handler.go:478`); `user.PGRepository.EnsureRole` vergibt die Standardrolle (`RETICORA_DEFAULT_PROVISION_ROLE`, Standard `viewer`) org-weit, sobald der Nutzer keine Rolle hat. Entzieht ein Administrator einem client-beschränkten Nutzer alle Zuweisungen, erhält dieser beim nächsten Login org-weiten Lesezugriff (Session mit `cls=null`). Das Akzeptanzkriterium von WP-536 „ohne Zuweisung keine Session“ ist rot.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Standardrolle wird nur in der Transaktion vergeben, in der `EnsureUser` den Nutzer neu anlegt oder per E-Mail erstmals verknüpft (Erstlogin); ein späterer Login vergibt keine Rolle. Die MFA-Bindung einer Standardrolle `org_admin` (WP-367) bleibt beim Erstlogin erhalten.
+- [ ] Ein Login ohne Rollenzuweisung (Standard- oder Custom-Rolle) erhält keine Session und kein Refresh-Cookie: 403 problem+json mit fester Meldung bzw. Rückleitung auf die Login-Seite mit Hinweis; Audit-Eintrag des abgewiesenen Logins ohne Rollenvergabe.
+- [ ] Defekttest `TestAuditCallbackWithoutAssignmentIssuesNoSession` grün und aus `identity/callback_scope_auditdefect_test.go` nach `identity/callback_scope_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; ergänzt um den Erstlogin eines neuen Nutzers (Standardrolle vergeben, Session) und einen Nutzer nur mit Custom-Rolle (Session, keine Standardrolle).
+- [ ] Bestehende Tests, die `EnsureRole` bei jedem Login voraussetzen (`identity`, `user`, MFA-Tests von WP-367), sind umgeschrieben (Konvention 13), nicht abgeschwächt.
+- [ ] Retest F-364: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditCallbackWithoutAssignmentIssuesNoSession|TestCallback' ./internal/identity/` → PASS.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/identity/handler.go
+- backend/internal/user/pg_repository.go
+- backend/internal/user/mfa.go (falls die MFA-Bindung mitwandert)
+- backend/internal/identity/callback_scope_integration_test.go
+- backend/internal/identity/callback_scope_auditdefect_test.go (entfernt)
+- backend/internal/user/pg_repository_integration_test.go
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `identity/callback_scope_integration_test.go` (Fake-IdP, `permission.NewPGRepository`, PG).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-04;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-637
+RBA-03;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-637
+```
+
+**Entscheidungsbedarf:** keiner (die Konfiguration nennt die Standardrolle bereits „assigned to a user on first login“, `config.go`).
+
+**Nicht Bestandteil:** Standardrolle mit Client-Scope; Oberfläche zum Entzug aller Rollen.
+
+### WP-638 – Org-weite Inventur nur durch org-weite Principals ändern, abschließen und löschen
+
+**Schlüssel:** `k5n-stocktake-org-writes` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-537 (`t1-ev-asset-isolation`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-365](../../../audit/g1-reaudit/FINDINGS.md#f-365) | P2 | Client-gescopter Principal ändert, schließt und löscht eine org-weite Inventur mit Differenzen anderer Clients (E-09) | schließt | WP-537 |
+
+**Problem:** `stocktake` hat keine Client-Spalte, die Policy prüft nur die Organisation (Migration 000012). `Update`, `Complete` und `Delete` des Repositories schreiben die Inventur für jeden Principal mit `stocktake:write`: Ein Client-1-Principal schließt die org-weite Inventur ab, danach sind die Client-2-Differenzen nicht mehr korrigierbar (`ErrAlreadyCompleted`); seine Löschung entfernt die Client-2-Scans mit. Nach [E-09](../entscheidungen.md#e-09) schreiben nur org-weite Principals Zeilen ohne Client. `TestStocktakeForeignClientCorrectionAndComplete` (WP-537) kodiert den Abschluss durch Client 1 als erlaubt.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PATCH`, `DELETE` und `POST …/complete` einer Inventur verlangen einen org-weiten Scope (restriktive UPDATE/DELETE-Policy auf `stocktake` oder `holdsOrgWide(stocktake:write)` im Handler); gebundene Principals erhalten 403 problem+json (bzw. `ErrNotFound` im Repository), die Zeile, ihre Scans und die Assets bleiben unverändert. Scans eigener Assets durch gebundene Principals bleiben möglich.
+- [ ] Defekttest `TestAuditStocktakeOrgWideWritesNeedOrgWideScope` grün und aus `stocktake/k5_org_wide_writes_auditdefect_test.go` nach `stocktake/stocktake_scope_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] `TestStocktakeForeignClientCorrectionAndComplete` umgeschrieben (Konvention 13): der Abschluss durch Client 1 wird abgewiesen; die Korrektur der Client-1-Differenz prüft der org-weite Abschluss.
+- [ ] Prüfung als `reticora_app` mit Tenant-GUCs; bei einer Migration up/down, Roundtrip, `docs/schema-baseline.md` mit dem Generator, RLS-Katalogtests grün.
+- [ ] Retest F-365: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditStocktakeOrgWideWritesNeedOrgWideScope|TestStocktake' ./internal/stocktake/` → PASS.
+
+**Dateien (8 Einträge, Migration = 2):**
+
+- backend/internal/stocktake/pg_repository.go
+- backend/internal/stocktake/handler.go
+- backend/internal/stocktake/stocktake_scope_integration_test.go
+- backend/internal/stocktake/k5_org_wide_writes_auditdefect_test.go (entfernt)
+- backend/migrations/ (falls Policy, nächste freie Nummer, up und down)
+- docs/schema-baseline.md (falls Migration)
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** optional eine Migration (restriktive Policy auf `stocktake`).
+
+**Tests:**
+
+- `stocktake/stocktake_scope_integration_test.go` (PG, App-Rolle).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-05;[B];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-638
+```
+
+**Entscheidungsbedarf:** keiner ([E-09](../entscheidungen.md#e-09) gilt)
+
+**Nicht Bestandteil:** Inventuren je Client (Client-Spalte für `stocktake`); Inventur-UI.
+
+### WP-639 – Buchung, Schlüsselausgabe und Schulungszuweisung nur mit Referenzen der eigenen Organisation
+
+**Schlüssel:** `k5n-module-org-refs` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-538 (`t1-ev-module-isolation`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-366](../../../audit/g1-reaudit/FINDINGS.md#f-366) | P1 | Arbeitsplatzbuchung, Schlüsselausgabe und Schulungszuweisung nehmen Nutzer und Kurse anderer Organisationen an | schließt | WP-538 |
+
+**Problem:** Die Fremdschlüssel `desk_booking.user_id`, `key_assignment.assigned_to`, `training_assignment.user_id` (→ `app_user`) und `training_assignment.training_id` (→ `training`, ON DELETE CASCADE) enthalten die Organisation nicht (Migration 000050), und die Repositories prüfen die Referenz nicht. Ein Principal von Org A bucht für einen Nutzer von Org B, gibt ihm einen Schlüssel aus und weist Kurse oder Nutzer von Org B zu (201); eine unbekannte ID ergibt 404 (Existenzorakel), die Löschung des Kurses durch Org B löscht Zeilen von Org A.
+
+**Akzeptanzkriterien:**
+
+- [ ] Referenzen auf Nutzer und Kurse einer anderen Organisation werden wie unbekannte IDs abgewiesen (gleicher Status und gleiche Meldung, ohne SQLSTATE-, Constraint- oder Policy-Text), keine Zeile entsteht: zusammengesetzte Fremdschlüssel `(organization_id, …)` auf `app_user(organization_id, id)` bzw. `training(organization_id, id)` mit eindeutigem Index, oder Prüfung der Referenz unter RLS in derselben Transaktion.
+- [ ] Alle Fremdschlüssel auf `app_user` und auf Mandantentabellen ohne `organization_id` in den Tabellen der Module desk, key und training sind geprüft und geschlossen; bestehende Cross-Org-Zeilen meldet die Migration (Abbruch mit Liste statt stillem Löschen).
+- [ ] Defekttests `TestAuditDeskBookingStaysInOrganization`, `TestAuditKeyIssueStaysInOrganization` und `TestAuditTrainingAssignmentStaysInOrganization` grün und in `desk/desk_scope_integration_test.go`, `keymgmt/keymgmt_scope_integration_test.go` und `training/training_scope_integration_test.go` überführt (Dateien `*_cross_org_auditdefect_test.go` gelöscht), drei Zeilen aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] Migration mit up/down, Roundtrip, `docs/schema-baseline.md` mit dem Generator; RLS-Katalogtests grün.
+- [ ] Retest F-366: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'StaysInOrganization' ./internal/desk/ ./internal/keymgmt/ ./internal/training/` → PASS.
+
+**Dateien (13 Einträge, Migration = 2):**
+
+- backend/migrations/ (nächste freie Nummer, up und down)
+- backend/internal/desk/pg_repository.go
+- backend/internal/keymgmt/pg_repository.go
+- backend/internal/training/pg_repository.go
+- backend/internal/desk/desk_scope_integration_test.go
+- backend/internal/keymgmt/keymgmt_scope_integration_test.go
+- backend/internal/training/training_scope_integration_test.go
+- backend/internal/desk/desk_cross_org_auditdefect_test.go (entfernt)
+- backend/internal/keymgmt/keymgmt_cross_org_auditdefect_test.go (entfernt)
+- backend/internal/training/training_cross_org_auditdefect_test.go (entfernt)
+- docs/schema-baseline.md
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** eine Migration (zusammengesetzte Fremdschlüssel bzw. eindeutige Indexe); Policies unverändert.
+
+**Tests:**
+
+- Die drei Scope-Integrationstests (httptest mit PG, Org-B-Referenzen und unbekannte IDs).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-06;[B];B;backend/internal/training/training_scope_integration_test.go;WP-639
+MGT-03;[P4];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-639
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Freischaltung der Module desk, key und training in G1 (E-03); Referenzen der Asset-Zuweisung (eigener Prüfpunkt in WP-537).
+
+### WP-640 – Ankündigung und Benachrichtigungsliste unsichtbarer Wartungsfenster mit 404
+
+**Schlüssel:** `k5n-maint-notify-hidden` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-538 (`t1-ev-module-isolation`), WP-540 (`t3-maint-notify`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-367](../../../audit/g1-reaudit/FINDINGS.md#f-367) | P3 | Ankündigung und Benachrichtigungsliste eines unsichtbaren Wartungsfensters antworten 200 statt 404 | schließt | WP-538 |
+
+**Problem:** `POST /maintenance-windows/{id}/notify` und `GET …/notifications` antworten für ein Fenster, das der Aufrufer nicht sieht (nur Client-2-CIs für einen Client-1-Principal, Fenster von Org B), 200 mit leerem Ergebnis (`{"queued":0}` bzw. `{"data":[]}`) statt 404 wie `GET`, `PATCH` und `DELETE` des Fensters. `NotifyClients` und `ListNotifications` prüfen die Sichtbarkeit nicht.
+
+**Akzeptanzkriterien:**
+
+- [ ] Beide Routen lesen das Fenster unter RLS und antworten für ein unsichtbares oder unbekanntes Fenster 404 problem+json; es entsteht keine Benachrichtigung. Sichtbare Fenster verhalten sich wie bisher (`TestMaintenanceNotifyClientScope` grün).
+- [ ] Spec-first: `api/openapi.yaml` führt 404 für beide Routen; `npm run generate:api` ohne weiteren Diff.
+- [ ] Defekttest `TestAuditMaintenanceNotifyHiddenWindowIsNotFound` grün und nach `maintenance/maintenance_scope_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] Retest F-367: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditMaintenanceNotifyHiddenWindowIsNotFound|TestMaintenance' ./internal/maintenance/` → PASS.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/maintenance/pg_repository.go
+- backend/internal/maintenance/maintenance_scope_integration_test.go
+- backend/internal/maintenance/maintenance_notify_scope_auditdefect_test.go (entfernt)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `maintenance/maintenance_scope_integration_test.go` (httptest mit PG).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-640
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Inhalt und Zustellung der Benachrichtigungen (WP-540).
+
+### WP-641 – Lauffehler für abgewiesene TLS-Verbindungen und nicht erreichbare Host-Ziele
+
+**Schlüssel:** `k5n-discovery-run-errors` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-539 (`t2-redfish-tls-evidence`), WP-542 (`t4-dis08-nachweis`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-368](../../../audit/g1-reaudit/FINDINGS.md#f-368) | P2 | Redfish-Lauf gegen ein nicht vertrauenswürdiges Zertifikat meldet keinen Fehler: die Probe verwirft den TLS-Fehler | schließt | WP-539 |
+| [F-369](../../../audit/g1-reaudit/FINDINGS.md#f-369) | P2 | Host-Scope auf ein nicht erreichbares Ziel meldet einen fehlerfreien Lauf (keine Ursache `unreachable`, Health ok) | schließt | WP-542 |
+
+**Problem:** `runPass` (`collector/collectorcmd/collectorcmd.go`) meldet Lauffehler nur, wenn `Probe` selbst scheitert oder `Collect` für einen Treffer scheitert (`collectHits`). Ein Ziel ohne Treffer ergibt keinen Fehler: Die Redfish-Probe verwirft den TLS-Fehler eines nicht vertrauenswürdigen Zertifikats (`plugins/redfish/redfish.go`, F-368), und ein Host-Scope auf ein Ziel, das nicht antwortet, meldet `error_count 0`, Health ok (F-369, Real-Stack-Fall E2 rot in allen sechs Projekten).
+
+**Akzeptanzkriterien:**
+
+- [ ] Plugins melden Fehler je Ziel aus der Probe (Erweiterung von `plugins.Plugin` oder Ergebnis mit Fehler je Ziel); `runPass` übernimmt sie als Lauffehler mit Protokoll, Ziel und Ursache (`plugins.ErrorCause`). Die Redfish-Probe meldet die Zertifikatsabweisung (Ursache aus der Aufzählung von `api/openapi.yaml`, Meldung nennt das Zertifikat) und sendet weiterhin keine Credentials an das Ziel.
+- [ ] Für Host-Scopes meldet jedes Protokoll, auf das ein Ziel nicht antwortet, einen Lauffehler `unreachable` (bzw. `timeout`) mit Protokoll und Ziel; für Netzbereiche (CIDR, Bereich) bleiben stumme Adressen fehlerfrei. Gilt auch für den Sweep.
+- [ ] Defekttests `TestAuditRedfishUntrustedCertificateReported` und `TestAuditUnreachableHostScopeReportsError` grün und in `collectorcmd/redfish_tls_integration_test.go` bzw. `collectorcmd/discovery_errors_test.go` überführt (Dateien gelöscht), zwei go-Zeilen aus `tests/audit/expected-failures.txt` entfernt. Der Probe-Teil von `TestCollectRejectsUntrustedCertificateByDefault` (`plugins/redfish/redfish_test.go`) ist umgeschrieben (Konvention 13).
+- [ ] Real-Stack-Fall E2 von `frontend/e2e-real/discovery-errors.spec.ts` grün in allen sechs Projekten (CI-Lauf von `install-smoke.yml`, Lauf-ID im PR); danach die sechs e2e-real-Zeilen von F-369 entfernt.
+- [ ] Retest F-368 und F-369: `cd collector && go test -count=1 -run 'TestAuditRedfishUntrustedCertificateReported|TestAuditUnreachableHostScopeReportsError|TestRedfishTLSScopeIntegration' ./collectorcmd/` und `go test -count=1 ./plugins/...` → PASS.
+
+**Dateien (11 Einträge):**
+
+- collector/plugins/plugin.go (Fehler je Ziel)
+- collector/plugins/redfish/redfish.go
+- collector/plugins/redfish/redfish_test.go
+- collector/collectorcmd/collectorcmd.go
+- collector/collectorcmd/redfish_tls_integration_test.go
+- collector/collectorcmd/discovery_errors_test.go
+- collector/collectorcmd/redfish_tls_auditdefect_test.go (entfernt)
+- collector/collectorcmd/unreachable_scope_auditdefect_test.go (entfernt)
+- frontend/e2e-real/discovery-errors.spec.ts (unverändert, Nachweis)
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `collectorcmd/redfish_tls_integration_test.go`, `collectorcmd/discovery_errors_test.go`, Plugin-Tests.
+- Real-Stack `discovery-errors.spec.ts` E2 (CI).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-641
+COL-02;[B];D;collector/collectorcmd/redfish_tls_integration_test.go;WP-641
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Neue Ursachen in der Aufzählung von `api/openapi.yaml` (nur falls keine bestehende passt, dann spec-first); Fehler je Adresse in Netzbereichen.
+
+### WP-642 – RETICORA_MASTER_KEY_PREVIOUS in Compose und Kubernetes
+
+**Schlüssel:** `k5n-master-key-previous` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-547 (`t6-rotation-evidence`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-370](../../../audit/g1-reaudit/FINDINGS.md#f-370) | P1 | Compose und Kubernetes reichen `RETICORA_MASTER_KEY_PREVIOUS` nicht an den Server: die dokumentierte Master-Key-Rotation ist nicht durchführbar | schließt | WP-547 |
+
+**Problem:** docs/ops/workers.md beschreibt die Rotation mit `RETICORA_MASTER_KEY` (neu) und `RETICORA_MASTER_KEY_PREVIOUS` (alt). Der Server liest beide (`config.go`), aber `deploy/docker-compose/docker-compose.yml` reicht dem Service `server` nur `RETICORA_MASTER_KEY` und `deploy/k8s/base/deployment.yaml` nur den Secret-Schlüssel `master-key` durch. Mit dem neuen Key allein startet der Server nicht (`failed to open the derivation root of the derived secrets`); der Real-Stack-Fall K01 von `key-rotation.spec.ts` ist in allen sechs Projekten rot.
+
+**Akzeptanzkriterien:**
+
+- [ ] Compose: der Service `server` erhält `RETICORA_MASTER_KEY_PREVIOUS: "${RETICORA_MASTER_KEY_PREVIOUS:-}"` (optional, leer zulässig). Kubernetes: der Container `server` von `reticora-server` liest `RETICORA_MASTER_KEY_PREVIOUS` aus `reticora-secrets`, Schlüssel `master-key-previous`, mit `optional: true`; die Overlays bauen.
+- [ ] deploy/README.md (Umgebungs- und Secret-Tabelle) und docs/ops/workers.md (Rotation) nennen Variable und Secret-Schlüssel je Plattform; der Installer behält die Variable bei einem erneuten Lauf (Prüfung mit dem Shell-Harness, nicht durch Ausführen des Installers).
+- [ ] `tests/audit/master-key-rotation-deploy.test.sh` grün und in den regulären CI-Job verschoben, der Compose- und K8s-Manifeste prüft (z. B. `installer-script-tests` bzw. `k8s-manifests`); seine zwei sh-Zeilen aus `tests/audit/expected-failures.txt` entfernt.
+- [ ] Real-Stack-Fall K01 von `frontend/e2e-real/key-rotation.spec.ts` grün in allen sechs Projekten (CI-Lauf von `install-smoke.yml`, Lauf-ID im PR); danach die sechs e2e-real-Zeilen von F-370 entfernt.
+- [ ] Retest F-370: `KUSTOMIZE=… ./tests/audit/master-key-rotation-deploy.test.sh` → alle Fälle ok; actionlint für geänderte Workflows.
+
+**Dateien (8 Einträge):**
+
+- deploy/docker-compose/docker-compose.yml
+- deploy/k8s/base/deployment.yaml
+- deploy/README.md
+- docs/ops/workers.md
+- tests/audit/master-key-rotation-deploy.test.sh (verschoben)
+- .github/workflows/ci.yml oder install-smoke.yml (Aufnahme in den regulären Job)
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `master-key-rotation-deploy.test.sh` (`docker compose config`, `kustomize build`).
+- Real-Stack `key-rotation.spec.ts` K01 (CI).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SEC-06;[B];A;frontend/e2e-real/key-rotation.spec.ts;WP-642
+```
+
+**Entscheidungsbedarf:** keiner ([E-15](../entscheidungen.md#e-15) gilt)
+
+**Nicht Bestandteil:** Automatische Rotation; Rotation der JWT- und Webhook-Schlüssel.
+
+### WP-643 – Review-Merge mit 404 für gelöschte Kandidaten und bereinigten Jobfehlern
+
+**Schlüssel:** `k5n-review-merge-errors` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-554 (`t7-review-merge-job`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-371](../../../audit/g1-reaudit/FINDINGS.md#f-371) | P3 | Merge eines Review-Items in einen inzwischen gelöschten Kandidaten antwortet 500 statt 404 | mit | WP-554 |
+| [F-372](../../../audit/g1-reaudit/FINDINGS.md#f-372) | P2 | Fehlerfeld gespiegelter Jobs enthält den rohen Datenbankfehler (SQLSTATE), lesbar mit `job:read` | schließt | WP-554 |
+
+**Problem:** `resolveCIReview` (`discovery/review.go`) gibt den `ci.ErrNotFound` von `ciRepo.Update` unverändert zurück; `reviews.writeError` erkennt ihn nicht, der Merge in einen inzwischen gelöschten Kandidaten antwortet 500 (F-371). `reviews.Service.runEffect`, `ci.Service.MergeAs` und der Export-Worker spiegeln `err.Error()` in das Fehlerfeld des Jobs; `GET /api/v1/jobs` zeigt jedem Inhaber von `job:read` z. B. `update ci: ERROR: invalid input syntax for type inet: "10.55.4.317" (SQLSTATE 22P02)` (F-372).
+
+**Akzeptanzkriterien:**
+
+- [ ] `resolveCIReview` bildet `ci.ErrNotFound` (merge, accept, Restore) auf 404 problem+json ab; das Item bleibt offen, der Merge-Job endet `failed` mit bereinigter Meldung.
+- [ ] Ein gemeinsamer Helfer bildet das Fehlerfeld gespiegelter und eigener Jobs: Domänenfehler (`reviews.Error`, Validierungsfehler) behalten ihre Meldung, Datenbank-, Treiber- und unbekannte Fehler werden zu einer festen Meldung; der Rohfehler wird mit Job-ID geloggt. Verwendet von `reviews.Service.runEffect`, `ci.Service.MergeAs` und `export/worker.go`.
+- [ ] Defekttests `TestAuditReviewMergeIntoDeletedCandidateIsNotFound` und `TestAuditReviewMergeJobErrorIsSanitized` grün und nach `server/review_merge_job_integration_test.go` überführt (Datei gelöscht), zwei Zeilen aus `tests/audit/expected-failures.txt` entfernt; ergänzt um den Fehler eines Exportjobs ohne SQLSTATE.
+- [ ] `TestReviewMergeJobThroughRouter` grün (Retry-Verhalten aus F-330 unverändert).
+- [ ] Retest F-371 und F-372: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditReviewMerge|TestReviewMergeJobThroughRouter' ./internal/server/` → PASS.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/discovery/review.go
+- backend/internal/reviews/service.go
+- backend/internal/ci/merge.go
+- backend/internal/export/worker.go
+- backend/internal/jobs/service.go (Helfer)
+- backend/internal/server/review_merge_job_integration_test.go
+- backend/internal/server/k5_review_merge_errors_auditdefect_test.go (entfernt)
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `server/review_merge_job_integration_test.go` (vollständiger Router, PG), Unit-Test des Helfers in `jobs`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-03;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-643
+JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-643
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Bereinigung bereits gespeicherter Jobfehler (Altbestand, optional per Migration); Fehlertexte anderer Job-Arten ohne Spiegelung.
+
+### WP-644 – Clientliste für client-gescopte Rollen ohne user:read
+
+**Schlüssel:** `k5n-clients-read` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-556 (`t7-ui-scope-lists`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-373](../../../audit/g1-reaudit/FINDINGS.md#f-373) | P2 | Die Standardrolle `client_technician` kann ihre Clients nicht auflisten: `GET /clients` 403, Client-Auswahl des Scope-Umschalters gesperrt | schließt | WP-556 |
+
+**Problem:** `GET /api/v1/clients` verlangt `user:read` (`server/authz.go`); die Rolle `client_technician` hat dieses Recht nach RBA-02 nicht (Migration 000147). Die Anfrage antwortet 403, und die Client-Auswahl des Scope-Umschalters (`ScopeSwitcher.tsx`, `disabled={!clients.isSuccess}`) bleibt für jeden Client-Techniker gesperrt.
+
+**Akzeptanzkriterien:**
+
+- [ ] `GET /api/v1/clients` und `GET /api/v1/clients/{id}` verlangen ein Leserecht, das jede Standardrolle mit Client-Bezug hat (z. B. `location:read`); die Sichtbarkeit begrenzt RLS auf die Clients des Scopes. Schreibrouten bleiben bei `user:manage`; die Rollenmatrix RBA-02 bleibt unverändert.
+- [ ] Spec-first: Beschreibung der Routen in `api/openapi.yaml` nennt das Recht; `npm run generate:api`.
+- [ ] Defekttest `TestAuditClientTechnicianListsOwnClients` grün und nach `server/authz_test.go` bzw. einem Router-Integrationstest überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; ergänzt um die übrigen drei Standardrollen und einen Principal ohne Leserecht (403).
+- [ ] Vitest `ScopeSwitcher.test.tsx`: mit den Rechten von `client_technician` (Stub der Clientliste 200) ist die Client-Auswahl bedienbar.
+- [ ] Retest F-373: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditClientTechnicianListsOwnClients' ./internal/server/` → PASS.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/server/authz.go
+- backend/internal/server/clients_read_integration_test.go (neu)
+- backend/internal/server/k5_client_technician_clients_auditdefect_test.go (entfernt)
+- api/openapi.yaml
+- frontend/src/components/ScopeSwitcher.test.tsx
+- tests/audit/expected-failures.txt
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `server/clients_read_integration_test.go` (vollständiger Router, PG, vier Standardrollen).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RBA-02;[B];C;backend/internal/server/clients_read_integration_test.go;WP-644
+UI-01;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-644
+```
+
+**Entscheidungsbedarf:** keiner (RBA-02 bleibt unverändert; nur die Routenberechtigung ändert sich)
+
+**Nicht Bestandteil:** Nutzerliste für `client_technician`; Clientnamen in anderen Ansichten.
+
+### WP-645 – LLDP-Kanten des ersten Zyklus unabhängig von der Reihenfolge der Ingest-Lanes
+
+**Schlüssel:** `k5n-lldp-lane-order` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-498 (`t4-power-redundancy`), WP-543 (`t4-rel-suppress-nachweis`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-374](../../../audit/g1-reaudit/FINDINGS.md#f-374) | P2 | LLDP-Kanten des ersten Discovery-Zyklus hängen von der Reihenfolge der Ingest-Lanes ab: Kanten zu Nachbarn aus einer späteren Lane fehlen bis zum nächsten Bericht | schließt | WP-543 |
+
+**Problem:** `deriveTopology` (`discovery/topology.go`) schreibt die Kante „meldendes Gerät → Nachbar“ nur, wenn der Nachbar zu einem vorhandenen CI auflöst. Die Records eines Zyklus verteilen sich über die Ingest-Lanes (`IngestLane`, FNV-1a von `serial:<Seriennummer>` modulo `RETICORA_INGEST_LANES`); wird das meldende Gerät vor seinem Nachbarn verarbeitet, fehlt die Kante bis zu seinem nächsten Bericht (5 bis 15 Minuten). Die gemeldeten Nachbarn werden nicht gespeichert, und beim Anlegen eines CI leitet nichts die Kanten ab, die andere Geräte zu ihm gemeldet haben. Für `powered_by` schließt `derivePowerFeedsOf` (WP-498, F-112) dieselbe Lücke. Lokal fehlen nach dem ersten Zyklus 9 von 30 Kanten der simulierten Flotte; in CI hatte `sim-access-01` 4 von 7 (R01).
+
+**Akzeptanzkriterien:**
+
+- [ ] Die gemeldeten LLDP/CDP-Nachbarn eines Records (Ziel-IP, -MAC, -Hostname, lokaler Port, Protokoll) werden am meldenden CI gespeichert (z. B. `raw_data.neighbors`), ohne dass eine unveränderte Meldung eine Attributänderung oder Historie erzeugt (AUD-03).
+- [ ] Nach dem Anlegen neuer CIs eines Batches werden die gespeicherten Nachbarn anderer CIs, die auf eines davon verweisen (IP, MAC, Hostname wie `BuildNeighborIndex`), aufgelöst und die Kanten mit `DeriveTopology` geschrieben: Confidence nach TOP-01, Suppressionen nach REL-03 (fail-closed wie `deriveTopology`), unbekannte Typschlüssel als Review wie bisher, keine doppelte Kante. Analog zu `derivePowerFeedsOf`: jede Seite leitet nach ihrem Commit ab, wer zuletzt ableitet, sieht die andere; das gilt auch für Lanes, die nebeneinander laufen.
+- [ ] Defekttest `TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder` grün und aus `discovery/k5_lldp_lane_order_auditdefect_test.go` nach `discovery/topology_integration_test.go` überführt (Datei gelöscht), Zeile aus `tests/audit/expected-failures.txt` entfernt; ergänzt um die Lanes nebeneinander (mehrere Runden) und eine unterdrückte Kante, die auch über den neuen Weg nicht entsteht.
+- [ ] Real-Stack-Fall R01 von `frontend/e2e-real/relationships-suppression.spec.ts` prüft die sieben Kanten von `sim-access-01` wieder nach dem ersten Zyklus (Vorbedingung aus Commit `51a68f9` zurückgenommen); grün in allen sechs Projekten (CI-Lauf von `install-smoke.yml`, Lauf-ID im PR).
+- [ ] Prüfung als `reticora_app` mit Tenant-GUCs; `TestAuditPowerRedundancyIndependentOfBatchOrder`, `TestSimulatedFleetIngest` und die Topologietests unverändert grün; Ingest-Budget (NFR-03, `ingest_budget_integration_test.go`) ohne Regression.
+- [ ] Retest F-374: `cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestAuditLLDPEdgesOfFirstCycleIndependentOfLaneOrder|TestTopology' ./internal/discovery/` → PASS.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/discovery/topology.go
+- backend/internal/discovery/discovery.go
+- backend/internal/discovery/devicerecord.go (Nachbarn im `raw_data`)
+- backend/internal/discovery/pg_repository.go (gespeicherte Nachbarn lesen)
+- backend/internal/discovery/topology_integration_test.go
+- backend/internal/discovery/k5_lldp_lane_order_auditdefect_test.go (entfernt)
+- frontend/e2e-real/relationships-suppression.spec.ts
+- tests/audit/expected-failures.txt
+
+**Migration/RLS:** keine (Speicherung im bestehenden `attributes` des CI); braucht die Suche nach verweisenden Nachbarn einen Index, eine Migration mit der nächsten freien Nummer (up/down, Roundtrip, Schema-Baseline mit dem Generator).
+
+**Tests:**
+
+- `discovery/topology_integration_test.go` (PG, App-Rolle, vier Lanes nacheinander in zwei Reihenfolgen und nebeneinander).
+- Real-Stack `relationships-suppression.spec.ts` R01 (CI).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** FDB-Kanten (Confidence 0.6), die nur ohne LLDP am Port entstehen; Entfernen gespeicherter Nachbarn, die ein Gerät nicht mehr meldet (TOP-02 unverändert).
+
+### WP-646 – Real-Stack-E2E für WebKit und Mobile Safari über einen TLS-Origin
+
+**Schlüssel:** `k5n-e2e-webkit-tls` · **Meilenstein:** K5-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-532 (`k-e2e-real-browsers`), WP-558 (`t7-onboarding-tls-origin`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-375](../../../audit/g1-reaudit/FINDINGS.md#f-375) | P3 | Real-Stack-E2E in WebKit und Mobile Safari über den Plain-HTTP-Origin `http://localhost`: der Browser verwirft das Secure-Refresh-Cookie, die Refresh-Fälle von `roles-authz` scheitern (Testumgebung) | schließt | WP-532 |
+
+**Problem:** Der Job `e2e-real` von `install-smoke.yml` führt alle sechs Browserprojekte gegen die Loopback-Installation `http://localhost:3000` aus. Der Server setzt das Refresh-Cookie `reticora_refresh` mit `Secure` (richtig nach SEC-01); Chromium und Firefox speichern es auf `http://localhost`, WebKit nicht. In webkit und mobile-safari sind deshalb die Fälle 07, 11, 14, 14a, 14b und 15 von `roles-authz.spec.ts` rot, und AUT-02 (Refresh) und RBA-03 (Rollenänderung beim Refresh) sind in WebKit nicht belegt. Ein Produktdefekt liegt nicht vor: Auf einem unsicheren Origin beginnt keine Anmeldung (`InsecureContextError`, INS-04).
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Projekte webkit und mobile-safari des Jobs `e2e-real` laufen gegen einen TLS-Origin `https://<Name>`, der nicht localhost ist: eine Installation mit `RETICORA_TLS_DOMAIN` und Zertifikat einer Test-CA (Pebble wie in `tls-domain-pebble`, sslip.io-Name des Runners), `BASE_URL` und Issuer auf diesem Origin. Die Test-CA ist im Trust-Store von Runner und Browser eingetragen; kein `ignoreHTTPSErrors`. Chromium, Edge, Firefox und mobile-chrome bleiben auf der Loopback-Installation (INS-04 `@plain-http` unverändert).
+- [ ] Der Job prüft vor der Suite, dass `BASE_URL` mit `https://` beginnt und nicht localhost nennt, und dass die Anmeldung in WebKit das Cookie `reticora_refresh` setzt (Abbruch mit klarer Meldung sonst).
+- [ ] Lauf von `install-smoke.yml` mit allen sechs Projekten grün gegen `tests/audit/expected-failures.txt` (Ratchet `e2e-real-ratchet`); `roles-authz.spec.ts` 07, 11, 14, 14a, 14b und 15 grün in webkit und mobile-safari (Lauf-ID im PR); danach die zwölf e2e-real-Zeilen von F-375 entfernt.
+- [ ] deploy/README.md (Abschnitt HTTPS) und docs/troubleshooting-installation.md: Plain HTTP erlaubt eine Anmeldung nur auf Loopback (sicherer Kontext); Safari erneuert dort keine Sitzung (Secure-Cookie); für den Betrieb HTTPS (SEC-01).
+- [ ] actionlint für `install-smoke.yml`; Shell-Hilfsskripte mit shellcheck und dem Shell-Harness geprüft, der Installer nicht ausgeführt.
+- [ ] Retest F-375: CI-Lauf von `install-smoke.yml`, Jobs `e2e-real (webkit)` und `e2e-real (mobile-safari)` → die sechs Fälle grün, `e2e-real-ratchet` 0 Fehler.
+
+**Dateien (6 Einträge):**
+
+- .github/workflows/install-smoke.yml (TLS-Origin für webkit und mobile-safari)
+- frontend/e2e/fixtures/setup-onboarding.sh oder ein eigenes Setup-Skript des TLS-Origins
+- frontend/e2e-real/playwright.real.config.ts (falls die Projekte einen eigenen `baseURL` brauchen)
+- deploy/README.md
+- docs/troubleshooting-installation.md
+- tests/audit/expected-failures.txt
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- Real-Stack `roles-authz.spec.ts` in webkit und mobile-safari über den TLS-Origin (CI).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUT-02;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-646
+TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
+```
+
+**Entscheidungsbedarf:** keiner (SEC-01 gilt; das Refresh-Cookie bleibt `Secure`)
+
+**Nicht Bestandteil:** `Secure` des Refresh-Cookies nach Schema der Anfrage oder der öffentlichen URL (von den Anforderungen nicht verlangt); Plain-HTTP-Betrieb auf anderen Hosts als Loopback; die übrigen in WebKit roten Fälle anderer Befunde.
 
 ## K6 Geringfügige Mängel
 

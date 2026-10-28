@@ -3,8 +3,10 @@ package audit_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -73,5 +75,51 @@ func TestAuditScope(t *testing.T) {
 	}
 	if !result.Intact || result.Checked != 2 {
 		t.Fatalf("verify: %+v, want an intact chain of 2 entries", result)
+	}
+}
+
+// TestAuditListWithoutScope covers the open evidence of WP-016 (TEN-06,
+// evidence WP-536): the audit list runs only in the caller's tenant
+// transaction. Without a tenant scope it returns ErrNoTenantScope and no
+// entry, with the scope of organization B naming organization A
+// ErrTenantMismatch; through the handler both answer a generic error
+// without entries. The org-wide principal of organization A lists the entry
+// (control).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAuditListWithoutScope(t *testing.T) {
+	f := scopetest.Seed(t, "95")
+	ci := f.CI(t, f.OrgA, f.Client1, "audit-noscope")
+	scope := database.OrgWideScope(f.OrgA, "")
+	if err := database.WithTenant(context.Background(), f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{OrganizationID: f.OrgA, Action: "ci.updated", ResourceType: "ci", ResourceID: ci})
+		return err
+	}); err != nil {
+		t.Fatalf("record entry: %v", err)
+	}
+	handler := audit.NewHandler(f.App)
+
+	entries, err := handler.ListEntries(context.Background(), f.OrgA)
+	if !errors.Is(err, database.ErrNoTenantScope) || len(entries) != 0 {
+		t.Errorf("list without scope: %d entries, %v; want none and ErrNoTenantScope", len(entries), err)
+	}
+	entries, err = handler.ListEntries(f.OrgCtx(f.OrgB), f.OrgA)
+	if !errors.Is(err, database.ErrTenantMismatch) || len(entries) != 0 {
+		t.Errorf("list A with B scope: %d entries, %v; want none and ErrTenantMismatch", len(entries), err)
+	}
+	entries, err = handler.ListEntries(f.OrgCtx(f.OrgA), f.OrgA)
+	if err != nil || len(entries) != 1 || entries[0].ResourceID != ci {
+		t.Fatalf("list A: %+v, %v; want the one entry", entries, err)
+	}
+
+	// The handler with tenant info but without a database scope.
+	for name, ctx := range map[string]context.Context{"no scope": context.Background(), "scope of B": f.OrgCtx(f.OrgB)} {
+		ctx = tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA})
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/audit?limit=100", nil).WithContext(ctx)
+		rec := httptest.NewRecorder()
+		handler.List(rec, req)
+		if rec.Code < 400 || strings.Contains(rec.Body.String(), ci) || strings.Contains(rec.Body.String(), "tenant scope") {
+			t.Errorf("GET /audit with %s: %d %s, want a generic error without entries", name, rec.Code, rec.Body.String())
+		}
 	}
 }

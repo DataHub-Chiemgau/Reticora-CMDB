@@ -39,7 +39,9 @@ var clientPolicyTables = []clientPolicyTable{
 	{"internal_order", "order_number, title", "'wp023-' || gen_random_uuid(), 'Order'"},
 	{"key_item", "name", "'Key ' || gen_random_uuid()"},
 	{"location_node_retired", "id, node", "gen_random_uuid(), '{}'::jsonb"},
-	{"maintenance_notification", "maintenance_window_id", "'" + cpWindow + "'"},
+	// One notification per window, client and channel (migration 000173):
+	// every row gets a channel of its own.
+	{"maintenance_notification", "maintenance_window_id, channel", "'" + cpWindow + "', 'wp023-' || gen_random_uuid()"},
 	{"quantity_item", "name", "'Item ' || gen_random_uuid()"},
 	{"sla", "name, priority, response_target_minutes, resolution_target_minutes", "'SLA ' || gen_random_uuid(), 'low', 10, 20"},
 }

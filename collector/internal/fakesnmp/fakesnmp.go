@@ -7,10 +7,21 @@
 // infrastructure: only collector/cmd/fakesnmp and tests (plugins/snmp
 // TestCollectFromSNMPFake, plugins/power) use it, the release build
 // (./cmd/collector) does not.
+//
+// Bound with ListenV3 it is an SNMPv3 agent of one USM user at authPriv for
+// frontend/e2e-real/discovery-errors.spec.ts (WP-542, DIS-08), answering
+// like the agent startRFC3414Agent of plugins/snmp/v3_agent_test.go
+// (WP-492): the engine discovery gets the report usmStatsUnknownEngineIDs
+// with engine ID, boots and time; a request of the user it cannot
+// authenticate or decrypt with the user's keys gets the unauthenticated
+// report usmStatsWrongDigests (another user: usmStatsUnknownUserNames,
+// RFC 3414 3.2); a request with the user's keys gets the authPriv
+// response.
 package fakesnmp
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"slices"
 	"strconv"
@@ -28,9 +39,42 @@ const (
 	OIDSysName     = ".1.3.6.1.2.1.1.5.0"
 )
 
+// usmStats report counters (RFC 3414 3.2, SNMP-USER-BASED-SM-MIB) of the
+// SNMPv3 mode.
+const (
+	OIDUsmStatsUnknownUserNames = ".1.3.6.1.6.3.15.1.1.3.0"
+	OIDUsmStatsUnknownEngineIDs = ".1.3.6.1.6.3.15.1.1.4.0"
+	OIDUsmStatsWrongDigests     = ".1.3.6.1.6.3.15.1.1.5.0"
+)
+
+// usmReportNames name the report counters in Request.Report.
+var usmReportNames = map[string]string{
+	OIDUsmStatsUnknownUserNames: "usmStatsUnknownUserNames",
+	OIDUsmStatsUnknownEngineIDs: "usmStatsUnknownEngineIDs",
+	OIDUsmStatsWrongDigests:     "usmStatsWrongDigests",
+}
+
+// The engine of the SNMPv3 mode: a fixed ID, boots and time, like the test
+// agent of plugins/snmp/v3_agent_test.go.
+const (
+	engineID    = "\x80\x00\x1f\x88\x80reticora-fake"
+	engineBoots = 1
+	engineTime  = 1000
+)
+
+// V3 is the one USM user of the SNMPv3 mode, at security level authPriv.
+type V3 struct {
+	User           string
+	AuthProtocol   gosnmp.SnmpV3AuthProtocol
+	AuthPassphrase string
+	PrivProtocol   gosnmp.SnmpV3PrivProtocol
+	PrivPassphrase string
+}
+
 // Config is what the agent answers and to whom.
 type Config struct {
-	// Community is the only community the agent answers.
+	// Community is the only community the agent answers (SNMPv2c); empty
+	// in the SNMPv3 mode (ListenV3), then no v2c request is answered.
 	Community   string
 	SysDescr    string
 	SysObjectID string
@@ -48,10 +92,18 @@ type Request struct {
 	// message.
 	Version string `json:"version"`
 	// Community is the community of an SNMPv1 or v2c message.
-	Community string   `json:"community"`
-	PDU       string   `json:"pdu,omitempty"`
-	OIDs      []string `json:"oids,omitempty"`
-	Answered  bool     `json:"answered"`
+	Community string `json:"community"`
+	// User is the USM user name of an SNMPv3 message (empty for the
+	// engine discovery).
+	User string `json:"user,omitempty"`
+	// PDU and OIDs of an SNMPv1/v2c message, and of an SNMPv3 message the
+	// agent authenticated and decrypted.
+	PDU  string   `json:"pdu,omitempty"`
+	OIDs []string `json:"oids,omitempty"`
+	// Report is the usmStats counter (e.g. usmStatsWrongDigests) the agent
+	// answered an SNMPv3 message with instead of a response.
+	Report   string `json:"report,omitempty"`
+	Answered bool   `json:"answered"`
 }
 
 // Agent is a running fake agent.
@@ -59,6 +111,8 @@ type Agent struct {
 	cfg  Config
 	conn *net.UDPConn
 	mib  []gosnmp.SnmpPDU // sorted by OID
+	// usm holds the keys of the V3 user; nil without the SNMPv3 mode.
+	usm *gosnmp.UsmSecurityParameters
 
 	mu   sync.Mutex
 	seen []Request
@@ -71,6 +125,31 @@ func Listen(addr string, cfg Config, extra ...gosnmp.SnmpPDU) (*Agent, error) {
 	if cfg.Community == "" {
 		return nil, errors.New("fakesnmp: a community is required")
 	}
+	return listen(addr, &cfg, nil, extra)
+}
+
+// ListenV3 binds the agent in the SNMPv3 mode (WP-542): it answers the user
+// v3 (authPriv) and, only if cfg names a community, SNMPv2c requests with it.
+func ListenV3(addr string, v3 *V3, cfg Config, extra ...gosnmp.SnmpPDU) (*Agent, error) {
+	if v3 == nil || v3.User == "" || v3.AuthPassphrase == "" || v3.PrivPassphrase == "" ||
+		v3.AuthProtocol <= gosnmp.NoAuth || v3.PrivProtocol <= gosnmp.NoPriv {
+		return nil, errors.New("fakesnmp: the SNMPv3 user needs a name, auth and privacy protocols and passphrases (authPriv)")
+	}
+	usm := &gosnmp.UsmSecurityParameters{
+		UserName: v3.User, AuthenticationProtocol: v3.AuthProtocol, AuthenticationPassphrase: v3.AuthPassphrase,
+		PrivacyProtocol: v3.PrivProtocol, PrivacyPassphrase: v3.PrivPassphrase,
+		AuthoritativeEngineID: engineID, AuthoritativeEngineBoots: engineBoots, AuthoritativeEngineTime: engineTime,
+		Logger: gosnmp.NewLogger(nil),
+	}
+	if err := usm.InitSecurityKeys(); err != nil {
+		return nil, fmt.Errorf("fakesnmp: SNMPv3 keys: %w", err)
+	}
+	return listen(addr, &cfg, usm, extra)
+}
+
+// listen binds the agent; usm holds the keys of the SNMPv3 user, nil
+// without the SNMPv3 mode.
+func listen(addr string, cfg *Config, usm *gosnmp.UsmSecurityParameters, extra []gosnmp.SnmpPDU) (*Agent, error) {
 	udp, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, err
@@ -85,7 +164,7 @@ func Listen(addr string, cfg Config, extra ...gosnmp.SnmpPDU) (*Agent, error) {
 		{Name: OIDSysName, Type: gosnmp.OctetString, Value: []byte(cfg.SysName)},
 	}, extra...)
 	slices.SortFunc(mib, func(a, b gosnmp.SnmpPDU) int { return compareOID(a.Name, b.Name) })
-	return &Agent{cfg: cfg, conn: conn, mib: mib}, nil
+	return &Agent{cfg: *cfg, conn: conn, mib: mib, usm: usm}, nil
 }
 
 // Addr is the address the agent listens on.
@@ -129,8 +208,9 @@ func (a *Agent) Serve() error {
 
 // handle returns the answer to a packet (nil: none) and what it carried.
 // Only SNMPv2c GET, GETNEXT and GETBULK with the agent's community are
-// answered; another community, another version and a packet that does not
-// decode stay unanswered, like a real agent.
+// answered, and in the SNMPv3 mode the SNMPv3 messages (handleV3); another
+// community, another version and a packet that does not decode stay
+// unanswered, like a real agent.
 func (a *Agent) handle(raw []byte) ([]byte, Request) {
 	var req Request
 	version, ok := messageVersion(raw)
@@ -138,10 +218,14 @@ func (a *Agent) handle(raw []byte) ([]byte, Request) {
 	case !ok:
 		return nil, req
 	case version == int(gosnmp.Version3):
-		// The USM header is not decoded; the version is enough to tell
-		// the test that the message was no v2c request.
 		req.Version = "3"
-		return nil, req
+		if a.usm == nil {
+			// Without the SNMPv3 mode the USM header is not decoded; the
+			// version tells the test that the message was no v2c request.
+			return nil, req
+		}
+		out := a.handleV3(raw, &req)
+		return out, req
 	case version == int(gosnmp.Version1):
 		req.Version = "1"
 	case version == int(gosnmp.Version2c):
@@ -158,10 +242,27 @@ func (a *Agent) handle(raw []byte) ([]byte, Request) {
 	for _, v := range pkt.Variables {
 		req.OIDs = append(req.OIDs, v.Name)
 	}
-	if pkt.Version != gosnmp.Version2c || pkt.Community != a.cfg.Community {
+	if pkt.Version != gosnmp.Version2c || a.cfg.Community == "" || pkt.Community != a.cfg.Community {
 		return nil, req
 	}
-	var vars []gosnmp.SnmpPDU
+	vars, ok := a.answer(pkt)
+	if !ok {
+		return nil, req
+	}
+	resp := &gosnmp.SnmpPacket{
+		Version: gosnmp.Version2c, Community: pkt.Community, PDUType: gosnmp.GetResponse,
+		RequestID: pkt.RequestID, Variables: vars, Logger: gosnmp.NewLogger(nil),
+	}
+	out, err := resp.MarshalMsg()
+	if err != nil {
+		return nil, req
+	}
+	return out, req
+}
+
+// answer returns the variables of the response to a GET, GETNEXT or
+// GETBULK; ok is false for another PDU.
+func (a *Agent) answer(pkt *gosnmp.SnmpPacket) (vars []gosnmp.SnmpPDU, ok bool) {
 	switch pkt.PDUType {
 	case gosnmp.GetRequest:
 		for _, v := range pkt.Variables {
@@ -174,17 +275,89 @@ func (a *Agent) handle(raw []byte) ([]byte, Request) {
 	case gosnmp.GetBulkRequest:
 		vars = a.bulk(pkt.Variables, int(pkt.NonRepeaters), int(pkt.MaxRepetitions))
 	default:
-		return nil, req
+		return nil, false
 	}
+	return vars, true
+}
+
+// handleV3 answers an SNMPv3 message after RFC 3414 3.2: the engine
+// discovery (no authentication) with the report usmStatsUnknownEngineIDs, a
+// message of another user with usmStatsUnknownUserNames, a message of the
+// user that does not authenticate or decrypt with its keys with
+// usmStatsWrongDigests – the reports are unauthenticated and echo the
+// msgID – and a GET, GETNEXT or GETBULK of the user with the authPriv
+// response.
+func (a *Agent) handleV3(raw []byte, req *Request) []byte {
+	// The header decodes without keys (gosnmp wants some user name for
+	// it); gosnmp decrypts in place, so every decode gets its own copy.
+	hdr, _ := v3Decoder(gosnmp.NoAuthNoPriv, &gosnmp.UsmSecurityParameters{UserName: "fakesnmp", Logger: gosnmp.NewLogger(nil)}).
+		SnmpDecodePacket(slices.Clone(raw))
+	if hdr == nil || hdr.Version != gosnmp.Version3 || hdr.MsgID == 0 {
+		return nil
+	}
+	if usm, ok := hdr.SecurityParameters.(*gosnmp.UsmSecurityParameters); ok {
+		req.User = usm.UserName
+	}
+	switch {
+	case hdr.MsgFlags&gosnmp.AuthNoPriv == 0:
+		return report(hdr, req, OIDUsmStatsUnknownEngineIDs)
+	case req.User != a.usm.UserName:
+		return report(hdr, req, OIDUsmStatsUnknownUserNames)
+	}
+	// SnmpDecodePacket does not check the digest; UnmarshalTrap does, with
+	// the decoder's keys, before it decrypts.
+	pkt, err := v3Decoder(gosnmp.AuthPriv, a.usm.Copy()).UnmarshalTrap(slices.Clone(raw), false)
+	if err != nil || pkt == nil {
+		return report(hdr, req, OIDUsmStatsWrongDigests)
+	}
+	req.PDU = pkt.PDUType.String()
+	for _, v := range pkt.Variables {
+		req.OIDs = append(req.OIDs, v.Name)
+	}
+	vars, ok := a.answer(pkt)
+	if !ok {
+		return nil
+	}
+	sp := a.usm.Copy().(*gosnmp.UsmSecurityParameters)
 	resp := &gosnmp.SnmpPacket{
-		Version: gosnmp.Version2c, Community: pkt.Community, PDUType: gosnmp.GetResponse,
-		RequestID: pkt.RequestID, Variables: vars, Logger: gosnmp.NewLogger(nil),
+		Version: gosnmp.Version3, MsgFlags: gosnmp.AuthPriv, SecurityModel: gosnmp.UserSecurityModel,
+		SecurityParameters: sp, MsgID: pkt.MsgID, RequestID: pkt.RequestID, MsgMaxSize: 65507,
+		PDUType: gosnmp.GetResponse, ContextEngineID: engineID, ContextName: pkt.ContextName, Variables: vars,
+		Logger: gosnmp.NewLogger(nil),
+	}
+	if err = sp.InitPacket(resp); err != nil {
+		return nil
 	}
 	out, err := resp.MarshalMsg()
 	if err != nil {
-		return nil, req
+		return nil
 	}
-	return out, req
+	return out
+}
+
+// v3Decoder decodes SNMPv3 messages with the security parameters sp.
+func v3Decoder(flags gosnmp.SnmpV3MsgFlags, sp gosnmp.SnmpV3SecurityParameters) *gosnmp.GoSNMP {
+	return &gosnmp.GoSNMP{Version: gosnmp.Version3, SecurityModel: gosnmp.UserSecurityModel, MsgFlags: flags,
+		SecurityParameters: sp, Logger: gosnmp.NewLogger(nil)}
+}
+
+// report is the unauthenticated Report PDU of the usmStats counter oid to
+// the message hdr: it echoes msgID, requestID and the user name and
+// carries the engine's ID, boots and time.
+func report(hdr *gosnmp.SnmpPacket, req *Request, oid string) []byte {
+	req.Report = usmReportNames[oid]
+	out, err := (&gosnmp.SnmpPacket{
+		Version: gosnmp.Version3, MsgFlags: gosnmp.NoAuthNoPriv, SecurityModel: gosnmp.UserSecurityModel,
+		SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: req.User, AuthoritativeEngineID: engineID,
+			AuthoritativeEngineBoots: engineBoots, AuthoritativeEngineTime: engineTime, Logger: gosnmp.NewLogger(nil)},
+		MsgID: hdr.MsgID, RequestID: hdr.RequestID, MsgMaxSize: 65507, PDUType: gosnmp.Report, ContextEngineID: engineID,
+		Variables: []gosnmp.SnmpPDU{{Name: oid, Type: gosnmp.Counter32, Value: uint32(1)}},
+		Logger:    gosnmp.NewLogger(nil),
+	}).MarshalMsg()
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // lookup returns the value of name, or noSuchObject.

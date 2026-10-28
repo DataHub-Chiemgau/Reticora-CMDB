@@ -398,7 +398,7 @@ func TestHandlerHidesSubscriptionsOutsideTheScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.Attempt = 6
-	if err = store.MoveToDeadLetter(context.Background(), rec); err != nil {
+	if _, err = store.MoveToDeadLetter(context.Background(), &rec, time.Now().Add(-24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
