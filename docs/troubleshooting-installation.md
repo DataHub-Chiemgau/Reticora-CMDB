@@ -42,6 +42,7 @@ healthy".
 | Cause | Diagnosis | Fix |
 |---|---|---|
 | Session key unreadable | `docker compose logs server` shows `read session key: permission denied` or `is a directory` | Re-run the installer — `ensure_session_key` removes Docker-created directories and fixes ownership (`uid:65534`, mode `0640`). |
+| OpenAPI contract unreadable | Logs show `open /etc/reticora/openapi.yaml: permission denied` | Rebuild the server with the corrected `backend/Dockerfile`: `/etc/reticora` needs mode `0755` for directory traversal, while `openapi.yaml` stays `0644`. After updating the checkout, rerun `./install.sh --cloud --build-from-source` to rebuild and complete the interrupted installation. Restarting the old image alone does not fix its permissions. |
 | Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` probes both databases (CMDB and Keycloak) over TCP and resets a stale role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
 | Migrations not applied | `logs server` shows missing tables/columns | Re-run the installer; migrations run before the server starts. |
 | DDL event trigger disabled | `logs server` shows `database is not ready … event trigger reticora_restrict_app_ddl is not enabled` (or `is missing`); `/readyz` answers `"database":"unavailable"` | An aborted TimescaleDB update left it disabled — see [TimescaleDB extension update failed](#timescaledb-extension-update-failed). Re-run the installer; the update step enables it again. |
@@ -830,3 +831,21 @@ curl -fsSL "$base/SOURCE_COMMIT"; git -C /opt/reticora-cmdb rev-parse HEAD
 | `Checksum mismatch: the downloaded go<version>.linux-<arch>.tar.gz is not the file go.dev publishes` | The Go toolchain download of the source build was manipulated | Re-run; install Go yourself if it persists. |
 | `… the Go toolchain is not installed unverified` (warning) | go.dev's checksum list was not reachable (source build) | The installer falls back to a prebuilt `bin/collector` or the existing binary; otherwise install Go yourself. |
 | `… not signature-verified (--build-from-source)` (warning) | The local build was requested | Expected for development and CI; production installs the signed release (no switch). |
+
+### No published release / API unavailable
+
+The installer also tries GitHub's public `/releases/latest` redirect when the
+API is unavailable or rate limited. The selected release still undergoes all
+signature and checksum checks. If GitHub redirects to the release overview,
+there is no published stable release available. To install the development
+branch explicitly, use:
+
+```sh
+./install.sh --cloud --build-from-source
+# Collector VM:
+./install.sh --vm --build-from-source
+```
+
+Source builds are not signature-verified. The installer never switches to them
+automatically. A signed installation requires a published release with its
+signed artifacts; a Git tag alone is insufficient.

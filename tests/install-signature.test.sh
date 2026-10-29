@@ -122,6 +122,9 @@ case "$url" in
     https://github.com/DataHub-Chiemgau/Reticora-CMDB/releases/download/*)
         src="$FAKE_RELEASES/${url#https://github.com/DataHub-Chiemgau/Reticora-CMDB/releases/download/}" ;;
     https://api.github.com/repos/DataHub-Chiemgau/Reticora-CMDB/releases/latest) src="${FAKE_LATEST:-}" ;;
+    https://github.com/DataHub-Chiemgau/Reticora-CMDB/releases/latest)
+        [ -n "${FAKE_LATEST_REDIRECT:-}" ] || exit 22
+        printf '%s' "$FAKE_LATEST_REDIRECT"; exit 0 ;;
     https://github.com/sigstore/cosign/releases/download/*) src="${FAKE_COSIGN_DOWNLOAD:-}" ;;
     'https://go.dev/dl/?mode=json&include=all') src="${FAKE_GO_JSON:-}" ;;
     https://go.dev/dl/*) src="${FAKE_GO_DL:-/nonexistent}/${url#https://go.dev/dl/}" ;;
@@ -595,6 +598,19 @@ OUT="$(install_sh sh-latest-down "$P_ALL" FAKE_LATEST=/nonexistent -- --cloud --
 [ -e "$(case_dir sh-latest-down)/src" ] && RC=82
 expect "install.sh: without a reachable newest release nothing is downloaded or run" 1 \
     "Could not determine the newest release of DataHub-Chiemgau/Reticora-CMDB" "$OUT" "RAN install"
+
+OUT="$(install_sh sh-latest-redirect "$P_ALL" FAKE_LATEST=/nonexistent FAKE_LATEST_REDIRECT="https://github.com/$REPOSITORY/releases/tag/$TAG" -- --cloud --non-interactive --repo "file://$SRC_REPO")"; RC=$?
+expect "install.sh: API failure resolves the signed release via the public redirect" 0 \
+    "Source verified: $TAG is commit $commit" "$OUT" "not signature-verified"
+
+OUT="$(install_sh sh-no-releases "$P_ALL" FAKE_LATEST=/nonexistent FAKE_LATEST_REDIRECT="https://github.com/$REPOSITORY/releases" -- --cloud --non-interactive --repo "file://$SRC_REPO")"; RC=$?
+[ -e "$(case_dir sh-no-releases)/src" ] && RC=82
+expect "install.sh: no published release explains the explicit source-build command" 1 \
+    "No published stable release.*--cloud --build-from-source" "$OUT" "RAN install"
+
+OUT="$(install_sh sh-foreign-redirect "$P_ALL" FAKE_LATEST=/nonexistent FAKE_LATEST_REDIRECT="https://example.com/releases/tag/$TAG" -- --cloud --non-interactive --repo "file://$SRC_REPO")"; RC=$?
+expect "install.sh: a foreign release redirect is refused" 1 \
+    "Could not determine the newest release" "$OUT" "RAN install"
 
 OUT="$(install_sh sh-main "$P_ALL" -- --cloud --non-interactive --repo "file://$SRC_REPO" --ref main)"; RC=$?
 { [ -s "$(case_dir sh-main)/calls" ] || [ -e "$(case_dir sh-main)/src" ]; } && RC=84
