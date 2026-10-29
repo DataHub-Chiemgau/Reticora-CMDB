@@ -2021,7 +2021,14 @@ start_stack() {
     create_initial_admin
 
     info "Starting the Reticora server and frontend …"
-    compose_cmd up -d server frontend
+    # Compose itself can fail while waiting for the server healthcheck before
+    # starting the dependent frontend. Under set -e that used to bypass the
+    # diagnostics below and hide the actual startup error.
+    compose_cmd up -d server frontend || {
+        show_service_logs server
+        show_service_logs frontend
+        die "Reticora server or frontend failed to start — see the container logs above."
+    }
     wait_for_service server || {
         show_service_logs server
         die "Reticora server did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs server"
