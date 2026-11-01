@@ -32,9 +32,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 1 |
 | P1 | 5 |
-| P2 | 25 |
-| P3 | 26 |
-| **Summe** | **57** |
+| P2 | 26 |
+| P3 | 27 |
+| **Summe** | **59** |
 
 ## Übersicht
 
@@ -97,6 +97,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-410](#f-410) | P3 | CI-Historie mit Audit zeigt nur die Audit-Einträge vom Typ `ci`: die Routeneinträge der Unterressourcen (`cis`, `ci-contacts`, `network-interfaces`) fehlen | WP-171/WP-133 (K7) | belegt | backend/internal/server/history_route_audit_integration_test.go | WP-681 |
 | [F-412](#f-412) | P3 | Offline-Detektor gegen parallelen Ingest: rund ein Viertel frisch gesehener CIs endet `unknown` mit `ci.offline` | WP-157 (K7) | belegt | backend/internal/lifecycle/offline_race_integration_test.go | WP-683 |
 | [F-413](#f-413) | P3 | Statuswechsel des Offline-Detektors fehlen in Historie und Audit-Log: der Wechsel nach `unknown` ist nirgends nachvollziehbar | WP-157/WP-171 (K7) | belegt | backend/internal/lifecycle/offline_integration_test.go | WP-684 |
+| [F-416](#f-416) | P2 | Unmerge in einer Merge-Kette: das Unmerge des früheren Merges belebt den Survivor, der Opfer eines offenen Merges ist, und verschiebt danach die Referenzen auf das falsche CI | WP-174 (K7) | belegt | backend/internal/ci/unmerge_integration_test.go | WP-687 |
+| [F-417](#f-417) | P3 | Lastnachweis: `evaluate-runs.sh` bewertet drei Läufe verschiedener Server-Commits mit nur einem Job als „alle Budgets gehalten“ (Exit 0) | WP-206 (K7) | belegt | tests/load/evaluate-runs.test.sh | WP-688 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1378,6 +1380,86 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   FAIL
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle	0.519s
   FAIL
+  ```
+
+<a id="f-416"></a>
+### F-416 (P2) – Unmerge in einer Merge-Kette: das Unmerge des früheren Merges belebt den Survivor, der Opfer eines offenen Merges ist, und verschiebt danach die Referenzen auf das falsche CI
+
+- **Gefunden in:** Wiederholungsprüfung von WP-174 (K7, Verifier r2-b5, Probe `TestVerifyK7MergeChains` auf `22e24ff`), adversarial bestätigt; `PGRepository.Unmerge`, `restoreRow` und `laterSurvivorChanges` sind auf diesem Stand identisch mit `e5c2d86` · **Betroffene Anforderungen:** CI-12 [B] (WP-174 AK1 „Unmerge stellt beide CIs und Referenzen aus Snapshot wieder her“; WP-173 Tombstone 301 für 12 Monate), JOB-03/E-25 (Revert des Jobs `ci.merge`), E-80 (force) · **Komponente:** backend/internal/ci/merge.go, `PGRepository.Unmerge` (Zeile 796 ff. auf `e5c2d86`: `restoreRow` der Zeile `snap.Survivor`, ohne zu prüfen, ob der Survivor selbst Opfer eines offenen `ci_merge` ist) und `laterSurvivorChanges` (Zeile 758 ff.: ohne die Zeile `reconciliation_decision/merged_ci` des Merges – sie ist mit der Historie des Survivors zum späteren Survivor gewandert – „geändert, ohne Felder“, 409 mit `"fields":[]`); backend/internal/ci/handler.go (`Unmerge`), backend/internal/server/router.go (Reverter `ci.merge`) · **Quelle:** `k7/ver/r2-b5/evidence/k-reaudit-2/WP-174/verify-probe-merge-chains.go.txt` und `verify-probe-merge-chains.log`; kodierende Tests von WP-687 (`k7/ad-687/red-687-ci.log`, `k7/ad-687/red-687-server.log`)
+- **Reproduktion:** CIs a, b, c (je eigene Seriennummer) und x, Beziehung a→x. `POST /api/v1/cis/{b}/merge {"victim_id": a}`, dann `POST /api/v1/cis/{c}/merge {"victim_id": b}` (die Beziehung startet jetzt an c). `POST /api/v1/cis/{a}/unmerge` → 409 `urn:reticora:problem:conflict` mit `"fields":[]` und `detail` „the survivor changed after the merge; unmerge with force=true to restore the snapshot: “ (nennt weder Feld noch den späteren Merge). `POST /api/v1/cis/{a}/unmerge?force=true` → 200: b ist aktiv (`deleted_at`, `merged_into_id` leer), obwohl `ci_merge` b→c offen bleibt (`unmerged_at` NULL); `GET /api/v1/cis/{b}` → 200 statt 301; ein Merge von b in ein viertes CI → 409 „the CI is part of another merge“; die Integritätsprüfung sieht den Zustand nicht. Danach `POST /api/v1/cis/{b}/unmerge` (ohne force) → 200, und die Beziehung a→x startet an b, obwohl a aktiv ist. Der Revert des Jobs `ci.merge` von a→b (`POST /api/v1/jobs/{id}/revert`) läuft über dasselbe Unmerge.
+- **Soll:** CI-12/WP-174 AK1: Ein Unmerge stellt genau den Zustand vor seinem Merge wieder her, beide CIs und ihre Referenzen, und berührt keinen anderen offenen Merge. Solange der Survivor Opfer eines offenen Merges ist (oder ein späterer offener Merge auf dem Survivor aufsetzt), wird das Unmerge abgewiesen: 409 problem+json mit eindeutigem `type` und `detail`, der den späteren Merge nennt, auch mit `force=true` und beim Job-Revert; zuerst wird der spätere Merge rückgängig gemacht. Danach kehren die Referenzen zum Opfer zurück. Die 409 für spätere Änderungen des Survivors nennt die Felder (E-80).
+- **Ist:** `Unmerge` liest nur den Merge des Opfers und schreibt `snap.Survivor` zurück; ein offener Merge, dessen Opfer der Survivor ist, bleibt offen, während sein Opfer aktiv wird. Ohne force antwortet es 409 ohne Felder, weil `laterSurvivorChanges` die Zeile `merged_ci` des Merges nicht mehr beim Survivor findet (sie ist beim Merge b→c mit der Historie nach c gewandert). Mit force entsteht ein inkonsistenter Zustand (aktives CI mit offenem Merge, kein 301, kein weiterer Merge möglich); das spätere Unmerge b→c stellt aus seinem Snapshot die Referenzen von a am Stand „bei b“ wieder her.
+- **Nutzerwirkung:** Wer einen Merge in einer Kette in der falschen Reihenfolge mit force rückgängig macht, erhält ein CI, das zugleich aktiv und gemergt ist: Links auf b leiten nicht mehr auf c um, b lässt sich nicht erneut mergen, und das folgende Unmerge von b hängt Beziehungen (sowie Schnittstellen, Kontakte, Historie, Dokumente) des wiederhergestellten a an b – stille Datenverfälschung im Bestand, die nur über die Datenbank sichtbar ist. Die 409 ohne Felder lässt nicht erkennen, warum das Unmerge abgewiesen wurde, und verleitet zu force.
+- **Ursache (belegt):** WP-174/WP-485 haben das Unmerge für einen einzelnen Merge gebaut; Ketten (Survivor wird später selbst Opfer) und spätere Merges in denselben Survivor waren nicht vorgesehen. Die Snapshots aufeinanderfolgender Merges bauen aufeinander auf, werden aber unabhängig zurückgeschrieben. `laterSurvivorChanges` setzt voraus, dass die Historie des Survivors bei ihm bleibt.
+- **Empfehlung:** In `PGRepository.Unmerge` nach dem Sperren beider CIs prüfen, ob ein anderer offener `ci_merge` den Survivor hält – als Opfer oder als Survivor eines späteren Merges (`merged_at` ≥ dem des eigenen Merges); dann 409 `urn:reticora:problem:unmerge-later-merge` mit `later_merge_id`, `later_merge_victim_id`, `later_merge_survivor_id` und einem `detail`, der den späteren Merge nennt, unabhängig von force; da die Merge-Zeile den Client ihres Survivors trägt (RLS), blockiert für eingeschränkte Principals zusätzlich der Tombstone des Survivors (`merged_into_id`), ohne Ids außerhalb des Scopes zu nennen; der Reverter `ci.merge` gibt dieselbe Ablehnung (409, `detail` nennt den Merge) zurück. `laterSurvivorChanges` nimmt ohne die Zeile `merged_ci` die Version nach dem Snapshot des Survivors (Snapshot-Version + 1) als Version des Merges, damit die 409 die Felder der späteren Änderungen nennt; ohne aufgezeichnete Felder nennt der `detail` die Version statt mit „: “ zu enden. `api/openapi.yaml` beschreibt die neue Ablehnung (Schema `UnmergeLaterMergeProblem`).
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestUnmergeRefusesWhileSurvivorIsMergedVictim$' ./internal/ci/` und `go test -count=1 -v -run '^TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: Nach a→b und b→c ist das Unmerge von a ohne und mit force sowie der Revert des Jobs von a→b 409 problem+json mit dem Typ `urn:reticora:problem:unmerge-later-merge` bzw. einem `detail`, der den Merge b→c nennt; nichts ändert sich (CI-Zeilen, offene Merges, Beziehung, Audit), `GET` b bleibt 301 auf c. In der richtigen Reihenfolge (b→c, dann a→b) startet die Beziehung erst wieder an b, dann an a; die 409 für die späteren Änderungen an b nennt die Felder (u. a. `merged_into_id`); danach ist kein CI mehr gemergt und kein Merge offen. Ein später in denselben Survivor gemergtes CI blockiert das Unmerge ebenso; ein Client-1-Principal, für den der spätere Merge in ein CI von Client 2 unsichtbar ist, erhält mit force 409 `unmerge-later-merge`, das nur b nennt, und nichts ändert sich. Dazu `go test -count=1 -p 1 ./internal/ci/ ./internal/server/ ./internal/jobs/` grün.
+- **Kodierender Test:** backend/internal/ci/unmerge_integration_test.go (`TestUnmergeRefusesWhileSurvivorIsMergedVictim`, Handler über `NewIndexingRepository(PGRepository)`) und backend/internal/server/merge_chain_revert_integration_test.go (`TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim`, Produktionsrouter mit OpenAPI-Validierung); auf `e5c2d86` rot (ausgeführt auf der Basis `bf51da7` mit den alten Produktionsdateien `merge.go`, `handler.go`, `router.go` aus `HEAD`; `PGRepository.Unmerge`, `restoreRow` und `laterSurvivorChanges` sind dort identisch mit `e5c2d86`; lange Zeilen gekürzt):
+
+  ```text
+  === RUN   TestUnmergeRefusesWhileSurvivorIsMergedVictim
+      unmerge_integration_test.go:366: unmerge of a while b is merged into c: 409 {"current_version":3,"detail":"the survivor changed after the merge; unmerge with force=true to restore the snapshot: ","fields":[],"status":409,"title":"Conflict","trace_id":"dc74f6676d33af37bd0257ade2cfdff8","type":"urn:reticora:problem:conflict"}
+          , want 409 unmerge-later-merge naming the later merge edb5604f-9297-4367-884d-591a64d52f8e of c0ded7a0-0000-4000-8000-000000001002 into c0ded7a0-0000-4000-8000-000000001003
+      unmerge_integration_test.go:367: forced unmerge of a while b is merged into c: 200 {"merge_id":"b853728b-9a6e-489a-9973-f68106594288","survivor":{"id":"c0ded7a0-0000-4000-8000-000000001002",…
+          , want 409 unmerge-later-merge naming the later merge edb5604f-9297-4367-884d-591a64d52f8e of c0ded7a0-0000-4000-8000-000000001002 into c0ded7a0-0000-4000-8000-000000001003
+      unmerge_integration_test.go:371: revert of the merge a->b while b is merged into c: not found, want the refusal naming the merge edb5604f-9297-4367-884d-591a64d52f8e
+      unmerge_integration_test.go:374: the refused unmerges changed
+          c0ded7a0-…-1001 deleted=f into=- v=3 open_as_victim=0; c0ded7a0-…-1002 deleted=f into=- v=3 open_as_victim=1; c0ded7a0-…-1003 deleted=f into=- v=2 open_as_victim=0 rel_source=c0ded7a0-…-1001 audits=1
+          before
+          c0ded7a0-…-1001 deleted=t into=c0ded7a0-…-1002 v=2 open_as_victim=1; c0ded7a0-…-1002 deleted=t into=c0ded7a0-…-1003 v=3 open_as_victim=1; c0ded7a0-…-1003 deleted=f into=- v=2 open_as_victim=0 rel_source=c0ded7a0-…-1003 audits=0
+      unmerge_integration_test.go:377: GET b (victim of the open merge b->c): 200 "", want 301 to c
+      unmerge_integration_test.go:397: unmerge of a after b was merged and unmerged: 404 {"detail":"no merge of this CI to revert",…}
+          , want 409 naming the changed fields
+      unmerge_integration_test.go:400: forced unmerge of a: 404 {"detail":"no merge of this CI to revert",…}
+  --- FAIL: TestUnmergeRefusesWhileSurvivorIsMergedVictim (0.81s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci	0.921s
+
+  === RUN   TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim
+      merge_chain_revert_integration_test.go:60: POST /api/v1/cis/c0ded8a0-…-1003/unmerge while b is merged into c: 409 {…"detail":"the survivor changed after the merge; unmerge with force=true to restore the snapshot: ","fields":[]…}
+          , want 409 problem+json naming the merge 62aa72dc-609d-4603-8746-c3ba6e92cc43
+      merge_chain_revert_integration_test.go:60: POST /api/v1/cis/c0ded8a0-…-1003/unmerge?force=true while b is merged into c: 200 {…}
+          , want 409 problem+json naming the merge 62aa72dc-609d-4603-8746-c3ba6e92cc43
+      merge_chain_revert_integration_test.go:64: POST /api/v1/cis/c0ded8a0-…-1003/unmerge?force=true changed
+          c0ded8a0-…-1003 f - 3; c0ded8a0-…-1004 f - 3; c0ded8a0-…-1005 f - 2 open=1 reverted=0
+          before
+          c0ded8a0-…-1003 t c0ded8a0-…-1004 2; c0ded8a0-…-1004 t c0ded8a0-…-1005 3; c0ded8a0-…-1005 f - 2 open=2 reverted=0
+      merge_chain_revert_integration_test.go:60: POST /api/v1/jobs/aa80a523-d497-46ce-ae7b-9e37811e9363/revert while b is merged into c: 409 {"detail":"the merge of the job no longer exists",…}
+          , want 409 problem+json naming the merge 62aa72dc-609d-4603-8746-c3ba6e92cc43
+      merge_chain_revert_integration_test.go:75: revert of the merge a->b after b->c was reverted: 409 {"detail":"the merge of the job no longer exists",…}
+          , want 409 for the later change of b
+      merge_chain_revert_integration_test.go:78: forced unmerge of a after b->c was reverted: 404 {"detail":"no merge of this CI to revert",…}
+  --- FAIL: TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim (0.67s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	0.789s
+  ```
+
+<a id="f-417"></a>
+### F-417 (P3) – Lastnachweis: `evaluate-runs.sh` bewertet drei Läufe verschiedener Server-Commits mit nur einem Job als „alle Budgets gehalten“ (Exit 0)
+
+- **Gefunden in:** Wiederholungsprüfung von WP-206/WP-612 (K7, Verifier r2-b5, Probe `verify-evaluate-runs-commit-and-jobs.sh` auf `22e24ff`); `tests/load/evaluate-runs.sh` und `.github/workflows/load-evidence.yml` sind auf diesem Stand identisch mit `e5c2d86` · **Betroffene Anforderungen:** NFR-10 [Q] (WP-206 und WP-612 AK „Drei vollständige Läufe (`scenarios=all`)“), Ergänzung zu E-58 vom 2026-10-26 (Median über drei Läufe), mittelbar NFR-01/NFR-02/NFR-03 und ABN-02 (deren Nachweis die Bewertung trägt) · **Komponente:** tests/load/evaluate-runs.sh (die Zeilen „Server, Seed und Migrationen“ und „Vollständig“ aus `ergebnis.md` werden nur in die Lauftabelle kopiert; bewertet werden nur die Jobs, die eines der Archive nennt oder hat; Exit 0, sobald deren Schwellen im Median halten); .github/workflows/load-evidence.yml (endet wie das Skript) · **Quelle:** `k7/ver/r2-b5/evidence/k-reaudit-2/WP-206/verify-evaluate-runs-commit-and-jobs.sh.txt` und `verify-evaluate-runs-commit-and-jobs.log`; kodierender Test von WP-688 (`k7/ad-687/red-688.log`)
+- **Reproduktion:** Drei Archive 900001 bis 900003, deren `ergebnis.md` unter „Server, Seed und Migrationen“ `commit1`, `commit2` bzw. `commit3` nennt, mit `Eingaben: scenarios=api` und nur dem Job `api` (Schwellen gehalten). `tests/load/evaluate-runs.sh 900001 900002 900003` → letzte Zeile „Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten“, Exit 0. Ebenso drei vollständige Läufe, von denen einer auf einem anderen Server-Commit lief, oder drei Läufe, in denen ein Job ohne Artefakt ist: Exit 0, solange der Median hält.
+- **Soll:** WP-206/WP-612: Der Lastnachweis besteht aus drei vollständigen Läufen (`scenarios=all`, alle fünf Jobs `api`, `ingest`, `ingest-spool`, `ingest-rediscover`, `nfr01-volume`) desselben Codes, bewertet nach dem Median von E-58. Die Bewertung weist Läufe mit verschiedenem Server-Commit oder mit einem fehlenden Job mit Exit 1 und einer klaren Meldung ab; eine Bewertung nur einer Teilmenge der Jobs ist, falls überhaupt, ein eigener, ausdrücklich benannter Modus, der nie als Nachweis erscheint.
+- **Ist:** Server-Commit und „Vollständig“ werden nur ausgegeben. Bewertet werden die Jobs, die eines der drei Archive nennt; ein Job, der in einem Lauf fehlt, zählt dort als rot, und der Median der beiden anderen Werte entscheidet. Läufe verschiedener Commits werden zu einem Median zusammengefasst. `load-evidence.yml` übernimmt Exit 0 und die Zeile „alle Budgets gehalten“.
+- **Nutzerwirkung:** Ein Nachweis „NFR-01/02/03 gehalten“ kann aus Läufen entstehen, die nicht denselben Code messen oder nur einen Teil der Szenarien enthalten (etwa drei schnelle `scenarios=api`-Läufe ohne die NFR-01-Volumina); Prüfer müssen die Lauftabelle selbst lesen, um das zu erkennen. Die bisher anerkannte Bewertung (Run 40320307297, N1 bis N3 auf `3910aae`, alle fünf Jobs) ist davon nicht betroffen.
+- **Ursache (belegt):** WP-612 hat die Regel von E-58 (Median, „rot in zwei von drei“, fehlender Job zählt als rot) umgesetzt, die Voraussetzung „drei vollständige Läufe desselben Codes“ aus WP-206/WP-439 aber dem Aufrufer überlassen; die Selbsttests decken nur Archive mit demselben Commit und Teilmengen der Jobs ab.
+- **Empfehlung:** `evaluate-runs.sh` prüft vor dem Urteil: derselbe nicht leere Commit unter „Server, Seed und Migrationen“ in allen drei Läufen und in jedem Lauf jeder der fünf Jobs (in der Zeile „Jobs“ genannt und mit Verzeichnis). Sonst letzte Zeile „Bewertung nach E-58 (Median über drei Läufe): nicht bewertbar: <Gründe>“ (Commits mit Lauf-ID, je fehlendem Job die Läufe), jeder Grund auf stderr, Exit 1; die Tabellen bleiben im Bericht. Eine Teilbewertung (`--partial`) bewertet nur die vorhandenen Jobs, verlangt ebenfalls denselben Server-Commit und beginnt ihre letzte Zeile mit „Teilbewertung nach E-58 (Median über drei Läufe, kein G1-Nachweis)“; `load-evidence.yml` nutzt sie nicht. `tests/load/README.md`, `docs/acceptance/lasttest-g1.md` und `load-evidence.yml` beschreiben die Regel.
+- **Retest (verbindlich):** `./tests/load/evaluate-runs.test.sh` PASS, darunter „mixed server commits: exit 1“ (drei vollständige Läufe, einer auf anderem Commit: „nicht bewertbar: verschiedene Server-Commits …“ mit beiden Commits), „a run without server commit: exit 1“, „missing job: exit 1“ (ein Job ohne Verzeichnis in einem Lauf, ein Job in einem Lauf nicht genannt: „nicht bewertbar: Job `ingest` fehlt in Lauf 1302; Job `nfr01-volume` fehlt in Lauf 1303“, Grund auf stderr), „three runs of scenarios=api and three server commits: exit 1“ (die Probe), „--partial with three server commits: exit 1“, die Fälle der Medianregel als `--partial` mit der Zeile „Teilbewertung …“ und „the same runs without --partial: exit 1“; „all held: exit 0“ mit fünf Jobs desselben Commits. Die Probe des Verifiers liefert Exit 1. `shellcheck` auf beiden Skripten und `actionlint` auf `load-evidence.yml` ohne Befund; `./tests/load/archive-run.test.sh` grün.
+- **Kodierender Test:** tests/load/evaluate-runs.test.sh (neue Fälle „mixed server commits: exit 1“, „a run without server commit: exit 1“, „missing job: exit 1“, „three runs of scenarios=api and three server commits: exit 1“, „--partial …“); auf `e5c2d86` rot (ausgeführt auf der Basis `bf51da7` mit `tests/load/evaluate-runs.sh` aus `HEAD`, dort identisch mit `e5c2d86`; Auszug, 33 passed, 45 failed – die übrigen Fehlschläge sind die Fälle mit `--partial`, das das alte Skript mit Exit 2 ablehnt):
+
+  ```text
+  ok   all held: exit 0
+  FAIL the preconditions are met: no line matches ^Voraussetzungen erfüllt\.$
+  FAIL mixed server commits: exit 1: exit 0, want 1
+  FAIL mixed server commits: not evaluable, both commits named: no line matches ^Bewertung nach E-58 \(Median über drei Läufe\): nicht bewertbar: verschiedene Server-Commits …
+  FAIL mixed server commits: no evidence line: a line matches alle Budgets gehalten
+  FAIL a run without server commit: exit 1: exit 0, want 1
+  FAIL missing job: exit 1: exit 0, want 1
+  FAIL missing job: the jobs and their runs named: no line matches ^Bewertung nach E-58 \(Median über drei Läufe\): nicht bewertbar: Job `ingest` fehlt in Lauf 1302; Job `nfr01-volume` fehlt in Lauf 1303$
+       Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten
+  FAIL three runs of scenarios=api and three server commits: exit 1: exit 0, want 1
+  FAIL --partial with three server commits: exit 1: exit 2, want 1
+  FAIL one noisy run, median held: exit 0: exit 2, want 0
+  FAIL the same runs without --partial: exit 1: exit 0, want 1
+  …
+  33 passed, 45 failed
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

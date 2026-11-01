@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-684 | 28 | 25,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-688 | 30 | 27,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **330** | **426,5** | |
+| **Summe** | | **332** | **428,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>28 WPs · 25,5 PT"]
+    K7N["K7-Nachträge<br/>30 WPs · 27,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -449,6 +449,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-681](#wp-681--ci-historie-mit-audit-auch-die-routeneinträge-des-ci-und-seiner-kontaktverknüpfungen-und-schnittstellen-im-scope-der-audit-liste) | `k7n-ci-history-route-audit` | CI-Historie mit Audit: auch die Routeneinträge des CI und seiner Kontaktverknüpfungen und Schnittstellen, im Scope der Audit-Liste | K7N | 0,5 | F-410 | WP-171, WP-475, WP-505, WP-660 |
 | [WP-683](#wp-683--offline-detektor-und-ingest-statuswechsel-nur-auf-der-gelesenen-zeile-rückkehr-nach-active-auf-der-gesperrten-zeile) | `k7n-offline-detector-race` | Offline-Detektor und Ingest: Statuswechsel nur auf der gelesenen Zeile, Rückkehr nach `active` auf der gesperrten Zeile | K7N | 1 | F-412 | WP-157, WP-383, WP-585, WP-487 |
 | [WP-684](#wp-684--offline-detektor-statuswechsel-in-ci-historie-und-audit-log-in-der-transaktion-des-wechsels) | `k7n-offline-status-history` | Offline-Detektor: Statuswechsel in CI-Historie und Audit-Log, in der Transaktion des Wechsels | K7N | 0,5 | F-413 | WP-157, WP-171, WP-487, WP-683 |
+| [WP-687](#wp-687--unmerge-in-merge-ketten-409-mit-dem-späteren-merge-solange-der-survivor-teil-eines-offenen-merges-ist-auch-mit-force-und-beim-job-revert) | `k7n-unmerge-chain` | Unmerge in Merge-Ketten: 409 mit dem späteren Merge, solange der Survivor Teil eines offenen Merges ist, auch mit force und beim Job-Revert | K7N | 1 | F-416 | WP-173, WP-174, WP-182, WP-485, WP-670 |
+| [WP-688](#wp-688--lastnachweis-drei-läufe-nur-desselben-server-commits-mit-allen-fünf-jobs-bewertbar-teilbewertung-als-eigener-modus) | `k7n-load-evidence-same-commit` | Lastnachweis: drei Läufe nur desselben Server-Commits mit allen fünf Jobs bewertbar, Teilbewertung als eigener Modus | K7N | 0,5 | F-417 | WP-206, WP-439, WP-612 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19982,6 +19984,114 @@ LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
 **Entscheidungsbedarf:** keiner für die Umsetzung. Hinweis für die Leitung: Soll der Detektor als eigene Quelle (`offline-detector`) statt `system` erscheinen, braucht es eine Migration der beiden CHECK-Constraints und der Filterwerte von `GET /audit-log?source=`; hier nicht umgesetzt.
 
 **Nicht Bestandteil:** die Statuswechsel anderer Systemjobs, die `ci` direkt ändern (nicht geprüft); die Historie des Collector-Status (`collector.offline`, eigener Job); eine Quelle `offline-detector` (siehe Entscheidungsbedarf).
+
+### WP-687 – Unmerge in Merge-Ketten: 409 mit dem späteren Merge, solange der Survivor Teil eines offenen Merges ist, auch mit force und beim Job-Revert
+
+**Schlüssel:** `k7n-unmerge-chain` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-173 (`c-ci-merge`), WP-174 (`c-ci-unmerge`), WP-182 (`c-jobs-api`), WP-485 (`t3-unmerge-conflict`), WP-670 (`k7n-max-cis-all-paths`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-416](../../../audit/g1-reaudit/FINDINGS.md#f-416) | P2 | Unmerge in einer Merge-Kette: das Unmerge des früheren Merges belebt den Survivor, der Opfer eines offenen Merges ist, und verschiebt danach die Referenzen auf das falsche CI | schließt | Wiederholungsprüfung von WP-174 (K7, Verifier r2-b5 auf `22e24ff`, adversarial bestätigt) |
+
+**Problem:** `PGRepository.Unmerge` (backend/internal/ci/merge.go) schreibt die Snapshot-Zeile des Survivors zurück, ohne zu prüfen, ob der Survivor inzwischen selbst Opfer eines offenen `ci_merge` ist. Nach a→b und b→c macht `POST /cis/{a}/unmerge?force=true` b aktiv, während der Merge b→c offen bleibt: `GET` b antwortet 200 statt 301, b lässt sich nicht mehr mergen, und das folgende Unmerge von b stellt aus seinem Snapshot die Beziehungen von a am Stand „bei b“ wieder her, obwohl a aktiv ist. Ohne force antwortet das Unmerge 409 mit `"fields":[]`, weil `laterSurvivorChanges` die Zeile `merged_ci` des Merges nicht mehr beim Survivor findet (sie ist mit der Historie nach c gewandert); der `detail` nennt weder Feld noch den späteren Merge. Der Revert des Jobs `ci.merge` läuft über dasselbe Unmerge.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PGRepository.Unmerge` weist nach dem Sperren beider CIs ab, solange ein anderer offener `ci_merge` den Survivor hält: als Opfer (der Survivor wurde später in ein anderes CI gemergt) oder als Survivor eines späteren Merges (`merged_at` ≥ dem eigenen). Die Ablehnung gilt auch mit `force=true`; sie ändert nichts (CI-Zeilen, offene Merges, Referenzen, Audit) und nennt den späteren Merge (`*ci.UnmergeLaterMergeError`, Sentinel `ci.ErrUnmergeLaterMerge`). Ist der spätere Merge für den Aufrufer unsichtbar (die Merge-Zeile trägt den Client ihres Survivors, RLS), blockiert der Tombstone des Survivors (`merged_into_id`) ebenso; die Ablehnung nennt dann nur den Survivor, keine Id außerhalb des Scopes.
+- [ ] `POST /api/v1/cis/{id}/unmerge` antwortet darauf 409 problem+json mit `type` `urn:reticora:problem:unmerge-later-merge`, `detail` „the survivor is part of a later merge; unmerge that merge first: merge … of the CI … into the CI …“ und den Feldern `later_merge_id`, `later_merge_victim_id`, `later_merge_survivor_id` (außerhalb des Scopes nur `later_merge_victim_id`); `POST /api/v1/jobs/{id}/revert` des Jobs `ci.merge` antwortet 409 mit demselben `detail` (Reverter in `router.go`), nicht 500.
+- [ ] In der richtigen Reihenfolge (zuerst b→c, dann a→b) kehren die Referenzen zum jeweiligen Opfer zurück: die Beziehung a→x startet nach dem Unmerge von b→c an b, nach dem Unmerge von a→b an a; danach ist keines der CIs gemergt und kein Merge offen. `GET` des Opfers eines offenen Merges bleibt 301 auf seinen Survivor.
+- [ ] Die 409 für spätere Änderungen des Survivors nennt die Felder: Fehlt die Zeile `merged_ci` des Merges in der Historie des Survivors, gilt die Version nach dem Snapshot des Survivors (Snapshot-Version + 1) als Version des Merges; ohne aufgezeichnete Felder nennt der `detail` die Version, statt mit „: “ zu enden.
+- [ ] `TestUnmergeRefusesWhileSurvivorIsMergedVictim` (`internal/ci/unmerge_integration_test.go`) und `TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim` (`internal/server/merge_chain_revert_integration_test.go`, Produktionsrouter) auf `e5c2d86` rot (force-Unmerge 200, b aktiv mit offenem Merge, GET b 200, Beziehung an b), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt die Ablehnung am Unmerge (Schema `UnmergeLaterMergeProblem`) und am Job-Revert; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/ci/ ./internal/server/ ./internal/jobs/` grün (ohne `TestCIQueryBudget`); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (11 Einträge):**
+
+- backend/internal/ci/merge.go
+- backend/internal/ci/handler.go
+- backend/internal/server/router.go
+- backend/internal/ci/unmerge_integration_test.go
+- backend/internal/server/merge_chain_revert_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die neue Abfrage auf `ci_merge` läuft in der Tenant-Transaktion des Unmerge (`database.WithRequestTenant`, `reticora_app`) mit `organization_id` der Anfrage; die RLS auf `ci_merge` gilt unverändert. Weil sie einem Client-Principal den Merge in ein CI eines anderen Clients verbirgt, prüft das Unmerge zusätzlich `merged_into_id` der (sichtbaren, gesperrten) Survivor-Zeile; im kodierenden Test belegt (Client-1-Principal, Survivor in Client 1 nach Client 2 gemergt: ohne diese Prüfung 200 und b aktiv). Die Prüfung liegt nach den Sperren `FOR UPDATE NOWAIT` auf Merge-Zeile und beiden CIs, ein paralleler Merge des Survivors ist damit ausgeschlossen (er bräuchte dieselbe CI-Sperre).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUnmergeRefusesWhileSurvivorIsMergedVictim$' ./internal/ci/` und `go test -count=1 -v -run '^TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim$' ./internal/server/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/server/ ./internal/jobs/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-687
+CI-12;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
+JOB-03;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
+```
+
+**Entscheidungsbedarf:** keiner. E-80 (force überschreibt spätere Änderungen des Survivors) bleibt unverändert; ein offener späterer Merge ist keine „Änderung“ im Sinne von E-80, sondern ein eigener Merge, den force nicht rückgängig macht.
+
+**Nicht Bestandteil:** ein Unmerge, das eine Kette in einem Schritt rückwärts auflöst (der Nutzer macht die späteren Merges nacheinander rückgängig); eine Integritätsprüfung auf „aktives CI mit offenem Merge als Opfer“ (der Zustand entsteht mit diesem WP nicht mehr; Altbestände aus force-Unmerges vor dem Fix sind nicht untersucht); eine Bereinigung der Konflikt-409 nach einem Merge-und-Unmerge des Survivors ohne Nettoänderung (sie nennt die Felder `merged_into_id`/`unmerged_ci`; force stellt dann den Snapshot her); Anzeige im Frontend (es ruft das Unmerge nicht auf).
+
+### WP-688 – Lastnachweis: drei Läufe nur desselben Server-Commits mit allen fünf Jobs bewertbar, Teilbewertung als eigener Modus
+
+**Schlüssel:** `k7n-load-evidence-same-commit` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-206 (`lt-run`), WP-439 (`t4-load-report`), WP-612 (`k3n-load-evidence`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-417](../../../audit/g1-reaudit/FINDINGS.md#f-417) | P3 | Lastnachweis: `evaluate-runs.sh` bewertet drei Läufe verschiedener Server-Commits mit nur einem Job als „alle Budgets gehalten“ (Exit 0) | schließt | Wiederholungsprüfung von WP-206/WP-612 (K7, Verifier r2-b5 auf `22e24ff`) |
+
+**Problem:** `tests/load/evaluate-runs.sh` (und damit `load-evidence.yml`) übernimmt „Server, Seed und Migrationen“ und „Vollständig“ aus `ergebnis.md` nur in die Lauftabelle. Drei Läufe mit den Server-Commits `commit1`, `commit2`, `commit3` und nur dem Job `api` (`scenarios=api`) ergeben „Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten“, Exit 0. WP-206/WP-612 verlangen drei vollständige Läufe (`scenarios=all`) desselben Codes.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ohne Option prüft `evaluate-runs.sh` vor dem Urteil: alle drei Läufe nennen denselben, nicht leeren Commit unter „Server, Seed und Migrationen“, und jeder Lauf hat jeden der fünf Jobs `api`, `ingest`, `ingest-spool`, `ingest-rediscover`, `nfr01-volume` (in der Zeile „Jobs“ genannt und mit Verzeichnis). Sonst lautet die letzte Zeile „Bewertung nach E-58 (Median über drei Läufe): nicht bewertbar: <Gründe>“ (verschiedene Commits mit Lauf-ID und Commit, ein Lauf ohne Commit, je fehlendem Job die Läufe ohne ihn), jeder Grund steht auf stderr, Exit 1. Tabellen und Mediane bleiben im Bericht; ein Abschnitt „Voraussetzungen“ nennt, ob sie erfüllt sind.
+- [ ] Die fünf Jobs erscheinen ohne Option immer, in der Reihenfolge von `load.yml`; die Medianregel von E-58 (Median, „rot in zwei von drei“, fehlender Messwert als verfehlt) bleibt unverändert.
+- [ ] `--partial` ist ein eigener Modus zur Diagnose: bewertet die Jobs, die einer der Läufe nennt oder hat (ein fehlender Job zählt in seinem Lauf als rot), verlangt ebenfalls denselben Server-Commit und beginnt die letzte Zeile mit „Teilbewertung nach E-58 (Median über drei Läufe, kein G1-Nachweis)“, nie mit „Bewertung nach E-58“. `load-evidence.yml` ruft das Skript ohne `--partial` auf.
+- [ ] `tests/load/evaluate-runs.test.sh`: neue Fälle „mixed server commits: exit 1“, „a run without server commit: exit 1“, „missing job: exit 1“, „three runs of scenarios=api and three server commits: exit 1“ (die Probe von F-417), „--partial with three server commits: exit 1“ und „the same runs without --partial: exit 1“; „all held: exit 0“ mit fünf Jobs eines Commits; die bisherigen Fälle der Medianregel laufen mit `--partial`. Auf `e5c2d86` rot (gemischte Commits und fehlender Job Exit 0), mit der Korrektur grün (78 von 78).
+- [ ] `shellcheck` auf `evaluate-runs.sh` und `evaluate-runs.test.sh`, `actionlint` auf `load-evidence.yml` und `load.yml` ohne Befund; `./tests/load/archive-run.test.sh` grün; Ratchet `--kinds sh` 0 Fehler.
+- [ ] `tests/load/README.md`, `docs/acceptance/lasttest-g1.md` (Nachtrag und Abschnitt „Bewertung nach E-58“), `docs/acceptance/artefakte/lasttest/README.md` und der Kopf von `load-evidence.yml` beschreiben die Voraussetzungen und den Modus `--partial`. Die anerkannte Bewertung von N1 bis N3 (Run 40320307297: alle drei auf `3910aae`, je fünf Jobs) bleibt gültig.
+
+**Dateien (9 Einträge):**
+
+- tests/load/evaluate-runs.sh
+- tests/load/evaluate-runs.test.sh
+- .github/workflows/load-evidence.yml (Kopfkommentar)
+- tests/load/README.md
+- docs/acceptance/lasttest-g1.md
+- docs/acceptance/artefakte/lasttest/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `./tests/load/evaluate-runs.test.sh` und `./tests/load/archive-run.test.sh`.
+- `shellcheck tests/load/evaluate-runs.sh tests/load/evaluate-runs.test.sh`; `actionlint .github/workflows/load-evidence.yml .github/workflows/load.yml`.
+- Probe des Verifiers (`verify-evaluate-runs-commit-and-jobs.sh`) gegen das neue Skript: Exit 1, „nicht bewertbar: verschiedene Server-Commits …; Job `ingest` fehlt in Lauf 900001, 900002, 900003; …“.
+- CI: der Selbsttest läuft im Job `prepare` von `load.yml`; ein Lauf von `load-evidence.yml` auf drei Archiven steht aus (nur in GitHub Actions).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-10;[Q];LT;tests/load/evaluate-runs.test.sh;WP-688
+```
+
+**Entscheidungsbedarf:** keiner. Die Ergänzung zu E-58 (Median über drei Läufe) bleibt unverändert; die Voraussetzung „drei vollständige Läufe desselben Codes“ stammt aus WP-206/WP-439 AK 3 und wird jetzt im Skript geprüft. Eine Teilbewertung ist nie G1-Nachweis.
+
+**Nicht Bestandteil:** Prüfung weiterer Felder von `ergebnis.md` (Lauf-Commit von `tests/load`, Versuch 1, Eingaben `objects`/`duration`, „Vollständig“ – der fehlende Job wird über Zeile „Jobs“ und Verzeichnis erkannt); ein neuer Lauf von `load-evidence.yml` (Wiederholungsläufe nach WP-658/WP-659 stehen ohnehin aus); die Übernahme der Archive ins Repository (WP-204).
 
 ## Zurückgestellte Befunde
 

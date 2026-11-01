@@ -37,6 +37,20 @@ erneut gemessen (Server des Review-Nachtrags, `load.yml`-Einstellungen, Seed
 IP jeweils ohne 429; `api.js` 60 s: 0 von 6.938 Anfragen fehlgeschlagen,
 Checks 8.069 von 8.069, kein 429; 60 ungültige Keys: 20 × 401, 40 × 429.
 
+Nachtrag 2026-11-01 (WP-688, `k7n-load-evidence-same-commit`, F-417):
+`tests/load/evaluate-runs.sh` (und damit `load-evidence.yml`) prüft jetzt
+die Voraussetzungen von „Drei vollständige Läufe“, statt Server-Commit und
+Vollständigkeit nur auszugeben: Die drei Läufe müssen denselben Commit
+unter „Server, Seed und Migrationen“ nennen, und jeder Lauf muss jeden der
+fünf Jobs (`api`, `ingest`, `ingest-spool`, `ingest-rediscover`,
+`nfr01-volume`) haben. Sonst lautet die letzte Zeile „Bewertung nach E-58
+(Median über drei Läufe): nicht bewertbar: …“, Exit 1 (vorher: drei Läufe
+verschiedener Commits mit nur dem Job `api` → „alle Budgets gehalten“,
+Exit 0). Eine Teilbewertung (`--partial`, nur die vorhandenen Jobs) ist ein
+eigener Modus und nie der Nachweis (Abschnitt „Bewertung nach E-58“). Die
+Bewertung der Nachweisläufe N1 bis N3 (Run 40320307297) bleibt gültig: alle
+drei auf `3910aae`, jeder mit allen fünf Jobs.
+
 **Quelle der Werte:** Die Werte der Läufe 1 bis 3 stammen aus den
 k6-Zusammenfassungen und Protokollzeilen in den Job-Logs der Läufe
 40269518264, 40270929166 und 40271818796 (Abschnitt „Läufe“). Das Archiv je
@@ -201,7 +215,15 @@ zwei der drei Läufe rot ist. Für `http_req_failed` (`rate==0`) und
 `bulk_jobs_succeeded` (`count==3`) gilt dieselbe Regel; seit WP-659
 (F-388) ist ein Job mit einer fehlgeschlagenen Anfrage oder einem nicht
 gelungenen Bulk-Job in seinem Lauf rot, und zwei solche Läufe verfehlen
-den Job. Die Mediane unten sind aus den Werten der
+den Job. Bewertbar sind nur drei Läufe desselben Server-Commits („Server,
+Seed und Migrationen“ in `ergebnis.md`), von denen jeder alle fünf Jobs
+(`api`, `ingest`, `ingest-spool`, `ingest-rediscover`, `nfr01-volume`) hat
+(WP-206/WP-612 „Drei vollständige Läufe“, F-417, WP-688);
+`tests/load/evaluate-runs.sh` meldet sonst „nicht bewertbar“ mit Exit 1.
+Ein Job ohne Artefakt in einem dieser Läufe macht die drei Läufe damit
+nicht bewertbar; die Regel „zählt in seinem Lauf als rot“ gilt nur noch
+in der Teilbewertung (`--partial`, nur die vorhandenen Jobs, derselbe
+Server-Commit), die kein G1-Nachweis ist. Die Mediane unten sind aus den Werten der
 Läufe 1 bis 3 in diesem Bericht gebildet (Quelle: Job-Logs);
 `tests/load/evaluate-runs.sh` bildet sie aus den Archiven, sobald diese
 übernommen sind. Fett: im Median verfehlt.

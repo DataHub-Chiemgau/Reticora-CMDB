@@ -3,10 +3,15 @@
 # job downloads the archives load-archive-<run id> that the job archive of
 # load.yml uploads, runs tests/load/evaluate-runs.sh on them and writes its
 # report to the job log, the job summary and the artifact
-# load-evidence-<run id of this run>. It exits like the script: 0 when every
-# threshold of every job is held in the median and no job is red in two
-# runs, 1 when not, 2 on a run ID that is no number or given twice. A run
-# without an archive (expired, never archived) fails the download step.
+# load-evidence-<run id of this run>. It exits like the script: 0 when the
+# three runs are evaluable, every threshold of every job is held in the
+# median and no job is red in two runs, 1 when not, 2 on a run ID that is no
+# number or given twice. Evaluable are only three runs of the same server
+# commit ("Server, Seed und Migrationen") with each of the five jobs (api,
+# ingest, ingest-spool, ingest-rediscover, nfr01-volume) in every run
+# (WP-206, F-417); the evidence never uses the partial mode of the script.
+# A run without an archive (expired, never archived) fails the download
+# step.
 name: Load evidence
 
 on:

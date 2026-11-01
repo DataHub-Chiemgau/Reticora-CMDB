@@ -244,17 +244,41 @@ a=docs/acceptance/artefakte/lasttest
 tests/load/evaluate-runs.sh "$a/<Lauf-ID-1>" "$a/<Lauf-ID-2>" "$a/<Lauf-ID-3>"
 ```
 
-Bewertet werden alle Jobs, die eines der drei `ergebnis.md` nennt. Die
-Ausgabe (Markdown) nennt die drei Läufe (Link, Server-Commit, Eingaben,
-Vollständigkeit und Ergebnis aus `ergebnis.md`), je Job jede Schwelle mit
-dem Messwert je Lauf, dem Median und „gehalten“ ja/nein, den Status des Jobs
-je Lauf („rot in n von 3“) und das Urteil des Jobs, zuletzt die Zeile
+**Voraussetzungen des Nachweises** (WP-206/WP-612 „Drei vollständige
+Läufe“, NFR-10, F-417): Die drei Läufe nennen in `ergebnis.md` unter
+„Server, Seed und Migrationen“ denselben Commit, und jeder Lauf hat jeden
+der fünf Jobs `api`, `ingest`, `ingest-spool`, `ingest-rediscover` und
+`nfr01-volume` (in der Zeile „Jobs“ genannt und mit seinem Verzeichnis im
+Archiv, also `scenarios=all`). Sonst sind die Läufe **nicht bewertbar**:
+Die letzte Zeile lautet „Bewertung nach E-58 (Median über drei Läufe):
+nicht bewertbar: <Gründe>“ (verschiedene oder fehlende Server-Commits mit
+Lauf-ID und Commit, je fehlendem Job die Läufe ohne ihn), jeder Grund steht
+zusätzlich auf stderr, Exit 1. Die Tabellen und Mediane stehen trotzdem im
+Bericht.
+
+Bewertet werden die fünf Jobs und alle weiteren, die eines der drei
+`ergebnis.md` nennt. Die Ausgabe (Markdown) nennt die drei Läufe (Link,
+Server-Commit, Eingaben, Vollständigkeit und Ergebnis aus `ergebnis.md`),
+die Voraussetzungen und ob sie erfüllt sind, je Job jede Schwelle mit dem
+Messwert je Lauf, dem Median und „gehalten“ ja/nein, den Status des Jobs je
+Lauf („rot in n von 3“) und das Urteil des Jobs, zuletzt die Zeile
 „Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten“ bzw.
 „… verfehlt: <Liste>“ (verfehlte Schwellen und Jobs, die in zwei oder drei
-Läufen rot sind). Exit 0, wenn jede Schwelle jedes Jobs im Median gehalten
-und kein Job in mindestens zwei Läufen rot ist, sonst 1; falsche Argumente (nicht genau
-drei Archive, ein Verzeichnis ohne `ergebnis.md`, derselbe Lauf zweimal,
-eine unlesbare k6-Zusammenfassung) Exit 2.
+Läufen rot sind) bzw. „… nicht bewertbar: …“. Exit 0 nur, wenn die
+Voraussetzungen erfüllt sind, jede Schwelle jedes Jobs im Median gehalten
+und kein Job in mindestens zwei Läufen rot ist, sonst 1; falsche Argumente
+(nicht genau drei Archive, ein Verzeichnis ohne `ergebnis.md`, derselbe
+Lauf zweimal, eine unlesbare k6-Zusammenfassung, kein Job) Exit 2.
+
+**Teilbewertung** (`tests/load/evaluate-runs.sh --partial <Archiv-1>
+<Archiv-2> <Archiv-3>`): eigener Modus zur Diagnose, **kein G1-Nachweis**.
+Bewertet werden nur die Jobs, die einer der drei Läufe nennt oder als
+Verzeichnis hat (etwa drei Läufe mit `scenarios=nfr01-volume`); ein Job, der
+in einem Lauf fehlt, zählt dort als rot (Regel oben). Voraussetzung ist
+auch hier derselbe Server-Commit in allen drei Läufen. Die letzte Zeile
+beginnt mit „Teilbewertung nach E-58 (Median über drei Läufe, kein
+G1-Nachweis)“, nie mit „Bewertung nach E-58“; Exit wie oben.
+`load-evidence.yml` ruft das Skript immer ohne `--partial` auf.
 
 In GitHub Actions macht das der Workflow `load-evidence.yml` (WP-612,
 manuell, Eingaben `run_1` bis `run_3`: die Lauf-IDs der drei

@@ -1122,3 +1122,4 @@ LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
 CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-687
 CI-12;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
 JOB-03;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
+NFR-10;[Q];LT;tests/load/evaluate-runs.test.sh;WP-688
