@@ -98,7 +98,10 @@ export const pageToPath: Record<AppPage, string> = {
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
   onCreateCI: () => void;
-  /** onToggleDarkMode switches to the next theme mode (light, dark, system). */
+  /**
+   * onToggleDarkMode switches to the next theme mode, relative to the OS
+   * theme: system -> opposite of the OS -> OS theme -> system.
+   */
   onToggleDarkMode: () => void;
   /**
    * themeToggleLabel names the theme command with the current and the next

@@ -114,6 +114,7 @@ function App() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const mode = useThemeStore((state) => state.mode);
   const resolvedTheme = useThemeStore((state) => state.resolved);
+  const osTheme = useThemeStore((state) => state.os);
   const setMode = useThemeStore((state) => state.setMode);
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
@@ -132,9 +133,11 @@ function App() {
     return 'Ctrl+K';
   }, []);
 
-  // The theme toggle (header and command palette) cycles light, dark and
-  // system (follow the OS). Its label names the current mode, in 'system'
-  // mode with the theme in effect, and the mode the next click selects.
+  // The theme toggle (header and command palette) cycles relative to the OS
+  // theme: system -> opposite of the OS -> OS theme -> system, so every click
+  // away from 'system' changes the page (nextThemeMode). Its label names the
+  // current mode, in 'system' mode with the theme in effect, and the mode the
+  // next click selects.
   const themeLabels: Record<ThemeMode, string> = {
     light: t('theme.light'),
     dark: t('theme.dark'),
@@ -145,11 +148,11 @@ function App() {
       mode === 'system'
         ? t('theme.systemResolved', { theme: themeLabels[resolvedTheme] })
         : themeLabels[mode],
-    next: themeLabels[nextThemeMode(mode)],
+    next: themeLabels[nextThemeMode(mode, osTheme)],
   });
 
   function cycleTheme() {
-    setMode(nextThemeMode(mode));
+    setMode(nextThemeMode(mode, osTheme));
   }
 
   function handleNavigate(page: AppPage) {

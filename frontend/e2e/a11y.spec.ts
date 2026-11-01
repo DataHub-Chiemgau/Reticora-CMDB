@@ -394,13 +394,14 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
     );
   });
 
-  // The theme toggle cycles light, dark and system: a light theme stored on a
-  // dark OS returns to following the OS, and in system mode the toggle and
-  // the page follow an OS change at runtime (no stale label).
+  // The theme toggle cycles relative to the OS theme (system -> opposite of
+  // the OS -> OS theme -> system): every click away from system changes the
+  // page, a light theme stored on a dark OS returns to following the OS, and
+  // the toggle and the page follow an OS change at runtime (no stale label).
   test.describe('theme toggle', () => {
     test.use({ locale: 'de-DE' });
 
-    test('cycles light, dark and system', async ({ page }) => {
+    test('cycles relative to the OS theme', async ({ page }) => {
       await mockBackend(page, A11Y_HANDLERS);
       await signIn(page);
       await storeTheme(page, 'light');
@@ -412,6 +413,7 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
           `Dunkelmodus umschalten – aktuell: ${current}, als Nächstes: ${next}`,
         );
 
+      // Dark OS: light -> dark (the OS theme) -> system.
       await named('Hell', 'Dunkel');
       await expectTheme(page, 'light');
       await toggle.click();
@@ -420,13 +422,29 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
       await toggle.click();
       await named('System (Dunkel)', 'Hell');
       await expectTheme(page, 'dark');
+      // The OS turns light: the page and the next step follow it.
       await page.emulateMedia({ colorScheme: 'light' });
-      await named('System (Hell)', 'Hell');
+      await named('System (Hell)', 'Dunkel');
       await expectTheme(page, 'light');
       expect(await page.evaluate(() => localStorage.getItem('reticora-theme-mode'))).toBe('system');
+      // Light OS: system -> dark -> light, each click changes the page; only
+      // the return to system keeps it.
       await toggle.click();
+      await named('Dunkel', 'Hell');
+      await expectTheme(page, 'dark');
+      await toggle.click();
+      await named('Hell', 'System');
+      await expectTheme(page, 'light');
+      // An explicit theme stays on an OS change, its next step follows the OS.
+      await page.emulateMedia({ colorScheme: 'dark' });
       await named('Hell', 'Dunkel');
       await expectTheme(page, 'light');
+      await page.emulateMedia({ colorScheme: 'light' });
+      await named('Hell', 'System');
+      await toggle.click();
+      await named('System (Hell)', 'Dunkel');
+      await expectTheme(page, 'light');
+      expect(await page.evaluate(() => localStorage.getItem('reticora-theme-mode'))).toBe('system');
     });
   });
 

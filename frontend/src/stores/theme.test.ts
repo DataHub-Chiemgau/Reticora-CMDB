@@ -3,8 +3,10 @@
  * on a dark OS has no .dark class and sets data-theme, which switches off the
  * pre-JS fallback of src/index.css (:root:not([data-theme])); 'system' follows
  * the OS, also when it changes at runtime, and the store carries the resolved
- * theme so the header toggle re-renders. The toggle cycles light, dark and
- * system, so a stored 'light' on a dark OS can be undone in the UI.
+ * theme so the header toggle re-renders. The toggle cycles relative to the OS
+ * theme (system -> opposite of the OS -> OS theme -> system), so every click
+ * away from 'system' changes the page and a stored 'light' on a dark OS can be
+ * undone in the UI.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -144,11 +146,18 @@ describe('theme store', () => {
     const os = stubMatchMedia(false);
     window.localStorage.setItem(STORAGE_KEY, 'light');
     const { useThemeStore } = await loadTheme();
+    expect(useThemeStore.getState().os).toBe('light');
 
     changeOS(os, true);
     expect(html()).not.toHaveClass('dark');
     expect(html().dataset.theme).toBe('light');
-    expect(useThemeStore.getState()).toMatchObject({ mode: 'light', resolved: 'light' });
+    // The OS preference is tracked in every mode: the toggle's next step
+    // depends on it.
+    expect(useThemeStore.getState()).toMatchObject({
+      mode: 'light',
+      os: 'dark',
+      resolved: 'light',
+    });
 
     useThemeStore.getState().setMode('dark');
     changeOS(os, false);
@@ -156,13 +165,39 @@ describe('theme store', () => {
     expect(html().dataset.theme).toBe('dark');
   });
 
-  it('cycles light, dark and system', async () => {
+  it('cycles relative to the OS theme', async () => {
     stubMatchMedia(false);
     const { nextThemeMode } = await loadTheme();
 
-    expect(nextThemeMode('light')).toBe('dark');
-    expect(nextThemeMode('dark')).toBe('system');
-    expect(nextThemeMode('system')).toBe('light');
+    // Light OS: system (light) -> dark -> light -> system.
+    expect(nextThemeMode('system', 'light')).toBe('dark');
+    expect(nextThemeMode('dark', 'light')).toBe('light');
+    expect(nextThemeMode('light', 'light')).toBe('system');
+    // Dark OS: system (dark) -> light -> dark -> system.
+    expect(nextThemeMode('system', 'dark')).toBe('light');
+    expect(nextThemeMode('light', 'dark')).toBe('dark');
+    expect(nextThemeMode('dark', 'dark')).toBe('system');
+  });
+
+  it('changes the page with every click away from system', async () => {
+    for (const dark of [false, true]) {
+      stubMatchMedia(dark);
+      window.localStorage.clear();
+      const { nextThemeMode, useThemeStore } = await loadTheme();
+      const shown: string[] = [useThemeStore.getState().resolved];
+      for (let click = 0; click < 3; click++) {
+        const { mode, os, setMode } = useThemeStore.getState();
+        setMode(nextThemeMode(mode, os));
+        shown.push(useThemeStore.getState().resolved);
+      }
+
+      const os = dark ? 'dark' : 'light';
+      const other = dark ? 'light' : 'dark';
+      // Only the last click, the return to following the OS, keeps the page.
+      expect(shown).toEqual([os, other, os, os]);
+      expect(useThemeStore.getState().mode).toBe('system');
+      vi.unstubAllGlobals();
+    }
   });
 
   it('applies the theme when the storage is unavailable', async () => {
