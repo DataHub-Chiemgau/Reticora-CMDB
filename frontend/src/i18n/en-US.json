@@ -377,7 +377,7 @@
     },
     "collectorHints": {
       "noEdge": "No edge connection: the collector delivers data only over port 4222/TCP (mTLS), and this connection is not up.",
-      "noEdgeCauses": "Common causes: port 4222/TCP blocked by a firewall, collector not enrolled or not restarted after enrollment, server certificate does not match the host name. See docs/troubleshooting-installation.md, \"Collector liefert nichts\".",
+      "noEdgeCauses": "Common causes: port 4222/TCP blocked by a firewall, collector not enrolled or not restarted after enrollment, server certificate does not match the host name. See docs/troubleshooting-installation.md, section \"Collector delivers nothing\".",
       "noScope": "No discovery scope – the collector scans nothing. Confirm suggested subnets or add a scope.",
       "showSuggestions": "Show suggested subnets ({{count}})",
       "noScopeRights": "Adding a scope needs the discovery:manage permission, confirming suggestions also review:resolve."

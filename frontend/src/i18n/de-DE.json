@@ -377,7 +377,7 @@
     },
     "collectorHints": {
       "noEdge": "Keine Edge-Verbindung: Der Collector liefert Daten nur über Port 4222/TCP (mTLS), diese Verbindung steht nicht.",
-      "noEdgeCauses": "Häufige Ursachen: Port 4222/TCP in einer Firewall gesperrt, Collector nicht enrolled oder nach dem Enrollment nicht neu gestartet, Server-Zertifikat passt nicht zum Hostnamen. Siehe docs/troubleshooting-installation.md, „Collector liefert nichts“.",
+      "noEdgeCauses": "Häufige Ursachen: Port 4222/TCP in einer Firewall gesperrt, Collector nicht enrolled oder nach dem Enrollment nicht neu gestartet, Server-Zertifikat passt nicht zum Hostnamen. Siehe docs/troubleshooting-installation.md, Abschnitt „Collector delivers nothing“.",
       "noScope": "Kein Discovery-Scope – der Collector scannt nichts. Vorgeschlagene Subnetze bestätigen oder Scope anlegen.",
       "showSuggestions": "Vorgeschlagene Subnetze anzeigen ({{count}})",
       "noScopeRights": "Scope anlegen erfordert die Berechtigung discovery:manage, Vorschläge bestätigen zusätzlich review:resolve."

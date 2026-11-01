@@ -174,6 +174,11 @@ func TestScopeChannelCarriesRunStateAndTimezone(t *testing.T) {
 // last enabled scope.
 func TestScopeChannelLogsCollectorWithoutScopes(t *testing.T) {
 	ctx := context.Background()
+	// The logged set is per process and MemoryRepository hands out the same
+	// sequential collector IDs in every run: start empty and leave it empty,
+	// so neither -count=N nor another test's scopes.request skews the count.
+	collectorsWithoutScopes.Clear()
+	t.Cleanup(collectorsWithoutScopes.Clear)
 	logs := &bytes.Buffer{}
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))

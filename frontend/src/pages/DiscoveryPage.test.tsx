@@ -421,7 +421,9 @@ describe('DiscoveryPage collector hints (COL-08, INS-06)', () => {
       expect(hint).toHaveTextContent(/Firewall/);
       expect(hint).toHaveTextContent(/nach dem Enrollment nicht neu gestartet/);
       expect(hint).toHaveTextContent(/Server-Zertifikat passt nicht zum Hostnamen/);
-      expect(hint).toHaveTextContent('Collector liefert nichts');
+      expect(hint).toHaveTextContent(
+        'docs/troubleshooting-installation.md, Abschnitt „Collector delivers nothing“',
+      );
       unmount();
       vi.unstubAllGlobals();
     }
