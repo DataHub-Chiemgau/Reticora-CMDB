@@ -4662,13 +4662,16 @@ export interface paths {
     get: operations['getRole'];
     put?: never;
     post?: never;
-    /** Delete a custom role */
+    /**
+     * Delete a custom role
+     * @description Deletes the role with all its assignments. The caller must be able to revoke each assignment (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the role and its assignments stay.
+     */
     delete: operations['deleteRole'];
     options?: never;
     head?: never;
     /**
      * Update a custom role
-     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the role stays unchanged.
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the role stays unchanged. Permissions the request removes are taken from every assignment of the role, so the caller must be able to revoke each of them (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the role stays unchanged.
      */
     patch: operations['updateRole'];
     trace?: never;
@@ -4780,7 +4783,7 @@ export interface paths {
     get: operations['listRolePermissions'];
     /**
      * Replace permissions granted to a role
-     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds to the role must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the permissions of the role stay unchanged.
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds to the role must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the permissions of the role stay unchanged. Permissions the request removes are taken from every assignment of the role (users and service accounts), so the caller must be able to revoke each of them (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the permissions stay unchanged.
      */
     put: operations['replaceRolePermissions'];
     post?: never;
@@ -22855,6 +22858,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };

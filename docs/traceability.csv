@@ -1071,3 +1071,5 @@ RBA-08;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
 AUT-04;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
 AUT-04;[B];B;backend/internal/identity/ceiling_test.go;WP-668
 TEN-09;[Q];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+RBA-03;[B];B;backend/internal/user/role_definition_ceiling_integration_test.go;WP-667
+TEN-09;[Q];B;backend/internal/user/role_definition_ceiling_integration_test.go;WP-667

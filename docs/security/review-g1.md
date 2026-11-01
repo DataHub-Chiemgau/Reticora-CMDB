@@ -354,6 +354,18 @@ Fehlende Kombinationen:
   (`backend/internal/server/audit_log_scope_integration_test.go`);
   Architekturtests `TestEveryAuditedRouteHasAScopeRule` und
   `TestEveryRecordedResourceTypeHasAScopeRule`.
+- Rollendefinitionen (F-396, WP-667): Die Grant-Obergrenze von WP-394/WP-395
+  galt für das Zuweisen und Entziehen, über die Rollendefinition aber nur für
+  hinzugefügte Rechte. Ein client-gebundener Inhaber von `role:manage`
+  durfte eine org-weite Zuweisung nicht entziehen (403), leerte aber dieselbe
+  Custom-Rolle (`PATCH /roles/{id}`), löschte sie samt Zuweisungen
+  (`DELETE /roles/{id}`) oder nahm einer Standardrolle hinzugefügte Rechte
+  (`PUT /roles/{id}/permissions`). Seit WP-667 verlangt jedes Entfernen von
+  Rechten und jedes Löschen einer Rolle die Entzugs-Obergrenze für jede
+  Zuweisung der Rolle (Benutzer und Service-Accounts;
+  `permission.CheckRoleNarrowing`), sonst 403 ohne Änderung. HTTP-Lauf über
+  den Produktionsrouter: `TestRoleDefinitionChangeNeverReachesBeyondCallerScope`
+  (`backend/internal/user/role_definition_ceiling_integration_test.go`).
 - Die endgültige Formulierung nach WP-409 auf dem Release-Kandidaten
   übernimmt WP-595 (`t5-rc-evidence`).
 

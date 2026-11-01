@@ -63,7 +63,7 @@ func (e *RoleWideningError) Error() string {
 
 // checkWidening returns a RoleWideningError unless caller holds every key of
 // next that current lacks organization-wide (identity.GrantCeiling with an
-// org-wide target). Removing permissions is not limited.
+// org-wide target). Removing permissions is limited by CheckRoleNarrowing.
 func checkWidening(caller *identity.Principal, current, next []string) error {
 	var added []identity.Permission
 	for _, key := range next {
@@ -78,6 +78,16 @@ func checkWidening(caller *identity.Principal, current, next []string) error {
 		return &RoleWideningError{Missing: missing}
 	}
 	return nil
+}
+
+// removes reports whether next leaves out a key of current.
+func removes(current, next []string) bool {
+	for _, key := range current {
+		if !slices.Contains(next, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -149,8 +159,46 @@ func (r *MemoryRepository) ReplaceRolePermissions(_ context.Context, orgID, role
 	if err := checkWidening(caller, current, keys); err != nil {
 		return nil, err
 	}
+	if removes(current, keys) {
+		if err := r.checkNarrowing(orgID, roleID, caller, current); err != nil {
+			return nil, err
+		}
+	}
 	r.roleGrants[grantKey(orgID, roleID)] = unique
 	return grantsToSlice(unique), nil
+}
+
+// checkNarrowing is CheckRoleNarrowing over the assignments of the memory
+// repository: caller must cover role:manage and the role's permissions
+// (current) in the scope of each assignment of the role; a site whose client
+// is unknown needs them in all clients.
+func (r *MemoryRepository) checkNarrowing(orgID, roleID string, caller *identity.Principal, current []string) error {
+	var missing []identity.Permission
+	for key, assignments := range r.assignments {
+		if !strings.HasPrefix(key, orgID+":") {
+			continue
+		}
+		for _, a := range assignments {
+			if a.roleID != roleID {
+				continue
+			}
+			target := identity.Grant{Permissions: append(toPermissions(current), identity.PermRoleManage),
+				Clients: slices.Clone(a.clients), Sites: slices.Clone(a.sites)}
+			if len(a.sites) > 0 && len(a.clients) == 0 {
+				target.Clients, _ = r.assignmentClients(orgID, a)
+			}
+			for _, perm := range identity.GrantCeiling(caller, []identity.Grant{target}) {
+				if !slices.Contains(missing, perm) {
+					missing = append(missing, perm)
+				}
+			}
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return &RoleNarrowingError{Missing: missing}
+	}
+	return nil
 }
 
 func (r *MemoryRepository) EffectivePermissions(_ context.Context, orgID, userID string) ([]string, error) {

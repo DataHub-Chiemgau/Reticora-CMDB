@@ -74,16 +74,23 @@ func (r *PGRepository) ListRolePermissions(ctx context.Context, orgID, roleID st
 // ReplaceRolePermissions implements Repository. The role grants
 // role_permission and role.permissions (AccessGrants); keys that neither
 // holds are added and must be held by caller organization-wide
-// (checkWidening), otherwise nothing changes.
+// (checkWidening); keys it holds and the request leaves out are removed
+// from every assignment of the role, so caller must be able to revoke each
+// of them (CheckRoleNarrowing, F-396). Otherwise nothing changes. The role
+// row is locked, so no assignment is added meanwhile.
 func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, caller *identity.Principal, keys []string) ([]RolePermissionGrant, error) {
 	items := make([]RolePermissionGrant, 0)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var current []string
+		var current, granted []string
 		err := tx.QueryRow(ctx, `
 			SELECT ARRAY(SELECT rp.permission_key FROM role_permission rp
 			              WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
-			             UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb)))
-			  FROM role ro WHERE ro.id = $1 AND ro.organization_id = $2`, roleID, orgID).Scan(&current)
+			             UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))),
+			       ARRAY(SELECT k FROM (SELECT rp.permission_key AS k FROM role_permission rp
+			              WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
+			             UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))) keys
+			              WHERE k IN (SELECT key FROM permission) ORDER BY k)
+			  FROM role ro WHERE ro.id = $1 AND ro.organization_id = $2 FOR UPDATE OF ro`, roleID, orgID).Scan(&current, &granted)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRoleNotFound
 		}
@@ -106,6 +113,11 @@ func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID
 		}
 		if wideningErr := checkWidening(caller, current, keys); wideningErr != nil {
 			return wideningErr
+		}
+		if removes(current, keys) {
+			if narrowingErr := CheckRoleNarrowing(ctx, tx, orgID, roleID, caller, toPermissions(granted), false); narrowingErr != nil {
+				return narrowingErr
+			}
 		}
 		if _, err = tx.Exec(ctx, "DELETE FROM role_permission WHERE organization_id = $1 AND role_id = $2", orgID, roleID); err != nil {
 			return fmt.Errorf("clear role permissions: %w", err)

@@ -16,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -882,7 +883,9 @@ func (r *PGRepository) CreateRole(ctx context.Context, role *CustomRole) error {
 
 // UpdateRole implements Repository. Permissions it adds must be held by
 // caller organization-wide (checkRoleWidening): the role applies to all its
-// assignments.
+// assignments. Permissions it removes are taken from every assignment, so
+// caller must be able to revoke each of them (permission.CheckRoleNarrowing,
+// F-396); the role row stays locked until the commit.
 func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller *identity.Principal, req UpdateRoleRequest) (*CustomRole, error) {
 	var item *CustomRole
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -900,6 +903,9 @@ func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller 
 		}
 		if req.Permissions != nil {
 			if err := checkRoleWidening(caller, current, req.Permissions); err != nil {
+				return err
+			}
+			if err := checkRoleNarrowing(ctx, tx, orgID, id, caller, current, req.Permissions); err != nil {
 				return err
 			}
 		}
@@ -952,10 +958,14 @@ func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller 
 	return item, err
 }
 
-func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
+// DeleteRole implements Repository. Deleting the role revokes all its
+// assignments (user_custom_role, ON DELETE CASCADE), so caller must be able
+// to revoke each of them (permission.CheckRoleNarrowing, F-396); the role
+// row is locked, so no assignment is added meanwhile.
+func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string, caller *identity.Principal) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var isSystem bool
-		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&isSystem); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2 FOR UPDATE", id, orgID).Scan(&isSystem); err != nil {
 			if err == pgx.ErrNoRows {
 				return errRoleNotFound
 			}
@@ -963,6 +973,16 @@ func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
 		}
 		if isSystem {
 			return ErrSystemRole
+		}
+		role, found, err := readCustomRole(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errRoleNotFound
+		}
+		if narrowingErr := permission.CheckRoleNarrowing(ctx, tx, orgID, id, caller, role.Permissions, true); narrowingErr != nil {
+			return narrowingErr
 		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
@@ -836,8 +837,13 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.UpdateRole(r.Context(), t.OrganizationID, id, &p, req)
 	var widening *RoleWideningError
-	if errors.As(err, &widening) {
+	var narrowing *permission.RoleNarrowingError
+	switch {
+	case errors.As(err, &widening):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", widening.Error())
+		return
+	case errors.As(err, &narrowing):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", narrowing.Error())
 		return
 	}
 	if err != nil {
@@ -859,7 +865,18 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteRole(r.Context(), t.OrganizationID, id); err != nil {
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "deleting a role requires an authenticated principal")
+		return
+	}
+	err := h.repo.DeleteRole(r.Context(), t.OrganizationID, id, &p)
+	var narrowing *permission.RoleNarrowingError
+	if errors.As(err, &narrowing) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", narrowing.Error())
+		return
+	}
+	if err != nil {
 		writeTeamError(w, r, "role not found", err)
 		return
 	}
