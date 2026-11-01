@@ -69,7 +69,10 @@ host, port, sender and display name, `starttls`/`ssl` from
 such as `replyTo` are kept). Keycloak sends its own e-mails over it — the
 invitation of the first administrator of an organization created with
 `POST /api/v1/admin/orgs` (`execute-actions-email`) and password resets.
-Without `RETICORA_SMTP_HOST` the realm's mail settings are left alone.
+Without `RETICORA_SMTP_HOST` the realm's mail settings are left alone, and
+the server sends no such invitation: an operator-created organization then
+gets no IdP account for its first administrator (`admin_invited: false`),
+which is created by hand as in step 5 of the manual import above.
 
 Keep Keycloak's own registration off (`registrationAllowed` is not set in
 the realm files): an account registered in Keycloak has no
@@ -148,10 +151,11 @@ check the Keycloak log and re-run the installer.
   - the initial administrator of `install-cloud.sh` (see above);
   - the first org_admin of a self-signup (`POST /api/v1/signup/verify`) and
     the first org_admin the operator path creates (`POST /api/v1/admin/orgs`,
-    invitation e-mail): the server maps `mfa_required` to the new account
-    with its Keycloak admin client and deletes the account again when the
-    mapping fails, so no org_admin is created without MFA. The client needs
-    nothing beyond `realm-management/manage-users`;
+    invitation e-mail with `RETICORA_SMTP_HOST`): the server maps
+    `mfa_required` to the new account with its Keycloak admin client and
+    deletes the account again when the mapping fails, so no org_admin is
+    created without MFA. The client needs nothing beyond
+    `realm-management/manage-users`;
   - every member of the group `reticora-admin`, which the app maps to
     org_admin: the group carries the realm role `mfa_required` (deliberately
     not `org_admin`: app rights come from the database, the realm only marks

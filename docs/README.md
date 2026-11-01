@@ -404,8 +404,11 @@ Operators create organizations with plan and limits through
 `POST /api/v1/admin/orgs` (TLC-02): the same creation chain as the
 self-signup (slug, default VRF, first org_admin, entitlements of the plan
 with the given limits), atomically with an `org.create` entry in
-`operator_audit`; with the Keycloak admin client the first org_admin is
-invited by the IdP's mail to set a password.
+`operator_audit`; with the Keycloak admin client and the central SMTP
+server (`RETICORA_SMTP_HOST`, whose settings the installer also gives the
+realm) the first org_admin is invited by the IdP's mail to set a password
+(`admin_invited`), otherwise the organization is created without an IdP
+account.
 Plan matrix (ENT-06):
 
 | Plan | Features |
@@ -1153,17 +1156,26 @@ places:
   of a member of the Keycloak group `operators` (OTP; login flow in
   [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Operators").
   The installer's administrator is not an operator; add an account to the
-  group first. The first administrator of the organization gets an
-  invitation e-mail from Keycloak, which uses the realm's SMTP server, so
-  this path needs the SMTP server as well. There is no UI for it.
+  group first. With `RETICORA_SMTP_HOST` the first administrator of the
+  organization gets an invitation e-mail from Keycloak over the realm's SMTP
+  server (`admin_invited: true`). Without it the organization is created
+  without an IdP account (`admin_invited: false`): create the account in
+  Keycloak by hand (same e-mail address, user attribute `organization_id` =
+  the `id` of the response, realm role `org_admin`, group `reticora-admin`;
+  [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Manual
+  import", step 5); it is linked at the first login. There is no UI for it.
 
 **Outgoing e-mail (SMTP):** the installer asks for the relay at "Outgoing
 e-mail (SMTP)" — host, TLS mode (`starttls` on 587, `tls` on 465, `none`),
 port, user name and password (optional), sender (`address` or
-`Name <address>`) — or takes `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT`,
-`RETICORA_SMTP_TLS`, `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD` and
-`RETICORA_SMTP_FROM` from the environment, otherwise from `.env`, in a
-non-interactive run; an empty host keeps e-mail off. It checks the relay
+`Name <address>`, checked like the server's Go `net/mail`: no `,` `;` `:`
+`@` `[` `]` `(` `)` `<` `>` in the name) — or takes `RETICORA_SMTP_HOST`,
+`RETICORA_SMTP_PORT`, `RETICORA_SMTP_TLS`, `RETICORA_SMTP_USERNAME`,
+`RETICORA_SMTP_PASSWORD` and `RETICORA_SMTP_FROM` from the environment,
+otherwise from `.env`, in a non-interactive run; an empty host keeps e-mail
+off. Without `RETICORA_SMTP_PORT` the port follows the TLS mode (465 for
+`tls`, 587 otherwise) unless `.env` holds a port other than the previous
+mode's default. It checks the relay
 over TCP before the start (with a host, `/readyz` depends on it), writes the
 settings to `.env` (mode `0600`), from where Docker Compose forwards them to
 the server, and sets the same server for the Keycloak realm. The relay

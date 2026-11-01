@@ -573,26 +573,53 @@ valid_env_value() {
 valid_smtp_username_answer() { [ "$1" = - ] || valid_env_value "$1"; }
 
 # valid_smtp_from <value> — the sender of the e-mails: an address or
-# 'Display Name <address>' (as net/mail parses it); no quotes, '$', '#',
-# backslash or backtick, since the value is written unquoted to .env.
-SMTP_ADDRESS_RE='^[A-Za-z0-9._%+=-]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$'
+# 'Display Name <address>', within what the server accepts: it parses the
+# value with Go's net/mail.ParseAddress (notify.SMTPConfig.Validate) and
+# exits at start on a refusal, which the installer would only see as an
+# unhealthy server. Accepted here (a subset of net/mail):
+#   - the address as dot-atom: no leading, trailing or double dot in the
+#     local part, a host name of non-empty labels as domain;
+#   - the display name as atoms: letters (also non-ASCII, valid UTF-8),
+#     digits, blanks and . ! % & * + / = ? ^ _ { | } ~ -, none of the
+#     specials , ; : @ [ ] ( ) < > and no word that starts with '=?' (an RFC
+#     2047 encoded word, refused for an unknown charset);
+#   - no quotes, '$', '#', backslash or backtick anywhere, since the value is
+#     written unquoted to .env.
+SMTP_LOCAL_RE='[A-Za-z0-9_%+=-]+(\.[A-Za-z0-9_%+=-]+)*'
+SMTP_LABEL_RE='[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?'
+SMTP_ADDRESS_RE="^${SMTP_LOCAL_RE}@(${SMTP_LABEL_RE}\\.)+[A-Za-z]{2,63}\$"
+# Matched byte-wise (LC_ALL=C): the ASCII characters of an atom plus any
+# byte of a multi-byte character, whose encoding valid_utf8 checks.
+SMTP_DISPLAY_NAME_RE=$'^([ A-Za-z0-9.!%&*+/=?^_{|}~-]|[\x80-\xff])*$'
+UTF8_RE=$'^([\x01-\x7f]|[\xc2-\xdf][\x80-\xbf]|\xe0[\xa0-\xbf][\x80-\xbf]|[\xe1-\xec\xee\xef][\x80-\xbf][\x80-\xbf]|\xed[\x80-\x9f][\x80-\xbf]|\xf0[\x90-\xbf][\x80-\xbf][\x80-\xbf]|[\xf1-\xf3][\x80-\xbf][\x80-\xbf][\x80-\xbf]|\xf4[\x80-\x8f][\x80-\xbf][\x80-\xbf])*$'
+
+# valid_utf8 <value> — well-formed UTF-8 (no overlong form, surrogate or
+# code point above U+10FFFF), as Go's utf8.DecodeRune requires.
+valid_utf8() { local LC_ALL=C; [[ "$1" =~ $UTF8_RE ]]; }
+
+# valid_smtp_display_name <name> — the display name before '<'.
+valid_smtp_display_name() {
+    local LC_ALL=C
+    case " $1" in *' =?'*) return 1 ;; esac
+    [[ "$1" =~ $SMTP_DISPLAY_NAME_RE ]] && valid_utf8 "$1"
+}
+
 valid_smtp_from() {
-    local addr="$1" name=""
+    local addr="$1"
     case "$1" in
         *[[:cntrl:]]*|*\"*|*\'*|*\`*|*\\*|*\$*|*'#'*) return 1 ;;
     esac
     if [[ "$1" == *'<'*'>' ]]; then
-        name="${1%%<*}"
+        valid_smtp_display_name "${1%%<*}" || return 1
         addr="${1#*<}"
         addr="${addr%>}"
-        case "$name" in *'>'*|*:*) return 1 ;; esac
     fi
     [[ "$addr" =~ $SMTP_ADDRESS_RE ]]
 }
 
 # explain_smtp_from_error <value> <suggestion-nameref>
 explain_smtp_from_error() {
-    warn "Invalid input — enter an e-mail address (noreply@example.com) or 'Name <address>' (Reticora CMDB <noreply@example.com>), without quotes, '\$', '#' or '\\'."
+    warn "Invalid input — enter an e-mail address (noreply@example.com) or 'Name <address>' (Reticora CMDB <noreply@example.com>). The name must not contain , ; : @ [ ] ( ) < > (the server refuses them, e.g. 'Reticora, Inc.' — write 'Reticora Inc.'); the address has no leading, trailing or double dot; no quotes, '\$', '#' or '\\' anywhere."
 }
 
 # valid_optional_ca_bundle <path> — empty, or the absolute path of a readable
@@ -1138,6 +1165,24 @@ collector_endpoint() {
 # ─── Outgoing e-mail (SMTP, TEC-13) ───────────────────────────────────────────
 SMTP_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'Self-signup answers 503'"
 
+# smtp_default_port <tls-mode> — 465 for implicit TLS, 587 (submission) for
+# starttls and none; the server's defaults as well (notify.SMTPConfig).
+smtp_default_port() { if [ "$1" = tls ]; then printf 465; else printf 587; fi; }
+
+# smtp_port_for_mode <port> <mode-of-port> <mode> — the SMTP port for the TLS
+# mode <mode>: an empty port, or the default port of <mode-of-port> after the
+# mode changed, becomes the default of <mode>; any other port is kept. A
+# .env written by a run without SMTP holds the STARTTLS default 587, and a
+# later run with RETICORA_SMTP_TLS=tls would otherwise try implicit TLS on
+# 587: the TCP pre-check passes, /readyz does not.
+smtp_port_for_mode() {
+    if [ -z "$1" ] || { [ "$2" != "$3" ] && [ "$1" = "$(smtp_default_port "$2")" ]; }; then
+        smtp_default_port "$3"
+    else
+        printf '%s' "$1"
+    fi
+}
+
 # collect_smtp_config — the central SMTP server of the installation: from the
 # environment, otherwise from .env; an interactive run asks for it with these
 # as defaults. The server sends the verification e-mail of the self-signup,
@@ -1146,7 +1191,7 @@ SMTP_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'Self-signup ans
 # e-mail off: self-signup then stays disabled, because its e-mail
 # verification is mandatory. The other values are kept for a later run.
 collect_smtp_config() {
-    local def_host def_port def_tls def_user def_pw def_from
+    local def_host def_port def_tls def_user def_pw def_from port_tls port
     def_host="${SMTP_HOST_OVERRIDE:-$(env_get RETICORA_SMTP_HOST || true)}"
     def_port="${SMTP_PORT_OVERRIDE:-$(env_get RETICORA_SMTP_PORT || true)}"
     def_tls="${SMTP_TLS_OVERRIDE:-$(env_get RETICORA_SMTP_TLS || true)}"
@@ -1159,6 +1204,11 @@ collect_smtp_config() {
     RETICORA_SMTP_USERNAME="$def_user"
     RETICORA_SMTP_PASSWORD="$def_pw"
     RETICORA_SMTP_FROM="$def_from"
+    # The TLS mode the port was chosen for: a port from .env belongs to the
+    # mode in .env (written as starttls without one). A port from the
+    # environment (SMTP_PORT_OVERRIDE) is explicit and kept for every mode.
+    port_tls="$(env_get RETICORA_SMTP_TLS || true)"
+    port_tls="${port_tls:-starttls}"
     while true; do
         if is_tty; then
             echo
@@ -1173,11 +1223,10 @@ collect_smtp_config() {
             if [ -n "$RETICORA_SMTP_HOST" ]; then
                 ask_validated RETICORA_SMTP_TLS "SMTP TLS mode: starttls (port 587), tls (implicit TLS, port 465) or none" \
                     "$RETICORA_SMTP_TLS" valid_smtp_tls
-                if [ -z "$RETICORA_SMTP_PORT" ]; then
-                    RETICORA_SMTP_PORT=587
-                    [ "$RETICORA_SMTP_TLS" != tls ] || RETICORA_SMTP_PORT=465
-                fi
+                [ -n "$SMTP_PORT_OVERRIDE" ] \
+                    || RETICORA_SMTP_PORT="$(smtp_port_for_mode "$RETICORA_SMTP_PORT" "$port_tls" "$RETICORA_SMTP_TLS")"
                 ask_validated RETICORA_SMTP_PORT "SMTP port" "$RETICORA_SMTP_PORT" valid_port
+                port_tls="$RETICORA_SMTP_TLS"
                 ask_validated RETICORA_SMTP_USERNAME "SMTP user name (empty = no authentication, optional; '-' removes it)" \
                     "$RETICORA_SMTP_USERNAME" valid_smtp_username_answer
                 [ "$RETICORA_SMTP_USERNAME" != - ] || RETICORA_SMTP_USERNAME=""
@@ -1195,9 +1244,12 @@ collect_smtp_config() {
                     "$RETICORA_SMTP_FROM" valid_smtp_from explain_smtp_from_error
             fi
         fi
-        if [ -z "$RETICORA_SMTP_PORT" ]; then
-            RETICORA_SMTP_PORT=587
-            [ "$RETICORA_SMTP_TLS" != tls ] || RETICORA_SMTP_PORT=465
+        if [ -z "$SMTP_PORT_OVERRIDE" ]; then
+            port="$(smtp_port_for_mode "$RETICORA_SMTP_PORT" "$port_tls" "$RETICORA_SMTP_TLS")"
+            [ -z "$RETICORA_SMTP_PORT" ] || [ "$port" = "$RETICORA_SMTP_PORT" ] || [ -z "$RETICORA_SMTP_HOST" ] \
+                || info "SMTP port $port for TLS mode $RETICORA_SMTP_TLS (the port $RETICORA_SMTP_PORT in $ENV_FILE is the default of $port_tls; set RETICORA_SMTP_PORT to keep another one)"
+            RETICORA_SMTP_PORT="$port"
+            port_tls="$RETICORA_SMTP_TLS"
         fi
         [ -n "$RETICORA_SMTP_HOST" ] || return 0
         validate_smtp_config
@@ -1232,7 +1284,7 @@ validate_smtp_config() {
     [ -n "$RETICORA_SMTP_FROM" ] \
         || die "RETICORA_SMTP_FROM is required with RETICORA_SMTP_HOST: the sender of the e-mails, e.g. 'Reticora CMDB <noreply@example.com>' ($SMTP_TROUBLESHOOTING)."
     valid_smtp_from "$RETICORA_SMTP_FROM" \
-        || die "RETICORA_SMTP_FROM ('$RETICORA_SMTP_FROM') must be an e-mail address or 'Name <address>', without quotes, '\$', '#' or '\\'."
+        || die "RETICORA_SMTP_FROM ('$RETICORA_SMTP_FROM') must be an e-mail address or 'Name <address>' that the server accepts (Go net/mail): no , ; : @ [ ] ( ) < > in the name (e.g. 'Reticora Inc.', not 'Reticora, Inc.'), no leading, trailing or double dot in the address, and no quotes, '\$', '#' or '\\' ($SMTP_TROUBLESHOOTING)."
 }
 
 # smtp_relay_reachable <host> <port> — a TCP connection to the SMTP server

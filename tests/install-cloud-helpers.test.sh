@@ -2051,6 +2051,94 @@ test_smtp_settings_noninteractive() {
         grep -qx 'RETICORA_SMTP_USERNAME=mailer' "$ENV_FILE" && grep -qx 'RETICORA_SMTP_PORT=587' "$ENV_FILE"
 }
 
+# The port follows the TLS mode when it is the default of the mode it was
+# written for: a run without SMTP writes RETICORA_SMTP_PORT=587 (STARTTLS),
+# and a later run with RETICORA_SMTP_TLS=tls must use 465 — implicit TLS on
+# 587 passes the TCP pre-check but never /readyz. An explicit port in the
+# environment and a port that is no default of the old mode are kept.
+# shellcheck disable=SC2034,SC2317 # variables and stub used by the installer functions
+test_smtp_port_follows_tls_mode() {
+    local probes="$TMP_ROOT/smtp-port-probes" out
+    rm -f "$probes"
+    smtp_relay_reachable() { printf '%s %s\n' "$1" "$2" >> "$probes"; return 0; }
+    smtp_env smtp-port-no-smtp
+    collect_config >/dev/null
+    write_env
+    grep -qx 'RETICORA_SMTP_HOST=' "$ENV_FILE" && grep -qx 'RETICORA_SMTP_PORT=587' "$ENV_FILE" &&
+        grep -qx 'RETICORA_SMTP_TLS=starttls' "$ENV_FILE" || { echo "the run without SMTP did not write 587/starttls"; return 1; }
+    SMTP_HOST_OVERRIDE=relay.example.test
+    SMTP_TLS_OVERRIDE=tls
+    SMTP_FROM_OVERRIDE=noreply@example.test
+    out="$(collect_config 2>&1)" && collect_config >/dev/null 2>&1 || { tail -n 3 <<< "$out"; return 1; }
+    [ "$RETICORA_SMTP_TLS" = tls ] && [ "$RETICORA_SMTP_PORT" = 465 ] && grep -qx 'relay.example.test 465' "$probes" &&
+        ! grep -qx 'relay.example.test 587' "$probes" || { echo "tls after a run without SMTP: port $RETICORA_SMTP_PORT"; return 1; }
+    grep -qF "SMTP port 465 for TLS mode tls (the port 587 in $ENV_FILE is the default of starttls" <<< "$out" || return 1
+    write_env
+    grep -qx 'RETICORA_SMTP_PORT=465' "$ENV_FILE" && grep -qx 'RETICORA_SMTP_TLS=tls' "$ENV_FILE" || return 1
+    # Back to STARTTLS: the implicit-TLS default 465 becomes 587.
+    SMTP_TLS_OVERRIDE=starttls
+    collect_config >/dev/null 2>&1 && [ "$RETICORA_SMTP_PORT" = 587 ] || { echo "starttls after tls: port $RETICORA_SMTP_PORT"; return 1; }
+    # An explicit port stays for every mode.
+    SMTP_TLS_OVERRIDE=tls
+    SMTP_PORT_OVERRIDE=587
+    collect_config >/dev/null 2>&1 && [ "$RETICORA_SMTP_PORT" = 587 ] || { echo "explicit port: $RETICORA_SMTP_PORT"; return 1; }
+    SMTP_HOST_OVERRIDE="" SMTP_TLS_OVERRIDE="" SMTP_FROM_OVERRIDE="" SMTP_PORT_OVERRIDE=""
+    # A port in .env that is no default of its mode stays: implicit TLS on
+    # 587 and a custom submission port.
+    smtp_env smtp-port-tls-587 "RETICORA_SMTP_HOST=relay.example.test" "RETICORA_SMTP_TLS=tls" "RETICORA_SMTP_PORT=587" \
+        "RETICORA_SMTP_FROM=noreply@example.test"
+    collect_config >/dev/null 2>&1 && [ "$RETICORA_SMTP_PORT" = 587 ] || { echo "tls on 587 from .env: port $RETICORA_SMTP_PORT"; return 1; }
+    smtp_env smtp-port-custom "RETICORA_SMTP_HOST=relay.example.test" "RETICORA_SMTP_TLS=starttls" "RETICORA_SMTP_PORT=2525" \
+        "RETICORA_SMTP_FROM=noreply@example.test"
+    SMTP_TLS_OVERRIDE=tls
+    collect_config >/dev/null 2>&1 && [ "$RETICORA_SMTP_PORT" = 2525 ] || { echo "custom port: $RETICORA_SMTP_PORT"; return 1; }
+    SMTP_TLS_OVERRIDE=""
+    local c
+    for c in ":starttls:tls:465" ":tls:starttls:587" "587:starttls:tls:465" "465:tls:none:587" "465:tls:starttls:587" \
+        "587:starttls:none:587" "587:none:tls:465" "587:tls:tls:587" "465:tls:tls:465" "2525:starttls:tls:2525" "25:none:tls:25"; do
+        IFS=: read -r port from to want <<< "$c"
+        [ "$(smtp_port_for_mode "$port" "$from" "$to")" = "$want" ] \
+            || { echo "smtp_port_for_mode $c: $(smtp_port_for_mode "$port" "$from" "$to")"; return 1; }
+    done
+}
+
+# Interactive: after a run without SMTP (587 in .env) choosing implicit TLS
+# offers 465, and a sender the server would refuse is asked for again.
+# shellcheck disable=SC2034,SC2317 # variables and stubs used by the installer functions
+test_smtp_interactive_port_and_from() {
+    smtp_env smtp-interactive "RETICORA_SMTP_HOST=" "RETICORA_SMTP_PORT=587" "RETICORA_SMTP_TLS=starttls"
+    smtp_relay_reachable() { return 0; }
+    is_tty() { return 0; }
+    RETICORA_PUBLIC_BASE_URL="$(env_get RETICORA_PUBLIC_BASE_URL)"
+    local out="$TMP_ROOT/smtp-interactive.out" pid result
+    # Answers: host, TLS mode, port (Enter = the offered default), user name
+    # (none), From (refused, then accepted). A prompt that keeps asking at
+    # the end of the answers would loop, so the run has a deadline.
+    (
+        collect_smtp_config <<'ANSWERS'
+relay.example.test
+tls
+
+
+Reticora, Inc. <ops@example.test>
+Reticora Inc. <ops@example.test>
+ANSWERS
+        printf 'RESULT %s|%s|%s|%s|%s\n' "$RETICORA_SMTP_HOST" "$RETICORA_SMTP_TLS" "$RETICORA_SMTP_PORT" \
+            "$RETICORA_SMTP_USERNAME" "$RETICORA_SMTP_FROM"
+    ) >"$out" 2>&1 &
+    pid=$!
+    for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid"
+        echo "collect_smtp_config still waits for input"
+        return 1
+    fi
+    wait "$pid" || { tail -n 3 "$out"; return 1; }
+    result="$(sed -n 's/^RESULT //p' "$out")"
+    [ "$result" = "relay.example.test|tls|465||Reticora Inc. <ops@example.test>" ] || { echo "result: $result"; return 1; }
+    grep -qF "The name must not contain , ; : @ [ ] ( ) < >" "$out"
+}
+
 # smtp_refused <name> <message> <KEY=value…> — collect_config on the legacy
 # .env with these SMTP settings aborts with the message, never printing the
 # password of the case password-dollar.
@@ -2083,14 +2171,26 @@ test_smtp_settings_validated() {
         smtp_refused password-dollar "RETICORA_SMTP_PASSWORD must not contain blanks, quotes" "RETICORA_SMTP_HOST=smtp.example.test" \
             "RETICORA_SMTP_USERNAME=mailer" 'RETICORA_SMTP_PASSWORD=secret-pa$$' "RETICORA_SMTP_FROM=noreply@example.test" &&
         smtp_refused bad-from "RETICORA_SMTP_FROM ('Reticora <noreply>') must be an e-mail address or 'Name <address>'" \
-            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_FROM=Reticora <noreply>" || return 1
+            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_FROM=Reticora <noreply>" &&
+        smtp_refused comma-name "no , ; : @ [ ] ( ) < > in the name (e.g. 'Reticora Inc.', not 'Reticora, Inc.')" \
+            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_FROM=Reticora, Inc. <ops@example.co.uk>" &&
+        smtp_refused double-dot "no leading, trailing or double dot in the address" \
+            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_FROM=no..reply@example.test" || return 1
+    # The accepted values are a subset of what Go's net/mail.ParseAddress
+    # (notify.SMTPConfig.Validate) accepts: a value it refuses would stop the
+    # server at its start ("invalid central SMTP configuration").
     local v
     for v in noreply@example.com "Reticora CMDB <noreply@example.com>" "<noreply@example.com>" \
-        "Störungsmeldung <a.b+c@mail.example.de>" "Reticora, Inc. <ops@example.co.uk>"; do
+        "Störungsmeldung <a.b+c@mail.example.de>" "Reticora Inc. <ops@example.co.uk>" "Name<a@example.de>" \
+        "Müller & Söhne IT-Service <it@mueller-soehne.de>" "Ops/Team 2 <ops_2%x=y@sub.example.de>" "x=?y <a@example.de>"; do
         valid_smtp_from "$v" || { echo "refused From: $v"; return 1; }
     done
     for v in noreply "Reticora <noreply>" '"Quoted" <a@example.de>' 'Name: x <a@example.de>' 'Team #1 <a@example.de>' \
-        '$HOME <a@example.de>' $'a@example.de\nX' "a@example.de>" "a<b <c@example.de>"; do
+        '$HOME <a@example.de>' $'a@example.de\nX' "a@example.de>" "a<b <c@example.de>" \
+        "Reticora, Inc. <ops@example.co.uk>" "Team; x <a@example.de>" "Team [x] <a@example.de>" "Team@x <a@example.de>" \
+        "Team (x) <a@example.de>" "Team > x <a@example.de>" "=?foo?q?x?= <a@example.de>" $'M\xfcller <a@example.de>' \
+        $'\xed\xa0\x80 <a@example.de>' a..b@example.com .a@example.com a.@example.com a@b..example.com a@.example.com \
+        a@example.com. "Name <a..b@example.com>" "Name <a@b..example.de>"; do
         ! valid_smtp_from "$v" || { echo "accepted From: $v"; return 1; }
     done
     for v in "" smtp.example.com mailrelay 192.0.2.25 2001:db8::25; do
@@ -2237,6 +2337,8 @@ run_test    "signup: admin client secret and captcha key generated once, reused,
 run_test    "signup: unusable admin client id, secret or captcha key in .env is refused"     test_signup_admin_client_settings_checked
 run_test    "smtp: non-interactive from .env and environment; empty host keeps e-mail off"  test_smtp_settings_noninteractive
 run_test    "smtp: settings the server would refuse are refused, the password never shown"  test_smtp_settings_validated
+run_test    "smtp: the port follows the TLS mode (465 for tls after a run without SMTP)"      test_smtp_port_follows_tls_mode
+run_test    "smtp: interactive tls offers 465; a sender net/mail refuses is asked again"      test_smtp_interactive_port_and_from
 run_test    "smtp: an unreachable SMTP server stops a non-interactive run before .env"     test_smtp_unreachable_aborts
 run_test    "smtp: the TCP pre-check reaches a listener and detects a refused port"          test_smtp_relay_probe
 run_test    "signup: state after the start probed and reported in the summary"               test_signup_state_reported

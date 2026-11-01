@@ -925,6 +925,16 @@ Notes:
 
 - User name and password are written unquoted to `.env` (mode `0600`): no
   blanks, quotes, `\`, `` ` `` or `$`. The password is never printed.
+- The installer checks the sender the way the server parses it (Go
+  `net/mail`): no `,` `;` `:` `@` `[` `]` `(` `)` `<` `>` in the name
+  (`Reticora Inc. <noreply@example.com>`, not `Reticora, Inc. <…>`), no
+  leading, trailing or double dot in the address. A sender the server
+  refuses stops it at its start (`invalid central SMTP configuration`) and
+  the installation ends in `Reticora server did not become healthy`.
+- Without `RETICORA_SMTP_PORT` in the environment the port follows the TLS
+  mode: the default of the previous mode (587 for `starttls`, 465 for `tls`)
+  becomes the default of the new one, so `RETICORA_SMTP_TLS=tls` after a run
+  without SMTP uses 465. Any other port in `.env` is kept.
 - `RETICORA_PUBLIC_BASE_URL` must be the address users open: the
   verification link is `<base URL>/onboarding?token=…`.
 - The sender domain needs SPF/DKIM at the relay, otherwise the mails land in
@@ -942,9 +952,14 @@ Notes:
   [deploy/keycloak/README.md](../deploy/keycloak/README.md)).
 - Without self-signup, platform operators create organizations through
   `POST /api/v1/admin/orgs` (members of the Keycloak group `operators`,
-  [README.md](README.md), "Creating organizations"). Keycloak then sends the
-  invitation of the first administrator over the realm's SMTP server, so
-  this path needs SMTP as well.
+  [README.md](README.md), "Creating organizations"). With
+  `RETICORA_SMTP_HOST` Keycloak sends the first administrator an invitation
+  over the realm's SMTP server (`admin_invited: true`). Without it the
+  organization is created without an IdP account (`admin_invited: false`):
+  create the first administrator's account in Keycloak by hand — the same
+  e-mail address, user attribute `organization_id` = the `id` of the
+  response, realm role `org_admin`, group `reticora-admin` — and it is
+  linked at the first login.
 
 ---
 
