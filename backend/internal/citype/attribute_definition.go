@@ -401,19 +401,62 @@ func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
 	return nil
 }
 
+// errSystemTypeAttribute refuses an organization attribute on a system CI
+// type: system types are read-only for tenants and are extended by
+// inheritance (MET-06, P2). The row-level security of attribute_definition
+// would refuse the row as well (the trigger copies the type's NULL
+// organization), but as an opaque 42501.
+func errSystemTypeAttribute() error {
+	return &api.FieldError{Field: "ci_type_id", Message: "system ci types cannot get organization attributes",
+		Status: http.StatusUnprocessableEntity}
+}
+
+// ciTypeOrganizationTx reads the organization of a CI type the tenant can
+// see: "" for a system type (organization_id NULL); found is false for an
+// unknown type or a type of another organization.
+func ciTypeOrganizationTx(ctx context.Context, tx pgx.Tx, typeID string) (org string, found bool, err error) {
+	err = tx.QueryRow(ctx, `SELECT COALESCE(organization_id::text, '') FROM ci_type WHERE id::text = $1`, typeID).Scan(&org)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read ci type: %w", err)
+	}
+	return org, true, nil
+}
+
 // checkAttributeType resolves the CI type of a new type-scoped definition:
 // it must be a type of the organization (system types are extended by
-// inheritance, MET-06, P2).
+// inheritance, MET-06, P2). An unknown type is a 422 on ci_type_id, the
+// field of the request body.
 func checkAttributeType(ctx context.Context, tx pgx.Tx, typeID string) error {
-	var org string
-	err := tx.QueryRow(ctx, `SELECT COALESCE(organization_id::text, '') FROM ci_type WHERE id::text = $1`, typeID).Scan(&org)
+	org, found, err := ciTypeOrganizationTx(ctx, tx, typeID)
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return &api.FieldError{Field: "ci_type_id", Message: "ci type not found", Status: 422}
 	case err != nil:
-		return fmt.Errorf("read ci type: %w", err)
+		return err
+	case !found:
+		return &api.FieldError{Field: "ci_type_id", Message: "ci type not found", Status: http.StatusUnprocessableEntity}
 	case org == "":
-		return &api.FieldError{Field: "ci_type_id", Message: "system ci types cannot get organization attributes", Status: 422}
+		return errSystemTypeAttribute()
+	}
+	return nil
+}
+
+// checkFieldType resolves the CI type of the legacy field upsert (PUT
+// /ci-types/{id}/fields): an unknown type is the documented 404 of the path
+// ("not found", see writeFieldDefinitionError), a system type the 422 of
+// checkAttributeType. It runs before the definition is looked up, so an
+// existing system definition of the same key is refused the same way
+// instead of reaching an UPDATE that row-level security hides.
+func checkFieldType(ctx context.Context, tx pgx.Tx, typeID string) error {
+	org, found, err := ciTypeOrganizationTx(ctx, tx, typeID)
+	switch {
+	case err != nil:
+		return err
+	case !found:
+		return fmt.Errorf("not found")
+	case org == "":
+		return errSystemTypeAttribute()
 	}
 	return nil
 }

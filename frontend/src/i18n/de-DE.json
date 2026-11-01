@@ -1392,7 +1392,10 @@
       "reason": "Grund: {{detail}}",
       "partial": "Das Feld „{{name}}“ wurde gespeichert, die Index-Einstellungen aber nicht. {{reason}}",
       "flagsNotSaved": "Index-Einstellungen nicht gespeichert. {{reason}}",
-      "fieldNotSaved": "Feld nicht gespeichert. {{reason}}"
+      "fieldNotSaved": "Feld nicht gespeichert. {{reason}}",
+      "forbiddenPermission": "Keine Berechtigung: Ihrer Sitzung fehlt das Recht „{{permission}}“.",
+      "systemType": "Systemtypen sind schreibgeschützt und erhalten keine eigenen Felder. Klonen Sie den Typ oder legen Sie ein organisationsweites Feld an.",
+      "readOnly": "System-Attribute sind schreibgeschützt."
     },
     "indexJob": {
       "scheduled": "Index-Job eingeplant",
@@ -1404,6 +1407,21 @@
         "failed": "fehlgeschlagen",
         "cancelled": "abgebrochen"
       }
+    },
+    "systemReadOnly": "Systemtyp: schreibgeschützt. Felder lassen sich hier nicht hinzufügen, und der Typ lässt sich nicht deaktivieren. Eigene Felder erfassen Sie so:",
+    "systemReadOnlyClone": "„Klonen“ legt einen eigenen Typ mit allen Feldern dieses Typs an, den Sie erweitern können. Bestehende und von der Discovery erkannte CIs behalten den Systemtyp.",
+    "systemReadOnlyOrgFields": "Organisationsweite Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und erkannte CIs.",
+    "orgFields": {
+      "title": "Organisationsweite Felder",
+      "hint": "Diese Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und von der Discovery erkannte CIs. Systemfelder sind schreibgeschützt.",
+      "add": "Organisationsweites Feld hinzufügen",
+      "editorHint": "Das Feld gilt für alle CI-Typen der Organisation. Ein Pflichtfeld muss bei jedem von Hand angelegten oder geänderten CI ausgefüllt sein.",
+      "empty": "Keine organisationsweiten Felder definiert.",
+      "readOnly": "Nur lesbar: Zum Ändern brauchen Sie das Recht „ci_attribute:manage“.",
+      "editAction": "Organisationsweites Feld bearbeiten: {{name}}",
+      "deleteAction": "Organisationsweites Feld löschen: {{name}}",
+      "deleteConfirm": "Organisationsweites Feld „{{name}}“ löschen? Es entfällt danach bei allen CI-Typen der Organisation.",
+      "deleteFailed": "Feld „{{name}}“ nicht gelöscht. {{reason}}"
     }
   },
   "inventory": {

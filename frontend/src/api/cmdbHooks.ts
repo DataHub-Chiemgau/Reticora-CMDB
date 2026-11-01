@@ -107,18 +107,44 @@ export class FlagUpdateError extends Error {
   }
 }
 
-/** The changes of an attribute definition: the type, its definitions and the index jobs. */
-function invalidateAttributes(qc: QueryClient, typeId: string) {
-  qc.invalidateQueries({ queryKey: ['ci-types', typeId] });
+/** The organization-wide and system fields of GET /ci-fields/global (MET-13). */
+const GLOBAL_FIELDS_KEY = ['ci-fields', 'global'];
+
+/**
+ * The changes of an attribute definition: the type (none: a global field),
+ * the global fields, the definitions and the index jobs.
+ */
+function invalidateAttributes(qc: QueryClient, typeId?: string) {
+  if (typeId) qc.invalidateQueries({ queryKey: ['ci-types', typeId] });
   qc.invalidateQueries({ queryKey: ['ci-types'] });
+  qc.invalidateQueries({ queryKey: GLOBAL_FIELDS_KEY });
   qc.invalidateQueries({ queryKey: ['attribute-definitions'] });
   qc.invalidateQueries({ queryKey: INDEX_JOBS_KEY });
+}
+
+/**
+ * saveWithIndexFlags saves a field and then, when the editor set them, its
+ * index flags (PATCH /attribute-definitions/{id}); a refused flag update is
+ * a FlagUpdateError with the saved field.
+ */
+async function saveWithIndexFlags(
+  save: () => Promise<FieldDefinition & { id?: string }>,
+  index: AttributeIndexFlags | undefined,
+): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> {
+  const saved = await save();
+  const id = saved.id;
+  if (!index || !id) return { field: saved };
+  try {
+    return { field: saved, definition: await attributeDefinitionApi.setIndexFlags(id, index) };
+  } catch (err) {
+    throw new FlagUpdateError(saved, err);
+  }
 }
 
 export function useUpsertCITypeField() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       typeId,
       field,
       index,
@@ -126,18 +152,54 @@ export function useUpsertCITypeField() {
       typeId: string;
       field: FieldDefinition;
       index?: AttributeIndexFlags;
-    }): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> => {
-      const saved = await ciTypeApi.upsertField(typeId, field);
-      const id = (saved as FieldDefinition & { id?: string }).id;
-      if (!index || !id) return { field: saved };
-      try {
-        return { field: saved, definition: await attributeDefinitionApi.setIndexFlags(id, index) };
-      } catch (err) {
-        throw new FlagUpdateError(saved, err);
-      }
-    },
+    }): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> =>
+      saveWithIndexFlags(() => ciTypeApi.upsertField(typeId, field), index),
     // A refused flag update leaves the field saved: the list reloads either way.
     onSettled: (_d, _e, v) => invalidateAttributes(qc, v.typeId),
+  });
+}
+
+/** The global fields: the organization-wide ones and the read-only system ones (MET-13). */
+export function useGlobalFields() {
+  return useQuery({
+    queryKey: GLOBAL_FIELDS_KEY,
+    queryFn: () => ciFieldApi.listGlobal(),
+  });
+}
+
+/** The global attribute definitions with their index flags (MET-15). */
+export function useGlobalAttributeDefinitions() {
+  return useQuery({
+    queryKey: ['attribute-definitions', { scope: 'global' }],
+    queryFn: () => attributeDefinitionApi.list({ scope: 'global' }),
+  });
+}
+
+/**
+ * PUT /ci-fields/global: an organization-wide field for every CI type of
+ * the organization, then its index flags as useUpsertCITypeField does.
+ */
+export function useUpsertGlobalField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      field,
+      index,
+    }: {
+      field: FieldDefinition;
+      index?: AttributeIndexFlags;
+    }): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> =>
+      saveWithIndexFlags(() => ciFieldApi.upsertGlobal(field), index),
+    onSettled: () => invalidateAttributes(qc),
+  });
+}
+
+/** DELETE /ci-fields/global/{name}: removes an organization-wide field. */
+export function useDeleteGlobalField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => ciFieldApi.deleteGlobal(name),
+    onSuccess: () => invalidateAttributes(qc),
   });
 }
 
@@ -150,11 +212,14 @@ export function useAttributeDefinitions(ciTypeId: string | undefined) {
   });
 }
 
-/** PATCH of the index flags of an existing definition; it queues the index job (DB-04). */
+/**
+ * PATCH of the index flags of an existing definition; it queues the index
+ * job (DB-04). typeId is the type of the definition, none for a global one.
+ */
 export function useSetAttributeIndexFlags() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, flags }: { id: string; typeId: string; flags: AttributeIndexFlags }) =>
+    mutationFn: ({ id, flags }: { id: string; typeId?: string; flags: AttributeIndexFlags }) =>
       attributeDefinitionApi.setIndexFlags(id, flags),
     onSettled: (_d, _e, v) => invalidateAttributes(qc, v.typeId),
   });

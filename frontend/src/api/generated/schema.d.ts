@@ -5802,7 +5802,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage global CI field definitions */
+    /**
+     * Manage global CI field definitions
+     * @description The global fields (no CI type, MET-13): the organization's organization-wide fields, which apply to every CI type of the organization, and the read-only system fields (`is_system`).
+     */
     get: operations['listCiFieldsGlobal'];
     /** Manage global CI field definitions */
     put: operations['putCiFieldsGlobal'];
@@ -6021,7 +6024,10 @@ export interface paths {
     };
     /** Manage CI type field definitions */
     get: operations['listCiTypesIdFields'];
-    /** Manage CI type field definitions */
+    /**
+     * Manage CI type field definitions
+     * @description Creates or updates a field of a CI type of the organization (legacy view of attribute_definition). System CI types (`is_system`, no organization) are read-only for tenants until inheritance (MET-06): a field on them is refused with 422 on `ci_type_id`; organization-wide fields (PUT /api/v1/ci-fields/global) apply to every CI type including the system types. An unknown CI type, or one of another organization, is 404.
+     */
     put: operations['putCiTypesIdFields'];
     post?: never;
     delete?: never;

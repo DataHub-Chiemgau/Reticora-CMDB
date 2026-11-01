@@ -419,7 +419,9 @@ func (r *PGRepository) ListGlobalFields(ctx context.Context, orgID string) ([]Fi
 }
 
 // UpsertField creates or updates a field definition (type or global scope)
-// in attribute_definition, keyed by type and name (legacy field view).
+// in attribute_definition, keyed by type and name (legacy field view). A
+// type-bound field needs a type of the organization: an unknown type is
+// "not found" (404), a system type a 422 on ci_type_id (checkFieldType).
 func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, req UpsertFieldRequest) (*Field, error) {
 	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
 		return nil, err
@@ -432,6 +434,11 @@ func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, re
 	}
 	var out *Field
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if req.Scope != "global" {
+			if err := checkFieldType(ctx, tx, typeID); err != nil {
+				return err
+			}
+		}
 		before, err := findAttributeTx(ctx, tx, typeID, req.Name)
 		if err != nil && !errors.Is(err, ErrAttributeNotFound) {
 			return err

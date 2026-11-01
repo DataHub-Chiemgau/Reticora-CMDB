@@ -28,7 +28,10 @@ import (
 // deletes definitions with every MET-10 field; ci_type.attribute_schema is
 // generated (JSON Schema 2020-12) with a rising schema_version and cannot
 // be written through the API or the database; system definitions are
-// read-only; other organizations see nothing.
+// read-only and system types get no organization attributes, neither
+// through /attribute-definitions nor through the legacy PUT
+// /ci-types/{id}/fields (422 on ci_type_id, not the 403 of row-level
+// security); other organizations see nothing.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestAttributeDefinitionsAgainstPostgres(t *testing.T) {
@@ -176,6 +179,51 @@ func TestAttributeDefinitionsAgainstPostgres(t *testing.T) {
 	}
 	if rec := call(orgA, http.MethodPost, "/api/v1/attribute-definitions", `{"ci_type_id":"`+systemType+`","key":"x5","data_type":"text"}`); rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("attribute on a system type: %d, want 422", rec.Code)
+	}
+
+	// The legacy field endpoint (the "Feld hinzufügen" of the CI type admin)
+	// refuses a system type the same way: 422 on ci_type_id instead of the
+	// 403 of row-level security, and nothing is written. An unknown type is
+	// its documented 404.
+	w = call(orgA, http.MethodPut, "/api/v1/ci-types/"+systemType+"/fields", `{"name":"x6","data_type":"text"}`)
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), `"field":"ci_type_id"`) ||
+		!strings.Contains(w.Body.String(), "system ci types cannot get organization attributes") {
+		t.Errorf("legacy field on a system type: %d %s, want 422 on ci_type_id", w.Code, w.Body.String())
+	}
+	var x6 int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM attribute_definition WHERE key = 'x6' AND ci_type_id::text = $1`,
+		systemType).Scan(&x6); err != nil || x6 != 0 {
+		t.Errorf("definitions x6 = %d (%v), want none", x6, err)
+	}
+	if _, err := repo.UpsertField(orgA, f.OrgA, systemType, UpsertFieldRequest{Name: "x6", DataType: "text"}); err == nil {
+		t.Error("repository: legacy field on a system type accepted")
+	}
+	if rec := call(orgA, http.MethodPut, "/api/v1/ci-types/"+f.ID()+"/fields", `{"name":"x7","data_type":"text"}`); rec.Code != http.StatusNotFound {
+		t.Errorf("legacy field on an unknown type: %d %s, want 404", rec.Code, rec.Body.String())
+	}
+	// A type of organization A is unknown to organization B.
+	if rec := call(orgB, http.MethodPut, "/api/v1/ci-types/"+typ.ID+"/fields", `{"name":"x8","data_type":"text"}`); rec.Code != http.StatusNotFound {
+		t.Errorf("legacy field on a type of another organization: %d %s, want 404", rec.Code, rec.Body.String())
+	}
+	// The key of an existing system definition of the type: the same 422,
+	// not the 500 of an UPDATE that row-level security hides.
+	var systemTypeDef string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO attribute_definition (organization_id, ci_type_id, scope, key, data_type)
+		VALUES (NULL, $1, 'type', 'wp116_switch_tag', 'text') RETURNING id::text`, systemType).Scan(&systemTypeDef); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DELETE FROM attribute_definition WHERE id = $1`, systemTypeDef)
+	})
+	w = call(orgA, http.MethodPut, "/api/v1/ci-types/"+systemType+"/fields", `{"name":"wp116_switch_tag","data_type":"text","required":true}`)
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), `"field":"ci_type_id"`) {
+		t.Errorf("legacy field with the key of a system definition: %d %s, want 422 on ci_type_id", w.Code, w.Body.String())
+	}
+	var sysRequired bool
+	var sysOrg *string
+	if err := f.Admin.QueryRow(bg, `SELECT required, organization_id::text FROM attribute_definition WHERE id = $1`, systemTypeDef).
+		Scan(&sysRequired, &sysOrg); err != nil || sysRequired || sysOrg != nil {
+		t.Errorf("system definition changed: required %v organization %v (%v)", sysRequired, sysOrg, err)
 	}
 
 	// System definitions: visible to everyone, read-only.

@@ -1392,7 +1392,10 @@
       "reason": "Reason: {{detail}}",
       "partial": "The field “{{name}}” was saved, its index settings were not. {{reason}}",
       "flagsNotSaved": "Index settings not saved. {{reason}}",
-      "fieldNotSaved": "Field not saved. {{reason}}"
+      "fieldNotSaved": "Field not saved. {{reason}}",
+      "forbiddenPermission": "Not allowed: your session lacks the permission “{{permission}}”.",
+      "systemType": "System types are read-only and get no fields of their own. Clone the type or add an organization-wide field.",
+      "readOnly": "System attributes are read-only."
     },
     "indexJob": {
       "scheduled": "Index job scheduled",
@@ -1404,6 +1407,21 @@
         "failed": "failed",
         "cancelled": "cancelled"
       }
+    },
+    "systemReadOnly": "System type: read-only. Fields cannot be added here and the type cannot be deactivated. To add your own fields:",
+    "systemReadOnlyClone": "“Clone” creates your own type with all fields of this type, which you can extend. Existing CIs and CIs found by discovery keep the system type.",
+    "systemReadOnlyOrgFields": "Organization-wide fields apply to every CI type of the organization, including system types and discovered CIs.",
+    "orgFields": {
+      "title": "Organization-wide fields",
+      "hint": "These fields apply to every CI type of the organization, including system types and CIs found by discovery. System fields are read-only.",
+      "add": "Add organization-wide field",
+      "editorHint": "The field applies to every CI type of the organization. A required field must be filled in on every CI created or changed by hand.",
+      "empty": "No organization-wide fields defined.",
+      "readOnly": "Read-only: changing them needs the permission “ci_attribute:manage”.",
+      "editAction": "Edit organization-wide field: {{name}}",
+      "deleteAction": "Delete organization-wide field: {{name}}",
+      "deleteConfirm": "Delete the organization-wide field “{{name}}”? It is then removed from every CI type of the organization.",
+      "deleteFailed": "Field “{{name}}” not deleted. {{reason}}"
     }
   },
   "inventory": {
