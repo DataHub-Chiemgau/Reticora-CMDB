@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 29 |
-| P3 | 35 |
-| **Summe** | **70** |
+| P3 | 36 |
+| **Summe** | **71** |
 
 ## Übersicht
 
@@ -110,6 +110,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-421](#f-421) | P3 | Eindeutigkeit mit Scope `org` gilt für Writer mit Client-Scope nur, solange ein gültiger Unique-Index existiert | Verifier r3-b4 (WP-142) auf `bf51da7` | belegt | backend/internal/ci/unique_attr_integration_test.go | WP-692 |
 | [F-426](#f-426) | P3 | Review-Liste ignoriert unbekannte `status`- und `kind`-Werte: 200 mit leerer Liste statt 400 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/reviews/handler_test.go | WP-697 |
 | [F-425](#f-425) | P2 | Enrollment-Dialog und Onboarding bieten keine Client-Auswahl: ein auf mehrere Clients beschränkter Nutzer erhält seit WP-677 422 und sieht nur „Ein Fehler ist aufgetreten“ | Kandidatenprüfung K7 auf `7cd63e0` | belegt | frontend/src/pages/DiscoveryPage.test.tsx | WP-696 |
+| [F-428](#f-428) | P3 | Sicherheitsreview und GATE-01-Prüfung erfassen die sicherheitsrelevanten Befunde ab F-355 nicht als SR-Befunde mit Severity; ein offener Scope- oder Auth-Befund aus K5 bis K7 blockiert weder GATE-01 noch `--final` | Verifier r3-b6 (WP-209/213) auf `7cd63e0` | belegt | tests/rep01-structure.test.sh | WP-699 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1882,6 +1883,30 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
    Test Files  2 failed (2)
         Tests  6 failed | 17 passed (23)
   ```
+
+<a id="f-428"></a>
+### F-428 (P3) – Sicherheitsreview und GATE-01-Prüfung erfassen die sicherheitsrelevanten Befunde ab F-355 nicht als SR-Befunde mit Severity; ein offener Scope- oder Auth-Befund aus K5 bis K7 blockiert weder GATE-01 noch `--final`
+
+- **Gefunden in:** K7-Wiederholungsprüfung r3-b6 (Wiederholungsprüfung von WP-209 und WP-213, Kandidat K-r3b6-1 des Auditors), vom Verifier bestätigt auf `7cd63e0`; `docs/security/review-g1.md`, `docs/acceptance/g1-gate.md` und `tests/rep01-structure.test.sh` sind dort in den betroffenen Abschnitten gleich `e5c2d86`; kodierender Test von WP-699 · **Betroffene Anforderungen:** SEC-11, GATE-03 (WP-209 AK1/AK2), GATE-01 (WP-213 AK3), WP-600 AK2/AK6 · **Komponente:** docs/security/review-g1.md (Abschnitte „Neue Befunde“ und „Befunde des Phase-1-Abnahmeaudits“: höchster SR-Befund SR-26, kein Abschnitt für die Befunde der Korrektur), docs/acceptance/g1-gate.md (GATE-01-Tabelle, Zeilen 272–274 auf `6a499ac`: Quellen „SR-01 bis SR-11“ und „F-001 bis F-016“), tests/rep01-structure.test.sh (Zeile 715 auf `6a499ac`: `for n in $(seq 1 15)`; keine Prüfung liest `audit/g1-reaudit/FINDINGS.md`) · **Quelle:** `k7/ver/r3-b6/k-reaudit-3/WP-209/verify-k-r3b6-1-review-coverage.txt` (Reproduktion `k7/ver/r3-b6/kcand.sh`), `k7/ver/r3-b6/k-reaudit-3/WP-213/verify-rep01-structure-final.log`, Bericht `k7/out/r3-b6/batches/r3-b6.md` (WP-209, WP-213); kodierender Test von WP-699 (`k7/ad-699/rep01-normal-red-e5c2d86.log`, `k7/ad-699/rep01-normal-red.log`)
+- **Reproduktion:** `grep -noE 'F-3[5-9][0-9]|F-4[0-9][0-9]' docs/security/review-g1.md docs/acceptance/g1-gate.md` → nur F-389, F-410, F-396 im Fließtext der Kanalmatrix und F-397 in der Zeile SR-18. Für F-359, F-360, F-363, F-364 (P0), F-365, F-366, F-370, F-372, F-393, F-406, F-407, F-409 und F-414 gibt es keine Zeile im Review und keine in der Checkliste; höchster SR-Befund SR-26. Die GATE-01-Tabelle nennt als Quellen „Neue Befunde des Sicherheitsreviews (SR-01 bis SR-11)“ und „P0-Befunde des Phase-1-Abnahmeaudits (F-001 bis F-016)“. `tests/rep01-structure.test.sh --final` auf `7cd63e0` meldet „ok GATE-01 an open Critical finding … keeps GATE-01 … from PASS“ und „ok --final no open Critical finding in review and pentest“, obwohl die Scope-Befunde F-418, F-420 und F-421 dort offen waren.
+- **Soll:** WP-209 AK2 (SEC-11): offene Punkte stehen als Befunde mit Severity im Review; WP-213 AK3 (GATE-01): kein offenes Critical, geprüft über alle Quellen. Jeder Befund der Korrektur (`audit/g1-reaudit/FINDINGS.md`) mit Sicherheitswirkung oder Critical nach dem Bewertungsschema (`docs/audit/README.md`) steht als SR-Befund mit Severity, Status, Korrektur-WP und Test im Review; die übrigen stehen mit Begründung ohne Sicherheitswirkung. GATE-01 nennt diese Quellen, und `tests/rep01-structure.test.sh` prüft die Aufnahme jedes Befunds P0 bis P2, auch später hinzukommender; `--final` verbietet einen offenen SR-Befund mit Critical oder High.
+- **Ist:** Die Fortschreibung des Reviews endet mit WP-452 (SR-26, P0-Befunde F-001 bis F-015 des Phase-1-Audits). Die Befunde ab F-355 mit Sicherheitswirkung fehlen; die Checkliste nennt sie nicht als Quelle; die Gate-Prüfung kennt nur F-001 bis F-015 (`seq 1 15`) und liest die Befundliste der Korrektur nicht. Ein offener Befund wie F-364 (P0, org-weiter Lesezugriff nach Entzug) wäre für die Gate-Prüfung unsichtbar.
+- **Nutzerwirkung:** Gate-Entscheider und Auftraggeber sehen im Sicherheitsreview nicht, dass während der Korrektur 21 Befunde mit Sicherheitswirkung (Mandanten- oder Scope-Isolation, Rechte, Krypto, Audit-Integrität, Offenlegung; 11 davon Critical) und zwei Critical-Befunde mit stillem Datenverlust gefunden wurden, und GATE-01 sowie `--final` blieben grün, solange ein solcher Befund offen ist. Auf `6a499ac` sind alle diese Befunde behoben; die Wirkung betrifft die Nachweisführung, nicht das Produkt.
+- **Ursache (belegt):** WP-452 hat den Umfang auf die P0-Befunde des Phase-1-Audits festgelegt; die Befundliste der Korrektur entstand erst danach (Konvention 16), und kein WP schreibt das Review für sie fort. Die Gate-Prüfung zählt die P0-Befunde mit einer festen Liste (`seq 1 15`) statt aus einer Befundliste.
+- **Empfehlung:** SR-Zeilen ab SR-27 im Format von SR-14 bis SR-26 für jeden sicherheitsrelevanten oder nach Schema Critical-Befund der Korrektur, dazu ein Abschnitt „Befunde der Korrektur ohne Sicherheitswirkung“ mit einer Begründung je übrigem Befund; GATE-01-Quellen in `g1-gate.md` auf SR-01 bis SR-<n> und die Befundliste der Korrektur; neue Regel in `tests/rep01-structure.test.sh`, die die Übersicht von `audit/g1-reaudit/FINDINGS.md` liest, mit Fixture-Selbsttests; `--final` ohne offenen SR-Befund Critical/High.
+- **Retest (verbindlich):** `KUSTOMIZE=~/go/bin/kustomize bash tests/rep01-structure.test.sh` → 0 failed, darunter „ok GATE-01 every P0–P2 finding of audit/g1-reaudit/FINDINGS.md is an SR finding of the review or listed without security impact (F-428)“, „ok GATE-01 audit/g1-reaudit/FINDINGS.md lists the findings of the correction in table '## Übersicht' (F-428)“ und die Fixture-Selbsttests `rep01_reaudit_*` (u. a. `rep01_reaudit_finding_missing` meldet `reaudit_coverage`, `rep01_reaudit_finding_listed` besteht, `rep01_reaudit_sr_high_open` meldet mit `--final` `final_review_high`); `--final` ohne neue Fehlschläge, „ok --final no SR finding of the security review rated Critical or High is open (F-428)“.
+- **Kodierender Test:** tests/rep01-structure.test.sh (Regel `reaudit_coverage` mit der Wiederholungsprüfung `GATE-01 audit/g1-reaudit/FINDINGS.md lists …`, Regel `final_review_high`, Fixture-Selbsttests `rep01_reaudit_finding_missing`, `rep01_reaudit_finding_listed`, `rep01_reaudit_finding_short_reason`, `rep01_reaudit_finding_sr`, `rep01_reaudit_finding_p3_only`, `rep01_reaudit_overview_empty`, `rep01_reaudit_sr_high_open`, `rep01_reaudit_sr_critical_open`); auf `e5c2d86` rot (ausgeführt im Arbeitsbaum `6a499ac` mit `docs/security/review-g1.md`, `docs/acceptance/g1-gate.md` und `audit/g1-reaudit/FINDINGS.md` aus `e5c2d86`; 229 passed, 21 failed, Auszug):
+
+  ```text
+  FAIL GATE-01 every P0–P2 finding of audit/g1-reaudit/FINDINGS.md is an SR finding of the review or listed without security impact (F-428): F-355 (P2) is neither an SR finding of docs/security/review-g1.md nor listed in section 'Befunde der Korrektur ohne Sicherheitswirkung'
+  … ebenso F-356, F-357, F-358, F-359, F-360, F-361, F-362, F-363 …
+  FAIL GATE-01 every P0–P2 finding of audit/g1-reaudit/FINDINGS.md is an SR finding of the review or listed without security impact (F-428): F-364 (P0) is neither an SR finding of docs/security/review-g1.md nor listed in section 'Befunde der Korrektur ohne Sicherheitswirkung'
+  … ebenso F-365, F-366 (P1), F-368, F-369, F-370 (P1), F-372, F-373, F-374, F-376 (P1), F-377 …
+  ok   GATE-01 audit/g1-reaudit/FINDINGS.md lists the findings of the correction in table '## Übersicht' (F-428)
+  FAIL rep01_control: the repository passes the gate checks in normal mode
+  ```
+
+  Auf `6a499ac` mit den Dokumenten vor der Korrektur 229 passed, 34 failed: 33 Befunde P0 bis P2 ohne SR-Zeile und ohne Begründung (F-355 bis F-427 außer F-397, das SR-18 nennt) und `rep01_control`. Mit der Korrektur 231 passed, 0 failed; `--final` vorher 215 passed, 31 failed, nachher 234 passed, 31 failed mit denselben Fehlschlägen.
 
 ## Geprüfte Kandidaten ohne neuen Befund
 
