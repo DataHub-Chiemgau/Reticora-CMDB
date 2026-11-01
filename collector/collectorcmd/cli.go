@@ -8,7 +8,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -27,6 +29,8 @@ import (
 const usage = `Usage:
   reticora-collector                 run the collector
   reticora-collector enroll --server <url> --code <code> [--name <name>] [--credentials <path>] [--ca-file <pem>]
+                                     (without --code the code is read from RETICORA_ENROLL_TOKEN,
+                                     which keeps it out of the process list)
   reticora-collector version         print the version
 `
 
@@ -61,7 +65,7 @@ func runEnroll(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	fs := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	server := fs.String("server", "", "URL of the Reticora server (https://cmdb.example.com)")
-	code := fs.String("code", "", "one-time enrollment code from the UI (valid 24 h)")
+	code := fs.String("code", "", "one-time enrollment code from the UI (valid 24 h); default "+envEnrollToken)
 	hostname, _ := os.Hostname()
 	name := fs.String("name", hostname, "name of the collector")
 	path := fs.String("credentials", credentialsPath(), "where the collector identity is stored")
@@ -70,8 +74,14 @@ func runEnroll(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return 2
 	}
 	serverURL := strings.TrimRight(strings.TrimSpace(*server), "/")
-	if serverURL == "" || strings.TrimSpace(*code) == "" {
-		fmt.Fprint(stderr, "enroll needs --server and --code\n\n"+usage)
+	// The code from the environment stays out of the process list
+	// (install-vm.sh passes it so).
+	enrollCode := strings.TrimSpace(*code)
+	if enrollCode == "" {
+		enrollCode = strings.TrimSpace(os.Getenv(envEnrollToken))
+	}
+	if serverURL == "" || enrollCode == "" {
+		fmt.Fprint(stderr, "enroll needs --server and --code (or "+envEnrollToken+")\n\n"+usage)
 		return 2
 	}
 	serverURL = normalizeServerURL(serverURL)
@@ -88,14 +98,16 @@ func runEnroll(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "--ca-file: %v\n", err)
 		return 1
 	}
-	creds, err := enrollAndStore(ctx, client, serverURL, strings.TrimSpace(*code), *name, *path)
+	creds, err := enrollAndStore(ctx, client, serverURL, enrollCode, *name, *path)
 	if err != nil {
-		fmt.Fprintln(stderr, err)
+		fmt.Fprintln(stderr, strings.ReplaceAll(err.Error(), enrollCode, "[redacted]"))
 		return 1
 	}
 	fmt.Fprintf(stdout, "Collector %q enrolled as %s.\nIdentity stored in %s.\n"+
-		"Start or restart the collector (systemctl restart reticora-collector); it reports its local subnets,\n"+
-		"confirm them as discovery scopes on the Discovery page.\n", *name, creds.DeviceID, *path)
+		"Start or restart the collector (systemctl restart reticora-collector); a running collector picks the identity up\n"+
+		"within %s. It connects to %s (4222/TCP outbound) and reports its local subnets and RETICORA_SCAN_SUBNETS;\n"+
+		"confirm them as discovery scopes on the Discovery page: nothing is discovered before.\n",
+		*name, creds.DeviceID, *path, natsEnrollPoll, natsEndpoint(serverURL))
 	return 0
 }
 
@@ -195,28 +207,71 @@ func bootstrapEnrollment(ctx context.Context, getenv func(string) string) (enrol
 	return true, nil
 }
 
-// applyEnrolledIdentity fills server URL, organization and collector id
-// from the credentials file when the environment does not set them.
+// applyEnrolledIdentity applies the identity of the credentials file. The
+// organization (O) and collector id (CN) of the enrolled certificate win
+// over RETICORA_ORGANIZATION_ID and RETICORA_COLLECTOR_ID, which are logged
+// as a warning when they differ: the edge authorizes the collector by its
+// certificate, another value would only mislabel the HTTP path and the
+// metric samples. A collector with a client certificate of its own
+// (RETICORA_TLS_CLIENT_CERT[_FILE]) keeps the values of the environment;
+// the credentials file only fills empty ones. The server URL of the
+// enrollment applies unless serverFromEnv: RETICORA_SERVER_URL still wins,
+// with a warning when its host differs from the enrolled one, because the
+// NATS endpoint follows it.
 func applyEnrolledIdentity(ctx context.Context, cfg *collectorConfig, serverFromEnv bool) error {
 	creds, err := (&keystore.FileStore{Path: cfg.CredentialsPath}).Load(ctx)
 	if err != nil {
 		return err
 	}
-	if !serverFromEnv && creds.Metadata["server_url"] != "" {
-		cfg.ServerURL = creds.Metadata["server_url"]
+	enrolledURL := creds.Metadata["server_url"]
+	switch {
+	case enrolledURL == "":
+	case !serverFromEnv:
+		cfg.ServerURL = enrolledURL
+	case urlHost(cfg.ServerURL) != urlHost(enrolledURL):
+		slog.Warn("RETICORA_SERVER_URL differs from the server URL of the enrollment; the collector and its NATS endpoint follow RETICORA_SERVER_URL",
+			"event", "collector.identity.mismatch", "server_url", cfg.ServerURL, "enrolled_server_url", enrolledURL,
+			"nats_url", natsEndpoint(cfg.ServerURL),
+			"hint", "remove RETICORA_SERVER_URL from collector.env or set it to the URL of the enrollment")
 	}
-	if cfg.CollectorID == "" {
-		cfg.CollectorID = creds.DeviceID
+	cert, err := leafCertificate(creds.ClientCertificatePEM)
+	if err != nil {
+		return err
 	}
-	if cfg.OrganizationID == "" {
-		cert, cerr := leafCertificate(creds.ClientCertificatePEM)
-		if cerr != nil {
-			return cerr
-		}
-		if len(cert.Subject.Organization) != 1 {
-			return errors.New("the collector certificate names no organization")
-		}
-		cfg.OrganizationID = cert.Subject.Organization[0]
+	if len(cert.Subject.Organization) != 1 {
+		return errors.New("the collector certificate names no organization")
 	}
+	collectorID := cert.Subject.CommonName
+	if collectorID == "" {
+		collectorID = creds.DeviceID
+	}
+	ownCert := len(cfg.TLSCertPEM) > 0 || cfg.TLSCertFile != ""
+	cfg.OrganizationID = enrolledValue("RETICORA_ORGANIZATION_ID", cfg.OrganizationID, cert.Subject.Organization[0], ownCert)
+	cfg.CollectorID = enrolledValue("RETICORA_COLLECTOR_ID", cfg.CollectorID, collectorID, ownCert)
 	return nil
+}
+
+// enrolledValue is the value of an identity setting: the enrolled one,
+// unless the collector has a client certificate of its own (ownCert) and
+// the environment sets it.
+func enrolledValue(env, configured, enrolled string, ownCert bool) string {
+	switch {
+	case configured == "" || configured == enrolled:
+		return enrolled
+	case ownCert:
+		return configured
+	}
+	slog.Warn(env+" differs from the enrolled identity; the identity of the collector certificate is used",
+		"event", "collector.identity.mismatch", "configured", configured, "enrolled", enrolled,
+		"hint", "remove "+env+" from collector.env; the enrollment sets it")
+	return enrolled
+}
+
+// urlHost is the lower-case host of a server URL (scheme optional).
+func urlHost(serverURL string) string {
+	u, err := url.Parse(normalizeServerURL(serverURL))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }

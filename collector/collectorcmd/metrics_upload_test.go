@@ -25,6 +25,10 @@ package collectorcmd
 //     request keeps the batch for the next attempt.
 //   - TestMetricSamplesAreSentInBoundedBatches: a large sweep goes in
 //     batches of at most 1000 samples.
+//   - TestMonitoringNotLicensedPausesMetrics: a refusal because monitoring
+//     is not licensed (403 feature-not-entitled, the default plan) is logged
+//     once as a warning, not as an error per batch; no further batch is
+//     sent until the probe interval passed, and an accepted probe resumes.
 //
 // Retest (F-046):
 //
@@ -42,8 +46,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
 )
 
 func TestAuditT7MetricSamplesReachTheServerAuthenticated(t *testing.T) {
@@ -254,10 +260,11 @@ func TestMetricRefusalsAreLoggedAndDropped(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// The server refuses the batch (no monitoring entitlement): the caller
-	// gets the status, the batch is not kept.
+	// The server refuses the batch (a disabled collector; monitoring not
+	// licensed is TestMonitoringNotLicensedPausesMetrics): the caller gets
+	// the status, the batch is not kept.
 	withEdge(t, func(context.Context, string, []byte) ([]byte, error) {
-		return []byte(`{"status":403,"type":"https://reticora.io/problems/feature-not-entitled","error":"feature \"monitoring\" is not included in the current plan"}`), nil
+		return []byte(`{"status":403,"error":"collector is disabled"}`), nil
 	})
 	err = up.uploadMetricSamples(ctx, []plugins.MetricSample{sample("192.0.2.1"), sample("192.0.2.2")})
 	var refused *metricsRefusedError
@@ -318,5 +325,93 @@ func TestMetricSamplesAreSentInBoundedBatches(t *testing.T) {
 	}
 	if fmt.Sprint(sizes) != "[1000 1000 500]" {
 		t.Errorf("batch sizes %v, want [1000 1000 500]", sizes)
+	}
+}
+
+func TestMonitoringNotLicensedPausesMetrics(t *testing.T) {
+	logs := captureLogs(t)
+	probe := monitoringProbeInterval
+	monitoringProbeInterval = 200 * time.Millisecond
+	t.Cleanup(func() { monitoringProbeInterval = probe })
+	up, err := newUploader(context.Background(), testConfig("http://127.0.0.1:1", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var mu sync.Mutex
+	licensed, requests := false, 0
+	withEdge(t, func(_ context.Context, suffix string, _ []byte) ([]byte, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if suffix != edgeMetricsSuffix {
+			t.Errorf("suffix %q", suffix)
+		}
+		requests++
+		if licensed {
+			return []byte(`{"status":202,"ingested":1,"unassigned":0}`), nil
+		}
+		return []byte(`{"status":403,"type":"https://reticora.io/problems/feature-not-entitled","error":"feature \"monitoring\" is not included in the current plan"}`), nil
+	})
+	sent := func() int { mu.Lock(); defer mu.Unlock(); return requests }
+
+	// The default plan without monitoring: the first batch is refused, which
+	// is no error for the caller (it would log one per batch).
+	if err = up.uploadMetricSamples(ctx, []plugins.MetricSample{sample("192.0.2.1")}); err != nil {
+		t.Fatalf("batch refused as not licensed: %v, want no error", err)
+	}
+	// Further batches, sweep samples and traps are not sent while paused.
+	for i := range 5 {
+		if err = up.uploadMetricSamples(ctx, []plugins.MetricSample{sample(fmt.Sprintf("192.0.2.%d", i+2))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = up.uploadTrapEvent(ctx, snmp.TrapEvent{SourceIP: "192.0.2.9", TrapOID: "1.3.6.1.6.3.1.1.5.3", Received: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if n := sent(); n != 1 {
+		t.Errorf("%d metric requests while monitoring is not licensed, want the first only", n)
+	}
+	if n := up.metrics.len(); n != 0 {
+		t.Errorf("%d batches buffered while monitoring is not licensed, want none", n)
+	}
+	warned := logLines(t, logs, "monitoring not licensed; metric samples are not sent")
+	if len(warned) != 1 || warned[0]["level"] != "WARN" || warned[0]["event"] != "collector.metrics.not_licensed" {
+		t.Errorf("not-licensed log = %v, want one WARN collector.metrics.not_licensed", warned)
+	}
+	if refused := logLines(t, logs, "metric samples refused"); len(refused) != 0 {
+		t.Errorf("refusals logged as errors: %v", refused)
+	}
+	if up.droppedSamples.Load() != 0 {
+		t.Errorf("dropped samples = %d: samples not sent for want of the licence are no loss", up.droppedSamples.Load())
+	}
+
+	// After the probe interval one batch probes again; still not licensed:
+	// no second warning.
+	time.Sleep(monitoringProbeInterval + 50*time.Millisecond)
+	if err = up.uploadMetricSamples(ctx, []plugins.MetricSample{sample("192.0.2.20")}); err != nil {
+		t.Fatal(err)
+	}
+	if n := sent(); n != 2 {
+		t.Errorf("%d metric requests after the probe interval, want 2", n)
+	}
+	if n := len(logLines(t, logs, "monitoring not licensed; metric samples are not sent")); n != 1 {
+		t.Errorf("not-licensed warnings = %d, want 1 (logged once)", n)
+	}
+
+	// Licensed meanwhile: the probe is accepted and the samples flow again.
+	mu.Lock()
+	licensed = true
+	mu.Unlock()
+	time.Sleep(monitoringProbeInterval + 50*time.Millisecond)
+	for i := range 3 {
+		if err = up.uploadMetricSamples(ctx, []plugins.MetricSample{sample(fmt.Sprintf("192.0.2.%d", 30+i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := sent(); n != 5 {
+		t.Errorf("%d metric requests after the licence, want 5", n)
+	}
+	if resumed := logLines(t, logs, "monitoring licensed; metric samples are sent again"); len(resumed) != 1 {
+		t.Errorf("resume log = %v, want one", resumed)
 	}
 }

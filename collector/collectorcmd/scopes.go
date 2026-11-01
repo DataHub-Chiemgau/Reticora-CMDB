@@ -22,8 +22,10 @@ import (
 // Discovery scopes (DIS-09): the server sends the collector its enabled
 // scopes over the NATS channel; the collector discovers each scope with its
 // plugins, tags the DeviceRecords with scope, client, site and VRF and
-// reports every run. After the connection it reports its local subnets,
-// which the server offers as scope_suggested. Without a scope list from the
+// reports every run. After the connection it reports its local subnets and
+// the configured RETICORA_SCAN_SUBNETS, which the server offers as
+// scope_suggested; an empty scope list means that nothing is discovered
+// (logged once as collector.scopes.empty). Without a scope list from the
 // server (not enrolled, no NATS endpoint) the collector scans
 // RETICORA_SCAN_SUBNETS as before.
 
@@ -115,17 +117,48 @@ func syncScopes(ctx context.Context, nc *nats.Conn, subject string) {
 	ticker := time.NewTicker(bundleRefresh)
 	defer ticker.Stop()
 	for {
-		if scopes, intervals, err := fetchScopes(ctx, nc, subject); err != nil {
-			slog.Warn("discovery scopes not updated", "error", err)
-		} else {
-			collectorScopes.set(scopes, intervals)
-			slog.Info("discovery scopes updated", "scopes", len(scopes))
-		}
+		refreshScopes(ctx, nc, subject)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+// refreshScopes fetches the scopes and stores them; it reports whether the
+// server answered.
+func refreshScopes(ctx context.Context, nc *nats.Conn, subject string) bool {
+	scopes, intervals, err := fetchScopes(ctx, nc, subject)
+	if err != nil {
+		slog.Warn("discovery scopes not updated", "error", err)
+		return false
+	}
+	applyScopes(scopes, intervals)
+	return true
+}
+
+// scopesEmptyWarned is set while the server's scope list is empty and that
+// was logged; a non-empty list resets it.
+var scopesEmptyWarned atomic.Bool
+
+// applyScopes stores the server's scope list. An empty list means that the
+// collector discovers nothing: it is logged as a warning once per change,
+// not on every refresh.
+func applyScopes(scopes []collectorScope, intervals *discoveryIntervals) {
+	collectorScopes.set(scopes, intervals)
+	slog.Info("discovery scopes updated", "scopes", len(scopes))
+	if len(scopes) > 0 {
+		if scopesEmptyWarned.Swap(false) {
+			slog.Info("discovery scopes received; discovery runs on them", "event", "collector.scopes.received", "scopes", len(scopes))
+		}
+		return
+	}
+	if !scopesEmptyWarned.Swap(true) {
+		slog.Warn("no discovery scope: nothing is discovered until a scope is created or a suggested subnet is accepted on the Discovery page",
+			"event", "collector.scopes.empty",
+			"hint", "the collector reports its local subnets and RETICORA_SCAN_SUBNETS as scope suggestions; "+
+				"accepted scopes reach it within 15 minutes or at its next start")
 	}
 }
 
@@ -192,7 +225,35 @@ func localSubnets(interfaces func() ([]localInterface, error)) []string {
 	return out
 }
 
-// reportSubnets sends the local subnets once after the connection
+// scopeSuggestions are the subnets the collector offers the server as scope
+// suggestions (Zero-Config, INS-06, DIS-09): those of its interfaces
+// (localSubnets) and the configured RETICORA_SCAN_SUBNETS, which the
+// installer asks for. Configured entries that are no CIDR, loopback,
+// link-local, multicast, unspecified or a single host are left out, as the
+// server does (discovery.suggestableSubnet); the simulated fleet's subnet
+// is never suggested.
+func scopeSuggestions(cfg *collectorConfig, interfaces func() ([]localInterface, error)) []string {
+	out := localSubnets(interfaces)
+	if cfg.Simulate {
+		return out
+	}
+	for _, subnet := range cfg.ScanSubnets {
+		p, err := netip.ParsePrefix(strings.TrimSpace(subnet))
+		if err != nil {
+			continue
+		}
+		a := p.Addr()
+		if a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsMulticast() || a.IsUnspecified() || p.Bits() == a.BitLen() {
+			continue
+		}
+		if cidr := p.Masked().String(); !slices.Contains(out, cidr) {
+			out = append(out, cidr)
+		}
+	}
+	return out
+}
+
+// reportSubnets sends the scope suggestions once after the connection
 // (Zero-Config, INS-06).
 func reportSubnets(ctx context.Context, nc *nats.Conn, subject string, subnets []string) {
 	if len(subnets) == 0 {
@@ -496,7 +557,12 @@ func jobProtocols(jobType string, plugins []string) []string {
 }
 
 // runOpenJobs runs the open jobs of the collector one after the other and
-// returns how many it ran; without the scope channel there are none.
+// returns how many it ran; without the scope channel there are none. When
+// jobs are open but the collector holds no scope (yet), it asks the server
+// for its scopes once before running them: a scope accepted in the UI
+// shortly before "run now" reaches the collector at once instead of after
+// the next 15-minute refresh, and the job does not fail with config_error.
+// Without open jobs nothing more than the job request is sent.
 func runOpenJobs(ctx context.Context, cfg *collectorConfig, up *uploader, hosts *hostCache) int {
 	ch := scopeChannel.Load()
 	if ch == nil {
@@ -506,6 +572,9 @@ func runOpenJobs(ctx context.Context, cfg *collectorConfig, up *uploader, hosts 
 	if err != nil {
 		slog.Warn("discovery jobs not fetched", "error", err)
 		return 0
+	}
+	if scopes, _, known := collectorScopes.get(); len(open) > 0 && !cfg.Simulate && (!known || len(scopes) == 0) {
+		refreshScopes(ctx, ch.nc, ch.subject)
 	}
 	ran := 0
 	for i := range open {

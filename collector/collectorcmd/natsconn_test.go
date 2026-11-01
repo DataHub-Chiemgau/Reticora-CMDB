@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -56,7 +57,7 @@ func TestNATSEndpointAndOptions(t *testing.T) {
 		ClientPrivateKeyPEM:  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})),
 		CertificateAuthority: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})),
 	}
-	opts, err := natsOptions(creds)
+	opts, err := natsOptions(creds, "tls://cmdb.example.com:4222", "")
 	if err != nil || len(opts) == 0 {
 		t.Fatalf("options: %v", err)
 	}
@@ -65,6 +66,26 @@ func TestNATSEndpointAndOptions(t *testing.T) {
 		if err = opt(&o); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// The edge certificate is verified by the collector itself against
+	// the collector CA (C1, TestEdgeCertificateNameRule); Go's host binding
+	// alone is off, the SNI is the dialled host unless overridden.
+	if o.TLSConfig == nil || o.TLSConfig.VerifyConnection == nil || !o.TLSConfig.InsecureSkipVerify || o.TLSConfig.ServerName != "" ||
+		o.TLSConfig.MinVersion != tls.VersionTLS12 || len(o.TLSConfig.Certificates) != 1 {
+		t.Fatalf("TLS configuration = %+v", o.TLSConfig)
+	}
+	override, err := natsOptions(creds, "tls://192.0.2.10:4222", "edge.example.net")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oo nats.Options
+	for _, opt := range override {
+		if err = opt(&oo); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if oo.TLSConfig == nil || oo.TLSConfig.ServerName != "edge.example.net" || oo.TLSConfig.VerifyConnection == nil {
+		t.Fatalf("TLS configuration with RETICORA_NATS_TLS_SERVER_NAME = %+v", oo.TLSConfig)
 	}
 	// It keeps reconnecting, also after repeated authentication refusals
 	// (WP-381, TestCollectorNATSReconnectsAfterAuthRefusals). The first
@@ -79,7 +100,7 @@ func TestNATSEndpointAndOptions(t *testing.T) {
 		t.Fatalf("subject = %q, %v", subject, serr)
 	}
 	creds.CertificateAuthority = ""
-	if _, err = natsOptions(creds); err == nil {
+	if _, err = natsOptions(creds, "tls://cmdb.example.com:4222", ""); err == nil {
 		t.Fatal("options without the collector CA")
 	}
 }
@@ -152,7 +173,7 @@ authorization {
 		}
 	}
 
-	opts, err := natsOptions(creds)
+	opts, err := natsOptions(creds, fmt.Sprintf("tls://127.0.0.1:%d", port), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +331,7 @@ authorization {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runNATS(runCtx, collectorConfig{ServerURL: "https://cmdb.example.com", CredentialsPath: credPath})
+		runNATS(runCtx, collectorConfig{ServerURL: "https://cmdb.example.com", CredentialsPath: credPath}, nil)
 	}()
 	defer func() { stopRun(); <-done }()
 
