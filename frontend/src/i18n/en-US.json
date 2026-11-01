@@ -1163,7 +1163,8 @@
     "positionFor": "Position of {{name}}",
     "conflict": "The room plan was changed elsewhere in the meantime and has been reloaded. Please check the position and move the object again.",
     "rangeError": "Position not saved: the coordinates must lie between 0 and 100 %.",
-    "saveError": "Position not saved: {{message}}"
+    "saveError": "Position not saved: {{message}}",
+    "staleObject": "Position not saved: an object is no longer assigned to this room. The room plan was reloaded; please move the object again."
   },
   "consumables": {
     "summary": "Consumable stock with level and minimum level.",

@@ -1163,7 +1163,8 @@
     "positionFor": "Position von {{name}}",
     "conflict": "Der Raumplan wurde zwischenzeitlich von anderer Seite geändert und neu geladen. Bitte prüfen Sie die Position und verschieben Sie das Objekt erneut.",
     "rangeError": "Position nicht gespeichert: Die Koordinaten müssen zwischen 0 und 100 % liegen.",
-    "saveError": "Position nicht gespeichert: {{message}}"
+    "saveError": "Position nicht gespeichert: {{message}}",
+    "staleObject": "Position nicht gespeichert: Ein Objekt ist diesem Raum nicht mehr zugeordnet. Der Raumplan wurde neu geladen; bitte verschieben Sie das Objekt erneut."
   },
   "consumables": {
     "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",

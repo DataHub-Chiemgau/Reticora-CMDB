@@ -3155,7 +3155,7 @@ export interface paths {
     head?: never;
     /**
      * Update a room
-     * @description Changes name, floor, room type or the floor-plan layout. Every layout key must be a CI of the organization the caller sees and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
+     * @description Changes name, floor, room type or the floor-plan layout. The layout replaces the positions the caller sees (see Room.layout): every key must be a CI of the organization that the caller sees, that is not deleted and that is located in this room (its location is the room or lies below it), and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`; a CI the caller does not see is answered like an unknown id. Stored entries of CIs the caller does not see are kept unchanged; stored entries of CIs the caller sees that are deleted or no longer located in the room are dropped. The merge runs under the room's row lock after the If-Match check. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
      */
     patch: operations['updateRoom'];
     trace?: never;
@@ -10577,7 +10577,7 @@ export interface components {
       name: string;
       floor?: number;
       room_type?: string;
-      /** @description Floor-plan object positions, object_id → {x, y} normalized 0..1. */
+      /** @description Floor-plan object positions, CI id → {x, y} normalized 0..1. Only entries of CIs the caller sees, that are not deleted and that are located in this room are returned; an entry of a CI that was deleted or moved out of the room (e.g. to another client) is ignored, it neither shows nor blocks a PATCH. */
       layout?: {
         [key: string]: {
           x?: number;
@@ -10599,7 +10599,7 @@ export interface components {
       name?: string;
       floor?: number;
       room_type?: string;
-      /** @description Replaces the room's floor-plan object positions. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. Each key must be a CI of the organization the caller sees (422 otherwise). */
+      /** @description Replaces the room's floor-plan object positions the caller sees. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears them. Each key must be a CI of the organization the caller sees, not deleted and located in this room (422 otherwise). Positions of CIs the caller does not see stay as stored. */
       layout?: {
         [key: string]: {
           x?: number;
@@ -18822,7 +18822,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller (field `layout.<ci>`). */
+      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller, not deleted and located in this room (field `layout.<ci>`; the same answer for an unknown id and a CI the caller does not see). */
       422: {
         headers: {
           [name: string]: unknown;

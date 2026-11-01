@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-689 | 35 | 30,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-698 | 36 | 31,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **337** | **431,0** | |
+| **Summe** | | **338** | **432,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>35 WPs · 30,0 PT"]
+    K7N["K7-Nachträge<br/>36 WPs · 31,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -456,6 +456,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-685](#wp-685--kontingent-ablehnung-nennt-den-bestand-der-organisation-nur-org-weiten-aufrufern) | `k7n-entitlement-limit-detail` | Kontingent-Ablehnung nennt den Bestand der Organisation nur org-weiten Aufrufern | K7N | 0,5 | F-414 | WP-072, WP-472, WP-674 |
 | [WP-686](#wp-686--rack-montage-explizites-height_u-0-und-leeres-face-sind-400-mit-feld-nichts-gespeichert-weggelassene-felder-behalten-die-vorgabe) | `k7n-rack-mount-explicit-zero` | Rack-Montage: explizites `height_u` 0 und leeres `face` sind 400 mit Feld, nichts gespeichert; weggelassene Felder behalten die Vorgabe | K7N | 0,5 | F-415 | WP-175, WP-126, WP-500 |
 | [WP-689](#wp-689--benachrichtigungskanäle-und-zustellungen-nur-für-org-weite-inhaber-von-notificationmanage-webhook-kanäle-bleiben-org-weite-ziele) | `k7n-notification-admin-org-wide` | Benachrichtigungskanäle und Zustellungen nur für org-weite Inhaber von `notification:manage`; Webhook-Kanäle bleiben org-weite Ziele | K7N | 1,0 | F-418 | WP-139, WP-398, WP-409, WP-633 |
+| [WP-698](#wp-698--raumlayout-im-scope-des-aufrufers-nur-sichtbare-cis-des-raums-unsichtbare-einträge-bleiben-veraltete-blockieren-nicht) | `k7n-room-layout-client-scope` | Raumlayout im Scope des Aufrufers: nur sichtbare CIs des Raums, unsichtbare Einträge bleiben, veraltete blockieren nicht | K7N | 1,0 | F-427 | WP-526 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20372,6 +20373,70 @@ TEN-09;[Q];B;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-6
 **Entscheidungsbedarf:** keiner (Option A entschieden: nur org-weite Inhaber verwalten Kanäle und lesen Zustellungen). Hinweis für die Leitung: Ein client-gebundener Kunden-Administrator kann Benachrichtigungen für seinen Client nicht mehr über eigene Kanäle umleiten; dafür bleiben die eigenen Präferenzen (`/notifications/preferences`) und Webhook-Abonnements (`POST /webhooks`), die seit WP-601 den Scope ihres Erzeugers tragen. Kanäle mit Client-Bezug (Option B) wären eine Erweiterung mit Migration.
 
 **Nicht Bestandteil:** Client-gebundene Benachrichtigungskanäle (Option B, Client-Dimension in `notification_channel` und Filter der Zustellung je Kanal); Scope-Filter der Zustellungsliste; Bestandskanäle, die vor der Korrektur ein client-gebundener Inhaber angelegt hat (sie bleiben org-weite Kanäle und sind für org-weite Administratoren sichtbar und löschbar); eine Frontend-Seite der Kanalverwaltung.
+
+### WP-698 – Raumlayout im Scope des Aufrufers: nur sichtbare CIs des Raums, unsichtbare Einträge bleiben, veraltete blockieren nicht
+
+**Schlüssel:** `k7n-room-layout-client-scope` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-526 (`t7-room-layout`; schloss F-341 und F-342)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-427](../../../audit/g1-reaudit/FINDINGS.md#f-427) | P2 | Raumlayout behält und akzeptiert Schlüssel von CIs eines anderen Clients: client-beschränkte Nutzer lesen deren ID und Position, können den Raum über die UI nicht mehr positionieren (422), und ein direkter PATCH löscht die fremde Position | schließt | K7-Wiederholungsprüfung r3-b5 (Verifier der Wiederholungsprüfung von WP-193 auf `7cd63e0`) |
+
+**Problem:** `room.layout` (CI-Id → Position) wird von `GET /rooms`, `GET /rooms/{id}` und der PATCH-Antwort ungefiltert geliefert (`tenantapi/pg_repository.go` `ListRooms`/`GetRoom` Zeile 623–666, `handler.go` `GetRoom` Zeile 541–553 auf `e5c2d86`). `UpdateRoom` ersetzt das Layout vollständig; `checkLayoutCIs` (Zeile 750–783) verlangt nur ein für den Aufrufer sichtbares CI der Organisation, nicht Raum oder Löschung. Wechselt ein CI zu einem anderen Client, sieht ein Client-1-Nutzer weiter dessen ID und Position; der Raumplan sendet das Server-Layout zurück (`RoomPlanPage.tsx` `flush`, Zeile 149) und scheitert mit 422 auf den fremden Schlüssel; ein direkter PATCH ohne ihn löscht die fremde Position. Der Org-Admin kann CIs beliebiger Clients in jeden Raum eintragen (F-427, UI-18, TEN-05, TEN-09).
+
+**Akzeptanzkriterien:**
+
+- [ ] Regel (spec-first, `api/openapi.yaml` an `Room.layout`, `UpdateRoomRequest.layout`, `PATCH /rooms/{id}` mit 422): Ein Layout-Schlüssel ist ein CI der Organisation, das der Aufrufer sieht, das nicht gelöscht ist und im Raum steht (`ci.room_id`, abgeleitet aus `location_id`: der Raum oder ein Ort darunter). `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `GET /rooms`, `GET /rooms/{id}` und die PATCH-Antwort zeigen nur Einträge nach dieser Regel (`showLayouts`, eine Abfrage je Liste); Einträge veralteter CIs (gelöscht, aus dem Raum verschoben) und für den Aufrufer unsichtbarer CIs fehlen.
+- [ ] `PATCH /rooms/{id}` mit `layout`: jeder gesendete Schlüssel nach der Regel, sonst 422 `layout.<ci>` mit einem Text für alle Gründe („the key is not a configuration item located in this room“), sodass ein CI eines anderen Clients wie eine unbekannte ID beantwortet wird (kein Existenz-Orakel). Das Ergebnis ersetzt die für den Aufrufer sichtbaren Einträge; gespeicherte Einträge von CIs, die er nicht sieht, bleiben unverändert; gespeicherte Einträge sichtbarer, aber veralteter CIs fallen weg (`mergeLayout`). Die Zusammenführung liest das gespeicherte Layout unter der Zeilensperre (`FOR UPDATE`) nach der If-Match-Prüfung von F-342; 409/412 unverändert.
+- [ ] Eine Verschiebung eines CI (Ortswechsel, auch Clientwechsel) ändert den alten Raum nicht; GET und PATCH ignorieren den veralteten Eintrag (in OpenAPI beschrieben).
+- [ ] `RoomPlanPage`: Ein 422 auf einen Schlüssel (`layout.<ci>` ohne `.x|.y`) zeigt einen Hinweis (de/en, `roomplan.staleObject`) und lädt Raum und Objekte neu, statt bei jeder weiteren Verschiebung erneut zu scheitern. Vitest „reloads room and objects when a layout key is no object of the room any more (F-427)“: auf `e5c2d86` rot, mit der Korrektur grün.
+- [ ] Defekttest `TestRoomLayoutForeignClientEntriesAgainstPostgres` (`backend/internal/tenantapi/room_layout_integration_test.go`, Handler über PostgreSQL als Laufzeitrolle, client-beschränkter Principal über `scopetest.ClientCtx` wie im Paket üblich): nach der Verschiebung von `m` zu Client 2 enthält GET für Client 1 und org-weit kein `m`, Server-Layout plus verschobenes `d` → 200, der org-weite PATCH entfernt den veralteten Eintrag, ein CI in einem anderen Raum → 422; org-weiter PATCH eines Client-1-Raums mit einem Client-2-CI → 422; mit einem früher gespeicherten Client-2-Eintrag zeigen GET und Liste für Client 1 nur sein CI, der Client-1-PATCH löscht die Client-2-Position nicht, der Client-2-Schlüssel ist 422 wie eine unbekannte ID; ein gelöschtes CI fehlt in GET und fällt beim nächsten PATCH weg. Auf `e5c2d86` rot, mit der Korrektur grün, auch als Nicht-Root-Nutzer (verbindlicher Retest F-427).
+- [ ] `TestRoomLayoutValidationAgainstPostgres` legt seine CIs in die Räume (die neue Regel) und bleibt grün (Bereich, Schlüssel, Client-Isolation, If-Match 409/412, gleichzeitige Bearbeiter).
+- [ ] `docs/security/review-g1.md` beschreibt die Korrektur. Regression: `go test -p 1 ./internal/tenantapi/ ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; `tsc`, prettier, eslint, Vitest `RoomPlanPage.test.tsx` und `src/i18n` grün; Ratchet `--kinds go,vitest` 0 Fehler.
+
+**Dateien (16 Einträge):**
+
+- backend/internal/tenantapi/pg_repository.go
+- backend/internal/tenantapi/validate.go
+- backend/internal/tenantapi/model.go
+- backend/internal/tenantapi/handler.go
+- backend/internal/tenantapi/room_layout_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- frontend/src/pages/RoomPlanPage.tsx
+- frontend/src/pages/RoomPlanPage.test.tsx
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Sichtbarkeit der CIs folgt der Policy `ci_isolation` in der Transaktion des Aufrufers (`WithRequestTenant`); geprüft als Laufzeitrolle. Da jede Site einen Client hat und der Ort eines CI dessen Client trägt (`ci_derive_location`), sieht jeder, der den Raum sieht, alle gültigen CIs darin; unsichtbare Einträge sind daher immer veraltet und bleiben nur, bis ein Aufrufer, der das CI sieht (org-weit), den Raum speichert.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestRoomLayout' ./internal/tenantapi/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/tenantapi/ ./internal/server/`.
+- `cd frontend && npx vitest run src/pages/RoomPlanPage.test.tsx src/i18n`.
+- Real-Stack `frontend/e2e-real/locations-racks.spec.ts` L06b unverändert (sein CI steht im Raum); nur in CI.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-18;[B];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+TEN-05;[B];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+TEN-09;[Q];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+UI-18;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-698
+```
+
+**Entscheidungsbedarf:** keiner. Gewählt: GET/PATCH ignorieren veraltete Einträge, statt sie beim Ortswechsel eines CI aus dem alten Raum zu entfernen (kein Schreibzugriff des CI-Pfads auf Räume, keine Migration); die Schlüsselregel „CI steht im Raum“ verschärft den Vertrag von WP-526 (bisher jedes sichtbare CI der Organisation).
+
+**Nicht Bestandteil:** Bereinigung bestehender veralteter Einträge per Migration (sie sind unsichtbar und werden beim nächsten org-weiten Speichern entfernt); Einträge von CIs, die endgültig gelöscht und für niemanden mehr sichtbar sind, bleiben gespeichert, ohne je gezeigt zu werden. Die `MemoryRepository` (ohne Scopes) bleibt unverändert. Raumpläne/Heatmaps (UI-13 [P4]).
 
 ## Zurückgestellte Befunde
 

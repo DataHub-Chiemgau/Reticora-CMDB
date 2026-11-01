@@ -546,7 +546,8 @@ func (h *Handler) GetRoom(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateRoom handles PATCH /api/v1/rooms/{id}. The layout is checked for
-// range and CI keys (422, F-341); If-Match with the room's ETag refuses a
+// range and CI keys (422, F-341) and replaces only the positions the caller
+// sees (F-427, see mergeLayout); If-Match with the room's ETag refuses a
 // room changed since with 409, a PATCH without If-Match stays allowed
 // (F-342). The answer carries the new ETag.
 func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {

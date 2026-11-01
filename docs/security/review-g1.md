@@ -390,6 +390,18 @@ Fehlende Kombinationen:
   `TestNotificationAdministrationRequiresOrgWideScope`
   (`backend/internal/server/notification_channel_scope_integration_test.go`);
   Matrixzeile `notification-channels` für jede Scope-Art.
+- Raumlayout (F-427, WP-698): Das Layout eines Raums (`room.layout`, CI-Id →
+  Position) wurde ungefiltert ausgeliefert. Wechselte ein CI zu einem
+  anderen Client, lasen client-gebundene Nutzer des alten Raums dessen Id und
+  Position; ihr nächster PATCH scheiterte mit 422 oder löschte fremde
+  Einträge. Seit WP-698 liefern `GET /rooms`, `GET /rooms/{id}` und die
+  PATCH-Antwort nur Einträge von CIs, die der Aufrufer sieht, die nicht
+  gelöscht sind und im Raum stehen; ein PATCH ersetzt nur diese Einträge und
+  behält die für den Aufrufer unsichtbaren unter der Zeilensperre des Raums.
+  Ein Schlüssel muss ein solches CI sein; ein CI eines anderen Clients wird
+  wie eine unbekannte Id abgelehnt (422 mit demselben Text, kein
+  Existenz-Orakel). Test: `TestRoomLayoutForeignClientEntriesAgainstPostgres`
+  (`backend/internal/tenantapi/room_layout_integration_test.go`).
 - Die endgültige Formulierung nach WP-409 auf dem Release-Kandidaten
   übernimmt WP-595 (`t5-rc-evidence`).
 

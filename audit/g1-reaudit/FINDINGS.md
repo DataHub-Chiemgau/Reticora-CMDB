@@ -32,9 +32,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 1 |
 | P1 | 5 |
-| P2 | 27 |
+| P2 | 28 |
 | P3 | 31 |
-| **Summe** | **64** |
+| **Summe** | **65** |
 
 ## Übersicht
 
@@ -104,6 +104,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-414](#f-414) | P3 | Ablehnung eines Kontingents nennt eingeschränkten Principals den Bestand der ganzen Organisation („N of L in use“) | WP-674 (K7-Nachträge) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-685 |
 | [F-415](#f-415) | P3 | Rack-Montage mit explizitem `height_u` 0 wird als 1 HE gespeichert (201/200), leeres `face` als `front` | WP-175 (K7) | belegt | backend/internal/rack/layout_integration_test.go | WP-686 |
 | [F-418](#f-418) | P2 | Ein auf einen Client gebundener Inhaber von `notification:manage` verwaltet die Benachrichtigungskanäle der Organisation und liest alle Zustellungen; ein von ihm angelegter Webhook-Kanal erhält die Benachrichtigungen anderer Clients mit Name und E-Mail fremder Empfänger | Verifier r3-b4 (WP-138/139) auf `bf51da7` | belegt | backend/internal/server/notification_channel_scope_integration_test.go | WP-689 |
+| [F-427](#f-427) | P2 | Raumlayout behält und akzeptiert Schlüssel von CIs eines anderen Clients: client-beschränkte Nutzer lesen deren ID und Position, können den Raum über die UI nicht mehr positionieren (422), und ein direkter PATCH löscht die fremde Position | Verifier r3-b5 (WP-193) auf `7cd63e0` | belegt | backend/internal/tenantapi/room_layout_integration_test.go | WP-698 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1652,6 +1653,50 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   --- FAIL: TestChannelMatrix/read/notification-channels/client (ebenso site, team, multi; write/notification-channels/client, site, team, multi)
       channel_matrix_integration_test.go:278: GET /api/v1/notification-channels as client: 200, want 403: {"data":[{"id":"fd6b0070-…","name":"chm-ntf-17","kind":"inapp",…
       channel_matrix_integration_test.go:278: GET /api/v1/notification-deliveries?limit=200 as client: 200, want 403: …
+  ```
+
+<a id="f-427"></a>
+### F-427 (P2) – Raumlayout behält und akzeptiert Schlüssel von CIs eines anderen Clients: client-beschränkte Nutzer lesen deren ID und Position, können den Raum über die UI nicht mehr positionieren (422), und ein direkter PATCH löscht die fremde Position
+
+- **Gefunden in:** K7-Wiederholungsprüfung r3-b5 (Verifier, Probe `TestVR3B5Probe/WP-193…` auf `7cd63e0`), Wiederholungsprüfung von WP-193 (AK2, Raumpositionierung) und WP-526; `backend/internal/tenantapi/` und `frontend/src/pages/RoomPlanPage.tsx` sind dort identisch mit `e5c2d86`; kodierender Test von WP-698 · **Betroffene Anforderungen:** UI-18 (WP-193 AK2, WP-526), TEN-05, TEN-09 · **Komponente:** backend/internal/tenantapi/pg_repository.go (`checkLayoutCIs`, Zeile 750–783 auf `e5c2d86`: prüft nur, ob der Schlüssel ein für den Aufrufer sichtbares CI der Organisation ist, nicht Client, Löschung und Raum des CI; `UpdateRoom` Zeile 684–748 ersetzt das gespeicherte Layout vollständig durch das gesendete; `GetRoom` Zeile 655–666 und `ListRooms` Zeile 623–653 liefern `room.layout` ungefiltert), backend/internal/tenantapi/handler.go (`GetRoom`, Zeile 541–553), frontend/src/pages/RoomPlanPage.tsx (`flush`, Zeile 149: sendet `{...base.layout, ...sent}`, also das Server-Layout samt fremder Schlüssel) · **Quelle:** `k7/ver/r3-b5/k-reaudit-3/WP-193/verify-probe-room-layout-cross-client.log`, Probe `k7/ver/r3-b5/k-reaudit-3/WP-193/verify-probe-vr3b5_test.go.txt`; kodierender Test von WP-698 (`k7/wp698-red.log`)
+- **Reproduktion:** (UI-erreichbar) Raum `room1` von Client 1 mit den Client-1-CIs `m` und `d` (beide in `room1`). Client-1-Nutzer `PATCH /api/v1/rooms/{room1} {"layout":{m:…, d:…}}` → 200. Org-Admin verschiebt `m` zu Client 2: `PATCH /api/v1/cis/{m} {"client_id":C2,"location_id":room2}` → 200. Client-1-Nutzer `GET /rooms/{room1}` → `layout` enthält weiter `m` (ID und Position eines Client-2-CI). Client-1-Nutzer sendet, was `RoomPlanPage.flush` sendet (Server-Layout plus verschobenes `d`) → 422 `layout.<m>: the key is not a configuration item of the organization`; jede weitere Positionierung im Raum scheitert. Variante: Org-Admin `PATCH /rooms/{room1}` mit einem Client-2-CI (in einem Client-2-Raum) als Schlüssel → 200; Client-1-Nutzer `GET` zeigt dessen Position; Client-1-Nutzer `PATCH {"layout":{c1:…}}` → 200 und löscht die Client-2-Position, die er nicht sieht.
+- **Soll:** UI-18/WP-193 AK2: Objekte eines Raums sind per Tastatur und Formular positionierbar, auch für client-beschränkte Nutzer. TEN-05/TEN-09: Ein Aufrufer sieht nur Daten seines Scopes; Objekte eines anderen Clients sind weder lesbar noch durch ihn veränderbar, und ihre Existenz ist nicht erkennbar. Für das Layout heißt das: Ein Aufrufer sieht nur Einträge von CIs, die er sieht, die nicht gelöscht sind und im Raum stehen; für ihn unsichtbare Einträge blockieren seinen PATCH nicht und werden von ihm nicht gelöscht (der Server führt zusammen, unter der Zeilensperre und If-Match-Prüfung von F-342); veraltete Einträge (CI gelöscht oder aus dem Raum verschoben) werden ignoriert statt zu blockieren. Ein gesendeter Schlüssel, der kein solches CI ist, bleibt 422, für ein CI eines anderen Clients mit derselben Antwort wie für eine unbekannte ID.
+- **Ist:** `GET /rooms`, `GET /rooms/{id}` und die PATCH-Antwort liefern `room.layout` ungefiltert, auch Schlüssel von CIs anderer Clients und gelöschter oder verschobener CIs. `UpdateRoom` ersetzt das ganze Layout: ein Schlüssel, den der Aufrufer nicht sieht, ist 422; lässt er ihn weg, ist die fremde Position gelöscht. Der Raumplan sendet das Server-Layout zurück und scheitert daher dauerhaft mit 422, sobald das Layout einen für den Nutzer unsichtbaren Schlüssel enthält. Ein Schlüssel muss nur ein CI der Organisation sein, nicht im Raum stehen; der Org-Admin kann CIs beliebiger Clients in jeden Raum eintragen.
+- **Nutzerwirkung:** Client-beschränkte Nutzer lesen IDs und Positionen von CIs eines anderen Clients (Cross-Client-Exposition, TEN-09) und können nach einer Client-Verschiebung eines CI ihren Raumplan weder per Tastatur noch per Formular oder Drag & Drop speichern (nur „Position nicht gespeichert: …“). Ein direkter PATCH eines Client-1-Nutzers löscht Positionen des anderen Clients.
+- **Ursache (belegt):** WP-526 (F-341) hat die Schlüsselprüfung über die CI-Policies gebaut (ein fremdes CI gilt als unbekannt), das Layout aber weiter als ganzes Objekt gelesen und ersetzt; Lesen und Schreiben kennen keine Sicht des Aufrufers auf die Einträge. `TestRoomLayoutValidationAgainstPostgres` prüfte nur Schlüssel, die der Aufrufer selbst sendet, und positionierte CIs, die nicht im Raum stehen.
+- **Empfehlung:** Ein Layout-Schlüssel ist ein CI der Organisation, das der Aufrufer sieht, nicht gelöscht ist und im Raum steht (`ci.room_id`, abgeleitet aus `location_id`). GET (Detail, Liste) und PATCH-Antwort zeigen nur solche Einträge. PATCH prüft die gesendeten Schlüssel nach dieser Regel (422 `layout.<ci>`, ein Text für alle Gründe), ersetzt die sichtbaren Einträge und behält die für den Aufrufer unsichtbaren; sichtbare, aber veraltete Einträge fallen weg. Die Zusammenführung liest das gespeicherte Layout unter der bestehenden Zeilensperre nach der If-Match-Prüfung. Eine Verschiebung des CI ändert den Raum nicht (GET/PATCH ignorieren den Eintrag). `api/openapi.yaml` beschreibt die Regel (spec-first). Der Raumplan lädt Raum und Objekte bei einem 422 auf einen Schlüssel neu.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestRoomLayout' ./internal/tenantapi/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: nach der Verschiebung von `m` zu Client 2 enthält `GET /rooms/{room1}` für Client 1 und org-weit kein `m`; Server-Layout plus verschobenes `d` → 200; der org-weite PATCH entfernt den veralteten Eintrag; ein Schlüssel eines CI in einem anderen Raum → 422; org-weiter PATCH eines Client-1-Raums mit einem Client-2-CI → 422; mit einem früher gespeicherten Client-2-Eintrag zeigen GET und Liste für Client 1 nur `c1`, `PATCH {c1}` → 200 und die Client-2-Position bleibt; der Client-2-Schlüssel ist 422 mit demselben Feld- und Detailtext wie eine unbekannte ID; ein gelöschtes CI fehlt in GET und fällt beim nächsten PATCH weg. Dazu `cd frontend && npx vitest run src/pages/RoomPlanPage.test.tsx` PASS (422 auf `layout.<ci>` → Hinweis, Raum und Objekte neu geladen).
+- **Kodierender Test:** backend/internal/tenantapi/room_layout_integration_test.go (`TestRoomLayoutForeignClientEntriesAgainstPostgres`, Handler über PostgreSQL als Laufzeitrolle mit dem Tenant-Scope des Principals, client-beschränkter Principal wie im Paket üblich über `scopetest.ClientCtx`) und frontend/src/pages/RoomPlanPage.test.tsx („reloads room and objects when a layout key is no object of the room any more (F-427)“); auf `e5c2d86` rot (ausgeführt auf der Basis `7cd63e0` mit den alten Produktionsdateien `pg_repository.go`, `validate.go`, `model.go`, `handler.go` bzw. `RoomPlanPage.tsx` aus `HEAD`, identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestRoomLayoutValidationAgainstPostgres
+  --- PASS: TestRoomLayoutValidationAgainstPostgres (0.53s)
+  === RUN   TestRoomLayoutForeignClientEntriesAgainstPostgres
+      room_layout_integration_test.go:323: client 1 GET room1 after the move still shows the client-2 CI m: map[c0de21a0-0000-4000-8000-000000001001:{0.2 0.2} c0de21a0-0000-4000-8000-000000001002:{0.8 0.8}]
+      room_layout_integration_test.go:327: client 1 PATCH of what the room plan sends (server layout + moved d): 422 {"detail":"layout.c0de21a0-0000-4000-8000-000000001001: the key is not a configuration item of the organization","field":"layout.c0de21a0-0000-4000-8000-000000001001",…}
+          , want 200
+      room_layout_integration_test.go:330: position of d after the client-1 PATCH: {X:0.8 Y:0.8}, want x=0.4
+      room_layout_integration_test.go:334: org-wide GET room1 shows m, which is no longer located in the room: map[c0de21a0-0000-4000-8000-000000001001:{0.2 0.2} c0de21a0-0000-4000-8000-000000001002:{0.8 0.8}]
+      room_layout_integration_test.go:340: the org-wide PATCH kept the stale entry of m: map[c0de21a0-0000-4000-8000-000000001001:{0.2 0.2} c0de21a0-0000-4000-8000-000000001002:{0.8 0.8}]
+      room_layout_integration_test.go:343: org-wide PATCH naming m, located in another room: 200 {"id":"f6461ad5-…","name":"wp698-room-c1",…}
+          , want 422
+      room_layout_integration_test.go:357: org-wide PATCH of a client-1 room naming a client-2 CI: 200 {"id":"4125bc99-…","name":"wp698-room-c1-legacy",…}
+          , want 422
+      room_layout_integration_test.go:364: client 1 GET of its room: map[c0de21a0-0000-4000-8000-000000001003:{0.2 0.2} c0de21a0-0000-4000-8000-000000001004:{0.8 0.8}], want only its own c1
+      room_layout_integration_test.go:367: org-wide GET of the client-1 room: map[c0de21a0-0000-4000-8000-000000001003:{0.2 0.2} c0de21a0-0000-4000-8000-000000001004:{0.8 0.8}], want only c1 (c2 is located elsewhere)
+      room_layout_integration_test.go:374: client 1 room list shows the client-2 CI: 200 {"data":[{"id":"4125bc99-…","name":"wp698-room-c1-legacy","layout":{…}…
+      room_layout_integration_test.go:381: layout after the client-1 PATCH {c1}: map[c0de21a0-0000-4000-8000-000000001003:{0.3 0.3}], want c1 moved and the client-2 position kept
+      room_layout_integration_test.go:391: refused PATCH changed the client-2 position: map[c0de21a0-0000-4000-8000-000000001003:{0.3 0.3}]
+      room_layout_integration_test.go:406: client 1 GET shows the deleted CI: map[c0de21a0-0000-4000-8000-000000001002:{0.4 0.4} c0de21a0-0000-4000-8000-000000001005:{0.6 0.6}]
+      room_layout_integration_test.go:413: the deleted CI stays in the layout after the PATCH: map[c0de21a0-0000-4000-8000-000000001002:{0.45 0.4} c0de21a0-0000-4000-8000-000000001005:{0.6 0.6}]
+  --- FAIL: TestRoomLayoutForeignClientEntriesAgainstPostgres (0.61s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi	1.268s
+  FAIL
+
+   FAIL  src/pages/RoomPlanPage.test.tsx > RoomPlanPage saving (F-342) > reloads room and objects when a layout key is no object of the room any more (F-427)
+  TestingLibraryElementError: Unable to find an element with the text: /nicht mehr zugeordnet|no longer assigned/.
+        Tests  1 failed | 9 passed (10)
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund
