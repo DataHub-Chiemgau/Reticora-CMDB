@@ -4004,7 +4004,7 @@ export interface paths {
     put?: never;
     /**
      * Register a discovery collector
-     * @description The new collector counts against max_collectors (ENT-03): at the limit of the organization's collectors that are not disabled, counted organization-wide, the request gets 403 entitlement-limit and no collector is registered.
+     * @description The new collector counts against max_collectors (ENT-03): at the limit of the organization's collectors that are not disabled, counted organization-wide, the request gets 403 entitlement-limit and no collector is registered. site_id binds the collector to a site, which decides its client: an unknown or not visible site and a site of another client than client_id are 422 with field site_id, nothing is registered (COL-01, F-423).
      */
     post: operations['registerCollector'];
     delete?: never;
@@ -4114,7 +4114,7 @@ export interface paths {
     head?: never;
     /**
      * Rename, bind to a site, disable or enable a collector
-     * @description Requires collector:manage. The site decides the client (422 for a site of another client). status disabled refuses the collector's heartbeats; active enables a disabled collector again (offline until its next heartbeat).
+     * @description Requires collector:manage. The site decides the client (422 for a site of another client). status disabled refuses the collector's heartbeats; active enables a disabled collector again (offline until its next heartbeat). An empty name, another status and an unknown or not visible site are 422 with field name, status or site_id; the collector stays unchanged (F-423).
      */
     patch: operations['updateCollector'];
     trace?: never;
@@ -11066,6 +11066,8 @@ export interface components {
     RegisterCollectorRequest: {
       name: string;
       client_id?: string;
+      /** @description Site of the collector; it decides the client (422 with field site_id for an unknown site or one of another client than client_id). */
+      site_id?: string;
       version?: string;
       status?: string;
       config?: {
@@ -21278,6 +21280,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

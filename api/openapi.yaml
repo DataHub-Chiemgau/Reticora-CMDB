@@ -8526,7 +8526,10 @@ paths:
         The new collector counts against max_collectors (ENT-03): at the
         limit of the organization's collectors that are not disabled,
         counted organization-wide, the request gets 403 entitlement-limit
-        and no collector is registered.
+        and no collector is registered. site_id binds the collector to a
+        site, which decides its client: an unknown or not visible site and
+        a site of another client than client_id are 422 with field site_id,
+        nothing is registered (COL-01, F-423).
       requestBody:
         required: true
         content:
@@ -8546,6 +8549,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/EntitlementLimit'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -8759,7 +8764,9 @@ paths:
         Requires collector:manage. The site decides the client (422 for a site
         of another client). status disabled refuses the collector's heartbeats;
         active enables a disabled collector again (offline until its next
-        heartbeat).
+        heartbeat). An empty name, another status and an unknown or not
+        visible site are 422 with field name, status or site_id; the
+        collector stays unchanged (F-423).
       requestBody:
         required: true
         content:
@@ -20888,6 +20895,12 @@ components:
           type: string
         client_id:
           type: string
+        site_id:
+          type: string
+          description: >-
+            Site of the collector; it decides the client (422 with field
+            site_id for an unknown site or one of another client than
+            client_id).
         version:
           type: string
         status:

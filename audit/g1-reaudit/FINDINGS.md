@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 29 |
-| P3 | 38 |
-| **Summe** | **73** |
+| P3 | 39 |
+| **Summe** | **74** |
 
 ## Übersicht
 
@@ -113,6 +113,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-428](#f-428) | P3 | Sicherheitsreview und GATE-01-Prüfung erfassen die sicherheitsrelevanten Befunde ab F-355 nicht als SR-Befunde mit Severity; ein offener Scope- oder Auth-Befund aus K5 bis K7 blockiert weder GATE-01 noch `--final` | Verifier r3-b6 (WP-209/213) auf `7cd63e0` | belegt | tests/rep01-structure.test.sh | WP-699 |
 | [F-429](#f-429) | P3 | Eindeutige Attribute: Wiederherstellen, Unmerge und die Review-Auflösungen, die ein CI anlegen oder reaktivieren, prüfen die Eindeutigkeit nicht (Duplikate ohne Index, 500 mit Index) | Korrektur WP-692 (K7) auf `7cd63e0` | belegt | backend/internal/server/unique_attr_write_paths_integration_test.go | WP-700 |
 | [F-422](#f-422) | P3 | `override_conflict` accept auf einem inzwischen soft-gelöschten CI entfernt den Override und schreibt das gelöschte CI; Override-Routen und Feldliste antworten für gelöschte CIs 200 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-693 |
+| [F-423](#f-423) | P3 | `POST /collectors` und `PATCH /collectors/{id}`: Feldfehler aus Validierung und Repository enden als 500 statt 422 mit Feld | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/collector_field_errors_integration_test.go | WP-694 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1991,6 +1992,44 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       override_scope_integration_test.go:48: client-1 field values of client-2 CI: len=0 err=<nil>, want 0/ErrNotFound
   --- FAIL: TestOverrideRepositoryClientScope (0.55s)
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override	0.561s
+  ```
+
+<a id="f-423"></a>
+### F-423 (P3) – `POST /collectors` und `PATCH /collectors/{id}`: Feldfehler aus Validierung und Repository enden als 500 statt 422 mit Feld
+
+- **Gefunden in:** Kandidatenprüfung K7 auf `7cd63e0` (Kandidat 2 des Auditors, Probe `TestKCand2CollectorFieldErrors`), in WP-677 als Beobachtung vermerkt; `backend/internal/discovery/collector_status.go` und `backend/internal/api/dberrors.go` sind dort identisch mit `e5c2d86`; kodierender Test von WP-694 · **Betroffene Anforderungen:** API-03 [B] (Fehler als RFC 7807), COL-01 [B] (Collector mit Client, Site und Status), WP-144, WP-677 · **Komponente:** backend/internal/discovery/collector_status.go (`UpdateCollector`, Zeile 103–111 auf `7cd63e0`: `patch.validate()` und der Fehler des Repositorys gehen beide über `api.WriteRepoError`), backend/internal/discovery/discovery.go (`RegisterCollector`, Zeile 852–854), backend/internal/discovery/pg_repository.go (`collectorError`, Zeile 184: Site-Bindung als `*api.FieldError` mit 422), backend/internal/api/dberrors.go (`WriteRepoError`, Zeile 116: kennt `*api.FieldError` nicht und antwortet 500); `api/openapi.yaml`: `registerCollector` dokumentiert keine 422, `RegisterCollectorRequest` kennt `site_id` nicht · **Quelle:** `k7/out/cand/evidence/k-reaudit-cand/2/probe-collector-field-errors.log`, Probe `k7/out/cand/evidence/k-reaudit-cand/probe/kcand_probe_test.go.txt` (über `go test -overlay`); kodierender Test von WP-694 (`k7/ad-693/red-694.log`, `k7/ad-693/red-694-api.log`)
+- **Reproduktion:** Org-weit: `POST /api/v1/collectors {"name":"kc2","site_id":"<unbekannte UUID>"}` → 500; `{"name":"kc2","client_id":"<Client 1>","site_id":"<Site von Client 2>"}` → 500. Mit `collector:manage` nur in Client 1 (aus der Datenbank aufgelöst): `POST` mit Client 1 und einer Site von Client 2 bzw. einer unbekannten Site → 500. `PATCH /api/v1/collectors/{id}` mit `{"name":""}`, `{"status":"bogus"}`, `{"status":"paused"}`, `{"site_id":"<unbekannt>"}`, `{"site_id":"<Site von Client 2>"}` → je 500, org-weit wie als Client-1-Principal. Gespeichert wird nichts. Kontrollen: `client_id` unbekannt oder einer anderen Organisation → 422; gültige Anlage → 201.
+- **Soll:** API-03: Fehler als RFC 7807 mit dem passenden Status; eine abgelehnte Eingabe ist kein Serverfehler. Die Spezifikation von `updateCollector` nennt 422 für eine Site eines anderen Clients, `CollectorPatch` erlaubt für `status` nur `disabled` und `active` und verlangt einen nicht leeren Namen. Erwartet: 422 application/problem+json mit `field` (`site_id`, `name`, `status`), nichts gespeichert; ein Client-1-Principal erfährt über die Site eines anderen Clients nichts (dieselbe Antwort wie für eine unbekannte Site).
+- **Ist:** Validierung und Repository liefern korrekte `*api.FieldError` (422 für die Site-Bindung, ohne Status für Name und Status), `WriteRepoError` wertet sie nicht aus und antwortet „the request could not be completed“ mit 500.
+- **Nutzerwirkung:** Die Web-Oberfläche und API-Clients erhalten für Eingabefehler beim Anlegen und Ändern eines Collectors einen Serverfehler ohne Feld; der Nutzer erfährt nicht, dass die gewählte Site unbekannt ist oder zu einem anderen Client gehört. Fehlalarme im Betriebsmonitoring (5xx-Rate). Keine Datenwirkung.
+- **Ursache (belegt):** WP-143 hat die Site-Bindung als `api.FieldError` im Repository abgebildet (`collectorError`) und `validate()` eingeführt, beide Handler aber an `api.WriteRepoError` gegeben, das nur `ErrNotFound`, PostgreSQL-Fehler und `ErrUnavailable` kennt. Die Tests prüften die Bindung im Repository, nicht die HTTP-Antwort.
+- **Empfehlung:** Zentral: `api.WriteRepoError` schreibt ein `*api.FieldError` und `*api.ConflictError` (auch verpackt) über `api.WriteFieldError` (Status des Fehlers, sonst 400; 409 für Konflikte), nach `ErrNotFound` und vor der Klassifikation der PostgreSQL-Fehler; die Meldungen von Feldfehlern sind für den Client geschrieben, der Text eines umhüllenden Fehlers wird nicht ausgegeben. `CollectorPatch.validate` setzt 422 für `name` und `status`. Spec-first: `registerCollector` dokumentiert 422 und `RegisterCollectorRequest.site_id`, `updateCollector` die 422 für Name, Status und Site.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestCollectorWritesKeepFieldErrorContract$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: org-weit `POST` mit unbekannter `site_id` und mit Client 1 plus Site von Client 2 → 422 problem+json auf `site_id`; als Principal mit `collector:manage` und `discovery:read` nur in Client 1 `POST` mit Client 1 plus Site von Client 2 und plus unbekannter Site → 422 auf `site_id` mit identischem `detail`; Zahl der Collectors unverändert; `PATCH` mit `name` "" → 422 `name`, `status` "bogus" und "paused" → 422 `status`, unbekannte Site und Site von Client 2 → 422 `site_id` (org-weit; als Client-1-Principal `name` "", `status` "bogus" sowie Site von Client 2 und unbekannte Site mit identischem `detail`), Collector (Name, Site, Client, Status) unverändert; Kontrollen `POST` 201 (org-weit und Client 1) und `PATCH` 200. Dazu `go test -count=1 -run '^TestWriteRepoError' ./internal/api/` grün (`TestWriteRepoErrorWritesFieldErrors`: verpacktes `FieldError` mit 422, `FieldError` ohne Status 400, `ConflictError` 409, jeweils mit Feld und ohne den Text des umhüllenden Fehlers).
+- **Kodierender Test:** backend/internal/server/collector_field_errors_integration_test.go (`TestCollectorWritesKeepFieldErrorContract`, Produktionsrouter mit Autorisierung und OpenAPI-Validierung gegen PostgreSQL), dazu backend/internal/api/dberrors_test.go (`TestWriteRepoErrorWritesFieldErrors`); auf `e5c2d86` rot (ausgeführt auf der Basis `7cd63e0` mit `api/dberrors.go` und `discovery/collector_status.go` aus `HEAD`, beide identisch mit `e5c2d86`; `trace_id` gekürzt):
+
+  ```text
+  === RUN   TestCollectorWritesKeepFieldErrorContract
+      collector_field_errors_integration_test.go:79: POST, unknown site_id: 500 field "", want 422 on site_id; body {"detail":"the request could not be completed","status":500,"title":"Internal Error","trace_id":"…","type":"https://reticora.io/problems/500"}
+      collector_field_errors_integration_test.go:81: POST, client 1 with a site of client 2: 500 field "", want 422 on site_id; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:83: POST as client 1, site of client 2: 500 field "", want 422 on site_id; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:85: POST as client 1, unknown site: 500 field "", want 422 on site_id; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:126: PATCH, name empty: 500 field "", want 422 on name; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:126: PATCH, status bogus: 500 field "", want 422 on status; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:126: PATCH, status paused: 500 field "", want 422 on status; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:126: PATCH, unknown site_id: 500 field "", want 422 on site_id; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:126: PATCH, site of client 2: 500 field "", want 422 on site_id; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:126: PATCH, name empty as client 1: 500 field "", want 422 on name; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:126: PATCH, status bogus as client 1: 500 field "", want 422 on status; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:128: PATCH as client 1, site of client 2: 500 field "", want 422 on site_id; body {"detail":"the request could not be completed","status":500,…}
+      collector_field_errors_integration_test.go:129: PATCH as client 1, unknown site: 500 field "", want 422 on site_id; body {"detail":"the request could not be completed","status":500,…}
+  --- FAIL: TestCollectorWritesKeepFieldErrorContract (0.69s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	0.944s
+  === RUN   TestWriteRepoErrorWritesFieldErrors
+      dberrors_test.go:120: status 500 field "" ({"detail":"the request could not be completed","status":500,…}), want 400 on name
+      dberrors_test.go:120: status 500 field "" ({"detail":"the request could not be completed","status":500,…}), want 409 on name
+      dberrors_test.go:120: status 500 field "" ({"detail":"the request could not be completed","status":500,…}), want 422 on site_id
+  --- FAIL: TestWriteRepoErrorWritesFieldErrors (0.00s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api	0.006s
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

@@ -1166,3 +1166,6 @@ REC-12;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;
 OVR-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
 CI-05;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
 OVR-01;[B];D;backend/internal/override/override_scope_integration_test.go;WP-693
+API-03;[B];D;backend/internal/server/collector_field_errors_integration_test.go;WP-694
+COL-01;[B];D;backend/internal/server/collector_field_errors_integration_test.go;WP-694
+API-03;[B];D;backend/internal/api/dberrors_test.go;WP-694

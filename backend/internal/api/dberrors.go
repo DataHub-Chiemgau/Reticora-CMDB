@@ -106,9 +106,12 @@ func WriteUnavailable(w http.ResponseWriter, detail string) {
 }
 
 // WriteRepoError reports a repository failure to the client. ErrNotFound
-// becomes 404; recognised PostgreSQL errors become a precise, sanitized
-// RFC 7807 response; an unreachable dependency (IsUnavailable) becomes 503
-// with Retry-After; anything else becomes a generic 500.
+// becomes 404; a *FieldError or *ConflictError of the validation or the
+// repository becomes its field problem (WriteFieldError: 400 unless the
+// error names its status, 409 for a conflict; F-423); recognised
+// PostgreSQL errors become a precise, sanitized RFC 7807 response; an
+// unreachable dependency (IsUnavailable) becomes 503 with Retry-After;
+// anything else becomes a generic 500.
 //
 // It exists so handlers never pass err.Error() to the client: raw pgx errors
 // carry table, column and constraint names, and echoing them discloses the
@@ -116,6 +119,12 @@ func WriteUnavailable(w http.ResponseWriter, detail string) {
 func WriteRepoError(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrNotFound) {
 		WriteError(w, http.StatusNotFound, "Not Found", "the requested resource was not found")
+		return
+	}
+	// A field error carries a message written for the client
+	// (handler_errors_test checks where it is built); only the field error
+	// is written, not the text of an error wrapping it.
+	if WriteFieldError(w, err) {
 		return
 	}
 	if WriteDBError(w, err) {
