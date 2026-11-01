@@ -1116,3 +1116,6 @@ AUD-05;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-
 REC-09;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
 LCY-05;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
 REC-07;[B];D;backend/internal/ci/sighting_test.go;WP-683
+AUD-03;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+AUD-07;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684

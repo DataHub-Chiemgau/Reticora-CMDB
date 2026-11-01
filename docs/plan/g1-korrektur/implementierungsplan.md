@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-680 | 25 | 23,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-684 | 28 | 25,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **327** | **424,5** | |
+| **Summe** | | **330** | **426,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>25 WPs · 23,5 PT"]
+    K7N["K7-Nachträge<br/>28 WPs · 25,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -446,6 +446,9 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-677](#wp-677--enrollment-code-bindet-den-collector-an-client-und-site-seines-erzeugers) | `k7n-enrollment-client-binding` | Enrollment-Code bindet den Collector an Client und Site seines Erzeugers | K7N | 1,5 | F-406 | WP-144, WP-145, WP-147, WP-153, WP-668 |
 | [WP-678](#wp-678--edge-ingest-bindet-die-records-eines-collectors-an-dessen-client) | `k7n-edge-ingest-collector-client` | Edge-Ingest bindet die Records eines Collectors an dessen Client | K7N | 1 | F-407 | WP-146, WP-153, WP-481, WP-334, WP-677 |
 | [WP-680](#wp-680--audit-einträge-für-die-laufzeitrolle-unveränderlich-siegel-personenbezogener-werte-nur-über-audit_seal_pii-keine-neuverkettung-audit-verify-prüft-versiegelte-einträge-gegen-das-original) | `k7n-audit-append-only-runtime` | Audit-Einträge für die Laufzeitrolle unveränderlich: Siegel personenbezogener Werte nur über `audit_seal_pii`, keine Neuverkettung, `audit-verify` prüft versiegelte Einträge gegen das Original | K7N | 2,5 | F-409 | WP-132, WP-241, WP-064, WP-656 |
+| [WP-681](#wp-681--ci-historie-mit-audit-auch-die-routeneinträge-des-ci-und-seiner-kontaktverknüpfungen-und-schnittstellen-im-scope-der-audit-liste) | `k7n-ci-history-route-audit` | CI-Historie mit Audit: auch die Routeneinträge des CI und seiner Kontaktverknüpfungen und Schnittstellen, im Scope der Audit-Liste | K7N | 0,5 | F-410 | WP-171, WP-475, WP-505, WP-660 |
+| [WP-683](#wp-683--offline-detektor-und-ingest-statuswechsel-nur-auf-der-gelesenen-zeile-rückkehr-nach-active-auf-der-gesperrten-zeile) | `k7n-offline-detector-race` | Offline-Detektor und Ingest: Statuswechsel nur auf der gelesenen Zeile, Rückkehr nach `active` auf der gesperrten Zeile | K7N | 1 | F-412 | WP-157, WP-383, WP-585, WP-487 |
+| [WP-684](#wp-684--offline-detektor-statuswechsel-in-ci-historie-und-audit-log-in-der-transaktion-des-wechsels) | `k7n-offline-status-history` | Offline-Detektor: Statuswechsel in CI-Historie und Audit-Log, in der Transaktion des Wechsels | K7N | 0,5 | F-413 | WP-157, WP-171, WP-487, WP-683 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19822,6 +19825,163 @@ TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-680
 **Entscheidungsbedarf:** keiner. Die Wahl des Wegs (SECURITY DEFINER einer eigenen Rolle ohne Mitglieder statt `reticora_owner` oder Admin-Pool) folgt aus dem Rollenvertrag: `reticora_owner` ist für `reticora_app` per `SET ROLE` erreichbar, `NewAdminPool` ist Kommandozeilenwerkzeugen vorbehalten und wechselt in `reticora_app`.
 
 **Nicht Bestandteil:** Wert-Subjekte im Vault bleiben für die Laufzeitrolle änderbar (`pii.Vault.UpdateTx`, `ReencryptTx` bei der Schlüsselrotation): Für Einträge, die seit 000125 schon beim Schreiben mit Referenz verkettet wurden, deckt die Kette nur die Referenz, nicht den angezeigten Wert; eine Änderung des Wert-Subjekts zeigt `audit-verify` dort nicht (für vom Backfill versiegelte Einträge schon, mit Vault). Als Kandidat gemeldet. Ein externer Anker des Kettenendes (gegen Neuverkettung mit Superuser-Rechten) und das Aufbewahrungs-Löschen über `app.audit_retention` (NFR-06, älter als 10 Jahre, mit Anker-Eintrag) bleiben unverändert; weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-681 – CI-Historie mit Audit: auch die Routeneinträge des CI und seiner Kontaktverknüpfungen und Schnittstellen, im Scope der Audit-Liste
+
+**Schlüssel:** `k7n-ci-history-route-audit` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-171 (`f-history`), WP-475 (`t3-history-access`), WP-505 (`t6-route-audit-values`), WP-660 (`k7n-audit-log-scope`, Scope-Register der Audit-Liste)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-410](../../../audit/g1-reaudit/FINDINGS.md#f-410) | P3 | CI-Historie mit Audit zeigt nur die Audit-Einträge vom Typ `ci`: die Routeneinträge der Unterressourcen (`cis`, `ci-contacts`, `network-interfaces`) fehlen | schließt | Wiederholungsprüfung von WP-171 (K7, Verifier r2-b4 auf `7845e9d`, zweiter Verifier r3-b3 auf `55b6e7d`) |
+
+**Problem:** `GET /api/v1/history/ci/{id}` liest für Leser mit `audit:read` nur die Audit-Einträge mit `resource_type = 'ci'` (`unifiedCIAudit`, `backend/internal/history/pg_repository.go:140–144` auf `e5c2d86`). Der Routen-Audit schreibt die Schreibvorgänge an den Unterressourcen eines CI unter dem Routensegment `cis` (`POST /cis/{id}/interfaces`, `/contacts`, `/lifecycle-transitions`, `/unmerge` …, `resource_id` = CI) und die an seinen Kontaktverknüpfungen und Netzwerkschnittstellen unter `ci-contacts` bzw. `network-interfaces` mit der Id der Verknüpfung oder Schnittstelle; das CI steht dort in den Werten (`values`, WP-505). Diese Einträge fehlen in der Historie, obwohl `audit_included: true` ist; `GET /audit-log?resource_id={id}` listet die `cis`-Einträge. Im kodierenden Test fehlen 7 von 8 Einträgen.
+
+**Akzeptanzkriterien:**
+
+- [ ] `unifiedCIAudit` liest die Einträge mit `resource_type IN ('ci', 'cis')` und `resource_id` = CI sowie die Einträge `ci-contacts` und `network-interfaces`, deren `resource_id` eine bestehende Kontaktverknüpfung bzw. Schnittstelle des CI ist oder deren Werte das CI als `ci_id` nennen (alt oder neu: Löschen, Anlegen, Umhängen). Einträge über andere CIs und andere Typen erscheinen nicht.
+- [ ] Für eingeschränkte Principals gilt im Audit-Anteil der Historie dieselbe Bedingung wie in der Audit-Liste: `audit.VisibleEntries(ctx)` (Register von WP-660, `scope.go`) liefert `true` für org-weite Principals und die Scope-Regel für eingeschränkte; `listTx` der Audit-Liste nutzt dieselbe Funktion. Ein eingeschränkter Principal sieht in der Historie keinen Eintrag, den ihm die Liste nicht zeigt (Einträge über gelöschte Verknüpfungen oder Schnittstellen bleiben ihm verborgen); das CI eines fremden Clients bleibt 404.
+- [ ] `TestCIHistoryIncludesRouteAuditOfCISubresources` (`internal/server/history_route_audit_integration_test.go`, Produktionsrouter, PostgreSQL-Routen-Auditor): Der org-weite Leser sieht alle Einträge, die `/audit-log?resource_id=` für das CI, seine Schnittstellen und seine gelöschte Kontaktverknüpfung listet (`ci.updated`, 2× `cis.interfaces`, 2× `cis.contacts`, `network-interfaces.update`, `network-interfaces.delete`, `ci-contacts.delete`), keinen Eintrag über die Schnittstelle eines anderen CI; der Client-1-Leser sieht nur Einträge der Liste und alle davon über das CI; die Historie des CI von Client 2 ist für ihn 404. Auf `e5c2d86` rot (7 von 8 fehlen), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt den Umfang des Audit-Anteils und die Sichtbarkeit für eingeschränkte Principals; `frontend/src/api/generated/schema.d.ts` neu erzeugt; `docs/security/review-g1.md` nennt die gemeinsame Regel.
+- [ ] Regression: `go test -p 1 ./internal/audit/ ./internal/history/ ./internal/server/ ./internal/middleware/ ./internal/pii/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/history/pg_repository.go
+- backend/internal/audit/scope.go
+- backend/internal/audit/audit.go
+- backend/internal/server/history_route_audit_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Abfrage läuft wie bisher in der Tenant-Transaktion des Lesers (`database.WithRequestTenant`) als `reticora_app`; die Unterabfragen auf `ci_contact` und `network_interface` und die Scope-Regel sehen nur, was die RLS dem Leser zeigt. Die Wertesuche (`changes->'values' @> …`) ist auf die zwei Typen `ci-contacts` und `network-interfaces` der Organisation beschränkt (Index `idx_audit_resource` auf `resource_type, resource_id`).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestCIHistoryIncludesRouteAuditOfCISubresources$' ./internal/server/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/audit/ ./internal/history/ ./internal/server/ ./internal/middleware/ ./internal/pii/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+CI-06;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
+AUD-05;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
+```
+
+**Entscheidungsbedarf:** keiner (E-78 regelt die Berechtigung `audit:read`, unverändert).
+
+**Nicht Bestandteil:** Routeneinträge anderer Objekte, die ein CI nur referenzieren (Beziehungen `relationships`, Rack-Montagen `rack-mounts`/`mounts`, Zuweisungen, Kompositionen, Dokumentverknüpfungen): Beziehungen erscheinen in der Historie bereits als `ci_change` (`relationship_added`/`relationship_removed`), die übrigen haben eigene Historien bzw. das Audit-Log. Einträge über gelöschte Verknüpfungen für eingeschränkte Principals (bewusst verborgen wie in der Audit-Liste, WP-660). Statuswechsel des Offline-Detektors in der Historie (F-413, WP-684). Eine Client-/Site-Spalte in `audit_log`.
+
+### WP-683 – Offline-Detektor und Ingest: Statuswechsel nur auf der gelesenen Zeile, Rückkehr nach `active` auf der gesperrten Zeile
+
+**Schlüssel:** `k7n-offline-detector-race` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-157 (`d-offline-detector`), WP-383 (Organisationsisolation des Detektors, F-108), WP-585 (`ci.online` in der Transaktion des Ingest, F-268), WP-487 (Änderungssätze `ci_change`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-412](../../../audit/g1-reaudit/FINDINGS.md#f-412) | P3 | Offline-Detektor gegen parallelen Ingest: rund ein Viertel frisch gesehener CIs endet `unknown` mit `ci.offline` | schließt | Wiederholungsprüfung von WP-157 (K7, Verifier r2-b4 auf `7845e9d`, echter Ingest-Pfad ohne Hook) |
+
+**Problem:** `OfflineDetector.RunOrg` (`backend/internal/lifecycle/offline.go`) liest die beobachtbaren CIs einer Organisation ohne Sperre und setzt den Status danach mit `UPDATE ci SET status = $3 WHERE id = $1 AND organization_id = $2` (Zeile 210 auf `e5c2d86`), ohne Bedingung auf `last_seen_at` oder `status`. Schreibt der Ingest die Sichtung dazwischen, überschreibt der Detektor sie mit `unknown` und meldet `ci.offline`. Umgekehrt entscheidet der Ingest über die Rückkehr nach `active` aus dem ungesperrten Abgleichsstand (`matched.Status == "unknown"`, `backend/internal/discovery/discovery.go:1581`); setzt der Detektor das CI nach diesem Lesen auf `unknown`, schreibt der Ingest nach dessen Commit nur `last_seen_at`. Über den echten Ingest-Pfad enden 40–50 von 200 frisch gesehenen CIs `unknown` (Probe: 48–50 von 200), bis der nächste Lauf sie zurückstellt.
+
+**Akzeptanzkriterien:**
+
+- [ ] Der Detektor setzt den Status nur, wenn die Zeile noch dem gelesenen Stand entspricht (`status`, `last_seen_at`, `deleted_at IS NULL`), und überspringt eine von einem anderen Schreiber gesperrte Zeile: `UPDATE ci SET status = $3 WHERE id = (SELECT … AND status = $4 AND last_seen_at = $5 FOR UPDATE SKIP LOCKED)`. Trifft das UPDATE keine Zeile, entstehen kein Ereignis und kein Zählerstand; der nächste Lauf entscheidet auf dem neuen Stand. Ein Status, den eine Person oder ein anderer Job dazwischen setzt (z. B. `maintenance`), bleibt ebenso erhalten.
+- [ ] Der Ingest übergibt die Sichtung als `ci.UpdateRequest.Sighting`; `ci.PGRepository.updateRow` entscheidet auf der mit `FOR UPDATE` gelesenen Zeile: ein `unknown`-CI, dessen `last_seen_at` älter als die Sichtung ist, wird im selben UPDATE `active` (Änderungssatz `status_changed`, `ci.online` wie bisher nach WP-585); eine ältere Sichtung bringt kein CI zurück (GLO-12), eine Override-Sperre des Status bleibt wirksam (`dropOverriddenFields`). `ci.MemoryRepository` entscheidet gleich. Die Entscheidung aus `matched.Status` in `discovery.go` entfällt.
+- [ ] `TestOfflineDetectorSkipsCISeenDuringRun` (`internal/lifecycle/offline_race_integration_test.go`, PostgreSQL, echter Ingest über `POST /api/v1/discovery/ingest` mit den Repositories wie `server.PostgresRepositories`, vier parallele Spuren und `RunOrg` mit 0, 20, 40 ms Versatz): kein CI mit der Sichtung der Runde endet `unknown`; `ci.offline` nur für die vom Detektor geänderten CIs, jedem folgt ein `ci.online`. Auf `e5c2d86` rot (50/50/40 von 200), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestUpdateSightingRevivesUnknownCI` (`internal/ci/sighting_test.go`): neuere Sichtung bringt `unknown` zurück, ältere nicht, ohne `Sighting` keine Änderung, `maintenance` bleibt, ungültige Zeit ist ein Validierungsfehler.
+- [ ] Regression: `go test -p 1 ./internal/ci/ ./internal/discovery/ ./internal/lifecycle/ ./internal/agent/ ./internal/reviews/ ./internal/server/` grün (bekannter lokaler Ausfall `TestCIQueryBudget` übersprungen), insbesondere `TestOfflineDetector`, `TestOfflineDetectorOrgIsolation` und die Ingest-Tests zu `ci.online` (WP-585); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (12 Einträge):**
+
+- backend/internal/lifecycle/offline.go
+- backend/internal/lifecycle/offline_race_integration_test.go (neu)
+- backend/internal/ci/model.go
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/memory_repo.go
+- backend/internal/ci/sighting_test.go (neu)
+- backend/internal/discovery/discovery.go
+- docs/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Der Detektor läuft wie bisher als `reticora_app` mit org-weitem Scope der Organisation (`database.WithTenant`, `OrgWideScope`); `FOR UPDATE SKIP LOCKED` sperrt nur die eine Zeile, die er ändert, und wartet nie auf die Zeilensperre eines Ingest, so dass zwischen Detektor und Ingest kein Sperrzyklus entsteht. Der Ingest sperrt wie bisher in `updateRow`.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestOfflineDetectorSkipsCISeenDuringRun$' ./internal/lifecycle/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -run '^TestUpdateSightingRevivesUnknownCI$' ./internal/ci/`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/discovery/ ./internal/lifecycle/ ./internal/agent/ ./internal/reviews/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+REC-09;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
+LCY-05;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
+REC-07;[B];D;backend/internal/ci/sighting_test.go;WP-683
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** dass ein CI, das zu Laufbeginn tatsächlich drei Intervalle nicht gesehen war und dessen Sichtung erst nach dem Statuswechsel eintrifft, kurz `ci.offline` und gleich danach `ci.online` meldet (beides zutreffend: der Detektor entscheidet auf dem Stand, den er liest). Der Agent-Telemetriepfad (`backend/internal/agent/handler.go`, Modul `agents` P4) setzt `Sighting` nicht; endpoint-CIs sind nicht Teil des Detektors, solange ihr Typ nicht beobachtbar ist. Die Historie der Statuswechsel des Detektors (F-413, WP-684).
+
+### WP-684 – Offline-Detektor: Statuswechsel in CI-Historie und Audit-Log, in der Transaktion des Wechsels
+
+**Schlüssel:** `k7n-offline-status-history` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-157 (`d-offline-detector`), WP-171 (`f-history`), WP-487 (Änderungssätze `ci_change`, AUD-03), WP-683 (`k7n-offline-detector-race`, Statuswechsel nur auf der gelesenen Zeile)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-413](../../../audit/g1-reaudit/FINDINGS.md#f-413) | P3 | Statuswechsel des Offline-Detektors fehlen in Historie und Audit-Log: der Wechsel nach `unknown` ist nirgends nachvollziehbar | schließt | Wiederholungsprüfung von WP-157/WP-171 (K7, Verifier r2-b4 auf `7845e9d`) |
+
+**Problem:** `OfflineDetector.RunOrg` (`backend/internal/lifecycle/offline.go`) ändert den Status eines CI (`active` → `unknown` und `unknown` → `active`) mit einem direkten UPDATE, ohne `ci_change`-Zeile und ohne Audit-Eintrag (Zeile 210 auf `e5c2d86`). Die Historie zeigt nach einer Rückkehr per Ingest nur `status_changed: unknown → active`, nie den Wechsel nach `unknown`; kehrt das CI durch den Detektor zurück, fehlen beide. AUD-03 nennt `status_changed` als Änderungsart, AUD-07 verlangt die Herkunft jeder Änderung; der Ingest schreibt seinen Statuswechsel als Änderungssatz mit Audit `ci.status_changed`.
+
+**Akzeptanzkriterien:**
+
+- [ ] Je Statuswechsel, der eine Zeile trifft (WP-683), schreibt der Detektor in derselben Transaktion eine `ci_change`-Zeile: `change_kind` `status_changed`, `change_type` `status_change`, `field_name` `status`, alter und neuer Status, `ci_version` = Version des CI, eigener `change_set_id`, `source` `system`, ohne `actor_id`/`actor_user_id`, Kommentar `ci.offline_detector`; dazu einen Audit-Eintrag `ci.status_changed` (`resource_type` `ci`, `resource_id` = CI, `actor_type` `system`, `source` `system`, `changes`: `fields` [{`field`, `old_value`, `new_value`}] wie beim Ingest, `job` `ci.offline_detector`, `last_seen_at`, `scope_interval`). Trifft der Wechsel keine Zeile, entsteht nichts.
+- [ ] `ci.version` bleibt unverändert (Systemschreibvorgang unter Rang 92, API-07, wie die Statusänderung des Ingest); `updated_at` setzt wie bisher der Trigger `trg_ci_updated_at`.
+- [ ] Audit-Einträge (`RecordMany`) und Ereignisse (`AppendMany`, `ci.offline`/`ci.online` unverändert) schreibt der Lauf gesammelt nach den Statuswechseln, in der Reihenfolge des Ingest (Audit-Kette, dann Outbox): Er hält keine der beiden organisationsweiten Sperren, während er Zeilen ändert, und Lauf und Ingest warten nicht im Zyklus aufeinander. Die Audit-Kette bleibt intakt.
+- [ ] `TestOfflineDetectorRecordsStatusChange` (`internal/lifecycle/offline_integration_test.go`, PostgreSQL): je CI genau eine `ci_change`-Zeile und genau ein Audit-Eintrag wie oben, für beide Richtungen; Version 1 unverändert; `audit.Verify` intakt; `history.List` mit `change_kind=status_changed` zeigt den Wechsel nach `unknown` mit Quelle `system`; ein zweiter Lauf schreibt nichts. Auf `e5c2d86` rot (0 Zeilen), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `docs/README.md` (Abschnitt `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED`) nennt Historie und Audit-Eintrag.
+- [ ] Regression: `go test -p 1 ./internal/lifecycle/ ./internal/history/ ./internal/audit/ ./internal/events/ ./internal/discovery/ ./internal/server/` grün, insbesondere `TestOfflineDetector`, `TestOfflineDetectorOrgIsolation`, `TestOfflineDetectorSkipsCISeenDuringRun`; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/lifecycle/offline.go
+- backend/internal/lifecycle/offline_integration_test.go
+- docs/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Der Detektor schreibt als `reticora_app` mit dem org-weiten Scope der Organisation (`database.WithTenant`, `OrgWideScope`) in `ci_change` (Policy `org_isolation`, Trigger `ci_change_scope` setzt Client und Site) und über `audit.PGRecorder` in `audit_log` (Kettentrigger). Eine eigene Quelle `offline-detector` ist ohne Migration nicht möglich (`audit_log_source_check`, `chk_ci_change_source`: `ui`, `api`, `collector`, `import`, `system`); der Job steht in `changes.job` bzw. im Kommentar.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestOfflineDetectorRecordsStatusChange$' ./internal/lifecycle/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/lifecycle/ ./internal/history/ ./internal/audit/ ./internal/events/ ./internal/discovery/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUD-03;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+AUD-07;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung. Hinweis für die Leitung: Soll der Detektor als eigene Quelle (`offline-detector`) statt `system` erscheinen, braucht es eine Migration der beiden CHECK-Constraints und der Filterwerte von `GET /audit-log?source=`; hier nicht umgesetzt.
+
+**Nicht Bestandteil:** die Statuswechsel anderer Systemjobs, die `ci` direkt ändern (nicht geprüft); die Historie des Collector-Status (`collector.offline`, eigener Job); eine Quelle `offline-detector` (siehe Entscheidungsbedarf).
 
 ## Zurückgestellte Befunde
 
