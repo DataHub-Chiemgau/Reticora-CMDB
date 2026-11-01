@@ -5561,7 +5561,12 @@ paths:
         403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
         serial_mismatch and duplicate_ip dismiss. Another action is 422.
         resolved_by and the audit actor are the caller; a body with
-        resolved_by is 400.
+        resolved_by is 400. An item is resolved exactly once (F-404): the
+        effect of the action and the resolution commit together, so a
+        refused or failed effect leaves the item open and writes nothing;
+        of two concurrent resolutions of the same item one answers 200 and
+        the other 409 (review item already resolved) without its effect,
+        as a resolution of an item that is no longer open does.
       requestBody:
         required: true
         content:

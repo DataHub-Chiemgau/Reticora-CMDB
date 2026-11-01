@@ -219,8 +219,13 @@ func (h *Handler) resolveReclassified(ctx context.Context, orgID, ciID string) e
 		return err
 	}
 	for i := range open {
-		if _, err = h.repo.ResolveReviewItem(ctx, orgID, open[i].ID, &Resolution{Status: ReviewStatusResolved,
-			Note: ReasonReclassified}); err != nil {
+		_, err = h.repo.ResolveReviewItem(ctx, orgID, open[i].ID, &Resolution{Status: ReviewStatusResolved,
+			Note: ReasonReclassified})
+		if errors.Is(err, reviews.ErrAlreadyResolved) {
+			// A principal resolved it meanwhile (F-404).
+			continue
+		}
+		if err != nil {
 			return err
 		}
 		id := open[i].ID

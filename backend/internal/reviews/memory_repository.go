@@ -104,6 +104,9 @@ func (r *MemoryRepository) ResolveReviewItem(_ context.Context, orgID, id string
 	if !ok || item.OrganizationID != orgID {
 		return nil, fmt.Errorf("not found")
 	}
+	if item.Status != StatusOpen {
+		return nil, ErrAlreadyResolved
+	}
 	item.Status = resolution.Status
 	item.Action = resolution.Action
 	item.Resolution = resolution.Note

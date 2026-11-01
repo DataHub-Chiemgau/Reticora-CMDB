@@ -1094,3 +1094,7 @@ ENT-05;[B];B;backend/cmd/server/scope_channel_license_test.go;WP-671
 ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-674
 ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-674
 ENT-03;[B];B;backend/internal/ci/active_count_integration_test.go;WP-674
+REC-08;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+API-05;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+REC-12;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+CI-13;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675

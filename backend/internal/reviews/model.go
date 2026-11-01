@@ -177,7 +177,20 @@ type Repository interface {
 	CreateReviewItem(ctx context.Context, item *Item) error
 	ListReviewItems(ctx context.Context, orgID string, filter Filter, page api.PaginationParams) ([]Item, int, error)
 	GetReviewItem(ctx context.Context, orgID, id string) (*Item, error)
+	// ResolveReviewItem resolves an open item; an item that is no longer
+	// open is ErrAlreadyResolved, an unknown or invisible one ErrNotFound.
 	ResolveReviewItem(ctx context.Context, orgID, id string, resolution *Resolution) (*Item, error)
+}
+
+// Locker is a repository whose resolutions run in one transaction with
+// their effect (REC-08, F-404): RunInTx runs fn in a transaction of the
+// context's tenant scope that every repository call with fn's context
+// joins, LockReviewItem locks the row of the item until that transaction
+// ends and returns the item as it stands then (ErrNotFound when unknown or
+// invisible). The PostgreSQL repository implements it.
+type Locker interface {
+	RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error
+	LockReviewItem(ctx context.Context, orgID, id string) (*Item, error)
 }
 
 // Errors of a resolution; the handler maps them to HTTP statuses.

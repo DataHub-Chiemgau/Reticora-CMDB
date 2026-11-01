@@ -115,6 +115,12 @@ func (s *Service) Merge(ctx context.Context, orgID, survivorID, victimID string)
 // one ci.merge job of that id instead of leaving a failed job beside a
 // succeeded one (the merge of a review item, F-330). A failed merge leaves
 // no merge row, so the id stays free until a merge under it succeeds.
+//
+// In a context transaction (the resolution of a review item, which commits
+// the merge with the resolution, F-404) the merge runs under a savepoint and
+// the job outside the transaction: a failed merge releases what it locked
+// and leaves its failed job although the transaction rolls back; the job
+// succeeds once the transaction has committed.
 func (s *Service) MergeAs(ctx context.Context, orgID, survivorID, victimID, mergeID string) (*MergeResult, error) {
 	merger, ok := s.repo.(Merger)
 	if !ok {
@@ -127,18 +133,26 @@ func (s *Service) MergeAs(ctx context.Context, orgID, survivorID, victimID, merg
 		return merger.Merge(ctx, orgID, survivorID, victimID, mergeID)
 	}
 	actor := tenant.FromContext(ctx).UserID
-	if err := s.jobs.Track(ctx, orgID, MergeJobKind, "ci_merge", mergeID, actor); err != nil {
+	jobCtx := database.WithoutTx(ctx)
+	if err := s.jobs.Track(jobCtx, orgID, MergeJobKind, "ci_merge", mergeID, actor); err != nil {
 		return nil, fmt.Errorf("track merge job: %w", err)
 	}
-	_ = s.jobs.Mirror(ctx, orgID, "ci_merge", mergeID, jobs.StatusRunning, "")
-	result, err := merger.Merge(ctx, orgID, survivorID, victimID, mergeID)
+	_ = s.jobs.Mirror(jobCtx, orgID, "ci_merge", mergeID, jobs.StatusRunning, "")
+	var result *MergeResult
+	err := database.Savepoint(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = merger.Merge(ctx, orgID, survivorID, victimID, mergeID)
+		return err
+	})
 	if err != nil {
 		// The refusals of the merge keep their text, any other error is
 		// sanitized and logged (F-372).
-		_ = jobs.MirrorFailed(ctx, s.jobs, orgID, "ci_merge", mergeID, err, ErrMergeConflict, ErrNotFound)
+		_ = jobs.MirrorFailed(jobCtx, s.jobs, orgID, "ci_merge", mergeID, err, ErrMergeConflict, ErrNotFound)
 		return nil, err
 	}
-	_ = s.jobs.Mirror(ctx, orgID, "ci_merge", mergeID, jobs.StatusSucceeded, "")
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		_ = s.jobs.Mirror(ctx, orgID, "ci_merge", mergeID, jobs.StatusSucceeded, "")
+	})
 	return result, nil
 }
 

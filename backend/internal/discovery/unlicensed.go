@@ -342,11 +342,36 @@ func (h *Handler) allowActiveCI(ctx context.Context, orgID string) error {
 
 // adoptUnlicensed creates the CI of an unlicensed_ci item when max_cis
 // allows it and resolves the item. It returns the entitlement error when the
-// limit is still reached.
+// limit is still reached. The item is locked, the CI created and the item
+// resolved in one transaction (F-404): of two adoptions of the same item
+// (a request and the adoption after the limit was raised) one creates the
+// CI, the other gets reviews.ErrAlreadyResolved and creates nothing.
 func (h *Handler) adoptUnlicensed(ctx context.Context, orgID, actorID string, item *ReviewItem) (string, error) {
 	if h.ciRepo == nil {
 		return "", errors.New("discovery: no CI repository")
 	}
+	var created string
+	err := h.inTx(ctx, orgID, func(ctx context.Context) error {
+		if locker, ok := h.repo.(reviews.Locker); ok {
+			locked, err := locker.LockReviewItem(ctx, orgID, item.ID)
+			if err != nil {
+				return err
+			}
+			if locked.Status != ReviewStatusOpen {
+				return reviews.ErrAlreadyResolved
+			}
+			item = locked
+		}
+		var err error
+		created, err = h.adoptHeld(ctx, orgID, actorID, item)
+		return err
+	})
+	return created, err
+}
+
+// adoptHeld creates the CI of the device an unlicensed_ci item holds and
+// resolves the item, in the transaction of ctx.
+func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *ReviewItem) (string, error) {
 	if err := h.allowActiveCI(ctx, orgID); err != nil {
 		return "", err
 	}
@@ -393,6 +418,10 @@ func (h *Handler) AdoptUnlicensed(ctx context.Context, orgID string) (int, error
 	adopted := 0
 	for i := range items {
 		if _, err = h.adoptUnlicensed(ctx, orgID, "", &items[i]); err != nil {
+			if errors.Is(err, reviews.ErrAlreadyResolved) {
+				// Resolved meanwhile by a principal or another replica.
+				continue
+			}
 			var exceeded *entitlement.LimitExceededError
 			if errors.As(err, &exceeded) {
 				break
