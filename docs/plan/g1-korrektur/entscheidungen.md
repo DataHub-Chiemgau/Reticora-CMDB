@@ -51,6 +51,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-99](#e-99) | Auswahl der Oberflächensprache (GLO-10, UI-18) | entschieden (Auftraggeber 2026-10-27): Option 1 | WP-523 |
 | [E-100](#e-100) | Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-649 |
 | [E-101](#e-101) | WP-332 AK 3: Rahmen und Ledger eines Ingest-Batches in einer oder in zwei Transaktionen (NFR-03) | offen; Übergangsregel: Empfehlung (Option 1) | WP-657 |
+| [E-102](#e-102) | Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432) | offen; Übergangsregel: Empfehlung (Option 1) | WP-703 |
 
 ## E-59
 
@@ -1083,3 +1084,27 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 **Betroffene IDs:** NFR-03
 
 **Betroffene WPs:** WP-332, WP-657
+
+
+## E-102
+
+**Thema:** Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432)
+
+**Status:** offen; Übergangsregel: Empfehlung (Option 1)
+
+**Frage:** Ein Collector meldet für ein Gerät einen Wert eines eindeutigen Attributs (z. B. Seriennummer), den bereits ein anderes aktives CI hält. Über die API ist das 409 (WP-692, WP-700), beim Ingest empfängt aber kein Mensch die Antwort. Bis WP-703 entstand ohne Unique-Index ein Duplikat; mit Index scheiterte der Datensatz als vorübergehender Fehler (500, `retryable`), das Gerät fehlte und die Neuzustellung lief endlos. Die Anforderungen (MET-15, DIS-*, REC-*) legen das Verhalten nicht fest. Wie soll der Ingest einen vergebenen Wert behandeln?
+
+**Optionen:**
+
+- 1) Der vergebene Wert wird nicht gespeichert und in `invalid_values` des Batches gezählt (wie ungültige Werte nach WP-501 und vergebene Identitäten); das Gerät wird ohne ihn angelegt oder aktualisiert, der Batch läuft weiter, ein Log-Eintrag `ingest.unique.dropped` nennt den Attributschlüssel. Eine Umklassifizierung von `generic_device`, die den Wert erst unter ein eindeutiges Attribut brächte, unterbleibt; der `unclassified_device`-Eintrag bleibt offen. Umgesetzt in WP-703.
+- 2) Wie 1, aber mit eigenem Zähler (z. B. `taken_unique_values`) statt `invalid_values`.
+- 3) Wie 1 und zusätzlich ein Review-Eintrag (z. B. `probable_duplicate` mit dem anderen CI als Kandidat), damit ein Mensch den Konflikt sieht.
+- 4) Datensatz dauerhaft abweisen (`permanent`, 409); das Gerät wird nicht inventarisiert.
+
+**Empfehlung:** Option 1 für G1. Sie nutzt einen bestehenden Mechanismus, verliert kein Gerät, erzeugt kein Duplikat und hält das Statement-Budget (NFR-03, `TestIngestStatementBudget` unverändert). Option 3 ist fachlich die vollständigste und kann nach G1 folgen; Option 4 verliert Geräte.
+
+**Übergangsregel:** bis zur Entscheidung gilt Option 1 (Code von WP-703, `TestIngestUniqueAttributes`).
+
+**Betroffene IDs:** MET-15, DIS-01
+
+**Betroffene WPs:** WP-703

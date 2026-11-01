@@ -2506,7 +2506,8 @@ func (r *PGRepository) recordTypeChangeAudit(ctx context.Context, tx pgx.Tx, tc 
 // record's origin, one event ci.changed (and ci.online for a CI it brings
 // back from unknown to active) and the audit entries of the update and of
 // the type change. A reclassification discovery may not make
-// (ErrReclassificationRefused, ErrUnknownType) leaves the type as it is.
+// (ErrReclassificationRefused, ErrUnknownType) or a value of a unique attribute
+// of the target type refuses (keepsType, F-432) leaves the type as it is.
 func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
 	result := &RecordUpdateResult{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -2519,7 +2520,8 @@ func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *
 		if rec.TypeID != "" && rec.TypeID != item.CITypeID && api.IsUUID(rec.TypeID) {
 			tc, err = r.changeTypeRow(ctx, tx, orgID, id, rec.TypeID, TypeChangeDiscovery)
 			switch {
-			case errors.Is(err, ErrReclassificationRefused), errors.Is(err, ErrUnknownType):
+			case keepsType(ctx, err, id, rec.TypeID):
+				// The unique check only reads: the transaction goes on.
 				tc = nil
 			case err != nil:
 				return err

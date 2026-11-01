@@ -1093,7 +1093,8 @@ paths:
         and event ci.changed (changed_fields ci_type_id). Discovery uses the
         same service but may only raise generic_device to a specific type.
         The values the CI carries must be free under the unique attributes
-        of the target type (MET-15).
+        of the target type (MET-15); discovery keeps generic_device when
+        another active CI holds one of them.
       requestBody:
         required: true
         content:
@@ -13848,7 +13849,10 @@ components:
             POST and PATCH /cis, the restore (POST /cis/{id}/restore), the
             unmerge (POST /cis/{id}/unmerge), the type change
             (POST /cis/{id}/type) and the resolutions of review items that
-            create or reactivate a CI (409 with `violations`).
+            create or reactivate a CI (409 with `violations`). The discovery
+            ingest does not store a discovered value another active CI holds
+            (counted in invalid_values) and does not reclassify a CI whose
+            value the target type's unique attribute holds elsewhere.
         unique_scope:
           type: string
           enum: [org, client]
@@ -16447,9 +16451,11 @@ components:
             Sum over the processed records of the discovered values dropped
             because a manual write would refuse them: the data type of a typed
             CI column (MET-11; a multi-line hostname, a hardware_uuid that is
-            no UUID, a malformed MAC or IP) or the field definitions of the CI
-            type (CI-03). The rest of each record is stored; no value fails a
-            record or the batch (WP-501). Absent when no value was dropped;
+            no UUID, a malformed MAC or IP), the field definitions of the CI
+            type (CI-03) or a unique attribute whose value another active CI
+            holds (MET-15, also before the unique index exists; the CI keeps
+            its own value). The rest of each record is stored; no value fails
+            a record or the batch (WP-501). Absent when no value was dropped;
             with the queue the records are processed asynchronously and it
             stays absent.
         job_id:

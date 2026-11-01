@@ -488,7 +488,7 @@ export interface paths {
     put?: never;
     /**
      * Change the type of a CI (CI-11)
-     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_changed, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type. The values the CI carries must be free under the unique attributes of the target type (MET-15).
+     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_changed, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type. The values the CI carries must be free under the unique attributes of the target type (MET-15); discovery keeps generic_device when another active CI holds one of them.
      */
     post: operations['changeCIType'];
     delete?: never;
@@ -6785,7 +6785,7 @@ export interface components {
       multi_value: boolean;
       /** @description Indexed for search: a job builds the index concurrently (DB-04). A non-unique definition of an organization without a CI type uses the index of its key, shared by all organizations (`attribute.index.key` job, `idx_attr_key_<key>`, or `idx_attr_keyh_<hash>` for other keys; E-73); other definitions get `idx_attr_<id>` (`attribute.index` job). */
       searchable: boolean;
-      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. The server check covers the CIs outside the client or site scope of the writer as well, also before the index exists, and every write that sets or brings back the values of a CI: POST and PATCH /cis, the restore (POST /cis/{id}/restore), the unmerge (POST /cis/{id}/unmerge), the type change (POST /cis/{id}/type) and the resolutions of review items that create or reactivate a CI (409 with `violations`). */
+      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. The server check covers the CIs outside the client or site scope of the writer as well, also before the index exists, and every write that sets or brings back the values of a CI: POST and PATCH /cis, the restore (POST /cis/{id}/restore), the unmerge (POST /cis/{id}/unmerge), the type change (POST /cis/{id}/type) and the resolutions of review items that create or reactivate a CI (409 with `violations`). The discovery ingest does not store a discovered value another active CI holds (counted in invalid_values) and does not reclassify a CI whose value the target type's unique attribute holds elsewhere. */
       unique: boolean;
       /**
        * @description Unique per organization or per client (CIs without a client count as one client).
@@ -8418,7 +8418,7 @@ export interface components {
       rejected_future?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
-      /** @description Sum over the processed records of the discovered values dropped because a manual write would refuse them: the data type of a typed CI column (MET-11; a multi-line hostname, a hardware_uuid that is no UUID, a malformed MAC or IP) or the field definitions of the CI type (CI-03). The rest of each record is stored; no value fails a record or the batch (WP-501). Absent when no value was dropped; with the queue the records are processed asynchronously and it stays absent. */
+      /** @description Sum over the processed records of the discovered values dropped because a manual write would refuse them: the data type of a typed CI column (MET-11; a multi-line hostname, a hardware_uuid that is no UUID, a malformed MAC or IP), the field definitions of the CI type (CI-03) or a unique attribute whose value another active CI holds (MET-15, also before the unique index exists; the CI keeps its own value). The rest of each record is stored; no value fails a record or the batch (WP-501). Absent when no value was dropped; with the queue the records are processed asynchronously and it stays absent. */
       invalid_values?: number;
       job_id?: string;
       /** @description Records processed, deduplicated or queued (REC-01). A record that fails does not take the others of the request down (WP-481). */

@@ -1307,6 +1307,10 @@ type batchFrame struct {
 	// blocked marks the records an earlier transient record failure holds
 	// back (WP-481); the batch of their window leaves them.
 	blocked []bool
+	// uniqueKeys are the keys of the unique attributes (MET-15), global
+	// ones included, per id of the types the frame looked up; nil when the
+	// repository cannot read them with the types (mayHoldUnique, F-432).
+	uniqueKeys map[string][]string
 }
 
 // recordOutcome is what processing one record changed.
@@ -1344,10 +1348,11 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 	// (organization_id IS NULL) and org-specific types. Items whose type can
 	// be resolved neither as UUID nor by name are queued for review instead of
 	// failing the whole batch with a 500.
-	types, err := h.lookupTypes(ctx, orgID, frameTypeNames(items))
+	types, unique, err := h.lookupFrameTypes(ctx, orgID, frameTypeNames(items))
 	if err != nil {
 		return nil, err
 	}
+	frame.uniqueKeys = unique
 	frame.typeIDs = resolveCITypeIDs(items, types)
 	frame.noProfile = make([]bool, len(items))
 	for i := range items {
@@ -1526,6 +1531,13 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			}
 		}
 		withoutTakenIdentity(&item, candidates)
+		// Likewise a value of a unique attribute another active CI holds
+		// (MET-15, F-432).
+		takenDropped, takenErr := h.withoutTakenUnique(ctx, frame, orgID, typeID, &item)
+		if takenErr != nil {
+			return takenErr
+		}
+		resp.InvalidValues += takenDropped
 		if h.beforeCreate != nil {
 			h.beforeCreate(ctx)
 		}
@@ -1651,6 +1663,16 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 				override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource)),
 			"raw_data": item.RawData,
 		}
+		if txErr != nil {
+			return txErr
+		}
+		// A value of a unique attribute another active CI holds is not
+		// written (MET-15, F-432), as for a new device.
+		dropped, takenErr := h.withoutTakenUniqueWrites(ctx, frame, orgID, matched, attributes, writes)
+		if takenErr != nil {
+			return takenErr
+		}
+		resp.InvalidValues += dropped
 		// In a fixed order: two transactions that write field values of
 		// one CI take their row locks in the same order (WP-334).
 		for _, k := range slices.Sorted(maps.Keys(attributes)) {
@@ -1957,10 +1979,17 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 	var pending []pendingCI
 	for _, k := range fresh {
 		i := start + k
+		typeID := frame.typeIDs[i]
+		// A new device with a value of a unique attribute (MET-15, F-432)
+		// is left to its own transaction, which checks the value against
+		// the other CIs and the devices of the batch before it.
+		if frame.mayHoldUnique(typeID, discoveredAttributes(&frame.items[i])) {
+			w.prefetched[k], w.candidates[k] = false, nil
+			continue
+		}
 		// The batch works on a copy: a record it leaves is processed on its
 		// own from what it reported.
 		item := cloneItem(&frame.items[i])
-		typeID := frame.typeIDs[i]
 		held, reviewed, err := h.resurrectionWith(ctx, orgID, &item, frame.identity, deleted[k])
 		if err != nil {
 			return err

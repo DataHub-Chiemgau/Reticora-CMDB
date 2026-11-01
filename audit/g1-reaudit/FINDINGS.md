@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 29 |
-| P3 | 41 |
-| **Summe** | **76** |
+| P3 | 42 |
+| **Summe** | **77** |
 
 ## Übersicht
 
@@ -116,6 +116,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-423](#f-423) | P3 | `POST /collectors` und `PATCH /collectors/{id}`: Feldfehler aus Validierung und Repository enden als 500 statt 422 mit Feld | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/collector_field_errors_integration_test.go | WP-694 |
 | [F-424](#f-424) | P3 | `unknown_relationship` accept legt die Kante trotz Typliste von `connected_to` und zu soft-gelöschten CIs an; `POST /relationships` auf ein gelöschtes CI antwortet 201 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-695 |
 | [F-431](#f-431) | P3 | Eindeutige Attribute: Der Typwechsel `POST /cis/{id}/type` prüft die eindeutigen Attribute des Zieltyps nicht (Duplikat ohne Index, mit Index 409 ohne den Attributschlüssel) | Korrektur WP-700 (K7) auf `6a499ac` | belegt | backend/internal/server/unique_attr_type_change_integration_test.go | WP-702 |
+| [F-432](#f-432) | P3 | Eindeutige Attribute im Discovery-Ingest: neue Geräte, Updates bekannter Geräte und die Umklassifizierung prüfen nicht (Duplikate ohne Index, mit Index scheitert der Datensatz als „retryable“ 500 und das Gerät fehlt) | Korrektur WP-700 (K7) auf `6a499ac` | belegt | backend/internal/discovery/ingest_unique_integration_test.go | WP-703 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -2096,6 +2097,50 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       unique_attr_type_change_integration_test.go:140: POST /cis/{id}/type with the index: 409 {"detail":"another CI holds the value of the unique attribute(s): attributes","status":409,"title":"Conflict",…,"type":"urn:reticora:problem:conflict","violations":[{"field":"attributes",… want 409 urn:reticora:problem:conflict with the violation of inventory_no
   --- FAIL: TestUniqueAttributeTypeChange (0.81s)
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	0.939s
+  ```
+
+<a id="f-432"></a>
+### F-432 (P3) – Eindeutige Attribute im Discovery-Ingest: neue Geräte, Updates bekannter Geräte und die Umklassifizierung prüfen nicht (Duplikate ohne Index, mit Index scheitert der Datensatz als „retryable“ 500 und das Gerät fehlt)
+
+- **Gefunden in:** Korrektur WP-700 (K7) auf `6a499ac` (Hinweis des WP-700-Agenten, „Nicht Bestandteil“ von WP-700, dort nicht reproduziert), reproduziert auf der Basis `903527f`; die Wege enthalten auf `e5c2d86` ebenfalls keine Prüfung · **Betroffene Anforderungen:** MET-15 (WP-142 AK2: serverseitige Eindeutigkeit), DB-04 (Unique-Index `idx_attr_<id>_u`), CI-03 (gemeldete Werte unterliegen den Regeln manueller Writes, WP-501), CI-11 (Umklassifizierung von `generic_device`), DIS-02 (`unclassified_device`), REC-01 (ein Datensatz nimmt die übrigen nicht mit, WP-481), NFR-03 (Statement-Budget des Ingest) · **Komponente:** backend/internal/discovery/discovery.go (`reconcileRecord` Zeile 1412 ff. auf `e5c2d86`: `createDiscoveredCI` Zeile 1492 und `ci.UpdateRecord` Zeile 1652 ohne Prüfung; `createInWindow` Zeile 1894 ff.: `creator.CreateMany` Zeile 1975, `ON CONFLICT DO NOTHING` greift nur mit Index), backend/internal/discovery/unlicensed.go (`createDiscoveredCI`, Zeile 90 ff.: `h.ciRepo.Create`), backend/internal/ci/pg_repository.go (`UpdateRecord` Zeile 2414 ff. → `changeTypeRow` Zeile 2340 ff. im Modus `discovery`), backend/internal/discovery/consumer.go (`classifyRecordError`, Zeile 346 ff.: `*ci.UniqueError` fällt auf „500, send it again“, nicht dauerhaft) · **Quelle:** kodierender Test von WP-703 (`k7/ad-701/red-wp703.log`)
+- **Reproduktion:** Typ `wp703-ups` mit `asset_tag` (`unique`, `org`, Index noch nicht gebaut) und `inventory_no` (`unique`, Index gebaut), globales Attribut `wp703_tag` (`unique`, ohne Index); Halter-CIs mit `asset_tag` `U-1`, `inventory_no` `I-1`, `wp703_tag` `G-1`. Über `POST /api/v1/ingest/bulk` (Verdrahtung wie server/router.go mit `WithObservedValidator`): (1) Batch mit vier neuen Geräten (`U-1`, zweimal `U-2`, `U-3`) → 202, je zwei aktive CIs mit `U-1` und `U-2` (Batch über `CreateMany`). (2) Mit Index: neues Gerät mit `I-1` → `CreateMany` lehnt ab, der Einzellauf scheitert: `rejected` 1, `errors` `{"status":500,"detail":"the record could not be processed, send it again","retryable":true}`, das Gerät fehlt. (3) `generic_device` ohne Profil (Einzellauf `createDiscoveredCI`) mit `wp703_tag` `G-1` → zweites CI mit `G-1`. (4) Zweiter Datensatz eines bekannten Geräts mit `asset_tag` `U-1` → das CI erhält `U-1` (Duplikat); mit `inventory_no` `I-1` → die ganze Anfrage antwortet 500 „the request could not be completed“, die Sichtung geht verloren. (5) `generic_device` mit `asset_tag` `U-1` (für `generic_device` nicht eindeutig), danach ein Datensatz mit Typ `wp703-ups` → Umklassifizierung, zweites CI des Typs mit `U-1`, der Eintrag `unclassified_device` wird aufgelöst. Der Index-Job scheitert danach für `asset_tag` und `wp703_tag` mit „Duplicate keys exist“.
+- **Soll:** MET-15: ein Wert eines eindeutigen Attributs gehört im Scope des Attributs nur einem aktiven CI, serverseitig durchgesetzt, auch vor dem Indexbau. Die Anforderungen legen nicht fest, wie das Ingest einen gemeldeten, bereits vergebenen Wert behandelt (eine 409 an eine Person gibt es dort nicht). Kleinstes sicheres Verhalten nach vorhandenen Mechanismen (WP-501 `invalid_values`, `withoutTakenIdentity`): der Wert wird nicht gespeichert und gezählt, der Rest des Datensatzes wird gespeichert, kein Datensatz und kein Batch scheitert; bei der Umklassifizierung bleibt der Typ `generic_device` mit offenem `unclassified_device` (Leitungsentscheidung offen, siehe WP-703).
+- **Ist:** Kein Ingest-Weg ruft `ci.CheckUnique` auf. Ohne Index entstehen Duplikate (auch zwischen zwei neuen Geräten eines Batches), mit Index scheitert der Datensatz am Index; `classifyRecordError` stuft den `*ci.UniqueError` als vorübergehend ein, der Collector bzw. die Queue liefert ihn immer wieder, folgende Datensätze desselben Geräts im Batch werden zurückgehalten (WP-481), und ein Request mit nur diesem Datensatz antwortet 500.
+- **Nutzerwirkung:** Wird ein Attribut, das die Discovery meldet (z. B. Inventar- oder Asset-Nummer aus SNMP/Redfish), als eindeutig markiert, legt die Discovery bis zum Indexbau Duplikate an, und der Index-Job scheitert danach. Mit Index wird ein Gerät mit kollidierendem Wert nie inventarisiert bzw. ein bekanntes Gerät nicht mehr aktualisiert (Sichtung, `last_seen_at`, Status), ohne Hinweis außer einem 500 im Ingest-Ergebnis und Wiederholungen.
+- **Ursache (belegt):** WP-142 hat die Prüfung in `ci.Service.Create`/`Update` gebaut, WP-700 die Wege der Review-Auflösung, Wiederherstellung und Übernahme nachgezogen; der Ingest schreibt über das Repository (`Create`, `CreateMany`, `UpdateRecord`) und wurde nicht nachgezogen. WP-700 hat ihn unter „Nicht Bestandteil“ als eigene Entscheidung vermerkt.
+- **Empfehlung:** `ci.CheckUnique` im Ingest aufrufen und einen vergebenen Wert wie einen abgelehnten Wert verwerfen (`invalid_values`, Warnung mit dem Schlüssel): vor `createDiscoveredCI` in `reconcileRecord`; für bekannte Geräte für die geänderten Werte vor der Schreibentscheidung; der Batch überlässt neue Geräte mit Werten eindeutiger Attribute ihrem Einzellauf (prüft auch gegen die vorher angelegten Geräte des Batches). Die Schlüssel der eindeutigen Attribute je Typ liest der Frame in der Anweisung der Typauflösung, damit das Statement-Budget (NFR-03) unverändert bleibt. Die Umklassifizierung prüft in `changeTypeRow` (WP-702) und behält bei einem Konflikt `generic_device` (`ci.keepsType`). Keine Migration.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestIngestUniqueAttributes$' ./internal/discovery/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: jede Antwort 202 ohne `rejected`; je Wert ein aktives CI (Batch, zwei neue Geräte mit einem Wert, Einzellauf `generic_device`, Update ohne und mit Index, Umklassifizierung); die Geräte sind ohne den vergebenen Wert gespeichert, das bekannte Gerät behält `U-8/I-8`, `invalid_values` zählt die verworfenen Werte; die Umklassifizierung lässt `generic_device` und den offenen `unclassified_device`; danach baut der Index-Job die Indexe. `TestIngestStatementBudget` und `TestRediscoverStatementBudget` mit unveränderten Grenzen grün.
+- **Kodierender Test:** backend/internal/discovery/ingest_unique_integration_test.go (`TestIngestUniqueAttributes`, `POST /api/v1/ingest/bulk` gegen PostgreSQL als `reticora_app`); auf `e5c2d86` rot (ausgeführt auf der Basis `903527f` mit den alten Produktionsdateien aus `HEAD`; die Wege enthalten dort wie auf `e5c2d86` keine Prüfung, Log-Zeilen gekürzt):
+
+  ```text
+  === RUN   TestIngestUniqueAttributes
+      ingest_unique_integration_test.go:160: batch, value of another CI: 2 active CIs hold asset_tag U-1, want 1
+      ingest_unique_integration_test.go:161: batch, value of another CI: device wp703-new-taken stores asset_tag "U-1", want it without the taken value
+      ingest_unique_integration_test.go:162: batch, two new devices with one value: 2 active CIs hold asset_tag U-2, want 1
+      ingest_unique_integration_test.go:164: batch: invalid_values = <nil>, want 2 (the dropped values)
+  … WARN ingest batch: CI refused by a unique index; record processed on its own event=ingest.batch.unique … serial_number=SN-703-5
+  … WARN ingest record failed; the batch goes on with the next record event=ingest.record.failed … permanent=false error="another CI holds the value of the unique attribute(s): attributes"
+      ingest_unique_integration_test.go:167: batch with the index: {"received":2,"created":1,"updated":0,"conflicts":0,"review_items":0,"relationships":0,"accepted":1,"rejected":1,"errors":[{"status":500,"detail":"the record could not be processed, send it again","retryable":true}]}
+          , want no rejected record (a taken value fails no record)
+      ingest_unique_integration_test.go:169: batch with the index: 0 CIs of device wp703-new-indexed, want 1 (the device is stored without the taken value)
+      ingest_unique_integration_test.go:171: batch with the index: invalid_values = <nil>, want 1 (the dropped values)
+      ingest_unique_integration_test.go:175: generic_device: 2 active CIs hold wp703_tag G-1, want 1
+      ingest_unique_integration_test.go:176: generic_device: device wp703-generic stores wp703_tag "G-1", want it without the taken value
+      ingest_unique_integration_test.go:177: generic_device: invalid_values = <nil>, want 1 (the dropped values)
+      ingest_unique_integration_test.go:183: known device: 3 active CIs hold asset_tag U-1, want 1
+      ingest_unique_integration_test.go:184: known device: invalid_values = <nil>, want 1 (the dropped values)
+  … WARN ingest record failed; the batch goes on with the next record event=ingest.record.failed … permanent=false error="another CI holds the value of the unique attribute(s): attributes"
+      ingest_unique_integration_test.go:185: known device with the index: ingest 500 {"detail":"the request could not be completed","status":500,"title":"Internal Error",…,"type":"https://reticora.io/problems/500"}
+          , want 202
+      ingest_unique_integration_test.go:187: known device with the index: invalid_values = <nil>, want 1 (the dropped values)
+      ingest_unique_integration_test.go:190: known device stores U-1/I-8, want its values U-8/I-8
+      ingest_unique_integration_test.go:197: reclassification: 4 active CIs hold asset_tag U-1, want 1
+      ingest_unique_integration_test.go:200: reclassification: the CI became wp703-ups, want it to stay generic_device
+      ingest_unique_integration_test.go:204: reclassification: unclassified_device item resolved, want open
+      ingest_unique_integration_test.go:210: index job for asset_tag after the ingest: CIs share a value of the unique attribute "asset_tag": Duplicate keys exist.
+      ingest_unique_integration_test.go:210: index job for wp703_tag after the ingest: CIs share a value of the unique attribute "wp703_tag": Duplicate keys exist.
+  --- FAIL: TestIngestUniqueAttributes (0.75s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery	0.863s
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

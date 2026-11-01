@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -171,11 +172,28 @@ func UpdateRecord(ctx context.Context, repo Repository, orgID, id string, rec *R
 	}
 	changed, err := changer.ChangeType(ctx, orgID, id, rec.TypeID, TypeChangeDiscovery)
 	switch {
-	case errors.Is(err, ErrReclassificationRefused), errors.Is(err, ErrUnknownType):
+	case keepsType(ctx, err, id, rec.TypeID):
 		return result, nil
 	case err != nil:
 		return nil, err
 	}
 	result.CI, result.TypeChanged = changed.CI, changed.Changed
 	return result, nil
+}
+
+// keepsType reports whether the reclassification of an ingest record
+// (CI-11) leaves the CI's type as it is: discovery may not make it
+// (ErrReclassificationRefused, ErrUnknownType), or another active CI holds
+// a value the CI carries of a unique attribute of the target type (MET-15,
+// F-432, *UniqueError). Discovery cannot answer a person with the conflict:
+// the CI stays a generic_device, its unclassified_device item stays open,
+// and the manual type change answers 409 with the attribute.
+func keepsType(ctx context.Context, err error, ciID, typeID string) bool {
+	var taken *UniqueError
+	if errors.As(err, &taken) {
+		slog.WarnContext(ctx, "discovery reclassification kept the type: another CI holds a value of a unique attribute of the target type",
+			"event", "ingest.reclassification.unique", "ci_id", ciID, "ci_type_id", typeID, "fields", taken.Fields)
+		return true
+	}
+	return errors.Is(err, ErrReclassificationRefused) || errors.Is(err, ErrUnknownType)
 }

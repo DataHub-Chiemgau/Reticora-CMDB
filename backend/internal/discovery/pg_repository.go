@@ -669,6 +669,48 @@ func (r *PGRepository) LookupCITypeIDs(ctx context.Context, orgID string, namesO
 	return types, nil
 }
 
+// LookupCITypeIDsWithUnique implements CITypeUniqueLookup: the types of
+// LookupCITypeIDs and, in the same statement, per type id the keys of its
+// unique attributes and of the global ones (MET-15, F-432), as
+// ci.PGRepository.UniqueConflicts selects them.
+func (r *PGRepository) LookupCITypeIDsWithUnique(ctx context.Context, orgID string, namesOrKeys []string) (
+	types map[string]string, unique map[string][]string, err error) {
+	types, unique = map[string]string{}, map[string][]string{}
+	if len(namesOrKeys) == 0 {
+		return types, unique, nil
+	}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, qerr := tx.Query(ctx, `
+			SELECT DISTINCT ON (k.name) k.name, t.id::text,
+				ARRAY(SELECT d.key FROM attribute_definition d
+					WHERE d.is_unique AND (d.ci_type_id = t.id OR d.ci_type_id IS NULL)
+					  AND (d.organization_id = $2::uuid OR d.organization_id IS NULL)
+					ORDER BY d.key)
+			FROM unnest($1::text[]) AS k(name)
+			JOIN ci_type t ON (t.key = k.name OR t.name = k.name)
+			  AND (t.organization_id IS NULL OR t.organization_id = $2)
+			ORDER BY k.name, t.organization_id NULLS LAST, t.id
+		`, namesOrKeys, orgID)
+		if qerr != nil {
+			return qerr
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, id string
+			var keys []string
+			if serr := rows.Scan(&name, &id, &keys); serr != nil {
+				return serr
+			}
+			types[name], unique[id] = id, keys
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("lookup ci types: %w", err)
+	}
+	return types, unique, nil
+}
+
 // RunInTx implements TxRunner: fn runs in one transaction of the context's
 // tenant scope, which every repository call with fn's context joins.
 func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
