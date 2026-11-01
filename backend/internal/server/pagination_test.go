@@ -1,10 +1,10 @@
 // Architecture and runtime tests of the list contract (API-02): every list
 // is a cursor page {data, next_cursor}, never a bare array, and an empty
-// list is "data": [] (WP-164, WP-466, WP-467, F-075, F-214).
+// list is "data": [] (WP-164, WP-466, WP-467, WP-672, F-075, F-214, F-401).
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -v -run 'TestEveryListIsCursorPaginated|TestAuditT2ContractHasNoBareArrayLists|TestAuditT2ListsAreCursorPages|TestEmptyListsAnswerAnEmptyDataArray' ./internal/server/
+//	cd backend && go test -count=1 -v -run 'TestEveryListIsCursorPaginated|TestAuditT2ContractHasNoBareArrayLists|TestAuditT2ListsAreCursorPages|TestEmptyListsAnswerAnEmptyDataArray|TestEmptyResponsesAnswerArraysOverPostgres' ./internal/server/
 package server_test
 
 import (
@@ -354,14 +354,27 @@ func TestAuditT2ListsAreCursorPages(t *testing.T) {
 
 // TestEmptyListsAnswerAnEmptyDataArray: an empty list of an organization
 // without rows is "data": [], never null; api.ListResponse encodes a nil
-// slice as [] whatever the repository returned (API-02, F-214 retest).
+// slice as [] whatever the repository returned (API-02, F-214 retest). The
+// lists with an own response type or a map answer [] as well: the search
+// without a hit (SearchResponse, F-401), the history of an entity without
+// changes and the sub-lists of the P2 modules.
 func TestEmptyListsAnswerAnEmptyDataArray(t *testing.T) {
 	s := newT2Stack(t)
 	admin, _ := s.login(t, identity.AllPermissions()...)
+	const unknown = "7a2a0000-0000-4000-8000-0000000000aa"
 	for _, path := range []string{
 		"/api/v1/ips?limit=1",
 		"/api/v1/ip-addresses?limit=1",
 		"/api/v1/credentials",
+		"/api/v1/search?q=no-such-text",
+		"/api/v1/search?q=no-such-text&type=ci",
+		"/api/v1/history/ci/" + unknown,
+		"/api/v1/history/asset/" + unknown,
+		"/api/v1/history/location/" + unknown,
+		"/api/v1/trainings/" + unknown + "/assignments",
+		"/api/v1/keys/" + unknown + "/assignments",
+		"/api/v1/desks/" + unknown + "/bookings",
+		"/api/v1/maintenance-windows/" + unknown + "/notifications",
 	} {
 		w := s.do(t2Request{method: http.MethodGet, path: path, bearer: admin})
 		var members map[string]json.RawMessage
@@ -372,5 +385,8 @@ func TestEmptyListsAnswerAnEmptyDataArray(t *testing.T) {
 	raw, err := json.Marshal(api.ListResponse[string]{Total: 0})
 	if err != nil || !strings.Contains(string(raw), `"data":[]`) {
 		t.Errorf("ListResponse with nil data encodes as %s (%v); want \"data\":[]", raw, err)
+	}
+	if raw, err = json.Marshal(api.NonNilSlice[string](nil)); err != nil || string(raw) != "[]" {
+		t.Errorf("NonNilSlice(nil) encodes as %s (%v); want []", raw, err)
 	}
 }

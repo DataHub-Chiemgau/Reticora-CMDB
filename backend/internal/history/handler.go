@@ -247,8 +247,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	// An entity without changes answers "data": [], not null (F-401).
 	resp := ListResponse{
-		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
+		Data: api.NonNilSlice(items), Total: total, Limit: page.Limit, Offset: page.Offset,
 		HasMore: page.Offset+page.Limit < total, AuditIncluded: opts.IncludeAudit,
 	}
 	if resp.HasMore && len(items) > 0 {

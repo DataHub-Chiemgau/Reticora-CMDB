@@ -1076,3 +1076,7 @@ TEN-09;[Q];B;backend/internal/user/role_definition_ceiling_integration_test.go;W
 RBA-02;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
 RBA-03;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
 AUD-07;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-672
+API-02;[B];C;backend/internal/server/empty_arrays_integration_test.go;WP-672
+API-02;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
+SRC-01;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
