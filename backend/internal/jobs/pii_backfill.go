@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,10 +23,12 @@ const PIIBackfillKind = "pii.backfill"
 // PIIBackfill replaces plaintext personal values in existing audit
 // entries, CI changes and events, and the personal data of contacts and of
 // assignment signers, with vault surrogates, per organization
-// in the organization's transaction. Rewritten audit entries are
-// re-chained (audit_rechain, migration 000125), so audit-verify stays
-// intact; entries written since migration 000125 are sealed already, so
-// later runs find nothing.
+// in the organization's transaction. An audit entry is sealed in place by
+// audit_seal_pii (migration 000188): it keeps the hash it was chained with,
+// the database records the digest of the original and accepts nothing but
+// personal values replaced by references, so audit-verify stays intact and
+// the runtime role rewrites no entry (AUD-04, WP-680). Entries written since
+// migration 000125 are sealed already, so later runs find nothing.
 type PIIBackfill struct {
 	pool *pgxpool.Pool
 }
@@ -47,7 +50,7 @@ func (b *PIIBackfill) Schedule() Schedule {
 
 // BackfillResult counts the rows a backfill sealed.
 type BackfillResult struct {
-	Audit, CIChanges, Events, Contacts, Assignments, Rechained int
+	Audit, CIChanges, Events, Contacts, Assignments int
 }
 
 // Total is the number of rows sealed.
@@ -86,7 +89,7 @@ func (b *PIIBackfill) RunOrg(ctx context.Context, orgID string) (BackfillResult,
 	scope := database.OrgWideScope(orgID, "")
 	err := database.WithTenant(ctx, b.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		if res.Audit, res.Rechained, err = sealAudit(ctx, tx, orgID); err != nil {
+		if res.Audit, err = sealAudit(ctx, tx, orgID); err != nil {
 			return err
 		}
 		if res.CIChanges, err = sealCIChanges(ctx, tx, orgID); err != nil {
@@ -117,51 +120,37 @@ type jsonRow struct {
 	a, b  []byte
 }
 
-func sealAudit(ctx context.Context, tx pgx.Tx, orgID string) (sealed, rechained int, err error) {
-	// The chain lock of the insert trigger: no entry is appended meanwhile.
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(1382380649, audit_org_lock_key($1))`, orgID); err != nil {
-		return 0, 0, fmt.Errorf("lock audit chain: %w", err)
-	}
+func sealAudit(ctx context.Context, tx pgx.Tx, orgID string) (sealed int, err error) {
 	rows, err := tx.Query(ctx, `SELECT id::text, seq, changes::text FROM audit_log
 		WHERE organization_id = $1 AND changes::text ~ $2 ORDER BY seq`, orgID, pii.KeyPattern())
 	if err != nil {
-		return 0, 0, fmt.Errorf("find audit entries: %w", err)
+		return 0, fmt.Errorf("find audit entries: %w", err)
 	}
 	found, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (jsonRow, error) {
 		var j jsonRow
 		scanErr := r.Scan(&j.id, &j.seq, &j.a)
 		return j, scanErr
 	})
-	if err != nil || len(found) == 0 {
-		return 0, 0, err
+	if err != nil {
+		return 0, err
 	}
-	if _, err = tx.Exec(ctx, `SELECT set_config('app.audit_pii_migration', 'on', true)`); err != nil {
-		return 0, 0, err
-	}
-	from := int64(-1)
 	for _, j := range found {
 		out, changed, serr := sealJSON(ctx, tx, orgID, "", j.a)
-		if serr != nil || !changed {
-			if serr != nil {
-				return 0, 0, fmt.Errorf("audit entry %s: %w", j.id, serr)
-			}
+		if serr != nil {
+			return 0, fmt.Errorf("audit entry %s: %w", j.id, serr)
+		}
+		if !changed {
 			continue
 		}
-		if _, err = tx.Exec(ctx, `UPDATE audit_log SET changes = $2::jsonb WHERE id = $1`, j.id, out); err != nil {
-			return 0, 0, fmt.Errorf("audit entry %s: %w", j.id, err)
+		var ok bool
+		if err = tx.QueryRow(ctx, `SELECT audit_seal_pii($1, $2::jsonb)`, j.id, out).Scan(&ok); err != nil {
+			return 0, fmt.Errorf("audit entry %s: %w", j.id, err)
 		}
-		if from < 0 {
-			from = j.seq
-		}
-		sealed++
-	}
-	if from >= 0 {
-		if err = tx.QueryRow(ctx, `SELECT audit_rechain($1, $2)`, orgID, from).Scan(&rechained); err != nil {
-			return 0, 0, fmt.Errorf("re-chain audit log: %w", err)
+		if ok {
+			sealed++
 		}
 	}
-	_, err = tx.Exec(ctx, `SELECT set_config('app.audit_pii_migration', 'off', true)`)
-	return sealed, rechained, err
+	return sealed, nil
 }
 
 func sealCIChanges(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
@@ -354,12 +343,16 @@ func sealSigner(ctx context.Context, tx pgx.Tx, orgID string, raw []byte) (any, 
 }
 
 // sealJSON seals a stored JSON value (of a field, when field is set).
+// Numbers keep their text (json.Number): the seal of an audit entry may
+// change nothing but personal values.
 func sealJSON(ctx context.Context, tx pgx.Tx, orgID, field string, raw []byte) (sealed string, changed bool, err error) {
 	var v any
-	if uerr := json.Unmarshal(raw, &v); uerr != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if uerr := dec.Decode(&v); uerr != nil {
 		return "", false, uerr
 	}
-	out, changed, err := pii.SealFieldTx(ctx, tx, orgID, field, v)
+	out, changed, err := pii.SealStoredTx(ctx, tx, orgID, field, v)
 	if err != nil || !changed {
 		return string(raw), false, err
 	}

@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-678 | 24 | 21,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-680 | 25 | 23,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **326** | **422,0** | |
+| **Summe** | | **327** | **424,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>24 WPs · 21,0 PT"]
+    K7N["K7-Nachträge<br/>25 WPs · 23,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -445,6 +445,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-676](#wp-676--review-auflösung-abgelehnte-wirkungen-mit-dem-fehlervertrag-der-ressource-409422404-statt-500-unknown_relationship-accept-ohne-kante-abgelehnt) | `k7n-review-resolve-errors` | Review-Auflösung: abgelehnte Wirkungen mit dem Fehlervertrag der Ressource (409/422/404 statt 500); `unknown_relationship` accept ohne Kante abgelehnt | K7N | 1,0 | F-405 | WP-088, WP-089, WP-643, WP-671, WP-675 |
 | [WP-677](#wp-677--enrollment-code-bindet-den-collector-an-client-und-site-seines-erzeugers) | `k7n-enrollment-client-binding` | Enrollment-Code bindet den Collector an Client und Site seines Erzeugers | K7N | 1,5 | F-406 | WP-144, WP-145, WP-147, WP-153, WP-668 |
 | [WP-678](#wp-678--edge-ingest-bindet-die-records-eines-collectors-an-dessen-client) | `k7n-edge-ingest-collector-client` | Edge-Ingest bindet die Records eines Collectors an dessen Client | K7N | 1 | F-407 | WP-146, WP-153, WP-481, WP-334, WP-677 |
+| [WP-680](#wp-680--audit-einträge-für-die-laufzeitrolle-unveränderlich-siegel-personenbezogener-werte-nur-über-audit_seal_pii-keine-neuverkettung-audit-verify-prüft-versiegelte-einträge-gegen-das-original) | `k7n-audit-append-only-runtime` | Audit-Einträge für die Laufzeitrolle unveränderlich: Siegel personenbezogener Werte nur über `audit_seal_pii`, keine Neuverkettung, `audit-verify` prüft versiegelte Einträge gegen das Original | K7N | 2,5 | F-409 | WP-132, WP-241, WP-064, WP-656 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19745,6 +19746,82 @@ TEN-09;[Q];D;backend/internal/discovery/edge_record_client_integration_test.go;W
 **Entscheidungsbedarf:** keiner für die Umsetzung. Hinweise für die Leitung: (1) Ein an eine Site gebundener Collector bindet seine Records an seinen Client und seine Site (Review-Items tragen sie), die entdeckten CIs aber nur an den Client, weil ein CI seine Site aus einer Location ableitet; eine Platzierung der CIs an der Site des Collectors wäre eine Produktentscheidung. (2) Der 409 für einen Record mit der Seriennummer eines fremden CI wird wie bisher (WP-334, `retryReason` „identity“) als wiederholbar eingestuft: Über die Queue wird der Record bis `MaxDeliver` erneut zugestellt und landet dann im Dead Letter; der Collector zählt ihn in der 202-Antwort als verloren. Er verrät, dass die Seriennummer in der Organisation existiert, wie für einen Client-1-Principal über die API.
 
 **Nicht Bestandteil:** Nachrichten, die vor dem Update mit org-weitem Scope in der Queue liegen, werden noch org-weit verarbeitet (höchstens bis zu ihrer Zustellung). Der HTTP-Ingest (`POST /discovery/ingest`) eines eingeschränkten Principals ohne `client_id` (403 per RLS, unverändert). Die Bindung des Enrollment-Codes (F-406, WP-677).
+
+### WP-680 – Audit-Einträge für die Laufzeitrolle unveränderlich: Siegel personenbezogener Werte nur über `audit_seal_pii`, keine Neuverkettung, `audit-verify` prüft versiegelte Einträge gegen das Original
+
+**Schlüssel:** `k7n-audit-append-only-runtime` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 2,5 PT
+
+**Voraussetzungen (gemergt):** WP-132 (`b-audit-chain`), WP-241 (`b-pii-surrogates`), WP-064 (`ddl-contract`), WP-656 (`k7n-assignment-signature-surrogate`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-409](../../../audit/g1-reaudit/FINDINGS.md#f-409) | P2 | Laufzeitrolle schreibt Audit-Einträge um und verkettet neu: `app.audit_pii_migration` und `audit_rechain` stehen der Anwendung offen, `audit-verify` meldet die Kette intakt | schließt | Wiederholungsprüfung von WP-132 (K7, Verifier r3-b3) auf `55b6e7d` |
+
+**Problem:** Migration 000125 (WP-241) lässt im Append-only-Trigger `reject_audit_log_mutation()` ein UPDATE der `changes` zu, sobald die Sitzung `app.audit_pii_migration = 'on'` setzt, und `audit_rechain(org, seq)` berechnet `previous_hash` und `hash` der Organisation ab einem beliebigen Eintrag neu. Beides prüft nur die Einstellung, die jede Sitzung selbst setzt; `reticora_app` hat UPDATE auf `audit_log` und EXECUTE auf `audit_rechain`, weil der Backfill (`pii.backfill`, `sealAudit`) als Systemjob auf dem Laufzeit-Pool läuft. Die Laufzeitrolle (auch als `reticora_owner` über `SET ROLE`) schreibt damit beliebige Einträge um, verkettet neu, und `audit-verify` meldet die Kette intakt (AUD-04, WP-132 AK1).
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000188 (Nummer vorläufig): Die GUC-Ausnahme im Trigger und `audit_rechain` entfallen, `reticora_app` verliert UPDATE auf `audit_log` (DELETE bleibt für den Aufbewahrungslauf, 000119); keine Funktion berechnet einen gespeicherten Hash neu. Als Laufzeit-Login, als `reticora_app` und als `reticora_owner` scheitern UPDATE unter `app.audit_pii_migration` und `audit_rechain`; Einträge und Hashes bleiben, `audit.Verify` meldet die Kette intakt über die Originaleinträge (`TestRuntimeRoleCannotRewriteAuditChain`, auf `e5c2d86` rot).
+- [ ] Versiegeln nur über `audit_seal_pii(entry uuid, changes jsonb)`: SECURITY DEFINER der neuen Rolle `reticora_audit_sealer` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS, ohne Mitglieder; Rechte nur SELECT (`id`, `organization_id`) und UPDATE (`changes`) auf `audit_log`, SELECT (`surrogate_id`, `organization_id`, `kind`) auf `pii_subject`), fester `search_path`, EXECUTE nur für `reticora_app`, nicht PUBLIC; RLS mit `app.org_id` des Aufrufers (Eintrag einer anderen Organisation: nicht gefunden).
+- [ ] Der Trigger nimmt ein UPDATE nur von `reticora_audit_sealer` an und nur, wenn die neuen `changes` die alten sind mit mindestens einer nicht leeren Zeichenkette personenbezogener Schlüssel (`audit_personal_keys()` = `pii.PersonalKeys`; Kennzeichen eines Schlüssels geht in Arrays über, nicht in Objekte, wie `pii.SealTx`) ersetzt durch `{"$pii": "<id>"}` auf ein Wert-Subjekt (`kind = 'value'`) derselben Organisation oder durch `{"$pii": ""}` (ohne Vault); alles andere bleibt textgleich, alle übrigen Spalten einschließlich `hash` und `previous_hash` unverändert. Abgelehnt: anderer Wert geändert, nicht personenbezogenes Feld versiegelt, unbekannte, fremde oder Kontakt-Referenz, Referenz ohne UUID oder mit zweitem Schlüssel, geänderter Zahlentext, entfernter oder hinzugefügter Schlüssel, Siegel ohne Referenz.
+- [ ] Der Trigger hält das Siegel fest: `chained_digest` (SHA-256 des kanonischen JSON, mit dem der Eintrag verkettet wurde; ab dem ersten Siegel unverändert), `sealed_refs` (eingeführte Referenzen, kumuliert), `sealed_hash` = SHA-256(`hash` ‖ SHA-256(kanonisches JSON des versiegelten Eintrags)); ein neuer Eintrag trägt keines. `audit_entry_hash` behält Signatur und Wert (zerlegt in `audit_entry_digest` und `audit_chain_link`).
+- [ ] `audit.Verify` (Endpunkt, Compliance-Bericht, `audit-verify`): versiegelter Eintrag verkettet über `chained_digest`; Inhalt geändert seit dem Siegel → Bruch „sealed entry changed after its seal“; mit Vault werden die Werte von `sealed_refs` zurückgesetzt (`audit_unseal`) und müssen `chained_digest` ergeben, sonst Bruch „sealed value differs from the original“; redigierter oder gelöschter Wert (Crypto-Shredding) → unbestätigt, kein Bruch. `VerifyResult` zählt `Sealed` und `Unconfirmed` (nicht in der API-Antwort); spec-first nennt `api/openapi.yaml` (`AuditVerifyResult.broken_reason`) die beiden neuen Gründe, `frontend/src/api/generated/schema.d.ts` neu erzeugt; eine Datenbank vor 000188 (wiederhergestelltes Backup) wird wie bisher geprüft (`TestAuditRechainAfterHashFix`); `audit-verify` nutzt den Vault mit `RETICORA_MASTER_KEY` (und `RETICORA_MASTER_KEY_PREVIOUS`) und nennt versiegelte und unbestätigte Einträge in der Ausgabe.
+- [ ] Der Backfill (`pii.backfill`, WP-241/WP-656) versiegelt Audit-Einträge über `audit_seal_pii` ohne Neuverkettung und ohne Kettensperre; Zahlen behalten ihren gespeicherten Text (`pii.SealStoredTx`, `json.Number`). `TestHistoryKeepsSurrogates` (Hashes unverändert, 1 versiegelt, bestätigt), `TestAssignmentSignatureKeepsSurrogate`, `TestContactsThroughTheVault` grün; `TestAuditSealOnlyReplacesPersonalValues` (Ablehnungen, Backfill mit Teil-Siegel, Verify mit und ohne Vault, geänderter und gelöschter Vault-Wert, Änderung nach dem Siegel) grün.
+- [ ] Rollenvertrag (WP-064): `VerifyRoleContract` meldet ein `current_user` oder `session_user`, das `reticora_audit_sealer` erreicht (`TestRoleContractStartupCheck`); `TestOwnerCannotTruncateTenantTables`, `TestAdminPoolCallersAreListed` unverändert grün. Kein Backfill über `NewAdminPool` (nur Kommandozeilenwerkzeuge, wechselt ohnehin in `reticora_app`).
+- [ ] Down-Migration stellt den Stand von 000125 her und verkettet jede Organisation ab ihrem ersten versiegelten Eintrag neu (wie der frühere Backfill); `reticora_audit_sealer` wird entfernt, wenn keine andere Datenbank des Clusters sie nutzt. `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün, `docs/schema-baseline.md` neu erzeugt.
+- [ ] Doku: `docs/ops/workers.md` („Sealed audit entries“: Siegel, Spalten, Prüfschritte von `audit-verify`, unbestätigte Einträge), `docs/backup-dr.md` (Schritt 7), `docs/betrieb/upgrade-hinweise.md` (Release-Hinweis, Rolle im geteilten Cluster), `docs/security/threat-model.md` (T16).
+- [ ] Regression: `go test -p 1` von `internal/audit`, `internal/jobs`, `internal/pii`, `internal/assignment`, `internal/contact`, `internal/compliance`, `internal/operator`, `internal/events`, `internal/tenant/...`, `cmd/audit-verify`, `internal/database` (allein) grün; neue Tests als Nicht-Root-Nutzer grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (23 Einträge):**
+
+- backend/migrations/000188_audit_seal_append_only.up.sql (neu)
+- backend/migrations/000188_audit_seal_append_only.down.sql (neu)
+- backend/internal/audit/audit.go
+- backend/internal/audit/append_only_integration_test.go (neu)
+- backend/internal/audit/seal_integration_test.go (neu)
+- backend/internal/jobs/pii_backfill.go
+- backend/internal/pii/surrogate.go
+- backend/internal/pii/surrogate_integration_test.go
+- backend/internal/database/role_check.go
+- backend/internal/database/role_check_integration_test.go
+- backend/cmd/audit-verify/main.go
+- backend/cmd/audit-verify/main_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/ops/workers.md
+- docs/backup-dr.md
+- docs/betrieb/upgrade-hinweise.md
+- docs/security/threat-model.md
+- docs/schema-baseline.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md (Lead)
+- docs/plan/g1-korrektur/implementierungsplan.md (Lead)
+- docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** Migration 000188 (Nummer vorläufig; 000187/000188 ggf. durch parallele WPs belegt). Neue Rolle `reticora_audit_sealer` (clusterweit, angelegt wenn nicht vorhanden, wie `reticora_owner` in 000078; dem Migrations-Login mit SET, ohne INHERIT gewährt, damit es die Funktion übergeben kann). Drei Spalten auf `audit_log` (`chained_digest`, `sealed_refs`, `sealed_hash`), Funktionen `audit_entry_digest`, `audit_chain_link`, `audit_personal_keys`, `audit_changes_seal`, `audit_unseal`, `audit_seal_pii`; `audit_entry_hash`, `reject_audit_log_mutation` und `audit_log_chain_trigger` neu definiert, `audit_rechain` entfernt; REVOKE UPDATE auf `audit_log` von `reticora_app`. Keine Policy-Änderung: `audit_isolation` und `pii_subject_isolation` gelten für PUBLIC und binden auch die Siegelrolle an `app.org_id`. Geprüft als Laufzeit-Login, als `reticora_app` mit den Tenant-GUCs (`database.WithTenant`) und nach `SET ROLE reticora_owner`.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^(TestRuntimeRoleCannotRewriteAuditChain|TestAuditSealOnlyReplacesPersonalValues)$' ./internal/audit/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -run '^(TestHistoryKeepsSurrogates|TestAssignmentSignatureKeepsSurrogate|TestContactsThroughTheVault)$' ./internal/pii/ ./internal/assignment/ ./internal/contact/`; `go test -count=1 ./cmd/audit-verify/` (`TestRunNamesSealedEntries`).
+- `cd backend && go test -count=1 ./internal/database/...` allein (`TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`, `TestRoleContractStartupCheck`, `TestOwnerCannotTruncateTenantTables`, `TestAdminPoolCallersAreListed`).
+- `cd backend && go test -count=1 -run '^TestAuditRechainAfterHashFix$' ./internal/audit/` (Prüfung einer Datenbank vor 000188).
+- Probe `verify-tamper-guc.sql` als Laufzeit-Login; `audit-verify` mit und ohne `RETICORA_MASTER_KEY` auf einem vom Backfill versiegelten Eintrag, danach mit im Vault geändertem Wert (Exit 1).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUD-04;[B];B;backend/internal/audit/append_only_integration_test.go;WP-680
+AUD-04;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
+SEC-05;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
+TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-680
+```
+
+**Entscheidungsbedarf:** keiner. Die Wahl des Wegs (SECURITY DEFINER einer eigenen Rolle ohne Mitglieder statt `reticora_owner` oder Admin-Pool) folgt aus dem Rollenvertrag: `reticora_owner` ist für `reticora_app` per `SET ROLE` erreichbar, `NewAdminPool` ist Kommandozeilenwerkzeugen vorbehalten und wechselt in `reticora_app`.
+
+**Nicht Bestandteil:** Wert-Subjekte im Vault bleiben für die Laufzeitrolle änderbar (`pii.Vault.UpdateTx`, `ReencryptTx` bei der Schlüsselrotation): Für Einträge, die seit 000125 schon beim Schreiben mit Referenz verkettet wurden, deckt die Kette nur die Referenz, nicht den angezeigten Wert; eine Änderung des Wert-Subjekts zeigt `audit-verify` dort nicht (für vom Backfill versiegelte Einträge schon, mit Vault). Als Kandidat gemeldet. Ein externer Anker des Kettenendes (gegen Neuverkettung mit Superuser-Rechten) und das Aufbewahrungs-Löschen über `app.audit_retention` (NFR-06, älter als 10 Jahre, mit Anker-Eintrag) bleiben unverändert; weitere Befunde der Wiederholungsprüfung (eigene WPs).
 
 ## Zurückgestellte Befunde
 

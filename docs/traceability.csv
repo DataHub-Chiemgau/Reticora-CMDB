@@ -1107,3 +1107,7 @@ COL-04;[B];D;backend/internal/server/enrollment_client_binding_integration_test.
 TEN-09;[Q];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677
 DIS-05;[B];D;backend/internal/discovery/edge_record_client_integration_test.go;WP-678
 TEN-09;[Q];D;backend/internal/discovery/edge_record_client_integration_test.go;WP-678
+AUD-04;[B];B;backend/internal/audit/append_only_integration_test.go;WP-680
+AUD-04;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
+SEC-05;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
+TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-680

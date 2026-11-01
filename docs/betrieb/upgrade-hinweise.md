@@ -37,6 +37,9 @@ Ein Rollback wirkt nur auf die eigene Datenbank:
   verwendet die vorhandene Rolle wieder.
 - `000078_app_role_ddl_contract.down.sql` verfährt mit `reticora_owner`
   ebenso, ohne Meldung.
+- `000188_audit_seal_append_only.down.sql` verfährt mit
+  `reticora_audit_sealer` (Eigentümer von `audit_seal_pii`, WP-680) ebenso,
+  ohne Meldung.
 
 Welche Datenbanken die Rolle noch verwenden, zeigt eine beliebige Datenbank
 des Clusters (`pg_shdepend` ist clusterweit):
@@ -462,6 +465,39 @@ beides verweigert.
 (`backend/internal/server/enrollment_client_binding_integration_test.go`)
 prüft Bindung, Wahl, Ablehnung, Site-Bindung, org-weite Codes und Altcodes
 gegen PostgreSQL.
+## Release-Hinweis: Audit-Einträge für die Laufzeitrolle unveränderlich (F-409)
+
+Stand: 2026-11-01. Umsetzung: WP-680 (Migration 000188, Nummer vorläufig).
+Anforderungen: AUD-04, SEC-05.
+
+Bisher konnte die Laufzeitrolle `app.audit_pii_migration` selbst setzen, die
+`changes` eines Audit-Eintrags umschreiben und die Kette der Organisation mit
+`audit_rechain` neu verketten; `audit-verify` meldete die Kette danach intakt.
+
+- Die Einstellung und `audit_rechain` entfallen, `reticora_app` verliert das
+  UPDATE-Recht auf `audit_log`. Der Lauf `pii.backfill` versiegelt
+  personenbezogene Werte alter Einträge nur noch über `audit_seal_pii`
+  (SECURITY DEFINER der neuen Rolle `reticora_audit_sealer`, NOLOGIN, ohne
+  Mitglieder) und ohne Neuverkettung; der Eintrag behält seinen Hash, die
+  Datenbank hält den Digest des Originals fest (`docs/ops/workers.md`,
+  „Sealed audit entries“).
+- Die Migration legt die Rolle an: Das Migrations-Login braucht dafür
+  SUPERUSER oder CREATEROLE (wie 000056 und 000078). Kein Login und keine
+  Anwendungsrolle darf Mitglied von `reticora_audit_sealer` werden; der
+  Server startet sonst nicht (Rollenvertrag, `role … reaches the audit sealer
+  role`).
+- Einträge, die der Backfill vor 000188 versiegelt und neu verkettet hat,
+  bleiben unverändert und verifizieren wie bisher. `audit-verify` nennt
+  versiegelte Einträge in der Ausgabe und prüft sie mit
+  `RETICORA_MASTER_KEY` gegen den Tresor.
+- Rollback: Die Down-Migration verkettet jede Organisation ab ihrem ersten
+  versiegelten Eintrag neu (wie der frühere Backfill) und entfernt die drei
+  Spalten des Siegels; danach gilt wieder der Stand von WP-241 (F-409 offen).
+
+`TestRuntimeRoleCannotRewriteAuditChain` und
+`TestAuditSealOnlyReplacesPersonalValues` (`backend/internal/audit/`) prüfen
+die Rechte der Laufzeitrolle, das Siegel und die Verifikation gegen
+PostgreSQL.
 
 ## Prüfung
 

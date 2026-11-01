@@ -8007,7 +8007,7 @@ export interface components {
       broken_id?: string;
       /** @description Chain position (seq) where the first violation was found. */
       broken_at?: number;
-      /** @description `sequence gap`, `previous_hash mismatch` or `hash mismatch`. */
+      /** @description `sequence gap`, `previous_hash mismatch` or `hash mismatch`; for an entry whose personal values were sealed after it was chained (migration 000189) `sealed entry changed after its seal` or `sealed value differs from the original` (the values in the vault no longer give back the original). */
       broken_reason?: string;
     };
     /** @enum {string} */

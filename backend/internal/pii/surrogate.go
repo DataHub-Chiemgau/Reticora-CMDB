@@ -88,6 +88,23 @@ func SealTx(ctx context.Context, tx pgx.Tx, orgID string, data any) (sealed any,
 // personal field (attributes.email), the personal keys inside a structured
 // one (the CI of a create).
 func SealFieldTx(ctx context.Context, tx pgx.Tx, orgID, fieldName string, value any) (sealed any, changed bool, err error) {
+	return sealField(ctx, tx, orgID, fieldName, value, SealTx)
+}
+
+// SealStoredTx is SealFieldTx for a value already in its JSON form, read
+// back from storage with json.Number for its numbers (the pii.backfill
+// run): the value is walked as it is, so numbers keep their stored text and
+// nothing but personal values changes.
+func SealStoredTx(ctx context.Context, tx pgx.Tx, orgID, fieldName string, value any) (sealed any, changed bool, err error) {
+	return sealField(ctx, tx, orgID, fieldName, value, func(ctx context.Context, tx pgx.Tx, orgID string, data any) (any, bool, error) {
+		s := &sealer{ctx: ctx, tx: tx, orgID: orgID, vault: Default(), anchor: anchorFrom(ctx)}
+		out, werr := s.walk(data, false)
+		return out, s.changed, werr
+	})
+}
+
+func sealField(ctx context.Context, tx pgx.Tx, orgID, fieldName string, value any,
+	seal func(ctx context.Context, tx pgx.Tx, orgID string, data any) (any, bool, error)) (sealed any, changed bool, err error) {
 	if value == nil {
 		return nil, false, nil
 	}
@@ -96,7 +113,7 @@ func SealFieldTx(ctx context.Context, tx pgx.Tx, orgID, fieldName string, value 
 		ref, serr := SealValueTx(ctx, tx, orgID, str)
 		return ref, serr == nil, serr
 	}
-	return SealTx(ctx, tx, orgID, value)
+	return seal(ctx, tx, orgID, value)
 }
 
 // PersonalKeys lists the personal field names, sorted.
