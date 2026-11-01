@@ -1414,8 +1414,8 @@
     "orgFields": {
       "title": "Organization-wide fields",
       "hint": "These fields apply to every CI type of the organization, including system types and CIs found by discovery. System fields are read-only.",
-      "add": "Add organization-wide field",
-      "editorHint": "The field applies to every CI type of the organization. A required field must be filled in on every CI created or changed by hand.",
+      "add": "New organization-wide field",
+      "editorHint": "The field applies to every CI type of the organization. Organization-wide fields added here are optional.",
       "empty": "No organization-wide fields defined.",
       "readOnly": "Read-only: changing them needs the permission “ci_attribute:manage”.",
       "editAction": "Edit organization-wide field: {{name}}",

@@ -1414,8 +1414,8 @@
     "orgFields": {
       "title": "Organisationsweite Felder",
       "hint": "Diese Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und von der Discovery erkannte CIs. Systemfelder sind schreibgeschützt.",
-      "add": "Organisationsweites Feld hinzufügen",
-      "editorHint": "Das Feld gilt für alle CI-Typen der Organisation. Ein Pflichtfeld muss bei jedem von Hand angelegten oder geänderten CI ausgefüllt sein.",
+      "add": "Neues organisationsweites Feld",
+      "editorHint": "Das Feld gilt für alle CI-Typen der Organisation. Hier angelegte organisationsweite Felder sind optional.",
       "empty": "Keine organisationsweiten Felder definiert.",
       "readOnly": "Nur lesbar: Zum Ändern brauchen Sie das Recht „ci_attribute:manage“.",
       "editAction": "Organisationsweites Feld bearbeiten: {{name}}",

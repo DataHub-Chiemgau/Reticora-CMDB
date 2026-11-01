@@ -7,6 +7,12 @@
  *       fields (is_system), without a selected type
  *   (+) adding writes PUT /ci-fields/global (never a type) and then the
  *       index flags through PATCH /attribute-definitions/{id}
+ *   (-) the editor offers no 'Pflichtfeld' and the PUT sends required:false:
+ *       the server enforces a required organization-wide field on every CI
+ *       write, but the CI form renders the type's fields only
+ *   (-) its add button does not contain 'Feld hinzufügen', so the type's
+ *       button stays unique for a name-substring lookup (e2e-real
+ *       metamodel-flags.spec.ts uses getByRole without exact)
  *   (+) the flags of an existing organization-wide field are edited through
  *       PATCH; deleting asks first and sends DELETE /ci-fields/global/{name}
  *   (-) system fields offer neither editing nor deleting
@@ -48,6 +54,15 @@ const SYSTEM_TYPE = {
   display_name: { de: 'Server', en: 'Server' },
   is_active: true,
   is_system: true,
+};
+/** A type of the organization: it offers 'Feld hinzufügen'. */
+const ORG_TYPE = {
+  id: 't-org',
+  key: 'flagtyp',
+  name: 'Flagtyp',
+  is_active: true,
+  is_system: false,
+  organization_id: 'org-1',
 };
 
 /** The organization's field cost_center and a read-only system field asset_tag. */
@@ -120,8 +135,17 @@ function stubBackend({
       if (method === 'GET' && /\/ci-types\/t-sys(\?|$)/.test(url)) {
         return json({ ...SYSTEM_TYPE, fields: [] });
       }
+      if (method === 'GET' && /\/ci-types\/t-org(\?|$)/.test(url)) {
+        return json({ ...ORG_TYPE, fields: [] });
+      }
       if (url.includes('/ci-types')) {
-        return json({ data: [SYSTEM_TYPE], total: 1, limit: 50, offset: 0, has_more: false });
+        return json({
+          data: [SYSTEM_TYPE, ORG_TYPE],
+          total: 2,
+          limit: 50,
+          offset: 0,
+          has_more: false,
+        });
       }
       return json({ detail: `unexpected ${method} ${url}` }, 404);
     }),
@@ -171,13 +195,16 @@ describe('CITypeAdminPage organization-wide fields', () => {
     const calls = stubBackend();
     const card = await section();
     fireEvent.click(
-      await within(card).findByRole('button', { name: 'Organisationsweites Feld hinzufügen' }),
+      await within(card).findByRole('button', { name: 'Neues organisationsweites Feld' }),
     );
     const dialog = screen.getByRole('dialog');
     expect(
-      within(dialog).getByRole('heading', { name: 'Organisationsweites Feld hinzufügen' }),
+      within(dialog).getByRole('heading', { name: 'Neues organisationsweites Feld' }),
     ).toBeInTheDocument();
-    expect(dialog).toHaveTextContent('Das Feld gilt für alle CI-Typen der Organisation.');
+    expect(dialog).toHaveTextContent(
+      'Das Feld gilt für alle CI-Typen der Organisation. Hier angelegte organisationsweite Felder sind optional.',
+    );
+    expect(within(dialog).queryByLabelText('Pflichtfeld')).not.toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText('Feldname'), {
       target: { value: 'contract_owner' },
     });
@@ -191,6 +218,7 @@ describe('CITypeAdminPage organization-wide fields', () => {
       name: 'contract_owner',
       data_type: 'text',
       ui_group: 'general',
+      required: false,
     });
     const patch = calls.findIndex((c) => c.method === 'PATCH');
     expect(patch).toBeGreaterThan(put);
@@ -199,6 +227,28 @@ describe('CITypeAdminPage organization-wide fields', () => {
     expect(calls.some((c) => c.method === 'PUT' && c.url.includes('/ci-types/'))).toBe(false);
     // The list reloads with the new field.
     expect(await within(card).findByText('contract_owner')).toBeInTheDocument();
+  });
+
+  it("keeps the type's 'Feld hinzufügen' the only button whose name contains it", async () => {
+    stubBackend();
+    const card = await section();
+    fireEvent.click(await screen.findByRole('button', { name: /^Flagtyp/ }));
+    expect(await screen.findByRole('button', { name: 'Feld hinzufügen' })).toBeInTheDocument();
+    expect(
+      within(card).getByRole('button', { name: 'Neues organisationsweites Feld' }),
+    ).toBeInTheDocument();
+    // Playwright's getByRole({ name }) matches a case-insensitive substring.
+    expect(screen.getAllByRole('button', { name: /feld hinzufügen/i })).toHaveLength(1);
+  });
+
+  it('offers the required checkbox for a field of a type', async () => {
+    stubBackend();
+    await section();
+    fireEvent.click(await screen.findByRole('button', { name: /^Flagtyp/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Feld hinzufügen' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('Pflichtfeld')).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent('organisationsweite Felder sind optional');
   });
 
   it('edits the index flags of an organization-wide field', async () => {

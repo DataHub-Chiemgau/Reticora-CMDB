@@ -446,7 +446,13 @@ export function CITypeAdminPage() {
             if (typeId) {
               upsertField.mutate({ typeId, field: fieldDraft, index }, { onSuccess });
             } else {
-              upsertGlobalField.mutate({ field: fieldDraft, index }, { onSuccess });
+              // Organization-wide fields stay optional: the server enforces a
+              // required one on every CI write (ResolveFields org layer), but the
+              // CI form renders type fields only, so nobody could fill it in.
+              upsertGlobalField.mutate(
+                { field: { ...fieldDraft, required: false }, index },
+                { onSuccess },
+              );
             }
           }}
         >
@@ -459,7 +465,12 @@ export function CITypeAdminPage() {
                   {t('citypes.orgFields.editorHint')}
                 </p>
               ) : null}
-              <FieldInputs draft={fieldDraft} onChange={setFieldDraft} t={t} />
+              <FieldInputs
+                draft={fieldDraft}
+                onChange={setFieldDraft}
+                allowRequired={fieldScope !== 'global'}
+                t={t}
+              />
             </>
           )}
           <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
@@ -513,14 +524,19 @@ export function CITypeAdminPage() {
   );
 }
 
-/** The inputs of a new field: name, label, type, group, values, required. */
+/**
+ * The inputs of a new field: name, label, type, group, values and, unless
+ * allowRequired is false (organization-wide fields), required.
+ */
 function FieldInputs({
   draft,
   onChange,
+  allowRequired = true,
   t,
 }: {
   draft: FieldDefinition;
   onChange: (draft: FieldDefinition) => void;
+  allowRequired?: boolean;
   t: TFunction;
 }) {
   return (
@@ -570,14 +586,16 @@ function FieldInputs({
           }
         />
       ) : null}
-      <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-        <input
-          type="checkbox"
-          checked={!!draft.required}
-          onChange={(e) => onChange({ ...draft, required: e.target.checked })}
-        />
-        {t('citypes.required', 'Pflichtfeld')}
-      </label>
+      {allowRequired ? (
+        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+          <input
+            type="checkbox"
+            checked={!!draft.required}
+            onChange={(e) => onChange({ ...draft, required: e.target.checked })}
+          />
+          {t('citypes.required', 'Pflichtfeld')}
+        </label>
+      ) : null}
     </>
   );
 }
