@@ -367,7 +367,9 @@ middleware maps route prefixes to features (export, ingest including the
 `feature-not-entitled`; GraphQL fields check their feature as well (the
 route→feature mapping of the phase-1 features is the table below). Quotas are
 enforced in the domain service (`ci.Service.Create`) and answer with 403
-`entitlement-limit`; `max_cis` counts the active CIs and holds on every write
+`entitlement-limit`; `max_cis` counts the active CIs of the whole
+organization, also those outside the writer's client and site scope
+(`ci_active_count()`, migration 000186), and holds on every write
 that makes a CI active: the restore, the unmerge, and of a review item `new`
 and the merge of a `resurrected_device` item (the item stays open). After `valid_until` only discovery stops (CH21): ingest
 and new scans answer 403 `license-expired` (counter

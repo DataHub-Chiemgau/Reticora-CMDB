@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-671 | 19 | 15,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-674 | 20 | 16,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **321** | **416,0** | |
+| **Summe** | | **322** | **417,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>19 WPs · 15,0 PT"]
+    K7N["K7-Nachträge<br/>20 WPs · 16,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -440,6 +440,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-673](#wp-673--beziehungsliste-dokumentierte-filter-ci_id-source_ci_id-target_ci_id-und-rel_type-wirken-ungültige-werte-400) | `k7n-relationship-list-filters` | Beziehungsliste: dokumentierte Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken; ungültige Werte 400 | K7N | 1,0 | F-402 | WP-165, WP-609 |
 | [WP-670](#wp-670--max_cis-auf-allen-wegen-die-ein-ci-aktiv-machen-wiederherstellen-unmerge-und-review-auflösung-über-dem-limit-403-entitlement-limit) | `k7n-max-cis-all-paths` | `max_cis` auf allen Wegen, die ein CI aktiv machen: Wiederherstellen, Unmerge und Review-Auflösung über dem Limit 403 `entitlement-limit` | K7N | 1 | F-399 | WP-072, WP-073, WP-169, WP-472 |
 | [WP-671](#wp-671--entitlement-gates-discovery-und-rack_view-auf-den-alias-pfaden-discovery-scopes-auflösung-von-scope_suggested-rack-knoten-im-standortbaum-und-nats-scope-kanal) | `k7n-entitlement-alias-paths` | Entitlement-Gates discovery und rack_view auf den Alias-Pfaden: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Knoten im Standortbaum und NATS-Scope-Kanal | K7N | 1 | F-400 | WP-471, WP-072 |
+| [WP-674](#wp-674--max_cis-zählt-alle-aktiven-cis-der-organisation-unabhängig-vom-scope-des-schreibenden) | `k7n-max-cis-org-count` | `max_cis` zählt alle aktiven CIs der Organisation, unabhängig vom Scope des Schreibenden | K7N | 1 | F-403 | WP-072, WP-073, WP-334, WP-064, WP-670 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19444,6 +19445,72 @@ ENT-05;[B];B;backend/cmd/server/scope_channel_license_test.go;WP-671
 **Entscheidungsbedarf:** keiner offen; im WP festgelegt und dokumentiert (`docs/README.md`): Standortbaum lesend und Review-Warteschlange Kern (wie das Frontend, `navFeatureFor`: `reviews`/`map` ohne Feature), Schreiben von Rack-Knoten rack_view, Auflösung von `scope_suggested` discovery. Falls der Lead die Warteschlange stattdessen ganz unter discovery stellen will, ist das eine Änderung von `coreRoutes` und `ReviewInbox` (CI-Merges öffnen dann für Mandanten ohne discovery unsichtbare Einträge).
 
 **Nicht Bestandteil:** Lesen der Rack-Knoten (Name, Pfad) im Standortbaum ohne rack_view (bewusst Kern); Verhalten des Collectors bei abgelehntem `scopes.request` (er behält seine zuletzt geladenen Scopes; sein Ingest ist ohne Lizenz ohnehin abgelehnt und der Status-Monitor setzt ihn auf `paused`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-674 – `max_cis` zählt alle aktiven CIs der Organisation, unabhängig vom Scope des Schreibenden
+
+**Schlüssel:** `k7n-max-cis-org-count` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-072 (`ent-enforce`, `max_cis` in `ci.Service.Create`), WP-073 (`ent-unlic`, `unlicensed_ci` beim Ingest), WP-334 (`max_cis`-Sperre der Ingest-Spuren), WP-064 (Rollenvertrag `reticora_app`/`reticora_owner`), WP-670 (`k7n-max-cis-all-paths`, gemeinsame Prüfung `allowActive`/`allowActiveCI`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-403](../../../audit/g1-reaudit/FINDINGS.md#f-403) | P2 | `max_cis` zählt nur die CIs im Scope des Schreibenden: ein auf einen Client beschränkter Principal legt über das Limit der Organisation an | schließt | K7-Nachtrag WP-670 (Probe `k7/ad-670-work/probe-scoped.log`), reproduziert auf `3eca249` (Zählung wie `e5c2d86`) |
+
+**Problem:** Alle Prüfungen von `max_cis` zählen die aktiven CIs unter der RLS der Anfrage: `ci.Service.Create` über `repo.List` (`backend/internal/ci/service.go:282` auf `e5c2d86`; seit WP-670 `allowActive`, `service.go:315` auf `55b6e7d`, auch für `Restore`, `Unmerge`, `RevertMerge`), die Discovery über `h.ciRepo.List` (`allowActiveCI`, `discovery/unlicensed.go:334`, für `adoptUnlicensed`, `AdoptUnlicensed`, `new` und die Reaktivierung eines `resurrected_device`; `openFrame`, `discovery.go:1344`) und die Neuzählung unter der `max_cis`-Sperre (`LockCICount`, `discovery/pg_repository.go:772`). `ci_isolation` filtert nach Client- und Site-Scope: ein auf Client 1 beschränkter Principal und ein an einen Client oder eine Site gebundener Collector zählen nur ihre sichtbaren CIs. Bei `max_cis` 2 und zwei CIs in Client 2 antwortet `POST /cis` org-weit 403, als Client-1-Principal zweimal 201 (4 aktive CIs). E-56: „`max_cis` wird exakt durchgesetzt“; ENT-03/ENT-08.
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000186 legt `ci_active_count()` an: Zahl der nicht gelöschten CIs der Organisation in `app.org_id`, nur Client- und Site-Scope für das eine Aggregat erweitert (`app_scope_widen`/`app_scope_restore`, 000139) und danach wiederhergestellt, `app.org_id` bleibt; ohne Tenant (Nil-Organisation, `WithSystem`) 0. Kein SECURITY DEFINER (Muster 000141/000181: der erweiterte Scope, nicht eine andere Rolle, macht die CIs sichtbar; FORCE ROW LEVEL SECURITY gilt weiter), fester `search_path`, `EXECUTE` nur für `reticora_app`, nicht PUBLIC. Down entfernt die Funktion; Roundtrip und Schema-Baseline grün.
+- [ ] `ci.ActiveCounter` (optionale Schnittstelle) mit `ci.PGRepository.CountActive` (`SELECT ci_active_count()` über `database.WithRequestTenant`, in der Transaktion des Aufrufers, wenn der Kontext eine trägt) und `ci.CountActive` (Rückfall auf die Summe von `List` für Repositories ohne Scope); der Index-Dekorator reicht `CountActive` weiter (SR-11, `TestIndexingRepositoryCoversPGRepositoryMethods`, `TestIndexingRepositoryForwardsOptionalInterfaces`).
+- [ ] Jede Prüfung von `max_cis` zählt über `ci.CountActive` bzw. `ci_active_count()`: `ci.Service.allowActive` (`Create`, `Restore`, `Unmerge`, `RevertMerge`), `discovery.allowActiveCI` (`adoptUnlicensed`, `AdoptUnlicensed`, `new` von `unclassified_device`/`ambiguous_identity`/`resurrected_device`, Reaktivierung beim `merge` eines `resurrected_device`), `openFrame` (Zählung des Ingest-Frames) und `LockCICount` (Neuzählung unter der `max_cis`-Sperre, WP-334). Antwort, Sperrverhalten und `unlicensed_ci`-Verhalten bleiben unverändert. Eine Nutzungsanzeige mit dieser Zählung gibt es nicht (`GET /entitlements` liefert nur Limits).
+- [ ] `TestT2EntitlementMaxCIsCountsTheWholeOrganization` (`internal/server/t2_entitlement_gates_test.go`, PostgreSQL, Produktionsrouter): `max_cis` = aktive CIs der Organisation (vier in Client 2); `POST /cis` org-weit (Kontrolle) und als Client-1-Principal, Wiederherstellen eines gelöschten Client-1-CI und `new` eines `unclassified_device`-Eintrags von Client 1 je 403 `entitlement-limit`; aktive CIs nie über dem Limit, das CI bleibt gelöscht, der Eintrag bleibt offen ohne CI; nach Anheben um 1 legt der Client-1-Principal an (201), das Wiederherstellen ist wieder 403. Auf `e5c2d86` rot (201/200/200, 7 aktive CIs bei `max_cis` 4).
+- [ ] `TestCIActiveCountIgnoresCallerScope` (`internal/ci/active_count_integration_test.go`, PostgreSQL): `CountActive`, `ci.CountActive` und `LockCICount` liefern als Client-1-, Site-1- und org-weiter Principal die Zahl der Organisation (ohne gelöschte CIs, ohne Organisation B), Organisation B ihre eigene; in der Transaktion des Aufrufers bleibt dessen Scope unverändert und er liest danach weiter nur seine CIs; ohne Tenant 0; Eigenschaften der Funktion wie im ersten Kriterium.
+- [ ] `api/openapi.yaml` (spec-first): Antwort `EntitlementLimit` nennt die Zählung über die ganze Organisation; `npm run generate:api` nachgeführt; `docs/README.md` beschreibt sie.
+- [ ] Bestehende Tests der Pakete `ci`, `discovery`, `server`, `reviews`, `entitlement`, `api`, `jobs`, `tenant/...` und `database` (allein) grün; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); die neuen Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (19 Einträge):**
+
+- backend/migrations/000186_ci_active_count.up.sql
+- backend/migrations/000186_ci_active_count.down.sql
+- backend/internal/ci/service.go
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/indexing_repository.go
+- backend/internal/ci/indexing_repository_test.go
+- backend/internal/ci/active_count_integration_test.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/discovery/discovery.go
+- backend/internal/discovery/pg_repository.go
+- backend/internal/server/t2_entitlement_gates_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/README.md
+- docs/schema-baseline.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** Migration 000186 (`ci_active_count()`), keine Änderung an Tabellen oder Policies. Die Funktion läuft als `reticora_app` mit den Tenant-GUCs der Anfrage (`database.WithRequestTenant`); sie erweitert nur Client- und Site-Scope für ein `count(*)` auf `ci` und stellt beide wieder her, `app.org_id` begrenzt auf die eigene Organisation, zurück kommt nur die Zahl. Kein SECURITY DEFINER, keine neuen Rechte außer `EXECUTE` für `reticora_app`. Kein `WithSystem`-Pfad (keine Änderung an `withSystemCallers`): `ci` ist keine System-Ausnahme (000060).
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/discovery/ ./internal/server/ ./internal/reviews/ ./internal/entitlement/ ./internal/jobs/ ./internal/tenant/... ./internal/api/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`, `TEST_NATS_SERVER_BIN` (bekannter lokaler Ausfall `TestCIQueryBudget` übersprungen).
+- `go test -count=1 -p 1 ./internal/database/...` allein (`TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`, Rollenvertrag).
+- `go test -count=1 -v -run '^TestT2EntitlementMaxCIs' ./internal/server/` und `-run '^TestCIActiveCountIgnoresCallerScope$' ./internal/ci/`, beide auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-674
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-674
+ENT-03;[B];B;backend/internal/ci/active_count_integration_test.go;WP-674
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung (E-56: `max_cis` exakt; das Limit gilt je Organisation). Hinweis für die Leitung: Die Ablehnung nennt wie bisher „N of L in use“ (`entitlement.LimitExceededError`); für einen auf einen Client beschränkten Principal ist N jetzt die Zahl der aktiven CIs der ganzen Organisation statt seiner sichtbaren. Die Zahl erscheint nur bei einer Ablehnung (N ≥ L), sie nennt kein CI, und das Limit selbst war schon vorher sichtbar; nach einem Downgrade unter den Bestand verrät sie aber den Gesamtbestand an CIs anderer Clients. Falls das nicht gewollt ist, wäre die Detailangabe für eingeschränkte Principals zu kürzen (z. B. nur „limit L reached“); das ist eine Produktentscheidung und hier nicht umgesetzt.
+
+**Nicht Bestandteil:** der Agent-Telemetriepfad (`backend/internal/agent/handler.go:479`, `h.cis.Create` am Repository) legt Endpoint-CIs ohne `max_cis`-Prüfung an; das Modul `agents` ist P4 und in G1 abgeschaltet (404), über das Verhalten über dem Limit (403 oder `unlicensed_ci`) ist noch nicht entschieden. Die Sperre der `max_cis`-Zählung bei `POST /cis` und `AdoptUnlicensed` (SR-09, zurückgestellt; unverändert). Die anderen Kontingente haben die Lücke nicht (geprüft, nicht geändert): `app_user` und `api_key` filtern per RLS nur nach der Organisation (`user_isolation`, `org_isolation`), `max_collectors` zählt in einer eigenen org-weiten Transaktion (`CountCollectors`, `OrgWideScope`). Eine Nutzungsanzeige (Bestand gegen Limit) für Administratoren oder die UI gibt es nicht; sie ist nicht Teil dieses WP.
 
 ## Zurückgestellte Befunde
 

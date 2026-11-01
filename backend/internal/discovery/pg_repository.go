@@ -759,9 +759,10 @@ var ciCountLockSQL = boundedLocksSQL("$1", `SELECT CASE WHEN $3 THEN pg_advisory
 
 // LockCICount implements CICountLocker: it takes the organization's max_cis
 // lock, exclusive or shared, until the end of the context transaction and
-// then counts the CIs the transaction sees, as ci.List counts them. The
-// count is a statement of its own, so it sees what every holder before
-// committed.
+// then counts the active CIs of the organization, also those outside the
+// scope of the transaction (ci_active_count, migration 000186, F-403), as
+// ci.CountActive counts them. The count is a statement of its own, so it
+// sees what every holder before committed.
 func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive bool) (int64, error) {
 	key := ingestLockKey(ciCountLockNamespace + strings.ToLower(orgID))
 	var count int64
@@ -769,7 +770,7 @@ func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive 
 		if _, err := tx.Exec(ctx, ciCountLockSQL, r.lockTimeoutSetting(), key, exclusive); err != nil {
 			return fmt.Errorf("lock max_cis: %w", err)
 		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID).Scan(&count); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT ci_active_count()`).Scan(&count); err != nil {
 			return fmt.Errorf("count cis: %w", err)
 		}
 		return nil

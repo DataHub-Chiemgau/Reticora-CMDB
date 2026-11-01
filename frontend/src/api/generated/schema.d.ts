@@ -11476,7 +11476,7 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description Forbidden: a missing permission, the organization's plan does not include the feature (type https://reticora.io/problems/feature-not-entitled, ENT-05), or the quota of the operation is reached (type https://reticora.io/problems/entitlement-limit, ENT-03): max_users for users, max_api_keys for API keys, max_collectors for collectors, max_cis (active CIs) for every write that makes a CI active (POST /cis, the restore, the unmerge, and of a review item new and the merge of a resurrected_device item). Nothing is created, restored or unmerged; after a downgrade below the stock the existing objects stay usable and readable (ENT-08). */
+    /** @description Forbidden: a missing permission, the organization's plan does not include the feature (type https://reticora.io/problems/feature-not-entitled, ENT-05), or the quota of the operation is reached (type https://reticora.io/problems/entitlement-limit, ENT-03): max_users for users, max_api_keys for API keys, max_collectors for collectors, max_cis (the active CIs of the whole organization, also those of clients and sites outside the caller's scope) for every write that makes a CI active (POST /cis, the restore, the unmerge, and of a review item new and the merge of a resurrected_device item). Nothing is created, restored or unmerged; after a downgrade below the stock the existing objects stay usable and readable (ENT-08). */
     EntitlementLimit: {
       headers: {
         [name: string]: unknown;

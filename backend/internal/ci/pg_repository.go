@@ -435,6 +435,24 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 	return items, total, err
 }
 
+var _ ActiveCounter = (*PGRepository)(nil)
+
+// CountActive implements ActiveCounter: the number of active CIs of the
+// organization, also of the clients and sites outside the caller's scope
+// (max_cis, F-403). ci_active_count() (migration 000186) widens only the
+// client and site scope for the one count, in the caller's transaction when
+// ctx carries one, and returns nothing but the number.
+func (r *PGRepository) CountActive(ctx context.Context, orgID string) (int64, error) {
+	var n int64
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT ci_active_count()`).Scan(&n); err != nil {
+			return fmt.Errorf("count active cis: %w", err)
+		}
+		return nil
+	})
+	return n, err
+}
+
 // GetByID retrieves a single CI by ID within the tenant scope.
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, error) {
 	var item *Item

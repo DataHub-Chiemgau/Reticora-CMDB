@@ -119,6 +119,25 @@ type ChangeReader interface {
 	ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error)
 }
 
+// ActiveCounter counts the active (not deleted) CIs of the organization for
+// max_cis, whatever the client and site scope of the caller (ENT-03,
+// F-403): the limit caps the organization, not what one principal sees. The
+// PG repository implements it with ci_active_count() (migration 000186).
+type ActiveCounter interface {
+	CountActive(ctx context.Context, orgID string) (int64, error)
+}
+
+// CountActive returns the number of active CIs max_cis is checked against:
+// through the repository's ActiveCounter, or the total of List for a
+// repository without one (it has no scope to narrow the count).
+func CountActive(ctx context.Context, repo Repository, orgID string) (int64, error) {
+	if counter, ok := repo.(ActiveCounter); ok {
+		return counter.CountActive(ctx, orgID)
+	}
+	_, total, err := repo.List(ctx, orgID, FilterParams{}, api.PaginationParams{Limit: 1})
+	return int64(total), err
+}
+
 // LimitGuard enforces licensed resource limits before a new CI is created.
 // It is implemented by the entitlement service.
 type LimitGuard interface {
@@ -307,16 +326,17 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 // allowActive checks max_cis before a CI becomes active (ENT-03): Create
 // adds one, Restore and Unmerge bring a deleted one back. Over the limit it
 // returns the entitlement error (403 entitlement-limit) and nothing is
-// written.
+// written. It counts every active CI of the organization, also those
+// outside the caller's scope (CountActive, F-403).
 func (s *Service) allowActive(ctx context.Context, orgID string) error {
 	if s.limit == nil {
 		return nil
 	}
-	_, total, err := s.repo.List(ctx, orgID, FilterParams{}, api.PaginationParams{Limit: 1})
+	total, err := CountActive(ctx, s.repo, orgID)
 	if err != nil {
 		return err
 	}
-	return s.limit.AllowCreate(ctx, orgID, LimitFeatureKey, int64(total))
+	return s.limit.AllowCreate(ctx, orgID, LimitFeatureKey, total)
 }
 
 // Update modifies an existing CI. The repository loads the prior state inside

@@ -325,17 +325,19 @@ func toMap(v any) (map[string]any, error) {
 // allowActiveCI checks max_cis before a review resolution makes a CI
 // active (ENT-03): adopting an unlicensed_ci item and new create one, the
 // merge of a resurrected_device item reactivates the deleted CI. It counts
-// the CIs as ci.Service.Create does; over the limit it returns the
-// entitlement error (403 entitlement-limit) and the item stays open.
+// the CIs as ci.Service.Create does, every active CI of the organization
+// whatever the resolver's scope (ci.CountActive, F-403); over the limit it
+// returns the entitlement error (403 entitlement-limit) and the item stays
+// open.
 func (h *Handler) allowActiveCI(ctx context.Context, orgID string) error {
 	if h.limits == nil {
 		return nil
 	}
-	_, total, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+	total, err := ci.CountActive(ctx, h.ciRepo, orgID)
 	if err != nil {
 		return err
 	}
-	return h.limits.AllowCreate(ctx, orgID, entitlement.LimitMaxCIs, int64(total))
+	return h.limits.AllowCreate(ctx, orgID, entitlement.LimitMaxCIs, total)
 }
 
 // adoptUnlicensed creates the CI of an unlicensed_ci item when max_cis

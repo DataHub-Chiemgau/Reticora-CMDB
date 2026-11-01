@@ -1338,14 +1338,15 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 		}
 	}
 
-	// The CI count for max_cis; identity candidates are looked up per item
-	// over the whole inventory (REC-02).
+	// The CI count for max_cis, over every active CI of the organization
+	// whatever the scope of the sender (F-403); identity candidates are
+	// looked up per item over the whole inventory (REC-02).
 	if h.limits != nil {
-		_, total, countErr := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+		total, countErr := ci.CountActive(ctx, h.ciRepo, orgID)
 		if countErr != nil {
 			return nil, countErr
 		}
-		frame.total = int64(total)
+		frame.total = total
 	}
 	if frame.identity, err = h.identityContext(ctx, orgID, types); err != nil {
 		return nil, err

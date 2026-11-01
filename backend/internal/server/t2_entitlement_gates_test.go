@@ -38,10 +38,15 @@
 //     location tree with its rack names and the review queue (REST, the
 //     deprecated alias and GraphQL reviewInbox) stay cmdb_core
 //     (TestAuditT2EntitlementAliasPathsGated).
+//   - WP-674 (ENT-03, ENT-08), finding F-403: max_cis counts every active
+//     CI of the organization, also those outside the writer's client
+//     scope: a creator restricted to client 1 is refused on POST /cis, the
+//     restore and new of a review item once the CIs of client 2 reach the
+//     limit (PostgreSQL).
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -v -run 'TestT2EntitlementGates|TestAuditT2EntitlementRackViewGated|TestAuditT2EntitlementAPIAccessGatesAPIKeys|TestAuditT2EntitlementQuotasEnforced|TestT2EntitlementQuota|TestT2EntitlementMaxCIs|TestAuditT2EntitlementAliasPathsGated' ./internal/server/
+//	cd backend && go test -count=1 -v -run 'TestT2EntitlementGates|TestAuditT2EntitlementRackViewGated|TestAuditT2EntitlementAPIAccessGatesAPIKeys|TestAuditT2EntitlementQuotasEnforced|TestT2EntitlementQuota|TestT2EntitlementMaxCIs|TestAuditT2EntitlementAliasPathsGated|TestT2EntitlementMaxCIsCountsTheWholeOrganization' ./internal/server/
 package server_test
 
 import (
@@ -868,5 +873,150 @@ func TestAuditT2EntitlementAliasPathsGated(t *testing.T) {
 	if rackName != "alias-rack-renamed" || rack2State != "gone" || suggestionStatus != "resolved" || scopes != 2 {
 		t.Errorf("with the features: rack name %q, rack two %s, suggestion %s, discovery scopes %d; want renamed, gone, resolved, 2",
 			rackName, rack2State, suggestionStatus, scopes)
+	}
+}
+
+// TestT2EntitlementMaxCIsCountsTheWholeOrganization covers ENT-03 and ENT-08
+// for a principal restricted to one client, through the production chain
+// over PostgreSQL (F-403): max_cis caps the active CIs of the organization,
+// so the CIs of a client the principal cannot see count as well. With the
+// limit reached by CIs of client 2, a creator restricted to client 1 (who
+// sees fewer CIs than the limit) gets 403 entitlement-limit on POST /cis,
+// on the restore of a deleted CI of client 1 and on new of an
+// unclassified_device item of client 1, like an org-wide creator; nothing
+// is created, the CI stays deleted, the item stays open. Raised by one, its
+// creation is admitted and the next restore is refused again.
+func TestT2EntitlementMaxCIsCountsTheWholeOrganization(t *testing.T) {
+	f := scopetest.Seed(t, "ed")
+	bg := context.Background()
+	s := newT2StackFrom(t, entitlement.Options{Enforce: true}, server.PostgresRepositories(f.App, audit.NewPGRecorder()))
+	admin := f.AppUser(t, f.OrgA, "maxcis-whole-admin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, f.OrgA, admin); err != nil {
+		t.Fatal(err)
+	}
+	issue := func(sid string, clients identity.ScopeSet) string {
+		t.Helper()
+		now := time.Now().UTC()
+		scope := identity.Scope{Clients: clients, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
+		token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+			Scope: &scope, SessionID: sid, ID: sid + "-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	orgWide := issue("maxcis-whole-all", identity.ScopeSet{All: true})
+	client1 := issue("maxcis-whole-c1", identity.ScopeSet{IDs: []string{f.Client1}})
+	call := func(token, method, path, body string) (int, string) {
+		t.Helper()
+		ct := ""
+		if body != "" {
+			ct = "application/json"
+		}
+		w := s.do(t2Request{method: method, path: path, body: body, contentType: ct, bearer: token})
+		return w.Code, strings.TrimSpace(w.Body.String())
+	}
+	if _, err := s.entitlements.Provision(f.OrgCtx(f.OrgA), f.OrgA, entitlement.PlanEssential); err != nil {
+		t.Fatal(err)
+	}
+	var serverType string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&serverType); err != nil {
+		t.Fatal(err)
+	}
+	createBody := func(name, client string) string {
+		return `{"ci_type_id":"` + serverType + `","name":"` + name + `","client_id":"` + client + `"}`
+	}
+	newCI := func(token, name, client string) string {
+		t.Helper()
+		code, body := call(token, http.MethodPost, "/api/v1/cis", createBody(name, client))
+		var out struct {
+			ID string `json:"id"`
+		}
+		if code != http.StatusCreated || json.Unmarshal([]byte(body), &out) != nil {
+			t.Fatalf("setup: create %s: %d %s", name, code, body)
+		}
+		return out.ID
+	}
+	// Four CIs of client 2: the client-1 creator would stay below the limit
+	// with each of the three refused writes.
+	for _, name := range []string{"maxcis-whole-c2-a", "maxcis-whole-c2-b", "maxcis-whole-c2-c", "maxcis-whole-c2-d"} {
+		newCI(orgWide, name, f.Client2)
+	}
+	gone := newCI(client1, "maxcis-whole-c1-gone", f.Client1)
+	if code, body := call(client1, http.MethodDelete, "/api/v1/cis/"+gone, ""); code >= 300 {
+		t.Fatalf("setup: delete: %d %s", code, body)
+	}
+	var unclassified string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO review_item (organization_id, kind, payload, candidate_ci_ids, client_id)
+		VALUES ($1, 'unclassified_device', jsonb_build_object('name', 'maxcis-whole-unclassified', 'ci_type_name', 'server',
+		'management_ip', '192.0.2.88'), '{}'::uuid[], $2) RETURNING id::text`, f.OrgA, f.Client1).Scan(&unclassified); err != nil {
+		t.Fatal(err)
+	}
+	active := func() int64 {
+		t.Helper()
+		var n int64
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, f.OrgA).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	setLimit := func(limit int64) {
+		t.Helper()
+		if _, err := s.entitlements.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: map[string]int64{entitlement.LimitMaxCIs: limit}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	limit := active()
+	setLimit(limit)
+
+	// Precondition: the client-1 creator sees fewer CIs than the limit.
+	code, body := call(client1, http.MethodGet, "/api/v1/cis?limit=1", "")
+	var page struct {
+		Total int64 `json:"total"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &page) != nil || page.Total >= limit {
+		t.Fatalf("precondition: client-1 list %d, total %d (max_cis %d) %.200s; want 200 and fewer than the limit", code, page.Total, limit, body)
+	}
+
+	resolveNew := `{"action":"new","ci_type_id":"` + serverType + `"}`
+	for _, c := range []struct {
+		name, token, path, body string
+	}{
+		{"POST /cis org-wide (control)", orgWide, "/api/v1/cis", createBody("maxcis-whole-orgwide-over", f.Client1)},
+		{"POST /cis restricted to client 1", client1, "/api/v1/cis", createBody("maxcis-whole-c1-over", f.Client1)},
+		{"restore restricted to client 1", client1, "/api/v1/cis/" + gone + "/restore", ""},
+		{"new of unclassified_device restricted to client 1", client1, "/api/v1/review-items/" + unclassified + "/resolve", resolveNew},
+	} {
+		code, body = call(c.token, http.MethodPost, c.path, c.body)
+		if code != http.StatusForbidden || !strings.Contains(body, api.ProblemEntitlementLimit) {
+			t.Errorf("%s at max_cis %d of the organization: %d %.200s, want 403 entitlement-limit", c.name, limit, code, body)
+		}
+		if n := active(); n > limit {
+			t.Errorf("after %s: %d active CIs > max_cis %d", c.name, n, limit)
+		}
+	}
+	var deleted bool
+	if err := f.Admin.QueryRow(bg, `SELECT deleted_at IS NOT NULL FROM ci WHERE id = $1`, gone).Scan(&deleted); err != nil || !deleted {
+		t.Errorf("refused restore: deleted %v (err %v), want still deleted", deleted, err)
+	}
+	var status string
+	var created int
+	if err := f.Admin.QueryRow(bg, `SELECT status, (SELECT count(*) FROM ci WHERE organization_id = $2 AND attributes->>'review_item_id' = $1::text)
+		FROM review_item WHERE id = $1::uuid`, unclassified, f.OrgA).Scan(&status, &created); err != nil || status != "open" || created != 0 {
+		t.Errorf("refused new: item status %q, CIs %d (err %v), want open and none", status, created, err)
+	}
+
+	// Raised by one: the client-1 creation is admitted and fills the limit
+	// again, so its restore is refused.
+	setLimit(limit + 1)
+	newCI(client1, "maxcis-whole-c1-within", f.Client1)
+	if code, body = call(client1, http.MethodPost, "/api/v1/cis/"+gone+"/restore", ""); code != http.StatusForbidden ||
+		!strings.Contains(body, api.ProblemEntitlementLimit) {
+		t.Errorf("restore restricted to client 1 at the raised max_cis %d: %d %.200s, want 403 entitlement-limit", limit+1, code, body)
+	}
+	if n := active(); n != limit+1 {
+		t.Errorf("active CIs at the end: %d, want %d", n, limit+1)
 	}
 }

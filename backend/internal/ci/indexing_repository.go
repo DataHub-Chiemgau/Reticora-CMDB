@@ -138,6 +138,12 @@ func (r *indexingRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeI
 	return checker.UniqueConflicts(ctx, orgID, ciTypeID, clientID, ciID, attrs)
 }
 
+// CountActive forwards the count of max_cis over the whole organization
+// (ActiveCounter, F-403); without it the count is the total of List.
+func (r *indexingRepository) CountActive(ctx context.Context, orgID string) (int64, error) {
+	return CountActive(ctx, r.Repository, orgID)
+}
+
 // GetByIDs forwards the batch read (NFR-02); without it every CI is read
 // on its own.
 func (r *indexingRepository) GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error) {
