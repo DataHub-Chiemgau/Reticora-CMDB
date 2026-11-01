@@ -1082,3 +1082,5 @@ API-02;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
 SRC-01;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
 API-01;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
 API-02;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670

@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-673 | 17 | 13,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-670 | 18 | 14,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **319** | **414,0** | |
+| **Summe** | | **320** | **415,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>17 WPs · 13,0 PT"]
+    K7N["K7-Nachträge<br/>18 WPs · 14,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -438,6 +438,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-669](#wp-669--standardrollen-seed-rechte-nicht-entfernbar-409-rechteliste-antwort-und-audit-zeigen-die-wirksamen-rechte) | `k7n-standard-role-permissions` | Standardrollen: Seed-Rechte nicht entfernbar (409), Rechteliste, Antwort und Audit zeigen die wirksamen Rechte | K7N | 0,5 | F-398 | WP-046, WP-363, WP-394, WP-505, WP-667 |
 | [WP-672](#wp-672--leere-suche-historie-verfügbarkeit-und-compliance-score-antworten-mit--statt-null-sweep-aller-get-listen) | `k7n-search-empty-array` | Leere Suche, Historie, Verfügbarkeit und Compliance-Score antworten mit `[]` statt `null`; Sweep aller GET-Listen | K7N | 0,5 | F-401 | WP-164, WP-466 |
 | [WP-673](#wp-673--beziehungsliste-dokumentierte-filter-ci_id-source_ci_id-target_ci_id-und-rel_type-wirken-ungültige-werte-400) | `k7n-relationship-list-filters` | Beziehungsliste: dokumentierte Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken; ungültige Werte 400 | K7N | 1,0 | F-402 | WP-165, WP-609 |
+| [WP-670](#wp-670--max_cis-auf-allen-wegen-die-ein-ci-aktiv-machen-wiederherstellen-unmerge-und-review-auflösung-über-dem-limit-403-entitlement-limit) | `k7n-max-cis-all-paths` | `max_cis` auf allen Wegen, die ein CI aktiv machen: Wiederherstellen, Unmerge und Review-Auflösung über dem Limit 403 `entitlement-limit` | K7N | 1 | F-399 | WP-072, WP-073, WP-169, WP-472 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19319,6 +19320,63 @@ API-02;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-
 **Entscheidungsbedarf:** keiner. Hinweis: `rel_type` wird wie beim Anlegen gegen den Typkatalog geprüft, nicht gegen das Enum `RelationshipType`; das Enum von `CreateRelationshipRequest` und `Relationship` bleibt unverändert (es deckt die Katalog- und projizierten Typen ebenfalls nicht ab; kein Befund dieses WPs).
 
 **Nicht Bestandteil:** Filter für `GET /api/v1/cis/{id}/relationships` (nicht dokumentiert); das Enum `RelationshipType` der Schemas `Relationship` und `CreateRelationshipRequest`; der Real-Stack-Lauf von frontend/e2e-real/tenant-isolation.spec.ts (nur in CI); F-401 (WP-672, `k7n-search-empty-array`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-670 – `max_cis` auf allen Wegen, die ein CI aktiv machen: Wiederherstellen, Unmerge und Review-Auflösung über dem Limit 403 `entitlement-limit`
+
+**Schlüssel:** `k7n-max-cis-all-paths` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-072 (`ent-enforce`, `max_cis` in `ci.Service.Create`), WP-073 (`ent-unlic`, `unlicensed_ci` beim Ingest), WP-169 (Review-Auflösung), WP-472 (`t2-ent-quotas`, Gates über die Produktionskette in `t2_entitlement_gates_test.go`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-399](../../../audit/g1-reaudit/FINDINGS.md#f-399) | P2 | `max_cis` wird über Wiederherstellen, Unmerge und die Review-Auflösung `new` umgangen: über dem Limit entstehen aktive CIs | schließt | Wiederholungsprüfung (K7) auf `e5c2d86`, Gegenprüfung r1-b5 (WP-073 AK1) |
+
+**Problem:** Nur `ci.Service.Create` (`backend/internal/ci/service.go:286` auf `e5c2d86`), der Ingest (`discovery/unlicensed.go:210`) und die Übernahme eines `unlicensed_ci`-Eintrags (`unlicensed.go:337`) prüfen `max_cis`. `POST /cis/{id}/restore` (`Service.Restore`, `service.go:395`), `POST /cis/{id}/unmerge` und der Revert des Jobs `ci.merge` (`Service.Unmerge`/`RevertMerge`, `merge.go:680/901`), die Review-Auflösung `new` von `unclassified_device`, `ambiguous_identity` und `resurrected_device` (`createReviewedDevice` → `h.ciRepo.Create`, `review.go:368/402`) und der `merge` eines `resurrected_device`-Eintrags (`restorer.Restore`, `review.go:290`) machen ein CI ohne Prüfung aktiv: bei `max_cis` 1 Wiederherstellen 200 (2 aktive CIs), `new` 200 (3 aktive CIs). E-56 legt fest: „`max_cis` wird exakt durchgesetzt“; ENT-03/ENT-08: REST-Schreibpfade über dem Limit 403 `entitlement-limit`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `ci.Service` prüft `max_cis` in einer gemeinsamen Prüfung (`allowActive`, Zählung und Sperrverhalten wie bisher `Create`: aktive CIs über `repo.List`, keine zusätzliche Sperre) vor `Create`, `Restore` und `Unmerge` (damit auch `RevertMerge`). Über dem Limit 403 `entitlement-limit`, das CI bleibt gelöscht bzw. der Merge bleibt; `POST /jobs/{id}/revert` beantwortet die Ablehnung ebenfalls mit 403 `entitlement-limit` (bisher 500).
+- [ ] Die Discovery prüft `max_cis` (`allowActiveCI`, Zählung wie `adoptUnlicensed`) vor dem Anlegen in `createReviewedDevice` (nach Typ- und Mandantenprüfung, in der Transaktion der Auflösung) und vor der Reaktivierung beim `merge` eines `resurrected_device`-Eintrags. Über dem Limit 403 `entitlement-limit`, kein CI, der Eintrag bleibt offen mit seinem Gerätedatensatz (keine Umwandlung in `unlicensed_ci`, Begründung unter Entscheidungsbedarf).
+- [ ] `TestT2EntitlementMaxCIsOnRestoreAndReviewNew` (`internal/server/t2_entitlement_gates_test.go`, PostgreSQL, Produktionsrouter): bei `max_cis` = aktive CIs `POST /cis` (Kontrolle), Wiederherstellen, Unmerge, Revert des Merge-Jobs, `new` von `unclassified_device` und `ambiguous_identity`, `merge` von `resurrected_device` je 403 `entitlement-limit`; aktive CIs nie über dem Limit; gelöschte CIs bleiben gelöscht, das Opfer bleibt zusammengeführt, die Einträge bleiben offen ohne CI; unterhalb eines angehobenen Limits Wiederherstellen, `new`, Unmerge und Reaktivierung je 200. Auf `e5c2d86` rot (200/200, 7 aktive CIs bei `max_cis` 2; Revert 500 mit altem `jobs/handler.go`).
+- [ ] `api/openapi.yaml` (spec-first): Antwort `EntitlementLimit` nennt `max_cis` und gilt für `createCI`, `restoreCI`, `unmergeCI`, `revertJob` und beide Auflösungs-Endpunkte; Beschreibungen nennen das Verhalten; `npm run generate:api` nachgeführt.
+- [ ] Bestehende Tests der Pakete `ci`, `discovery`, `server`, `reviews`, `entitlement`, `api`, `jobs` grün; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); der neue Test auch als Nicht-Root-Nutzer grün.
+
+**Dateien (14 Einträge):**
+
+- backend/internal/ci/service.go
+- backend/internal/ci/merge.go
+- backend/internal/ci/handler.go
+- backend/internal/discovery/review.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/jobs/handler.go
+- backend/internal/server/t2_entitlement_gates_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/README.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Zählung läuft wie bei `POST /cis` als `reticora_app` mit den Tenant-GUCs der Anfrage (`database.WithRequestTenant`); bei `new` in der Transaktion der Auflösung.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/ci/ ./internal/discovery/ ./internal/server/ ./internal/reviews/ ./internal/entitlement/ ./internal/api/ ./internal/jobs/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL` (bekannter lokaler Ausfall `TestCIQueryBudget` übersprungen).
+- `go test -count=1 -v -run '^TestT2EntitlementMaxCIsOnRestoreAndReviewNew$' ./internal/server/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung. Die Auflösung `new` über dem Limit antwortet 403 `entitlement-limit` statt den Eintrag in `unlicensed_ci` umzuwandeln: ENT-03 verlangt für REST-Schreibpfade 403 `entitlement-limit`, WP-073 AK1 und E-22 betreffen die automatische Ingest-Neuanlage; der Gerätedatensatz liegt verlustfrei im offenen Eintrag, und die Auflösung `new` eines `unlicensed_ci`-Eintrags antwortet bereits so. Hinweise für die Leitung: (1) Die Zählung von `POST /cis` (und damit der neuen Prüfungen) läuft unter dem Scope des Aufrufers; ein auf einen Client beschränkter Principal zählt nur seine sichtbaren CIs und legt über `max_cis` an (neuer Befund, Probe `k7/ad-670-work/probe-scoped.log`, nicht in diesem WP behoben). (2) Der Agent-Telemetriepfad (`agent/handler.go:479`, `h.cis.Create` am Repository) legt Endpoint-CIs ohne `max_cis` an; das Modul `agents` ist P4 und in G1 abgeschaltet (404), über das Verhalten über dem Limit (403 oder `unlicensed_ci`) ist noch nicht entschieden.
+
+**Nicht Bestandteil:** die Sperre der `max_cis`-Zählung bei `AdoptUnlicensed` und bei `POST /cis` (SR-09, zurückgestellt; die neuen Prüfungen sind nicht nebenläufiger als `Create`); die Zählung unter dem Scope des Aufrufers (siehe Hinweis 1); der Agent-Pfad (Hinweis 2); UI-Meldungen für 403 beim Wiederherstellen und Auflösen.
 
 ## Zurückgestellte Befunde
 

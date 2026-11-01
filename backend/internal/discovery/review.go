@@ -287,6 +287,10 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			if !ok {
 				return false, refused(http.StatusNotImplemented, "this repository cannot reactivate CIs")
 			}
+			// The reactivated CI counts against max_cis (ENT-03).
+			if err := h.allowActiveCI(ctx, orgID); err != nil {
+				return false, err
+			}
 			if _, err := restorer.Restore(ctx, orgID, res.CIID); err != nil {
 				return false, restoreRefused(err)
 			}
@@ -399,6 +403,12 @@ func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem, ch
 	// the writing transaction: unknown, of another organization or
 	// deactivated is refused (CI-01, TEN-09).
 	newItem.ChosenType = chosenTypeID != ""
+	// The CI counts against max_cis as one created by POST /cis: over the
+	// limit new is 403 entitlement-limit, no CI is created and the item
+	// stays open with the device record (ENT-03, ENT-08).
+	if err := h.allowActiveCI(ctx, orgID); err != nil {
+		return "", err
+	}
 	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
 		if ve, ok := ci.AsValidationError(err); ok && len(ve.Violations) > 0 {
 			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: ve.Violations[0].Field,

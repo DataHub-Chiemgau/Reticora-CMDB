@@ -278,14 +278,8 @@ func (s *Service) GetByID(ctx context.Context, orgID, id string) (*Item, error) 
 // The type is the writer's choice (ChosenType): an ID that is no UUID is
 // refused here, the repository reads the type in the writing transaction.
 func (s *Service) Create(ctx context.Context, item *Item) error {
-	if s.limit != nil {
-		_, total, err := s.repo.List(ctx, item.OrganizationID, FilterParams{}, api.PaginationParams{Limit: 1})
-		if err != nil {
-			return err
-		}
-		if err := s.limit.AllowCreate(ctx, item.OrganizationID, LimitFeatureKey, int64(total)); err != nil {
-			return err
-		}
+	if err := s.allowActive(ctx, item.OrganizationID); err != nil {
+		return err
 	}
 	if err := CheckReservedKeys("attributes", item.Attributes); err != nil {
 		return err
@@ -308,6 +302,21 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 		return err
 	}
 	return s.repo.Create(ctx, item)
+}
+
+// allowActive checks max_cis before a CI becomes active (ENT-03): Create
+// adds one, Restore and Unmerge bring a deleted one back. Over the limit it
+// returns the entitlement error (403 entitlement-limit) and nothing is
+// written.
+func (s *Service) allowActive(ctx context.Context, orgID string) error {
+	if s.limit == nil {
+		return nil
+	}
+	_, total, err := s.repo.List(ctx, orgID, FilterParams{}, api.PaginationParams{Limit: 1})
+	if err != nil {
+		return err
+	}
+	return s.limit.AllowCreate(ctx, orgID, LimitFeatureKey, int64(total))
 }
 
 // Update modifies an existing CI. The repository loads the prior state inside
@@ -392,10 +401,15 @@ func (s *Service) WithRestoreRetention(retention time.Duration) *Service {
 }
 
 // Restore brings a deleted CI back within the retention (CI-05, API-05).
+// The restored CI counts against max_cis like a new one: at the limit the
+// CI stays deleted (ENT-03, F-399).
 func (s *Service) Restore(ctx context.Context, orgID, id string) (*Item, error) {
 	restorer, ok := s.repo.(Restorer)
 	if !ok {
 		return nil, errors.New("restore is not supported by this repository")
+	}
+	if err := s.allowActive(ctx, orgID); err != nil {
+		return nil, err
 	}
 	retention := s.restoreRetention
 	if retention <= 0 {

@@ -32,9 +32,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 1 |
 | P1 | 5 |
-| P2 | 19 |
+| P2 | 20 |
 | P3 | 21 |
-| **Summe** | **46** |
+| **Summe** | **47** |
 
 ## Übersicht
 
@@ -86,6 +86,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-398](#f-398) | P3 | PUT /roles/{id}/permissions auf einer Standardrolle antwortet 200 mit den neuen Rechten, die Seed-Rechte (`role.permissions`) bleiben aber wirksam; Antwort, Rechteliste und Audit-Schnappschuss weichen von den wirksamen Rechten ab | WP-066 (K7) | belegt | backend/internal/permission/standard_role_permissions_integration_test.go | WP-669 |
 | [F-401](#f-401) | P3 | Suche ohne Treffer antwortet `"data": null` statt `[]`; ebenso Historie ohne Änderungen, Verfügbarkeitsprojektion und `results` des Compliance-Scores | WP-164 (K7) | belegt | backend/internal/server/pagination_test.go | WP-672 |
 | [F-402](#f-402) | P3 | `GET /api/v1/relationships` ignoriert die dokumentierten Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` | WP-165 (K7) | belegt | backend/internal/relationship/pg_repository_integration_test.go | WP-673 |
+| [F-399](#f-399) | P2 | `max_cis` wird über Wiederherstellen, Unmerge und die Review-Auflösung `new` umgangen: über dem Limit entstehen aktive CIs | WP-073 (K7) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-670 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1007,6 +1008,54 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       pg_repository_integration_test.go:920: GET &rel_type=no_such_type: 200 "application/json" field "", want 400 problem+json on rel_type
       pg_repository_integration_test.go:920: GET &rel_type=a%00b: 200 "application/json" field "", want 400 problem+json on rel_type
   --- FAIL: TestListHonoursDocumentedQueryFilters (0.79s)
+  FAIL
+  ```
+
+<a id="f-399"></a>
+### F-399 (P2) – `max_cis` wird über Wiederherstellen, Unmerge und die Review-Auflösung `new` umgangen: über dem Limit entstehen aktive CIs
+
+- **Gefunden in:** Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von einem Gegenprüfer bestätigt (r1-b5, WP-073 AK1); erweitert bei WP-670 um den Unmerge, den Revert des Merge-Jobs und den Merge eines `resurrected_device`-Eintrags (Durchsicht aller Wege, die ein CI aktiv machen) · **Betroffene Anforderungen:** ENT-03, ENT-08 · **Komponente:** backend/internal/ci/service.go (`Service.Restore`, Zeilen 395-404 auf `e5c2d86`: `RestoreDeleted` ohne `s.limit.AllowCreate`; `Service.Create` prüft in Zeile 286), backend/internal/ci/merge.go (`Service.Unmerge`, Zeilen 680-685, auch über `RevertMerge` Zeile 901 und `POST /jobs/{id}/revert`), backend/internal/discovery/review.go (`resolveCIReview`: `ActionNew` Zeile 318 → `createReviewedDevice` Zeile 368 → `h.ciRepo.Create` Zeile 402 ohne `h.limits.AllowCreate`, erreichbar für `unclassified_device`, `ambiguous_identity` und `resurrected_device`; `ActionMerge` eines `resurrected_device`-Eintrags → `restorer.Restore` Zeile 290 ohne Prüfung), backend/internal/jobs/handler.go (`Revert`, Zeile 275: eine Entitlement-Ablehnung würde als Repository-Fehler beantwortet); geprüft werden `max_cis` dagegen in `discovery/unlicensed.go` Zeilen 210 (Ingest, `admitNewCI`) und 337 (`adoptUnlicensed`) · **Quelle:** Probe des Gegenprüfers über die Produktionskette mit PG-Repositories (`k7/ver/r1-b5/evidence/k-reaudit-1/WP-073/verify-probe-zz_verify_b5_limit_test.go.txt`, Log `verify-probe-ci-limit-bypass.log`, `TestVerifyB5CILimitBypass`); erweiterte Reproduktion im kodierenden Test von WP-670 (`k7/ad-670-work/red.log`)
+- **Reproduktion:** Organisation mit Plan Essential, `max_cis` per Grant auf `cmdb_core` gleich der Zahl der aktiven CIs gesetzt (Probe: 1; kodierender Test: 2), ein gelöschtes CI, ein per `POST /cis/{id}/merge` zusammengeführtes CI, offene Review-Einträge `unclassified_device`, `ambiguous_identity` und `resurrected_device` (Kandidat ein gelöschtes CI). `POST /api/v1/cis` → 403 `entitlement-limit` „1 of 1 in use“ (Kontrolle). `POST /api/v1/cis/{gelöscht}/restore` → 200, aktive CIs 2. `POST /api/v1/review-items/{unclassified_device}/resolve` `{"action":"new","ci_type_id":…}` → 200, aktive CIs 3. Ebenso (kodierender Test, Limit 2): `POST /cis/{victim}/unmerge` → 200, `new` eines `ambiguous_identity`-Eintrags → 200, `merge` eines `resurrected_device`-Eintrags → 200; am Ende 7 aktive CIs bei `max_cis` 2.
+- **Soll:** ENT-03: „Limitprüfung in REST-Schreibpfaden; Überschreitung ergibt 403 entitlement-limit.“ ENT-08: bei Überschreitung „nur Sperre für Neuanlage (REST) bzw. unlicensed_ci (Ingest)“. E-56 (`docs/plan/entscheidungen.md`, Festlegung und Formulierung): „`max_cis` wird exakt durchgesetzt“. WP-073 AK1: Neuanlagen der Discovery über dem Limit werden `unlicensed_ci` statt CI. Jeder Schreibweg, der ein CI aktiv macht (anlegen, wiederherstellen, Merge rückgängig machen), zählt gegen `max_cis` wie `POST /cis`.
+- **Ist:** Nur `ci.Service.Create`, der Ingest (`admitNewCI`) und die Übernahme eines `unlicensed_ci`-Eintrags (`adoptUnlicensed`) rufen `AllowCreate`. `Service.Restore` setzt `deleted_at` ohne Prüfung zurück, `Service.Unmerge` (auch als Revert des Jobs `ci.merge`) reaktiviert das Opfer ohne Prüfung; die Review-Auflösung `new` legt das CI über `h.ciRepo.Create` an, also am `ci.Service` und damit an der Limitprüfung vorbei, und der `merge` eines `resurrected_device`-Eintrags reaktiviert das gelöschte CI über das Repository. Der Review-Eintrag wird dabei als `resolved` abgeschlossen.
+- **Nutzerwirkung:** Ein Mandant mit erschöpftem Kontingent (oder nach einem Downgrade, ENT-08) kann beliebig viele aktive CIs halten: Er löscht und stellt wieder her, führt zusammen und trennt wieder, oder löst Discovery-Review-Einträge mit `new` auf, statt dass die Geräte als `unlicensed_ci` warten. Das lizenzierte Limit (Paketgrenze, ENT-06) ist für zahlende Mandanten damit wirkungslos; die Abrechnung nach Plan stimmt nicht mit dem Bestand überein.
+- **Ursache (belegt):** WP-072/WP-073 haben die Limitprüfung an `ci.Service.Create` und an den Ingest gehängt. Die später gebauten Wege, die ein CI ohne `Create` aktiv machen (Wiederherstellen CI-05, Unmerge CI-12, Review-Auflösung `new` CI-13 und Reaktivierung eines wiedergesehenen Geräts), schreiben direkt über das Repository bzw. ohne `AllowCreate`; kein Test prüfte `max_cis` auf diesen Wegen.
+- **Empfehlung:** Eine gemeinsame Prüfung „CI wird aktiv“ im `ci.Service` (`allowActive`) für `Create`, `Restore` und `Unmerge` (damit auch `RevertMerge`), mit derselben Zählung wie `Create`; in der Discovery eine entsprechende Prüfung (`allowActiveCI`, Zählung wie `adoptUnlicensed`) vor `h.ciRepo.Create` in `createReviewedDevice` und vor der Reaktivierung eines `resurrected_device`. Über dem Limit 403 `entitlement-limit`, nichts wird geschrieben: das CI bleibt gelöscht, der Merge bleibt, der Review-Eintrag bleibt offen mit seinem Gerätedatensatz. Begründung gegen die Umwandlung in `unlicensed_ci` bei `new`: Die Auflösung ist ein REST-Schreibpfad eines Menschen (ENT-03: 403 `entitlement-limit`), der Gerätedatensatz liegt bereits verlustfrei im offenen Eintrag (kein stiller Verlust), und die Antwort entspricht der Auflösung `new` eines `unlicensed_ci`-Eintrags (`api/openapi.yaml`: „403 entitlement-limit otherwise“); eine Umwandlung schlösse den Eintrag mit einer anderen Entscheidung (Identität, Typ, Mandant) als der gewählten. `POST /jobs/{id}/revert` beantwortet die Ablehnung ebenfalls mit 403 `entitlement-limit`. `api/openapi.yaml` beschreibt das (Antwort `EntitlementLimit` für `createCI`, `restoreCI`, `unmergeCI`, `revertJob` und die Auflösung).
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestT2EntitlementMaxCIsOnRestoreAndReviewNew$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: bei `max_cis` = aktive CIs `POST /cis` (Kontrolle), Wiederherstellen, Unmerge, Revert des Merge-Jobs, `new` von `unclassified_device` und `ambiguous_identity` und `merge` von `resurrected_device` je 403 `entitlement-limit`; aktive CIs nie über dem Limit, gelöschte CIs bleiben gelöscht, das Opfer bleibt zusammengeführt, die Einträge bleiben offen ohne CI; nach Anheben um 1 Wiederherstellen 200 und `new` wieder 403, nach Anheben um 3 weitere `new`, Unmerge und Reaktivierung je 200.
+- **Kodierender Test:** backend/internal/server/t2_entitlement_gates_test.go (`TestT2EntitlementMaxCIsOnRestoreAndReviewNew`, Produktionsrouter mit PG-Repositories, Entitlement-Durchsetzung an); auf `e5c2d86` rot (ausgeführt auf der Basis `e438b09`; `internal/ci`, `internal/discovery/review.go`, `internal/discovery/unlicensed.go` und `internal/jobs/handler.go` dort identisch mit `e5c2d86`). Der Revert des Merge-Jobs ist auf dem alten Code durch den vorangehenden Unmerge verdeckt (409); mit der Korrektur in `internal/ci` und dem alten `jobs/handler.go` antwortet er 500 statt 403 (zweiter Lauf unten):
+
+  ```text
+  === RUN   TestT2EntitlementMaxCIsOnRestoreAndReviewNew
+      t2_entitlement_gates_test.go:650: restore at max_cis 2: 200 {"id":"dab723f4-…","organization_id":"c0deeda0-…","client_id":"c0deeda0-…","health":"unk…, want 403 entitlement-limit
+      t2_entitlement_gates_test.go:653: after restore: 3 active CIs > max_cis 2
+      t2_entitlement_gates_test.go:650: unmerge at max_cis 2: 200 {"merge_id":"cd4bc6d1-…","survivor":{…}, want 403 entitlement-limit
+      t2_entitlement_gates_test.go:653: after unmerge: 4 active CIs > max_cis 2
+      t2_entitlement_gates_test.go:650: revert of the merge job at max_cis 2: 409 {"detail":"the merge of the job no longer exists",…}, want 403 entitlement-limit
+      t2_entitlement_gates_test.go:653: after revert of the merge job: 4 active CIs > max_cis 2
+      t2_entitlement_gates_test.go:650: new of unclassified_device at max_cis 2: 200 {"id":"662c5d9e-…","kind":"unclassified_device","status":"resolv…, want 403 entitlement-limit
+      t2_entitlement_gates_test.go:653: after new of unclassified_device: 5 active CIs > max_cis 2
+      t2_entitlement_gates_test.go:650: new of ambiguous_identity at max_cis 2: 200 {"id":"513d3d80-…","kind":"ambiguous_identity","status":"resolved…, want 403 entitlement-limit
+      t2_entitlement_gates_test.go:653: after new of ambiguous_identity: 6 active CIs > max_cis 2
+      t2_entitlement_gates_test.go:650: merge of resurrected_device at max_cis 2: 200 {"id":"e7f28681-…","kind":"resurrected_device","status":"resolv…, want 403 entitlement-limit
+      t2_entitlement_gates_test.go:653: after merge of resurrected_device: 7 active CIs > max_cis 2
+      t2_entitlement_gates_test.go:661: refused restore of dab723f4-…: deleted false (err <nil>), want still deleted
+      t2_entitlement_gates_test.go:661: refused restore of cff495ed-…: deleted false (err <nil>), want still deleted
+      t2_entitlement_gates_test.go:667: refused unmerge: victim merged false (err <nil>), want still merged
+      t2_entitlement_gates_test.go:674: refused resolution of 662c5d9e-…: status "resolved", CIs 1 (err <nil>), want open and none
+      t2_entitlement_gates_test.go:674: refused resolution of 513d3d80-…: status "resolved", CIs 1 (err <nil>), want open and none
+      t2_entitlement_gates_test.go:674: refused resolution of e7f28681-…: status "resolved", CIs 0 (err <nil>), want open and none
+      t2_entitlement_gates_test.go:681: restore below max_cis: 409 {"detail":"the CI is not deleted",…}, want 200
+      t2_entitlement_gates_test.go:686: new at the raised max_cis 3: 409 {"detail":"review item already resolved",…}
+      t2_entitlement_gates_test.go:696: new below max_cis: 409 {"detail":"review item already resolved",…}, want 200
+      t2_entitlement_gates_test.go:696: unmerge below max_cis: 404 {"detail":"no merge of this CI to revert",…}
+      t2_entitlement_gates_test.go:696: merge of resurrected_device below max_cis: 409 {"detail":"review item already resolved",…}
+      t2_entitlement_gates_test.go:700: active CIs at the end: 7, want 6
+  --- FAIL: TestT2EntitlementMaxCIsOnRestoreAndReviewNew (2.81s)
+  FAIL
+  (korrigiertes internal/ci und internal/discovery, alter jobs/handler.go:)
+  WARN job revert failed job_id=0238f5f9-… error="entitlement limit for \"max_cis\" exceeded: 2 of 2 in use"
+      t2_entitlement_gates_test.go:650: revert of the merge job at max_cis 2: 500 {"detail":"the request could not be completed","status":500,"title":"Internal Error",…}, want 403 entitlement-limit
+  --- FAIL: TestT2EntitlementMaxCIsOnRestoreAndReviewNew (1.11s)
   FAIL
   ```
 

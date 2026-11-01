@@ -366,7 +366,9 @@ middleware maps route prefixes to features (export, ingest including the
 `/api/v1/discovery/ingest` alias, topology, ...) and answers with 403
 `feature-not-entitled`; GraphQL fields check their feature as well. Quotas are
 enforced in the domain service (`ci.Service.Create`) and answer with 403
-`entitlement-limit`. After `valid_until` only discovery stops (CH21): ingest
+`entitlement-limit`; `max_cis` counts the active CIs and holds on every write
+that makes a CI active: the restore, the unmerge, and of a review item `new`
+and the merge of a `resurrected_device` item (the item stays open). After `valid_until` only discovery stops (CH21): ingest
 and new scans answer 403 `license-expired` (counter
 `reticora_ingest_refused_license_expired_total`), reading, editing, export and
 every other feature stay available; the heartbeat response carries

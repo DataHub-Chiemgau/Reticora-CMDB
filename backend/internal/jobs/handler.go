@@ -278,6 +278,9 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 		case api.WriteFieldError(w, err):
 		case errors.As(err, &refused):
 			api.WriteError(w, http.StatusConflict, "Conflict", refused.Error())
+		case api.WriteEntitlementError(w, err):
+			// A quota of the revert is reached, e.g. max_cis for the unmerge
+			// (ENT-03); the job stays succeeded and not reverted.
 		default:
 			slog.WarnContext(r.Context(), "job revert failed", "job_id", job.ID, "error", err)
 			api.WriteRepoError(w, err)

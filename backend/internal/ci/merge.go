@@ -676,11 +676,16 @@ type UnmergeResult struct {
 }
 
 // Unmerge reverts the merge of victimID within the snapshot retention;
-// force overrides later changes of the survivor (E-80).
+// force overrides later changes of the survivor (E-80). The victim becomes
+// active again and counts against max_cis like a new CI: at the limit the
+// merge stays (ENT-03, F-399).
 func (s *Service) Unmerge(ctx context.Context, orgID, victimID string, force bool) (*UnmergeResult, error) {
 	unmerger, ok := s.repo.(Unmerger)
 	if !ok {
 		return nil, ErrMergeUnsupported
+	}
+	if err := s.allowActive(ctx, orgID); err != nil {
+		return nil, err
 	}
 	return unmerger.Unmerge(ctx, orgID, victimID, force)
 }

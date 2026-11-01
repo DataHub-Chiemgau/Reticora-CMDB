@@ -876,6 +876,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
         '409':
           description: >-
             Another active CI holds the value of a unique attribute (MET-15);
@@ -1039,7 +1041,9 @@ paths:
         the status and the asset link of the deletion come back, the change
         history and the audit trail record the restore (ci.restored).
         Requires ci:delete. A CI of another organization, outside the
-        caller's scope or unknown is 404.
+        caller's scope or unknown is 404. The restored CI counts against
+        max_cis like a new one: with max_cis reached the restore is 403
+        entitlement-limit and the CI stays deleted (ENT-03).
       responses:
         '200':
           description: The restored CI
@@ -1050,7 +1054,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1192,7 +1196,9 @@ paths:
         nothing; force=true restores the snapshot over those changes, and
         the audit entry ci.unmerged names force and the overwritten fields
         (E-80). The revert of the merge job behaves like an unmerge without
-        force. Requires ci:delete.
+        force. The merged CI becomes active again and counts against
+        max_cis like a new one: with max_cis reached the unmerge is 403
+        entitlement-limit and the merge stays (ENT-03). Requires ci:delete.
       parameters:
         - name: force
           in: query
@@ -1215,7 +1221,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -2524,7 +2530,10 @@ paths:
         CI-12); every other kind, and a job that did not succeed, is 409.
         The bulk revert follows with BLK-02. A successful revert is recorded
         on the job (reverted_at, reverted_by); a second revert is 409
-        "the job is already reverted" (F-329).
+        "the job is already reverted" (F-329). The revert of ci.merge makes
+        the merged CI active again: with max_cis reached it is 403
+        entitlement-limit like POST /cis/{id}/unmerge and the merge stays
+        (ENT-03).
       responses:
         '200':
           description: The job was reverted
@@ -2541,7 +2550,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -5535,7 +5544,10 @@ paths:
         CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and
         resurrected_device creates the CI as the ingest of the device kept
         in the payload would, with the client and site of the item (CI-13),
-        and 422 when the item records no client and its candidate CIs share
+        and like POST /cis within max_cis: with max_cis reached new and the
+        merge of a resurrected_device item are 403 entitlement-limit, no CI
+        is created or reactivated and the item stays open with its device
+        record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share
         none (dismiss it and wait for the next sighting); its type is
         ci_type_id of the request or else the recorded type name resolved
         as the ingest resolves it, and without a type that resolves new is
@@ -5565,7 +5577,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -5651,7 +5663,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -13482,9 +13494,12 @@ components:
         https://reticora.io/problems/feature-not-entitled, ENT-05), or the
         quota of the operation is reached (type
         https://reticora.io/problems/entitlement-limit, ENT-03): max_users
-        for users, max_api_keys for API keys, max_collectors for collectors.
-        Nothing is created; after a downgrade below the stock the existing
-        objects stay usable and readable (ENT-08).
+        for users, max_api_keys for API keys, max_collectors for collectors,
+        max_cis (active CIs) for every write that makes a CI active (POST
+        /cis, the restore, the unmerge, and of a review item new and the
+        merge of a resurrected_device item). Nothing is created, restored
+        or unmerged; after a downgrade below the stock the existing objects
+        stay usable and readable (ENT-08).
       content:
         application/problem+json:
           schema:

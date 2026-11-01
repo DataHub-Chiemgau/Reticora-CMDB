@@ -25,10 +25,14 @@
 //     readable and only refuses new ones; on PostgreSQL a first login with
 //     an invitation and the acceptance of an invitation at max_users are
 //     refused with entitlement-limit and leave the invitation open.
+//   - WP-670 (ENT-03, ENT-08), finding F-399: max_cis holds on every write
+//     that makes a CI active, not only POST /cis: the restore, the
+//     unmerge, new of a review item and the merge of a resurrected_device
+//     item are 403 entitlement-limit at the limit (PostgreSQL).
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -v -run 'TestT2EntitlementGates|TestAuditT2EntitlementRackViewGated|TestAuditT2EntitlementAPIAccessGatesAPIKeys|TestAuditT2EntitlementQuotasEnforced|TestT2EntitlementQuota' ./internal/server/
+//	cd backend && go test -count=1 -v -run 'TestT2EntitlementGates|TestAuditT2EntitlementRackViewGated|TestAuditT2EntitlementAPIAccessGatesAPIKeys|TestAuditT2EntitlementQuotasEnforced|TestT2EntitlementQuota|TestT2EntitlementMaxCIs' ./internal/server/
 package server_test
 
 import (
@@ -44,10 +48,12 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	rackpkg "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 )
 
@@ -520,5 +526,177 @@ func TestT2EntitlementQuotaFirstLoginWithInvitation(t *testing.T) {
 	setLimit(active + 2)
 	if w := accept(); w.Code != http.StatusCreated || open(acceptInvitation) || usersOf("quota-accept@a.invalid") != 1 {
 		t.Errorf("acceptance below max_users: %d %s, invitation open %v; want 201 and accepted", w.Code, strings.TrimSpace(w.Body.String()), open(acceptInvitation))
+	}
+}
+
+// TestT2EntitlementMaxCIsOnRestoreAndReviewNew covers ENT-03 and ENT-08 for
+// max_cis (active CIs) on the writes besides POST /cis that make a CI
+// active, through the production chain over PostgreSQL (F-399): with
+// max_cis reached the restore of a deleted CI, the unmerge and the revert
+// of the merge job, new of an unclassified_device and of an
+// ambiguous_identity item and the merge of a resurrected_device item
+// (which reactivates the deleted CI) are 403 entitlement-limit like POST
+// /cis; the deleted CI stays deleted, the merge stays, the items stay open
+// with their device record and the number of active CIs stays at the
+// limit. Below a raised limit each is admitted.
+func TestT2EntitlementMaxCIsOnRestoreAndReviewNew(t *testing.T) {
+	f := scopetest.Seed(t, "ed")
+	bg := context.Background()
+	s := newT2StackFrom(t, entitlement.Options{Enforce: true}, server.PostgresRepositories(f.App, audit.NewPGRecorder()))
+	admin := f.AppUser(t, f.OrgA, "maxcis-admin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, f.OrgA, admin); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	scope := identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
+	token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+		Scope: &scope, SessionID: "maxcis-sid", ID: "maxcis-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(method, path, body string) (int, string) {
+		t.Helper()
+		ct := ""
+		if body != "" {
+			ct = "application/json"
+		}
+		w := s.do(t2Request{method: method, path: path, body: body, contentType: ct, bearer: token})
+		return w.Code, strings.TrimSpace(w.Body.String())
+	}
+	if _, err = s.entitlements.Provision(f.OrgCtx(f.OrgA), f.OrgA, entitlement.PlanEssential); err != nil {
+		t.Fatal(err)
+	}
+	var serverType string
+	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&serverType); err != nil {
+		t.Fatal(err)
+	}
+	newCI := func(name string) string {
+		t.Helper()
+		code, body := call(http.MethodPost, "/api/v1/cis", `{"ci_type_id":"`+serverType+`","name":"`+name+`","client_id":"`+f.Client1+`"}`)
+		var out struct {
+			ID string `json:"id"`
+		}
+		if code != http.StatusCreated || json.Unmarshal([]byte(body), &out) != nil {
+			t.Fatalf("setup: create %s: %d %s", name, code, body)
+		}
+		return out.ID
+	}
+	newCI("maxcis-keep")
+	survivor, victim := newCI("maxcis-survivor"), newCI("maxcis-victim")
+	gone, resurrectedCI := newCI("maxcis-gone"), newCI("maxcis-resurrected")
+	code, body := call(http.MethodPost, "/api/v1/cis/"+survivor+"/merge", `{"victim_id":"`+victim+`"}`)
+	var merged struct {
+		MergeID string `json:"merge_id"`
+	}
+	if code != http.StatusOK || json.Unmarshal([]byte(body), &merged) != nil {
+		t.Fatalf("setup: merge: %d %s", code, body)
+	}
+	var mergeJob string
+	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM job WHERE organization_id = $1 AND kind = 'ci.merge' AND ref_id = $2`,
+		f.OrgA, merged.MergeID).Scan(&mergeJob); err != nil {
+		t.Fatalf("setup: merge job: %v", err)
+	}
+	for _, id := range []string{gone, resurrectedCI} {
+		if code, body = call(http.MethodDelete, "/api/v1/cis/"+id, ""); code >= 300 {
+			t.Fatalf("setup: delete: %d %s", code, body)
+		}
+	}
+	active := func() int64 {
+		t.Helper()
+		var n int64
+		if qerr := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, f.OrgA).Scan(&n); qerr != nil {
+			t.Fatal(qerr)
+		}
+		return n
+	}
+	setLimit := func(limit int64) {
+		t.Helper()
+		if _, gerr := s.entitlements.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: map[string]int64{entitlement.LimitMaxCIs: limit}}); gerr != nil {
+			t.Fatal(gerr)
+		}
+	}
+	limit := active()
+	setLimit(limit)
+	review := func(kind, name, ip string, candidates ...string) string {
+		t.Helper()
+		if candidates == nil {
+			candidates = []string{}
+		}
+		var id string
+		if qerr := f.Admin.QueryRow(bg, `INSERT INTO review_item (organization_id, kind, payload, candidate_ci_ids, client_id)
+			VALUES ($1, $2, jsonb_build_object('name', $3::text, 'ci_type_name', 'server', 'management_ip', $4::text), $5::uuid[], $6)
+			RETURNING id::text`, f.OrgA, kind, name, ip, candidates, f.Client1).Scan(&id); qerr != nil {
+			t.Fatalf("seed %s item: %v", kind, qerr)
+		}
+		return id
+	}
+	unclassified := review("unclassified_device", "maxcis-unclassified", "192.0.2.77")
+	ambiguous := review("ambiguous_identity", "maxcis-ambiguous", "192.0.2.78", survivor)
+	resurrected := review("resurrected_device", "maxcis-resurrected", "192.0.2.79", resurrectedCI)
+
+	for _, c := range []struct{ name, path, body string }{
+		{"POST /cis (control)", "/api/v1/cis", `{"ci_type_id":"` + serverType + `","name":"maxcis-over","client_id":"` + f.Client1 + `"}`},
+		{"restore", "/api/v1/cis/" + gone + "/restore", ""},
+		{"unmerge", "/api/v1/cis/" + victim + "/unmerge", ""},
+		{"revert of the merge job", "/api/v1/jobs/" + mergeJob + "/revert", ""},
+		{"new of unclassified_device", "/api/v1/review-items/" + unclassified + "/resolve", `{"action":"new","ci_type_id":"` + serverType + `"}`},
+		{"new of ambiguous_identity", "/api/v1/review-items/" + ambiguous + "/resolve", `{"action":"new","ci_type_id":"` + serverType + `"}`},
+		{"merge of resurrected_device", "/api/v1/review-items/" + resurrected + "/resolve", `{"action":"merge","ci_id":"` + resurrectedCI + `"}`},
+	} {
+		code, body = call(http.MethodPost, c.path, c.body)
+		if code != http.StatusForbidden || !strings.Contains(body, api.ProblemEntitlementLimit) {
+			t.Errorf("%s at max_cis %d: %d %.200s, want 403 entitlement-limit", c.name, limit, code, body)
+		}
+		if n := active(); n > limit {
+			t.Errorf("after %s: %d active CIs > max_cis %d", c.name, n, limit)
+		}
+	}
+
+	// Nothing came back and nothing was created; the items stay open.
+	for _, id := range []string{gone, resurrectedCI} {
+		var deleted bool
+		if err = f.Admin.QueryRow(bg, `SELECT deleted_at IS NOT NULL FROM ci WHERE id = $1`, id).Scan(&deleted); err != nil || !deleted {
+			t.Errorf("refused restore of %s: deleted %v (err %v), want still deleted", id, deleted, err)
+		}
+	}
+	var victimMerged bool
+	if err = f.Admin.QueryRow(bg, `SELECT deleted_at IS NOT NULL AND merged_into_id IS NOT NULL FROM ci WHERE id = $1`, victim).
+		Scan(&victimMerged); err != nil || !victimMerged {
+		t.Errorf("refused unmerge: victim merged %v (err %v), want still merged", victimMerged, err)
+	}
+	for _, id := range []string{unclassified, ambiguous, resurrected} {
+		var status string
+		var created int
+		if err = f.Admin.QueryRow(bg, `SELECT status, (SELECT count(*) FROM ci WHERE organization_id = $2 AND attributes->>'review_item_id' = $1::text)
+			FROM review_item WHERE id = $1::uuid`, id, f.OrgA).Scan(&status, &created); err != nil || status != "open" || created != 0 {
+			t.Errorf("refused resolution of %s: status %q, CIs %d (err %v), want open and none", id, status, created, err)
+		}
+	}
+
+	// Raised by one: the restore is admitted, new is refused again.
+	setLimit(limit + 1)
+	if code, body := call(http.MethodPost, "/api/v1/cis/"+gone+"/restore", ""); code != http.StatusOK {
+		t.Errorf("restore below max_cis: %d %.200s, want 200", code, body)
+	}
+	resolveNew := `{"action":"new","ci_type_id":"` + serverType + `"}`
+	if code, body := call(http.MethodPost, "/api/v1/review-items/"+unclassified+"/resolve", resolveNew); code != http.StatusForbidden ||
+		!strings.Contains(body, api.ProblemEntitlementLimit) {
+		t.Errorf("new at the raised max_cis %d: %d %.200s, want 403 entitlement-limit", limit+1, code, body)
+	}
+	// Three more: new, the unmerge and the reactivation are admitted.
+	setLimit(limit + 4)
+	for _, c := range []struct{ name, path, body string }{
+		{"new below max_cis", "/api/v1/review-items/" + unclassified + "/resolve", resolveNew},
+		{"unmerge below max_cis", "/api/v1/cis/" + victim + "/unmerge", ""},
+		{"merge of resurrected_device below max_cis", "/api/v1/review-items/" + resurrected + "/resolve", `{"action":"merge","ci_id":"` + resurrectedCI + `"}`},
+	} {
+		if code, body := call(http.MethodPost, c.path, c.body); code != http.StatusOK {
+			t.Errorf("%s: %d %.200s, want 200", c.name, code, body)
+		}
+	}
+	if n := active(); n != limit+4 {
+		t.Errorf("active CIs at the end: %d, want %d", n, limit+4)
 	}
 }

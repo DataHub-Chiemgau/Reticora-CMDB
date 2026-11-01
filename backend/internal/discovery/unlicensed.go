@@ -322,6 +322,22 @@ func toMap(v any) (map[string]any, error) {
 	return out, err
 }
 
+// allowActiveCI checks max_cis before a review resolution makes a CI
+// active (ENT-03): adopting an unlicensed_ci item and new create one, the
+// merge of a resurrected_device item reactivates the deleted CI. It counts
+// the CIs as ci.Service.Create does; over the limit it returns the
+// entitlement error (403 entitlement-limit) and the item stays open.
+func (h *Handler) allowActiveCI(ctx context.Context, orgID string) error {
+	if h.limits == nil {
+		return nil
+	}
+	_, total, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+	if err != nil {
+		return err
+	}
+	return h.limits.AllowCreate(ctx, orgID, entitlement.LimitMaxCIs, int64(total))
+}
+
 // adoptUnlicensed creates the CI of an unlicensed_ci item when max_cis
 // allows it and resolves the item. It returns the entitlement error when the
 // limit is still reached.
@@ -329,14 +345,8 @@ func (h *Handler) adoptUnlicensed(ctx context.Context, orgID, actorID string, it
 	if h.ciRepo == nil {
 		return "", errors.New("discovery: no CI repository")
 	}
-	if h.limits != nil {
-		_, total, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
-		if err != nil {
-			return "", err
-		}
-		if limitErr := h.limits.AllowCreate(ctx, orgID, entitlement.LimitMaxCIs, int64(total)); limitErr != nil {
-			return "", limitErr
-		}
+	if err := h.allowActiveCI(ctx, orgID); err != nil {
+		return "", err
 	}
 	var device IngestItem
 	raw, err := json.Marshal(item.Payload["device"])

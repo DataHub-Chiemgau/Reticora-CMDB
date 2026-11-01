@@ -262,6 +262,9 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no deleted CI with this id")
 		return
+	case api.WriteEntitlementError(w, err):
+		// max_cis is reached: the CI stays deleted (ENT-03).
+		return
 	case err != nil:
 		if api.WriteFieldError(w, err) {
 			return
@@ -395,6 +398,9 @@ func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no merge of this CI to revert")
+		return
+	case api.WriteEntitlementError(w, err):
+		// max_cis is reached: the merge stays (ENT-03).
 		return
 	case err != nil:
 		if api.WriteFieldError(w, err) {

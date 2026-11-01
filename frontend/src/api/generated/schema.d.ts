@@ -465,7 +465,7 @@ export interface paths {
     put?: never;
     /**
      * Restore a deleted CI within the retention (CI-05, API-05)
-     * @description Clears the deletion of a CI deleted within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days); the status and the asset link of the deletion come back, the change history and the audit trail record the restore (ci.restored). Requires ci:delete. A CI of another organization, outside the caller's scope or unknown is 404.
+     * @description Clears the deletion of a CI deleted within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days); the status and the asset link of the deletion come back, the change history and the audit trail record the restore (ci.restored). Requires ci:delete. A CI of another organization, outside the caller's scope or unknown is 404. The restored CI counts against max_cis like a new one: with max_cis reached the restore is 403 entitlement-limit and the CI stays deleted (ENT-03).
      */
     post: operations['restoreCI'];
     delete?: never;
@@ -534,7 +534,7 @@ export interface paths {
     put?: never;
     /**
      * Revert the merge of this (merged) CI within 30 days (CI-12)
-     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values, the asset link and the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone (410). A survivor changed after the merge (its version is above the version the merge recorded) is not overwritten silently: the unmerge answers 409 with the fields of the later history entries and changes nothing; force=true restores the snapshot over those changes, and the audit entry ci.unmerged names force and the overwritten fields (E-80). The revert of the merge job behaves like an unmerge without force. Requires ci:delete.
+     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values, the asset link and the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone (410). A survivor changed after the merge (its version is above the version the merge recorded) is not overwritten silently: the unmerge answers 409 with the fields of the later history entries and changes nothing; force=true restores the snapshot over those changes, and the audit entry ci.unmerged names force and the overwritten fields (E-80). The revert of the merge job behaves like an unmerge without force. The merged CI becomes active again and counts against max_cis like a new one: with max_cis reached the unmerge is 403 entitlement-limit and the merge stays (ENT-03). Requires ci:delete.
      */
     post: operations['unmergeCI'];
     delete?: never;
@@ -1201,7 +1201,7 @@ export interface paths {
     put?: never;
     /**
      * Revert a succeeded job where the revert is defined (E-25)
-     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02. A successful revert is recorded on the job (reverted_at, reverted_by); a second revert is 409 "the job is already reverted" (F-329).
+     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02. A successful revert is recorded on the job (reverted_at, reverted_by); a second revert is 409 "the job is already reverted" (F-329). The revert of ci.merge makes the merged CI active again: with max_cis reached it is 403 entitlement-limit like POST /cis/{id}/unmerge and the merge stays (ENT-03).
      */
     post: operations['revertJob'];
     delete?: never;
@@ -2796,7 +2796,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -11475,7 +11475,7 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description Forbidden: a missing permission, the organization's plan does not include the feature (type https://reticora.io/problems/feature-not-entitled, ENT-05), or the quota of the operation is reached (type https://reticora.io/problems/entitlement-limit, ENT-03): max_users for users, max_api_keys for API keys, max_collectors for collectors. Nothing is created; after a downgrade below the stock the existing objects stay usable and readable (ENT-08). */
+    /** @description Forbidden: a missing permission, the organization's plan does not include the feature (type https://reticora.io/problems/feature-not-entitled, ENT-05), or the quota of the operation is reached (type https://reticora.io/problems/entitlement-limit, ENT-03): max_users for users, max_api_keys for API keys, max_collectors for collectors, max_cis (active CIs) for every write that makes a CI active (POST /cis, the restore, the unmerge, and of a review item new and the merge of a resurrected_device item). Nothing is created, restored or unmerged; after a downgrade below the stock the existing objects stay usable and readable (ENT-08). */
     EntitlementLimit: {
       headers: {
         [name: string]: unknown;
@@ -12388,6 +12388,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. */
       409: {
         headers: {
@@ -12566,7 +12567,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). */
       409: {
@@ -12712,7 +12713,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), or one of the CIs is locked by another write. */
       409: {
@@ -14003,7 +14004,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
@@ -17804,7 +17805,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       /** @description The action does not resolve items of this type, new cannot tell the client of the device, or new has no CI type (field ci_type_id) */
@@ -17897,7 +17898,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
