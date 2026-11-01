@@ -160,10 +160,11 @@ export function useUpsertCITypeField() {
 }
 
 /** The global fields: the organization-wide ones and the read-only system ones (MET-13). */
-export function useGlobalFields() {
+export function useGlobalFields(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: GLOBAL_FIELDS_KEY,
     queryFn: () => ciFieldApi.listGlobal(),
+    enabled: options.enabled ?? true,
   });
 }
 

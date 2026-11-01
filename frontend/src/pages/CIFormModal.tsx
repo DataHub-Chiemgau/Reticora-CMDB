@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import type { CI, CICreateRequest, CIUpdateRequest } from '../api/client';
 import { localizedText } from '../api/cmdb';
-import { useCIType, useCITypes } from '../api/cmdbHooks';
+import { useCIType, useCITypes, useGlobalFields } from '../api/cmdbHooks';
 import { useCreateCI, useUpdateCI } from '../api/hooks';
 import { useLocationNames } from '../components/cmdb/CIDetailSections';
 import { DynamicForm, validateAll } from '../components/form/DynamicForm';
@@ -98,10 +98,20 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   const ciTypes = useCITypes({ limit: 200 }, { enabled: open, staleTime: 0 });
   // The chosen type's schema: its attributes are rendered below the fields.
   const selectedType = useCIType(values.ci_type_id || undefined, { enabled: open, staleTime: 0 });
-  const typeFields = useMemo(
-    () => (selectedType.data?.id === values.ci_type_id ? (selectedType.data.fields ?? []) : []),
-    [selectedType.data, values.ci_type_id],
-  );
+  // The organization-wide fields (GET /ci-fields/global, MET-13) apply to
+  // every type, system types included, and the server validates them with
+  // the type's own fields (ResolveFields). GET /ci-types/{id} carries only the
+  // type's own fields, so the form adds the global ones in front; a type field
+  // of the same name is the narrower definition and wins. Without the global
+  // list (no answer, or no right to read it) the form shows the type fields.
+  const globalFields = useGlobalFields({ enabled: open });
+  const typeFields = useMemo(() => {
+    if (selectedType.data?.id !== values.ci_type_id) return [];
+    const own = selectedType.data.fields ?? [];
+    const ownNames = new Set(own.map((field) => field.name));
+    const globals = (globalFields.data?.data ?? []).filter((field) => !ownNames.has(field.name));
+    return [...globals, ...own];
+  }, [selectedType.data, values.ci_type_id, globalFields.data]);
 
   const typeOptions = useMemo(() => {
     const types = ciTypes.data?.data ?? [];
