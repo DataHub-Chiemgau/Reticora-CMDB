@@ -1614,14 +1614,12 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		// ci.RecordUpdater). It is dated by the record's observed_at
 		// (GLO-12): the repository keeps the later of the two times, and a
 		// record not newer than the last sighting brings no CI back and
-		// raises no ci.online.
+		// raises no ci.online. The repository decides on the locked row
+		// (UpdateRequest.Sighting): a CI the offline detector set unknown
+		// after the match read it is active again as well (F-412).
 		seen := seenAt(&item)
 		lastSeen := seen.Format(time.RFC3339Nano)
-		update := ci.UpdateRequest{LastSeenAt: &lastSeen}
-		if matched.Status == "unknown" && (matched.LastSeenAt == nil || seen.After(*matched.LastSeenAt)) {
-			active := "active"
-			update.Status = &active
-		}
+		update := ci.UpdateRequest{LastSeenAt: &lastSeen, Sighting: true}
 		for _, f := range []struct {
 			name           string
 			value, current string

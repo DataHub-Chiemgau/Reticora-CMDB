@@ -1113,3 +1113,6 @@ SEC-05;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
 TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-680
 CI-06;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
 AUD-05;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
+REC-09;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
+LCY-05;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
+REC-07;[B];D;backend/internal/ci/sighting_test.go;WP-683

@@ -1057,6 +1057,9 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		}
 		return nil, fmt.Errorf("get ci before update: %w", err)
 	}
+	if reviveErr := reviveSighted(before, &req); reviveErr != nil {
+		return nil, reviveErr
+	}
 	if req.Manual != nil {
 		if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
 			return nil, preErr
@@ -1172,6 +1175,25 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		}
 	}
 	return w, nil
+}
+
+// reviveSighted brings an unknown CI back to active for a sighting
+// (UpdateRequest.Sighting) newer than the last one of the locked row
+// before: like a status the record carries, a field override of the status
+// keeps it (dropOverriddenFields).
+func reviveSighted(before *Item, req *UpdateRequest) error {
+	if !req.Sighting || req.Status != nil || req.LastSeenAt == nil || before.Status != StatusUnknown {
+		return nil
+	}
+	seen, err := time.Parse(time.RFC3339, *req.LastSeenAt)
+	if err != nil {
+		return &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
+	}
+	if before.LastSeenAt == nil || seen.After(*before.LastSeenAt) {
+		active := StatusActive
+		req.Status = &active
+	}
+	return nil
 }
 
 // checkCITypes keeps the type of a CI within its organization (CI-01,

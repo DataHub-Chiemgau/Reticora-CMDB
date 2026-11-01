@@ -207,12 +207,17 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 			default:
 				continue
 			}
-			if _, err = tx.Exec(ctx, `UPDATE ci SET status = $3 WHERE id = $1 AND organization_id = $2`, ci.id, orgID, next); err != nil {
-				return fmt.Errorf("set CI %s %s: %w", ci.id, next, err)
+			changed, setErr := setStatus(ctx, tx, orgID, ci, next)
+			if setErr != nil {
+				return setErr
 			}
+			if !changed {
+				continue
+			}
+			lastSeen := ci.lastSeen.UTC().Format(time.RFC3339)
 			if _, err = outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: eventType, EntityID: ci.id,
 				Data: map[string]any{"id": ci.id, "name": ci.name, "client_id": ci.client, "site_id": ci.site, "status": next,
-					"last_seen_at": ci.lastSeen.UTC().Format(time.RFC3339), "scope_interval": interval.String()}}); err != nil {
+					"last_seen_at": lastSeen, "scope_interval": interval.String()}}); err != nil {
 				return err
 			}
 			if eventType == events.CIOffline {
@@ -227,4 +232,21 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 		return nil
 	})
 	return c, err
+}
+
+// setStatus sets the status of ci to next if the row is still as the run
+// read it (F-412): same status, same last_seen_at, not deleted, and not
+// locked by another writer. A sighting the ingest committed after the read,
+// or one it is writing (its row lock), and a status a person or another
+// job set in between leave the row as it is; the run then changes nothing
+// and raises no event, the next run decides on the new state.
+func setStatus(ctx context.Context, tx pgx.Tx, orgID string, ci *observedCI, next string) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE ci SET status = $3
+		WHERE id = (SELECT c.id FROM ci c WHERE c.id = $1 AND c.organization_id = $2 AND c.deleted_at IS NULL
+			AND c.status = $4 AND c.last_seen_at = $5 FOR UPDATE SKIP LOCKED)`, ci.id, orgID, next, ci.status, ci.lastSeen)
+	if err != nil {
+		return false, fmt.Errorf("set CI %s %s: %w", ci.id, next, err)
+	}
+	return tag.RowsAffected() == 1, nil
 }

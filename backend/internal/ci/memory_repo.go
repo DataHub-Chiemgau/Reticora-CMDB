@@ -174,6 +174,9 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return nil, ErrNotFound
 	}
+	if err := reviveSighted(item, &req); err != nil {
+		return nil, err
+	}
 
 	if req.Name != nil {
 		item.Name = *req.Name

@@ -198,6 +198,12 @@ type UpdateRequest struct {
 	// Authoritative marks an automated write of rank >= 92 (workflow,
 	// import), which raises the version like a manual change does.
 	Authoritative bool `json:"-"`
+	// Sighting marks the write of a discovery record that saw the CI at
+	// LastSeenAt (REC-07, REC-09): a CI that is unknown in the locked row
+	// and was last seen before is active again in the same UPDATE. The
+	// decision is made on the locked row, not on an earlier read, so a
+	// status the offline detector set in between is undone too (F-412).
+	Sighting bool `json:"-"`
 	// Manual marks a change made by a person through the API (not by
 	// discovery or automation): every changed field gets a protected
 	// override in the same transaction (OVR-01). Set by the API paths only
