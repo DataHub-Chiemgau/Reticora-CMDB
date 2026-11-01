@@ -31,6 +31,7 @@ package server_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -165,4 +166,114 @@ func TestReviewResolutionKeepsErrorContract(t *testing.T) {
 	}
 	try("ambiguous_identity merge into a candidate deleted meanwhile", ambiguous, `{"action":"merge","ci_id":"`+deleted+`"}`,
 		http.StatusNotFound, "", "open")
+}
+
+// WP-693 (REC-12, WP-089, WP-676 AK2; F-422): the accept of an
+// override_conflict item whose CI was soft-deleted meanwhile is 404
+// application/problem+json and changes nothing: the item stays open, the
+// override, the field value, the CI (model, version), its history
+// (ci_change) and the audit stay as they were. The direct override routes
+// (PUT and DELETE /cis/{id}/fields/{name}/override) and GET
+// /cis/{id}/fields answer 404 for a deleted CI as GET /cis/{id} does and
+// write nothing; the controls on a live CI stay 200. Before the fix the
+// accept answered 200, removed the override and gave the deleted CI the
+// observed value; the override routes and the field list answered 200.
+//
+//	cd backend && TEST_DATABASE_URL=... go test -count=1 -run '^TestOverrideConflictAcceptOnDeletedCIIsNotFound$' ./internal/server/
+func TestOverrideConflictAcceptOnDeletedCIIsNotFound(t *testing.T) {
+	r := newAuditT3Router(t, "6d")
+	f := r.f
+	all := identity.AllPermissions()
+	// state is everything the refused requests must leave unchanged.
+	state := func(ciID string) string {
+		return r.str(`SELECT format('deleted=%s model=%s version=%s override=%s override_at=%s ci_change=%s audit=%s',
+			c.deleted_at IS NOT NULL, coalesce(c.model, '<null>'), c.version,
+			(SELECT coalesce(override_value::text, '<null>') FROM ci_field_value v WHERE v.ci_id = c.id AND v.field_name = 'model'),
+			(SELECT override_at IS NOT NULL FROM ci_field_value v WHERE v.ci_id = c.id AND v.field_name = 'model'),
+			(SELECT count(*) FROM ci_change h WHERE h.ci_id = c.id),
+			(SELECT count(*) FROM audit_log a WHERE a.resource_id = c.id AND a.action LIKE 'ci.override%'))
+			FROM ci c WHERE c.id = $1`, ciID)
+	}
+	// overridden creates a CI with an override of model that the source
+	// contradicts, and its open override_conflict item.
+	overridden := func(name string) (string, string) {
+		id := f.CI(t, f.OrgA, "", name)
+		if w := r.call(all, http.MethodPut, "/api/v1/cis/"+id+"/fields/model/override", `{"value":"manual-model","reason":"wp693"}`); w.Code != http.StatusOK {
+			t.Fatalf("override %s: %d %s", name, w.Code, w.Body.String())
+		}
+		r.str(`UPDATE ci_field_value SET discovered_value = '"observed-model"', discovered_source = 'snmp', discovered_at = now(), discovered_rank = 3
+			WHERE ci_id = $1 AND field_name = 'model' RETURNING id::text`, id)
+		item := r.str(`INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids, object_key) VALUES ($1, 'override_conflict', 'open',
+			jsonb_build_object('ci_id', $2::text, 'field', 'model', 'observed_value', 'observed-model', 'source', 'snmp', 'rank', 3), ARRAY[$2::uuid],
+			'ci:' || $2 || '/model') RETURNING id::text`, f.OrgA, id)
+		return id, item
+	}
+	remove := func(id string) {
+		t.Helper()
+		if w := r.call(all, http.MethodDelete, "/api/v1/cis/"+id, ""); w.Code != http.StatusNoContent {
+			t.Fatalf("delete CI: %d %s", w.Code, w.Body.String())
+		}
+	}
+	notFound := func(what string, w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s: %d, want 404; body %.240s", what, w.Code, w.Body.String())
+			return
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+			t.Errorf("%s: Content-Type %q, want application/problem+json", what, ct)
+		}
+	}
+
+	// Control: the accept on a live CI removes the override (200).
+	live, liveItem := overridden("wp693-live")
+	if w := r.call(all, http.MethodPost, "/api/v1/review-items/"+liveItem+"/resolve", `{"action":"accept"}`); w.Code != http.StatusOK {
+		t.Fatalf("control accept on a live CI: %d %s", w.Code, w.Body.String())
+	}
+	if got := state(live); !strings.Contains(got, "model=observed-model") || !strings.Contains(got, "override=<null>") {
+		t.Errorf("live CI after the accept: %s, want the observed model without override", got)
+	}
+
+	// The accept on a CI deleted meanwhile.
+	gone, item := overridden("wp693-gone")
+	remove(gone)
+	before := state(gone)
+	notFound("override_conflict accept on a deleted CI",
+		r.call(all, http.MethodPost, "/api/v1/review-items/"+item+"/resolve", `{"action":"accept"}`))
+	if got := r.str(`SELECT status || '/' || coalesce(action, '') FROM review_item WHERE id = $1`, item); got != "open/" {
+		t.Errorf("item after the refused accept: %s, want open", got)
+	}
+	if after := state(gone); after != before {
+		t.Errorf("deleted CI after the refused accept: %s, want unchanged %s", after, before)
+	}
+	notFound("GET /cis/{deleted}/fields", r.call(all, http.MethodGet, "/api/v1/cis/"+gone+"/fields", ""))
+
+	// The direct override routes on a deleted CI.
+	gone2, _ := overridden("wp693-gone2")
+	remove(gone2)
+	before = state(gone2)
+	notFound("PUT override on a deleted CI", r.call(all, http.MethodPut, "/api/v1/cis/"+gone2+"/fields/model/override", `{"value":"again","reason":"wp693"}`))
+	notFound("PUT override of a new field on a deleted CI",
+		r.call(all, http.MethodPut, "/api/v1/cis/"+gone2+"/fields/description/override", `{"value":"again","reason":"wp693"}`))
+	notFound("DELETE override on a deleted CI", r.call(all, http.MethodDelete, "/api/v1/cis/"+gone2+"/fields/model/override", ""))
+	if after := state(gone2); after != before {
+		t.Errorf("deleted CI after the refused override writes: %s, want unchanged %s", after, before)
+	}
+	if n := r.str(`SELECT count(*)::text FROM ci_field_value WHERE ci_id = $1 AND field_name = 'description'`, gone2); n != "0" {
+		t.Errorf("field values of description on the deleted CI: %s, want 0", n)
+	}
+
+	// Controls on a live CI: set, the field list and clear stay 200; an
+	// unknown CI is 404 like a deleted one.
+	other := f.CI(t, f.OrgA, "", "wp693-other")
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPut, "/api/v1/cis/" + other + "/fields/model/override", `{"value":"m","reason":"wp693"}`},
+		{http.MethodGet, "/api/v1/cis/" + other + "/fields", ""},
+		{http.MethodDelete, "/api/v1/cis/" + other + "/fields/model/override", ""},
+	} {
+		if w := r.call(all, c.method, c.path, c.body); w.Code != http.StatusOK {
+			t.Errorf("control %s %s: %d %s", c.method, c.path, w.Code, w.Body.String())
+		}
+	}
+	notFound("GET /cis/{unknown}/fields", r.call(all, http.MethodGet, "/api/v1/cis/00000000-0000-4000-8000-0000000006d0/fields", ""))
 }

@@ -554,7 +554,7 @@ export interface paths {
     put?: never;
     /**
      * Bulk status change of up to 500 CIs (API-08, BLK-01)
-     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. Every change is a manual change like a PATCH of status (CI-04, OVR-01): the status is set also over an existing override and gets a protected override with the requesting user (for a job its creator) as author; the CI version rises (API-07), so a later PATCH of status with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the requested status afterwards, otherwise it is an error.
+     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write. Every change is a manual change like a PATCH of status (CI-04, OVR-01): the status is set also over an existing override and gets a protected override with the requesting user (for a job its creator) as author; the CI version rises (API-07), so a later PATCH of status with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the requested status afterwards, otherwise it is an error.
      */
     post: operations['bulkCIs'];
     delete?: never;
@@ -2796,7 +2796,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI or the override of the field is gone; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or connected_to does not allow their types and 404 when one of the CIs is gone (no edge is recorded). A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or connected_to does not allow their types and 404 when one of the CIs is gone (no edge is recorded).
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -2907,7 +2907,7 @@ export interface paths {
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
      * @deprecated
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Over a redundant type (powered_by, member_of_cluster) a CI is impacted only when all its providers failed (IMP-04), also those outside the client or site scope of the caller, which the answer never names (IMP-07). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
      */
     get: operations['getCIImpactLegacy'];
     put?: never;
@@ -2927,7 +2927,7 @@ export interface paths {
     };
     /**
      * Joint impact of several CIs failing at once (IMP-05)
-     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). A provider outside the client or site scope of the caller counts as well, so the impact equals that of an org-wide caller, restricted to the visible CIs; the answer never names such a provider (IMP-07). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
+     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
      */
     get: operations['getMultiImpact'];
     put?: never;
@@ -2959,7 +2959,7 @@ export interface paths {
     };
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Over a redundant type (powered_by, member_of_cluster) a CI is impacted only when all its providers failed (IMP-04), also those outside the client or site scope of the caller, which the answer never names (IMP-07). Powers the Ausfallsimulation in the topology view.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
      */
     get: operations['getCIImpact'];
     put?: never;
@@ -3155,7 +3155,7 @@ export interface paths {
     head?: never;
     /**
      * Update a room
-     * @description Changes name, floor, room type or the floor-plan layout. The layout replaces the positions the caller sees (see Room.layout): every key must be a CI of the organization that the caller sees, that is not deleted and that is located in this room (its location is the room or lies below it), and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`; a CI the caller does not see is answered like an unknown id. Stored entries of CIs the caller does not see are kept unchanged; stored entries of CIs the caller sees that are deleted or no longer located in the room are dropped. The merge runs under the room's row lock after the If-Match check. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
+     * @description Changes name, floor, room type or the floor-plan layout. Every layout key must be a CI of the organization the caller sees and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
      */
     patch: operations['updateRoom'];
     trace?: never;
@@ -3568,13 +3568,13 @@ export interface paths {
     };
     /**
      * Notification channels of the organization
-     * @description Requires notification:manage for the whole organization (RBA-02: org_admin only; RBA-03, F-418): channels belong to the organization, not to a client, and receive the notifications of every client. A holder bound to a client, a site or a team gets 403. Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
+     * @description Requires notification:manage (RBA-02: org_admin only). Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
      */
     get: operations['listNotificationChannels'];
     put?: never;
     /**
      * Create a notification channel
-     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is created. A webhook channel is a target of the whole organization: it receives the notifications of every client with name and e-mail of their recipients, so only an org-wide administrator creates one. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
+     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
      */
     post: operations['createNotificationChannel'];
     delete?: never;
@@ -3594,21 +3594,21 @@ export interface paths {
     };
     /**
      * Get a notification channel
-     * @description Requires notification:manage for the whole organization (F-418; 403 for a holder bound to a client, a site or a team, also for an unknown id); redacted like the list.
+     * @description Requires notification:manage; redacted like the list.
      */
     get: operations['getNotificationChannel'];
     put?: never;
     post?: never;
     /**
      * Delete a notification channel
-     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is deleted.
+     * @description Requires notification:manage.
      */
     delete: operations['deleteNotificationChannel'];
     options?: never;
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is changed. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
+     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -3622,7 +3622,7 @@ export interface paths {
     };
     /**
      * Latest notification deliveries with their status
-     * @description Requires notification:manage for the whole organization (RBA-02: org_admin only; RBA-03, F-418): the deliveries name recipients of every client, so a holder bound to a client, a site or a team gets 403. A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
+     * @description Requires notification:manage (RBA-02: org_admin only). A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
      */
     get: operations['listNotificationDeliveries'];
     put?: never;
@@ -4024,7 +4024,7 @@ export interface paths {
     put?: never;
     /**
      * Mint a single-use collector enrollment code
-     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client. The web UI offers the client choice when the caller's collector:manage scope of GET /api/v1/me (pscp, otherwise cls) holds several clients (F-425).
+     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client.
      */
     post: operations['createCollectorEnrollmentCode'];
     delete?: never;
@@ -6093,7 +6093,7 @@ export interface paths {
     };
     /**
      * Compute the blast radius of a CI failure
-     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed, also those outside the client or site scope of the caller, which the answer never names (IMP-07). single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed. single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
      */
     get: operations['listCisIdBlastRadius'];
     put?: never;
@@ -6170,7 +6170,7 @@ export interface paths {
     };
     /**
      * List field provenance (discovered/override/effective) of a CI
-     * @description Per field the observed value with source and time, the manual override with author, reason and time, and the effective value: the override when there is one, otherwise the observed value (OVR-01). GET /cis/{id} and the CI list return the same effective values.
+     * @description Per field the observed value with source and time, the manual override with author, reason and time, and the effective value: the override when there is one, otherwise the observed value (OVR-01). GET /cis/{id} and the CI list return the same effective values. A CI that is unknown, not visible or soft-deleted is 404 like GET /cis/{id} (F-422).
      */
     get: operations['listCisIdFields'];
     put?: never;
@@ -6195,13 +6195,13 @@ export interface paths {
     get?: never;
     /**
      * Set a manual field override
-     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden; a reserved namespace (_overrides, _observed, _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409.
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden; a reserved namespace (_overrides, _observed, _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409. An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422).
      */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
     /**
      * Clear a manual field override
-     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version. A reserved namespace as name is 400 (GLO-13).
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version. A reserved namespace as name is 400 (GLO-13). An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422).
      */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
@@ -6785,7 +6785,7 @@ export interface components {
       multi_value: boolean;
       /** @description Indexed for search: a job builds the index concurrently (DB-04). A non-unique definition of an organization without a CI type uses the index of its key, shared by all organizations (`attribute.index.key` job, `idx_attr_key_<key>`, or `idx_attr_keyh_<hash>` for other keys; E-73); other definitions get `idx_attr_<id>` (`attribute.index` job). */
       searchable: boolean;
-      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. The server check covers the CIs outside the client or site scope of the writer as well, also before the index exists, and every write that sets or brings back the values of a CI: POST and PATCH /cis, the restore (POST /cis/{id}/restore), the unmerge (POST /cis/{id}/unmerge) and the resolutions of review items that create or reactivate a CI (409 with `violations`). */
+      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. */
       unique: boolean;
       /**
        * @description Unique per organization or per client (CIs without a client count as one client).
@@ -7742,21 +7742,6 @@ export interface components {
       cls?: string[] | null;
       sts?: string[] | null;
       tms?: string[] | null;
-      /**
-       * @description Permission scopes: for each permission whose scope differs from the
-       *     session scope (cls, sts, tms), the scope in which the caller holds
-       *     it, in the same form; a permission not listed holds the session
-       *     scope. The UI reads it for collector:manage to offer the client
-       *     choice of an enrollment code (createCollectorEnrollmentCode,
-       *     F-425).
-       */
-      pscp?: {
-        [key: string]: {
-          cls?: string[] | null;
-          sts?: string[] | null;
-          tms?: string[] | null;
-        };
-      };
       name?: string;
       email?: string;
       /**
@@ -10592,7 +10577,7 @@ export interface components {
       name: string;
       floor?: number;
       room_type?: string;
-      /** @description Floor-plan object positions, CI id → {x, y} normalized 0..1. Only entries of CIs the caller sees, that are not deleted and that are located in this room are returned; an entry of a CI that was deleted or moved out of the room (e.g. to another client) is ignored, it neither shows nor blocks a PATCH. */
+      /** @description Floor-plan object positions, object_id → {x, y} normalized 0..1. */
       layout?: {
         [key: string]: {
           x?: number;
@@ -10614,7 +10599,7 @@ export interface components {
       name?: string;
       floor?: number;
       room_type?: string;
-      /** @description Replaces the room's floor-plan object positions the caller sees. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears them. Each key must be a CI of the organization the caller sees, not deleted and located in this room (422 otherwise). Positions of CIs the caller does not see stay as stored. */
+      /** @description Replaces the room's floor-plan object positions. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. Each key must be a CI of the organization the caller sees (422 otherwise). */
       layout?: {
         [key: string]: {
           x?: number;
@@ -11487,15 +11472,6 @@ export interface components {
     };
     /** @description Forbidden */
     Forbidden: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['ProblemDetail'];
-      };
-    };
-    /** @description Forbidden: the principal does not hold notification:manage, or holds it only for some clients, sites or teams. Notification channels and their deliveries belong to the whole organization (a channel receives the notifications of every client, a delivery names recipients of every client), so only a holder of notification:manage for the whole organization administers them (RBA-03, TEN-06, F-418); nothing is created, changed or deleted. */
-    NotificationAdminForbidden: {
       headers: {
         [name: string]: unknown;
       };
@@ -12426,7 +12402,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
-      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. The check covers every CI of the scope of the attribute, also those outside the client or site scope of the caller, and never names the other CI. */
+      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12550,7 +12526,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes; also a CI outside the client or site scope of the caller, which is never named) */
+      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12606,7 +12582,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. */
+      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12752,7 +12728,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), the survivor is part of a later open merge (UnmergeLaterMergeProblem, type urn:reticora:problem:unmerge-later-merge: unmerge that merge first; force does not override it), one of the CIs is locked by another write, or another active CI holds a value of a unique attribute of the merged CI or of the survivor in the snapshot meanwhile (MET-15: urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; force does not override it, the merge stays). */
+      /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), the survivor is part of a later open merge (UnmergeLaterMergeProblem, type urn:reticora:problem:unmerge-later-merge: unmerge that merge first; force does not override it), or one of the CIs is locked by another write. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -17756,9 +17732,7 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
-        /** @description Return items of this status. Another value → 400 with field status (F-426). */
         status?: 'open' | 'resolved' | 'dismissed';
-        /** @description Return items of this review type. Another value → 400 with field kind (F-426). */
         kind?:
           | 'unclassified_device'
           | 'ambiguous_identity'
@@ -17878,9 +17852,7 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
-        /** @description Return items of this status. Another value → 400 with field status (F-426). */
         status?: 'open' | 'resolved' | 'dismissed';
-        /** @description Return items of this review type. Another value → 400 with field kind (F-426). */
         kind?:
           | 'unclassified_device'
           | 'ambiguous_identity'
@@ -17909,7 +17881,6 @@ export interface operations {
           'application/json': components['schemas']['ReviewItemListResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -18842,7 +18813,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller, not deleted and located in this room (field `layout.<ci>`; the same answer for an unknown id and a CI the caller does not see). */
+      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller (field `layout.<ci>`). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -20044,7 +20015,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['NotificationAdminForbidden'];
+      403: components['responses']['Forbidden'];
     };
   };
   createNotificationChannel: {
@@ -20071,7 +20042,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['NotificationAdminForbidden'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
@@ -20097,7 +20068,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['NotificationAdminForbidden'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -20120,7 +20091,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['NotificationAdminForbidden'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -20150,7 +20121,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['NotificationAdminForbidden'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -20190,7 +20161,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['NotificationAdminForbidden'];
+      403: components['responses']['Forbidden'];
     };
   };
   listVRFs: {
@@ -27413,6 +27384,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   putCisIdFieldsNameOverride: {
@@ -27484,7 +27456,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Unknown or invisible CI, or the CI has no value of the field */
+      /** @description Unknown, invisible or soft-deleted CI, or the CI has no value of the field */
       404: {
         headers: {
           [name: string]: unknown;

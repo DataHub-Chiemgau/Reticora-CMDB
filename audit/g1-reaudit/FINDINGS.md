@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 29 |
-| P3 | 37 |
-| **Summe** | **72** |
+| P3 | 38 |
+| **Summe** | **73** |
 
 ## Übersicht
 
@@ -112,6 +112,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-425](#f-425) | P2 | Enrollment-Dialog und Onboarding bieten keine Client-Auswahl: ein auf mehrere Clients beschränkter Nutzer erhält seit WP-677 422 und sieht nur „Ein Fehler ist aufgetreten“ | Kandidatenprüfung K7 auf `7cd63e0` | belegt | frontend/src/pages/DiscoveryPage.test.tsx | WP-696 |
 | [F-428](#f-428) | P3 | Sicherheitsreview und GATE-01-Prüfung erfassen die sicherheitsrelevanten Befunde ab F-355 nicht als SR-Befunde mit Severity; ein offener Scope- oder Auth-Befund aus K5 bis K7 blockiert weder GATE-01 noch `--final` | Verifier r3-b6 (WP-209/213) auf `7cd63e0` | belegt | tests/rep01-structure.test.sh | WP-699 |
 | [F-429](#f-429) | P3 | Eindeutige Attribute: Wiederherstellen, Unmerge und die Review-Auflösungen, die ein CI anlegen oder reaktivieren, prüfen die Eindeutigkeit nicht (Duplikate ohne Index, 500 mit Index) | Korrektur WP-692 (K7) auf `7cd63e0` | belegt | backend/internal/server/unique_attr_write_paths_integration_test.go | WP-700 |
+| [F-422](#f-422) | P3 | `override_conflict` accept auf einem inzwischen soft-gelöschten CI entfernt den Override und schreibt das gelöschte CI; Override-Routen und Feldliste antworten für gelöschte CIs 200 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-693 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1957,6 +1958,39 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       unique_attr_integration_test.go:290: restore refused: deleted=false (<nil>), want the CI to stay deleted
   --- FAIL: TestUniqueAttributeRestoreForClientWriter (0.47s)
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci	0.580s
+  ```
+
+<a id="f-422"></a>
+### F-422 (P3) – `override_conflict` accept auf einem inzwischen soft-gelöschten CI entfernt den Override und schreibt das gelöschte CI; Override-Routen und Feldliste antworten für gelöschte CIs 200
+
+- **Gefunden in:** Kandidatenprüfung K7 auf `7cd63e0` (Kandidat 1 des Auditors, Probe `TestKCand1OverrideConflictDeletedCI`); `backend/internal/override/` ist dort identisch mit `e5c2d86`; kodierender Test von WP-693 · **Betroffene Anforderungen:** REC-12 [B] (accept übernimmt den beobachteten Wert), OVR-01 [B], CI-05 [B] (DELETE setzt `deleted_at`, das CI ist danach weg), WP-089, WP-676 AK2 · **Komponente:** backend/internal/discovery/review.go (`resolveOverrideConflict`: 404 nur bei `override.ErrNotFound`), backend/internal/override/pg_repository.go (`lockCI`, Zeile 91–98 auf `7cd63e0`: `EXISTS (SELECT 1 FROM ci WHERE id = $1)` ohne `deleted_at`; `visibleCI`, Zeile 67, in `ListForCI` und im `UPDATE` von `ClearOverride`, Zeile 438 ff.; `SetOverride` über `requireVisibleCI`), backend/internal/override/handler.go (`ListForCI`: ein unbekanntes CI ergibt 200 mit leerer Liste) · **Quelle:** `k7/out/cand/evidence/k-reaudit-cand/1/probe-override-conflict-deleted-ci.log`, Probe `k7/out/cand/evidence/k-reaudit-cand/probe/kcand_probe_test.go.txt` (über `go test -overlay`); kodierender Test von WP-693 (`k7/ad-693/red-693.log`)
+- **Reproduktion:** CI mit Override `model = manual-model` (`PUT /api/v1/cis/{id}/fields/model/override`, 200), die Quelle meldet `observed-model`, offener Eintrag `override_conflict`. `DELETE /api/v1/cis/{id}` → 204; `GET /api/v1/cis/{id}` und `PATCH` → 404. `POST /api/v1/review-items/{item}/resolve {"action":"accept"}` → 200, Eintrag `resolved/accept`; danach am gelöschten CI `model = observed-model`, `version` 2 → 3, Override entfernt, eine neue `ci_change`-Zeile und ein Audit `ci.override_cleared`. `GET /api/v1/cis/{gelöscht}/fields` → 200 mit den Feldwerten. Direkt: `PUT /api/v1/cis/{gelöscht}/fields/model/override` → 200 (Version +1, `model = again`), `DELETE …/override` → 200 (Version +1). Vergleich: `merge` eines `ambiguous_identity`-Eintrags in einen inzwischen gelöschten Kandidaten → 404.
+- **Soll:** Spezifikation von `resolveReviewItem`: „accept of override_conflict is 404 when the CI or the override of the field is gone“; die Auflösung schreibt bei einer verweigerten Wirkung nichts und der Eintrag bleibt offen (F-404, F-405). Ein soft-gelöschtes CI ist für die manuellen Wege weg wie für `GET /cis/{id}` (CI-05, F-371): accept → 404 problem+json, Override, Feldwert, CI (Wert, Version), `ci_change` und Audit unverändert; `PUT`/`DELETE /cis/{gelöscht}/fields/{f}/override` und `GET /cis/{gelöscht}/fields` → 404, nichts geschrieben.
+- **Ist:** Die Sichtbarkeitsprüfung des Override-Repositorys fragt nur, ob die CI-Zeile unter der RLS existiert; `deleted_at` bleibt unbeachtet. Das accept entfernt den Override eines gelöschten CIs und schreibt ihm den beobachteten Wert mit neuer Version und Historie; die Override-Routen ändern gelöschte CIs, die Feldliste zeigt ihre Werte.
+- **Nutzerwirkung:** Ein Prüfer, der einen alten Konflikt annimmt, ändert unbemerkt ein gelöschtes CI und verliert dessen manuellen Override; nach einem Restore (`POST /cis/{id}/restore`) trägt das CI den beobachteten statt des geschützten Werts (OVR-01: „stiller Verlust ist Critical“, hier über einen gelöschten Datensatz, daher P3). API-Clients können gelöschte CIs über die Override-Routen weiter schreiben und deren Feldwerte lesen, obwohl das CI selbst 404 antwortet.
+- **Ursache (belegt):** `lockCI`/`requireVisibleCI` und `visibleCI` (WP-025, WP-206) prüfen nur die Sichtbarkeit unter dem Scope; WP-676 (F-405) hat für das accept die 404 auf `override.ErrNotFound` gestützt, ohne den Fall eines soft-gelöschten CIs zu prüfen. Die Tests der Override-Routen liefen nur mit lebenden CIs.
+- **Empfehlung:** `lockCI` meldet zusätzlich, ob das CI nicht gelöscht ist; `SetOverride` (über `requireLiveCI`) und `ClearOverride` verlangen ein nicht gelöschtes CI (sonst „not found“ bzw. `ErrNotFound` → 404, auch im accept); das `UPDATE` von `ClearOverride` und `ListForCI` filtern über `liveCI` (`deleted_at IS NULL`); `ListForCI` antwortet für ein unbekanntes, nicht sichtbares oder gelöschtes CI mit `ErrNotFound`, der Handler mit 404 wie `GET /cis/{id}`. Der Discovery-Weg (`RecordDiscovered*`, `Get` der Entscheidung) bleibt unverändert, da der Abgleich nur lebende CIs trifft. Spec-first: `GET /cis/{id}/fields` dokumentiert 404, die Override-Routen und `resolveReviewItem` nennen das gelöschte CI.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestOverrideConflictAcceptOnDeletedCIIsNotFound$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: accept auf einem lebenden CI 200 (beobachteter Wert, kein Override); accept auf einem inzwischen gelöschten CI 404 problem+json, Eintrag `open`, Zustand (`deleted_at`, `model`, `version`, Override-Wert und -Zeit, Zahl der `ci_change`-Zeilen, Audits `ci.override*`) unverändert; `GET /cis/{gelöscht}/fields` 404; `PUT …/model/override`, `PUT …/description/override` (neues Feld) und `DELETE …/model/override` auf dem gelöschten CI je 404 problem+json, Zustand unverändert, kein Feldwert `description`; Kontrollen auf einem lebenden CI (`PUT`, `GET /fields`, `DELETE`) 200; `GET /cis/{unbekannt}/fields` 404. Dazu `go test -count=1 -run '^TestOverrideRepositoryClientScope$' ./internal/override/` (das CI von Client 2 ist für Client 1 `ErrNotFound`) und `TestReviewResolutionKeepsErrorContract` unverändert grün.
+- **Kodierender Test:** backend/internal/server/scope_suggested_errors_integration_test.go (`TestOverrideConflictAcceptOnDeletedCIIsNotFound`, Produktionsrouter mit Autorisierung und OpenAPI-Validierung gegen PostgreSQL), dazu backend/internal/override/override_scope_integration_test.go (`TestOverrideRepositoryClientScope`); auf `e5c2d86` rot (ausgeführt auf der Basis `7cd63e0` mit den alten Produktionsdateien `override/pg_repository.go` und `override/handler.go` aus `HEAD`; `backend/internal/override/` ist dort identisch mit `e5c2d86`; lange Zeilen gekürzt):
+
+  ```text
+  === RUN   TestOverrideConflictAcceptOnDeletedCIIsNotFound
+      scope_suggested_errors_integration_test.go:241: override_conflict accept on a deleted CI: 200, want 404; body {"id":"97292dc0-…","organization_id":"c0de6da0-0000-4000-8000-000000000001","kind":"override_conflict","status":"resolved",…
+      scope_suggested_errors_integration_test.go:244: item after the refused accept: resolved/accept, want open
+      scope_suggested_errors_integration_test.go:247: deleted CI after the refused accept: deleted=t model=observed-model version=3 override=<null> override_at=f ci_change=3 audit=2, want unchanged deleted=t model=manual-model version=2 override="manual-model" override_at=t ci_change=2 audit=1
+      scope_suggested_errors_integration_test.go:249: GET /cis/{deleted}/fields: 200, want 404; body {"data":[{"id":"e6acccbf-…","ci_id":"c0de6da0-0000-4000-8000-000000001004","field_name":"model","discovered_value":"observed-model",…
+      scope_suggested_errors_integration_test.go:255: PUT override on a deleted CI: 200, want 404; body {"id":"c04ddc9c-…","ci_id":"c0de6da0-0000-4000-8000-000000001005","field_name":"model",…
+      scope_suggested_errors_integration_test.go:256: PUT override of a new field on a deleted CI: 200, want 404; body {"id":"d7cf8095-…","field_name":"description","override_value":"again",…
+      scope_suggested_errors_integration_test.go:258: DELETE override on a deleted CI: 200, want 404; body {"id":"c04ddc9c-…","field_name":"model",…
+      scope_suggested_errors_integration_test.go:260: deleted CI after the refused override writes: deleted=t model=observed-model version=5 override=<null> override_at=f ci_change=5 audit=4, want unchanged deleted=t model=manual-model version=2 override="manual-model" override_at=t ci_change=2 audit=1
+      scope_suggested_errors_integration_test.go:263: field values of description on the deleted CI: 1, want 0
+      scope_suggested_errors_integration_test.go:278: GET /cis/{unknown}/fields: 200, want 404; body {"data":[],"total":0,"limit":0,"offset":0,"has_more":false}
+  --- FAIL: TestOverrideConflictAcceptOnDeletedCIIsNotFound (0.98s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	1.150s
+  === RUN   TestOverrideRepositoryClientScope
+      override_scope_integration_test.go:48: client-1 field values of client-2 CI: len=0 err=<nil>, want 0/ErrNotFound
+  --- FAIL: TestOverrideRepositoryClientScope (0.55s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override	0.561s
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

@@ -5597,7 +5597,8 @@ paths:
         collector already has a scope for the CIDR and 422 with field
         collector_id or target for an unknown collector or an invalid value,
         as POST /discovery-scopes; accept of override_conflict is 404 when
-        the CI or the override of the field is gone; new of unlicensed_ci is
+        the CI (also one soft-deleted meanwhile, F-422) or the override of
+        the field is gone, the override stays; new of unlicensed_ci is
         422 when the item holds no device record; accept of
         unknown_relationship is 422 when the item names no CI ids or
         connected_to does not allow their types and 404 when one of the CIs
@@ -12356,7 +12357,9 @@ paths:
         Per field the observed value with source and time, the manual
         override with author, reason and time, and the effective value: the
         override when there is one, otherwise the observed value (OVR-01).
-        GET /cis/{id} and the CI list return the same effective values.
+        GET /cis/{id} and the CI list return the same effective values. A CI
+        that is unknown, not visible or soft-deleted is 404 like GET
+        /cis/{id} (F-422).
       responses:
         '200':
           description: Field provenance of the CI
@@ -12373,6 +12376,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/FieldProvenance' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/cis/{id}/fields/{name}/override:
     parameters:
@@ -12399,7 +12403,8 @@ paths:
         same transaction the CI version rises by one and the CI history
         records the change (change_type override; an attribute counts as the
         field attributes, as for PATCH), so a PATCH of the field with an
-        older If-Match is refused with 409.
+        older If-Match is refused with 409. An unknown, not visible or
+        soft-deleted CI is 404 and nothing is written (F-422).
       requestBody:
         required: true
         content:
@@ -12433,7 +12438,9 @@ paths:
         the same transaction; the change is audited. Clearing an override is
         a manual write (API-07): the CI version rises by one and the CI
         history records the change, as for PUT. A field without an override
-        keeps the version. A reserved namespace as name is 400 (GLO-13).
+        keeps the version. A reserved namespace as name is 400 (GLO-13). An
+        unknown, not visible or soft-deleted CI is 404 and nothing is written
+        (F-422).
       responses:
         '200':
           description: Field provenance after the change
@@ -12447,7 +12454,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
-          description: Unknown or invisible CI, or the CI has no value of the field
+          description: Unknown, invisible or soft-deleted CI, or the CI has no value of the field
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }

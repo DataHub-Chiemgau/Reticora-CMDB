@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-700 | 43 | 37,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699); F-429 Eindeutigkeitsprüfung auf allen Schreibwegen (WP-700). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-693 | 44 | 37,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699); F-429 Eindeutigkeitsprüfung auf allen Schreibwegen (WP-700); F-422 Override und Konfliktauflösung auf gelöschten CIs (WP-693). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **345** | **438,0** | |
+| **Summe** | | **346** | **438,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>43 WPs · 37,0 PT"]
+    K7N["K7-Nachträge<br/>44 WPs · 37,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -464,6 +464,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-696](#wp-696--enrollment-code-in-der-oberfläche-pflichtauswahl-des-kunden-für-nutzer-mehrerer-clients-grund-der-ablehnung-statt-allgemeiner-fehlermeldung) | `k7n-enrollment-client-choice` | Enrollment-Code in der Oberfläche: Pflichtauswahl des Kunden für Nutzer mehrerer Clients, Grund der Ablehnung statt allgemeiner Fehlermeldung | K7N | 1,0 | F-425 | WP-677, WP-199, WP-524 |
 | [WP-699](#wp-699--sicherheitsreview-und-gate-01-erfassen-die-befunde-der-korrektur-sr-27-bis-sr-49-begründung-ohne-sicherheitswirkung-maschinelle-prüfung-über-die-befundliste) | `k7n-sr-coverage-reaudit-findings` | Sicherheitsreview und GATE-01 erfassen die Befunde der Korrektur: SR-27 bis SR-49, Begründung ohne Sicherheitswirkung, maschinelle Prüfung über die Befundliste | K7N | 1,0 | F-428 | WP-452, WP-451, WP-633, WP-634, WP-636, WP-639, WP-642, WP-643, WP-656, WP-660, WP-663, WP-664, WP-667, WP-669, WP-677, WP-678, WP-680, WP-682, WP-685, WP-687, WP-689, WP-692, WP-698 |
 | [WP-700](#wp-700--eindeutige-attribute-auf-allen-schreibwegen-wiederherstellen-unmerge-und-review-auflösung-prüfen-wie-post-cis-409-mit-violations) | `k7n-unique-check-all-write-paths` | Eindeutige Attribute auf allen Schreibwegen: Wiederherstellen, Unmerge und Review-Auflösung prüfen wie POST /cis (409 mit violations) | K7N | 1,0 | F-429 | WP-142, WP-692, WP-670, WP-676 |
+| [WP-693](#wp-693--override-wege-auf-soft-gelöschten-cis-override_conflict-accept-override-setzenentfernen-und-feldliste-antworten-404-und-schreiben-nichts) | `k7n-override-deleted-ci` | Override-Wege auf soft-gelöschten CIs: `override_conflict` accept, Override setzen/entfernen und Feldliste antworten 404 und schreiben nichts | K7N | 0,5 | F-422 | WP-025, WP-057, WP-089, WP-676 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20826,6 +20827,61 @@ MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-700
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** Der Discovery-Ingest (`createDiscoveredCI` aus `processRecord`, Batch über `ci.BatchCreator`, Updates bekannter Geräte mit `attributes`) prüft weiterhin nur über den Index; wie ein gemeldeter, bereits vergebener Wert eines eindeutigen Attributs zu behandeln ist (Datensatz abweisen, Wert verwerfen wie vergebene Identitätswerte, Review-Eintrag), ist eine eigene Entscheidung. Ebenso der Typwechsel (`POST /cis/{id}/type`, CI-11), bei dem ein vorhandener Wert unter ein eindeutiges Attribut des Zieltyps fällt (nicht reproduziert). Eine Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben. Dass `new` die dynamischen Attribute des Geräte-Datensatzes nicht übernimmt (`devicePayload` speichert sie nicht), bleibt unverändert.
+
+### WP-693 – Override-Wege auf soft-gelöschten CIs: `override_conflict` accept, Override setzen/entfernen und Feldliste antworten 404 und schreiben nichts
+
+**Schlüssel:** `k7n-override-deleted-ci` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-025 (`denorm-ci`), WP-057 (`manual-ovr`), WP-089 (`conflict`), WP-676 (`k7n-review-resolve-errors`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-422](../../../audit/g1-reaudit/FINDINGS.md#f-422) | P3 | `override_conflict` accept auf einem inzwischen soft-gelöschten CI entfernt den Override und schreibt das gelöschte CI; Override-Routen und Feldliste antworten für gelöschte CIs 200 | schließt | Kandidatenprüfung K7 auf `7cd63e0` (Probe `k7/out/cand/evidence/k-reaudit-cand/1/probe-override-conflict-deleted-ci.log`) |
+
+**Problem:** `POST /api/v1/review-items/{id}/resolve {"action":"accept"}` eines `override_conflict`-Eintrags, dessen CI inzwischen gelöscht wurde (`DELETE /cis/{id}` → 204, `GET` → 404), antwortet 200, löst den Eintrag auf, entfernt den Override und gibt dem gelöschten CI den beobachteten Wert mit neuer Version, `ci_change`-Zeile und Audit. `PUT`/`DELETE /api/v1/cis/{gelöscht}/fields/{f}/override` antworten 200 und schreiben, `GET /api/v1/cis/{gelöscht}/fields` 200 mit den Werten. Ursache: `lockCI` (`backend/internal/override/pg_repository.go:91–98` auf `7cd63e0`) und `visibleCI` (Zeile 67) prüfen `EXISTS (SELECT 1 FROM ci WHERE id = $1)` ohne `deleted_at`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `lockCI` meldet neben der Sichtbarkeit, ob das CI nicht gelöscht ist; `SetOverride` (über `requireLiveCI`) und `ClearOverride` verlangen ein nicht gelöschtes CI (sonst „not found“ bzw. `override.ErrNotFound`); das `UPDATE` von `ClearOverride` und `ListForCI` filtern mit `liveCI` (`deleted_at IS NULL`). Der Discovery-Weg (`RecordDiscovered`, `RecordDiscoveredMany`, `RecordDiscoveredBatch`, `Get`) und `Conflicts` bleiben unverändert.
+- [ ] accept eines `override_conflict`-Eintrags auf einem soft-gelöschten CI → 404 problem+json; der Eintrag bleibt offen, Override, Feldwert, CI (`model`, `version`), `ci_change` und Audit bleiben unverändert. Das accept auf einem lebenden CI bleibt 200.
+- [ ] `PUT` und `DELETE /api/v1/cis/{gelöscht}/fields/{name}/override` → 404 problem+json, nichts geschrieben (auch kein neuer Feldwert); `GET /api/v1/cis/{id}/fields` → 404 für ein unbekanntes, nicht sichtbares oder gelöschtes CI wie `GET /cis/{id}`; lebende CIs unverändert 200.
+- [ ] `api/openapi.yaml` (spec-first): `listCisIdFields` dokumentiert 404, `putCisIdFieldsNameOverride`/`deleteCisIdFieldsNameOverride` und `resolveReviewItem` nennen das soft-gelöschte CI; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestOverrideConflictAcceptOnDeletedCIIsNotFound` (`internal/server/scope_suggested_errors_integration_test.go`) deckt den Retest von F-422 ab; `TestOverrideRepositoryClientScope` erwartet für das CI eines anderen Clients `ErrNotFound`. Auf `e5c2d86` rot, mit der Korrektur grün, auch als Nutzer `nobody`.
+- [ ] Regression: `go test -p 1 ./internal/override/ ./internal/server/ ./internal/ci/ ./internal/reviews/` grün (ohne `TestCIQueryBudget`); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/override/pg_repository.go
+- backend/internal/override/handler.go
+- backend/internal/override/override_scope_integration_test.go
+- backend/internal/server/scope_suggested_errors_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Prüfung läuft wie bisher als `reticora_app` unter `database.WithRequestTenant` mit den Tenant-GUCs der Anfrage; `deleted_at IS NULL` verengt nur die bestehende Sichtbarkeit.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestOverrideConflictAcceptOnDeletedCIIsNotFound$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestOverrideRepositoryClientScope$' ./internal/override/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/override/ ./internal/server/ ./internal/ci/ ./internal/reviews/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+REC-12;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+OVR-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+CI-05;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+OVR-01;[B];D;backend/internal/override/override_scope_integration_test.go;WP-693
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** `GET /api/v1/reconciliation/conflicts` listet Konflikte soft-gelöschter CIs weiter (`Conflicts` filtert mit `visibleCI`); als Beobachtung gemeldet, nicht geändert. Der Discovery-Weg (`RecordDiscovered*`) schreibt weiter auf jedes sichtbare CI, da der Abgleich nur lebende CIs trifft. Das Aufräumen offener `override_conflict`-Einträge beim Löschen eines CIs.
 
 ## Zurückgestellte Befunde
 

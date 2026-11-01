@@ -41,9 +41,11 @@ func TestOverrideRepositoryClientScope(t *testing.T) {
 	if err != nil || len(values) != 1 || values[0].EffectiveValue != "manual" {
 		t.Fatalf("client-1 field values of own CI: %+v err=%v, want one value with effective \"manual\"", values, err)
 	}
+	// A CI the scope does not show is not found, like an unknown or
+	// deleted one (F-422).
 	values, err = repo.ListForCI(ctx, f.OrgA, foreign)
-	if err != nil || len(values) != 0 {
-		t.Fatalf("client-1 field values of client-2 CI: len=%d err=%v, want 0/nil", len(values), err)
+	if !errors.Is(err, override.ErrNotFound) || len(values) != 0 {
+		t.Fatalf("client-1 field values of client-2 CI: len=%d err=%v, want 0/ErrNotFound", len(values), err)
 	}
 	if _, err = repo.Get(ctx, f.OrgA, foreign, "hostname"); err == nil {
 		t.Fatal("client-1 principal read a field value of a client-2 CI")
