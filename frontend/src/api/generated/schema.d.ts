@@ -8087,7 +8087,7 @@ export interface components {
       attributes: {
         [key: string]: unknown;
       };
-      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). */
+      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). An edge that is verified or re-confirmed is kept, also while a cleanup run is under way: a verification answered with 200 is never undone by the cleanup (F-411). */
       source: string;
       confidence?: number;
       /** @description Port of the source CI the edge starts at (REL-02). */
