@@ -284,7 +284,7 @@ auf dem Release-Kandidaten“) und `docs/acceptance/g1-installation.md`.
 | V1 Architektur | Threat-Model, Mandantentrennung in der DB (RLS FORCE), ein DB-Einstieg `WithTenant` | `docs/security/threat-model.md`, `backend/internal/tenant/rls/` |
 | V2 Authentisierung | OIDC mit PKCE über Keycloak, MFA für Operatoren, API-Schlüssel mit Hash und Ablauf | T1, T2, T15 |
 | V3 Sessions | RS256-JWT mit 15 min, Refresh-Rotation, Widerruf über Redis | T1 |
-| V4 Zugriffskontrolle | Routen-Rechte-Tabelle (fail closed), Scopes je Client/Site/Team; Kanalmatrix mit 29 Kanälen für jede der 6 Scope-Arten seit WP-409, Lücken davor und außerhalb der Matrix im Abschnitt „Kanalmatrix: Kanal × Scope-Art“ | T6, T7, `backend/internal/server/authz_test.go`, `backend/internal/tenant/rls/channel_matrix_integration_test.go` |
+| V4 Zugriffskontrolle | Routen-Rechte-Tabelle (fail closed), Scopes je Client/Site/Team; Kanalmatrix mit 29 Kanälen für jede der 6 Scope-Arten seit WP-409 (30 mit den Benachrichtigungskanälen seit WP-689), Lücken davor und außerhalb der Matrix im Abschnitt „Kanalmatrix: Kanal × Scope-Art“ | T6, T7, `backend/internal/server/authz_test.go`, `backend/internal/tenant/rls/channel_matrix_integration_test.go` |
 | V5 Validierung | OpenAPI-Validierung der Anfragen, typisierte Fehler (RFC 7807) | `backend/internal/middleware/` (Validation) |
 | V7 Logging | Audit-Kette, Redaktion personenbezogener Daten | T16, T17 |
 | V8 Datenschutz | PII-Vault, Envelope-Encryption der Credentials | T17 |
@@ -303,15 +303,16 @@ läuft seit WP-409 (`t1-channel-matrix`, `52ac11d`) tabellengetrieben über
 - Scope-Arten: Org, Client, Site, Team, Mehrfach (zwei Clients, eine Site)
   und die andere Organisation, dazu ein zweiter org-weiter Nutzer der
   Organisation.
-- Lesend (27 Kanäle): CIs, Suche, Export, Topologie, Impact, Metriken,
+- Lesend (27 Kanäle, 28 seit WP-689): CIs, Suche, Export, Topologie, Impact, Metriken,
   Beziehungen, Sites, Gebäude, Räume, Racks mit Layout, Mounts, Review-Items
-  mit und ohne Kandidaten, Webhooks, Benachrichtigungen, Jobs, Export-Jobs und
+  mit und ohne Kandidaten, Webhooks, Benachrichtigungen,
+  Benachrichtigungskanäle mit Zustellungen (seit WP-689), Jobs, Export-Jobs und
   je GraphQL-Query-Feld ein Kanal (`cis`, `ci`, `relationships`,
   `currentUser`, `topology`, `rackLayout`, `searchEverything`, `reviewInbox`,
   `jobs`).
-- Schreibend (15 Kanäle): CIs, Beziehungen, Sites, Gebäude, Räume, Racks,
+- Schreibend (15 Kanäle, 16 seit WP-689): CIs, Beziehungen, Sites, Gebäude, Räume, Racks,
   Mounts, Review-Items mit und ohne Kandidaten, Webhooks, Benachrichtigungen,
-  Jobs, Export-Jobs, Ingest und Verweise auf Objekte der anderen Organisation
+  Benachrichtigungskanäle (seit WP-689), Jobs, Export-Jobs, Ingest und Verweise auf Objekte der anderen Organisation
   (`reference`: Kontakte, Subnetze über Client und VRF, Kontaktlinks,
   Discovery-Scopes, Rollenzuweisungen über Benutzer und Rolle).
 - Jede der 294 Kombinationen aus Kanal, Nutzer und Lesen bzw. Schreiben prüft
@@ -372,6 +373,23 @@ Fehlende Kombinationen:
   `permission.CheckRoleNarrowing`), sonst 403 ohne Änderung. HTTP-Lauf über
   den Produktionsrouter: `TestRoleDefinitionChangeNeverReachesBeyondCallerScope`
   (`backend/internal/user/role_definition_ceiling_integration_test.go`).
+- Benachrichtigungskanäle (F-418, WP-689): Kanäle und Zustellungen gehören
+  der Organisation, nicht einem Client: Ein Kanal erhält die
+  Benachrichtigungen aller Clients, eine Zustellung nennt Empfänger aller
+  Clients. Die Routen prüften nur `notification:manage` in irgendeinem Scope.
+  Ein client-gebundener Inhaber las alle Kanäle und Zustellungen (mit Name
+  und E-Mail fremder Empfänger), legte einen Webhook-Kanal an, der die
+  Benachrichtigungen anderer Clients mit deren Empfängern erhielt, und
+  änderte oder löschte die Kanäle der Organisation. Seit WP-689 verwalten
+  nur org-weite Inhaber von `notification:manage` die Kanäle und lesen die
+  Zustellungen (`identity.HoldsOrgWide`, dasselbe Muster wie `PATCH /org`
+  für F-359); ein an Client, Site oder Team gebundener Inhaber erhält auf
+  allen sechs Routen 403 ohne Wirkung. Webhook-Kanäle bleiben damit
+  dokumentierte org-weite Ziele. HTTP-Lauf mit Principals, die wie beim
+  Login aus der Datenbank aufgelöst werden:
+  `TestNotificationAdministrationRequiresOrgWideScope`
+  (`backend/internal/server/notification_channel_scope_integration_test.go`);
+  Matrixzeile `notification-channels` für jede Scope-Art.
 - Die endgültige Formulierung nach WP-409 auf dem Release-Kandidaten
   übernimmt WP-595 (`t5-rc-evidence`).
 

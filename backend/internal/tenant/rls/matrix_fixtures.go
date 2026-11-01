@@ -48,6 +48,9 @@ var Channels = []Channel{
 			"POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry, DELETE /api/v1/webhooks/{id}"},
 	{Name: "notification", Read: "GET /api/v1/notifications",
 		Write: "POST /api/v1/notifications/{id}/read, POST /api/v1/notifications/read-all"},
+	{Name: "notification-channels", Read: "GET /api/v1/notification-channels, GET /api/v1/notification-channels/{id}, " +
+		"GET /api/v1/notification-deliveries (org-wide principals only, F-418)",
+		Write: "POST /api/v1/notification-channels, PATCH /api/v1/notification-channels/{id}, DELETE /api/v1/notification-channels/{id}"},
 	{Name: "job", Read: "GET /api/v1/jobs, GET /api/v1/jobs/{id}, GET /api/v1/jobs/{id}/result",
 		Write: "DELETE /api/v1/jobs/{id}, POST /api/v1/jobs/{id}/revert"},
 	{Name: "export-job", Read: "GET /api/v1/jobs?kind=export, GET /api/v1/jobs/{id}, GET /api/v1/export/jobs, GET /api/v1/export/jobs/{id} (export job mirrored into the job model)",

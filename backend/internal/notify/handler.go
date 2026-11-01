@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -74,10 +75,23 @@ func user(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	return t, true
 }
 
-func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
+// admin is the tenant of the channel administration and the delivery list.
+// Channels and deliveries belong to the organization, not to a client: a
+// channel receives the notifications of every client, and a delivery names
+// recipients of every client. Only a holder of notification:manage for the
+// whole organization administers them; the route authorization accepts any
+// scope of the permission, so a holder bound to a client, a site or a team
+// gets 403 here, before anything is read or changed (RBA-03, TEN-06,
+// F-418).
+func admin(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return t, false
+	}
+	if !identity.HoldsOrgWide(r.Context(), identity.PermNotificationManage) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden",
+			"only a holder of notification:manage for the whole organization may manage notification channels and read deliveries")
 		return t, false
 	}
 	return t, true
@@ -251,7 +265,7 @@ func redact(ch *Channel) *Channel {
 
 // ListChannels handles GET /api/v1/notification-channels.
 func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -278,7 +292,7 @@ type channelRequest struct {
 
 // CreateChannel handles POST /api/v1/notification-channels.
 func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -319,7 +333,7 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 
 // GetChannel handles GET /api/v1/notification-channels/{id}.
 func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -337,7 +351,7 @@ func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
 // keep their value. The placeholder is refused when the configuration
 // changes where the secret goes (F-152).
 func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -418,7 +432,7 @@ func destinationChanged(ch *Channel, cfg map[string]any) bool {
 
 // DeleteChannel handles DELETE /api/v1/notification-channels/{id}.
 func (h *Handler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -465,7 +479,7 @@ func viewDelivery(d *QueuedDelivery) deliveryView {
 // ListDeliveries handles GET /api/v1/notification-deliveries: the latest
 // deliveries of the organization with their status (NTF-04).
 func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}

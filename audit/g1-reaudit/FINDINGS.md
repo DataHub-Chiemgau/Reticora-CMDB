@@ -32,9 +32,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 1 |
 | P1 | 5 |
-| P2 | 26 |
+| P2 | 27 |
 | P3 | 31 |
-| **Summe** | **63** |
+| **Summe** | **64** |
 
 ## Übersicht
 
@@ -103,6 +103,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-411](#f-411) | P3 | Kanten-Cleanup löscht Discovery-Kanten, die während des Laufs verifiziert oder bestätigt wurden: 70–99 % der mit 200 beantworteten Verifikationen gehen verloren | WP-159 (K7) | belegt | backend/internal/relationship/cleanup_race_integration_test.go | WP-682 |
 | [F-414](#f-414) | P3 | Ablehnung eines Kontingents nennt eingeschränkten Principals den Bestand der ganzen Organisation („N of L in use“) | WP-674 (K7-Nachträge) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-685 |
 | [F-415](#f-415) | P3 | Rack-Montage mit explizitem `height_u` 0 wird als 1 HE gespeichert (201/200), leeres `face` als `front` | WP-175 (K7) | belegt | backend/internal/rack/layout_integration_test.go | WP-686 |
+| [F-418](#f-418) | P2 | Ein auf einen Client gebundener Inhaber von `notification:manage` verwaltet die Benachrichtigungskanäle der Organisation und liest alle Zustellungen; ein von ihm angelegter Webhook-Kanal erhält die Benachrichtigungen anderer Clients mit Name und E-Mail fremder Empfänger | Verifier r3-b4 (WP-138/139) auf `bf51da7` | belegt | backend/internal/server/notification_channel_scope_integration_test.go | WP-689 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1605,6 +1606,52 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   FAIL
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack	1.766s
   FAIL
+  ```
+
+<a id="f-418"></a>
+### F-418 (P2) – Ein auf einen Client gebundener Inhaber von `notification:manage` verwaltet die Benachrichtigungskanäle der Organisation und liest alle Zustellungen; ein von ihm angelegter Webhook-Kanal erhält die Benachrichtigungen anderer Clients mit Name und E-Mail fremder Empfänger
+
+- **Gefunden in:** Wiederholungsprüfung von WP-138/WP-139 (K7, Batch r3-b4, Kandidat K-1 des Auditors), vom Verifier mit eigener Probe `TestVR3B4K1ClientBoundNotificationManage` auf `bf51da7` reproduziert; `backend/internal/notify/handler.go` und die Routenzuordnung in `backend/internal/server/authz.go` sind dort für diese Routen identisch mit `e5c2d86` · **Betroffene Anforderungen:** NTF-03 [B] (Empfänger nur im Scope des Ereignisses), NTF-04 [B] (Kanal-Administration und Zustellstatus), TEN-06 [B], RBA-03 [B] (Rechte wirken nur im Scope der Zuweisung), API-05 · **Komponente:** backend/internal/notify/handler.go (`ListChannels`, `CreateChannel`, `GetChannel`, `UpdateChannel`, `DeleteChannel`, `ListDeliveries` prüfen über `org(w, r)` nur die Organisation), backend/internal/server/authz.go (`notification-channels` und `notification-deliveries` → `notification:manage` ohne Scope-Prüfung), backend/internal/notify/notifier.go (`Notify`, Fall `KindWebhook`: ein Webhook-Kanal erhält jede nicht persönliche Benachrichtigung der Organisation mit allen Empfängern); `notification-channels` fehlte in `rls.Channels`/`TestChannelMatrix` · **Quelle:** `k7/ver/r3-b4/k-reaudit-3/WP-139/verify-probe-k1-k2.log` und `verify-probe-k1-k2.go.txt` (Verifier), Overlay-Probe `k7/v-r3b4/vr3b4_probe_test.go` mit `k7/v-r3b4/probe.log`; kodierende Tests von WP-689 (`k7/f418-backup/red-server.log`, `red-notify.log`, `red-matrix.log`)
+- **Reproduktion:** Der org_admin legt die Custom-Rolle `{notification:manage, webhook:manage}` an (`POST /api/v1/roles`, 201) und weist sie mit `scope_type` `client` für Client 1 zu (`POST /api/v1/role-assignments`, 201). Der Principal wird wie beim Login aufgelöst (`permission.PGRepository.AccessGrants`, `identity.ResolveAccess`: Rechte `notification:manage`, `webhook:manage`, Clients nur Client 1). Als dieser Principal: `GET /api/v1/notification-channels` → 200 mit allen Kanälen der Organisation; `POST /api/v1/notification-channels {"provider":"webhook","config":{"url":"https://93.184.216.34/v-c1"}}` → 201; `PATCH /api/v1/notification-channels/{In-App-Kanal der Organisation} {"enabled":false}` → 200 (Kanal danach deaktiviert); `DELETE` desselben Kanals → 204; `GET /api/v1/notification-deliveries` → 200 mit den Empfängern von Client 2. Ein Ereignis `review.created` von Client 2 wird an den Webhook-Kanal des Client-1-Inhabers zugestellt mit `to=[{"user_id":…,"email":"scopetest-e7-v-c2rev@scopetest.invalid","name":"scopetest-e7-v-c2rev"}]` und `data.client_id` = Client 2. Kontrolle: ein Nutzer ohne `notification:manage` erhält 403.
+- **Soll:** Kanäle und Zustellungen gehören der ganzen Organisation, nicht einem Client: Ein Kanal erhält die Benachrichtigungen aller Clients, eine Zustellung nennt Empfänger aller Clients. Ein Recht wirkt nur im Scope seiner Zuweisung (RBA-03); Daten anderer Clients sind für einen client-gebundenen Principal unsichtbar (TEN-06), und Empfänger einer Benachrichtigung sind nur Berechtigte im Scope des Ereignisses (NTF-03). Daher verwaltet nur ein org-weiter Inhaber von `notification:manage` die Kanäle und liest die Zustellungen; ein an Client, Site oder Team gebundener Inhaber erhält auf allen sechs Routen 403, nichts wird angelegt, geändert oder gelöscht.
+- **Ist:** Die Routenautorisierung verlangt `notification:manage` in irgendeinem Scope; die Handler lesen und schreiben über `org(w, r)` alle Kanäle und Zustellungen der Organisation. Der Client-1-Inhaber liest, ändert und löscht die Kanäle der Organisation, legt Webhook-Kanäle an, die die Benachrichtigungen aller Clients samt Empfängern erhalten, und liest alle Zustellungen mit Name und E-Mail der Empfänger anderer Clients. Webhook-Abonnements (`POST /webhooks`) desselben Principals tragen dagegen seit WP-601 den Scope des Erzeugers.
+- **Nutzerwirkung:** Ein Kunden-Administrator, dem die Organisation die Benachrichtigungsverwaltung nur für seinen Client überträgt, leitet sich die Benachrichtigungen aller anderen Clients (Review-Items mit Namen der Objekte, Zuweisungen, Einladungen) samt Name und E-Mail der fremden Empfänger an eine eigene URL aus, liest den Zustellverlauf der ganzen Organisation und kann die Kanäle der Organisation abschalten oder löschen, sodass Benachrichtigungen anderer Clients ausbleiben. Cross-Client-Exposition personenbezogener Daten (TEN-09).
+- **Ursache (belegt):** WP-139/WP-398 haben die Kanal-Administration unter `notification:manage` gestellt (F-154) mit der Annahme „org_admin only“ (RBA-02); dass eine Custom-Rolle mit diesem Recht an einen Client gebunden werden kann (Zuweisung mit `scope_type` erlaubt, Grant-Obergrenze erfüllt), wurde nicht berücksichtigt. Die Kanaltabellen haben keine Client-Dimension, die Handler prüfen den Scope nicht, und die Kanalmatrix (`rls.Channels`) hatte keine Zeile für Kanäle und Zustellungen. Für `PATCH /org` wurde dasselbe Muster mit F-359 (WP-633) über `holdsOrgWide` behoben, aber nicht auf die Benachrichtigungskanäle übertragen.
+- **Empfehlung:** Option A (entschieden): Die sechs Routen prüfen im Handler vor jedem Lesen oder Schreiben, dass der Principal `notification:manage` für die ganze Organisation hält (Prüfung von F-359 als `identity.HoldsOrgWide` exportiert und in `tenantapi` und `notify` genutzt); sonst 403 problem+json ohne Wirkung, auch für eine unbekannte ID. Webhook-Kanäle bleiben dokumentierte org-weite Ziele, die nur org-weite Administratoren anlegen. `api/openapi.yaml` beschreibt die 403 (Antwort `NotificationAdminForbidden`) spec-first; `docs/security/review-g1.md` nennt die Regel; die Kanalmatrix erhält die Zeile `notification-channels` für jede Scope-Art.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestNotificationAdministrationRequiresOrgWideScope$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: Der Inhaber der Custom-Rolle `{notification:manage, webhook:manage}` mit Client-Scope (Client 1) und mit Site-Scope, wie beim Login aus der Datenbank aufgelöst, erhält auf `GET /notification-deliveries`, `GET /notification-channels`, `POST /notification-channels` (Webhook), `GET`, `PATCH` und `DELETE /notification-channels/{id}` jeweils 403, die Antwort nennt weder Kanal noch Empfänger von Client 2, die Zahl der Kanäle und der In-App-Kanal der Organisation bleiben unverändert, kein Webhook-Kanal entsteht; ein Viewer ohne `notification:manage` erhält 403; dieselbe Rolle org-weit zugewiesen erhält 200/200/201/200/200/204 und liest die Zustellung an den Empfänger von Client 2. Dazu `go test -count=1 -run '^TestChannelAdministrationNeedsOrgWideScope$' ./internal/notify/` (Client-, Site-, Team-Scope, `notification:manage` nur je Recht in Client 1, client-gebundener API-Key, ohne Principal: 403 auf allen sechs Routen) und `go test -count=1 -run '^TestChannelMatrix$' ./internal/tenant/rls/` (Zeile `notification-channels`: Client, Site, Team und Mehrfach 403 auf allen Routen ohne Wirkung; Org und zweiter Nutzer 2xx bzw. 404 für den Kanal der anderen Organisation) grün.
+- **Kodierender Test:** backend/internal/server/notification_channel_scope_integration_test.go (`TestNotificationAdministrationRequiresOrgWideScope`, Produktionsrouter mit PG-Repositories, Principal wie beim Login aus `AccessGrants`/`ResolveAccess`), dazu backend/internal/notify/handler_test.go (`TestChannelAdministrationNeedsOrgWideScope`) und die Zeile `notification-channels` von `TestChannelMatrix`; auf `e5c2d86` rot (ausgeführt auf der Basis `7cd63e0` mit den alten Produktionsdateien `notify/handler.go`, `identity/ceiling.go`, `tenantapi/handler.go` aus `HEAD`; `backend/internal/notify/` ist dort identisch mit `e5c2d86`; lange Zeilen gekürzt):
+
+  ```text
+  --- FAIL: TestNotificationAdministrationRequiresOrgWideScope (0.75s)
+      notification_channel_scope_integration_test.go:135: GET /api/v1/notification-deliveries as the client-1 holder (notification:manage in a scope) = 200, want 403 (only an org-wide holder administers channels and reads deliveries): {"data":[{"id":"700cf51a-…","channel_id":"65839e16-…","recipient":{"user_id":"c0decaa0-0000-4000-8000-000000001002","email":"wp689-…
+      notification_channel_scope_integration_test.go:139: GET /api/v1/notification-deliveries as the client-1 holder discloses channel or recipient: …
+      notification_channel_scope_integration_test.go:135: GET /api/v1/notification-channels as the client-1 holder (notification:manage in a scope) = 200, want 403 …: {"data":[{"id":"65839e16-…","name":"wp689-center","kind":"inapp",…
+      notification_channel_scope_integration_test.go:135: POST /api/v1/notification-channels as the client-1 holder (notification:manage in a scope) = 201, want 403 …: {"id":"fe346426-…","name":"wp689-hook","kind":"webhook","provider":"webhook","config":{"url":"https://93.184.216.34/********"},"enabled":true,…
+      notification_channel_scope_integration_test.go:142: POST /api/v1/notification-channels as the client-1 holder: 2 channels, before 1
+      notification_channel_scope_integration_test.go:135: GET /api/v1/notification-channels/65839e16-… as the client-1 holder (notification:manage in a scope) = 200, want 403 …
+      notification_channel_scope_integration_test.go:135: PATCH /api/v1/notification-channels/65839e16-… as the client-1 holder (notification:manage in a scope) = 200, want 403 …: {"id":"65839e16-…","name":"wp689-renamed","kind":"inapp","provider":"inapp","enabled":false,…
+      notification_channel_scope_integration_test.go:145: PATCH /api/v1/notification-channels/65839e16-… as the client-1 holder changed or deleted the in-app channel of the organization
+      notification_channel_scope_integration_test.go:135: DELETE /api/v1/notification-channels/65839e16-… as the client-1 holder (notification:manage in a scope) = 204, want 403 …
+      notification_channel_scope_integration_test.go:142: DELETE /api/v1/notification-channels/65839e16-… as the client-1 holder: 1 channels, before 2
+      notification_channel_scope_integration_test.go:135: GET /api/v1/notification-deliveries as the site-1 holder (notification:manage in a scope) = 200, want 403 …
+      notification_channel_scope_integration_test.go:135: GET /api/v1/notification-channels as the site-1 holder (notification:manage in a scope) = 200, want 403 …: {"data":[{"id":"fe346426-…","name":"wp689-hook","kind":"webhook",…
+      notification_channel_scope_integration_test.go:135: POST /api/v1/notification-channels as the site-1 holder (notification:manage in a scope) = 409, want 403 …: {"detail":"create notification channel: notification channel name is taken",…
+      notification_channel_scope_integration_test.go:135: PATCH /api/v1/notification-channels/65839e16-… as the site-1 holder (notification:manage in a scope) = 404, want 403 …
+      notification_channel_scope_integration_test.go:156: refused holders created 1 webhook channels
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	0.860s
+
+  --- FAIL: TestChannelAdministrationNeedsOrgWideScope (0.00s)
+      handler_test.go:583: client: POST /api/v1/notification-channels = 201, want 403: {"id":"00000000-0000-4000-8000-000000000002",…
+      handler_test.go:583: client: DELETE /api/v1/notification-channels/00000000-0000-4000-8000-000000000001 = 204, want 403:
+      handler_test.go:583: per permission: GET /api/v1/notification-channels = 200, want 403: {"data":[{"id":"00000000-0000-4000-8000-000000000002",…,"name":"hook","kind":"webhook",…
+      handler_test.go:583: per permission: GET /api/v1/notification-deliveries = 200, want 403: {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+      handler_test.go:583: client-bound key: GET /api/v1/notification-channels = 200, want 403: …
+      (ebenso site, team und ohne Principal)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify	0.124s
+
+  --- FAIL: TestChannelMatrix/read/notification-channels/client (ebenso site, team, multi; write/notification-channels/client, site, team, multi)
+      channel_matrix_integration_test.go:278: GET /api/v1/notification-channels as client: 200, want 403: {"data":[{"id":"fd6b0070-…","name":"chm-ntf-17","kind":"inapp",…
+      channel_matrix_integration_test.go:278: GET /api/v1/notification-deliveries?limit=200 as client: 200, want 403: …
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

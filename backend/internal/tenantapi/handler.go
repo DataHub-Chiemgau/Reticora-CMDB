@@ -121,7 +121,7 @@ func (h *Handler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !holdsOrgWide(r, identity.PermUserManage) {
+	if !identity.HoldsOrgWide(r.Context(), identity.PermUserManage) {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "only a holder of user:manage for the whole organization may change the organization")
 		return
 	}
@@ -140,14 +140,6 @@ func (h *Handler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, o)
-}
-
-// holdsOrgWide reports whether the request's principal holds perm for the
-// whole organization, not only for some clients, sites or teams (RBA-03).
-// Without a principal it is false (fail-closed).
-func holdsOrgWide(r *http.Request, perm identity.Permission) bool {
-	p, ok := identity.PrincipalFromContext(r.Context())
-	return ok && len(identity.GrantCeiling(&p, []identity.Grant{identity.OrgWideGrant([]identity.Permission{perm})})) == 0
 }
 
 func validateOrganization(req *UpdateOrganizationRequest) error {

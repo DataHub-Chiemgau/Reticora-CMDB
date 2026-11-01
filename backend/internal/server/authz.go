@@ -80,8 +80,10 @@ var readPermissionFor = map[string]identity.Permission{
 	"webhooks":         identity.PermWebhookRead,
 	// Notification channels hold provider credentials and their deliveries
 	// name recipients: reading needs notification:manage like writing
-	// (RBA-01, RBA-02: org_admin only; NTF-01). The own inbox below
-	// /notifications is self-service.
+	// (RBA-01, RBA-02: org_admin only; NTF-01). Channels and deliveries
+	// belong to the whole organization: the handler refuses a holder bound
+	// to a client, site or team with 403 (RBA-03, F-418). The own inbox
+	// below /notifications is self-service.
 	"notification-channels":   identity.PermNotificationManage,
 	"notification-deliveries": identity.PermNotificationManage,
 	"credentials":             identity.PermCredentialRead,

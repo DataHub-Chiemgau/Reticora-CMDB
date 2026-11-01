@@ -3568,13 +3568,13 @@ export interface paths {
     };
     /**
      * Notification channels of the organization
-     * @description Requires notification:manage (RBA-02: org_admin only). Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
+     * @description Requires notification:manage for the whole organization (RBA-02: org_admin only; RBA-03, F-418): channels belong to the organization, not to a client, and receive the notifications of every client. A holder bound to a client, a site or a team gets 403. Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
      */
     get: operations['listNotificationChannels'];
     put?: never;
     /**
      * Create a notification channel
-     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is created. A webhook channel is a target of the whole organization: it receives the notifications of every client with name and e-mail of their recipients, so only an org-wide administrator creates one. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
      */
     post: operations['createNotificationChannel'];
     delete?: never;
@@ -3594,21 +3594,21 @@ export interface paths {
     };
     /**
      * Get a notification channel
-     * @description Requires notification:manage; redacted like the list.
+     * @description Requires notification:manage for the whole organization (F-418; 403 for a holder bound to a client, a site or a team, also for an unknown id); redacted like the list.
      */
     get: operations['getNotificationChannel'];
     put?: never;
     post?: never;
     /**
      * Delete a notification channel
-     * @description Requires notification:manage.
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is deleted.
      */
     delete: operations['deleteNotificationChannel'];
     options?: never;
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is changed. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -3622,7 +3622,7 @@ export interface paths {
     };
     /**
      * Latest notification deliveries with their status
-     * @description Requires notification:manage (RBA-02: org_admin only). A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
+     * @description Requires notification:manage for the whole organization (RBA-02: org_admin only; RBA-03, F-418): the deliveries name recipients of every client, so a holder bound to a client, a site or a team gets 403. A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
      */
     get: operations['listNotificationDeliveries'];
     put?: never;
@@ -11472,6 +11472,15 @@ export interface components {
     };
     /** @description Forbidden */
     Forbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Forbidden: the principal does not hold notification:manage, or holds it only for some clients, sites or teams. Notification channels and their deliveries belong to the whole organization (a channel receives the notifications of every client, a delivery names recipients of every client), so only a holder of notification:manage for the whole organization administers them (RBA-03, TEN-06, F-418); nothing is created, changed or deleted. */
+    NotificationAdminForbidden: {
       headers: {
         [name: string]: unknown;
       };
@@ -20015,7 +20024,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
     };
   };
   createNotificationChannel: {
@@ -20042,7 +20051,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
@@ -20068,7 +20077,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -20091,7 +20100,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -20121,7 +20130,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -20161,7 +20170,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
     };
   };
   listVRFs: {

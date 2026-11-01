@@ -291,6 +291,10 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 			MaxAttempts: n.MaxAttempts, NextAttemptAt: now}
 		switch ch.Kind {
 		case KindWebhook:
+			// A webhook channel is a target of the whole organization: it
+			// receives the notifications of every client with their
+			// recipients, so only an org-wide holder of
+			// notification:manage creates or changes it (F-418).
 			if req.Personal {
 				continue
 			}

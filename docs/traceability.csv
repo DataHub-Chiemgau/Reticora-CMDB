@@ -1134,3 +1134,8 @@ ENT-03;[B];B;backend/internal/entitlement/entitlement_test.go;WP-685
 RCK-01;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
 RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
 API-03;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+NTF-03;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+NTF-04;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+TEN-06;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+NTF-04;[B];B;backend/internal/notify/handler_test.go;WP-689
+TEN-09;[Q];B;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-689
