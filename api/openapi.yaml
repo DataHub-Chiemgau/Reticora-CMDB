@@ -881,7 +881,9 @@ paths:
         '409':
           description: >-
             Another active CI holds the value of a unique attribute (MET-15);
-            `violations` names the attributes.
+            `violations` names the attributes. The check covers every CI of
+            the scope of the attribute, also those outside the client or site
+            scope of the caller, and never names the other CI.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -986,7 +988,8 @@ paths:
           description: >-
             Fields of the request changed since the If-Match version, or
             another active CI holds the value of a unique attribute (MET-15,
-            `violations` names the attributes)
+            `violations` names the attributes; also a CI outside the client
+            or site scope of the caller, which is never named)
           content:
             application/problem+json:
               schema:
@@ -13788,7 +13791,8 @@ components:
           description: >-
             The value is unique among the active CIs (MET-15), enforced by the
             server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do
-            not count.
+            not count. The server check covers the CIs outside the client or
+            site scope of the writer as well, also before the index exists.
         unique_scope:
           type: string
           enum: [org, client]

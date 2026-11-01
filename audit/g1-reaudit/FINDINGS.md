@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 28 |
-| P3 | 33 |
-| **Summe** | **67** |
+| P3 | 34 |
+| **Summe** | **68** |
 
 ## Übersicht
 
@@ -107,6 +107,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-427](#f-427) | P2 | Raumlayout behält und akzeptiert Schlüssel von CIs eines anderen Clients: client-beschränkte Nutzer lesen deren ID und Position, können den Raum über die UI nicht mehr positionieren (422), und ein direkter PATCH löscht die fremde Position | Verifier r3-b5 (WP-193) auf `7cd63e0` | belegt | backend/internal/tenantapi/room_layout_integration_test.go | WP-698 |
 | [F-419](#f-419) | P3 | Bulk-Operation entfernt doppelte IDs nur bei identischer Schreibweise: dieselbe UUID in anderer Groß-/Kleinschreibung wird zweimal geschrieben und zweimal gemeldet | Verifier r3-b4 (WP-181) auf `bf51da7` | belegt | backend/internal/ci/bulk_test.go | WP-690 |
 | [F-420](#f-420) | P3 | Redundanz-Postfilter für Principals mit Client-Scope: ein Versorger eines anderen Clients zählt nicht, das CI gilt als betroffen | Verifier r3-b4 (WP-179) auf `bf51da7` | belegt | backend/internal/topology/redundancy_depth_integration_test.go | WP-691 |
+| [F-421](#f-421) | P3 | Eindeutigkeit mit Scope `org` gilt für Writer mit Client-Scope nur, solange ein gültiger Unique-Index existiert | Verifier r3-b4 (WP-142) auf `bf51da7` | belegt | backend/internal/ci/unique_attr_integration_test.go | WP-692 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1768,6 +1769,32 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   --- FAIL: TestRedundancyHiddenSupplyForScopedPrincipal (0.68s)
   FAIL
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology	0.689s
+  FAIL
+  ```
+
+<a id="f-421"></a>
+### F-421 (P3) – Eindeutigkeit mit Scope `org` gilt für Writer mit Client-Scope nur, solange ein gültiger Unique-Index existiert
+
+- **Gefunden in:** K7-Wiederholungsprüfung r3-b4 (Verifier, Probe `TestVR3B4UniqueAcrossClients` auf `bf51da7`), Wiederholungsprüfung von WP-142; `PGRepository.UniqueConflicts` ist dort identisch mit `e5c2d86`; kodierender Test von WP-692 · **Betroffene Anforderungen:** MET-15 (WP-142 AK2: serverseitige Eindeutigkeit, 409 bei Duplikat), DB-04 (Unique-Index `idx_attr_<id>_u`), TEN-05 · **Komponente:** backend/internal/ci/pg_repository.go (`UniqueConflicts`, Zeile 2265 ff. auf `e5c2d86`: die Prüfung läuft mit `database.WithRequestTenant` unter dem Client- und Site-Scope des Aufrufers, `ci_isolation` verbirgt die CIs der anderen Clients), backend/internal/ci/service.go (`checkUnique`, aufgerufen in `Create` Zeile 307 und `Update` Zeile 348) · **Quelle:** `k7/ver/r3-b4/k-reaudit-3/WP-142/verify-probe-unique-scope.log` und `…/verify-probe-unique-scope.go.txt`; kodierender Test von WP-692 (`k7/ad-690/red-692.log`)
+- **Reproduktion:** Attribut `serial` des Typs, `unique`, `unique_scope` `org`; der Index ist noch nicht gebaut (Fenster zwischen Flag und DDL-Job, oder der Job scheiterte). Ein org-weiter Writer legt ein CI von Client 2 mit `serial` `SN-1` an. Ein auf Client 1 beschränkter Principal legt ein CI von Client 1 mit `SN-1` an → `err=nil`; zwei aktive CIs mit `SN-1`. Der Index-Job scheitert danach mit „CIs share a value of the unique attribute "serial": Duplicate keys exist.“, das Attribut bleibt ohne gültigen Index. Im kodierenden Test ebenso: eine Änderung (`PATCH`) eines CI von Client 1 auf den Wert eines CI von Client 2 → `err=nil`. Mit gültigem Index wird der Wert abgewiesen.
+- **Soll:** MET-15/WP-142 AK2: ein Wert eines eindeutigen Attributs mit Scope `org` darf in der Organisation nur ein aktives CI tragen (Scope `client`: je Client); der Server weist ein Duplikat ab (409, `violations` mit dem Attribut), unabhängig vom Scope des Schreibenden und unabhängig davon, ob der Index schon existiert. Die Ablehnung nennt das andere CI nicht (TEN-05).
+- **Ist:** Die serverseitige Prüfung sieht nur die CIs im Scope des Aufrufers. Für einen Client- oder Site-gebundenen Writer greift die Eindeutigkeit über Clients bzw. Standorte hinweg nur durch den Unique-Index; solange er fehlt, entstehen Duplikate, die anschließend den Indexbau verhindern.
+- **Nutzerwirkung:** Ein MSP-Techniker mit Client-Scope kann Seriennummern, Inventarnummern o. Ä. vergeben, die ein CI eines anderen Clients bereits trägt; das neue Eindeutigkeitsmerkmal lässt sich dann nicht aktivieren (Job scheitert), bis ein org-weiter Administrator die Duplikate findet und bereinigt. Bis dahin ist die Eindeutigkeit, auf die sich Abgleich und Import verlassen, für die ganze Organisation nicht durchgesetzt.
+- **Ursache (belegt):** WP-142 hat die Prüfung unter dem Request-Scope gebaut und den Index als Absicherung gegen parallele Schreibvorgänge vorgesehen; der Fall „Wert in einem für den Schreibenden unsichtbaren Client“ war nicht getestet (`TestUniqueAttributes` schreibt nur org-weit, mit gebautem Index). WP-674 hat dasselbe Muster für `max_cis` behoben, nicht für die Eindeutigkeit.
+- **Empfehlung:** `UniqueConflicts` für Aufrufer mit eingeschränktem Client- oder Site-Scope in einer eigenen Transaktion mit dem org-weiten Scope der Organisation ausführen (vorhandener Mechanismus `database.OrgWideScope` mit `database.WithTenant(database.WithoutTx(ctx), …)`, `app.org_id` bleibt); zurück kommen nur die Schlüssel der Attribute. Trägt `ctx` die Transaktion des Aufrufers, zusätzlich darin prüfen, damit ein früher in derselben Transaktion geschriebenes CI zählt. Die Antwort bleibt 409 mit `violations` des Attributs und dem festen Text ohne das andere CI. Keine Migration.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestUniqueAttributeOrgScopeForClientWriter$' ./internal/ci/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: `serial` (`org`) und `slot` (`client`) nur als Flag, ohne Index; CIs von Client 2 mit `SN-1` und `SN-4` (org-weit angelegt); der Client-1-Principal legt ein CI mit `SN-1` an und ändert ein eigenes CI auf `SN-4` → beide Male `UniqueError` mit genau dem Feld `serial`, der Fehlertext nennt weder Id noch Namen der CIs von Client 2; je Wert genau ein aktives CI; `slot` `S-1` von Client 2 ist in Client 1 frei; zwei CIs mit `SN-3` in einer Transaktion des Client-1-Principals → Konflikt; danach baut der Index-Job den Index ohne Fehler. `TestUniqueAttributes` unverändert grün.
+- **Kodierender Test:** backend/internal/ci/unique_attr_integration_test.go (`TestUniqueAttributeOrgScopeForClientWriter`, `ci.Service` mit PG-Repository als `reticora_app`); auf `e5c2d86` rot (ausgeführt auf der Basis `a347dd3` mit der alten Produktionsdatei `pg_repository.go` aus `HEAD`; `UniqueConflicts` ist dort identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestUniqueAttributeOrgScopeForClientWriter
+      unique_attr_integration_test.go:204: client-1 writer creates a CI with the serial of a CI of client 2: <nil>, want a conflict on serial
+      unique_attr_integration_test.go:213: client-1 writer changes its CI to the serial of a CI of client 2: <nil>, want a conflict on serial
+      unique_attr_integration_test.go:217: 2 active CIs hold serial SN-1, want only the CI of client 2
+      unique_attr_integration_test.go:217: 2 active CIs hold serial SN-4, want only the CI of client 2
+      unique_attr_integration_test.go:237: index job after the refused writes: CIs share a value of the unique attribute "serial": Duplicate keys exist.
+  --- FAIL: TestUniqueAttributeOrgScopeForClientWriter (0.60s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci	0.735s
   FAIL
   ```
 

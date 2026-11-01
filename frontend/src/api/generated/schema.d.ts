@@ -6785,7 +6785,7 @@ export interface components {
       multi_value: boolean;
       /** @description Indexed for search: a job builds the index concurrently (DB-04). A non-unique definition of an organization without a CI type uses the index of its key, shared by all organizations (`attribute.index.key` job, `idx_attr_key_<key>`, or `idx_attr_keyh_<hash>` for other keys; E-73); other definitions get `idx_attr_<id>` (`attribute.index` job). */
       searchable: boolean;
-      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. */
+      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. The server check covers the CIs outside the client or site scope of the writer as well, also before the index exists. */
       unique: boolean;
       /**
        * @description Unique per organization or per client (CIs without a client count as one client).
@@ -12411,7 +12411,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
-      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. */
+      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. The check covers every CI of the scope of the attribute, also those outside the client or site scope of the caller, and never names the other CI. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12535,7 +12535,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes) */
+      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes; also a CI outside the client or site scope of the caller, which is never named) */
       409: {
         headers: {
           [name: string]: unknown;

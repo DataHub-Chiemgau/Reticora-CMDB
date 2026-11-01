@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-691 | 38 | 32,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-692 | 39 | 33,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **340** | **433,5** | |
+| **Summe** | | **341** | **434,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>38 WPs · 32,5 PT"]
+    K7N["K7-Nachträge<br/>39 WPs · 33,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -459,6 +459,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-698](#wp-698--raumlayout-im-scope-des-aufrufers-nur-sichtbare-cis-des-raums-unsichtbare-einträge-bleiben-veraltete-blockieren-nicht) | `k7n-room-layout-client-scope` | Raumlayout im Scope des Aufrufers: nur sichtbare CIs des Raums, unsichtbare Einträge bleiben, veraltete blockieren nicht | K7N | 1,0 | F-427 | WP-526 |
 | [WP-690](#wp-690--bulk-operation-dieselbe-uuid-in-anderer-schreibweise-zählt-einmal-bericht-je-kanonischer-id) | `k7n-bulk-uuid-dedupe` | Bulk-Operation: dieselbe UUID in anderer Schreibweise zählt einmal, Bericht je kanonischer ID | K7N | 0,5 | F-419 | WP-181, WP-368, WP-517 |
 | [WP-691](#wp-691--redundanz-postfilter-versorger-außerhalb-des-client--oder-site-scopes-zählen-ohne-genannt-zu-werden) | `k7n-redundancy-hidden-supply` | Redundanz-Postfilter: Versorger außerhalb des Client- oder Site-Scopes zählen, ohne genannt zu werden | K7N | 1,0 | F-420 | WP-179, WP-513, WP-611, WP-345 |
+| [WP-692](#wp-692--eindeutige-attribute-die-prüfung-umfasst-die-cis-außerhalb-des-client--oder-site-scopes-des-schreibenden-ohne-sie-zu-nennen) | `k7n-unique-org-scope-client-writer` | Eindeutige Attribute: die Prüfung umfasst die CIs außerhalb des Client- oder Site-Scopes des Schreibenden, ohne sie zu nennen | K7N | 1,0 | F-421 | WP-142, WP-674 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20547,6 +20548,55 @@ IMP-07;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-
 **Entscheidungsbedarf:** keiner. Dass ein eingeschränkter Principal aus „nicht betroffen“ bzw. „geschützt durch Redundanz“ auf die Existenz eines Versorgers außerhalb seines Scopes schließen kann, folgt aus IMP-04 selbst und entspricht der Ansicht eines org-weiten Nutzers; Id, Name, Client und Kante des Versorgers bleiben verborgen (IMP-07, E-62).
 
 **Nicht Bestandteil:** Ein unsichtbarer Versorger zählt immer als funktionsfähig, wie einer jenseits der Analysetiefe (F-160): fällt er seinerseits nur über unsichtbare CIs aus, sieht der eingeschränkte Principal den Abhängigen weiterhin als nicht betroffen, während die org-weite Analyse ihn als betroffen zeigt. Eine Analyse über den org-weiten Graphen mit anschließender Filterung (Wege durch unsichtbare CIs) widerspräche IMP-07 und ist nicht vorgesehen. Das Speicher-Repository (Entwicklungsmodus) implementiert `HiddenEdgeReader` nicht.
+
+### WP-692 – Eindeutige Attribute: die Prüfung umfasst die CIs außerhalb des Client- oder Site-Scopes des Schreibenden, ohne sie zu nennen
+
+**Schlüssel:** `k7n-unique-org-scope-client-writer` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-142 (`b-met-ddl`), WP-674 (`k7n-max-cis-org-count`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-421](../../../audit/g1-reaudit/FINDINGS.md#f-421) | P3 | Eindeutigkeit mit Scope `org` gilt für Writer mit Client-Scope nur, solange ein gültiger Unique-Index existiert | schließt | Verifier r3-b4 (Wiederholungsprüfung von WP-142 auf `bf51da7`) |
+
+**Problem:** Attribut `serial` `unique`, `unique_scope` `org`, Index noch nicht gebaut (Fenster zwischen Flag und Job): ein org-weiter Writer legt ein CI von Client 2 mit `SN-1` an, ein Client-1-Principal ein CI von Client 1 mit `SN-1` → `err=nil`, zwei aktive CIs mit `SN-1`; der Index-Job scheitert danach mit „Duplicate keys exist“. `PGRepository.UniqueConflicts` (`backend/internal/ci/pg_repository.go:2265` auf `e5c2d86`) läuft unter `database.WithRequestTenant`, also unter dem Client- und Site-Scope des Aufrufers, und sieht die CIs anderer Clients nicht. MET-15/WP-142 AK2 verlangt die serverseitige Eindeutigkeit unabhängig davon.
+
+**Akzeptanzkriterien:**
+
+- [ ] `UniqueConflicts` prüft für einen Aufrufer mit eingeschränktem Client- oder Site-Scope in einer eigenen Transaktion, die nur liest, mit dem org-weiten Scope der Organisation des Aufrufers (`database.OrgWideScope`, vorhandener Mechanismus wie in `webhook`, `notify`, `discovery`; `app.org_id` bleibt, keine Zeile einer anderen Organisation). Trägt `ctx` die Transaktion des Aufrufers, prüft es zusätzlich darin (ein früher in derselben Transaktion geschriebenes CI zählt); die Schlüssel beider Prüfungen werden vereinigt. Org-weite Aufrufer: unverändert eine Abfrage in ihrer Transaktion. Fremde Organisation: `ErrTenantMismatch`.
+- [ ] Zurück kommen nur die Schlüssel der Attribute. `POST /cis` und `PATCH /cis/{id}` (und jeder andere Weg über `ci.Service.Create`/`Update`) antworten bei einem Wert eines CI außerhalb des Scopes 409 `urn:reticora:problem:conflict` mit `violations` des Attributs und dem festen Text „another CI holds the value of the unique attribute(s): …“, ohne Id, Namen oder Client des anderen CI. Nichts wird gespeichert.
+- [ ] Scope `client` bleibt je Client: der Wert eines CI eines anderen Clients ist frei; ein CI desselben Clients an einem anderen, für einen Site-gebundenen Writer unsichtbaren Standort zählt.
+- [ ] `TestUniqueAttributeOrgScopeForClientWriter` (`internal/ci/unique_attr_integration_test.go`): Flags ohne Index; CIs von Client 2 mit `SN-1` und `SN-4`; der Client-1-Principal: Anlage mit `SN-1` und Änderung auf `SN-4` → `UniqueError` mit dem Feld `serial`, Fehlertext ohne die CIs von Client 2; je Wert ein aktives CI; `slot` (`client`) von Client 2 in Client 1 frei; zwei CIs mit `SN-3` in einer Transaktion → Konflikt; danach baut der Index-Job den Index. Auf `e5c2d86` rot (`err=nil` bei Anlage und Änderung, zwei CIs je Wert, Job scheitert mit „Duplicate keys exist“), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an der 409 von `POST /cis` und `PATCH /cis/{id}` und an `AttributeDefinition.unique`, dass die Prüfung auch CIs außerhalb des Scopes des Schreibenden umfasst und das andere CI nie nennt; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/citype/` grün (ohne `TestCIQueryBudget`, bekannte lokale Abweichung; `TestUniqueAttributes` unverändert); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/unique_attr_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration (000189 bleibt frei), keine Policy-Änderung. Statt einer Funktion mit erweitertem Scope wie `ci_active_count()` (WP-674, Migration 000186) nutzt die Prüfung das vorhandene Muster einer eigenen Transaktion mit `database.OrgWideScope`: sie muss nicht unter einer Sperre der Schreibtransaktion laufen (die Prüfung lief schon bisher vor dem Schreiben in eigener Transaktion; parallele Schreibvorgänge hält der Unique-Index ab), und die Transaktion des Aufrufers wird zusätzlich geprüft.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUniqueAttributeOrgScopeForClientWriter$|^TestUniqueAttributes$' ./internal/ci/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/citype/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-692
+```
+
+**Entscheidungsbedarf:** keiner. Dass ein eingeschränkter Principal aus der 409 auf die Existenz des Werts außerhalb seines Scopes schließen kann, folgt aus `unique_scope` `org` (MET-15) selbst; welches CI ihn trägt, bleibt verborgen.
+
+**Nicht Bestandteil:** Wege, die CIs am Service vorbei über das Repository schreiben (Discovery-Ingest, Review-Auflösung `new`, `adoptUnlicensed`) und das Wiederherstellen (`Restore`) prüfen die Eindeutigkeit weiterhin nur über den Unique-Index, auch für org-weite Aufrufer; im Fenster ohne Index können dort Duplikate entstehen (unverändert seit WP-142). Eine Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben.
 
 ## Zurückgestellte Befunde
 

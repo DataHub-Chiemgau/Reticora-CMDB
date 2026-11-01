@@ -2302,6 +2302,16 @@ func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error)
 // CI type and the global ones whose value another active CI of the
 // organization (scope org) or of the same client (scope client) holds.
 // Soft-deleted CIs do not count (MET-15).
+//
+// The check covers the CIs the caller does not see (F-421): for a caller
+// restricted in the client or site scope it runs in an own transaction,
+// which only reads, with the organization-wide scope of the caller's
+// organization (database.OrgWideScope, app.org_id stays), so the value of
+// a CI of another client or site is found also while the unique index
+// does not exist yet (DB-04). It returns only the keys of the attributes,
+// never the other CI. When ctx carries the caller's transaction, the
+// check also runs in it, so a CI written earlier in that transaction
+// counts as well.
 func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) ([]string, error) {
 	if len(attrs) == 0 {
 		return nil, nil
@@ -2311,7 +2321,7 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 		return nil, fmt.Errorf("encode attributes: %w", err)
 	}
 	var keys []string
-	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	check := func(ctx context.Context, tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx, `
 			SELECT d.key FROM attribute_definition d
 			WHERE d.is_unique AND (d.ci_type_id = $2::uuid OR d.ci_type_id IS NULL)
@@ -2328,10 +2338,33 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 		if qerr != nil {
 			return fmt.Errorf("check unique attributes: %w", qerr)
 		}
-		keys, qerr = pgx.CollectRows(rows, pgx.RowTo[string])
+		found, qerr := pgx.CollectRows(rows, pgx.RowTo[string])
+		for _, key := range found {
+			if !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
 		return qerr
-	})
-	return keys, err
+	}
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok || (scope.Clients.IsAll() && scope.Sites.IsAll()) {
+		err = database.WithRequestTenant(ctx, r.pool, orgID, check)
+		return keys, err
+	}
+	if !strings.EqualFold(scope.OrgID, orgID) {
+		return nil, fmt.Errorf("%w: %q", database.ErrTenantMismatch, orgID)
+	}
+	if database.InTx(ctx) {
+		if terr := database.WithRequestTenant(ctx, r.pool, orgID, check); terr != nil {
+			return nil, terr
+		}
+	}
+	wide := database.OrgWideScope(scope.OrgID, scope.UserID)
+	if werr := database.WithTenant(database.WithoutTx(ctx), r.pool, &wide, check); werr != nil {
+		return nil, werr
+	}
+	slices.Sort(keys)
+	return keys, nil
 }
 
 // ChangeType implements TypeChanger (CI-11): the CI keeps its row, so its
