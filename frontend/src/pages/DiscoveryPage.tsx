@@ -89,7 +89,7 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
           <p className="text-sm text-gray-600 dark:text-gray-300">
             {t(
               'discovery.enroll.intro',
-              'Schließen Sie einen Collector an: erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Die Infrastruktur erscheint automatisch.',
+              'Schließen Sie einen Collector an: Erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Der Collector muss den Server über Port 4222/TCP erreichen. Die Subnetze, die er meldet, erscheinen hier als Vorschläge; erst bestätigte Subnetze scannt er.',
             )}
           </p>
           <label className="block text-sm">
@@ -802,7 +802,70 @@ function ScopeList({ collector, canManage }: { collector: Collector; canManage: 
   );
 }
 
-function CollectorCard({ collector, canManage }: { collector: Collector; canManage: boolean }) {
+/** The anchor of the card of the scope suggestions, the target of CollectorHints. */
+const SUGGESTIONS_ANCHOR = 'scope-suggestions';
+
+const hintClass =
+  'rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100';
+
+/**
+ * CollectorHints says why a collector delivers nothing: it has no edge
+ * connection (offline, or never a heartbeat: data reach the server only over
+ * the mTLS endpoint on 4222/TCP, COL-08), or it has no enabled scope, so it
+ * scans nothing until a suggested subnet is confirmed or a scope is added
+ * (INS-06, DIS-09). A disabled collector is switched off on purpose and gets
+ * no hint. The link leads to the suggestions of the collector; confirming
+ * them needs review:resolve besides discovery:manage, like the Accept button.
+ */
+function CollectorHints({ collector, canResolve }: { collector: Collector; canResolve: boolean }) {
+  const { t } = useTranslation();
+  const scopes = useDiscoveryScopes(collector.id);
+  const suggestions = useScopeSuggestions();
+  if (collector.status === 'disabled') return null;
+  const noEdge = collector.status === 'offline' || !collector.last_heartbeat_at;
+  // Only once the scopes have loaded: a failed or pending read is no hint.
+  const noScope = scopes.data !== undefined && !scopes.data.data.some((s) => s.enabled);
+  const suggested = (suggestions.data?.data ?? []).filter(
+    (item) => item.payload.collector_id === collector.id,
+  ).length;
+  if (!noEdge && !noScope) return null;
+  return (
+    <div className="mb-4 space-y-2">
+      {noEdge ? (
+        <div role="note" className={hintClass}>
+          <p className="font-medium">{t('discovery.collectorHints.noEdge')}</p>
+          <p className="mt-1">{t('discovery.collectorHints.noEdgeCauses')}</p>
+        </div>
+      ) : null}
+      {noScope ? (
+        <div role="note" className={hintClass}>
+          <p className="font-medium">{t('discovery.collectorHints.noScope')}</p>
+          {suggested > 0 ? (
+            <a
+              href={`#${SUGGESTIONS_ANCHOR}`}
+              className="mt-1 inline-block font-medium underline underline-offset-2"
+            >
+              {t('discovery.collectorHints.showSuggestions', { count: suggested })}
+            </a>
+          ) : null}
+          {!canResolve ? (
+            <p className="mt-1">{t('discovery.collectorHints.noScopeRights')}</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CollectorCard({
+  collector,
+  canManage,
+  canResolve,
+}: {
+  collector: Collector;
+  canManage: boolean;
+  canResolve: boolean;
+}) {
   const { t } = useTranslation();
 
   return (
@@ -814,6 +877,7 @@ function CollectorCard({ collector, canManage }: { collector: Collector; canMana
         </Badge>
       }
     >
+      <CollectorHints collector={collector} canResolve={canResolve} />
       <dl className="space-y-2 text-sm">
         <div className="flex justify-between gap-4">
           <dt className="text-gray-500 dark:text-gray-400">{t('discovery.version')}</dt>
@@ -874,7 +938,10 @@ export function DiscoveryPage() {
 
       <EnrollWizard open={enrollOpen} onClose={() => setEnrollOpen(false)} />
 
-      <ScopeSuggestions canResolve={canResolve} />
+      {/* Without suggestions the anchor is empty and takes no space. */}
+      <div id={SUGGESTIONS_ANCHOR} className="scroll-mt-6 empty:hidden">
+        <ScopeSuggestions canResolve={canResolve} />
+      </div>
 
       {isLoading ? (
         <p className="text-sm text-gray-600 dark:text-gray-300">{t('app.loading')}</p>
@@ -884,7 +951,12 @@ export function DiscoveryPage() {
       {data?.data.length ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {data.data.map((collector) => (
-            <CollectorCard key={collector.id} collector={collector} canManage={canManage} />
+            <CollectorCard
+              key={collector.id}
+              collector={collector}
+              canManage={canManage}
+              canResolve={canResolve}
+            />
           ))}
         </div>
       ) : null}

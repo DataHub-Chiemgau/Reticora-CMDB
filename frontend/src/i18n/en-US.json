@@ -361,7 +361,7 @@
     "enroll": {
       "button": "Connect collector",
       "title": "Connect collector",
-      "intro": "Connect a collector: generate a single-use enrollment code and enter it in the collector. Your infrastructure appears automatically.",
+      "intro": "Connect a collector: generate a single-use enrollment code and enter it in the collector. The collector must reach the server on port 4222/TCP. The subnets it reports appear here as suggestions; it scans only the subnets you confirm.",
       "label": "Label (e.g. site)",
       "generate": "Generate code",
       "once": "This code is shown only once and expires. Run in the customer network:",
@@ -374,6 +374,13 @@
       "offline": "Offline",
       "disabled": "Disabled",
       "paused": "Paused (license)"
+    },
+    "collectorHints": {
+      "noEdge": "No edge connection: the collector delivers data only over port 4222/TCP (mTLS), and this connection is not up.",
+      "noEdgeCauses": "Common causes: port 4222/TCP blocked by a firewall, collector not enrolled or not restarted after enrollment, server certificate does not match the host name. See docs/troubleshooting-installation.md, \"Collector liefert nichts\".",
+      "noScope": "No discovery scope – the collector scans nothing. Confirm suggested subnets or add a scope.",
+      "showSuggestions": "Show suggested subnets ({{count}})",
+      "noScopeRights": "Adding a scope needs the discovery:manage permission, confirming suggestions also review:resolve."
     },
     "scopes": {
       "title": "Discovery scopes",

@@ -6,7 +6,8 @@ import { renderWithProviders } from '../test/utils';
 /*
  * The Discovery page: scopes with all fields of DIS-09 (F-107), deleting
  * only after a confirmation, feedback for failed scope actions and the
- * controls only with discovery:manage (F-267, WP-496).
+ * controls only with discovery:manage (F-267, WP-496), and the hints why a
+ * collector delivers nothing: no edge connection, no enabled scope.
  */
 
 function paginated<T>(data: T[]) {
@@ -35,6 +36,7 @@ const collector = {
   client_id: 'client-1',
   name: 'collector-a',
   status: 'active',
+  last_heartbeat_at: '2026-10-13T08:00:00Z',
   config: {},
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
@@ -90,6 +92,7 @@ const credentials = [
 
 interface Options {
   permissions?: string[];
+  collectors?: unknown[];
   scopes?: unknown[];
   suggestions?: unknown[];
   /** write answers every POST, PATCH and DELETE; default 200 with the scope. */
@@ -105,6 +108,7 @@ interface Call {
 /** stubDiscovery answers the reads of the page and hands every write to `write`. */
 function stubDiscovery({
   permissions = manage,
+  collectors = [collector],
   scopes = [scope],
   suggestions = [],
   write = () => json(scope),
@@ -118,7 +122,7 @@ function stubDiscovery({
     if (url.includes('/me/permissions')) return json({ permissions });
     if (url.includes('/review-items')) return json(paginated(suggestions));
     if (url.includes('/discovery-scopes?collector_id=c1')) return json(paginated(scopes));
-    if (url.includes('/collectors')) return json(paginated([collector]));
+    if (url.includes('/collectors')) return json(paginated(collectors));
     if (url.includes('/sites')) return json(paginated(sites));
     if (url.includes('/vrfs')) return json(paginated(vrfs));
     if (url.includes('/credentials')) return json(paginated(credentials));
@@ -389,5 +393,116 @@ describe('DiscoveryPage scopes (DIS-09)', () => {
       const resolve = writes(calls, 'POST').find((c) => c.url.includes('/review-items/r1/resolve'));
       expect(resolve?.body).toEqual({ action: 'accept' });
     });
+  });
+});
+
+const suggestion = {
+  id: 'r1',
+  kind: 'scope_suggested',
+  status: 'open',
+  payload: { collector_id: 'c1', collector_name: 'collector-a', cidr: '192.168.50.0/24' },
+  created_at: '2026-10-13T08:00:00Z',
+};
+
+describe('DiscoveryPage collector hints (COL-08, INS-06)', () => {
+  it('warns about a missing edge connection when offline or without a heartbeat', async () => {
+    for (const state of [
+      { status: 'offline', last_heartbeat_at: '2026-10-13T08:00:00Z' },
+      { status: 'pending', last_heartbeat_at: undefined },
+      { status: 'active', last_heartbeat_at: undefined },
+    ]) {
+      stubDiscovery({ collectors: [{ ...collector, ...state }] });
+      const { unmount } = renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+      const note = await screen.findByText(/Keine Edge-Verbindung/);
+      const hint = note.closest('[role="note"]');
+      expect(hint, state.status).not.toBeNull();
+      expect(hint).toHaveTextContent('4222/TCP (mTLS)');
+      expect(hint).toHaveTextContent(/Firewall/);
+      expect(hint).toHaveTextContent(/nach dem Enrollment nicht neu gestartet/);
+      expect(hint).toHaveTextContent(/Server-Zertifikat passt nicht zum Hostnamen/);
+      expect(hint).toHaveTextContent('Collector liefert nichts');
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('shows no hint for a connected collector with an enabled scope, nor for a disabled one', async () => {
+    stubDiscovery();
+    const { unmount } = renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+    expect(await screen.findByText('10.0.0.0/24')).toBeInTheDocument();
+    expect(screen.queryAllByRole('note')).toHaveLength(0);
+    // Without suggestions their anchor stays empty (hidden, no gap).
+    expect(document.getElementById('scope-suggestions')).toBeEmptyDOMElement();
+    unmount();
+    vi.unstubAllGlobals();
+
+    stubDiscovery({
+      collectors: [{ ...collector, status: 'disabled', last_heartbeat_at: undefined }],
+      scopes: [],
+    });
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+    expect(await screen.findByText('Deaktiviert')).toBeInTheDocument();
+    expect(await screen.findByText(/Noch keine Scopes/)).toBeInTheDocument();
+    expect(screen.queryAllByRole('note')).toHaveLength(0);
+  });
+
+  it('says the collector scans nothing without an enabled scope and links to its suggestions', async () => {
+    stubDiscovery({
+      scopes: [{ ...scope, enabled: false }],
+      suggestions: [
+        suggestion,
+        { ...suggestion, id: 'r2', payload: { ...suggestion.payload, cidr: '192.168.51.0/24' } },
+        { ...suggestion, id: 'r3', payload: { collector_id: 'c2', cidr: '10.9.0.0/24' } },
+      ],
+    });
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+    const text = await screen.findByText(
+      'Kein Discovery-Scope – der Collector scannt nichts. Vorgeschlagene Subnetze bestätigen oder Scope anlegen.',
+    );
+    const hint = text.closest('[role="note"]') as HTMLElement;
+    expect(hint).not.toBeNull();
+    // Only the suggestions of this collector count.
+    const link = within(hint).getByRole('link', { name: 'Vorgeschlagene Subnetze anzeigen (2)' });
+    expect(link).toHaveAttribute('href', '#scope-suggestions');
+    const target = document.getElementById('scope-suggestions');
+    expect(target).not.toBeNull();
+    expect(within(target!).getByText('Vorgeschlagene Scopes')).toBeInTheDocument();
+    expect(within(target!).getAllByRole('button', { name: 'Als Scope übernehmen' })).toHaveLength(
+      3,
+    );
+    // The user may confirm and add scopes: no note on the rights.
+    expect(hint).not.toHaveTextContent('review:resolve');
+  });
+
+  it('names the rights needed to confirm when the user lacks them', async () => {
+    stubDiscovery({
+      permissions: ['discovery:read', 'discovery:manage', 'collector:manage'],
+      scopes: [],
+      suggestions: [suggestion],
+    });
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+    const text = await screen.findByText(/Kein Discovery-Scope/);
+    const hint = text.closest('[role="note"]') as HTMLElement;
+    expect(
+      await within(hint).findByRole('link', { name: 'Vorgeschlagene Subnetze anzeigen (1)' }),
+    ).toBeInTheDocument();
+    expect(hint).toHaveTextContent(
+      'Scope anlegen erfordert die Berechtigung discovery:manage, Vorschläge bestätigen zusätzlich review:resolve.',
+    );
+    expect(screen.queryByRole('button', { name: 'Als Scope übernehmen' })).toBeNull();
+  });
+
+  it('tells in the enroll dialog that 4222/TCP must be reachable and subnets must be confirmed', async () => {
+    stubDiscovery();
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Collector verbinden' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('Port 4222/TCP');
+    expect(dialog).toHaveTextContent(/erscheinen hier als Vorschläge/);
+    expect(dialog).not.toHaveTextContent(/erscheint automatisch/);
   });
 });

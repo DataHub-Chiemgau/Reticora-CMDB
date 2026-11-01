@@ -361,7 +361,7 @@
     "enroll": {
       "button": "Collector verbinden",
       "title": "Collector verbinden",
-      "intro": "Schließen Sie einen Collector an: erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Die Infrastruktur erscheint automatisch.",
+      "intro": "Schließen Sie einen Collector an: Erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Der Collector muss den Server über Port 4222/TCP erreichen. Die Subnetze, die er meldet, erscheinen hier als Vorschläge; erst bestätigte Subnetze scannt er.",
       "label": "Bezeichnung (z. B. Standort)",
       "generate": "Code erzeugen",
       "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
@@ -374,6 +374,13 @@
       "offline": "Offline",
       "disabled": "Deaktiviert",
       "paused": "Pausiert (Lizenz)"
+    },
+    "collectorHints": {
+      "noEdge": "Keine Edge-Verbindung: Der Collector liefert Daten nur über Port 4222/TCP (mTLS), diese Verbindung steht nicht.",
+      "noEdgeCauses": "Häufige Ursachen: Port 4222/TCP in einer Firewall gesperrt, Collector nicht enrolled oder nach dem Enrollment nicht neu gestartet, Server-Zertifikat passt nicht zum Hostnamen. Siehe docs/troubleshooting-installation.md, „Collector liefert nichts“.",
+      "noScope": "Kein Discovery-Scope – der Collector scannt nichts. Vorgeschlagene Subnetze bestätigen oder Scope anlegen.",
+      "showSuggestions": "Vorgeschlagene Subnetze anzeigen ({{count}})",
+      "noScopeRights": "Scope anlegen erfordert die Berechtigung discovery:manage, Vorschläge bestätigen zusätzlich review:resolve."
     },
     "scopes": {
       "title": "Discovery-Scopes",
