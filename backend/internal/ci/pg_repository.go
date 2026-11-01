@@ -2407,7 +2407,9 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 		return r.recordEvent(ctx, tx, events.CIChanged, tc.result.CI, []string{"ci_type_id"})
 	})
 	if err != nil {
-		return nil, err
+		// A concurrent write the check could not see: the index names the
+		// attribute.
+		return nil, r.uniqueField(ctx, orgID, err)
 	}
 	return result, nil
 }
@@ -2462,6 +2464,14 @@ func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID
 	// raises generic_device to the type it resolved, as it creates CIs.
 	if mode == TypeChangeManual && !active {
 		return nil, ciTypeViolation(ciTypeDeactivated)
+	}
+	// The values the CI carries fall under the unique attributes of the
+	// target type (MET-15, F-431): the check of ci.Service (CheckUnique) in
+	// the writing transaction, before the row changes, so it holds also
+	// while the unique index does not exist yet. A value another active CI
+	// holds is a *UniqueError; the CI keeps its type.
+	if uerr := CheckUnique(database.ContextWithTx(ctx, tx), r, orgID, typeID, before.ClientID, ciID, before.Attributes); uerr != nil {
+		return nil, uerr
 	}
 	if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
 		WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {

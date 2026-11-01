@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 29 |
-| P3 | 40 |
-| **Summe** | **75** |
+| P3 | 41 |
+| **Summe** | **76** |
 
 ## Übersicht
 
@@ -115,6 +115,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-422](#f-422) | P3 | `override_conflict` accept auf einem inzwischen soft-gelöschten CI entfernt den Override und schreibt das gelöschte CI; Override-Routen und Feldliste antworten für gelöschte CIs 200 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-693 |
 | [F-423](#f-423) | P3 | `POST /collectors` und `PATCH /collectors/{id}`: Feldfehler aus Validierung und Repository enden als 500 statt 422 mit Feld | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/collector_field_errors_integration_test.go | WP-694 |
 | [F-424](#f-424) | P3 | `unknown_relationship` accept legt die Kante trotz Typliste von `connected_to` und zu soft-gelöschten CIs an; `POST /relationships` auf ein gelöschtes CI antwortet 201 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-695 |
+| [F-431](#f-431) | P3 | Eindeutige Attribute: Der Typwechsel `POST /cis/{id}/type` prüft die eindeutigen Attribute des Zieltyps nicht (Duplikat ohne Index, mit Index 409 ohne den Attributschlüssel) | Korrektur WP-700 (K7) auf `6a499ac` | belegt | backend/internal/server/unique_attr_type_change_integration_test.go | WP-702 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -2071,6 +2072,30 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       deleted_endpoint_integration_test.go:93: edges of the live CI: 3, want the control edge only
   --- FAIL: TestCreateRefusesDeletedEndpoints (0.71s)
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship	0.930s
+  ```
+
+<a id="f-431"></a>
+### F-431 (P3) – Eindeutige Attribute: Der Typwechsel `POST /cis/{id}/type` prüft die eindeutigen Attribute des Zieltyps nicht (Duplikat ohne Index, mit Index 409 ohne den Attributschlüssel)
+
+- **Gefunden in:** Korrektur WP-700 (K7) auf `6a499ac` (Hinweis des WP-700-Agenten, „Nicht Bestandteil“ von WP-700, dort nicht reproduziert), reproduziert auf der Basis `903527f`; der Weg enthält auf `e5c2d86` ebenfalls keine Prüfung · **Betroffene Anforderungen:** MET-15 (WP-142 AK2: serverseitige Eindeutigkeit, 409 bei Duplikat), DB-04 (Unique-Index `idx_attr_<id>_u`), CI-11 (Typwechsel) · **Komponente:** backend/internal/ci/pg_repository.go (`changeTypeRow`, Zeile 2340 ff. auf `e5c2d86`: `UPDATE ci SET ci_type_id = …` Zeile 2380 ohne Prüfung, nur der Index meldet einen Konflikt; `ChangeType` Zeile 2300 ff. gibt den Index-Fehler ohne `uniqueField` weiter), backend/internal/ci/handler.go (`ChangeType`, Zeile 278 ff.), api/openapi.yaml (`changeCIType` ohne 409) · **Quelle:** kodierender Test von WP-702 (`k7/ad-701/red-wp702.log`)
+- **Reproduktion:** Quelltyp `wp702-src` mit `asset_tag` und `inventory_no` ohne Flag, Zieltyp `wp702-dst` mit beiden Attributen `unique`, `unique_scope` `org`; der Index von `asset_tag` ist noch nicht gebaut (Fenster zwischen Flag und Index-Job, oder der Job scheiterte), der von `inventory_no` gebaut. Über `server.NewRouter` mit OpenAPI-Validierung als org-weiter Principal: CI `wp702-holder` des Zieltyps mit `asset_tag` `T-1`, CI `wp702-mover` des Quelltyps mit `asset_tag` `T-1`, `POST /cis/{mover}/type` mit dem Zieltyp → 200, zwei aktive CIs des Zieltyps mit `T-1`; der Index-Job für `asset_tag` scheitert danach mit „CIs share a value of the unique attribute "asset_tag": Duplicate keys exist.“. Mit gebautem Index (`inventory_no` `I-1` bei Halter und Wechsler) → 409 `urn:reticora:problem:conflict`, aber `violations` nennt `attributes` statt `inventory_no`, und die Spezifikation von `changeCIType` kennt keine 409.
+- **Soll:** MET-15/WP-142 AK2: Ein Wert eines eindeutigen Attributs darf im Scope des Attributs nur ein aktives CI tragen, serverseitig durchgesetzt, unabhängig davon, ob der Index schon existiert. Jeder Weg, der die Werte eines CI unter ein eindeutiges Attribut bringt, antwortet wie `POST /cis` mit 409 `urn:reticora:problem:conflict` und `violations` des Attributs, ohne das andere CI zu nennen (so seit WP-700 für Wiederherstellen, Unmerge und Review-Auflösung). Der Typwechsel bringt die vorhandenen Werte unter die Attribute des Zieltyps; das CI behält bei einem Konflikt seinen Typ.
+- **Ist:** `changeTypeRow` ändert `ci_type_id` ohne `ci.CheckUnique`. Ohne Index entsteht ein Duplikat (200), der Index lässt sich danach nicht mehr bauen. Mit Index meldet der Index den Konflikt als `*ci.UniqueError` mit dem Feld `attributes`, weil `ChangeType` den Indexnamen nicht über `uniqueField` auf den Schlüssel abbildet; die Antwort 409 ist nicht spezifiziert.
+- **Nutzerwirkung:** Wer ein CI manuell umklassifiziert, kann bis zum Indexbau (oder dauerhaft nach einem gescheiterten Job) eine doppelte Inventar- oder Seriennummer im Zieltyp erzeugen; der Index-Job scheitert danach, bis jemand die Duplikate findet. Mit Index erfährt der Nutzer nicht, welches Attribut kollidiert. Eine 500 tritt nicht auf (die Annahme des Hinweises „500 statt 409“ ist widerlegt: der Handler bildet `*ci.UniqueError` seit WP-700 auf 409 ab).
+- **Ursache (belegt):** WP-142 hat die Prüfung in `ci.Service.Create`/`Update` gebaut, WP-700 die Wege Wiederherstellen, Unmerge und Review-Auflösung nachgezogen; der Typwechsel (CI-11, `ci.Service.ChangeType` → `PGRepository.ChangeType`) läuft am Service vorbei und wurde nicht nachgezogen. WP-700 hat ihn unter „Nicht Bestandteil“ vermerkt.
+- **Empfehlung:** In `changeTypeRow` vor dem `UPDATE` `ci.CheckUnique(…, typeID, before.ClientID, ciID, before.Attributes)` in der schreibenden Transaktion aufrufen (keine zweite Implementierung; derselbe Weg dient dem Typwechsel der Discovery); in `ChangeType` den Index-Fehler über `uniqueField` auf den Schlüssel abbilden. `api/openapi.yaml` (spec-first): 409 von `changeCIType` und die Beschreibung von `AttributeDefinition.unique`. Keine Migration.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestUniqueAttributeTypeChange$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: ohne Index antwortet `POST /cis/{id}/type` 409 `urn:reticora:problem:conflict` mit genau der Verletzung von `asset_tag`, das CI behält seinen Typ, ein CI des Zieltyps hält `T-1`, danach baut der Index-Job den Index; mit gebautem Index 409 mit der Verletzung von `inventory_no`; ein CI mit freien Werten wechselt den Typ (200). `TestUniqueAttributeEveryWritePath`, `TestUniqueAttributes` und die Typwechsel-Tests von `internal/ci` unverändert grün.
+- **Kodierender Test:** backend/internal/server/unique_attr_type_change_integration_test.go (`TestUniqueAttributeTypeChange`, kompletter `server.NewRouter` mit OpenAPI-Validierung als `reticora_app`); auf `e5c2d86` rot (ausgeführt auf der Basis `903527f` mit den alten Produktionsdateien aus `HEAD`; der Weg enthält dort wie auf `e5c2d86` keine Prüfung, Antwortkörper gekürzt):
+
+  ```text
+  === RUN   TestUniqueAttributeTypeChange
+      unique_attr_type_change_integration_test.go:128: POST /cis/{id}/type: 200 {"ci":{"id":"fafb08ae-…","ci_type_id":"e0c1db5c-…","name":"wp702-mover","status":"active","attributes":{"asset_tag":"T-1"},… want 409 urn:reticora:problem:conflict with the violation of asset_tag
+      unique_attr_type_change_integration_test.go:130: type change: 2 active CIs of the target type hold asset_tag T-1, want 1
+      unique_attr_type_change_integration_test.go:132: type change refused: the CI changed its type to e0c1db5c-bd93-462c-8eeb-2aaa1cf77288, want it to keep wp702-src
+      unique_attr_type_change_integration_test.go:134: index job for asset_tag after the refused type change: CIs share a value of the unique attribute "asset_tag": Duplicate keys exist.
+      unique_attr_type_change_integration_test.go:140: POST /cis/{id}/type with the index: 409 {"detail":"another CI holds the value of the unique attribute(s): attributes","status":409,"title":"Conflict",…,"type":"urn:reticora:problem:conflict","violations":[{"field":"attributes",… want 409 urn:reticora:problem:conflict with the violation of inventory_no
+  --- FAIL: TestUniqueAttributeTypeChange (0.81s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	0.939s
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

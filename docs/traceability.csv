@@ -1173,3 +1173,5 @@ TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;
 REL-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
 REL-01;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
 CI-05;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
+MET-15;B/G1;B;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
+CI-11;[B];C;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702

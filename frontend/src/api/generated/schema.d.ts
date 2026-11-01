@@ -488,7 +488,7 @@ export interface paths {
     put?: never;
     /**
      * Change the type of a CI (CI-11)
-     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_changed, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type.
+     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_changed, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type. The values the CI carries must be free under the unique attributes of the target type (MET-15).
      */
     post: operations['changeCIType'];
     delete?: never;
@@ -6785,7 +6785,7 @@ export interface components {
       multi_value: boolean;
       /** @description Indexed for search: a job builds the index concurrently (DB-04). A non-unique definition of an organization without a CI type uses the index of its key, shared by all organizations (`attribute.index.key` job, `idx_attr_key_<key>`, or `idx_attr_keyh_<hash>` for other keys; E-73); other definitions get `idx_attr_<id>` (`attribute.index` job). */
       searchable: boolean;
-      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. The server check covers the CIs outside the client or site scope of the writer as well, also before the index exists, and every write that sets or brings back the values of a CI: POST and PATCH /cis, the restore (POST /cis/{id}/restore), the unmerge (POST /cis/{id}/unmerge) and the resolutions of review items that create or reactivate a CI (409 with `violations`). */
+      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. The server check covers the CIs outside the client or site scope of the writer as well, also before the index exists, and every write that sets or brings back the values of a CI: POST and PATCH /cis, the restore (POST /cis/{id}/restore), the unmerge (POST /cis/{id}/unmerge), the type change (POST /cis/{id}/type) and the resolutions of review items that create or reactivate a CI (409 with `violations`). */
       unique: boolean;
       /**
        * @description Unique per organization or per client (CIs without a client count as one client).
@@ -12663,6 +12663,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description Another active CI holds a value the CI carries of a unique attribute of the target type (MET-15): urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists. The CI keeps its type. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
       /** @description The target type is not allowed, `violations` names ci_type_id: no UUID ("not the ID (UUID) of a CI type"), no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or deactivated ("the CI type is deactivated"). */
       422: {
         headers: {

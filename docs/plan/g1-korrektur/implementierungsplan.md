@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-695 | 46 | 39,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699); F-429 Eindeutigkeitsprüfung auf allen Schreibwegen (WP-700); F-422 Override und Konfliktauflösung auf gelöschten CIs (WP-693); F-423 Feldfehler bei Collectors (WP-694); F-424 unknown_relationship accept mit Typliste und gelöschten CIs (WP-695). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-702 | 47 | 39,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699); F-429 Eindeutigkeitsprüfung auf allen Schreibwegen (WP-700); F-422 Override und Konfliktauflösung auf gelöschten CIs (WP-693); F-423 Feldfehler bei Collectors (WP-694); F-424 unknown_relationship accept mit Typliste und gelöschten CIs (WP-695); F-431 Eindeutigkeit beim Typwechsel (WP-702). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **348** | **440,0** | |
+| **Summe** | | **349** | **440,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>46 WPs · 39,0 PT"]
+    K7N["K7-Nachträge<br/>47 WPs · 39,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -467,6 +467,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-693](#wp-693--override-wege-auf-soft-gelöschten-cis-override_conflict-accept-override-setzenentfernen-und-feldliste-antworten-404-und-schreiben-nichts) | `k7n-override-deleted-ci` | Override-Wege auf soft-gelöschten CIs: `override_conflict` accept, Override setzen/entfernen und Feldliste antworten 404 und schreiben nichts | K7N | 0,5 | F-422 | WP-025, WP-057, WP-089, WP-676 |
 | [WP-694](#wp-694--collector-anlegen-und-ändern-feldfehler-aus-validierung-und-repository-sind-422-mit-feld-statt-500) | `k7n-collector-field-errors` | Collector anlegen und ändern: Feldfehler aus Validierung und Repository sind 422 mit Feld statt 500 | K7N | 0,5 | F-423 | WP-143, WP-144, WP-677 |
 | [WP-695](#wp-695--unknown_relationship-accept-folgt-den-regeln-von-post-relationships-typliste-von-connected_to-422-soft-gelöschtes-ci-404-keine-neue-kante-zu-gelöschten-cis) | `k7n-unknown-relationship-accept-rules` | `unknown_relationship` accept folgt den Regeln von `POST /relationships`: Typliste von `connected_to` 422, soft-gelöschtes CI 404; keine neue Kante zu gelöschten CIs | K7N | 1,0 | F-424 | WP-127, WP-158, WP-592, WP-676 |
+| [WP-702](#wp-702--eindeutige-attribute-beim-typwechsel-post-cisidtype-prüft-die-eindeutigen-attribute-des-zieltyps-409-mit-violations) | `k7n-unique-check-type-change` | Eindeutige Attribute beim Typwechsel: POST /cis/{id}/type prüft die eindeutigen Attribute des Zieltyps (409 mit violations) | K7N | 0,5 | F-431 | WP-142, WP-172, WP-700 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20994,6 +20995,55 @@ CI-05;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;W
 **Entscheidungsbedarf:** keiner. Begründung der Abgrenzung: beobachtete Discovery-Kanten bleiben ohne Typlistenprüfung (WP-592, E-95: die Typlisten gelten für Kanten, über die ein Mensch entscheidet); eine Kante zu einem soft-gelöschten CI ist dagegen auf keinem Weg sinnvoll (CI-05), der Abgleich trifft nur lebende CIs, sodass nur ein Wettlauf zwischen Löschen und Ingest betroffen ist.
 
 **Nicht Bestandteil:** Selbstschleifen (`source = target`) und die Umkehrung einer bestehenden ungerichteten Kante beim accept (Probe (c)) bleiben wie bei `POST /relationships` erlaubt. Bestehende Kanten gelöschter CIs bleiben erhalten (CI-05: „Beziehungen bleiben“). Ein Typwechsel eines CIs nach dem Anlegen einer Kante.
+
+### WP-702 – Eindeutige Attribute beim Typwechsel: POST /cis/{id}/type prüft die eindeutigen Attribute des Zieltyps (409 mit violations)
+
+**Schlüssel:** `k7n-unique-check-type-change` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-142 (`b-met-ddl`), WP-172 (Typwechsel CI-11), WP-700 (`k7n-unique-check-all-write-paths`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-431](../../../audit/g1-reaudit/FINDINGS.md#f-431) | P3 | Eindeutige Attribute: Der Typwechsel `POST /cis/{id}/type` prüft die eindeutigen Attribute des Zieltyps nicht (Duplikat ohne Index, mit Index 409 ohne den Attributschlüssel) | schließt | Korrektur WP-700 (K7) auf `6a499ac` |
+
+**Problem:** Der Typwechsel (CI-11) bringt die vorhandenen Attributwerte eines CI unter die Attribute des Zieltyps. `PGRepository.changeTypeRow` ändert `ci_type_id` ohne die Prüfung von MET-15 (`ci.CheckUnique`) und verlässt sich auf den Unique-Index. Solange er fehlt (Fenster zwischen Flag und Index-Job oder nach einem gescheiterten Job), antwortet `POST /cis/{id}/type` 200 und es entstehen zwei aktive CIs des Zieltyps mit demselben Wert; der Index-Job scheitert danach mit „Duplicate keys exist“. Mit Index antwortet der Weg 409, aber `violations` nennt `attributes` statt des Attributs (`ChangeType` bildet den Indexnamen nicht über `uniqueField` ab), und die Spezifikation von `changeCIType` kennt keine 409. Eine 500 tritt nicht auf.
+
+**Akzeptanzkriterien:**
+
+- [ ] `changeTypeRow` ruft vor dem `UPDATE` in der schreibenden Transaktion `ci.CheckUnique(…, typeID, before.ClientID, ciID, before.Attributes)` auf (die Prüfung von `ci.Service`, keine zweite Implementierung, inkl. WP-692 für eingeschränkte Writer); ein vergebener Wert ist `*ci.UniqueError`, das CI behält seinen Typ. `ChangeType` bildet einen Index-Konflikt (gleichzeitiger Write) über `uniqueField` auf den Attributschlüssel ab.
+- [ ] `POST /cis/{id}/type` antwortet damit 409 `urn:reticora:problem:conflict` mit `violations` des Attributs (fester Text, ohne das andere CI), mit und ohne Index; ein CI mit freien Werten wechselt den Typ (200).
+- [ ] `api/openapi.yaml` (spec-first): 409 von `changeCIType` (`ViolationProblem`) und die Beschreibung von `AttributeDefinition.unique` nennen den Typwechsel; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestUniqueAttributeTypeChange` (`internal/server`): auf `e5c2d86` rot (200 und zwei aktive CIs des Zieltyps, Index-Job „Duplicate keys exist“, mit Index 409 mit dem Feld `attributes`), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1 ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/` grün (ohne `TestCIQueryBudget`, bekannte lokale Abweichung; `TestUniqueAttributeEveryWritePath` und die Typwechsel-Tests unverändert); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/ci/pg_repository.go
+- backend/internal/server/unique_attr_type_change_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Prüfung läuft in der schreibenden Transaktion des Typwechsels (`database.ContextWithTx`); für eingeschränkte Writer zusätzlich in der eigenen, nur lesenden org-weiten Transaktion von WP-692.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUniqueAttributeTypeChange$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MET-15;B/G1;B;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
+CI-11;[B];C;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Die Umklassifizierung durch die Discovery (`UpdateRecord`, Modus `discovery`) nutzt dieselbe Prüfung in `changeTypeRow`; wie das Ingest einen solchen Konflikt behandelt (Typ bleibt `generic_device`), regelt WP-703 (F-432). Eine Oberfläche für den Typwechsel gibt es nicht; die Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben.
 
 ## Zurückgestellte Befunde
 

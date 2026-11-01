@@ -1092,6 +1092,8 @@ paths:
         change is recorded as ci_change type_changed, audit ci.type_changed
         and event ci.changed (changed_fields ci_type_id). Discovery uses the
         same service but may only raise generic_device to a specific type.
+        The values the CI carries must be free under the unique attributes
+        of the target type (MET-15).
       requestBody:
         required: true
         content:
@@ -1121,6 +1123,16 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            Another active CI holds a value the CI carries of a unique
+            attribute of the target type (MET-15):
+            urn:reticora:problem:conflict with `violations` naming the
+            attributes, as POST /cis, also before the unique index exists.
+            The CI keeps its type.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
         '422':
           description: >-
             The target type is not allowed, `violations` names ci_type_id: no
@@ -13834,8 +13846,9 @@ components:
             site scope of the writer as well, also before the index exists,
             and every write that sets or brings back the values of a CI:
             POST and PATCH /cis, the restore (POST /cis/{id}/restore), the
-            unmerge (POST /cis/{id}/unmerge) and the resolutions of review
-            items that create or reactivate a CI (409 with `violations`).
+            unmerge (POST /cis/{id}/unmerge), the type change
+            (POST /cis/{id}/type) and the resolutions of review items that
+            create or reactivate a CI (409 with `violations`).
         unique_scope:
           type: string
           enum: [org, client]
