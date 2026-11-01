@@ -151,11 +151,12 @@ func unauthenticatedAPI(t *testing.T) (*httptest.Server, *atomic.Int32) {
 	return srv, &calls
 }
 
-// withRecordLimit sets the size of the records payloads for one test.
+// withRecordLimit sets the size of the records payloads for one test, as
+// the limit of a connected edge.
 func withRecordLimit(t *testing.T, limit int) {
 	t.Helper()
 	previous := recordPayloadLimit
-	recordPayloadLimit = func() int { return limit }
+	recordPayloadLimit = func() (int, bool) { return limit, true }
 	t.Cleanup(func() { recordPayloadLimit = previous })
 }
 
@@ -337,6 +338,60 @@ func TestOversizedSingleRecordIsQuarantined(t *testing.T) {
 	}
 	if n := httpCalls.Load(); n != 0 {
 		t.Errorf("%d requests to the HTTP path", n)
+	}
+}
+
+// TestRecordAbovePackingSizeWaitsForTheEdge: while the edge's limit is
+// unknown (no connection), a record larger than the packing size (512 KiB)
+// but within the NATS default (1 MiB) is spooled in a payload of its own,
+// not quarantined; the connected edge then takes it with the run's other
+// records, in their order. A record the edge refuses even alone is
+// quarantined only then, and blocks nothing behind it.
+func TestRecordAbovePackingSizeWaitsForTheEdge(t *testing.T) {
+	previous := scopeChannel.Load()
+	scopeChannel.Store(nil)
+	t.Cleanup(func() { scopeChannel.Store(previous) })
+	if limit, known := recordPayloadLimit(); known || limit != defaultRecordPayloadLimit {
+		t.Fatalf("control: limit %d known %v without an edge connection", limit, known)
+	}
+	withEdge(t, func(context.Context, string, []byte) ([]byte, error) { return nil, errNoEdge })
+	srv, _ := unauthenticatedAPI(t)
+	ctx := context.Background()
+	spoolDir := t.TempDir()
+	up, err := newUploader(ctx, testConfig(srv.URL, spoolDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := namedRecords("run", 3)
+	records[1].System.Description = strings.Repeat("x", 700<<10)
+	huge := namedRecords("huge", 1)
+	huge[0].System.Description = strings.Repeat("y", 3<<19)
+	base := time.Now().Add(-time.Hour)
+	if err = up.uploadRecordsAt(ctx, records, base); err == nil || errors.Is(err, errRecordTooLarge) {
+		t.Fatalf("upload without the edge: %v, want a transient failure, not errRecordTooLarge", err)
+	}
+	if err = up.uploadRecordsAt(ctx, huge, base.Add(time.Second)); errors.Is(err, errRecordTooLarge) {
+		t.Fatalf("upload of a 1.5 MiB record without the edge: %v, want it queued behind the backlog", err)
+	}
+	if err = up.uploadRecordsAt(ctx, namedRecords("later", 1), base.Add(2*time.Second)); err != nil {
+		t.Fatalf("queueing behind the backlog: %v", err)
+	}
+	if n, _ := up.spool.Len(ctx); n != 5 || quarantined(t, spoolDir) != 0 {
+		t.Fatalf("spool %d, quarantine %d; want 5 payloads (3 of the run, the huge record, the later run) and none quarantined",
+			n, quarantined(t, spoolDir))
+	}
+
+	edge := &limitedEdge{limit: 1 << 20}
+	withEdge(t, edge.request)
+	up.flushSpool(ctx)
+	if took, _ := edge.took(); !slices.Equal(took, []string{"run-000", "run-001", "run-002", "later-000"}) {
+		t.Errorf("the edge took %v, want the run in its order, then the later run", took)
+	}
+	if n, _ := up.spool.Len(ctx); n != 0 || quarantined(t, spoolDir) != 1 {
+		t.Errorf("spool %d, quarantine %d; want 0 and the record the edge refused", n, quarantined(t, spoolDir))
+	}
+	if stats, _ := up.spool.Stats(ctx); stats.DroppedMessages != 1 {
+		t.Errorf("dropped messages = %d, want 1", stats.DroppedMessages)
 	}
 }
 

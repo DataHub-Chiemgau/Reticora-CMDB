@@ -105,6 +105,13 @@ HTTPS und nicht für den NATS-Endpunkt.
 - Im Docker-Modus gehört das Spool-Verzeichnis dem Benutzer des Images
   (`65534:65534`, Modus 700); ein vorhandenes Verzeichnis außerhalb des
   Standardpfads wird nicht übernommen, der Installer sagt, was zu tun ist.
+- Im Docker-Modus bindet der Installer die Dateien aus `collector.env`
+  (`RETICORA_TLS_CA_FILE`, `RETICORA_TLS_CLIENT_CERT_FILE`,
+  `RETICORA_TLS_CLIENT_KEY_FILE`), die außerhalb der ohnehin eingebundenen
+  Verzeichnisse liegen, schreibgeschützt unter demselben Pfad ein. So liest
+  das Enrollment im Image die private Cloud-CA (`--ca-file`). Ein relativer
+  Pfad oder eine Datei, die der Image-Benutzer nicht lesen kann, ergibt eine
+  Warnung.
 - Nachweis: `tests/install-vm-enroll.test.sh`.
 
 ## Discovery-Scopes und Vorschläge
@@ -134,9 +141,13 @@ HTTPS und nicht für den NATS-Endpunkt.
   zerlegt (`collector.spool.split`). Die Teile behalten die Quellzeit des
   Batches und gehen vor allen späteren Batches (COL-05); der Server
   dedupliziert über `record_id`.
-- Ein einzelner Record, der in keine Nachricht passt, kommt in die
-  Quarantäne des Spools und zählt als verloren (`collector.record.oversized`,
-  im Heartbeat gemeldet). Er blockiert den Spool nicht.
+- Ein einzelner Record, der größer als die maximale Nachrichtengröße des
+  verbundenen Endpunkts ist, kommt in die Quarantäne des Spools und zählt
+  als verloren (`collector.record.oversized`, im Heartbeat gemeldet). Er
+  blockiert den Spool nicht.
+- Ohne Verbindung ist die Grenze des Endpunkts unbekannt: 512 KiB ist dann
+  nur die Packgröße. Ein größerer Record wartet als eigene Payload im Spool;
+  erst wenn der verbundene Endpunkt ihn ablehnt, kommt er in die Quarantäne.
 - Zu große Payloads gehen nie über HTTP.
 
 ## Monitoring nicht lizenziert
@@ -189,8 +200,8 @@ openssl s_client -connect <cloud-host>:4222 </dev/null 2>/dev/null | openssl x50
 Nachweise: `collector/collectorcmd/edge_tls_test.go`
 (Namensregel mit echten Zertifikaten, Wiederholung und Hinweise der
 Verbindungsmeldungen, Start vor dem Enrollment), `edge_test.go` (Aufteilung
-großer Läufe und gespoolter Batches, Quarantäne einzelner Records, 401 des
-HTTP-Wegs), `collectorcmd_test.go` (Heartbeat-Abweisung, unvollständige
+großer Läufe und gespoolter Batches, Quarantäne einzelner Records erst
+nach Ablehnung durch den Endpunkt, 401 des HTTP-Wegs), `collectorcmd_test.go` (Heartbeat-Abweisung, unvollständige
 Konfiguration, Identität aus dem Zertifikat, Scope-Vorschläge, leere
 Scope-Liste), `metrics_upload_test.go` (Monitoring nicht lizenziert),
 `discovery_scope_test.go` (Scopes vor einem Job neu holen, braucht

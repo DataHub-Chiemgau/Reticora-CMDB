@@ -18,8 +18,9 @@
 #     on; an enrolled collector is not enrolled again; without a cloud URL
 #     the code is not used;
 #   - Docker mode: the enrollment runs in the image before the container
-#     starts, then the container is restarted; the spool belongs to the
-#     image user (65534:65534, mode 700);
+#     starts, then the container is restarted; a private cloud CA (and a
+#     client certificate) outside the mounted directories is mounted
+#     read-only; the spool belongs to the image user (65534:65534, mode 700);
 #   - verify: the NATS endpoint <host of the cloud URL>:4222 (or
 #     RETICORA_NATS_URL, or the server URL of the enrollment) is probed over
 #     TCP with a timeout; an unreachable endpoint is a clear warning;
@@ -255,6 +256,43 @@ else
     fail "Docker mode: the spool belongs to the image user (65534:65534, mode 700)" \
         "$(stat -c %u:%g:%a "$TMP/docker/var-lib/spool" 2>&1); $(log docker)"
 fi
+# A private cloud CA outside the mounted directories is mounted read-only at
+# its path, so the enrollment in the image (--ca-file) and the container can
+# read it; files below a mounted directory are not mounted twice.
+mkdir -p "$TMP/docker-ca/opt" "$TMP/docker-ca/pki" "$TMP/docker-ca/src/collector"
+: > "$TMP/docker-ca/src/collector/Dockerfile"
+CA="$TMP/docker-ca/pki/cloud-ca.pem"
+printf 'CA\n' > "$CA"
+printf 'RETICORA_TLS_CA_FILE=%s\n' "$CA" > "$TMP/docker-ca/opt/collector.env"
+installer docker-ca 'MODE=docker; collect_config && write_env || exit 1
+    BUILD_FROM_SOURCE=1; SOURCE_DIR="$CASE/src"; install_docker_setup' RETICORA_ENROLL_CODE="$CODE" RETICORA_SERVER_URL=https://cloud.example.test
+compose_file="$TMP/docker-ca/opt/docker-compose.yml"
+if grep -qxF "      - $CA:$CA:ro" "$compose_file" \
+    && grep -q "^docker compose run --rm -e RETICORA_ENROLL_TOKEN collector enroll --server https://cloud.example.test .*--ca-file $CA token=$CODE\$" "$TMP/docker-ca/calls"; then
+    ok "Docker mode: a private cloud CA is mounted read-only, so the enrollment in the image can read --ca-file"
+else
+    fail "Docker mode: a private cloud CA is mounted read-only, so the enrollment in the image can read --ca-file" \
+        "$(cat "$compose_file" 2>&1; calls docker-ca; log docker-ca)"
+fi
+installer docker-mounts '
+    RETICORA_SPOOL_DIR="$CASE/spool"; mkdir -p "$CASE/pki"; printf "CA\n" > "$CASE/pki/ca.pem"; chmod 644 "$CASE/pki/ca.pem"
+    printf "KEY\n" > "$CASE/pki/client.key"; chmod 600 "$CASE/pki/client.key"
+    RETICORA_TLS_CA_FILE="$CASE/pki/ca.pem"; RETICORA_TLS_CLIENT_CERT_FILE="$INSTALL_DIR/client.pem"
+    RETICORA_TLS_CLIENT_KEY_FILE="$CASE/pki/ca.pem"; docker_file_mounts "$CASE/var-lib"
+    RETICORA_TLS_CA_FILE="$CASE/var-lib/ca.pem"; RETICORA_TLS_CLIENT_CERT_FILE="relative/client.pem"
+    RETICORA_TLS_CLIENT_KEY_FILE="$CASE/pki/client.key"; docker_file_mounts "$CASE/var-lib"'
+if [ "$(grep -c -- '^      - ' "$TMP/docker-mounts.log")" = 2 ] \
+    && grep -qxF "      - $TMP/docker-mounts/pki/ca.pem:$TMP/docker-mounts/pki/ca.pem:ro" "$TMP/docker-mounts.log" \
+    && grep -qxF "      - $TMP/docker-mounts/pki/client.key:$TMP/docker-mounts/pki/client.key:ro" "$TMP/docker-mounts.log" \
+    && grep -q 'relative/client.pem is not an absolute path: the collector container cannot read it' "$TMP/docker-mounts.log" \
+    && grep -q "make $TMP/docker-mounts/pki/client.key readable for it" "$TMP/docker-mounts.log" \
+    && ! grep -q "make $TMP/docker-mounts/pki/ca.pem readable" "$TMP/docker-mounts.log"; then
+    ok "Docker mode: files below a mounted directory or named twice are mounted once; a relative path or an unreadable file is a warning"
+else
+    fail "Docker mode: files below a mounted directory or named twice are mounted once; a relative path or an unreadable file is a warning" \
+        "$(log docker-mounts)"
+fi
+
 # Another existing spool directory of the operator is not handed over.
 mkdir -p "$TMP/docker-spool/opt" "$TMP/docker-spool/srv-spool" "$TMP/docker-spool/src/collector"
 : > "$TMP/docker-spool/src/collector/Dockerfile"

@@ -400,8 +400,10 @@ installer over an older installation switches `RETICORA_CREDENTIALS_PATH` from
 `/opt/reticora-collector/credentials.json` to that path and moves an identity
 found there. With `--docker`, the compose project mounts
 `/var/lib/reticora-collector` (mode `700`, owned by the image user `nobody`,
-65534), and the image runs `reticora-collector` as its entrypoint
-(`collector` remains as a link):
+65534) and, read-only at the same path, the CA bundle and client certificate
+files `collector.env` names outside the mounted directories (so `--ca-file`
+works in the container), and the image runs `reticora-collector` as its
+entrypoint (`collector` remains as a link):
 
 ```bash
 docker compose -f /opt/reticora-collector/docker-compose.yml run --rm collector \

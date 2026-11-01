@@ -19,25 +19,30 @@ import (
 // run, flushSpool splits a spooled batch the edge refused as too large
 // (spooled before this split existed, or for an edge with a smaller limit)
 // instead of retrying it forever ahead of every later batch. A single
-// record larger than the limit is quarantined and counted as lost; it
-// never blocks the spool. The server deduplicates records on record_id, so
-// a payload delivered twice after a crash does no harm.
+// record larger than the edge's limit is quarantined and counted as lost;
+// it never blocks the spool. Only the edge's own limit decides that: while
+// it is unknown (no connection), such a record is spooled in a payload of
+// its own, and flushSpool quarantines it only if the edge refuses it. The
+// server deduplicates records on record_id, so a payload delivered twice
+// after a crash does no harm.
 
 // defaultRecordPayloadLimit is the size of a records payload while the
 // edge's limit is unknown (no connection): half the NATS default, so a
-// payload spooled now fits the edge later.
+// payload spooled now fits the edge later. It is a packing size only,
+// never a reason to quarantine a record.
 const defaultRecordPayloadLimit = 512 << 10
 
-// recordPayloadLimit is the size a records payload may have: the edge's
-// maximum message size while the collector holds its channel, else
-// defaultRecordPayloadLimit; tests replace it.
-var recordPayloadLimit = func() int {
+// recordPayloadLimit returns the size a records payload may have and
+// whether it is the edge's own limit: the edge's maximum message size
+// while the collector holds its channel (known), else
+// defaultRecordPayloadLimit (not known); tests replace it.
+var recordPayloadLimit = func() (limit int, known bool) {
 	if ch := scopeChannel.Load(); ch != nil && ch.nc != nil && ch.nc.IsConnected() {
 		if n := ch.nc.MaxPayload(); n > 0 {
-			return int(n)
+			return int(n), true
 		}
 	}
-	return defaultRecordPayloadLimit
+	return defaultRecordPayloadLimit, false
 }
 
 // errRecordTooLarge: a device record does not fit a payload of its own; it
@@ -80,9 +85,11 @@ func marshalRecords(records []plugins.DeviceRecord) ([]json.RawMessage, error) {
 
 // splitRecords packs the encoded records, in their order, into payloads
 // (the encoding of plugins.DeviceRecordBatch) of at most limit bytes. A
-// record that does not fit a payload of its own is returned in oversized,
-// as a payload of its own, and left out of the others.
-func splitRecords(raws []json.RawMessage, limit int) (payloads, oversized []recordsPayload) {
+// record that does not fit a payload of its own goes in a payload of its
+// own: when limit is the edge's own limit (known), it is returned in
+// oversized and left out of the others; else it stays in payloads, in its
+// place, and the edge decides once it is connected.
+func splitRecords(raws []json.RawMessage, limit int, known bool) (payloads, oversized []recordsPayload) {
 	overhead := len(recordsPrefix) + len(recordsSuffix)
 	var current []json.RawMessage
 	size := overhead
@@ -94,7 +101,13 @@ func splitRecords(raws []json.RawMessage, limit int) (payloads, oversized []reco
 	}
 	for _, raw := range raws {
 		if overhead+len(raw) > limit {
-			oversized = append(oversized, recordsPayload{data: joinRecords([]json.RawMessage{raw}), records: 1})
+			single := recordsPayload{data: joinRecords([]json.RawMessage{raw}), records: 1}
+			if known {
+				oversized = append(oversized, single)
+			} else {
+				flush()
+				payloads = append(payloads, single)
+			}
 			continue
 		}
 		if len(current) > 0 && size+1+len(raw) > limit {
@@ -128,18 +141,18 @@ func joinRecords(raws []json.RawMessage) []byte {
 }
 
 // splitSpooledRecords splits a spooled records payload the edge refused as
-// too large into payloads of at most limit bytes. When the limit lets the
-// whole payload pass (the edge's limit is smaller than known), it is
-// halved. A payload of a single record, or one that is not a records
-// payload, cannot be split (ok false).
-func splitSpooledRecords(payload []byte, limit int) (payloads, oversized []recordsPayload, ok bool) {
+// too large into payloads of at most limit bytes (splitRecords). When the
+// limit lets the whole payload pass (the edge's limit is smaller than
+// known), it is halved. A payload of a single record, or one that is not a
+// records payload, cannot be split (ok false).
+func splitSpooledRecords(payload []byte, limit int, known bool) (payloads, oversized []recordsPayload, ok bool) {
 	var batch struct {
 		Records []json.RawMessage `json:"records"`
 	}
 	if json.Unmarshal(payload, &batch) != nil || len(batch.Records) < 2 {
 		return nil, nil, false
 	}
-	payloads, oversized = splitRecords(batch.Records, limit)
+	payloads, oversized = splitRecords(batch.Records, limit, known)
 	if len(payloads) == 1 && len(oversized) == 0 {
 		mid := len(batch.Records) / 2
 		payloads = []recordsPayload{
@@ -166,13 +179,13 @@ func (u *uploader) quarantineOversized(ctx context.Context, p recordsPayload, so
 // splitSpooledBatch replaces the spooled batch msg, which the edge refused
 // as too large, by its parts with its source time (partSourceTime), so they
 // keep their order and their place ahead of every later batch (COL-05).
-// The parts are stored before
-// msg is acknowledged: a crash in between delivers records twice, which
-// the server deduplicates, but loses none. A batch that cannot be split (a
-// single record) is quarantined and counted as lost.
+// The parts are stored before msg is acknowledged: a crash in between
+// delivers records twice, which the server deduplicates, but loses none. A
+// batch that cannot be split (a single record the edge refused) is
+// quarantined and counted as lost.
 func (u *uploader) splitSpooledBatch(ctx context.Context, msg *buffer.Message) error {
-	limit := recordPayloadLimit()
-	payloads, oversized, ok := splitSpooledRecords(msg.Payload, limit)
+	limit, known := recordPayloadLimit()
+	payloads, oversized, ok := splitSpooledRecords(msg.Payload, limit, known)
 	if !ok {
 		if err := u.spool.Reject(ctx, msg.ID); err != nil {
 			return fmt.Errorf("quarantine the oversized spooled batch: %w", err)

@@ -1029,6 +1029,34 @@ prepare_spool() {
         || warn "Could not hand $RETICORA_SPOOL_DIR to the user of the collector image ($IMAGE_USER); the container cannot buffer results there."
 }
 
+# docker_file_mounts <identity dir> — read-only volume lines for the files
+# collector.env names (CA bundle, client certificate and key) outside the
+# directories the container mounts anyway, so the container and the enroll
+# command run in it (--ca-file) can read them at the same path. The image
+# runs as IMAGE_USER: a file other users cannot read is a warning (the
+# installer does not change the mode of the operator's files).
+docker_file_mounts() {
+    local f dir seen=" "
+    for f in "$RETICORA_TLS_CA_FILE" "$RETICORA_TLS_CLIENT_CERT_FILE" "$RETICORA_TLS_CLIENT_KEY_FILE"; do
+        [ -n "$f" ] || continue
+        case "$f" in
+            /*) ;;
+            *)
+                warn "$f is not an absolute path: the collector container cannot read it; name it with an absolute path in $ENV_FILE."
+                continue
+                ;;
+        esac
+        for dir in "$1" "$RETICORA_SPOOL_DIR" "$INSTALL_DIR"; do
+            case "$f" in "${dir%/}"/*) continue 2 ;; esac
+        done
+        case "$seen" in *" $f "*) continue ;; esac
+        seen="$seen$f "
+        [ ! -f "$f" ] || [ -n "$(find "$f" -maxdepth 0 -perm -004 2>/dev/null)" ] \
+            || warn "The collector image runs as $IMAGE_USER: make $f readable for it, or the container cannot read it."
+        printf '      - %s:%s:ro\n' "$f" "$f"
+    done
+}
+
 install_docker_setup() {
     info "Installing the Docker-based collector …"
     local spool_created=0
@@ -1074,6 +1102,7 @@ ${build}    env_file:
       - $identity_dir:$identity_dir
       - $RETICORA_SPOOL_DIR:$RETICORA_SPOOL_DIR
       - $INSTALL_DIR:$INSTALL_DIR
+$(docker_file_mounts "$identity_dir")
 EOF
 
     compose "$step" || die "Docker collector startup failed."
@@ -1181,13 +1210,14 @@ verify() {
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 print_summary() {
-    local endpoint nats="<host of the cloud URL>:$NATS_PORT" nats_port="$NATS_PORT" enrollment server_arg
+    local endpoint nats="<host of the cloud URL>:$NATS_PORT" nats_port="$NATS_PORT" enrollment enroll_args
     endpoint="$(nats_endpoint)"
     if [ -n "$endpoint" ]; then
         nats_port="${endpoint##* }"
         nats="$(host_port "${endpoint% *}" "$nats_port")"
     fi
-    server_arg="${RETICORA_SERVER_URL:-<url>}"
+    # The enroll command trusts a private cloud CA only with --ca-file.
+    enroll_args="--server ${RETICORA_SERVER_URL:-<url>}${RETICORA_TLS_CA_FILE:+ --ca-file $RETICORA_TLS_CA_FILE}"
     if [ "$ENROLLED" = 1 ] || [ -f "$RETICORA_CREDENTIALS_PATH" ]; then
         enrollment="enrolled (identity: $RETICORA_CREDENTIALS_PATH)"
     elif [ -n "$RETICORA_TLS_CLIENT_CERT_FILE" ]; then
@@ -1218,7 +1248,7 @@ EOF
   Logs:              journalctl -u reticora-collector -f
 EOF
         [ "$enrollment" = "${enrollment#NOT}" ] || cat <<EOF
-  Enrollment:        sudo reticora-collector enroll --server $server_arg --code <code>
+  Enrollment:        sudo reticora-collector enroll $enroll_args --code <code>
                      (command of the Discovery page); the running service picks the
                      identity up within 30 s, or: sudo systemctl restart reticora-collector
 EOF
@@ -1229,7 +1259,7 @@ EOF
 EOF
         [ "$enrollment" = "${enrollment#NOT}" ] || cat <<EOF
   Enrollment:        docker compose -f $INSTALL_DIR/docker-compose.yml run --rm collector \\
-                       enroll --server $server_arg --code <code>, then
+                       enroll $enroll_args --code <code>, then
                      docker compose -f $INSTALL_DIR/docker-compose.yml restart collector
 EOF
     fi

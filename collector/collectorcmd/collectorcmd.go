@@ -798,14 +798,15 @@ func (u *uploader) uploadRecords(ctx context.Context, records []plugins.DeviceRe
 // uploadRecordsAt sends the DeviceRecords of a discovery cycle that started at
 // sourceTime to the backend: over the edge, or compressed to the HTTP
 // ingest without it. The records go in payloads that fit the edge's
-// message size (recordbatch.go), in their order; a record too large for
-// any payload is quarantined and counted as lost. While older batches wait
-// in the spool the payloads are queued behind them, so the backend
-// receives data in source-time order (COL-05). When a payload fails
-// transiently and a spool directory is configured, it and the payloads
-// after it are persisted and delivered by flushSpool once the backend is
-// reachable again. Every failure is returned, so the caller never reports
-// undelivered records as uploaded.
+// message size (recordbatch.go), in their order; a record larger than the
+// edge's own limit is quarantined and counted as lost (while that limit is
+// unknown, it waits in a payload of its own until the edge decides). While
+// older batches wait in the spool the payloads are queued behind them, so
+// the backend receives data in source-time order (COL-05). When a payload
+// fails transiently and a spool directory is configured, it and the
+// payloads after it are persisted and delivered by flushSpool once the
+// backend is reachable again. Every failure is returned, so the caller
+// never reports undelivered records as uploaded.
 func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.DeviceRecord, sourceTime time.Time) error {
 	if u.paused.Load() {
 		return errLicenseExpired
@@ -814,8 +815,8 @@ func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.Device
 	if err != nil {
 		return err
 	}
-	limit := recordPayloadLimit()
-	payloads, oversized := splitRecords(raws, limit)
+	limit, known := recordPayloadLimit()
+	payloads, oversized := splitRecords(raws, limit, known)
 	var errs []error
 	for _, p := range oversized {
 		u.quarantineOversized(ctx, p, sourceTime, limit)
