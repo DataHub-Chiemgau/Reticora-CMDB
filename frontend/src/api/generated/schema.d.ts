@@ -6329,7 +6329,7 @@ export interface paths {
     };
     /**
      * List the unified change history of an entity
-     * @description Needs ci:read and the read permission of the entity type: ci:read for ci, relationship:read for relationship, location:read for location, asset:read for asset, reservation and composition (CI-06, E-78). The history is read in the caller's client and site scope. The audit entries of a CI are part of its history only when the caller holds audit:read; audit_included says whether they are.
+     * @description Needs ci:read and the read permission of the entity type: ci:read for ci, relationship:read for relationship, location:read for location, asset:read for asset, reservation and composition (CI-06, E-78). The history is read in the caller's client and site scope. The audit entries of a CI are part of its history only when the caller holds audit:read; audit_included says whether they are. They are the entries about the CI under both forms of its type: those of the domain audit (resource_type ci) and those of the route audit (resource_type cis: the writes on its sub-resources such as interfaces, contacts, lifecycle transitions and unmerge), and the route entries of its contact links (ci-contacts) and network interfaces (network-interfaces), the delete of one included. A caller restricted to some clients, sites or teams reads only the entries GET /audit-log shows it (an entry about a deleted link or interface is not among them).
      */
     get: operations['getHistoryEntitytypeId'];
     put?: never;

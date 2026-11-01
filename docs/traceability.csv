@@ -1111,3 +1111,5 @@ AUD-04;[B];B;backend/internal/audit/append_only_integration_test.go;WP-680
 AUD-04;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
 SEC-05;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
 TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-680
+CI-06;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
+AUD-05;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681

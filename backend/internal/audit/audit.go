@@ -900,15 +900,10 @@ func (h *Handler) list(ctx context.Context, orgID string, filter *ListFilter, pa
 }
 
 func listTx(ctx context.Context, tx pgx.Tx, orgID string, filter *ListFilter, page api.PaginationParams) ([]Entry, int, error) {
-	where := "organization_id = $1"
-	args := []any{orgID}
 	// A restricted principal sees only the entries about objects it may
-	// read (restrictedResource, scope.go); audit_log carries no client
-	// column.
-	if scope, ok := database.TenantScopeFromContext(ctx); ok &&
-		(!scope.Clients.IsAll() || !scope.Sites.IsAll() || !scope.Teams.IsAll()) {
-		where += " AND " + restrictedResource
-	}
+	// read (VisibleEntries, scope.go); audit_log carries no client column.
+	where := "organization_id = $1 AND " + VisibleEntries(ctx)
+	args := []any{orgID}
 	where, args = filter.where(where, args)
 
 	var total int

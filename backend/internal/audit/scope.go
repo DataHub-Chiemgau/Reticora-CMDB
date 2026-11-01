@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
@@ -213,6 +214,19 @@ func HasScopeRule(resourceType string) bool {
 // restrictedResource is the condition of the audit list for a principal
 // restricted to some clients, sites or teams.
 var restrictedResource = buildRestrictedResource()
+
+// VisibleEntries is the condition (SQL over audit_log) of the entries the
+// principal of ctx may read: every entry of the organization for an
+// org-wide principal, the scope rule of the register (restrictedResource)
+// for one restricted to some clients, sites or teams. The audit list and
+// the audit part of the CI history (WP-681) apply the same rule.
+func VisibleEntries(ctx context.Context) string {
+	if scope, ok := database.TenantScopeFromContext(ctx); ok &&
+		(!scope.Clients.IsAll() || !scope.Sites.IsAll() || !scope.Teams.IsAll()) {
+		return restrictedResource
+	}
+	return "true"
+}
 
 // buildRestrictedResource writes the condition as a CASE over the type,
 // which evaluates only the row check of the entry's type; the types with

@@ -353,7 +353,13 @@ Fehlende Kombinationen:
   org-weiter Kontrolle: `TestAuditLogHidesForeignClientRouteEntries`
   (`backend/internal/server/audit_log_scope_integration_test.go`);
   Architekturtests `TestEveryAuditedRouteHasAScopeRule` und
-  `TestEveryRecordedResourceTypeHasAScopeRule`.
+  `TestEveryRecordedResourceTypeHasAScopeRule`. Der Audit-Anteil der
+  CI-Historie (`GET /history/ci/{id}`, F-410, WP-681) liest seither auch die
+  Routeneinträge `cis`, `ci-contacts` und `network-interfaces` des CI und
+  wendet dieselbe Regel an (`audit.VisibleEntries`): Ein eingeschränkter
+  Principal sieht dort nur Einträge, die ihm die Audit-Liste zeigt
+  (`TestCIHistoryIncludesRouteAuditOfCISubresources`,
+  `backend/internal/server/history_route_audit_integration_test.go`).
 - Rollendefinitionen (F-396, WP-667): Die Grant-Obergrenze von WP-394/WP-395
   galt für das Zuweisen und Entziehen, über die Rollendefinition aber nur für
   hinzugefügte Rechte. Ein client-gebundener Inhaber von `role:manage`

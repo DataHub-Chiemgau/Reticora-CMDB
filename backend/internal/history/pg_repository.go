@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/jackc/pgx/v5"
@@ -136,12 +137,31 @@ var unifiedCIChanges = ciChangeSets + `
 	UNION ALL` + locationChanges("ci", ancestorsOf("(SELECT ci.location_id FROM ci WHERE ci.id = $2::uuid)"))
 
 // unifiedCIAudit adds the audit entries of the CI to its history; only a
-// caller with audit:read reads them (E-78).
-const unifiedCIAudit = `
+// caller with audit:read reads them (E-78). They are the entries about the
+// CI under both forms of its type (CI-06, WP-681, F-410): the domain
+// recorder writes "ci", the route audit the route segment "cis" (POST
+// /cis/{id}/interfaces, /contacts, /lifecycle-transitions, /unmerge …).
+// The route entries about its contact links and network interfaces name
+// the link or the interface: an entry of such a row the CI still has, or
+// whose values ({field, old, new}, WP-505) name the CI as ci_id (the
+// delete of a link, the create, a move to another CI), is about the CI as
+// well. visible is the scope rule of the audit list (audit.VisibleEntries,
+// WP-660): a restricted principal reads only the entries the list shows
+// it, so no entry of a deleted link or interface.
+func unifiedCIAudit(visible string) string {
+	return `
 	UNION ALL
 	SELECT id::text, organization_id::text, 'ci', resource_id::text, COALESCE(actor_id::text, ''), action,
 	       '', NULL, changes, '', "timestamp", 'audit', ''` + noChangeSet + `
-	FROM audit_log WHERE organization_id = $1 AND resource_type = 'ci' AND resource_id = $2::uuid` + noChangeKind
+	FROM audit_log WHERE organization_id = $1 AND (
+		(resource_type IN ('ci', 'cis') AND resource_id = $2::uuid)
+		OR (resource_type = 'ci-contacts' AND resource_id IN (SELECT l.id FROM ci_contact l WHERE l.ci_id = $2::uuid))
+		OR (resource_type = 'network-interfaces' AND resource_id IN (SELECT n.id FROM network_interface n WHERE n.ci_id = $2::uuid))
+		OR (resource_type IN ('ci-contacts', 'network-interfaces') AND (
+			changes->'values' @> jsonb_build_array(jsonb_build_object('field', 'ci_id', 'old', $2::uuid::text))
+			OR changes->'values' @> jsonb_build_array(jsonb_build_object('field', 'ci_id', 'new', $2::uuid::text)))))
+	  AND (` + visible + `)` + noChangeKind
+}
 
 // unifiedLocationHistory is the history of a location (LOC-11): its
 // entity_change rows and the location_change rows of the location itself,
@@ -160,7 +180,7 @@ var unifiedLocationHistory = `
 func (r *PGRepository) listCI(ctx context.Context, orgID, ciID string, page api.PaginationParams, opts ListOptions) ([]Change, int, error) {
 	unified := unifiedCIChanges
 	if opts.IncludeAudit {
-		unified += unifiedCIAudit
+		unified += unifiedCIAudit(audit.VisibleEntries(ctx))
 	}
 	return r.listUnified(ctx, orgID, ciID, page, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", unified, opts.ChangeKind, api.ErrNotFound)
 }
