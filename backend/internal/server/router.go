@@ -419,6 +419,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 				// after the merge refuses the revert (E-80). A repository
 				// error reaches the client sanitized (API-03).
 				_, err := opts.CIService.RevertMerge(ctx, job.OrganizationID, job.RefID)
+				// A later open merge of the survivor blocks the revert like
+				// the unmerge; the refusal names that merge (F-416).
+				var later *ci.UnmergeLaterMergeError
+				if errors.As(err, &later) {
+					return &jobs.RevertRefusedError{Reason: later}
+				}
 				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrUnmergeConflict, ci.ErrMergeUnsupported} {
 					if errors.Is(err, refusal) {
 						return &jobs.RevertRefusedError{Reason: refusal}

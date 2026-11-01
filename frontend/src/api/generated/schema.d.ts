@@ -534,7 +534,7 @@ export interface paths {
     put?: never;
     /**
      * Revert the merge of this (merged) CI within 30 days (CI-12)
-     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values, the asset link and the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone (410). A survivor changed after the merge (its version is above the version the merge recorded) is not overwritten silently: the unmerge answers 409 with the fields of the later history entries and changes nothing; force=true restores the snapshot over those changes, and the audit entry ci.unmerged names force and the overwritten fields (E-80). The revert of the merge job behaves like an unmerge without force. The merged CI becomes active again and counts against max_cis like a new one: with max_cis reached the unmerge is 403 entitlement-limit and the merge stays (ENT-03). Requires ci:delete.
+     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values, the asset link and the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone (410). A survivor changed after the merge (its version is above the version the merge recorded) is not overwritten silently: the unmerge answers 409 with the fields of the later history entries and changes nothing; force=true restores the snapshot over those changes, and the audit entry ci.unmerged names force and the overwritten fields (E-80). A survivor that is part of a later merge still open (merged into another CI, or another CI merged into it later) blocks the unmerge, also with force=true: 409 unmerge-later-merge names that merge, which is unmerged first; an unmerge never touches another open merge (F-416). The revert of the merge job behaves like an unmerge without force. The merged CI becomes active again and counts against max_cis like a new one: with max_cis reached the unmerge is 403 entitlement-limit and the merge stays (ENT-03). Requires ci:delete.
      */
     post: operations['unmergeCI'];
     delete?: never;
@@ -9636,6 +9636,15 @@ export interface components {
       /** Format: int64 */
       current_version: number;
     };
+    /** @description The unmerge is blocked by a later open merge of the survivor (F-416): the merge later_merge_id of later_merge_victim_id into later_merge_survivor_id is unmerged first. A later merge into a CI outside the caller's scope is named only by its victim (the survivor of this merge); later_merge_id and later_merge_survivor_id are absent. */
+    UnmergeLaterMergeProblem: components['schemas']['ProblemDetail'] & {
+      /** Format: uuid */
+      later_merge_id?: string;
+      /** Format: uuid */
+      later_merge_victim_id: string;
+      /** Format: uuid */
+      later_merge_survivor_id?: string;
+    };
     ViolationProblem: components['schemas']['ProblemDetail'] & {
       violations: {
         field: string;
@@ -12716,7 +12725,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), or one of the CIs is locked by another write. */
+      /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), the survivor is part of a later open merge (UnmergeLaterMergeProblem, type urn:reticora:problem:unmerge-later-merge: unmerge that merge first; force does not override it), or one of the CIs is locked by another write. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12724,6 +12733,7 @@ export interface operations {
         content: {
           'application/problem+json':
             | components['schemas']['VersionConflictProblem']
+            | components['schemas']['UnmergeLaterMergeProblem']
             | components['schemas']['ProblemDetail'];
         };
       };
@@ -14007,7 +14017,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the merge kind has no unmerge, or the merge no longer exists. */
+      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the survivor is part of a later open merge (the detail names that merge; its job is reverted first, F-416), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
         headers: {
           [name: string]: unknown;

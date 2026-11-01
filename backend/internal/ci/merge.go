@@ -53,7 +53,32 @@ var (
 	// ErrUnmergeConflict: the survivor changed after the merge; only an
 	// unmerge with force restores the snapshot (409, CI-12, E-80).
 	ErrUnmergeConflict = errors.New("the survivor changed after the merge")
+	// ErrUnmergeLaterMerge: the survivor of the merge is part of a later
+	// merge still open (merged into another CI, or another CI merged into
+	// it); that merge is unmerged first, force does not override it (409,
+	// CI-12, F-416).
+	ErrUnmergeLaterMerge = errors.New("the survivor is part of a later merge; unmerge that merge first")
 )
+
+// UnmergeLaterMergeError names the later open merge that blocks the
+// unmerge: its id, victim and survivor; a merge outside the caller's scope
+// only by its victim, the survivor of this merge. The unmerge changed
+// nothing (409, F-416).
+type UnmergeLaterMergeError struct {
+	MergeID    string
+	VictimID   string
+	SurvivorID string
+}
+
+// validation: a fixed rule text with the ids of the later merge.
+func (e *UnmergeLaterMergeError) Error() string {
+	if e.MergeID == "" {
+		return fmt.Sprintf("%s: the CI %s is merged into a CI outside the caller's scope", ErrUnmergeLaterMerge, e.VictimID)
+	}
+	return fmt.Sprintf("%s: merge %s of the CI %s into the CI %s", ErrUnmergeLaterMerge, e.MergeID, e.VictimID, e.SurvivorID)
+}
+
+func (e *UnmergeLaterMergeError) Unwrap() error { return ErrUnmergeLaterMerge }
 
 // UnmergeConflictError names the fields of the survivor changed after the
 // merge (the ci_change rows above the version of the merge) and its
@@ -65,6 +90,9 @@ type UnmergeConflictError struct {
 
 // validation: a fixed rule text with the names of the changed fields.
 func (e *UnmergeConflictError) Error() string {
+	if len(e.Fields) == 0 {
+		return fmt.Sprintf("%s (version %d, no recorded field changes); unmerge with force=true to restore the snapshot", ErrUnmergeConflict, e.Current)
+	}
 	return fmt.Sprintf("%s; unmerge with force=true to restore the snapshot: %s", ErrUnmergeConflict, strings.Join(e.Fields, ", "))
 }
 
@@ -772,9 +800,10 @@ func restoreRow(ctx context.Context, tx pgx.Tx, cols map[string][]string, row *s
 // laterSurvivorChanges returns the fields of the survivor changed after the
 // merge: the ci_change rows above the version the merge recorded
 // (reconciliation_decision/merged_ci of this merge). conflict is false
-// while the survivor still has that version. A survivor without that row
-// counts as changed, without fields.
-func laterSurvivorChanges(ctx context.Context, tx pgx.Tx, survivorID, mergeID string) (fields []string, current int64, conflict bool, err error) {
+// while the survivor still has that version. Without that row (history
+// retention) the version of the merge is the one after the snapshot of
+// the survivor, mergedVersion (F-416).
+func laterSurvivorChanges(ctx context.Context, tx pgx.Tx, survivorID, mergeID string, mergedVersion int64) (fields []string, current int64, conflict bool, err error) {
 	var merged *int64
 	err = tx.QueryRow(ctx, `SELECT c.version,
 			(SELECT max(ch.ci_version) FROM ci_change ch WHERE ch.ci_id = c.id AND ch.change_type = 'reconciliation_decision'
@@ -787,25 +816,51 @@ func laterSurvivorChanges(ctx context.Context, tx pgx.Tx, survivorID, mergeID st
 	case err != nil:
 		return nil, 0, false, fmt.Errorf("read survivor version: %w", err)
 	}
-	if merged != nil && current <= *merged {
+	if merged == nil {
+		merged = &mergedVersion
+	}
+	if current <= *merged {
 		return nil, current, false, nil
 	}
-	since := int64(0)
-	if merged != nil {
-		since = *merged
-	}
 	rows, err := tx.Query(ctx, `SELECT DISTINCT COALESCE(field_name, change_type) FROM ci_change
-		WHERE ci_id = $1 AND ci_version > $2 ORDER BY 1`, survivorID, since)
+		WHERE ci_id = $1 AND ci_version > $2 ORDER BY 1`, survivorID, *merged)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("read survivor changes since the merge: %w", err)
 	}
 	if fields, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
 		return nil, 0, false, fmt.Errorf("read survivor changes since the merge: %w", err)
 	}
-	if merged == nil {
-		fields = nil
-	}
 	return fields, current, true, nil
+}
+
+// laterOpenMerge returns the open merge after mergeID that holds the
+// survivor: as its victim (the survivor was merged into another CI) or as
+// its survivor (another CI was merged into it later). Its snapshot rests
+// on the state this unmerge would restore, so it is unmerged first (F-416).
+func laterOpenMerge(ctx context.Context, tx pgx.Tx, orgID, survivorID, mergeID string) (*UnmergeLaterMergeError, error) {
+	later := &UnmergeLaterMergeError{}
+	err := tx.QueryRow(ctx, `SELECT m.id::text, m.victim_id::text, m.survivor_id::text FROM ci_merge m, ci_merge this
+		WHERE this.id = $3 AND m.organization_id = $1 AND m.id <> this.id AND m.unmerged_at IS NULL
+			AND (m.victim_id = $2 OR (m.survivor_id = $2 AND m.merged_at >= this.merged_at))
+		ORDER BY m.merged_at DESC LIMIT 1`, orgID, survivorID, mergeID).Scan(&later.MergeID, &later.VictimID, &later.SurvivorID)
+	if err == nil {
+		return later, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("read later merges of the survivor: %w", err)
+	}
+	// The merge row carries the client of its survivor: a merge into a CI
+	// outside the caller's scope is invisible to the caller, the tombstone
+	// of the survivor is not. That merge stays unnamed.
+	var merged bool
+	if err = tx.QueryRow(ctx, `SELECT merged_into_id IS NOT NULL FROM ci WHERE id = $1`, survivorID).Scan(&merged); err != nil &&
+		!errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("read the survivor: %w", err)
+	}
+	if merged {
+		return &UnmergeLaterMergeError{VictimID: survivorID}, nil
+	}
+	return nil, nil
 }
 
 // Unmerge implements Unmerger: both CI rows, the moved rows and the removed
@@ -839,8 +894,29 @@ func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string, forc
 			}
 			return fmt.Errorf("lock merge pair: %w", err)
 		}
-		// Later changes of the survivor are not lost silently (F-097).
-		overwritten, current, changed, err := laterSurvivorChanges(ctx, tx, survivorID, result.MergeID)
+		// A later merge of the survivor still open blocks the unmerge, also
+		// with force: restoring the survivor would revive the victim of
+		// that merge or take back its moves (F-416).
+		later, err := laterOpenMerge(ctx, tx, orgID, survivorID, result.MergeID)
+		if err != nil {
+			return err
+		}
+		if later != nil {
+			return later
+		}
+		var snap mergeSnapshot
+		if err = json.Unmarshal(raw, &snap); err != nil {
+			return fmt.Errorf("decode merge snapshot: %w", err)
+		}
+		var before struct {
+			Version int64 `json:"version"`
+		}
+		if err = json.Unmarshal(snap.Survivor, &before); err != nil {
+			return fmt.Errorf("decode merge snapshot: %w", err)
+		}
+		// Later changes of the survivor are not lost silently (F-097); the
+		// merge raised the version of the survivor by one.
+		overwritten, current, changed, err := laterSurvivorChanges(ctx, tx, survivorID, result.MergeID, before.Version+1)
 		if err != nil {
 			return err
 		}
@@ -849,10 +925,6 @@ func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string, forc
 		}
 		if overwritten == nil {
 			overwritten = []string{}
-		}
-		var snap mergeSnapshot
-		if err = json.Unmarshal(raw, &snap); err != nil {
-			return fmt.Errorf("decode merge snapshot: %w", err)
 		}
 		cols := map[string][]string{}
 		// The survivor first gives up the unique values of the victim.
