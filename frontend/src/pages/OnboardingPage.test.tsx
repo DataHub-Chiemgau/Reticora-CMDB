@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { Route, Routes, useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
 import { OnboardingPage, currentStep, passwordPolicyViolations } from './OnboardingPage';
 import { useAuthStore } from '../auth/authStore';
@@ -40,6 +41,29 @@ function signIn(user: { sub: string; email?: string } = { sub: 'user-1' }) {
     expiresAt: new Date(Date.now() + 3600_000).toISOString(),
     user,
   });
+}
+
+/** LoginProbe stands in for the sign-in page and shows the router state it got. */
+function LoginProbe() {
+  const location = useLocation();
+  return <pre data-testid="login-state">{JSON.stringify(location.state)}</pre>;
+}
+
+/** renderOnboarding renders the onboarding next to a stand-in for /login. */
+function renderOnboarding(route: string) {
+  return renderWithProviders(
+    <Routes>
+      <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/login" element={<LoginProbe />} />
+    </Routes>,
+    { route },
+  );
+}
+
+/** followLogin follows the sign-in link and returns the router state of /login. */
+function followLogin(link: HTMLElement) {
+  fireEvent.click(link);
+  return JSON.parse(screen.getByTestId('login-state').textContent ?? 'null');
 }
 
 function problem(status: number, detail: string, field?: string) {
@@ -187,7 +211,7 @@ describe('OnboardingPage', () => {
       json({ organization_slug: 'muster-gmbh', trial_ends_at: '2026-11-13T00:00:00Z' }, 201),
     );
     vi.stubGlobal('fetch', fetchMock);
-    renderWithProviders(<OnboardingPage />, { route: '/onboarding?token=tok-1' });
+    renderOnboarding('/onboarding?token=tok-1');
 
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
     expect(screen.getByText(/Mindestens 12 Zeichen mit Groß- und Kleinbuchstaben/)).toBeVisible();
@@ -203,15 +227,16 @@ describe('OnboardingPage', () => {
         `Ihr Testzeitraum läuft bis ${new Date('2026-11-13T00:00:00Z').toLocaleDateString('de-DE')}.`,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Jetzt anmelden und fortfahren' })).toHaveAttribute(
-      'href',
-      '/login',
-    );
+    const login = screen.getByRole('link', { name: 'Jetzt anmelden und fortfahren' });
+    expect(login).toHaveAttribute('href', '/login');
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({
       token: 'tok-1',
       password: GOOD_PASSWORD,
     });
+    // A tab without a session can still share the IdP session of another
+    // account: the sign-in asks the IdP for a fresh login.
+    expect(followLogin(login)).toEqual({ from: '/onboarding', forceLogin: true });
   });
 
   it('explains an expired verification link', async () => {
@@ -296,7 +321,7 @@ describe('OnboardingPage', () => {
       return json({ detail: 'unexpected' }, 404);
     });
     vi.stubGlobal('fetch', fetchMock);
-    renderWithProviders(<OnboardingPage />, { route: '/onboarding?token=tok-1' });
+    renderOnboarding('/onboarding?token=tok-1');
 
     // The token wins over the session: the verification, not the collector.
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
@@ -328,6 +353,11 @@ describe('OnboardingPage', () => {
     ).toBe(true);
     expect(useAuthStore.getState().isAuthenticated()).toBe(false);
     expect(screen.queryByRole('button', { name: 'Abmelden' })).toBeNull();
+    // Only the local session ended: the IdP session of the superadmin is
+    // still there, so the sign-in must ask for a fresh login.
+    expect(
+      followLogin(screen.getByRole('link', { name: 'Jetzt anmelden und fortfahren' })),
+    ).toEqual({ from: '/onboarding', forceLogin: true });
   });
 
   it('says that the server has no self-signup set up (503 on the challenge)', async () => {

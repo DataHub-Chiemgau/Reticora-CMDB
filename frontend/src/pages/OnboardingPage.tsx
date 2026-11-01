@@ -48,6 +48,15 @@ export function currentStep(
   return 'done';
 }
 
+/**
+ * ONBOARDING_LOGIN_STATE is the router state of the sign-in after the
+ * verification: back to the onboarding, and forceLogin, which asks the
+ * sign-in page for a fresh IdP login (prompt=login) instead of the IdP's
+ * single sign-on session. A tab without a Reticora session still shares that
+ * session with the other tabs, e.g. the superadmin's (F-351).
+ */
+const ONBOARDING_LOGIN_STATE = { from: '/onboarding', forceLogin: true } as const;
+
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.detail || err.message;
   return err instanceof Error ? err.message : String(err);
@@ -367,9 +376,11 @@ function VerifyStep({ token, signedInAs }: { token: string; signedInAs?: string 
             </Button>
           </SignedInHint>
         ) : (
+          // Also a tab without a Reticora session (a new tab, or one after a
+          // local-only logout) can share the IdP session of another account.
           <Link
             to="/login"
-            state={{ from: '/onboarding' }}
+            state={ONBOARDING_LOGIN_STATE}
             className="inline-block font-medium text-primary underline"
           >
             {t('onboarding.verify.login')}
