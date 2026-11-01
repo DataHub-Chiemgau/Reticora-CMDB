@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-676 | 22 | 18,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-678 | 24 | 21,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **324** | **419,5** | |
+| **Summe** | | **326** | **422,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>22 WPs · 18,5 PT"]
+    K7N["K7-Nachträge<br/>24 WPs · 21,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -443,6 +443,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-674](#wp-674--max_cis-zählt-alle-aktiven-cis-der-organisation-unabhängig-vom-scope-des-schreibenden) | `k7n-max-cis-org-count` | `max_cis` zählt alle aktiven CIs der Organisation, unabhängig vom Scope des Schreibenden | K7N | 1 | F-403 | WP-072, WP-073, WP-334, WP-064, WP-670 |
 | [WP-675](#wp-675--review-auflösung-genau-einmal-eintrag-gesperrt-wirkung-und-auflösung-in-einer-transaktion-gleichzeitige-zweite-auflösung-409) | `k7n-review-resolve-once` | Review-Auflösung genau einmal: Eintrag gesperrt, Wirkung und Auflösung in einer Transaktion, gleichzeitige zweite Auflösung 409 | K7N | 1,5 | F-404 | WP-088, WP-089, WP-087, WP-554, WP-643 |
 | [WP-676](#wp-676--review-auflösung-abgelehnte-wirkungen-mit-dem-fehlervertrag-der-ressource-409422404-statt-500-unknown_relationship-accept-ohne-kante-abgelehnt) | `k7n-review-resolve-errors` | Review-Auflösung: abgelehnte Wirkungen mit dem Fehlervertrag der Ressource (409/422/404 statt 500); `unknown_relationship` accept ohne Kante abgelehnt | K7N | 1,0 | F-405 | WP-088, WP-089, WP-643, WP-671, WP-675 |
+| [WP-677](#wp-677--enrollment-code-bindet-den-collector-an-client-und-site-seines-erzeugers) | `k7n-enrollment-client-binding` | Enrollment-Code bindet den Collector an Client und Site seines Erzeugers | K7N | 1,5 | F-406 | WP-144, WP-145, WP-147, WP-153, WP-668 |
+| [WP-678](#wp-678--edge-ingest-bindet-die-records-eines-collectors-an-dessen-client) | `k7n-edge-ingest-collector-client` | Edge-Ingest bindet die Records eines Collectors an dessen Client | K7N | 1 | F-407 | WP-146, WP-153, WP-481, WP-334, WP-677 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19628,6 +19630,121 @@ TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** `override_conflict` accept auf einem inzwischen gelöschten CI (Probe: 200, der Override des gelöschten CI wird entfernt) und `probable_duplicate` merge mit einer `ci_id` ohne UUID-Form im Payload (400 statt 404/422) – als Kandidaten gemeldet, nicht Teil von F-405; die Adoption nach Erhöhung von `max_cis` (`AdoptUnlicensed`) bricht an einem Eintrag ohne Gerätesatz weiter ab wie bisher; weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-677 – Enrollment-Code bindet den Collector an Client und Site seines Erzeugers
+
+**Schlüssel:** `k7n-enrollment-client-binding` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-144 (`d-col-token`, Enrollment-Code, COL-04), WP-145 (`d-col-cert`, Collector-CA), WP-147 (`d-col-bundle`), WP-153 (`d-scope`, `scope_suggested` nach dem Enrollment), WP-668 (`k7n-bound-key-creator-scope`, Erzeuger-Scope gebundener API-Keys, Muster E-98)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-406](../../../audit/g1-reaudit/FINDINGS.md#f-406) | P2 | Enrollment-Code ohne Client-Bindung: ein auf Client 1 beschränkter Engineer schreibt über das unauthentifizierte Enrollment einen aktiven Collector in Client 2 oder org-weit ein | schließt | K7-Wiederholungsprüfung r2-b3 (Auditor und adversarialer Verifier auf `96bb4d0`, Probe `k7/ver/r2-b3/evidence/k-reaudit-2/WP-145/verify-k1-enrollment-client-binding.log`) |
+
+**Problem:** `collector_enrollment_code` (000042) trägt nur die Organisation. `POST /collectors/enrollment-codes` (`discovery.go:851` auf `e5c2d86`) speichert keinen Scope des Erzeugers, und das unauthentifizierte `POST /collectors/enroll` (`discovery.go:901`) übernimmt die `client_id` des Bodys; `EnrollCollectorWithQuota` (`pg_repository.go:806`) registriert unter `OrgWideScope`. Ein Engineer, dem `collector:manage` nur in Client 1 zugewiesen ist und dem `POST /collectors` für Client 2 und org-weit 403 antwortet, schreibt so einen aktiven Collector mit mTLS-Zertifikat in Client 2 oder org-weit ein. Er sieht ihn danach nicht mehr; der Collector meldet Daten und Scope-Vorschläge in den fremden Client und erhält dort angelegte Zugangsdaten über den Scope-Kanal (COL-04, TEN-09, E-08).
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000187: `collector_enrollment_code` erhält `binding_recorded` (BOOLEAN, Default false), `client_id` und `site_id` (Fremdschlüssel auf `client(id, organization_id)` bzw. `site(id, organization_id)`, `ON DELETE CASCADE`), Check `binding_recorded OR (client_id IS NULL AND site_id IS NULL)`, einen Trigger, der den Client aus der Site ableitet und einen abweichenden ablehnt (fester `search_path`, kein SECURITY DEFINER), und die restriktiven Policies `collector_enrollment_code_scope_select|insert|update|delete`, die Client- und Site-Scope wie die Policies von `collector` anwenden (Lesen zeigt auch ungebundene Codes; das System-Flag darf nur lesen). Down entfernt alles; Roundtrip, Schema-Baseline, `TestRLSCatalog` und `TestRLSMatrix` grün.
+- [ ] `POST /api/v1/collectors/enrollment-codes` (spec-first) nimmt optional `client_id` und `site_id` an und nennt die Bindung in der Antwort. Maßgeblich ist der Scope, in dem der Erzeuger `collector:manage` hält (`Principal.ScopeFor`, geschnitten mit dem Scope der Anfrage; API-Keys: Scope der Anfrage; ohne Scope 403): eine gewählte ID außerhalb → 403; ohne Wahl bindet genau ein Client bzw. eine Site, mehrere → 422, keiner → 403; eine org-weite Dimension bleibt ungebunden. Eine Site eines anderen Clients → 422. `created_by` wird belegt.
+- [ ] `POST /api/v1/collectors/enroll` registriert den Collector im Client und in der Site des Codes; eine abweichende `client_id` → 422, nichts angelegt, der Code bleibt unbenutzt (Prüfung vor Quota und Verbrauch, `api.WriteFieldError` statt 500). Der Code eines org-weiten Erzeugers verhält sich wie bisher (beliebiger Client der Organisation oder org-weit). Codes ohne `binding_recorded` (vor 000187 oder von einem älteren Build erzeugt) werden nicht eingelöst (401).
+- [ ] `TestEnrollmentCodeBindsCreatorClients` (`internal/server/enrollment_client_binding_integration_test.go`, PostgreSQL, Produktionsrouter mit Collector-CA und OpenAPI-Validierung) deckt die Fälle des Retests von F-406 ab; auf `e5c2d86` rot (201 mit Collector in Client 2), grün nach der Korrektur, auch als `nobody`.
+- [ ] `docs/betrieb/upgrade-hinweise.md` beschreibt die Behandlung offener Altcodes (fail-closed, Abfrage für Betreiber, Prüfung bereits eingeschriebener Collectors); `docs/betrieb/collector-ca.md` nennt die Bindung.
+- [ ] Bestehende Tests der Pakete `discovery`, `server`, `tenant/...`, `cmd/server`, `api` und `database` (allein) grün; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline).
+
+**Dateien (18 Einträge):**
+
+- backend/migrations/000187_enrollment_code_client_binding.up.sql
+- backend/migrations/000187_enrollment_code_client_binding.down.sql
+- backend/internal/discovery/discovery.go
+- backend/internal/discovery/enrollment_binding.go
+- backend/internal/discovery/pg_repository.go
+- backend/internal/discovery/collector_quota_test.go
+- backend/internal/server/enrollment_client_binding_integration_test.go
+- backend/internal/tenant/rls/fixtures_test.go
+- backend/internal/tenant/rls/system_worker_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/schema-baseline.md
+- docs/betrieb/upgrade-hinweise.md
+- docs/betrieb/collector-ca.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** Migration 000187 (Spalten, Fremdschlüssel, Check, Trigger `trg_collector_enrollment_code_site_binding`, vier restriktive Policies). Bestehende Policies (`collector_enrollment_code_isolation`, `_system_select`) bleiben. Die Erzeugung läuft als `reticora_app` mit den Tenant-GUCs der Anfrage (`database.WithRequestTenant`), das Einlösen wie bisher: Suche nach dem Hash unter `WithSystem` (nur Lesen), Registrierung unter `OrgWideScope` der Organisation des Codes. Keine neuen Rechte, keine Änderung an `withSystemCallers`.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/discovery/ ./internal/server/ ./internal/tenant/... ./cmd/server/ ./internal/api/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`, `TEST_NATS_SERVER_BIN`.
+- `go test -count=1 -p 1 ./internal/database/...` allein (`TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`).
+- `go test -count=1 -v -run '^TestEnrollmentCodeBindsCreatorClients$' ./internal/server/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+COL-04;[B];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677
+TEN-09;[Q];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung (E-08 fail-closed; Muster E-98/WP-668 für den Scope des Erzeugers). Hinweis für die Leitung: Die Web-Oberfläche (`DiscoveryPage`, `OnboardingPage`) erzeugt Codes ohne `client_id`; ein auf mehrere Clients beschränkter Nutzer erhält dort jetzt 422 statt eines unbeschränkten Codes und muss den Client über die API wählen. Eine Client-Auswahl im Dialog ist nicht Teil dieses WP.
+
+**Nicht Bestandteil:** Client-/Site-Auswahl beim Erzeugen eines Codes in der Web-Oberfläche. Bereits eingeschriebene Collectors werden nicht umgebunden (Hinweis zur Prüfung in `upgrade-hinweise.md`). Die Bindung der Edge-Ingest-Records an den Client des Collectors (F-407, WP-678). Beobachtung ohne Änderung: `PATCH /collectors/{id}` und `POST /collectors` geben eine `api.FieldError` des Repositorys (`collectorError`, etwa „the site belongs to another client“) über `api.WriteRepoError` als 500 statt 422 aus.
+
+### WP-678 – Edge-Ingest bindet die Records eines Collectors an dessen Client
+
+**Schlüssel:** `k7n-edge-ingest-collector-client` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-146 (`d-col-nats`, Edge-Datenpfad), WP-153 (`d-scope`), WP-481 (`t3-ingest-poison`, Fehler je Record, F-090), WP-334 (`nfr03-lanes`, Ingest-Spuren), WP-677 (`k7n-enrollment-client-binding`, F-406)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-407](../../../audit/g1-reaudit/FINDINGS.md#f-407) | P2 | Edge-Ingest bindet die Records eines client-gebundenen Collectors nicht an dessen Client: CIs in fremden Clients angelegt und geändert | schließt | K7-Wiederholungsprüfung r2-b3 (adversarialer Verifier auf `96bb4d0`, Probe `k7/ver/r2-b3/evidence/k-reaudit-2/WP-153/verify-k3-edge-record-client.log`) |
+
+**Problem:** `edgeIngest` (`backend/internal/discovery/edge_ingest.go:146` auf `e5c2d86`) läuft im org-weiten Systemkontext des NATS-Endpunkts und übernimmt `client_id`, `site_id` und `scope_id` jedes Records ungeprüft (`itemFromRecord`, `newIngestMessages`); `collectorScopeContext` gilt nur für Metriken. Ein an Client 1 gebundener Collector legt so CIs in Client 2 oder org-weit an und ändert über einen passenden Identitätsschlüssel CIs von Client 2 (`updated` 1, `management_ip` geändert), während ein Engineer von Client 1 über `POST /discovery/ingest` dafür 403 erhält. Über die Queue trägt die Nachricht denselben org-weiten Scope (DIS-05, TEN-09, E-08).
+
+**Akzeptanzkriterien:**
+
+- [ ] `edgeIngest` liest den Collector und verarbeitet die Records in seinem Client-Scope (`collectorIngestContext`); die Queue-Nachricht trägt diesen Scope zum Consumer. Die Site-Dimension bleibt beim Ingest org-weit (ein entdecktes CI erhält seine Site aus einer Location; begründet im Code und in `docs/betrieb/ingest-spuren.md`). Metriken behalten Client- und Site-Scope (`collectorScopeContext`, F-394).
+- [ ] Records eines client-gebundenen Collectors: ohne `client_id` → Client des Collectors (bei Site-Bindung auch dessen Site); fremde `client_id`, fremde Site, eine Site eines anderen Clients oder eine `scope_id`, die der Client nicht sieht oder die einem anderen Client gehört → Fehler je Record (403, nicht wiederholbar), nicht veröffentlicht; die übrigen Records des Batches werden verarbeitet (WP-481); sind alle abgewiesen, antwortet die Edge 403. Eine fehlgeschlagene Nachschlage-Abfrage ist ein vorübergehender Fehler des Records. Records org-weiter Collectors bleiben unverändert.
+- [ ] Die Identitätsauflösung sieht nur CIs des Collector-Clients: Ein Record mit der Seriennummer eines CI eines anderen Clients ändert dieses nicht (Abweisung 409 an der Eindeutigkeit der Seriennummer je Organisation, wie über die API).
+- [ ] `TestEdgeIngestBindsRecordsToCollectorClient` (`internal/discovery/edge_record_client_integration_test.go`, PostgreSQL) deckt die Fälle des Retests von F-407 ab, auch den Queue-Weg; auf `e5c2d86` rot (CI in Client 2, Client-2-CI geändert), grün nach der Korrektur, auch als `nobody`.
+- [ ] `TestIngestStatementBudget`, `TestRediscoverStatementBudget`, die Spur- und Poison-Tests und die übrigen Tests der Pakete `discovery`, `tenant/...`, `server` und `cmd/server` grün; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline).
+
+**Dateien (9 Einträge):**
+
+- backend/internal/discovery/edge_ingest.go
+- backend/internal/discovery/consumer.go
+- backend/internal/discovery/scope.go
+- backend/internal/discovery/edge_record_client_integration_test.go
+- docs/betrieb/ingest-spuren.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Der Edge-Ingest läuft als `reticora_app` mit dem Client-Scope des Collectors (`database.WithRequestTenant` über den Kontext des Requests bzw. den Scope der Queue-Nachricht); die Policies von `ci`, `review_item` und `site` (`SiteClient`) wirken unverändert. Keine neuen Rechte, kein `WithSystem`-Pfad.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/discovery/ ./internal/tenant/... ./internal/server/ ./cmd/server/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`, `TEST_NATS_SERVER_BIN`.
+- `go test -count=1 -v -run '^TestEdgeIngestBindsRecordsToCollectorClient$' ./internal/discovery/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+DIS-05;[B];D;backend/internal/discovery/edge_record_client_integration_test.go;WP-678
+TEN-09;[Q];D;backend/internal/discovery/edge_record_client_integration_test.go;WP-678
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung. Hinweise für die Leitung: (1) Ein an eine Site gebundener Collector bindet seine Records an seinen Client und seine Site (Review-Items tragen sie), die entdeckten CIs aber nur an den Client, weil ein CI seine Site aus einer Location ableitet; eine Platzierung der CIs an der Site des Collectors wäre eine Produktentscheidung. (2) Der 409 für einen Record mit der Seriennummer eines fremden CI wird wie bisher (WP-334, `retryReason` „identity“) als wiederholbar eingestuft: Über die Queue wird der Record bis `MaxDeliver` erneut zugestellt und landet dann im Dead Letter; der Collector zählt ihn in der 202-Antwort als verloren. Er verrät, dass die Seriennummer in der Organisation existiert, wie für einen Client-1-Principal über die API.
+
+**Nicht Bestandteil:** Nachrichten, die vor dem Update mit org-weitem Scope in der Queue liegen, werden noch org-weit verarbeitet (höchstens bis zu ihrer Zustellung). Der HTTP-Ingest (`POST /discovery/ingest`) eines eingeschränkten Principals ohne `client_id` (403 per RLS, unverändert). Die Bindung des Enrollment-Codes (F-406, WP-677).
 
 ## Zurückgestellte Befunde
 
