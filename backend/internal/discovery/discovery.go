@@ -382,6 +382,10 @@ func (r *MemoryRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode
 		r.mu.Unlock()
 		return nil, fmt.Errorf("enrollment code invalid, expired or already used")
 	}
+	if err := applyEnrollmentBinding(code.ClientID, code.SiteID, c); err != nil {
+		r.mu.Unlock()
+		return nil, err
+	}
 	if quota != nil {
 		if err := quota.AllowCreate(ctx, code.OrganizationID, entitlement.LimitMaxCollectors, r.countCollectors(code.OrganizationID)); err != nil {
 			r.mu.Unlock()
@@ -431,12 +435,20 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID strin
 // enroll. Only the SHA-256 hash is persisted; the raw code is carried on the
 // struct only transiently between creation and hashing.
 type EnrollmentCode struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organization_id"`
-	Label          string     `json:"label,omitempty"`
-	ExpiresAt      time.Time  `json:"expires_at"`
-	UsedAt         *time.Time `json:"used_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	// ClientID and SiteID bind the enrolled collector (F-406, migration
+	// 000187): "" leaves the dimension to the collector, which a creator
+	// holding collector:manage org-wide there allows. A site decides the
+	// client.
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	// CreatedBy is the user that minted the code.
+	CreatedBy string     `json:"created_by,omitempty"`
+	Label     string     `json:"label,omitempty"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 
 	// rawCode is never serialized; it exists only so the handler can return
 	// the code once at creation time.
@@ -858,9 +870,21 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Label      string `json:"label"`
 		TTLMinutes int    `json:"ttl_minutes,omitempty"`
+		// ClientID and SiteID bind the code to a client and site within
+		// the creator's scope (F-406).
+		ClientID string `json:"client_id,omitempty"`
+		SiteID   string `json:"site_id,omitempty"`
 	}
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	// The code binds the collector to the client and site the creator may
+	// register collectors in (F-406, E-08): a body client_id at enrollment
+	// cannot leave them.
+	clientID, siteID, err := enrollmentBinding(r.Context(), req.ClientID, req.SiteID)
+	if err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	// Enrollment codes are valid for 24 hours (COL-04); a shorter validity
@@ -877,21 +901,33 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 	}
 	code := &EnrollmentCode{
 		OrganizationID: t.OrganizationID,
+		ClientID:       clientID,
+		SiteID:         siteID,
 		Label:          req.Label,
+		CreatedBy:      t.UserID,
 		ExpiresAt:      time.Now().UTC().Add(ttl),
 	}
 	code.SetRawCode(raw)
 	if err := h.repo.CreateEnrollmentCode(r.Context(), code); err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, map[string]any{
+	out := map[string]any{
 		"id":         code.ID,
 		"code":       raw,
 		"label":      code.Label,
 		"expires_at": code.ExpiresAt.UTC().Format(time.RFC3339),
-	})
+	}
+	if code.ClientID != "" {
+		out["client_id"] = code.ClientID
+	}
+	if code.SiteID != "" {
+		out["site_id"] = code.SiteID
+	}
+	api.WriteJSON(w, http.StatusCreated, out)
 }
 
 // EnrollCollector handles POST /api/v1/collectors/enroll. The enrollment code
@@ -919,7 +955,8 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 
 	// The code is consumed and the collector registered (active) in one
 	// step: the request is unauthenticated, the code authorizes registration
-	// for its organization (E-08); a code works exactly once (COL-04).
+	// for its organization and in the client and site it is bound to (E-08,
+	// F-406); a code works exactly once (COL-04).
 	c := &Collector{
 		Name:     req.Name,
 		Version:  req.Version,
@@ -945,7 +982,9 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case api.WriteEntitlementError(w, err):
 		case errors.As(err, &fe):
-			api.WriteRepoError(w, err)
+			// A client or site outside the code's binding (F-406) or an
+			// unknown site: 422, the code stays unused.
+			api.WriteFieldError(w, err)
 		case errors.Is(err, ErrInvalidCSR):
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		default:

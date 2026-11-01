@@ -4024,7 +4024,7 @@ export interface paths {
     put?: never;
     /**
      * Mint a single-use collector enrollment code
-     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll.
+     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client.
      */
     post: operations['createCollectorEnrollmentCode'];
     delete?: never;
@@ -4044,7 +4044,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a collector with an enrollment code
-     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04). The enrollment counts against max_collectors of the code's organization (ENT-03): at the limit it answers 403 entitlement-limit, registers nothing and leaves the code unused and valid.
+     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04). The enrollment counts against max_collectors of the code's organization (ENT-03): at the limit it answers 403 entitlement-limit, registers nothing and leaves the code unused and valid. The collector is registered in the client and site the code is bound to (see createCollectorEnrollmentCode); `client_id` may then be left out or must name that client, otherwise the answer is 422, nothing is registered and the code stays unused. Only a code without a client binding takes the `client_id` of the request (a client of the code's organization; without it the collector is organization-wide). Codes minted before the binding was recorded are not accepted (401).
      */
     post: operations['enrollCollector'];
     delete?: never;
@@ -21281,6 +21281,16 @@ export interface operations {
           label?: string;
           /** @description Validity in minutes; defaults to and is capped at 1440 (24 h, COL-04). */
           ttl_minutes?: number;
+          /**
+           * Format: uuid
+           * @description Client the collector is enrolled in; must lie in the caller's scope.
+           */
+          client_id?: string;
+          /**
+           * Format: uuid
+           * @description Site the collector is bound to; must lie in the caller's scope and decides the client.
+           */
+          site_id?: string;
         };
       };
     };
@@ -21297,11 +21307,23 @@ export interface operations {
             label?: string;
             /** Format: date-time */
             expires_at?: string;
+            /**
+             * Format: uuid
+             * @description Client the code binds the collector to; absent when unbound.
+             */
+            client_id?: string;
+            /**
+             * Format: uuid
+             * @description Site the code binds the collector to; absent when unbound.
+             */
+            site_id?: string;
           };
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   enrollCollector: {
@@ -21317,6 +21339,7 @@ export interface operations {
           code: string;
           name: string;
           version?: string;
+          /** @description Client of the collector; must be the code's client when the code is bound to one. */
           client_id?: string;
           /** @description PEM certificate signing request */
           csr?: string;

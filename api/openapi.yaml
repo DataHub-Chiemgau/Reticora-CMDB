@@ -8479,7 +8479,15 @@ paths:
       description: >-
         Zero-config onboarding: returns the plaintext code exactly once. Only
         its SHA-256 hash is stored. The collector redeems the code via
-        /api/v1/collectors/enroll.
+        /api/v1/collectors/enroll. The code is bound to the client and site
+        the collector is enrolled in (TEN-09, E-08), within the scope in
+        which the caller holds collector:manage, as POST /api/v1/collectors
+        allows it: `client_id` and `site_id` choose them; without them a
+        caller restricted to exactly one client (site) is bound to it, a
+        caller restricted to several must choose (422), and a dimension the
+        caller holds org-wide stays unbound, so the collector may name a
+        client of the organization when it enrolls. A site decides the
+        client.
       requestBody:
         required: true
         content:
@@ -8492,6 +8500,14 @@ paths:
                 ttl_minutes:
                   type: integer
                   description: Validity in minutes; defaults to and is capped at 1440 (24 h, COL-04).
+                client_id:
+                  type: string
+                  format: uuid
+                  description: Client the collector is enrolled in; must lie in the caller's scope.
+                site_id:
+                  type: string
+                  format: uuid
+                  description: Site the collector is bound to; must lie in the caller's scope and decides the client.
       responses:
         '201':
           description: Enrollment code created; plaintext returned once
@@ -8504,10 +8520,22 @@ paths:
                   code: { type: string }
                   label: { type: string }
                   expires_at: { type: string, format: date-time }
+                  client_id:
+                    type: string
+                    format: uuid
+                    description: Client the code binds the collector to; absent when unbound.
+                  site_id:
+                    type: string
+                    format: uuid
+                    description: Site the code binds the collector to; absent when unbound.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/collectors/enroll:
     post:
@@ -8523,7 +8551,14 @@ paths:
         collector's client certificate (CN = collector id, 90 days, COL-04).
         The enrollment counts against max_collectors of the code's
         organization (ENT-03): at the limit it answers 403 entitlement-limit,
-        registers nothing and leaves the code unused and valid.
+        registers nothing and leaves the code unused and valid. The collector
+        is registered in the client and site the code is bound to (see
+        createCollectorEnrollmentCode); `client_id` may then be left out or
+        must name that client, otherwise the answer is 422, nothing is
+        registered and the code stays unused. Only a code without a client
+        binding takes the `client_id` of the request (a client of the code's
+        organization; without it the collector is organization-wide). Codes
+        minted before the binding was recorded are not accepted (401).
       requestBody:
         required: true
         content:
@@ -8535,7 +8570,9 @@ paths:
                 code: { type: string }
                 name: { type: string }
                 version: { type: string }
-                client_id: { type: string }
+                client_id:
+                  type: string
+                  description: Client of the collector; must be the code's client when the code is bound to one.
                 csr: { type: string, description: PEM certificate signing request }
       responses:
         '201':

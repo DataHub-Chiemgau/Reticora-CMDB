@@ -93,7 +93,7 @@ func TestSystemWorkersPerOrganization(t *testing.T) {
 		raw := "scopetest-41-code-" + string(rune('a'+i))
 		sum := sha256.Sum256([]byte(raw))
 		if _, err := f.Admin.Exec(bg,
-			`INSERT INTO collector_enrollment_code (organization_id, code_hash, expires_at) VALUES ($1, $2, now() + interval '1 hour')`,
+			`INSERT INTO collector_enrollment_code (organization_id, code_hash, expires_at, binding_recorded) VALUES ($1, $2, now() + interval '1 hour', true)`,
 			org, hex.EncodeToString(sum[:])); err != nil {
 			t.Fatalf("seed enrollment code: %v", err)
 		}

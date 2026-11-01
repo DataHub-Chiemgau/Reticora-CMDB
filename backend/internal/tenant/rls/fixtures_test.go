@@ -73,6 +73,8 @@ var matrixOverrides = map[string]map[string]string{
 	"location":             {"kind": "site"},
 	"event_outbox":         {"type": "ci.created"},
 	"notification_channel": {"kind": "inapp", "provider": "inapp"},
+	// Rows with a client or site need a recorded binding (000187).
+	"collector_enrollment_code": {"binding_recorded": "true"},
 	// Global rows (organization_id NULL) must be system rows.
 	"lifecycle_definition":   {"is_system": "true"},
 	"relationship_type":      {"is_system": "true"},

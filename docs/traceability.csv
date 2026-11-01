@@ -1103,3 +1103,5 @@ API-03;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;
 API-05;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
 DIS-09;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
 TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+COL-04;[B];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677
+TEN-09;[Q];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677

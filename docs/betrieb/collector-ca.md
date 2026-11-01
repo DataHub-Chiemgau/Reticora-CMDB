@@ -14,6 +14,12 @@ Anforderungen: COL-04 ([B]), COL-02 ([B]). Umsetzung: WP-145, WP-146, WP-375
   90 Tage. Der private Schlüssel verlässt den Collector nicht. Jede Ausstellung
   steht in `collector_certificate` (Seriennummer, Fingerprint, Laufzeit,
   Sperre).
+- Der Enrollment-Code bindet den Collector an Client und Site, in denen sein
+  Erzeuger Collectors anlegen darf (F-406, Migration 000187): ein auf einen
+  Client beschränkter Erzeuger erhält einen Code dieses Clients, bei mehreren
+  wählt er beim Erzeugen (`client_id`, `site_id`). Eine abweichende
+  `client_id` beim Enrollment wird mit 422 abgelehnt. Nur Codes org-weiter
+  Erzeuger lassen den Client offen.
 - Deaktivieren eines Collectors sperrt alle seine Zertifikate (CRL unter
   `GET /api/v1/collectors/pki`); der Callout von `nats-edge` weist sie ab.
 

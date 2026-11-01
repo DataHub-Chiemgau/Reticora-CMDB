@@ -411,6 +411,58 @@ Accounts und einen Key ohne gespeicherten Scope gegen PostgreSQL;
 `TestBoundKeyCreatorCeiling` (`backend/internal/identity/ceiling_test.go`)
 den Schnitt je Recht.
 
+## Release-Hinweis: Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers (F-406)
+
+Stand: 2026-11-01. Umsetzung: WP-677 (Migration 000187). Anforderungen:
+COL-04, TEN-09, E-08.
+
+Ein Enrollment-Code trug bisher nur die Organisation. Das Einlösen
+(`POST /api/v1/collectors/enroll`, ohne Anmeldung) übernahm die `client_id`
+des Request-Bodys: Ein auf Client 1 beschränkter Principal mit
+`collector:manage` legte so einen aktiven Collector samt Client-Zertifikat in
+Client 2 oder einen org-weiten Collector an, obwohl ihm `POST /collectors`
+beides verweigert.
+
+- Neue Codes speichern in `collector_enrollment_code` den Client und die
+  Site, an die der Collector gebunden wird (`client_id`, `site_id`,
+  `binding_recorded = true`): aus dem Scope, in dem der Erzeuger
+  `collector:manage` hält, oder die beim Erzeugen gewählten
+  (`client_id`/`site_id` im Body, innerhalb dieses Scopes). Ein auf mehrere
+  Clients beschränkter Erzeuger muss einen wählen (422). Beim Einlösen
+  landet der Collector in diesem Client; eine andere `client_id` ergibt 422,
+  nichts wird angelegt, der Code bleibt gültig. Codes org-weiter Erzeuger
+  bleiben ungebunden: Der Collector darf wie bisher einen Client der
+  Organisation nennen oder org-weit bleiben.
+- Codes, die vor 000187 erzeugt wurden, haben keine gespeicherte Bindung
+  (`binding_recorded = false`). Mit welchem Scope ihr Erzeuger sie erzeugt
+  hat, ist nicht bekannt (`created_by` war nicht belegt). Sie werden ab dem
+  Upgrade nicht mehr eingelöst (401, fail-closed); dasselbe gilt für Codes,
+  die ein noch laufender älterer Build während des Rollouts erzeugt. Ein
+  Code gilt höchstens 24 Stunden: Ein Administrator erzeugt für noch nicht
+  eingerichtete Collectors einen neuen Code. Offene Altcodes findet ein
+  Betreiber so:
+
+  ```sql
+  SELECT organization_id, id, label, expires_at
+    FROM collector_enrollment_code
+   WHERE used_at IS NULL AND expires_at > now() AND NOT binding_recorded;
+  ```
+
+- Bereits eingeschriebene Collectors ändern sich nicht. Ein Collector, der
+  mit einem Code eines eingeschränkten Erzeugers in einen fremden Client
+  oder org-weit eingeschrieben wurde, ist aus den Daten nicht sicher zu
+  erkennen; Administratoren prüfen die Liste der Collectors (Client, Name,
+  Einschreibezeit, Audit-Eintrag `collector.enrolled`) und deaktivieren
+  unbekannte Collectors.
+- Rollback: `000187_enrollment_code_client_binding.down.sql` entfernt
+  Spalten, Trigger und Policies. Ein früherer Build übernimmt die
+  `client_id` des Bodys dann wieder (F-406 offen).
+
+`TestEnrollmentCodeBindsCreatorClients`
+(`backend/internal/server/enrollment_client_binding_integration_test.go`)
+prüft Bindung, Wahl, Ablehnung, Site-Bindung, org-weite Codes und Altcodes
+gegen PostgreSQL.
+
 ## Prüfung
 
 `TestMigrationsRoundtrip` (`backend/internal/database/migrations_roundtrip_integration_test.go`)
