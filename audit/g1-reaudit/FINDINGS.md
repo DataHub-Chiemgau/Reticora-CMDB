@@ -32,9 +32,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 1 |
 | P1 | 5 |
-| P2 | 21 |
-| P3 | 22 |
-| **Summe** | **49** |
+| P2 | 22 |
+| P3 | 23 |
+| **Summe** | **51** |
 
 ## Übersicht
 
@@ -89,6 +89,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-399](#f-399) | P2 | `max_cis` wird über Wiederherstellen, Unmerge und die Review-Auflösung `new` umgangen: über dem Limit entstehen aktive CIs | WP-073 (K7) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-670 |
 | [F-400](#f-400) | P3 | Alias-Pfade umgehen die Entitlement-Gates discovery und rack_view: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Schreibzugriffe über `/locations` und der NATS-Scope-Kanal | WP-072 (K7) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-671 |
 | [F-403](#f-403) | P2 | `max_cis` zählt nur die CIs im Scope des Schreibenden: ein auf einen Client beschränkter Principal legt über das Limit der Organisation an | WP-670 (K7-Nachträge) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-674 |
+| [F-404](#f-404) | P2 | Gleichzeitige Auflösung desselben Review-Eintrags: beide Anfragen 200, die Wirkung läuft zweimal (zwei CIs, zwei `review.resolved`, `resolved_by` = letzter Schreiber) | WP-088 (K7) | belegt | backend/internal/server/review_resolve_concurrency_integration_test.go | WP-675 |
+| [F-405](#f-405) | P3 | Review-Auflösung: abgelehnte Wirkung (`*api.FieldError`, fehlende Abhängigkeit) antwortet 500 statt 409/422/404; `unknown_relationship` accept mit ungültiger Quelle 200 ohne Kante | WP-088 (K7) | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-676 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1135,6 +1137,64 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	0.908s
   FAIL
   ```
+
+<a id="f-404"></a>
+### F-404 (P2) – Gleichzeitige Auflösung desselben Review-Eintrags: beide Anfragen 200, die Wirkung läuft zweimal (zwei CIs, zwei `review.resolved`, `resolved_by` = letzter Schreiber)
+
+- **Gefunden in:** Wiederholungsprüfung (K7, Runde r2-b2) von WP-088 auf `8e761c2`, von einem adversarialen Verifier bestätigt; der Code der Auflösung ist auf `e5c2d86` identisch · **Betroffene Anforderungen:** REC-08, API-05 (WP-088), REC-12 (WP-089), CI-13 (WP-087) · **Komponente:** backend/internal/reviews/pg_repository.go (`ResolveReviewItem`: `UPDATE review_item … WHERE id = $2 AND organization_id = $3 AND <visible>` ohne `status = 'open'`), backend/internal/reviews/service.go (`Resolve`: Statusprüfung auf einem früheren, nicht gesperrten Lesen, Wirkung und Auflösung in getrennten Transaktionen), backend/internal/discovery/review.go (`resolveCIReview`, ActionNew: `inTx` legt das CI an und ruft `ResolveReviewItem`, das nicht scheitert), backend/internal/discovery/unlicensed.go (`adoptUnlicensed`), backend/internal/ci/merge.go (`MergeAs`, Job der CI-12-Zusammenführung) · **Quelle:** Verifier-Probe `TestV2ConcurrentReviewResolution` über den vollständigen `server.NewRouter` (scratchpad k7/ver/r2-b2/evidence/k-reaudit-2/WP-088/verify-probe-src/, Protokoll verify-review-resolve-concurrency.log)
+- **Reproduktion:** Offener Eintrag, zwei Benutzer derselben Organisation senden gleichzeitig `POST /api/v1/review-items/{id}/resolve`. `unclassified_device` (ohne `reason`) `new` ‖ `new`: in 8 von 8 Runden beide 200, zwei CIs mit `attributes.review_item_id` = Eintrag und zwei Ereignisse `review.resolved`. `duplicate_ip` `dismiss` ‖ `dismiss` zweier Benutzer: 8/8 beide 200, zwei Ereignisse, `resolved_by` ist der letzte Schreiber. `unclassified_device` `new` ‖ `dismiss`: 8/8 beide 200, der Eintrag endet `resolved/new`, der Dismisser erhielt aber „dismissed“. `override_conflict` `accept` ‖ `dismiss`: 6/6 beide 200, der Override ist entfernt. Kontrolle sequentiell: 200, dann 409 `review item already resolved`, ein CI.
+- **Soll:** REC-08/API-05: Ein Eintrag wird genau einmal aufgelöst. Von zwei gleichzeitigen Auflösungen gewinnt eine (200), die andere erhält 409 und bewirkt nichts; die Wirkung (CI anlegen, Merge, Reaktivierung, Werte übernehmen, Scope anlegen, Override entfernen, Kante anlegen) läuft genau einmal und ist mit der Auflösung atomar; ein `review.resolved`; `resolved_by`, `status` und `action` sind die des Gewinners. CI-13: kein Duplikat-CI.
+- **Ist:** `Service.Resolve` liest den Eintrag ohne Sperre, prüft `status = 'open'`, führt die Wirkung aus (in eigenen Transaktionen) und schreibt die Auflösung mit einem `UPDATE` ohne Statusbedingung. Beide Anfragen sehen den Eintrag offen, beide Wirkungen laufen, beide `UPDATE`s gelingen (der zweite überschreibt den ersten), jede schreibt `review.resolved`. Bei `new` legt `inTx` das CI an und ruft `ResolveReviewItem`, das nicht scheitert.
+- **Nutzerwirkung:** Doppelte CIs desselben Geräts (CI-13 verletzt, Lizenzzählung `max_cis` erhöht), widersprüchliche Ergebnisse für die beiden Bearbeiter (der Dismisser erhält „dismissed“, gespeichert ist `resolved/new`), doppelte Benachrichtigungen und Webhook-Ereignisse, falscher Bearbeiter in der Historie; ein abgelehnter Override-Konflikt kann trotzdem den Override entfernen.
+- **Ursache (belegt):** Weder Sperre noch bedingter Statusübergang; Wirkung und Statuswechsel sind getrennte Transaktionen. Die sequentielle Kontrolle zeigt, dass nur die vorgelagerte, ungesperrte Statusprüfung schützt.
+- **Empfehlung:** Den Eintrag in derselben Transaktion wie die Wirkung vor der Wirkung sperren (`SELECT … FOR UPDATE`) und den Status dort erneut prüfen; den Statusübergang zusätzlich bedingt machen (`AND status = 'open'`, keine Zeile → `ErrAlreadyResolved` → 409); alle Wirkungen jedes Review-Typs in diese Transaktion legen, damit die Wirkung des Verlierers gar nicht erst läuft bzw. zurückgerollt wird; Jobs (`review.merge`, `ci.merge`) außerhalb der Transaktion führen, damit ein gescheiterter Merge seinen fehlgeschlagenen Job behält.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestConcurrentResolutionResolvesOnce$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: je Runde (6) und Fall genau eine 200 und eine 409, ein CI bei `new` ‖ `new`, ein CI nur wenn `new` gewinnt, Override nur entfernt wenn `accept` gewinnt, genau ein `review.resolved`, `status`/`action`/`resolved_by` des Gewinners; sequentiell 200, dann 409 und kein zweites CI. `TestReviewMergeRetryJobStatus`, `TestReviewMergeJobThroughRouter` und `TestAuditReviewMergeIntoDeletedCandidateIsNotFound` bleiben grün.
+- **Kodierender Test:** backend/internal/server/review_resolve_concurrency_integration_test.go (`TestConcurrentResolutionResolvesOnce`); auf `e5c2d86` rot (ausgeführt auf der Basis `7845e9d`; `internal/reviews` und die Auflösungspfade von `internal/discovery` dort im betroffenen Verhalten wie auf `e5c2d86`), Auszug (Antwortkörper gekürzt, Runden 1–5 ebenso):
+
+  ```text
+  === RUN   TestConcurrentResolutionResolvesOnce
+      review_resolve_concurrency_integration_test.go:119: unclassified_device new || new, round 0: 2 review.resolved events of the item (stored resolved/new resolved_by c0dee5a0-0000-4000-8000-000000001001), want 1
+      review_resolve_concurrency_integration_test.go:120: unclassified_device new || new, round 0: new 200 | new 200, want exactly one 200 and one 409 (bodies …)
+      review_resolve_concurrency_integration_test.go:124: unclassified_device new || new, round 0: 2 CIs with review_item_id of the item, want 1
+      review_resolve_concurrency_integration_test.go:131: unclassified_device new || dismiss, round 0: 2 review.resolved events of the item (stored resolved/new resolved_by c0dee5a0-0000-4000-8000-000000001001), want 1
+      review_resolve_concurrency_integration_test.go:132: unclassified_device new || dismiss, round 0: new 200 | dismiss 200, want exactly one 200 and one 409 (bodies …)
+      review_resolve_concurrency_integration_test.go:149: duplicate_ip dismiss || dismiss, round 0: 2 review.resolved events of the item (stored dismissed/dismiss resolved_by c0dee5a0-0000-4000-8000-000000001002), want 1
+      review_resolve_concurrency_integration_test.go:150: duplicate_ip dismiss || dismiss, round 0: dismiss 200 | dismiss 200, want exactly one 200 and one 409 (bodies …)
+      review_resolve_concurrency_integration_test.go:166: override_conflict accept || dismiss, round 0: 2 review.resolved events of the item (stored resolved/accept resolved_by c0dee5a0-0000-4000-8000-000000001001), want 1
+      review_resolve_concurrency_integration_test.go:167: override_conflict accept || dismiss, round 0: accept 200 | dismiss 200, want exactly one 200 and one 409 (bodies …)
+      (… Runden 1–5 ebenso: in allen 6 Runden jeder Fall zweimal 200, zwei Ereignisse, new || new zwei CIs …)
+  --- FAIL: TestConcurrentResolutionResolvesOnce (1.15s)
+  FAIL
+  ```
+
+<a id="f-405"></a>
+### F-405 (P3) – Review-Auflösung: abgelehnte Wirkung (`*api.FieldError`, fehlende Abhängigkeit) antwortet 500 statt 409/422/404; `unknown_relationship` accept mit ungültiger Quelle 200 ohne Kante
+
+- **Gefunden in:** Wiederholungsprüfung (K7, Runde r2-b2) von WP-088 auf `8e761c2`, von zwei Prüfagenten bestätigt (Prüfer und Verifier); der Code ist auf `e5c2d86` identisch · **Betroffene Anforderungen:** REC-08, API-05 (WP-088), API-03 (Fehlervertrag RFC 7807), DIS-09 (Scope-Vorschläge), REC-12 (WP-089), ENT-03 (`unlicensed_ci`), TOP-01 · **Komponente:** backend/internal/reviews/handler.go (`writeError` bildet nur `*reviews.Error`, `ErrNotFound`, `ErrAlreadyResolved` und `TypedProblem` ab, sonst `api.WriteRepoError` → 500), backend/internal/discovery/scope_handler.go (`resolveScopeSuggested` gibt `*api.FieldError` aus `Scope.Validate` und `scopeError` zurück), backend/internal/discovery/review.go (`resolveOverrideConflict`: `override.ErrNotFound` ungemappt), backend/internal/discovery/unlicensed.go (`adoptUnlicensed` ohne Prüfung des gehaltenen Geräts), backend/internal/discovery/topology.go (`resolveUnknownRelationship` → `upsertRelationship` verschluckt Fehler) · **Quelle:** Verifier-Probe `TestV2ReviewResolutionErrorMapping` über den vollständigen `server.NewRouter` (scratchpad k7/ver/r2-b2/evidence/k-reaudit-2/WP-088/verify-review-resolution-error-mapping.log), Prüferprobe k7/out/r2-b2/evidence/k-reaudit-2/WP-088/probe-src/ und k7/r2b2/probe/
+- **Reproduktion:** `POST /api/v1/review-items/{id}/resolve` mit `{"action":"accept"}` auf `scope_suggested`-Einträgen: CIDR, die der Kollektor schon als Scope hat (`POST /api/v1/discovery-scopes` antwortet dafür 409 mit Feld `target`) → 500; unbekannte Kollektor-UUID → 500; Kollektor-ID ohne UUID-Form → 500; ungültige CIDR → 500. `override_conflict` accept, wenn das Feld keine Zeile in `ci_field_value` hat → 500. `unlicensed_ci` `new` mit leerem Payload → 500. `unknown_relationship` accept mit `source_ci_id` `not-a-uuid` oder einer unbekannten CI-UUID → 200 `resolved`, aber keine Kante. Der Eintrag bleibt bei den 500ern offen. Richtig sind bereits: `conflicting_values` accept mit vergebener Seriennummer 409, Merge eines `resurrected_device` mit vergebener Seriennummer 409, ungültige `management_ip` 400, unbekannter `ci_type_id` 422 auf `ci_type_id`, Merge in einen inzwischen gelöschten Kandidaten 404.
+- **Soll:** API-03/API-05: Eine abgelehnte Wirkung antwortet mit dem Status und Feld, die die Ressource selbst liefern würde (Scope wie `POST /discovery-scopes`: 409 `target` bei bestehendem Scope, 422 `collector_id`/`target` bei unbekanntem Kollektor oder ungültigen Werten), eine fehlende Abhängigkeit mit 404, ein Eintrag ohne verwertbare Daten mit 422, jeweils `application/problem+json`; der Eintrag bleibt offen, nichts ist geschrieben. TOP-01: accept einer unbekannten Beziehung, die keine Kante anlegt, wird abgelehnt statt als aufgelöst gemeldet.
+- **Ist:** `writeError` kennt `*api.FieldError` nicht; `override.ErrNotFound` und der unlesbare/leere Gerätesatz eines `unlicensed_ci`-Eintrags kommen als einfache Fehler an; alle landen in `api.WriteRepoError` → 500. `upsertRelationship` verschluckt den Fehler von `relationship.PGRepository.Create` (`ErrSourceCINotFound`, Cast-Fehler der UUID), die Auflösung gilt als erfolgreich.
+- **Nutzerwirkung:** Gering: Bearbeiter sehen „Internal Error“ statt eines erklärenden Problems (z. B. „Scope existiert bereits“) und können den Fall nicht von einem Serverfehler unterscheiden; 500er lösen Alarme aus. Ein `unknown_relationship`-Eintrag verschwindet aus der Queue, obwohl keine Kante entstand.
+- **Ursache (belegt):** Die Fehlerabbildung des Review-Handlers wurde nur für die Fehlertypen der Discovery-CI-Wirkungen gebaut; die später ergänzten Wirkungen (Scope-Vorschlag, Override-Konflikt, Adoption, Beziehung) geben die Fehler ihrer Ressourcen unverändert zurück oder verschlucken sie.
+- **Empfehlung:** `writeError` bildet `*api.FieldError`/`*api.ConflictError` mit `api.WriteFieldError` ab; `resolveOverrideConflict` bildet `override.ErrNotFound` auf 404 ab und prüft CI-ID und Feld; `adoptUnlicensed` lehnt einen Eintrag ohne Gerätesatz oder Typ mit 422 ab und bildet Validierungsfehler des CI auf 422 mit Feld ab; `resolveUnknownRelationship` prüft die IDs (422) und reicht den Fehler der Kante weiter (unbekanntes CI 404, unzulässiger Typ 422).
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestReviewResolutionKeepsErrorContract$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: `scope_suggested` accept bei bestehendem Scope 409 Feld `target` (genau ein Scope des Kollektors), unbekannter Kollektor und Kollektor ohne UUID 422 Feld `collector_id`, ungültige CIDR 422 Feld `target`; `override_conflict` accept ohne Feldwert 404; `unlicensed_ci` new mit leerem Payload 422; `unknown_relationship` accept mit Quelle ohne UUID 422, mit unbekanntem CI 404 und keine Kante; jeweils `application/problem+json` und Eintrag offen; die bereits richtigen Abbildungen (409, 409, 400, 422 `ci_type_id`, 404) und die Kontrollen (200) unverändert.
+- **Kodierender Test:** backend/internal/server/scope_suggested_errors_integration_test.go (`TestReviewResolutionKeepsErrorContract`); auf `e5c2d86` rot (ausgeführt auf der Basis `7845e9d`; Fehlerabbildung und Wirkungen dort wie auf `e5c2d86`), Auszug (Trace-IDs je Lauf zufällig, Körper gekürzt):
+
+  ```text
+  === RUN   TestReviewResolutionKeepsErrorContract
+      scope_suggested_errors_integration_test.go:85: scope_suggested accept, CIDR already a scope of the collector: 500 (item open), want 409 (item open); body {"detail":"the request could not be completed","status":500,"title":"Internal Error",…}
+      scope_suggested_errors_integration_test.go:89: scope_suggested accept, unknown collector: 500 (item open), want 422 (item open); body {"detail":"the request could not be completed","status":500,…}
+      scope_suggested_errors_integration_test.go:91: scope_suggested accept, collector id not a UUID: 500 (item open), want 422 (item open); body {"detail":"the request could not be completed","status":500,…}
+      scope_suggested_errors_integration_test.go:92: scope_suggested accept, CIDR invalid: 500 (item open), want 422 (item open); body {"detail":"the request could not be completed","status":500,…}
+      scope_suggested_errors_integration_test.go:102: override_conflict accept, field without a field value row: 500 (item open), want 404 (item open); body {"detail":"the request could not be completed","status":500,…}
+      scope_suggested_errors_integration_test.go:111: unlicensed_ci new with an empty payload: 500 (item open), want 422 (item open); body {"detail":"the request could not be completed","status":500,…}
+      scope_suggested_errors_integration_test.go:121: unknown_relationship accept, source id not a UUID: 200 (item resolved), want 422 (item open); body {"id":"…","kind":"unknown_relationship","status":"resolved",…}
+      scope_suggested_errors_integration_test.go:122: unknown_relationship accept, source CI unknown: 200 (item resolved), want 404 (item open); body {"id":"…","kind":"unknown_relationship","status":"resolved",…}
+  --- FAIL: TestReviewResolutionKeepsErrorContract (0.74s)
+  FAIL
+  ```
+
+  Auf dem Zwischenstand nach WP-675 (`c0b5c58`, Wirkung in der Transaktion der Auflösung) ist derselbe Test ebenso rot, nur der Fall „source id not a UUID“ antwortet dort 500 statt 200 (der verschluckte Cast-Fehler bricht die Transaktion ab); mit WP-676 grün.
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

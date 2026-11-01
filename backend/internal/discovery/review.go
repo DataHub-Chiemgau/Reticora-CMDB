@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
 
@@ -543,7 +544,19 @@ func (h *Handler) resolveOverrideConflict(ctx context.Context, item *ReviewItem,
 		return false, refused(http.StatusNotImplemented, "overrides cannot be cleared here")
 	}
 	ciID, field := payloadString(item.Payload, "ci_id"), payloadString(item.Payload, "field")
+	if !isUUID(ciID) || field == "" {
+		return false, refused(http.StatusUnprocessableEntity, "the item names no CI field")
+	}
 	if err := clearer.ClearOverride(ctx, item.OrganizationID, ciID, field); err != nil {
+		// A CI that is gone or a field without an override (any more) is
+		// 404 like an unknown item, a name that is no field 422; the item
+		// stays open (F-405).
+		switch {
+		case errors.Is(err, override.ErrNotFound):
+			return false, refused(http.StatusNotFound, "the CI or the override of "+field+" was not found; dismiss the item")
+		case errors.Is(err, override.ErrReservedName):
+			return false, refused(http.StatusUnprocessableEntity, "the item names no CI field")
+		}
 		return false, err
 	}
 	res.Note = "override of " + field + " removed, observed value accepted"

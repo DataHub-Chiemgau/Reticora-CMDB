@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -369,14 +370,24 @@ func (h *Handler) adoptUnlicensed(ctx context.Context, orgID, actorID string, it
 	return created, err
 }
 
+// errNoDeviceRecord refuses the adoption of an unlicensed_ci item that holds
+// no device record to create a CI from (F-405); the item stays open.
+var errNoDeviceRecord = &reviews.Error{Status: http.StatusUnprocessableEntity,
+	Message: "the item holds no device record to create a CI from; dismiss it"}
+
 // adoptHeld creates the CI of the device an unlicensed_ci item holds and
 // resolves the item, in the transaction of ctx.
 func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *ReviewItem) (string, error) {
+	typeID := payloadString(item.Payload, "ci_type_id")
+	record, ok := item.Payload["device"].(map[string]any)
+	if !ok || !isUUID(typeID) {
+		return "", errNoDeviceRecord
+	}
 	if err := h.allowActiveCI(ctx, orgID); err != nil {
 		return "", err
 	}
 	var device IngestItem
-	raw, err := json.Marshal(item.Payload["device"])
+	raw, err := json.Marshal(record)
 	if err != nil {
 		return "", err
 	}
@@ -391,13 +402,16 @@ func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *Re
 			break
 		}
 	}
-	typeID := payloadString(item.Payload, "ci_type_id")
 	// The held values pass the field rules like a direct ingest.
 	if _, err = h.dropInvalidObserved(ctx, orgID, typeID, "", &device); err != nil {
 		return "", err
 	}
 	created, err := h.createDiscoveredCI(ctx, orgID, &device, typeID, payloadString(item.Payload, "source"))
 	if err != nil {
+		if ve, ok := ci.AsValidationError(err); ok && len(ve.Violations) > 0 {
+			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: ve.Violations[0].Field,
+				Message: ve.Violations[0].Detail}
+		}
 		return "", err
 	}
 	if _, err = h.repo.ResolveReviewItem(ctx, orgID, item.ID, &Resolution{Status: ReviewStatusResolved, Action: reviews.ActionNew,

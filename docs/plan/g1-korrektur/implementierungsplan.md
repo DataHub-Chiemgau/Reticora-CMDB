@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-674 | 20 | 16,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-676 | 22 | 18,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **322** | **417,0** | |
+| **Summe** | | **324** | **419,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>20 WPs · 16,0 PT"]
+    K7N["K7-Nachträge<br/>22 WPs · 18,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -441,6 +441,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-670](#wp-670--max_cis-auf-allen-wegen-die-ein-ci-aktiv-machen-wiederherstellen-unmerge-und-review-auflösung-über-dem-limit-403-entitlement-limit) | `k7n-max-cis-all-paths` | `max_cis` auf allen Wegen, die ein CI aktiv machen: Wiederherstellen, Unmerge und Review-Auflösung über dem Limit 403 `entitlement-limit` | K7N | 1 | F-399 | WP-072, WP-073, WP-169, WP-472 |
 | [WP-671](#wp-671--entitlement-gates-discovery-und-rack_view-auf-den-alias-pfaden-discovery-scopes-auflösung-von-scope_suggested-rack-knoten-im-standortbaum-und-nats-scope-kanal) | `k7n-entitlement-alias-paths` | Entitlement-Gates discovery und rack_view auf den Alias-Pfaden: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Knoten im Standortbaum und NATS-Scope-Kanal | K7N | 1 | F-400 | WP-471, WP-072 |
 | [WP-674](#wp-674--max_cis-zählt-alle-aktiven-cis-der-organisation-unabhängig-vom-scope-des-schreibenden) | `k7n-max-cis-org-count` | `max_cis` zählt alle aktiven CIs der Organisation, unabhängig vom Scope des Schreibenden | K7N | 1 | F-403 | WP-072, WP-073, WP-334, WP-064, WP-670 |
+| [WP-675](#wp-675--review-auflösung-genau-einmal-eintrag-gesperrt-wirkung-und-auflösung-in-einer-transaktion-gleichzeitige-zweite-auflösung-409) | `k7n-review-resolve-once` | Review-Auflösung genau einmal: Eintrag gesperrt, Wirkung und Auflösung in einer Transaktion, gleichzeitige zweite Auflösung 409 | K7N | 1,5 | F-404 | WP-088, WP-089, WP-087, WP-554, WP-643 |
+| [WP-676](#wp-676--review-auflösung-abgelehnte-wirkungen-mit-dem-fehlervertrag-der-ressource-409422404-statt-500-unknown_relationship-accept-ohne-kante-abgelehnt) | `k7n-review-resolve-errors` | Review-Auflösung: abgelehnte Wirkungen mit dem Fehlervertrag der Ressource (409/422/404 statt 500); `unknown_relationship` accept ohne Kante abgelehnt | K7N | 1,0 | F-405 | WP-088, WP-089, WP-643, WP-671, WP-675 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19511,6 +19513,121 @@ ENT-03;[B];B;backend/internal/ci/active_count_integration_test.go;WP-674
 **Entscheidungsbedarf:** keiner für die Umsetzung (E-56: `max_cis` exakt; das Limit gilt je Organisation). Hinweis für die Leitung: Die Ablehnung nennt wie bisher „N of L in use“ (`entitlement.LimitExceededError`); für einen auf einen Client beschränkten Principal ist N jetzt die Zahl der aktiven CIs der ganzen Organisation statt seiner sichtbaren. Die Zahl erscheint nur bei einer Ablehnung (N ≥ L), sie nennt kein CI, und das Limit selbst war schon vorher sichtbar; nach einem Downgrade unter den Bestand verrät sie aber den Gesamtbestand an CIs anderer Clients. Falls das nicht gewollt ist, wäre die Detailangabe für eingeschränkte Principals zu kürzen (z. B. nur „limit L reached“); das ist eine Produktentscheidung und hier nicht umgesetzt.
 
 **Nicht Bestandteil:** der Agent-Telemetriepfad (`backend/internal/agent/handler.go:479`, `h.cis.Create` am Repository) legt Endpoint-CIs ohne `max_cis`-Prüfung an; das Modul `agents` ist P4 und in G1 abgeschaltet (404), über das Verhalten über dem Limit (403 oder `unlicensed_ci`) ist noch nicht entschieden. Die Sperre der `max_cis`-Zählung bei `POST /cis` und `AdoptUnlicensed` (SR-09, zurückgestellt; unverändert). Die anderen Kontingente haben die Lücke nicht (geprüft, nicht geändert): `app_user` und `api_key` filtern per RLS nur nach der Organisation (`user_isolation`, `org_isolation`), `max_collectors` zählt in einer eigenen org-weiten Transaktion (`CountCollectors`, `OrgWideScope`). Eine Nutzungsanzeige (Bestand gegen Limit) für Administratoren oder die UI gibt es nicht; sie ist nicht Teil dieses WP.
+
+### WP-675 – Review-Auflösung genau einmal: Eintrag gesperrt, Wirkung und Auflösung in einer Transaktion, gleichzeitige zweite Auflösung 409
+
+**Schlüssel:** `k7n-review-resolve-once` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-088 (`review-model`), WP-089 (`conflict`), WP-087 (`resurrect`), WP-554 (`t7-review-merge-job`), WP-643 (`k5n-review-merge-errors`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-404](../../../audit/g1-reaudit/FINDINGS.md#f-404) | P2 | Gleichzeitige Auflösung desselben Review-Eintrags: beide Anfragen 200, die Wirkung läuft zweimal (zwei CIs, zwei `review.resolved`, `resolved_by` = letzter Schreiber) | schließt | Wiederholungsprüfung von WP-088 (K7, r2-b2) auf `8e761c2`, Verifier |
+
+**Problem:** `reviews.Service.Resolve` prüft `status = 'open'` auf einem ungesperrten Lesen, führt die Wirkung des Typs in eigenen Transaktionen aus und schreibt die Auflösung mit `PGRepository.ResolveReviewItem` ohne Statusbedingung (`UPDATE review_item … WHERE id = $2 AND organization_id = $3 AND <visible>`). Zwei gleichzeitige Auflösungen desselben Eintrags antworten beide 200: `new` ‖ `new` eines `unclassified_device` legt zwei CIs an (CI-13), `dismiss` ‖ `dismiss` schreibt zwei `review.resolved` und `resolved_by` des letzten Schreibers, `new` ‖ `dismiss` meldet dem Dismisser „dismissed“ bei gespeichertem `resolved/new`, `accept` ‖ `dismiss` eines `override_conflict` entfernt den Override (je 6–8 von 8 Runden, F-404). Sequentiell schützt nur die vorgelagerte Prüfung (200, dann 409).
+
+**Akzeptanzkriterien:**
+
+- [ ] `Service.Resolve` sperrt den Eintrag in einer Transaktion des Tenant-Scopes (`SELECT … FOR UPDATE`, `reviews.Locker` des PostgreSQL-Repositorys), prüft den Status dort erneut und führt Wirkung und Auflösung in derselben Transaktion aus: die zweite gleichzeitige Auflösung wartet und erhält 409 `review item already resolved`, ohne ihre Wirkung auszuführen; eine gescheiterte Wirkung hinterlässt weder ihre Schreibvorgänge noch eine Auflösung. `ResolveReviewItem` ist zusätzlich bedingt (`AND status = 'open'`; keine Zeile → `ErrAlreadyResolved` bzw. `ErrNotFound`), auch für die Auflösungen außerhalb des Service (Reklassifizierung im Ingest überspringt einen inzwischen aufgelösten Eintrag; die Adoption von `unlicensed_ci` sperrt den Eintrag, legt das CI an und löst in einer Transaktion auf, ein inzwischen aufgelöster Eintrag wird übersprungen).
+- [ ] Alle Wirkungen jedes Review-Typs laufen in dieser Transaktion: CI anlegen (`new`), Werte übernehmen und Merge in einen Kandidaten, Reaktivierung (`resurrected_device`), CI-12-Merge (`probable_duplicate`), Override entfernen (`override_conflict`), Scope anlegen (`scope_suggested`), Kante anlegen (`unknown_relationship`), Adoption (`unlicensed_ci`).
+- [ ] Die Jobs der Merge-Auflösung (`review.merge`, JOB-04) und der CI-12-Merge (`ci.merge`) werden außerhalb der Transaktion geführt: Start, sobald der Eintrag gesperrt ist; ein gescheiterter Merge behält seinen fehlgeschlagenen Job (bereinigter Fehler, F-372), ein Retry läuft im selben Job (F-330); `ci.merge` endet `succeeded` nach dem Commit, der Merge läuft unter einem Savepoint. Der Verlierer einer gleichzeitigen Auflösung berührt keinen Job.
+- [ ] `TestConcurrentResolutionResolvesOnce` (je 6 Runden `new` ‖ `new` und `new` ‖ `dismiss` von `unclassified_device`, `dismiss` ‖ `dismiss` von `duplicate_ip`, `accept` ‖ `dismiss` von `override_conflict`; sequentielle Kontrolle) ist auf `e5c2d86` rot (beide 200, zwei CIs, zwei Ereignisse) und mit der Korrektur grün, auch als Nicht-Root-Nutzer: genau eine 200 und eine 409, ein CI, ein `review.resolved`, Status/Aktion/`resolved_by` des Gewinners.
+- [ ] Spec-first: `api/openapi.yaml` beschreibt bei `resolveReviewItem` die einmalige Auflösung und 409 der gleichzeitigen zweiten; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/reviews/ ./internal/discovery/... ./internal/ci/ ./internal/override/ ./internal/relationship/ ./internal/jobs/ ./internal/server/` grün (`TestReviewMergeRetryJobStatus`, `TestReviewMergeJobThroughRouter`, `TestAuditReviewMergeIntoDeletedCandidateIsNotFound` unverändert); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (12 Einträge):**
+
+- backend/internal/reviews/model.go
+- backend/internal/reviews/service.go
+- backend/internal/reviews/pg_repository.go
+- backend/internal/reviews/memory_repository.go
+- backend/internal/discovery/review.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/ci/merge.go
+- backend/internal/server/review_resolve_concurrency_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Sperre ist `SELECT … FOR UPDATE OF review_item` unter `WithRequestTenant` mit derselben Sichtbarkeitsbedingung wie `GetReviewItem` (die restriktiven Update-Policies von Migration 000140 gelten); die Wirkungen treten der Transaktion über `database.ContextWithTx` bei, ihr Scope ist der der Anfrage. Audit-Kette und Outbox bleiben in der Transaktion (BeforeCommit); Job-Schreibvorgänge außerhalb laufen nur, während die Transaktion außer der Zeilensperre des Eintrags nichts hält, bzw. nach ihrem Ende.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestConcurrentResolutionResolvesOnce$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/reviews/ ./internal/discovery/... ./internal/ci/ ./internal/override/ ./internal/relationship/ ./internal/jobs/ ./internal/server/` (lokal ohne `TestCIQueryBudget`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+REC-08;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+API-05;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+REC-12;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+CI-13;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** die Fehlerabbildung abgelehnter Wirkungen (F-405, WP-676 `k7n-review-resolve-errors`); ein `ci.merge`-Job, dessen Merge gelang, dessen Auflösungstransaktion danach aber scheiterte, bleibt `running`, bis ein Retry ihn abschließt (Restrisiko, nur bei Datenbankfehler nach dem Merge); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-676 – Review-Auflösung: abgelehnte Wirkungen mit dem Fehlervertrag der Ressource (409/422/404 statt 500); `unknown_relationship` accept ohne Kante abgelehnt
+
+**Schlüssel:** `k7n-review-resolve-errors` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-088 (`review-model`), WP-089 (`conflict`), WP-643 (`k5n-review-merge-errors`), WP-671 (`k7n-entitlement-alias-paths`), WP-675 (`k7n-review-resolve-once`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-405](../../../audit/g1-reaudit/FINDINGS.md#f-405) | P3 | Review-Auflösung: abgelehnte Wirkung (`*api.FieldError`, fehlende Abhängigkeit) antwortet 500 statt 409/422/404; `unknown_relationship` accept mit ungültiger Quelle 200 ohne Kante | schließt | Wiederholungsprüfung von WP-088 (K7, r2-b2) auf `8e761c2`, Prüfer und Verifier |
+
+**Problem:** `reviews.writeError` (backend/internal/reviews/handler.go) bildet nur `*reviews.Error`, `ErrNotFound`, `ErrAlreadyResolved` und `TypedProblem` ab; jeder andere Fehler einer Wirkung wird über `api.WriteRepoError` zu 500. Betroffen: accept eines `scope_suggested`-Eintrags, dessen CIDR der Kollektor schon als Scope hat (`POST /discovery-scopes` antwortet 409 auf `target`), mit unbekannter Kollektor-UUID, mit Kollektor-ID ohne UUID-Form und mit ungültiger CIDR (`*api.FieldError` aus `Scope.Validate`/`scopeError`); accept eines `override_conflict` ohne Zeile in `ci_field_value` (`override.ErrNotFound`); `new` eines `unlicensed_ci` mit leerem Payload. `resolveUnknownRelationship` verschluckt den Fehler von `upsertRelationship`: accept mit `source_ci_id` ohne UUID-Form oder mit unbekanntem CI meldet 200 `resolved` ohne Kante (TOP-01). Seit WP-675 läuft die Wirkung in der Transaktion der Auflösung; ein verschluckter Anweisungsfehler würde dort als 500 enden.
+
+**Akzeptanzkriterien:**
+
+- [ ] `writeError` bildet `*api.FieldError` und `*api.ConflictError` mit `api.WriteFieldError` ab (Status und Feld der Ressource, `application/problem+json`): `scope_suggested` accept bei bestehendem Scope 409 Feld `target`, unbekannter Kollektor und Kollektor ohne UUID 422 Feld `collector_id`, ungültige CIDR 422 Feld `target`, wie `POST /api/v1/discovery-scopes`; der Eintrag bleibt offen, kein Scope entsteht.
+- [ ] `override_conflict` accept: ein CI, das fehlt, oder ein Feld ohne Feldwert (`override.ErrNotFound`) 404, ein Eintrag ohne CI-UUID oder Feld bzw. mit reserviertem Namen 422; `unlicensed_ci` new: ein Eintrag ohne Gerätesatz oder ohne Typ-UUID 422, ein Validierungsfehler des CI 422 mit Feld; der Eintrag bleibt offen.
+- [ ] `unknown_relationship` accept (TOP-01): Quelle oder Ziel ohne UUID-Form 422, ein unbekanntes oder unsichtbares CI 404, ein vom Typ `connected_to` nicht erlaubter CI-Typ 422; keine Kante, der Eintrag bleibt offen. Die Ingest-Ableitung (`upsertRelationship`) verhält sich unverändert.
+- [ ] Die bisher richtigen Abbildungen bleiben: `conflicting_values` accept mit vergebener Seriennummer 409, Merge eines `resurrected_device` mit vergebener Seriennummer 409, ungültige `management_ip` 400, unbekannter `ci_type_id` 422 auf `ci_type_id`, Merge in einen inzwischen gelöschten Kandidaten 404.
+- [ ] `TestReviewResolutionKeepsErrorContract` ist auf `e5c2d86` rot (sechs Fälle 500, `unknown_relationship` 200 ohne Kante) und mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Spec-first: `api/openapi.yaml` beschreibt bei `resolveReviewItem` die Antworten abgelehnter Wirkungen (409/422 mit Feld, 404); `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/reviews/ ./internal/discovery/... ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/reviews/handler.go
+- backend/internal/discovery/review.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/discovery/topology.go
+- backend/internal/server/scope_suggested_errors_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Nur die Abbildung von Fehlern und Vorprüfungen vor der Wirkung; die Wirkungen laufen weiter unter dem Scope der Anfrage in der Transaktion der Auflösung (WP-675).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestReviewResolutionKeepsErrorContract$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/reviews/ ./internal/discovery/... ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+REC-08;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+API-03;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+API-05;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+DIS-09;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** `override_conflict` accept auf einem inzwischen gelöschten CI (Probe: 200, der Override des gelöschten CI wird entfernt) und `probable_duplicate` merge mit einer `ci_id` ohne UUID-Form im Payload (400 statt 404/422) – als Kandidaten gemeldet, nicht Teil von F-405; die Adoption nach Erhöhung von `max_cis` (`AdoptUnlicensed`) bricht an einem Eintrag ohne Gerätesatz weiter ab wie bisher; weitere Befunde der Wiederholungsprüfung (eigene WPs).
 
 ## Zurückgestellte Befunde
 

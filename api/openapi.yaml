@@ -5566,7 +5566,17 @@ paths:
         refused or failed effect leaves the item open and writes nothing;
         of two concurrent resolutions of the same item one answers 200 and
         the other 409 (review item already resolved) without its effect,
-        as a resolution of an item that is no longer open does.
+        as a resolution of an item that is no longer open does. A refused
+        effect answers as the resource it writes and leaves the item open
+        (F-405): accept of scope_suggested is 409 with field target when the
+        collector already has a scope for the CIDR and 422 with field
+        collector_id or target for an unknown collector or an invalid value,
+        as POST /discovery-scopes; accept of override_conflict is 404 when
+        the CI or the override of the field is gone; new of unlicensed_ci is
+        422 when the item holds no device record; accept of
+        unknown_relationship is 422 when the item names no CI ids or
+        connected_to does not allow their types and 404 when one of the CIs
+        is gone (no edge is recorded).
       requestBody:
         required: true
         content:
@@ -5593,8 +5603,10 @@ paths:
         '422':
           description: >-
             The action does not resolve items of this type, new cannot tell
-            the client of the device, or new has no CI type (field
-            ci_type_id)
+            the client of the device, new has no CI type (field
+            ci_type_id), or the effect refuses a value of the item (the
+            field it names, e.g. collector_id or target of a suggested
+            scope)
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }

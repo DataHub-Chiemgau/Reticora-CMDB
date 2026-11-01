@@ -130,6 +130,12 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.As(err, &refused):
 		api.WriteError(w, refused.Status, http.StatusText(refused.Status), refused.Message)
 	default:
+		// A refusal of the effect as the resource it writes reports it
+		// (e.g. the scope of a scope_suggested item: 409 on target, 422 on
+		// collector_id, as POST /discovery-scopes answers, F-405).
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		var typed api.TypedProblem
 		if errors.As(err, &typed) && typed.ProblemType() != "" {
 			api.WriteTypedProblem(w, http.StatusForbidden, err)
