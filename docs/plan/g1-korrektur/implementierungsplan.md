@@ -21040,7 +21040,7 @@ CI-05;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;W
 
 ```text
 MET-15;B/G1;B;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
-CI-11;[B];C;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
+CI-11;[B];B;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
 ```
 
 **Entscheidungsbedarf:** keiner.
@@ -21097,7 +21097,7 @@ CI-11;[B];C;backend/internal/server/unique_attr_type_change_integration_test.go;
 ```text
 MET-15;B/G1;B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
 CI-03;[B];B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
-CI-11;[B];C;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
+CI-11;[B];B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
 ```
 
 **Entscheidungsbedarf:** ja, durch die Leitung. Die Anforderungen legen das Verhalten nicht fest. Umgesetzt ist das kleinste sichere Verhalten über einen vorhandenen Mechanismus: der vergebene Wert wird verworfen und in `invalid_values` gezählt (wie WP-501 und `withoutTakenIdentity`), das Gerät wird ohne ihn angelegt bzw. aktualisiert, der Batch läuft weiter; bei der Umklassifizierung bleibt `generic_device` mit offenem `unclassified_device`. Alternativen: (a) eigener Zähler (z. B. `taken_unique_values`) statt `invalid_values`; (b) zusätzlich ein Review-Eintrag (z. B. `conflicting_values` oder `probable_duplicate` mit dem anderen CI als Kandidat), damit ein Mensch den Konflikt sieht, statt nur Log und Zähler; (c) Datensatz als dauerhaft fehlgeschlagen (`permanent`, 409) abweisen – verliert das Gerät, wie heute mit Index. Ebenso zu entscheiden: ob P3 reicht, da mit Index ein Gerät mit kollidierendem Wert heute nie inventarisiert wird.
