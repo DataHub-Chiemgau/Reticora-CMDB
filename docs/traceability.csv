@@ -1128,3 +1128,6 @@ API-03;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
 MET-10;B/G1, Teil P2/G2;D;backend/internal/citype/attrdef_integration_test.go;WP-679
 TOP-02;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-682
 REL-08;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-682
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
+TEN-09;[Q];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
+ENT-03;[B];B;backend/internal/entitlement/entitlement_test.go;WP-685

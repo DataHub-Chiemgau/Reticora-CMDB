@@ -13593,7 +13593,12 @@ components:
         review item new and the merge of a resurrected_device item).
         Nothing is created, restored
         or unmerged; after a downgrade below the stock the existing objects
-        stay usable and readable (ENT-08).
+        stay usable and readable (ENT-08). Every quota counts the whole
+        organization; the detail of entitlement-limit names count and limit
+        ("N of L in use") only to a caller with org-wide client and site
+        scope. A caller restricted to clients or sites, an invitation, a
+        first login and an enrollment get "the limit of the plan is
+        reached" without numbers (F-414).
       content:
         application/problem+json:
           schema:

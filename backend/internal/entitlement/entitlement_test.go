@@ -6,6 +6,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 func testService(t *testing.T, plan Plan) *Service {
@@ -149,6 +151,44 @@ func TestAllowCreateEnforcesLimit(t *testing.T) {
 	}
 	if limitErr.Limit != 2 || limitErr.Current != 2 {
 		t.Fatalf("unexpected limit error: %+v", limitErr)
+	}
+}
+
+// TestLimitExceededDetailFollowsCallerScope covers F-414 (ENT-03): the
+// refusal names count and limit only to a principal with org-wide client
+// and site scope; a client- or site-scoped principal and a context without
+// a user (invitation, first login, enrollment, ingest) get the text without
+// numbers. The fields keep both for the callers in code.
+func TestLimitExceededDetailFollowsCallerScope(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
+	if _, err := svc.Grant(context.Background(), Entitlement{OrganizationID: "org-1", FeatureKey: FeatureCMDBCore,
+		Plan: PlanEssential, Enabled: true, Limits: map[string]int64{LimitMaxCIs: 7}}); err != nil {
+		t.Fatal(err)
+	}
+	orgWide := database.OrgWideScope("org-1", "user-1")
+	clientScoped, siteScoped := orgWide, orgWide
+	clientScoped.Clients = database.ScopeIDs("c0dea1a0-0000-4000-8000-0000000000c1")
+	siteScoped.Sites = database.ScopeIDs("c0dea1a0-0000-4000-8000-0000000000a1")
+	system := database.OrgWideScope("org-1", "")
+	const hidden = `entitlement limit for "max_cis" exceeded: the limit of the plan is reached`
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want string
+	}{
+		"org-wide principal": {database.ContextWithTenantScope(context.Background(), &orgWide), `entitlement limit for "max_cis" exceeded: 9 of 7 in use`},
+		"client-scoped":      {database.ContextWithTenantScope(context.Background(), &clientScoped), hidden},
+		"site-scoped":        {database.ContextWithTenantScope(context.Background(), &siteScoped), hidden},
+		"system scope":       {database.ContextWithTenantScope(context.Background(), &system), hidden},
+		"no scope":           {context.Background(), hidden},
+	} {
+		err := svc.AllowCreate(tc.ctx, "org-1", LimitMaxCIs, 9)
+		var limitErr *LimitExceededError
+		if !asLimitError(err, &limitErr) {
+			t.Fatalf("%s: %v, want LimitExceededError", name, err)
+		}
+		if err.Error() != tc.want || limitErr.Limit != 7 || limitErr.Current != 9 {
+			t.Errorf("%s: %q (limit %d, current %d), want %q with limit 7 and current 9", name, err.Error(), limitErr.Limit, limitErr.Current, tc.want)
+		}
 	}
 }
 

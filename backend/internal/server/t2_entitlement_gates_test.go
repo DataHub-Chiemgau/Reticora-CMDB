@@ -43,10 +43,15 @@
 //     scope: a creator restricted to client 1 is refused on POST /cis, the
 //     restore and new of a review item once the CIs of client 2 reach the
 //     limit (PostgreSQL).
+//   - WP-685 (ENT-03, TEN-09), finding F-414: the refusal of max_cis,
+//     max_users, max_api_keys and max_collectors names the organization's
+//     count ("N of L in use") only to an org-wide caller; a caller
+//     restricted to client 1 gets "the limit of the plan is reached"
+//     without count or limit (PostgreSQL).
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -v -run 'TestT2EntitlementGates|TestAuditT2EntitlementRackViewGated|TestAuditT2EntitlementAPIAccessGatesAPIKeys|TestAuditT2EntitlementQuotasEnforced|TestT2EntitlementQuota|TestT2EntitlementMaxCIs|TestAuditT2EntitlementAliasPathsGated|TestT2EntitlementMaxCIsCountsTheWholeOrganization' ./internal/server/
+//	cd backend && go test -count=1 -v -run 'TestT2EntitlementGates|TestAuditT2EntitlementRackViewGated|TestAuditT2EntitlementAPIAccessGatesAPIKeys|TestAuditT2EntitlementQuotasEnforced|TestT2EntitlementQuota|TestT2EntitlementMaxCIs|TestAuditT2EntitlementAliasPathsGated|TestT2EntitlementMaxCIsCountsTheWholeOrganization|TestEntitlementLimitDetailHidesOrgCountFromScopedCallers' ./internal/server/
 package server_test
 
 import (
@@ -55,6 +60,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +75,6 @@ import (
 	rackpkg "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
-	"strconv"
 )
 
 func t2GraphQLForbidden(body []byte) bool {
@@ -1018,5 +1023,146 @@ func TestT2EntitlementMaxCIsCountsTheWholeOrganization(t *testing.T) {
 	}
 	if n := active(); n != limit+1 {
 		t.Errorf("active CIs at the end: %d, want %d", n, limit+1)
+	}
+}
+
+// TestEntitlementLimitDetailHidesOrgCountFromScopedCallers covers F-414
+// (ENT-03, TEN-09) through the production chain on PostgreSQL: every quota
+// counts the whole organization (F-403), so its refusal names the count
+// only to an org-wide caller. A caller restricted to client 1 is refused
+// at max_cis, max_users, max_api_keys and max_collectors with 403
+// entitlement-limit and a detail without count and limit; the org-wide
+// caller keeps "N of L in use".
+func TestEntitlementLimitDetailHidesOrgCountFromScopedCallers(t *testing.T) {
+	f := scopetest.Seed(t, "ed")
+	bg := context.Background()
+	s := newT2StackFrom(t, entitlement.Options{Enforce: true}, server.PostgresRepositories(f.App, audit.NewPGRecorder()))
+	admin := f.AppUser(t, f.OrgA, "limit-detail-admin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, f.OrgA, admin); err != nil {
+		t.Fatal(err)
+	}
+	issue := func(sid string, clients identity.ScopeSet) string {
+		t.Helper()
+		now := time.Now().UTC()
+		scope := identity.Scope{Clients: clients, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
+		token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+			Scope: &scope, SessionID: sid, ID: sid + "-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	orgWide := issue("limit-detail-all", identity.ScopeSet{All: true})
+	client1 := issue("limit-detail-c1", identity.ScopeSet{IDs: []string{f.Client1}})
+	call := func(token, method, path, body string) (int, string) {
+		t.Helper()
+		w := s.do(t2Request{method: method, path: path, body: body, contentType: "application/json", bearer: token})
+		return w.Code, strings.TrimSpace(w.Body.String())
+	}
+	grant := func(feature string, limits map[string]int64) {
+		t.Helper()
+		if _, err := s.entitlements.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
+			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: limits}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.entitlements.Provision(f.OrgCtx(f.OrgA), f.OrgA, entitlement.PlanEssential); err != nil {
+		t.Fatal(err)
+	}
+	grant(entitlement.FeatureCMDBCore, map[string]int64{})
+	grant(entitlement.FeatureAPIAccess, map[string]int64{})
+	grant(entitlement.FeatureDiscovery, map[string]int64{})
+
+	// Stock of client 2 (and of the organization), created org-wide; the
+	// client-1 caller does not see the CIs and collectors of client 2.
+	var serverType string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&serverType); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 5 {
+		n := strconv.Itoa(i)
+		if code, body := call(orgWide, http.MethodPost, "/api/v1/cis", `{"ci_type_id":"`+serverType+`","name":"limit-detail-c2-`+n+`","client_id":"`+f.Client2+`"}`); code != http.StatusCreated {
+			t.Fatalf("setup: CI %s: %d %s", n, code, body)
+		}
+		if code, body := call(orgWide, http.MethodPost, "/api/v1/collectors", `{"name":"limit-detail-c2-`+n+`","client_id":"`+f.Client2+`"}`); code != http.StatusCreated {
+			t.Fatalf("setup: collector %s: %d %s", n, code, body)
+		}
+		if code, body := call(orgWide, http.MethodPost, "/api/v1/api-keys", `{"name":"limit-detail-`+n+`","permissions":["ci:read"]}`); code != http.StatusCreated {
+			t.Fatalf("setup: API key %s: %d %s", n, code, body)
+		}
+		f.AppUser(t, f.OrgA, "limit-detail-user-"+n)
+	}
+	counts := map[string]string{
+		entitlement.LimitMaxCIs:        `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`,
+		entitlement.LimitMaxUsers:      `SELECT count(*) FROM app_user WHERE organization_id = $1 AND is_active`,
+		entitlement.LimitMaxAPIKeys:    `SELECT count(*) FROM api_key WHERE organization_id = $1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now())`,
+		entitlement.LimitMaxCollectors: `SELECT count(*) FROM collector WHERE organization_id = $1 AND status <> 'disabled'`,
+	}
+	count := func(quota string) int64 {
+		t.Helper()
+		var n int64
+		if err := f.Admin.QueryRow(bg, counts[quota], f.OrgA).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	stock := map[string]int64{}
+	for quota := range counts {
+		stock[quota] = count(quota)
+	}
+	grant(entitlement.FeatureCMDBCore, map[string]int64{entitlement.LimitMaxCIs: stock[entitlement.LimitMaxCIs], entitlement.LimitMaxUsers: stock[entitlement.LimitMaxUsers]})
+	grant(entitlement.FeatureAPIAccess, map[string]int64{entitlement.LimitMaxAPIKeys: stock[entitlement.LimitMaxAPIKeys]})
+	grant(entitlement.FeatureDiscovery, map[string]int64{entitlement.LimitMaxCollectors: stock[entitlement.LimitMaxCollectors]})
+
+	// Precondition: the client-1 caller sees fewer CIs and collectors than
+	// the organization holds.
+	for _, p := range []struct{ path, quota string }{
+		{"/api/v1/cis?limit=1", entitlement.LimitMaxCIs}, {"/api/v1/collectors?limit=1", entitlement.LimitMaxCollectors},
+	} {
+		code, body := call(client1, http.MethodGet, p.path, "")
+		var page struct {
+			Total int64 `json:"total"`
+		}
+		if code != http.StatusOK || json.Unmarshal([]byte(body), &page) != nil || page.Total >= stock[p.quota] {
+			t.Fatalf("precondition: client-1 GET %s: %d, total %d of %d in the organization %.200s", p.path, code, page.Total, stock[p.quota], body)
+		}
+	}
+
+	for _, c := range []struct {
+		quota, path, body string
+	}{
+		{entitlement.LimitMaxCIs, "/api/v1/cis", `{"ci_type_id":"` + serverType + `","name":"limit-detail-over","client_id":"` + f.Client1 + `"}`},
+		{entitlement.LimitMaxUsers, "/api/v1/users", `{"email":"limit-detail-over@example.com","display_name":"Limit Detail"}`},
+		{entitlement.LimitMaxAPIKeys, "/api/v1/api-keys", `{"name":"limit-detail-over","permissions":["ci:read"]}`},
+		{entitlement.LimitMaxCollectors, "/api/v1/collectors", `{"name":"limit-detail-over","client_id":"` + f.Client1 + `"}`},
+	} {
+		for _, caller := range []struct {
+			name, token, want string
+		}{
+			{"client-1 caller", client1, `entitlement limit for "` + c.quota + `" exceeded: the limit of the plan is reached`},
+			{"org-wide caller", orgWide, `entitlement limit for "` + c.quota + `" exceeded: ` +
+				strconv.FormatInt(stock[c.quota], 10) + ` of ` + strconv.FormatInt(stock[c.quota], 10) + ` in use`},
+		} {
+			code, body := call(caller.token, http.MethodPost, c.path, c.body)
+			var problem struct {
+				Type   string `json:"type"`
+				Detail string `json:"detail"`
+			}
+			_ = json.Unmarshal([]byte(body), &problem)
+			if code != http.StatusForbidden || problem.Type != api.ProblemEntitlementLimit {
+				t.Errorf("%s POST %s at %s %d: %d %.300s, want 403 entitlement-limit", caller.name, c.path, c.quota, stock[c.quota], code, body)
+				continue
+			}
+			if problem.Detail != caller.want {
+				t.Errorf("%s POST %s at %s %d: detail %q, want %q", caller.name, c.path, c.quota, stock[c.quota], problem.Detail, caller.want)
+			}
+			if caller.token == client1 && strings.Contains(problem.Detail, strconv.FormatInt(stock[c.quota], 10)) {
+				t.Errorf("client-1 caller POST %s: detail %q names the organization's count %d", c.path, problem.Detail, stock[c.quota])
+			}
+		}
+		if n := count(c.quota); n != stock[c.quota] {
+			t.Errorf("%s: %d after the refused writes, want %d (nothing created)", c.quota, n, stock[c.quota])
+		}
 	}
 }
