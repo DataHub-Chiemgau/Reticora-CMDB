@@ -415,6 +415,12 @@ func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem, ch
 	if err := h.allowActiveCI(ctx, orgID); err != nil {
 		return "", err
 	}
+	// The unique attributes are checked as POST /cis checks them, also
+	// before their index exists: a value another active CI holds is 409
+	// with the violations and the item stays open (MET-15, F-429).
+	if err := ci.CheckUnique(ctx, h.ciRepo, orgID, typeID, newItem.ClientID, "", newItem.Attributes); err != nil {
+		return "", err
+	}
 	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
 		if ve, ok := ci.AsValidationError(err); ok && len(ve.Violations) > 0 {
 			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: ve.Violations[0].Field,

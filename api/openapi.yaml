@@ -1065,7 +1065,10 @@ paths:
             The CI is not deleted, it was merged into another CI (it comes
             back only through POST /cis/{id}/unmerge, CI-12), or another
             active CI holds one of its unique values meanwhile, such as the
-            serial number (MET-15).
+            serial number (MET-15). A value of a unique attribute another
+            active CI holds is 409 urn:reticora:problem:conflict with
+            `violations` naming the attributes, as POST /cis, also before the
+            unique index exists; the CI stays deleted.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -1238,8 +1241,13 @@ paths:
             of the survivor; retry with force=true to overwrite them), the
             survivor is part of a later open merge (UnmergeLaterMergeProblem,
             type urn:reticora:problem:unmerge-later-merge: unmerge that
-            merge first; force does not override it), or one of the CIs is
-            locked by another write.
+            merge first; force does not override it), one of the CIs is
+            locked by another write, or another active CI holds a value of a
+            unique attribute of the merged CI or of the survivor in the
+            snapshot meanwhile (MET-15: urn:reticora:problem:conflict with
+            `violations` naming the attributes, as POST /cis, also before
+            the unique index exists; force does not override it, the merge
+            stays).
           content:
             application/problem+json:
               schema:
@@ -5593,7 +5601,14 @@ paths:
         422 when the item holds no device record; accept of
         unknown_relationship is 422 when the item names no CI ids or
         connected_to does not allow their types and 404 when one of the CIs
-        is gone (no edge is recorded).
+        is gone (no edge is recorded). A CI that new creates (also new of
+        unlicensed_ci) or that the merge of a resurrected_device item
+        reactivates is checked against the unique attributes like POST
+        /cis (MET-15): a value another active CI holds is 409
+        urn:reticora:problem:conflict with `violations` naming the
+        attributes, also before the unique index exists; no CI is created
+        or reactivated and the item stays open. The adoption after max_cis
+        was raised leaves such an item open and adopts the others.
       requestBody:
         required: true
         content:
@@ -13800,7 +13815,11 @@ components:
             The value is unique among the active CIs (MET-15), enforced by the
             server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do
             not count. The server check covers the CIs outside the client or
-            site scope of the writer as well, also before the index exists.
+            site scope of the writer as well, also before the index exists,
+            and every write that sets or brings back the values of a CI:
+            POST and PATCH /cis, the restore (POST /cis/{id}/restore), the
+            unmerge (POST /cis/{id}/unmerge) and the resolutions of review
+            items that create or reactivate a CI (409 with `violations`).
         unique_scope:
           type: string
           enum: [org, client]

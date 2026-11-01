@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 29 |
-| P3 | 36 |
-| **Summe** | **71** |
+| P3 | 37 |
+| **Summe** | **72** |
 
 ## Übersicht
 
@@ -111,6 +111,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-426](#f-426) | P3 | Review-Liste ignoriert unbekannte `status`- und `kind`-Werte: 200 mit leerer Liste statt 400 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/reviews/handler_test.go | WP-697 |
 | [F-425](#f-425) | P2 | Enrollment-Dialog und Onboarding bieten keine Client-Auswahl: ein auf mehrere Clients beschränkter Nutzer erhält seit WP-677 422 und sieht nur „Ein Fehler ist aufgetreten“ | Kandidatenprüfung K7 auf `7cd63e0` | belegt | frontend/src/pages/DiscoveryPage.test.tsx | WP-696 |
 | [F-428](#f-428) | P3 | Sicherheitsreview und GATE-01-Prüfung erfassen die sicherheitsrelevanten Befunde ab F-355 nicht als SR-Befunde mit Severity; ein offener Scope- oder Auth-Befund aus K5 bis K7 blockiert weder GATE-01 noch `--final` | Verifier r3-b6 (WP-209/213) auf `7cd63e0` | belegt | tests/rep01-structure.test.sh | WP-699 |
+| [F-429](#f-429) | P3 | Eindeutige Attribute: Wiederherstellen, Unmerge und die Review-Auflösungen, die ein CI anlegen oder reaktivieren, prüfen die Eindeutigkeit nicht (Duplikate ohne Index, 500 mit Index) | Korrektur WP-692 (K7) auf `7cd63e0` | belegt | backend/internal/server/unique_attr_write_paths_integration_test.go | WP-700 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1907,6 +1908,56 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   ```
 
   Auf `6a499ac` mit den Dokumenten vor der Korrektur 229 passed, 34 failed: 33 Befunde P0 bis P2 ohne SR-Zeile und ohne Begründung (F-355 bis F-427 außer F-397, das SR-18 nennt) und `rep01_control`. Mit der Korrektur 231 passed, 0 failed; `--final` vorher 215 passed, 31 failed, nachher 234 passed, 31 failed mit denselben Fehlschlägen.
+
+<a id="f-429"></a>
+### F-429 (P3) – Eindeutige Attribute: Wiederherstellen, Unmerge und die Review-Auflösungen, die ein CI anlegen oder reaktivieren, prüfen die Eindeutigkeit nicht (Duplikate ohne Index, 500 mit Index)
+
+- **Gefunden in:** Korrektur WP-692 (K7) auf `7cd63e0` (Hinweis des WP-692-Agenten, „Nicht Bestandteil“ von WP-692), reproduziert auf der Basis `6a499ac`; die betroffenen Wege enthalten auf `e5c2d86` ebenfalls keine Prüfung · **Betroffene Anforderungen:** MET-15 (WP-142 AK2: serverseitige Eindeutigkeit, 409 bei Duplikat), DB-04 (Unique-Index `idx_attr_<id>_u`), CI-05 (Wiederherstellen), CI-12 (Unmerge), REC-08 (Review-Auflösung), ENT-03 (Übernahme gehaltener Geräte) · **Komponente:** backend/internal/ci/pg_repository.go (`restore`, Zeile 1472 ff. auf `e5c2d86`: `UPDATE ci SET deleted_at = NULL …` ohne Prüfung, nur der Index meldet einen Konflikt), backend/internal/ci/merge.go (`Unmerge`, Zeile 796 ff.: die Zeilen des Snapshots werden zurückgeschrieben, ohne Prüfung), backend/internal/discovery/review.go (`createReviewedDevice`, `h.ciRepo.Create` Zeile 402; Auflösung `merge` von `resurrected_device` über `Restore`, Zeile 290), backend/internal/discovery/unlicensed.go (`adoptHeld` → `createDiscoveredCI`, `h.ciRepo.Create` Zeile 92; `AdoptUnlicensed` bricht bei einem Fehler die Übernahme ab, Zeile 388), backend/internal/reviews/handler.go (`writeError` → `api.WriteRepoError`) und backend/internal/ci/handler.go (`Restore`, `Unmerge`: `api.WriteFieldError` kennt `*ci.UniqueError` nicht) · **Quelle:** kodierende Tests von WP-700 (`k7/ad-700/red-server.log`, `red-discovery.log`, `red-ci.log`), Sonde mit gebautem Index (`k7/ad-700/probe-old.log`, `probe-new.log`)
+- **Reproduktion:** Attribut `asset_tag` des Typs, `unique`, `unique_scope` `org`, Index noch nicht gebaut (Fenster zwischen Flag und Index-Job, oder der Job scheiterte). Über `server.NewRouter` als org-weiter Principal: `POST /cis` mit einem vergebenen Wert → 409 (Kontrolle). (1) CI mit `R-1` löschen, ein anderes CI mit `R-1` anlegen, `POST /cis/{id}/restore` → 200, zwei aktive CIs mit `R-1`. (2) Ebenso über einen `resurrected_device`-Eintrag, Auflösung `merge` → 200, Eintrag aufgelöst, zwei CIs mit `D-1`. (3) CI `V` (`V-1`) in `S` (`S-1`) mergen (das Überlebende behält `S-1`, `V-1` wird frei), ein drittes CI mit `V-1` anlegen, `POST /cis/{V}/unmerge` → 200, zwei CIs mit `V-1`. (4) `unlicensed_ci`-Eintrag, dessen gehaltenes Gerät `attributes.asset_tag` `A-1` trägt, das ein anderes CI hält: Auflösung `new` → 200, zwei CIs mit `A-1`; ebenso die Übernahme nach Anheben von `max_cis` (`AdoptUnlicensed`). (5) `unclassified_device`-Eintrag, `new`: das CI erhält `fingerprint` aus dem Geräte-Datensatz; ist `fingerprint` als eindeutiges Attribut definiert und hält ein anderes CI denselben Wert → 200, zwei CIs. Der Index-Job scheitert danach jeweils mit „CIs share a value of the unique attribute …: Duplicate keys exist.“ Mit gebautem Index antworten das Wiederherstellen und `new` von `unlicensed_ci` (und die übrigen Wege) 500 „the request could not be completed“ statt 409.
+- **Soll:** MET-15/WP-142 AK2: ein Wert eines eindeutigen Attributs darf im Scope des Attributs nur ein aktives CI tragen, serverseitig durchgesetzt, unabhängig davon, ob der Index schon existiert. Jeder Weg, der die Werte eines CI setzt oder zurückbringt, antwortet wie `POST /cis` mit 409 `urn:reticora:problem:conflict` und `violations` des Attributs, ohne das andere CI zu nennen. `POST /cis/{id}/restore` dokumentiert die 409 bereits; das CI bleibt gelöscht bzw. gemergt. Die Review-Auflösung antwortet „wie die Ressource, die sie schreibt“, der Eintrag bleibt offen (F-405, WP-676).
+- **Ist:** Die Prüfung `UniqueConflicts` läuft nur in `ci.Service.Create`/`Update`. Wiederherstellen, Unmerge, Review-Auflösung `new` und `merge` (`resurrected_device`) sowie die Übernahme von `unlicensed_ci` schreiben über das Repository und verlassen sich auf den Unique-Index: ohne Index entstehen Duplikate, mit Index meldet der Index den Konflikt als `*ci.UniqueError`, den die Handler von Restore, Unmerge und Review-Auflösung nicht abbilden (500).
+- **Nutzerwirkung:** Wird ein Attribut neu als eindeutig markiert, können bis zum Indexbau (oder dauerhaft nach einem gescheiterten Job) über Papierkorb, Unmerge, Review-Queue und die automatische Übernahme gehaltener Geräte doppelte Inventar- oder Seriennummern entstehen; der Index lässt sich dann nicht mehr bauen, bis jemand die Duplikate findet. Mit Index sieht der Nutzer statt der verständlichen 409 mit dem Feld einen internen Fehler (500), die UI kann das Feld nicht markieren. Die automatische Übernahme nach Anheben von `max_cis` bricht bei dem ersten solchen Gerät ab, die übrigen gehaltenen Geräte bleiben liegen.
+- **Ursache (belegt):** WP-142 hat die Prüfung im `ci.Service` gebaut; die Wege am Service vorbei (Review-Auflösung `new` und `merge` von `resurrected_device`, Übernahme gehaltener Geräte, Restore CI-05, Unmerge CI-12) wurden nicht nachgezogen, `TestUniqueAttributes` prüft das Wiederherstellen nur über das Repository mit gebautem Index. WP-692 hat die Lücke unter „Nicht Bestandteil“ vermerkt.
+- **Empfehlung:** Die vorhandene Prüfung (`UniqueConflicts`) als `ci.CheckUnique(ctx, repo, …)` exportieren (von `ci.Service` genutzt) und auf allen Wegen aufrufen, die Werte eines CI setzen oder zurückbringen: vor dem `Create` in `createReviewedDevice` und `adoptHeld`; im Repository in der schreibenden Transaktion nach dem Zurückschreiben in `restore` (beide Restore-Wege) und für Opfer und Überlebendes in `Unmerge`. `*ci.UniqueError` als `api.ViolationsConflict` an `api.WriteFieldError` anbinden, damit Restore, Unmerge und Review-Auflösung 409 mit `violations` antworten (auch mit Index). `AdoptUnlicensed` überspringt einen solchen Eintrag (bleibt offen) und übernimmt die übrigen. Keine Migration.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestUniqueAttributeEveryWritePath$' ./internal/server/`, `go test -count=1 -v -run '^TestAdoptUnlicensedChecksUniqueAttributes$' ./internal/discovery/` und `go test -count=1 -v -run '^TestUniqueAttribute' ./internal/ci/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: ohne Index antworten `POST /cis` (Kontrolle), `POST /cis/{id}/restore`, `merge` von `resurrected_device`, `POST /cis/{id}/unmerge`, `new` von `unlicensed_ci` und `new` von `unclassified_device` 409 `urn:reticora:problem:conflict` mit genau der Verletzung des Attributs; je Wert ein aktives CI, das CI bleibt gelöscht bzw. gemergt, der Eintrag offen; danach baut der Index-Job die Indexe; mit gebautem Index antworten Restore und `new` von `unlicensed_ci` ebenso 409 (vorher 500). `AdoptUnlicensed` übernimmt das zweite gehaltene Gerät und lässt das erste mit vergebenem Wert offen. Ein auf Client 1 beschränkter Writer kann sein CI nicht mit dem Wert wiederherstellen, den inzwischen ein CI von Client 2 hält (Fehlertext ohne das andere CI). `TestUniqueAttributes` und `TestUniqueAttributeOrgScopeForClientWriter` unverändert grün.
+- **Kodierender Test:** backend/internal/server/unique_attr_write_paths_integration_test.go (`TestUniqueAttributeEveryWritePath`, kompletter `server.NewRouter` mit OpenAPI-Validierung als `reticora_app`), backend/internal/discovery/unlicensed_unique_integration_test.go (`TestAdoptUnlicensedChecksUniqueAttributes`), backend/internal/ci/unique_attr_integration_test.go (`TestUniqueAttributeRestoreForClientWriter`); auf `e5c2d86` rot (ausgeführt auf der Basis `6a499ac` mit den alten Produktionsdateien aus `HEAD`; die Wege enthalten dort wie auf `e5c2d86` keine Prüfung, Antwortkörper gekürzt):
+
+  ```text
+  === RUN   TestUniqueAttributeEveryWritePath
+      unique_attr_write_paths_integration_test.go:139: POST /cis/{id}/restore: 200 {"id":"c8fe963b-…","name":"wp700-restore","status":"active","attributes":{"asset_tag":"R-1"},… want 409 urn:reticora:problem:conflict with the violation of asset_tag
+      unique_attr_write_paths_integration_test.go:140: restore: 2 active CIs hold asset_tag "R-1", want 1
+      unique_attr_write_paths_integration_test.go:142: restore refused: the CI is active again, want it deleted
+      unique_attr_write_paths_integration_test.go:151: resurrected_device merge: 200 {"id":"52cf8045-…","kind":"resurrected_device","status":"resolved",… want 409 urn:reticora:problem:conflict with the violation of asset_tag
+      unique_attr_write_paths_integration_test.go:152: resurrected_device merge: 2 active CIs hold asset_tag "D-1", want 1
+      unique_attr_write_paths_integration_test.go:153: resurrected_device merge: the item is resolved, want it open
+      unique_attr_write_paths_integration_test.go:163: POST /cis/{id}/unmerge: 200 {"merge_id":"0aaf2b5d-…",… want 409 urn:reticora:problem:conflict with the violation of asset_tag
+      unique_attr_write_paths_integration_test.go:164: unmerge: 2 active CIs hold asset_tag "V-1", want 1
+      unique_attr_write_paths_integration_test.go:166: unmerge refused: the victim is no longer merged, want the merge to stay
+      unique_attr_write_paths_integration_test.go:175: unlicensed_ci new: 200 {"id":"edf444c5-…","kind":"unlicensed_ci","status":"resolved",… want 409 urn:reticora:problem:conflict with the violation of asset_tag
+      unique_attr_write_paths_integration_test.go:176: unlicensed_ci new: 2 active CIs hold asset_tag "A-1", want 1
+      unique_attr_write_paths_integration_test.go:177: unlicensed_ci new: the item is resolved, want it open
+      unique_attr_write_paths_integration_test.go:185: unclassified_device new: 200 {"id":"d27d8eb1-…","kind":"unclassified_device","status":"resolved",… want 409 urn:reticora:problem:conflict with the violation of fingerprint
+      unique_attr_write_paths_integration_test.go:186: unclassified_device new: 2 active CIs hold fingerprint {"sys_descr":"wp700"}, want 1
+      unique_attr_write_paths_integration_test.go:187: unclassified_device new: the item is resolved, want it open
+      unique_attr_write_paths_integration_test.go:192: index job for asset_tag after the refused writes: CIs share a value of the unique attribute "asset_tag": Duplicate keys exist.
+      unique_attr_write_paths_integration_test.go:192: index job for fingerprint after the refused writes: CIs share a value of the unique attribute "fingerprint": Duplicate keys exist.
+      unique_attr_write_paths_integration_test.go:200: POST /cis/{id}/restore with the index: 500 {"detail":"the request could not be completed","status":500,"title":"Internal Error",…}, want 409 urn:reticora:problem:conflict with the violation of inventory_no
+      unique_attr_write_paths_integration_test.go:206: unlicensed_ci new with the index: 500 {"detail":"the request could not be completed","status":500,"title":"Internal Error",…}, want 409 urn:reticora:problem:conflict with the violation of inventory_no
+  --- FAIL: TestUniqueAttributeEveryWritePath (1.14s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	1.266s
+  === RUN   TestAdoptUnlicensedChecksUniqueAttributes
+  2026/11/01 21:59:37 INFO unlicensed_ci items adopted organization_id=c0de7ba0-0000-4000-8000-000000000001 adopted=2 remaining=0
+      unlicensed_unique_integration_test.go:62: AdoptUnlicensed: 2, <nil>, want 1 adopted and no error
+      unlicensed_unique_integration_test.go:66: item 5e2612d5-dd0a-4e16-8060-ce635c48da4f: resolved, want open
+      unlicensed_unique_integration_test.go:72: 2 active CIs hold asset_tag A-1, want 1
+  --- FAIL: TestAdoptUnlicensedChecksUniqueAttributes (0.45s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery	0.564s
+  === RUN   TestUniqueAttributeRestoreForClientWriter
+      unique_attr_integration_test.go:283: client-1 writer restores its CI with the serial a CI of client 2 took: <nil>, want a conflict on serial
+      unique_attr_integration_test.go:290: restore refused: deleted=false (<nil>), want the CI to stay deleted
+  --- FAIL: TestUniqueAttributeRestoreForClientWriter (0.47s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci	0.580s
+  ```
 
 ## Geprüfte Kandidaten ohne neuen Befund
 

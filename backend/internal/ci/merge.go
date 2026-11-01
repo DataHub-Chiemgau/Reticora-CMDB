@@ -958,6 +958,13 @@ func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string, forc
 		if result.Victim, err = scanCI(tx.QueryRow(ctx, query, victimID)); err != nil {
 			return fmt.Errorf("read victim: %w", err)
 		}
+		// The values of both CIs in the snapshot may have been taken by
+		// another CI since the merge (MET-15, F-429).
+		for _, item := range []*Item{result.Victim, result.Survivor} {
+			if uerr := r.checkUniqueBack(ctx, tx, item); uerr != nil {
+				return uerr
+			}
+		}
 		for _, item := range []*Item{result.Survivor, result.Victim} {
 			if cerr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindRestored), orgID, item.ID, item.Version, "reconciliation_decision", "unmerged_ci",
 				nil, map[string]any{"merge_id": result.MergeID, "survivor_id": survivorID, "victim_id": victimID}); cerr != nil {

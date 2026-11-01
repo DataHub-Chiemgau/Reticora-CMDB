@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-699 | 42 | 36,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-700 | 43 | 37,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699); F-429 Eindeutigkeitsprüfung auf allen Schreibwegen (WP-700). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **344** | **437,0** | |
+| **Summe** | | **345** | **438,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>42 WPs · 36,0 PT"]
+    K7N["K7-Nachträge<br/>43 WPs · 37,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -463,6 +463,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-697](#wp-697--review-liste-unbekannte-status--und-kind-werte-sind-400-mit-feld-auch-am-veralteten-alias) | `k7n-review-list-filter-validation` | Review-Liste: unbekannte `status`- und `kind`-Werte sind 400 mit Feld, auch am veralteten Alias | K7N | 0,5 | F-426 | WP-088, WP-673 |
 | [WP-696](#wp-696--enrollment-code-in-der-oberfläche-pflichtauswahl-des-kunden-für-nutzer-mehrerer-clients-grund-der-ablehnung-statt-allgemeiner-fehlermeldung) | `k7n-enrollment-client-choice` | Enrollment-Code in der Oberfläche: Pflichtauswahl des Kunden für Nutzer mehrerer Clients, Grund der Ablehnung statt allgemeiner Fehlermeldung | K7N | 1,0 | F-425 | WP-677, WP-199, WP-524 |
 | [WP-699](#wp-699--sicherheitsreview-und-gate-01-erfassen-die-befunde-der-korrektur-sr-27-bis-sr-49-begründung-ohne-sicherheitswirkung-maschinelle-prüfung-über-die-befundliste) | `k7n-sr-coverage-reaudit-findings` | Sicherheitsreview und GATE-01 erfassen die Befunde der Korrektur: SR-27 bis SR-49, Begründung ohne Sicherheitswirkung, maschinelle Prüfung über die Befundliste | K7N | 1,0 | F-428 | WP-452, WP-451, WP-633, WP-634, WP-636, WP-639, WP-642, WP-643, WP-656, WP-660, WP-663, WP-664, WP-667, WP-669, WP-677, WP-678, WP-680, WP-682, WP-685, WP-687, WP-689, WP-692, WP-698 |
+| [WP-700](#wp-700--eindeutige-attribute-auf-allen-schreibwegen-wiederherstellen-unmerge-und-review-auflösung-prüfen-wie-post-cis-409-mit-violations) | `k7n-unique-check-all-write-paths` | Eindeutige Attribute auf allen Schreibwegen: Wiederherstellen, Unmerge und Review-Auflösung prüfen wie POST /cis (409 mit violations) | K7N | 1,0 | F-429 | WP-142, WP-692, WP-670, WP-676 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20764,6 +20765,67 @@ GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-699
 **Entscheidungsbedarf:** keiner. Festgelegt (zur Bestätigung durch den Lead): Befunde ohne Sicherheitswirkung, die nach dem Bewertungsschema Critical sind (stiller Datenverlust, F-411 und F-416), stehen als SR-Befund im Review, weil GATE-01 die Critical-Befunde aus dem Review liest; F-404 und F-422 gelten nicht als stiller Verlust (jede Wirkung von einem Nutzer angefordert bzw. nur an gelöschten CIs). Die Prüfung verlangt die Aufnahme für P0 bis P2; P3-Befunde sind vollständig aufgeführt, aber nicht maschinell verlangt.
 
 **Nicht Bestandteil:** die Statuspflege von GATE-01 bis GATE-03 und der übrigen Zeilen auf dem RC-Commit (WP-595); die RC-Scanläufe des Reviews (F-122, WP-595); die Klassifikation künftiger Befunde ab F-429 (die Regel macht sie zur Pflicht beim Eintrag in die Befundliste).
+
+### WP-700 – Eindeutige Attribute auf allen Schreibwegen: Wiederherstellen, Unmerge und Review-Auflösung prüfen wie POST /cis (409 mit violations)
+
+**Schlüssel:** `k7n-unique-check-all-write-paths` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-142 (`b-met-ddl`), WP-692 (`k7n-unique-org-scope-client-writer`), WP-670 (`k7n-max-cis-all-paths`), WP-676 (`k7n-review-resolve-errors`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-429](../../../audit/g1-reaudit/FINDINGS.md#f-429) | P3 | Eindeutige Attribute: Wiederherstellen, Unmerge und die Review-Auflösungen, die ein CI anlegen oder reaktivieren, prüfen die Eindeutigkeit nicht (Duplikate ohne Index, 500 mit Index) | schließt | Korrektur WP-692 (K7) auf `7cd63e0` |
+
+**Problem:** Die serverseitige Prüfung der eindeutigen Attribute (`UniqueConflicts`, MET-15) läuft nur in `ci.Service.Create`/`Update`. `POST /cis/{id}/restore` und die Auflösung `merge` von `resurrected_device` (`PGRepository.restore`), `POST /cis/{id}/unmerge` (`PGRepository.Unmerge`), `new` von `unclassified_device`/`ambiguous_identity`/`resurrected_device` (`createReviewedDevice`) und `new` von `unlicensed_ci` sowie die Übernahme nach Anheben von `max_cis` (`adoptHeld`, `AdoptUnlicensed`) schreiben am Service vorbei und verlassen sich auf den Unique-Index. Solange er fehlt (Fenster zwischen Flag und Index-Job oder nach einem gescheiterten Job), antworten sie 200 und legen ein zweites aktives CI mit demselben Wert an; der Index-Job scheitert danach mit „Duplicate keys exist“. Mit Index meldet der Index den Konflikt als `*ci.UniqueError`, den die Handler von Restore, Unmerge und Review-Auflösung nicht abbilden: 500 statt der dokumentierten 409. `AdoptUnlicensed` bricht bei so einem Gerät ab und übernimmt die übrigen nicht.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Prüfung von `ci.Service` ist als `ci.CheckUnique(ctx, repo, orgID, ciTypeID, clientID, ciID, attrs)` exportiert (`UniqueConflicts` über `UniqueChecker`, unverändert inkl. WP-692 für eingeschränkte Writer); `ci.Service.Create`/`Update` nutzen sie, keine zweite Implementierung.
+- [ ] `PGRepository.restore` (beide Wege: `RestoreDeleted` für `POST /cis/{id}/restore`, `Restore` für `resurrected_device`) und `PGRepository.Unmerge` (Opfer und Überlebendes) prüfen nach dem Zurückschreiben in der schreibenden Transaktion; ein vergebener Wert ist `*ci.UniqueError`, die Transaktion rollt zurück, das CI bleibt gelöscht bzw. gemergt. `createReviewedDevice` und `adoptHeld` prüfen vor dem `Create`.
+- [ ] `*ci.UniqueError` implementiert `api.ViolationsConflict`; `api.WriteFieldError` antwortet damit 409 `urn:reticora:problem:conflict` mit `violations` (Feld je Attribut, fester Text, ohne das andere CI), so wie `POST /cis` (der CI-Handler nutzt dieselbe Ausgabe). Restore, Unmerge und `POST /review-items/{id}/resolve` antworten so, mit und ohne Index; der Review-Eintrag bleibt offen.
+- [ ] `AdoptUnlicensed` lässt einen Eintrag mit vergebenem Wert offen (Warnung im Log mit den Attributschlüsseln) und übernimmt die folgenden.
+- [ ] `api/openapi.yaml` (spec-first): 409 von `POST /cis/{id}/restore` und `POST /cis/{id}/unmerge`, die Beschreibung von `resolveReviewItem` und `AttributeDefinition.unique` beschreiben die Regel; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestUniqueAttributeEveryWritePath` (`internal/server`), `TestAdoptUnlicensedChecksUniqueAttributes` (`internal/discovery`) und `TestUniqueAttributeRestoreForClientWriter` (`internal/ci`): auf `e5c2d86` rot (200 und zwei aktive CIs je Weg, Index-Job „Duplicate keys exist“, mit Index 500; `AdoptUnlicensed` übernimmt beide Geräte; Client-1-Writer stellt sein CI mit dem Wert eines CI von Client 2 wieder her), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1 ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/` grün (ohne `TestCIQueryBudget`, bekannte lokale Abweichung; `TestUniqueAttributes`, `TestUniqueAttributeOrgScopeForClientWriter` unverändert; `TestHandlersDoNotEchoRepositoryErrors` mit dem Eintrag für `api.WriteFieldError`); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (16 Einträge):**
+
+- backend/internal/api/fielderrors.go
+- backend/internal/ci/service.go
+- backend/internal/ci/handler.go
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/merge.go
+- backend/internal/ci/unique_attr_integration_test.go
+- backend/internal/discovery/review.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/discovery/unlicensed_unique_integration_test.go (neu)
+- backend/internal/server/unique_attr_write_paths_integration_test.go (neu)
+- backend/internal/server/handler_errors_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration (000189 bleibt frei), keine Policy-Änderung. Die Prüfung beim Wiederherstellen und Unmerge läuft in der schreibenden Transaktion (`database.ContextWithTx`); für eingeschränkte Writer zusätzlich in der eigenen, nur lesenden org-weiten Transaktion von WP-692.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUniqueAttributeEveryWritePath$' ./internal/server/`, `… -run '^TestAdoptUnlicensedChecksUniqueAttributes$' ./internal/discovery/`, `… -run '^TestUniqueAttribute' ./internal/ci/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MET-15;B/G1;B;backend/internal/server/unique_attr_write_paths_integration_test.go;WP-700
+MET-15;B/G1;B;backend/internal/discovery/unlicensed_unique_integration_test.go;WP-700
+MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-700
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Der Discovery-Ingest (`createDiscoveredCI` aus `processRecord`, Batch über `ci.BatchCreator`, Updates bekannter Geräte mit `attributes`) prüft weiterhin nur über den Index; wie ein gemeldeter, bereits vergebener Wert eines eindeutigen Attributs zu behandeln ist (Datensatz abweisen, Wert verwerfen wie vergebene Identitätswerte, Review-Eintrag), ist eine eigene Entscheidung. Ebenso der Typwechsel (`POST /cis/{id}/type`, CI-11), bei dem ein vorhandener Wert unter ein eindeutiges Attribut des Zieltyps fällt (nicht reproduziert). Eine Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben. Dass `new` die dynamischen Attribute des Geräte-Datensatzes nicht übernimmt (`devicePayload` speichert sie nicht), bleibt unverändert.
 
 ## Zurückgestellte Befunde
 

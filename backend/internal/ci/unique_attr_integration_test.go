@@ -237,3 +237,56 @@ func TestUniqueAttributeOrgScopeForClientWriter(t *testing.T) {
 		t.Errorf("index job after the refused writes: %v", err)
 	}
 }
+
+// TestUniqueAttributeRestoreForClientWriter covers WP-700 (MET-15; F-429)
+// against PostgreSQL: the restore checks the unique attributes as the
+// service checks a create, also while the unique index does not exist yet
+// and for a writer restricted to client 1. The value of its deleted CI,
+// taken meanwhile by a CI of client 2 the writer does not see, refuses the
+// restore with the conflict of the attribute without naming the other CI;
+// the CI stays deleted.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestUniqueAttributeRestoreForClientWriter(t *testing.T) {
+	f := scopetest.Seed(t, "9f")
+	bg := context.Background()
+	orgCtx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	c1Ctx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User, ClientID: f.Client1})
+	types := citype.NewPGRepository(f.App)
+	typ := &citype.Type{OrganizationID: f.OrgA, Key: "wp700-rack", Name: "wp700-rack", IsObservable: true}
+	if err := types.Create(orgCtx, typ); err != nil {
+		t.Fatalf("create type: %v", err)
+	}
+	// The flag only: the index job has not run (DB-04 window).
+	d := &citype.AttributeDefinition{CITypeID: typ.ID, Key: "serial", DataType: "string", Unique: true, UniqueScope: "org"}
+	if err := types.CreateAttributeDefinition(orgCtx, f.OrgA, d); err != nil {
+		t.Fatalf("define serial: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+citype.IndexName(d.ID, true)) })
+	svc := ci.NewService(ci.NewPGRepository(f.App))
+	own := &ci.Item{OrganizationID: f.OrgA, ClientID: f.Client1, CITypeID: typ.ID, Name: "wp700-own", Status: "active",
+		Attributes: map[string]any{"serial": "SN-7"}}
+	if err := svc.Create(c1Ctx, own); err != nil {
+		t.Fatalf("client-1 CI: %v", err)
+	}
+	if _, err := svc.Delete(c1Ctx, f.OrgA, own.ID); err != nil {
+		t.Fatal(err)
+	}
+	foreign := &ci.Item{OrganizationID: f.OrgA, ClientID: f.Client2, CITypeID: typ.ID, Name: "wp700-foreign", Status: "active",
+		Attributes: map[string]any{"serial": "SN-7"}}
+	if err := svc.Create(orgCtx, foreign); err != nil {
+		t.Fatalf("org-wide writer, CI of client 2 with the released serial: %v", err)
+	}
+	_, err := svc.Restore(c1Ctx, f.OrgA, own.ID)
+	var ue *ci.UniqueError
+	if !errors.As(err, &ue) || len(ue.Fields) != 1 || ue.Fields[0] != "serial" {
+		t.Errorf("client-1 writer restores its CI with the serial a CI of client 2 took: %v, want a conflict on serial", err)
+	}
+	if err != nil && (strings.Contains(err.Error(), foreign.ID) || strings.Contains(err.Error(), foreign.Name)) {
+		t.Errorf("restore: %q names the CI of client 2", err)
+	}
+	var deleted bool
+	if qerr := f.Admin.QueryRow(bg, `SELECT deleted_at IS NOT NULL FROM ci WHERE id = $1`, own.ID).Scan(&deleted); qerr != nil || !deleted {
+		t.Errorf("restore refused: deleted=%v (%v), want the CI to stay deleted", deleted, qerr)
+	}
+}

@@ -218,10 +218,23 @@ func (e *UniqueError) Error() string {
 	return "another CI holds the value of the unique attribute(s): " + strings.Join(e.Fields, ", ")
 }
 
-// checkUnique enforces the unique attributes server-side (MET-15) when the
-// repository can check them.
-func (s *Service) checkUnique(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) error {
-	checker, ok := s.repo.(UniqueChecker)
+// ConflictViolations implements api.ViolationsConflict: 409 with a
+// violation per attribute, never naming the other CI.
+func (e *UniqueError) ConflictViolations() []api.Violation {
+	violations := make([]api.Violation, len(e.Fields))
+	for i, f := range e.Fields {
+		violations[i] = api.Violation{Field: f, Detail: "another CI already holds this value of the unique attribute"}
+	}
+	return violations
+}
+
+// CheckUnique enforces the unique attributes server-side (MET-15) when the
+// repository can check them (UniqueChecker): a value of attrs another
+// active CI holds is a *UniqueError. ciID is the CI written ("" for a new
+// one). Every path that sets or brings back the values of a CI runs it,
+// not only ci.Service: the unique index may not exist yet (F-429).
+func CheckUnique(ctx context.Context, repo Repository, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) error {
+	checker, ok := repo.(UniqueChecker)
 	if !ok {
 		return nil
 	}
@@ -317,7 +330,7 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 	if item.AssetID != "" && item.LocationID != "" {
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
 	}
-	if err := s.checkUnique(ctx, item.OrganizationID, item.CITypeID, item.ClientID, "", item.Attributes); err != nil {
+	if err := CheckUnique(ctx, s.repo, item.OrganizationID, item.CITypeID, item.ClientID, "", item.Attributes); err != nil {
 		return err
 	}
 	return s.repo.Create(ctx, item)
@@ -374,7 +387,7 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 			if req.ClientID != nil {
 				clientID = *req.ClientID
 			}
-			if err := s.checkUnique(ctx, orgID, before.CITypeID, clientID, id, MergePatch(before.Attributes, req.Attributes)); err != nil {
+			if err := CheckUnique(ctx, s.repo, orgID, before.CITypeID, clientID, id, MergePatch(before.Attributes, req.Attributes)); err != nil {
 				return nil, err
 			}
 		}

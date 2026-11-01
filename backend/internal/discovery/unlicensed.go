@@ -406,6 +406,12 @@ func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *Re
 	if _, err = h.dropInvalidObserved(ctx, orgID, typeID, "", &device); err != nil {
 		return "", err
 	}
+	// The unique attributes are checked as POST /cis checks them, also
+	// before their index exists: a value another active CI holds is 409
+	// with the violations and the item stays open (MET-15, F-429).
+	if uerr := ci.CheckUnique(ctx, h.ciRepo, orgID, typeID, device.ClientID, "", discoveredAttributes(&device)); uerr != nil {
+		return "", uerr
+	}
 	created, err := h.createDiscoveredCI(ctx, orgID, &device, typeID, payloadString(item.Payload, "source"))
 	if err != nil {
 		if ve, ok := ci.AsValidationError(err); ok && len(ve.Violations) > 0 {
@@ -434,6 +440,15 @@ func (h *Handler) AdoptUnlicensed(ctx context.Context, orgID string) (int, error
 		if _, err = h.adoptUnlicensed(ctx, orgID, "", &items[i]); err != nil {
 			if errors.Is(err, reviews.ErrAlreadyResolved) {
 				// Resolved meanwhile by a principal or another replica.
+				continue
+			}
+			// Another active CI holds a value of a unique attribute of the
+			// device (MET-15, F-429): the item stays open for a principal,
+			// the others are adopted.
+			var taken *ci.UniqueError
+			if errors.As(err, &taken) {
+				slog.WarnContext(ctx, "unlicensed_ci item not adopted: a unique value is taken", "organization_id", orgID,
+					"review_item_id", items[i].ID, "attributes", taken.Fields)
 				continue
 			}
 			var exceeded *entitlement.LimitExceededError

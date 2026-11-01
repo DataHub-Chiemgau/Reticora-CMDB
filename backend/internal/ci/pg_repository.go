@@ -1564,6 +1564,9 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {
 			return fmt.Errorf("get restored ci: %w", err)
 		}
+		if uerr := r.checkUniqueBack(ctx, tx, restored); uerr != nil {
+			return uerr
+		}
 		if changeErr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindRestored), orgID, id, restored.Version, changeType, "deleted_at", "deleted", nil); changeErr != nil {
 			return changeErr
 		}
@@ -2365,6 +2368,16 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 	}
 	slices.Sort(keys)
 	return keys, nil
+}
+
+// checkUniqueBack refuses a CI that comes back with its values (restore,
+// unmerge) while another active CI holds a value of one of its unique
+// attributes (MET-15, F-429): the check of ci.Service (CheckUnique), run in
+// the writing transaction tx, so it holds also while the unique index does
+// not exist yet. The caller's transaction rolls back; the CI stays deleted
+// or merged.
+func (r *PGRepository) checkUniqueBack(ctx context.Context, tx pgx.Tx, item *Item) error {
+	return CheckUnique(database.ContextWithTx(ctx, tx), r, item.OrganizationID, item.CITypeID, item.ClientID, item.ID, item.Attributes)
 }
 
 // ChangeType implements TypeChanger (CI-11): the CI keeps its row, so its

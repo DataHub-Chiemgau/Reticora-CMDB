@@ -1159,3 +1159,6 @@ COL-04;[B];D;frontend/e2e-real/enrollment-client-choice.spec.ts;WP-696
 GATE-01;[Q];SR;tests/rep01-structure.test.sh;WP-699
 SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-699
 GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-699
+MET-15;B/G1;B;backend/internal/server/unique_attr_write_paths_integration_test.go;WP-700
+MET-15;B/G1;B;backend/internal/discovery/unlicensed_unique_integration_test.go;WP-700
+MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-700

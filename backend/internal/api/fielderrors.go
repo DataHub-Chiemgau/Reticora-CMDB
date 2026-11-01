@@ -34,10 +34,36 @@ type FieldProblem struct {
 	Field string `json:"field"`
 }
 
+// Violation names a field of a problem and what is wrong with its value.
+type Violation struct {
+	Field  string `json:"field"`
+	Detail string `json:"detail"`
+}
+
+// ViolationsConflict is a conflict on fields whose values another resource
+// holds, e.g. the unique attributes of a CI (MET-15).
+type ViolationsConflict interface {
+	error
+	ConflictViolations() []Violation
+}
+
 // WriteFieldError answers a *FieldError (400 unless it carries another
-// status) or a *ConflictError (409) with the field named, and reports
-// whether err was one of them.
+// status) or a *ConflictError (409) with the field named, or a
+// ViolationsConflict (409 with violations), and reports whether err was
+// one of them.
 func WriteFieldError(w http.ResponseWriter, err error) bool {
+	var vc ViolationsConflict
+	if errors.As(err, &vc) {
+		WriteProblemBody(w, http.StatusConflict, struct {
+			ProblemDetail
+			Violations []Violation `json:"violations"`
+		}{
+			ProblemDetail: ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
+				Status: http.StatusConflict, Detail: vc.Error()},
+			Violations: vc.ConflictViolations(),
+		})
+		return true
+	}
 	var fe *FieldError
 	if errors.As(err, &fe) {
 		status := fe.Status
