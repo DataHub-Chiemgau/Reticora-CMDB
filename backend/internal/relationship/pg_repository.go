@@ -1158,6 +1158,84 @@ func (r *PGRepository) EdgesOf(ctx context.Context, orgID string, ciIDs, relType
 	return result, nil
 }
 
+var _ HiddenEdgeReader = (*PGRepository)(nil)
+
+// HiddenEdgesOf implements HiddenEdgeReader (IMP-04, IMP-07, F-420). For a
+// caller restricted in the client or site scope one statement reads, in an
+// own transaction with the organization-wide scope of the caller's
+// organization (database.OrgWideScope, read only), the stored
+// relationships of relTypes with an end among ciIDs between two not
+// deleted CIs; one statement under the caller's scope then finds the edges
+// and ends the caller sees. Only the edges EdgesOf would not return leave
+// the repository, without id and source and with the ids of the ends the
+// caller does not see left empty: no id of a hidden CI or edge reaches the
+// caller. An org-wide caller sees every edge; nothing is read.
+func (r *PGRepository) HiddenEdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error) {
+	result := make([]Relationship, 0)
+	scope, ok := database.TenantScopeFromContext(ctx)
+	switch {
+	case !ok:
+		return nil, database.ErrNoTenantScope
+	case !strings.EqualFold(scope.OrgID, orgID):
+		return nil, fmt.Errorf("%w: %q", database.ErrTenantMismatch, orgID)
+	case len(ciIDs) == 0 || len(relTypes) == 0 || (scope.Clients.IsAll() && scope.Sites.IsAll()):
+		return result, nil
+	}
+	wide := database.OrgWideScope(scope.OrgID, scope.UserID)
+	var edges []edgeRow
+	err := database.WithTenant(database.WithoutTx(ctx), r.pool, &wide, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		edges, err = readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM ci_relationship r
+			WHERE r.organization_id = $1 AND r.rel_type = ANY($3::text[])
+				AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.source_ci_id AND ci.deleted_at IS NULL)
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.target_ci_id AND ci.deleted_at IS NULL)
+			ORDER BY r.id`, orgID, ciIDs, relTypes)
+		return err
+	})
+	if err != nil || len(edges) == 0 {
+		return result, err
+	}
+	edgeIDs := make([]string, 0, len(edges))
+	ends := make([]string, 0, 2*len(edges))
+	for _, e := range edges {
+		edgeIDs = append(edgeIDs, e.id)
+		ends = append(ends, e.sourceCIID, e.targetCIID)
+	}
+	seenEdge, seenCI := map[string]bool{}, map[string]bool{}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, qerr := tx.Query(ctx, `SELECT id::text FROM ci_relationship WHERE organization_id = $1 AND id = ANY($2::uuid[])`, orgID, edgeIDs)
+		if qerr != nil {
+			return fmt.Errorf("read visible relationships: %w", qerr)
+		}
+		ids, qerr := pgx.CollectRows(rows, pgx.RowTo[string])
+		if qerr != nil {
+			return fmt.Errorf("read visible relationships: %w", qerr)
+		}
+		for _, id := range ids {
+			seenEdge[id] = true
+		}
+		return visibleCIs(ctx, tx, orgID, ends, seenCI)
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range edges {
+		if seenEdge[e.id] && seenCI[e.sourceCIID] && seenCI[e.targetCIID] {
+			continue
+		}
+		rel := Relationship{RelType: e.relType}
+		if seenCI[e.sourceCIID] {
+			rel.SourceCIID = e.sourceCIID
+		}
+		if seenCI[e.targetCIID] {
+			rel.TargetCIID = e.targetCIID
+		}
+		result = append(result, rel)
+	}
+	return result, nil
+}
+
 func readEdges(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]edgeRow, error) {
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {

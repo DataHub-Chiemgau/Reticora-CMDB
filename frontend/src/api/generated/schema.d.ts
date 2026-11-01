@@ -2907,7 +2907,7 @@ export interface paths {
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
      * @deprecated
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Over a redundant type (powered_by, member_of_cluster) a CI is impacted only when all its providers failed (IMP-04), also those outside the client or site scope of the caller, which the answer never names (IMP-07). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
      */
     get: operations['getCIImpactLegacy'];
     put?: never;
@@ -2927,7 +2927,7 @@ export interface paths {
     };
     /**
      * Joint impact of several CIs failing at once (IMP-05)
-     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
+     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). A provider outside the client or site scope of the caller counts as well, so the impact equals that of an org-wide caller, restricted to the visible CIs; the answer never names such a provider (IMP-07). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
      */
     get: operations['getMultiImpact'];
     put?: never;
@@ -2959,7 +2959,7 @@ export interface paths {
     };
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Over a redundant type (powered_by, member_of_cluster) a CI is impacted only when all its providers failed (IMP-04), also those outside the client or site scope of the caller, which the answer never names (IMP-07). Powers the Ausfallsimulation in the topology view.
      */
     get: operations['getCIImpact'];
     put?: never;
@@ -6093,7 +6093,7 @@ export interface paths {
     };
     /**
      * Compute the blast radius of a CI failure
-     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed. single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed, also those outside the client or site scope of the caller, which the answer never names (IMP-07). single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
      */
     get: operations['listCisIdBlastRadius'];
     put?: never;

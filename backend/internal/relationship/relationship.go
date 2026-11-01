@@ -537,6 +537,23 @@ type IncidentEdgeReader interface {
 	EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error)
 }
 
+// HiddenEdgeReader reads the stored edges of some types that touch a set of
+// CIs and that the caller's client or site scope hides (IMP-04, IMP-07,
+// F-420): the impact counts a provider of a redundant type in another
+// client or site as a working supply of its dependent, as it does for an
+// org-wide caller, without learning which CI it is. The PostgreSQL
+// repository implements it; without it the impact sees only what the
+// caller sees.
+type HiddenEdgeReader interface {
+	// HiddenEdgesOf returns the stored relationships of one of relTypes
+	// whose source or target is among ciIDs, whose source and target are
+	// not deleted CIs of the organization, and which EdgesOf does not
+	// return to the caller. They carry neither an id nor a source; an end
+	// the caller does not see is empty. Nothing is returned to a caller
+	// without a client and site restriction.
+	HiddenEdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error)
+}
+
 // MemoryRepository is an in-memory relationship store.
 type MemoryRepository struct {
 	mu    sync.RWMutex

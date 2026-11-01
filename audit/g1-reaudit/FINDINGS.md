@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 28 |
-| P3 | 32 |
-| **Summe** | **66** |
+| P3 | 33 |
+| **Summe** | **67** |
 
 ## Übersicht
 
@@ -106,6 +106,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-418](#f-418) | P2 | Ein auf einen Client gebundener Inhaber von `notification:manage` verwaltet die Benachrichtigungskanäle der Organisation und liest alle Zustellungen; ein von ihm angelegter Webhook-Kanal erhält die Benachrichtigungen anderer Clients mit Name und E-Mail fremder Empfänger | Verifier r3-b4 (WP-138/139) auf `bf51da7` | belegt | backend/internal/server/notification_channel_scope_integration_test.go | WP-689 |
 | [F-427](#f-427) | P2 | Raumlayout behält und akzeptiert Schlüssel von CIs eines anderen Clients: client-beschränkte Nutzer lesen deren ID und Position, können den Raum über die UI nicht mehr positionieren (422), und ein direkter PATCH löscht die fremde Position | Verifier r3-b5 (WP-193) auf `7cd63e0` | belegt | backend/internal/tenantapi/room_layout_integration_test.go | WP-698 |
 | [F-419](#f-419) | P3 | Bulk-Operation entfernt doppelte IDs nur bei identischer Schreibweise: dieselbe UUID in anderer Groß-/Kleinschreibung wird zweimal geschrieben und zweimal gemeldet | Verifier r3-b4 (WP-181) auf `bf51da7` | belegt | backend/internal/ci/bulk_test.go | WP-690 |
+| [F-420](#f-420) | P3 | Redundanz-Postfilter für Principals mit Client-Scope: ein Versorger eines anderen Clients zählt nicht, das CI gilt als betroffen | Verifier r3-b4 (WP-179) auf `bf51da7` | belegt | backend/internal/topology/redundancy_depth_integration_test.go | WP-691 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1737,6 +1738,36 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   --- FAIL: TestBulkAgainstPostgres (1.06s)
   FAIL
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci	1.170s
+  FAIL
+  ```
+
+<a id="f-420"></a>
+### F-420 (P3) – Redundanz-Postfilter für Principals mit Client-Scope: ein Versorger eines anderen Clients zählt nicht, das CI gilt als betroffen
+
+- **Gefunden in:** K7-Wiederholungsprüfung r3-b4 (Verifier, Probe `TestVR3B4RedundancyHiddenSupply` auf `bf51da7`), Wiederholungsprüfung von WP-179; `backend/internal/topology/redundancy.go` und `PGRepository.EdgesOf` sind dort identisch mit `e5c2d86`; kodierender Test von WP-691 · **Betroffene Anforderungen:** IMP-04 [B] (betroffen nur, wenn alle Quellen ausgefallen sind), IMP-07 [B] (Tenant- und Scope-Grenzen, Ergebnisse stimmen mit dem DB-Zustand überein), IMP-05 · **Komponente:** backend/internal/topology/redundancy.go (`readFeeds`, Zeile 68 ff. auf `e5c2d86`: liest Versorger nur für Abhängige an der Tiefe und nur über `relationship.IncidentEdgeReader` unter der RLS des Aufrufers; `redundantProviders`/`downLevels` kennen nur Kanten zwischen sichtbaren CIs), backend/internal/topology/topology.go (`graphFrom`, Zeile 387: Kanten zu unsichtbaren CIs werden verworfen), backend/internal/relationship/pg_repository.go (`EdgesOf`, Zeile 1111: `ci_relationship_isolation` und die `EXISTS`-Prüfungen auf `ci` verbergen die Kante zum CI von Client 2) · **Quelle:** `k7/ver/r3-b4/k-reaudit-3/WP-179/verify-probe-redundancy-hidden-supply.log` und `…/verify-probe-redundancy-hidden-supply.go.txt`; kodierender Test von WP-691 (`k7/ad-690/red-691.log`)
+- **Reproduktion:** server (Client 1) `powered_by` pdu-a (Client 1) und pdu-b (Client 2). `GET /api/v1/impact/{pdu-a}?depth=1` und `GET /api/v1/impact?ci_ids={pdu-a}&depth=1`: org-weit `impacted=[]`, als Client-1-Principal `impacted=[server]`. Im kodierenden Test zusätzlich: bei `depth=2`/`20` auch die vm (`hosted_on` server), dasselbe auf `/topology/cis/{id}/impact` und für zwei ausgefallene CIs; `GET /cis/{pdu-a}/blast-radius` nennt server als betroffen und nicht unter `protected_by_redundancy`.
+- **Soll:** IMP-04: über einen Typ mit `redundant = true` ist ein CI nur betroffen, wenn alle seine Quellen ausgefallen sind. IMP-07: das Ergebnis stimmt mit dem DB-Zustand überein und respektiert die Scope-Grenzen: ein eingeschränkter Principal sieht die Auswirkung auf seine CIs wie ein org-weiter, ohne dass die Antwort CIs oder Kanten außerhalb seines Scopes nennt. Ein gelöschter Versorger zählt nicht.
+- **Ist:** Die Analyse läuft vollständig unter der RLS des Aufrufers. Ein Versorger eines anderen Clients (oder Standorts) fehlt im Graphen und in den Zusatzkanten von `readFeeds`; der Abhängige hat scheinbar nur den ausgefallenen Versorger und gilt als betroffen, ebenso alles dahinter.
+- **Nutzerwirkung:** Ein MSP-Techniker mit Client-Scope erhält in der Ausfallsimulation, im Blast Radius und in der Wartungsplanung (`/impact?ci_ids=`) falsche Betroffene: CIs mit einer zweiten Einspeisung aus geteilter Infrastruktur eines anderen Clients erscheinen als ausgefallen bzw. als Single Point of Failure. Wartungsfenster werden zu groß geplant, die Redundanz wird nicht erkannt; org-weite und eingeschränkte Nutzer sehen widersprüchliche Ergebnisse für dasselbe CI.
+- **Ursache (belegt):** WP-179/WP-513 haben den Postfilter auf dem Graphen des Aufrufers gebaut; F-160 hat Versorger jenseits der Tiefe ergänzt, aber nur unter der RLS des Aufrufers (`EdgesOf`, „ein client-gebundener Principal erfährt nie von einer Kante zu einem CI eines anderen Clients“). Die Tests der Redundanz liefen mit Versorgern desselben Clients.
+- **Empfehlung:** Eine optionale Schnittstelle `relationship.HiddenEdgeReader`: für Aufrufer mit eingeschränktem Client- oder Site-Scope liest `PGRepository.HiddenEdgesOf` in einer eigenen, nur lesenden Transaktion mit dem org-weiten Scope der Organisation (`database.OrgWideScope`, wie `webhook.objectScopes`) die Kanten der redundanten Typen der Abhängigen zwischen zwei nicht gelöschten CIs, bestimmt unter dem Scope des Aufrufers, welche davon er sieht, und gibt nur die übrigen heraus, ohne Kanten-Id und mit leerer Id jedes Endes, das er nicht sieht. `readFeeds` fügt sie für jeden Abhängigen über einen redundanten Typ (in jeder Tiefe) als Feed mit einem Versorger `outside` an: er hält den Abhängigen wie ein Versorger jenseits der Tiefe; der Weg läuft nie über ihn, keine Antwort nennt ihn. Org-weite Aufrufer: keine zusätzliche Abfrage. Keine Migration.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestRedundancyHiddenSupplyForScopedPrincipal$' ./internal/topology/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: server (pdu-a C1, pdu-b C2), server2 (pdu-a, pdu-c C1), server3 (pdu-a, gelöschte pdu-d C2), vm `hosted_on` server; für org-weiten und Client-1-Principal gleich: `/impact/{pdu-a}` mit `depth` 1, 2, 20, `/impact?ci_ids={pdu-a}` mit `depth` 1 und 2 und `/topology/cis/{pdu-a}/impact` → nur server3; `/impact?ci_ids={pdu-a},{pdu-c}&depth=2` → server2, server3; Blast Radius von pdu-a: betroffen server3, `protected_by_redundancy` server und server2. Keine Antwort an den Client-1-Principal enthält Id oder Namen von pdu-b oder pdu-d. Dazu `go test -count=1 -v -run '^TestEdgesOfStaysInsideScope$' ./internal/relationship/` PASS (`HiddenEdgesOf`: Client 1 erhält nur die Kante zum CI von Client 2 ohne Id und Ziel, org-weit nichts, ohne Scope `ErrNoTenantScope`, andere Organisation `ErrTenantMismatch`) und `TestRedundancyAcrossDepthLimitAgainstPostgres`, `TestBlastRadiusAgainstPostgres` unverändert grün.
+- **Kodierender Test:** backend/internal/topology/redundancy_depth_integration_test.go (`TestRedundancyHiddenSupplyForScopedPrincipal`, Topologie-Handler mit PG-Repositories als `reticora_app`); auf `e5c2d86` rot (ausgeführt auf der Basis `36439c1` mit den alten Produktionsdateien `redundancy.go`, `relationship.go` und `pg_repository.go` aus `HEAD`; `readFeeds`, `redundantProviders` und `EdgesOf` sind dort identisch mit `e5c2d86`; die org-weiten Antworten stimmen bereits):
+
+  ```text
+  === RUN   TestRedundancyHiddenSupplyForScopedPrincipal
+      redundancy_depth_integration_test.go:287: /api/v1/impact/c0deb8a0-0000-4000-8000-000000001005?depth=1 (client "c0deb8a0-0000-4000-8000-0000000000c1"): impacted [server server3], want [server3]
+      redundancy_depth_integration_test.go:287: /api/v1/impact/c0deb8a0-0000-4000-8000-000000001005?depth=2 (client "c0deb8a0-0000-4000-8000-0000000000c1"): impacted [server server3 vm], want [server3]
+      redundancy_depth_integration_test.go:287: /api/v1/impact/c0deb8a0-0000-4000-8000-000000001005?depth=20 (client "c0deb8a0-0000-4000-8000-0000000000c1"): impacted [server server3 vm], want [server3]
+      redundancy_depth_integration_test.go:287: /api/v1/impact?ci_ids=c0deb8a0-0000-4000-8000-000000001005&depth=1 (client "c0deb8a0-0000-4000-8000-0000000000c1"): impacted [server server3], want [server3]
+      redundancy_depth_integration_test.go:287: /api/v1/impact?ci_ids=c0deb8a0-0000-4000-8000-000000001005&depth=2 (client "c0deb8a0-0000-4000-8000-0000000000c1"): impacted [server server3 vm], want [server3]
+      redundancy_depth_integration_test.go:287: /api/v1/topology/cis/c0deb8a0-0000-4000-8000-000000001005/impact?depth=1 (client "c0deb8a0-0000-4000-8000-0000000000c1"): impacted [server server3], want [server3]
+      redundancy_depth_integration_test.go:287: /api/v1/impact?ci_ids=c0deb8a0-0000-4000-8000-000000001005,c0deb8a0-0000-4000-8000-000000001006&depth=2 (client "c0deb8a0-0000-4000-8000-0000000000c1"): impacted [server server2 server3 vm], want [server2 server3]
+      redundancy_depth_integration_test.go:301: blast radius of pdu-a (client "c0deb8a0-0000-4000-8000-0000000000c1"): affected [server server3 vm], want [server3]
+      redundancy_depth_integration_test.go:304: blast radius of pdu-a (client "c0deb8a0-0000-4000-8000-0000000000c1"): protected [server2], want [server server2]
+  --- FAIL: TestRedundancyHiddenSupplyForScopedPrincipal (0.68s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology	0.689s
   FAIL
   ```
 

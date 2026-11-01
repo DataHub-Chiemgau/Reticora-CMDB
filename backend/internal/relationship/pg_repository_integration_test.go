@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -629,6 +630,28 @@ func TestEdgesOfStaysInsideScope(t *testing.T) {
 	}
 	if _, err := repo.EdgesOf(bg, f.OrgA, []string{server}, []string{"powered_by"}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Errorf("without scope: %v, want ErrNoTenantScope", err)
+	}
+
+	// WP-691 (F-420): HiddenEdgesOf returns to the client-1 principal the
+	// edge to the CI of client 2 that EdgesOf leaves out, without its id and
+	// with the end of client 2 empty; the edge to the deleted CI does not
+	// count. An org-wide principal sees every edge: nothing is hidden.
+	hidden, err := repo.HiddenEdgesOf(f.ClientCtx(f.Client1), f.OrgA, []string{server}, []string{"powered_by", "member_of_cluster"})
+	if err != nil || len(hidden) != 1 || !reflect.DeepEqual(hidden[0], relationship.Relationship{SourceCIID: server, RelType: "powered_by"}) {
+		t.Errorf("hidden edges for client 1: %+v %v, want only the powered_by edge from the server without id and target", hidden, err)
+	}
+	if hidden, err = repo.HiddenEdgesOf(f.OrgCtx(f.OrgA), f.OrgA, []string{server}, []string{"powered_by"}); err != nil || len(hidden) != 0 {
+		t.Errorf("hidden edges org-wide: %+v %v, want none", hidden, err)
+	}
+	if hidden, err = repo.HiddenEdgesOf(f.ClientCtx(f.Client2), f.OrgA, []string{foreign}, []string{"powered_by"}); err != nil ||
+		len(hidden) != 1 || !reflect.DeepEqual(hidden[0], relationship.Relationship{TargetCIID: foreign, RelType: "powered_by"}) {
+		t.Errorf("hidden edges for client 2: %+v %v, want the edge to its CI without id and source", hidden, err)
+	}
+	if _, err = repo.HiddenEdgesOf(bg, f.OrgA, []string{server}, []string{"powered_by"}); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("hidden edges without scope: %v, want ErrNoTenantScope", err)
+	}
+	if _, err = repo.HiddenEdgesOf(f.ClientCtx(f.Client1), f.OrgB, []string{server}, []string{"powered_by"}); !errors.Is(err, database.ErrTenantMismatch) {
+		t.Errorf("hidden edges of another organization: %v, want ErrTenantMismatch", err)
 	}
 }
 
