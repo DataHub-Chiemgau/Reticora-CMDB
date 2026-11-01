@@ -38,7 +38,9 @@ seiner Server-URL; dafür nennt das Zertifikat die Namen aus
 `RETICORA_NATS_EDGE_HOSTS` (siehe Plattformseite). Passt kein Name, scheitert
 der Handshake (`x509: … doesn't contain any IP SANs`, `certificate is valid
 for …, not …`) und der Collector liefert nichts
-(`docs/troubleshooting-installation.md`, „Collector delivers nothing“).
+(`docs/troubleshooting-installation.md`, „Collector delivers nothing“). Die
+Namensregel und die Log-Ereignisse des Collectors beschreibt
+[collector-verbindung.md](collector-verbindung.md).
 
 Nicht benötigt: eingehende Verbindungen in das Kundennetz, VPN, Portweiterleitungen.
 Ein Proxy für HTTPS ist möglich; für NATS (4222) muss die Verbindung direkt

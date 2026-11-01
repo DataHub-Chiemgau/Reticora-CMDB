@@ -979,6 +979,7 @@ and uploads are answered with 401, the collector keeps the batches in its
 spool and retries every 30 s — traffic, but nothing arrives
 ([betrieb/firewall-matrix.md](betrieb/firewall-matrix.md)). Spooled batches
 are delivered once the endpoint connects (up to `RETICORA_SPOOL_MAX_AGE`).
+The collector side (name rule of the endpoint certificate, `RETICORA_NATS_TLS_SERVER_NAME`, all log events) is described in [betrieb/collector-verbindung.md](betrieb/collector-verbindung.md).
 
 **Log signatures** of the collector (`journalctl -u reticora-collector
 --since -1h`; Docker mode: `docker compose -f /opt/reticora-collector/docker-compose.yml logs collector`):
@@ -986,7 +987,7 @@ are delivered once the endpoint connects (up to `RETICORA_SPOOL_MAX_AGE`).
 | Collector log | Meaning | Fix |
 |---|---|---|
 | `collector NATS endpoint connected over mTLS` | The endpoint works. | Check the scopes (last row). |
-| `collector NATS endpoint not used` with `reason="not enrolled or no endpoint"` | Not enrolled, or enrolled without a restart afterwards (the process reads its credentials only at start). | Enroll, then restart (below). |
+| `"event":"collector.enroll.pending"` / `collector not enrolled: nothing is delivered until it is` (older collectors: `collector NATS endpoint not used` with `reason="not enrolled or no endpoint"`) | Not enrolled yet. A running collector picks up the credentials within about 30 s after the enrollment; collectors before this release read them only at start and need a restart. | Enroll, then restart (below). |
 | `"event":"collector.nats.unreachable"` / `collector NATS endpoint unreachable` with `x509: cannot validate certificate for <ip> because it doesn't contain any IP SANs` or `x509: certificate is valid for …, not <host>` | The server certificate of the endpoint does not name the host the collector dials. | Certificate names (below). |
 | … with `x509: certificate signed by unknown authority` | The collector does not trust the endpoint: its CA bundle comes from another installation, or a proxy intercepts TLS on 4222. | Enroll against this installation; let 4222 pass without TLS inspection. |
 | … with `i/o timeout`, `connection refused` or `no route to host` | Port 4222 is not reachable. | Open 4222 (below). |

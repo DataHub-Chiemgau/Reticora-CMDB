@@ -155,6 +155,12 @@ jobs:
       - name: install-vm.sh cosign for the signed auto-updates (COL-06)
         run: ./tests/install-vm-cosign.test.sh
 
+      # INS-06, COL-08: install-vm.sh enrolls with the one-time code (passed in
+      # the environment, never in argv), mounts a private CA in Docker mode,
+      # gives the spool to the image user and probes the NATS endpoint 4222/TCP.
+      - name: install-vm.sh enrollment, NATS endpoint probe and spool owner (INS-06, COL-08)
+        run: ./tests/install-vm-enroll.test.sh
+
       # COL-06 (WP-546, open evidence of WP-148): the self-update of the
       # running collector with two builds (v0.0.1, v0.0.2), manifests and
       # artifacts on a local HTTP server and a cosign stub that accepts only
