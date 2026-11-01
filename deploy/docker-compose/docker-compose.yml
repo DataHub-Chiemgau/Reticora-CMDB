@@ -354,6 +354,32 @@ services:
       # Page the link of the invitation mail opens (TLC-03, NTF-05), on the
       # public base URL install-cloud.sh writes into .env (same default).
       RETICORA_INVITATION_ACCEPT_URL: "${RETICORA_PUBLIC_BASE_URL:-http://localhost:3000}/invitations/accept"
+      # Self-signup (TLC-01) and the central SMTP server (TEC-13), from the
+      # .env that install-cloud.sh writes; the server treats an empty value
+      # as unset. Signups need the Keycloak admin client, the SMTP server
+      # (the e-mail verification is mandatory) and the page the verification
+      # link opens (<public base URL>/onboarding unless set in .env); without
+      # one of them GET /api/v1/signup/challenge and POST /api/v1/signup
+      # answer 503 ("self-signup is not available"). Without
+      # RETICORA_SMTP_HOST no e-mail is sent at all; with it /readyz also
+      # checks the SMTP server. The admin client (service account,
+      # install-cloud.sh ensure_admin_client) also creates the accounts of
+      # accepted invitations and binds org_admins to MFA.
+      RETICORA_SIGNUP_VERIFY_URL: "${RETICORA_SIGNUP_VERIFY_URL:-${RETICORA_PUBLIC_BASE_URL:-http://localhost:3000}/onboarding}"
+      RETICORA_SIGNUP_CAPTCHA_KEY: "${RETICORA_SIGNUP_CAPTCHA_KEY:-}"
+      RETICORA_SIGNUP_BLOCKED_DOMAINS: "${RETICORA_SIGNUP_BLOCKED_DOMAINS:-}"
+      RETICORA_SIGNUP_ALLOWED_DOMAINS: "${RETICORA_SIGNUP_ALLOWED_DOMAINS:-}"
+      RETICORA_TRIAL_PLAN: "${RETICORA_TRIAL_PLAN:-}"
+      RETICORA_TRIAL_DAYS: "${RETICORA_TRIAL_DAYS:-}"
+      RETICORA_TRIAL_MAX_CIS: "${RETICORA_TRIAL_MAX_CIS:-}"
+      RETICORA_KEYCLOAK_ADMIN_CLIENT_ID: "${RETICORA_KEYCLOAK_ADMIN_CLIENT_ID:-}"
+      RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET: "${RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET:-}"
+      RETICORA_SMTP_HOST: "${RETICORA_SMTP_HOST:-}"
+      RETICORA_SMTP_PORT: "${RETICORA_SMTP_PORT:-587}"
+      RETICORA_SMTP_TLS: "${RETICORA_SMTP_TLS:-starttls}"
+      RETICORA_SMTP_USERNAME: "${RETICORA_SMTP_USERNAME:-}"
+      RETICORA_SMTP_PASSWORD: "${RETICORA_SMTP_PASSWORD:-}"
+      RETICORA_SMTP_FROM: "${RETICORA_SMTP_FROM:-}"
       RETICORA_ENVIRONMENT: "production"
       # Optional: switch the search backend from PostgreSQL FTS (default) to
       # OpenSearch. Only takes effect when the `opensearch` compose profile is
@@ -384,7 +410,7 @@ services:
       RETICORA_WORKER_EVENTS_ENABLED: "${RETICORA_WORKER_EVENTS_ENABLED:-true}"
       RETICORA_WORKER_NOTIFIER_ENABLED: "${RETICORA_WORKER_NOTIFIER_ENABLED:-true}"
       # Collector NATS endpoint (COL-08): its PKI and the authorization
-      # callout (worker nats_edge); host names of its server certificate.
+      # callout (worker nats_edge).
       RETICORA_WORKER_NATS_EDGE_ENABLED: "${RETICORA_WORKER_NATS_EDGE_ENABLED:-true}"
       RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED: "${RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED:-true}"
       RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED: "${RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED:-true}"
@@ -392,7 +418,16 @@ services:
       RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED: "${RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED:-true}"
       RETICORA_PKI_DIR: "/pki"
       RETICORA_NATS_EDGE_URL: "tls://nats-edge:4222"
-      RETICORA_NATS_EDGE_HOSTS: "${RETICORA_TLS_DOMAIN:-localhost},nats-edge,localhost"
+      # Names on the server certificate of nats-edge. A collector connects to
+      # tls://<host of its server URL>:4222, so the list must name that host
+      # (domain, IP or host name of the enrollment URL): install-cloud.sh
+      # derives RETICORA_NATS_EDGE_HOSTS on every run and writes it into
+      # .env. Without it (an .env from before, a start without the installer)
+      # the TLS domain applies. nats-edge is the name the server itself
+      # connects to; the server adds the fixed name reticora-collector-nats
+      # and reissues the certificate when the names change. Duplicates are
+      # ignored.
+      RETICORA_NATS_EDGE_HOSTS: "${RETICORA_NATS_EDGE_HOSTS:-${RETICORA_TLS_DOMAIN:-localhost}},nats-edge,localhost"
     volumes:
       - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
       - collector-pki:/pki

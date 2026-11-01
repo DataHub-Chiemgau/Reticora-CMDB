@@ -17,13 +17,15 @@
 # (non-interactive, on a previous .env) and write_env of the installer,
 # sourced without its main call. Cases:
 #   tls installation          domain: only 80/443/4222 on all interfaces,
-#                             8080/8180 on 127.0.0.1, 3000 not public
+#                             8080/8180 on 127.0.0.1, 3000 not public; the
+#                             nats-edge certificate names the domain
 #   tls after ip installation the previous .env of an IP installation (opt-in,
 #                             port 3000, issuer on 8180) gets a domain: the
 #                             same, and the installer warns about the issuer
 #   ip installation           no domain: 3000/443/4222 and, through the
 #                             opt-in, 8080/8180 on 0.0.0.0; the installer
-#                             warns
+#                             warns; the nats-edge certificate names the IP
+#                             of the public base URL first
 #   ip without opt-in         the same .env without the installer's bind
 #                             address (the compose default, e.g. an .env from
 #                             before WP-431): 8080/8180 on 127.0.0.1
@@ -166,7 +168,8 @@ if installer_env "tls installation" \
     ports "tls installation"; then
     policy "tls installation" "80 443 4222" "8080 8180"
     not_public_3000 "tls installation"
-    env_is "tls installation" RETICORA_FRONTEND_PORT=80 RETICORA_PUBLISH_DIRECT_PORTS=false RETICORA_DIRECT_PORTS_BIND=127.0.0.1
+    env_is "tls installation" RETICORA_FRONTEND_PORT=80 RETICORA_PUBLISH_DIRECT_PORTS=false RETICORA_DIRECT_PORTS_BIND=127.0.0.1 \
+        RETICORA_NATS_EDGE_HOSTS=cmdb.example.com,nats-edge,localhost
     log_has "tls installation" no "$warning" "the installer does not announce the direct ports"
 else
     fail "tls installation: install-cloud.sh collect_config/write_env ($(tail -n 3 "$TMP/tls installation/installer.log"))"
@@ -195,6 +198,14 @@ if installer_env "ip installation" "RETICORA_PUBLIC_BASE_URL=http://192.0.2.10:3
         RETICORA_OIDC_ISSUER_URL=http://192.0.2.10:8180/realms/reticora
     log_has "ip installation" yes "$warning" \
         "the installer warns that REST API and Keycloak are published on all interfaces without TLS"
+    # The collector endpoint's certificate names the IP collectors connect
+    # to (first; the host IP of the runner may follow).
+    if grep -qE '^RETICORA_NATS_EDGE_HOSTS=192\.0\.2\.10,(.+,)?nats-edge,localhost$' "$TMP/ip installation/.env" &&
+        jq -e '.services.server.environment.RETICORA_NATS_EDGE_HOSTS | startswith("192.0.2.10,")' "$TMP/ip installation/config.json" >/dev/null; then
+        ok "ip installation: RETICORA_NATS_EDGE_HOSTS names 192.0.2.10 first, in .env and in the server environment"
+    else
+        fail "ip installation: RETICORA_NATS_EDGE_HOSTS does not name 192.0.2.10 first ($(grep -E '^RETICORA_NATS_EDGE_HOSTS=' "$TMP/ip installation/.env" || echo none))"
+    fi
 
     # ─── the same installation without the installer's bind address ──────────
     mkdir -p "$TMP/ip without opt-in"

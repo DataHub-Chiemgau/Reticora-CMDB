@@ -35,6 +35,53 @@ required actions *update password* and *configure OTP*. It removes the demo
 user `admin@reticora.local` of earlier releases, whose password is publicly
 known. Re-runs leave an existing administrator alone.
 
+## Server admin client and realm SMTP (installer)
+
+The server creates the accounts of self-signups, accepted invitations and
+operator-created organizations and binds org_admins to MFA through the
+Keycloak admin REST API, as a confidential client with a service account
+(client credentials). `install-cloud.sh` creates that client on every run,
+after the initial administrator and before the server starts
+(`ensure_admin_client`):
+
+- client `reticora-server-admin` (`RETICORA_KEYCLOAK_ADMIN_CLIENT_ID`):
+  confidential (`client-secret`), service account only — no standard flow,
+  no implicit flow, no direct access grants;
+- its secret is `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` of `.env`, generated
+  once and never asked for; a different secret in `.env` is set in Keycloak
+  by the next run, over the admin CLI's stdin (never on a command line or in
+  the log);
+- the service account `service-account-reticora-server-admin` holds the
+  client roles `manage-users`, `view-users` and `query-users` of
+  `realm-management`; missing ones are added, drifted client settings are
+  reset, an unchanged client is not written.
+
+The realm files do not carry the client: the production realm ships without
+users (the service account is one), and `start --import-realm` skips an
+existing realm anyway. `manage-users` lets the service account manage every
+user and the group memberships of the realm, so keep the secret where the
+installer puts it (`.env`, mode `0600`, and the server's environment).
+
+With an SMTP server (`RETICORA_SMTP_HOST`, asked for by the installer) the
+installer also sets it as `smtpServer` of the realm (`apply_realm_smtp`:
+host, port, sender and display name, `starttls`/`ssl` from
+`RETICORA_SMTP_TLS`, authentication with user and password; other settings
+such as `replyTo` are kept). Keycloak sends its own e-mails over it — the
+invitation of the first administrator of an organization created with
+`POST /api/v1/admin/orgs` (`execute-actions-email`) and password resets.
+Without `RETICORA_SMTP_HOST` the realm's mail settings are left alone.
+
+Keep Keycloak's own registration off (`registrationAllowed` is not set in
+the realm files): an account registered in Keycloak has no
+`organization_id` and no app user and cannot sign in. Organizations are
+created only by the self-signup at `<RETICORA_PUBLIC_BASE_URL>/onboarding`
+(TLC-01, needs the SMTP server for its mandatory e-mail verification) and by
+operators (`POST /api/v1/admin/orgs`, see Operators).
+
+Once the admin client exists, the server binds the org_admins that exist
+already to MFA at its start (see Policies): they set up OTP at their next
+login, and accepted invitations get their Keycloak account from the server.
+
 ## Upgrade
 
 Keycloak starts with `start --import-realm` and imports the realm file only
@@ -75,9 +122,10 @@ an installation only through the installer: every run of `install-cloud.sh`
 Every change is logged (`Keycloak realm: …`), every stricter value that is
 kept as well (`Keycloak realm: kept …`); a run without anything to change
 reports `Keycloak realm settings match the bundled realm`. Users, the client
-(apart from the rotated secret, redirect URIs and web origins, see
-`docs/troubleshooting-installation.md`) and all other realm settings are left
-alone. A failing call aborts the installer with this section as the hint;
+`reticora-app` (apart from the rotated secret, redirect URIs and web origins,
+see `docs/troubleshooting-installation.md`) and all other realm settings are
+left alone; the server's admin client and the realm's SMTP server are the
+installer's (see Server admin client and realm SMTP). A failing call aborts the installer with this section as the hint;
 check the Keycloak log and re-run the installer.
 
 ## Policies (AUT-09, CH26)
@@ -144,11 +192,12 @@ check the Keycloak log and re-run the installer.
 
   **Prerequisite:** the Keycloak admin client
   (`RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET`,
-  service account with `realm-management/manage-users`). Without it, every
-  grant of org_admin answers 503 outside `RETICORA_ENVIRONMENT=development`
-  (fail closed); in development nothing is bound. The group `reticora-admin`
-  and the installer administrator are covered by the realm and need no
-  admin client.
+  service account with `realm-management/manage-users`); `install-cloud.sh`
+  creates it as `reticora-server-admin` (see Server admin client and realm
+  SMTP). Without it, every grant of org_admin answers 503 outside
+  `RETICORA_ENVIRONMENT=development` (fail closed); in development nothing
+  is bound. The group `reticora-admin` and the installer administrator are
+  covered by the realm and need no admin client.
 
 ## Operators (SEC-07)
 

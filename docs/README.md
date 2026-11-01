@@ -991,7 +991,7 @@ The server is configured via environment variables:
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production). The collector reads the same variable: it accepts `RETICORA_SIMULATE=true` (simulated device fleet, SIM-02) only with `development` or `test` (case-insensitive) and exits with code 1 and `collector.simulate.refused` for any other value, including an unset or empty one (F-276).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
-- `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `POST /api/v1/signup` answers 503.
+- `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `GET /api/v1/signup/challenge` and `POST /api/v1/signup` answer 503. Docker Compose derives the page as `<RETICORA_PUBLIC_BASE_URL>/onboarding` (a value in `.env` wins) and forwards the admin client, the SMTP settings, the captcha key, the domain lists and the trial settings from `.env`; `install-cloud.sh` creates the admin client (`reticora-server-admin`) and the captcha key and asks for the SMTP server (see "Creating organizations" below).
 - `RETICORA_KEYCLOAK_INTERNAL_URL` — optional base URL (`http(s)://host[:port]`) under which the server reaches Keycloak directly; the Keycloak admin client (signup, invitations, MFA binding) then sends its requests there with the public issuer host in `Host`/`X-Forwarded-*`, because the public reverse proxy does not expose `/admin/`. The compose stack sets `http://keycloak:8080`; empty means the issuer host.
 - `RETICORA_INVITATION_ACCEPT_URL` — page the link of the invitation mail opens; the token is appended as `?token=` (TLC-03, NTF-05). An absolute `http` or `https` URL (`http` is accepted in production for the HTTP default path); development defaults to `http://localhost:5173/invitations/accept`, Docker Compose derives it from `RETICORA_PUBLIC_BASE_URL`. Without it `POST /api/v1/invitations` and `/invitations/{id}/renew` answer 503. The mail goes over the organization's e-mail channels only; webhook deliveries of `invitation.created` leave out the link.
 - `RETICORA_MASTER_KEY_PREVIOUS` — master keys being rotated out (comma-separated, SEC-06): their data keys stay readable until the nightly `rotation.master_key` run has rewrapped them with `RETICORA_MASTER_KEY`; then remove them (see [`docs/ops/workers.md`](ops/workers.md)).
@@ -1125,6 +1125,53 @@ installation fails or misbehaves, see
 [troubleshooting-installation.md](troubleshooting-installation.md) for the
 known failure modes (container health, Keycloak/login, TLS, idempotent
 re-runs) and their fixes.
+
+### Creating organizations (tenants)
+
+`install-cloud.sh` creates one organization, the default organization with
+the initial administrator (`RETICORA_INITIAL_ADMIN_EMAIL`, org_admin of that
+organization, not a platform operator). Further organizations come from two
+places:
+
+- **Self-signup (TLC-01):** `<RETICORA_PUBLIC_BASE_URL>/onboarding` ("Create
+  account" on the login page). The visitor enters organization, e-mail
+  address and name (the browser solves a proof-of-work challenge); the server
+  sends a verification e-mail whose link (`/onboarding?token=…`), after the
+  password is set, creates the organization (trial
+  plan `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS`)
+  and its first org_admin with the chosen password (realm policy: 12
+  characters, upper and lower case, digit, special character) and OTP at the
+  first login. Open the page logged out or in a private window and the
+  verification link in a new tab; a signed-in session or its Keycloak SSO
+  session hides the steps. The e-mail verification is mandatory, so
+  self-signup needs the central SMTP server: without `RETICORA_SMTP_HOST`
+  the server answers `GET /api/v1/signup/challenge` with 503 ("self-signup is
+  not available") and the installer's summary says
+  `Self-signup disabled: no SMTP configured`. Keycloak's own registration
+  stays off; it would create accounts without an organization.
+- **Operators (SEC-07):** `POST /api/v1/admin/orgs` with an operator session
+  of a member of the Keycloak group `operators` (OTP; login flow in
+  [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Operators").
+  The installer's administrator is not an operator; add an account to the
+  group first. The first administrator of the organization gets an
+  invitation e-mail from Keycloak, which uses the realm's SMTP server, so
+  this path needs the SMTP server as well. There is no UI for it.
+
+**Outgoing e-mail (SMTP):** the installer asks for the relay at "Outgoing
+e-mail (SMTP)" — host, TLS mode (`starttls` on 587, `tls` on 465, `none`),
+port, user name and password (optional), sender (`address` or
+`Name <address>`) — or takes `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT`,
+`RETICORA_SMTP_TLS`, `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD` and
+`RETICORA_SMTP_FROM` from the environment, otherwise from `.env`, in a
+non-interactive run; an empty host keeps e-mail off. It checks the relay
+over TCP before the start (with a host, `/readyz` depends on it), writes the
+settings to `.env` (mode `0600`), from where Docker Compose forwards them to
+the server, and sets the same server for the Keycloak realm. The relay
+sends the verification mails of the self-signup, invitations and the
+notification mails of the `central_smtp` channels; set up SPF/DKIM for the
+sender domain there. See
+[troubleshooting-installation.md](troubleshooting-installation.md),
+"Self-signup answers 503".
 
 ### Installer hardening (Epic A)
 

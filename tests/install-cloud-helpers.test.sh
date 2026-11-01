@@ -389,6 +389,8 @@ stub_issuer_stack() {
     seed_default_organization() { :; }
     ensure_runtime_login() { :; }
     create_initial_admin() { printf 'create_initial_admin\n' >> "$STACK_CALLS"; }
+    ensure_admin_client() { printf 'ensure_admin_client\n' >> "$STACK_CALLS"; }
+    apply_realm_smtp() { printf 'apply_realm_smtp\n' >> "$STACK_CALLS"; }
     show_service_logs() { :; }
 }
 
@@ -409,10 +411,12 @@ test_issuer_domain_served_by_frontend() {
 }
 
 # Order of the whole run (main): Keycloak health and realm before
-# create_initial_admin, which stays before the server start; the strict
-# checks after `up -d server frontend` and both health waits (after a reload
-# of a regenerated bootstrap certificate) and before print_summary. The realm
-# validation itself never asks the configured issuer.
+# create_initial_admin, then the server's Keycloak admin client and the
+# realm's SMTP server, all before the server start (the server reads its
+# admin client only at start); the strict checks after `up -d server
+# frontend` and both health waits (after a reload of a regenerated bootstrap
+# certificate) and before print_summary. The realm validation itself never
+# asks the configured issuer.
 # shellcheck disable=SC2317,SC2034 # stubs and variables used by main
 test_issuer_checks_order() {
     stub_issuer_stack order
@@ -443,10 +447,12 @@ test_issuer_checks_order() {
     main
     local issuer_probe="curl $RETICORA_OIDC_ISSUER_URL/.well-known/openid-configuration"
     local container_probe="compose run --rm --no-deps --entrypoint server server -check-oidc-issuer"
-    local keycloak realm admin up server frontend reload host container summary
+    local keycloak realm admin admin_client realm_smtp up server frontend reload host container summary
     keycloak="$(line_in_calls 'wait keycloak')"
     realm="$(line_in_calls 'curl http://localhost:8180/realms/reticora/.well-known/openid-configuration')"
     admin="$(line_in_calls 'create_initial_admin')"
+    admin_client="$(line_in_calls 'ensure_admin_client')"
+    realm_smtp="$(line_in_calls 'apply_realm_smtp')"
     up="$(line_in_calls 'compose up -d server frontend')"
     server="$(line_in_calls 'wait server')"
     frontend="$(line_in_calls 'wait frontend')"
@@ -455,7 +461,7 @@ test_issuer_checks_order() {
     container="$(line_in_calls "$container_probe")"
     summary="$(line_in_calls 'print_summary')"
     local n prev=0
-    for n in "$keycloak" "$realm" "$admin" "$up" "$server" "$frontend" "$reload" "$host" "$container" "$summary"; do
+    for n in "$keycloak" "$realm" "$admin" "$admin_client" "$realm_smtp" "$up" "$server" "$frontend" "$reload" "$host" "$container" "$summary"; do
         if [ -z "$n" ] || [ "$n" -le "$prev" ]; then sed 's/^/  /' "$STACK_CALLS"; return 1; fi
         prev="$n"
     done
@@ -667,6 +673,8 @@ test_runtime_login_order() {
     ensure_runtime_login() { printf 'ensure_runtime_login\n' >> "$calls"; }
     validate_keycloak_bootstrap() { :; }
     create_initial_admin() { :; }
+    ensure_admin_client() { :; }
+    apply_realm_smtp() { :; }
     check_issuer_from_host() { :; }
     check_issuer_from_container() { :; }
     RETICORA_TLS_DOMAIN=""
@@ -1055,6 +1063,8 @@ test_nats_edge_recreated_after_server() {
     ensure_runtime_login() { :; }
     validate_keycloak_bootstrap() { :; }
     create_initial_admin() { :; }
+    ensure_admin_client() { :; }
+    apply_realm_smtp() { :; }
     check_issuer_from_host() { :; }
     check_issuer_from_container() { :; }
     RETICORA_TLS_DOMAIN=""
@@ -1250,7 +1260,10 @@ fake_realm() {
 # KC_USERS (username=id). The state a rotation changes lives in files under
 # KC_STATE (kcadm also runs in pipelines, i.e. subshells): the password of
 # the master administrator and the client reticora-app, initially as in the
-# realm configure_realm rendered. Logins are checked against that password
+# realm configure_realm rendered, and the server's admin client
+# (RETICORA_KEYCLOAK_ADMIN_CLIENT_ID; KC_STATE/admin-client.json once
+# created, the realm-management roles of its service account in
+# KC_STATE/sa-roles.json). Logins are checked against that password
 # and recorded in KC_STATE/logins (ok/refused); the log masks the --password
 # value. Every write is recorded in KCADM_WRITES with the fields it sets,
 # never with values. KC_FAIL_UPDATE=1 makes client updates fail.
@@ -1282,8 +1295,52 @@ fake_kcadm() {
                 fi
                 printf 'refused\n' >> "$KC_STATE/logins"
                 return 1 ;;
-            "get clients") printf 'client-uuid\n'; return 0 ;;
+            "get clients")
+                # The server's admin client (admin-uuid) exists once created;
+                # every other client id is reticora-app.
+                a="$(printf '%s\n' "$@" | sed -n 's/^clientId=//p' | head -n 1)"
+                if [ -n "$a" ] && [ "$a" = "${RETICORA_KEYCLOAK_ADMIN_CLIENT_ID:-}" ]; then
+                    [ ! -f "$KC_STATE/admin-client.json" ] || printf 'admin-uuid\n'
+                    return 0
+                fi
+                printf 'client-uuid\n'; return 0 ;;
             "get clients/client-uuid") cat "$KC_STATE/client.json"; return 0 ;;
+            "create clients")
+                cat > "$KC_STATE/body"
+                printf 'create client %s %s\n' "$(jq -r .clientId "$KC_STATE/body")" \
+                    "$(jq -r 'keys | join(",")' "$KC_STATE/body")" >> "$KCADM_WRITES"
+                jq '. + {id: "admin-uuid"}' "$KC_STATE/body" > "$KC_STATE/admin-client.json"
+                printf '[]\n' > "$KC_STATE/sa-roles.json"
+                printf 'admin-uuid\n'
+                return 0 ;;
+            "get clients/admin-uuid") cat "$KC_STATE/admin-client.json"; return 0 ;;
+            "get clients/admin-uuid/client-secret") jq '{type: "secret", value: .secret}' "$KC_STATE/admin-client.json"; return 0 ;;
+            "get clients/admin-uuid/service-account-user")
+                jq '{id: "sa-uuid", username: ("service-account-" + (.clientId | ascii_downcase))}' "$KC_STATE/admin-client.json"
+                return 0 ;;
+            "update clients/admin-uuid")
+                cat > "$KC_STATE/body"
+                [ -z "${KC_FAIL_UPDATE:-}" ] || return 1
+                printf 'update client %s %s\n' "$(jq -r .clientId "$KC_STATE/admin-client.json")" \
+                    "$(jq -r 'keys | join(",")' "$KC_STATE/body")" >> "$KCADM_WRITES"
+                jq -s '.[0] * .[1]' "$KC_STATE/admin-client.json" "$KC_STATE/body" > "$KC_STATE/client.new" &&
+                    mv "$KC_STATE/client.new" "$KC_STATE/admin-client.json"
+                return ;;
+            "get-roles -r")
+                [ "$*" = "get-roles -r reticora --uid sa-uuid --cclientid realm-management" ] || return 1
+                jq 'map({name: ., clientRole: true})' "$KC_STATE/sa-roles.json"
+                return 0 ;;
+            "add-roles -r")
+                # The service account's client roles (the initial
+                # administrator's realm role is handled below).
+                if [ "$3 $4 $5 $6 $7" = "reticora --uid sa-uuid --cclientid realm-management" ]; then
+                    local roles=() p=""
+                    for a in "$@"; do [ "$p" = --rolename ] && roles+=("$a"); p="$a"; done
+                    printf 'add-roles service-account %s\n' "${roles[*]}" >> "$KCADM_WRITES"
+                    jq '. + $ARGS.positional' --args "${roles[@]}" < "$KC_STATE/sa-roles.json" > "$KC_STATE/sa-roles.new" &&
+                        mv "$KC_STATE/sa-roles.new" "$KC_STATE/sa-roles.json"
+                    return 0
+                fi ;;
             "update clients/client-uuid")
                 cat > "$KC_STATE/body"
                 [ -z "${KC_FAIL_UPDATE:-}" ] || return 1
@@ -1814,6 +1871,718 @@ run_test    "realm upgrade: an unbound browser-mfa that differs is rebuilt and b
 run_test    "realm upgrade: an operator's browser flow stays bound with a warning"         test_realm_operator_browser_flow_kept
 run_test    "realm upgrade: a failing realm update aborts with a hint"                     test_realm_update_failure_aborts
 run_test    "realm upgrade: deploy/keycloak/README.md describes the upgrade"               test_realm_upgrade_documented
+
+# ─── self-signup: SMTP, admin client, captcha key (TLC-01, TEC-13) ───────────
+# A default installation could not take a self-signup: the installer neither
+# asked for an SMTP server nor created the Keycloak admin client, and
+# docker-compose.yml did not pass these settings to the server, so GET
+# /api/v1/signup/challenge answered 503 "self-signup is not available". The
+# installer now generates the admin client's secret and the captcha key,
+# takes the SMTP server from the environment, .env or the prompt, and
+# compose forwards all of them.
+
+# clean_env [NAME=value…] <command…> — the command without the RETICORA_*,
+# KEYCLOAK_* and E2E_* variables of the caller's environment (docker compose
+# prefers them to the values of .env).
+clean_env() {
+    local unset=() v
+    for v in $(compgen -e); do
+        case "$v" in RETICORA_*|KEYCLOAK_*|E2E_*) unset+=(-u "$v") ;; esac
+    done
+    env "${unset[@]}" "$@"
+}
+
+# server_env <env file> [overlay] [NAME=value…] — the environment of the
+# server service as docker compose renders it with <env file> (JSON). rc 2
+# when docker compose or jq is missing.
+server_env() {
+    command -v jq >/dev/null && docker compose version >/dev/null 2>&1 || return 2
+    local env_file="$1" files=(-f "$REPO_ROOT/deploy/docker-compose/docker-compose.yml")
+    [ -z "${2:-}" ] || files+=(-f "$2")
+    shift 2 || shift $#
+    clean_env "$@" docker compose --env-file "$env_file" "${files[@]}" config --format json server | jq -c '.services.server.environment'
+}
+
+# smtp_env <name> <KEY=value…> — the legacy .env plus these settings.
+smtp_env() {
+    write_legacy_env "$1"
+    shift
+    printf '%s\n' "$@" >> "$ENV_FILE"
+}
+
+SMTP_PW="Smtp+Pass/word=1#"
+
+# The SMTP server, the admin client and the captcha key of .env reach the
+# server container; the verification page is <public base URL>/onboarding.
+# shellcheck disable=SC2317 # the stub is called by the installer functions
+test_signup_settings_reach_server() {
+    smtp_env signup-compose "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_PORT=465" "RETICORA_SMTP_TLS=tls" \
+        "RETICORA_SMTP_USERNAME=mailer@example.test" "RETICORA_SMTP_PASSWORD=$SMTP_PW" \
+        "RETICORA_SMTP_FROM=Reticora CMDB <noreply@example.test>"
+    smtp_relay_reachable() { return 0; }
+    collect_config >/dev/null
+    write_env
+    grep -qx "RETICORA_SMTP_PASSWORD=$SMTP_PW" "$ENV_FILE" && grep -qx 'RETICORA_SMTP_FROM=Reticora CMDB <noreply@example.test>' "$ENV_FILE" &&
+        [ "$(stat -c %a "$ENV_FILE")" = 600 ] || return 1
+    local env rc=0
+    env="$(server_env "$ENV_FILE")" || rc=$?
+    [ "$rc" -ne 2 ] || { echo "docker compose/jq missing: rendering not checked"; return 0; }
+    [ "$rc" -eq 0 ] || return 1
+    jq -e --arg pw "$SMTP_PW" --arg secret "$(env_get RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)" --arg key "$(env_get RETICORA_SIGNUP_CAPTCHA_KEY)" '
+        .RETICORA_SMTP_HOST == "smtp.example.test" and .RETICORA_SMTP_PORT == "465" and .RETICORA_SMTP_TLS == "tls"
+        and .RETICORA_SMTP_USERNAME == "mailer@example.test" and .RETICORA_SMTP_PASSWORD == $pw
+        and .RETICORA_SMTP_FROM == "Reticora CMDB <noreply@example.test>"
+        and .RETICORA_KEYCLOAK_ADMIN_CLIENT_ID == "reticora-server-admin" and .RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET == $secret
+        and (.RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET | length) == 48 and .RETICORA_SIGNUP_CAPTCHA_KEY == $key
+        and .RETICORA_SIGNUP_VERIFY_URL == "http://192.0.2.10:3000/onboarding"
+        and .RETICORA_INVITATION_ACCEPT_URL == "http://192.0.2.10:3000/invitations/accept"' <<< "$env" >/dev/null \
+        || { echo "server environment: $env"; return 1; }
+}
+
+# An .env without the new settings (written by an earlier release, or a
+# start without the installer): empty values, which the server treats as
+# unset, the SMTP defaults, the derived verification page; an explicit
+# RETICORA_SIGNUP_VERIFY_URL and the trial settings of .env are passed on.
+test_signup_compose_defaults() {
+    write_legacy_env signup-defaults
+    printf 'RETICORA_DB_APP_PASSWORD=%s\n' "$APP_PW" >> "$ENV_FILE"
+    local env rc=0
+    env="$(server_env "$ENV_FILE")" || rc=$?
+    [ "$rc" -ne 2 ] || { echo "docker compose/jq missing: rendering not checked"; return 0; }
+    [ "$rc" -eq 0 ] || return 1
+    jq -e '.RETICORA_SMTP_HOST == "" and .RETICORA_SMTP_PORT == "587" and .RETICORA_SMTP_TLS == "starttls"
+        and .RETICORA_SMTP_FROM == "" and .RETICORA_SMTP_PASSWORD == "" and .RETICORA_KEYCLOAK_ADMIN_CLIENT_ID == ""
+        and .RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET == "" and .RETICORA_SIGNUP_CAPTCHA_KEY == ""
+        and .RETICORA_TRIAL_PLAN == "" and .RETICORA_SIGNUP_BLOCKED_DOMAINS == ""
+        and .RETICORA_SIGNUP_VERIFY_URL == "http://192.0.2.10:3000/onboarding"' <<< "$env" >/dev/null \
+        || { echo "server environment: $env"; return 1; }
+    printf '%s\n' "RETICORA_SIGNUP_VERIFY_URL=https://signup.example.test/onboarding" "RETICORA_TRIAL_PLAN=pro" \
+        "RETICORA_TRIAL_DAYS=14" "RETICORA_TRIAL_MAX_CIS=50" "RETICORA_SIGNUP_BLOCKED_DOMAINS=spam.example" \
+        "RETICORA_SIGNUP_ALLOWED_DOMAINS=partner.example" >> "$ENV_FILE"
+    env="$(server_env "$ENV_FILE")" || return 1
+    jq -e '.RETICORA_SIGNUP_VERIFY_URL == "https://signup.example.test/onboarding" and .RETICORA_TRIAL_PLAN == "pro"
+        and .RETICORA_TRIAL_DAYS == "14" and .RETICORA_TRIAL_MAX_CIS == "50"
+        and .RETICORA_SIGNUP_BLOCKED_DOMAINS == "spam.example" and .RETICORA_SIGNUP_ALLOWED_DOMAINS == "partner.example"' <<< "$env" >/dev/null \
+        || { echo "server environment: $env"; return 1; }
+}
+
+# The overlay of the onboarding E2E suite still wins: compose merges the
+# environment maps of the server service.
+test_signup_e2e_overlay_wins() {
+    write_legacy_env signup-e2e
+    collect_config >/dev/null
+    write_env
+    local env rc=0
+    env="$(server_env "$ENV_FILE" "$REPO_ROOT/frontend/e2e/fixtures/docker-compose.e2e.yml" \
+        E2E_CAPTCHA_KEY=e2e-captcha-key-0123456789abcdef0123 E2E_KC_CLIENT_SECRET=e2e-secret E2E_BASE_URL=http://localhost:3000)" || rc=$?
+    [ "$rc" -ne 2 ] || { echo "docker compose/jq missing: rendering not checked"; return 0; }
+    [ "$rc" -eq 0 ] || return 1
+    jq -e '.RETICORA_SMTP_HOST == "mailpit" and .RETICORA_SMTP_PORT == "1025" and .RETICORA_SMTP_TLS == "none"
+        and .RETICORA_SMTP_FROM == "Reticora <noreply@reticora-e2e.de>"
+        and .RETICORA_KEYCLOAK_ADMIN_CLIENT_ID == "reticora-e2e-signup" and .RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET == "e2e-secret"
+        and .RETICORA_SIGNUP_CAPTCHA_KEY == "e2e-captcha-key-0123456789abcdef0123"
+        and .RETICORA_SIGNUP_VERIFY_URL == "http://localhost:3000/onboarding"' <<< "$env" >/dev/null \
+        || { echo "server environment: $env"; return 1; }
+}
+
+# The admin client's id and secret and the captcha key are generated on the
+# first run, never asked for and never printed, and reused unchanged.
+test_signup_secrets_generated_and_reused() {
+    write_legacy_env signup-secrets
+    collect_config > "$TMP_ROOT/signup-secrets.out" 2>&1
+    write_env
+    local id secret key
+    id="$(env_get RETICORA_KEYCLOAK_ADMIN_CLIENT_ID)"
+    secret="$(env_get RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)"
+    key="$(env_get RETICORA_SIGNUP_CAPTCHA_KEY)"
+    [ "$id" = reticora-server-admin ] && [[ "$secret" =~ ^[0-9a-f]{48}$ ]] && [[ "$key" =~ ^[0-9a-f]{64}$ ]] || return 1
+    collect_config >> "$TMP_ROOT/signup-secrets.out" 2>&1
+    write_env
+    [ "$(env_get RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)" = "$secret" ] && [ "$(env_get RETICORA_SIGNUP_CAPTCHA_KEY)" = "$key" ] || return 1
+    local k
+    for k in RETICORA_KEYCLOAK_ADMIN_CLIENT_ID RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET RETICORA_SIGNUP_CAPTCHA_KEY RETICORA_SMTP_HOST \
+        RETICORA_SMTP_PASSWORD RETICORA_NATS_EDGE_HOSTS; do
+        [ "$(grep -c "^$k=" "$ENV_FILE")" -eq 1 ] || { echo "$k: $(grep -c "^$k=" "$ENV_FILE") lines"; return 1; }
+    done
+    ! grep -q -F -e "$secret" -e "$key" "$TMP_ROOT/signup-secrets.out" && [ "$(stat -c %a "$ENV_FILE")" = 600 ]
+}
+
+# An admin client id of the login client, or one that does not fit the admin
+# CLI, and secrets that would break .env are refused before anything starts.
+# shellcheck disable=SC2016 # literal '$' in the values
+test_signup_admin_client_settings_checked() {
+    local out
+    smtp_env admin-client-same "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID=reticora-app"
+    if out="$(collect_config 2>&1)"; then echo "accepted the login client as admin client"; return 1; fi
+    grep -qF "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID must name a client of its own, not the login client reticora-app" <<< "$out" || return 1
+    smtp_env admin-client-name "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID=server admin"
+    if out="$(collect_config 2>&1)"; then echo "accepted 'server admin'"; return 1; fi
+    grep -qF "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID in $ENV_FILE must consist of letters" <<< "$out" || return 1
+    smtp_env admin-client-secret 'RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET=short$x'
+    if out="$(collect_config 2>&1)"; then echo "accepted a short secret"; return 1; fi
+    grep -qF "RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET in $ENV_FILE must have at least 16 characters" <<< "$out" &&
+        ! grep -qF 'short$x' <<< "$out" || return 1
+    smtp_env captcha-short "RETICORA_SIGNUP_CAPTCHA_KEY=0123456789"
+    if out="$(collect_config 2>&1)"; then echo "accepted a short captcha key"; return 1; fi
+    grep -qF "RETICORA_SIGNUP_CAPTCHA_KEY in $ENV_FILE must have at least 32 characters" <<< "$out"
+}
+
+# Non-interactive: the SMTP settings come from .env, the environment
+# overrides them; an empty host keeps e-mail off and the other values are
+# kept for a later run; the implicit-TLS port defaults to 465.
+# shellcheck disable=SC2034,SC2317 # variables and stub used by the installer functions
+test_smtp_settings_noninteractive() {
+    smtp_relay_reachable() { return 0; }
+    smtp_env smtp-env-file "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_FROM=noreply@example.test"
+    collect_config >/dev/null
+    [ "$RETICORA_SMTP_HOST" = smtp.example.test ] && [ "$RETICORA_SMTP_PORT" = 587 ] && [ "$RETICORA_SMTP_TLS" = starttls ] &&
+        [ "$RETICORA_SMTP_FROM" = noreply@example.test ] && [ -z "$RETICORA_SMTP_USERNAME" ] || return 1
+    SMTP_HOST_OVERRIDE="relay.example.test"
+    SMTP_TLS_OVERRIDE="tls"
+    collect_config >/dev/null
+    [ "$RETICORA_SMTP_HOST" = relay.example.test ] && [ "$RETICORA_SMTP_TLS" = tls ] && [ "$RETICORA_SMTP_PORT" = 465 ] || return 1
+    SMTP_HOST_OVERRIDE=""
+    SMTP_TLS_OVERRIDE=""
+    smtp_env smtp-off "RETICORA_SMTP_HOST=" "RETICORA_SMTP_FROM=noreply@example.test" "RETICORA_SMTP_USERNAME=mailer"
+    smtp_relay_reachable() { echo "no SMTP check without a host" >&2; return 1; }
+    collect_config >/dev/null
+    write_env
+    grep -qx 'RETICORA_SMTP_HOST=' "$ENV_FILE" && grep -qx 'RETICORA_SMTP_FROM=noreply@example.test' "$ENV_FILE" &&
+        grep -qx 'RETICORA_SMTP_USERNAME=mailer' "$ENV_FILE" && grep -qx 'RETICORA_SMTP_PORT=587' "$ENV_FILE"
+}
+
+# smtp_refused <name> <message> <KEY=value…> — collect_config on the legacy
+# .env with these SMTP settings aborts with the message, never printing the
+# password of the case password-dollar.
+# shellcheck disable=SC2016 # literal '$' in the password
+smtp_refused() {
+    local name="$1" message="$2" out
+    shift 2
+    smtp_env "$name" "$@"
+    if out="$(collect_config 2>&1)"; then echo "$name: accepted"; return 1; fi
+    grep -qF -- "$message" <<< "$out" || { echo "$name: $(tail -n 1 <<< "$out")"; return 1; }
+    ! grep -qF 'secret-pa$$' <<< "$out" || { echo "$name: the password was printed"; return 1; }
+}
+
+# Settings the server would refuse at its start (config.Validate,
+# notify.SMTPConfig) or that would break .env are refused before anything
+# is written; the password is never printed.
+# shellcheck disable=SC2016,SC2317 # literal '$' in the values; the stub is called by the installer functions
+test_smtp_settings_validated() {
+    smtp_relay_reachable() { return 0; }
+    smtp_refused no-from "RETICORA_SMTP_FROM is required with RETICORA_SMTP_HOST" "RETICORA_SMTP_HOST=smtp.example.test" &&
+        smtp_refused bad-tls "RETICORA_SMTP_TLS ('ssl') must be starttls, tls or none" \
+            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_TLS=ssl" "RETICORA_SMTP_FROM=noreply@example.test" &&
+        smtp_refused loopback "not a loopback address" "RETICORA_SMTP_HOST=localhost" "RETICORA_SMTP_FROM=noreply@example.test" &&
+        smtp_refused with-port "must be the host name or IP address of the SMTP server, without port" \
+            "RETICORA_SMTP_HOST=smtp.example.test:587" "RETICORA_SMTP_FROM=noreply@example.test" &&
+        smtp_refused bad-port "RETICORA_SMTP_PORT ('70000') must be a port number" \
+            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_PORT=70000" "RETICORA_SMTP_FROM=noreply@example.test" &&
+        smtp_refused password-only "RETICORA_SMTP_PASSWORD needs RETICORA_SMTP_USERNAME" \
+            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_PASSWORD=secret-pw" "RETICORA_SMTP_FROM=noreply@example.test" &&
+        smtp_refused password-dollar "RETICORA_SMTP_PASSWORD must not contain blanks, quotes" "RETICORA_SMTP_HOST=smtp.example.test" \
+            "RETICORA_SMTP_USERNAME=mailer" 'RETICORA_SMTP_PASSWORD=secret-pa$$' "RETICORA_SMTP_FROM=noreply@example.test" &&
+        smtp_refused bad-from "RETICORA_SMTP_FROM ('Reticora <noreply>') must be an e-mail address or 'Name <address>'" \
+            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_FROM=Reticora <noreply>" || return 1
+    local v
+    for v in noreply@example.com "Reticora CMDB <noreply@example.com>" "<noreply@example.com>" \
+        "Störungsmeldung <a.b+c@mail.example.de>" "Reticora, Inc. <ops@example.co.uk>"; do
+        valid_smtp_from "$v" || { echo "refused From: $v"; return 1; }
+    done
+    for v in noreply "Reticora <noreply>" '"Quoted" <a@example.de>' 'Name: x <a@example.de>' 'Team #1 <a@example.de>' \
+        '$HOME <a@example.de>' $'a@example.de\nX' "a@example.de>" "a<b <c@example.de>"; do
+        ! valid_smtp_from "$v" || { echo "accepted From: $v"; return 1; }
+    done
+    for v in "" smtp.example.com mailrelay 192.0.2.25 2001:db8::25; do
+        valid_optional_smtp_host "$v" || { echo "refused host: $v"; return 1; }
+    done
+    for v in localhost 127.0.0.1 ::1 smtp.example.com:587 cafe.dead:25 "smtp example" -relay "smtp.example.com/"; do
+        ! valid_optional_smtp_host "$v" || { echo "accepted host: $v"; return 1; }
+    done
+    for v in "" "$SMTP_PW" "SG.abc_DEF-123.xyz" "user@example.com"; do
+        valid_env_value "$v" || { echo "refused value: $v"; return 1; }
+    done
+    for v in "a b" "a'b" 'a"b' 'a$b' 'a\b' 'a`b' $'a\tb'; do
+        ! valid_env_value "$v" || { echo "accepted value: $v"; return 1; }
+    done
+}
+
+# With RETICORA_SMTP_HOST set, /readyz depends on the SMTP server: an
+# unreachable one stops a non-interactive run before anything is written
+# instead of ending in "Reticora server did not become healthy".
+# shellcheck disable=SC2317 # the stub is called by the installer functions
+test_smtp_unreachable_aborts() {
+    smtp_env smtp-unreachable "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_PORT=2525" "RETICORA_SMTP_FROM=noreply@example.test"
+    local probes="$TMP_ROOT/smtp-probes" out
+    smtp_relay_reachable() { printf '%s %s\n' "$1" "$2" >> "$probes"; return 1; }
+    cp "$ENV_FILE" "$TMP_ROOT/smtp-unreachable-before"
+    if out="$(collect_config 2>&1)"; then echo "an unreachable SMTP server was accepted"; return 1; fi
+    grep -qx 'smtp.example.test 2525' "$probes" &&
+        grep -qF "The SMTP server smtp.example.test:2525 is not reachable from this host" <<< "$out" &&
+        grep -qF "/readyz" <<< "$out" && grep -qF "Reticora server did not become healthy" <<< "$out" &&
+        cmp -s "$ENV_FILE" "$TMP_ROOT/smtp-unreachable-before"
+}
+
+# The probe itself: a TCP connection that opens (a listener on 127.0.0.1)
+# and one that is refused.
+test_smtp_relay_probe() {
+    command -v python3 >/dev/null || { echo "python3 missing: TCP probe not checked"; return 0; }
+    local portfile="$TMP_ROOT/smtp-listener-port" pid port=""
+    rm -f "$portfile"
+    python3 -c 'import socket, sys, time
+s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(4)
+open(sys.argv[1] + ".tmp", "w").write(str(s.getsockname()[1])); __import__("os").rename(sys.argv[1] + ".tmp", sys.argv[1])
+time.sleep(20)' "$portfile" &
+    pid=$!
+    for _ in $(seq 1 50); do [ -s "$portfile" ] && break; sleep 0.1; done
+    port="$(cat "$portfile" 2>/dev/null || true)"
+    [ -n "$port" ] || { kill "$pid" 2>/dev/null; return 1; }
+    RETICORA_SMTP_CHECK_TIMEOUT=3
+    local ok=0
+    smtp_relay_reachable 127.0.0.1 "$port" || ok=1
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null || true
+    [ "$ok" -eq 0 ] || { echo "listener on $port not reached"; return 1; }
+    ! smtp_relay_reachable 127.0.0.1 "$port"
+}
+
+# The signup state after the start: the probe of GET
+# /api/v1/signup/challenge decides the summary line; with SMTP and no 200
+# the installer warns with the server's log line.
+# shellcheck disable=SC2034,SC2317 # variables and stub used by the installer functions
+test_signup_state_reported() {
+    local calls="$TMP_ROOT/signup-probe-calls" out
+    : > "$calls"
+    RETICORA_SERVER_PORT=8080
+    RETICORA_PUBLIC_BASE_URL="https://cmdb.example.test"
+    RETICORA_SIGNUP_RETRY_DELAY=0
+    COMPOSE=(docker compose)
+    curl() { printf '%s\n' "${*: -1}" >> "$calls"; printf '%s' "$CHALLENGE_STATUS"; [ "$CHALLENGE_STATUS" != 000 ]; }
+    RETICORA_SMTP_HOST=""
+    CHALLENGE_STATUS=503
+    check_signup > "$TMP_ROOT/signup-state.out" 2>&1
+    [ "$SIGNUP_STATUS" = disabled ] && [ "$(cat "$calls")" = "http://127.0.0.1:8080/api/v1/signup/challenge" ] || return 1
+    signup_summary_line | grep -qF "Self-signup disabled: no SMTP configured — re-run the installer and enter an SMTP server" || return 1
+    : > "$calls"
+    RETICORA_SMTP_HOST="smtp.example.test"
+    CHALLENGE_STATUS=200
+    check_signup > "$TMP_ROOT/signup-state.out" 2>&1
+    [ "$SIGNUP_STATUS" = available ] && [ "$(wc -l < "$calls")" -eq 1 ] || return 1
+    signup_summary_line | grep -qF "Self-signup:       https://cmdb.example.test/onboarding" || return 1
+    : > "$calls"
+    CHALLENGE_STATUS=503
+    out="$(check_signup 2>&1; printf 'state=%s' "$SIGNUP_STATUS")"
+    grep -qF "state=unavailable" <<< "$out" && [ "$(wc -l < "$calls")" -eq 3 ] &&
+        grep -qF "Self-signup is not available although an SMTP server is configured: GET /api/v1/signup/challenge answered 503" <<< "$out" &&
+        grep -qF "self-signup" <<< "$out" || return 1
+    CHALLENGE_STATUS=000
+    check_signup >/dev/null 2>&1
+    [ "$SIGNUP_STATUS" = unavailable ] && [ "$SIGNUP_HTTP_STATUS" = 000 ] &&
+        signup_summary_line | grep -qF "not available — GET /api/v1/signup/challenge answered 000 although SMTP is configured"
+}
+
+# The summary names the collector endpoint, port 4222 and the real
+# collector flow instead of the bare install-vm.sh hint.
+# shellcheck disable=SC2034 # read by print_summary
+test_summary_collector_flow() {
+    RETICORA_FRONTEND_PORT=3000 RETICORA_SERVER_PORT=8080 RETICORA_KEYCLOAK_PORT=8180 KEYCLOAK_ADMIN=admin
+    RETICORA_TLS_DOMAIN="" RETICORA_PUBLISH_DIRECT_PORTS=true RETICORA_INITIAL_ADMIN_EMAIL=ops@example.test
+    RETICORA_PUBLIC_BASE_URL="http://192.0.2.10:3000" RETICORA_NATS_EDGE_HOSTS="192.0.2.10,10.0.0.5,nats-edge,localhost"
+    INITIAL_ADMIN_PASSWORD="" SIGNUP_STATUS=disabled ENV_FILE="$TMP_ROOT/summary.env"
+    COMPOSE=(docker compose)
+    local out
+    out="$(print_summary)"
+    grep -qF "Collector endpoint: tls://192.0.2.10:4222  (mTLS; certificate names: 192.0.2.10,10.0.0.5,nats-edge,localhost)" <<< "$out" &&
+        grep -qF "Port 4222/TCP:   must be reachable inbound from the customer networks" <<< "$out" &&
+        grep -qF "cloud firewall / security group" <<< "$out" &&
+        grep -qF "sudo reticora-collector enroll --server <URL> --code <code>" <<< "$out" &&
+        grep -qF "sudo systemctl restart reticora-collector" <<< "$out" &&
+        grep -qF "confirm the suggested scopes" <<< "$out" &&
+        grep -qF "Self-signup disabled: no SMTP configured" <<< "$out" &&
+        ! grep -qF "Next step: install a collector in the customer network with ./install-vm.sh" <<< "$out" || { printf '%s\n' "$out"; return 1; }
+    RETICORA_NATS_EDGE_HOSTS="2001:db8::10,nats-edge,localhost"
+    printf 'RETICORA_NATS_EDGE_PORT=14222\n' > "$ENV_FILE"
+    [ "$(collector_endpoint)" = "tls://[2001:db8::10]:14222" ]
+}
+
+# The configuration shown before the start names the collector endpoint
+# with its certificate names and the SMTP server.
+# shellcheck disable=SC2034,SC2317 # variables and stubs used by main
+test_config_shows_collector_endpoint() {
+    local f
+    for f in preflight collect_config select_release verify_release_checkout write_env ensure_session_key configure_realm \
+        bootstrap_tls_cert provide_images configure_log_retention start_stack issue_tls_certificate verify_stack gc_images print_summary; do
+        eval "$f() { :; }"
+    done
+    BUILD_FROM_SOURCE=1
+    RETICORA_PUBLIC_BASE_URL="https://cmdb.example.test" RETICORA_OIDC_ISSUER_URL="https://cmdb.example.test/realms/reticora"
+    RETICORA_OIDC_REDIRECT_URL="https://cmdb.example.test/auth/callback" RETICORA_TLS_DOMAIN="cmdb.example.test"
+    RETICORA_FRONTEND_PORT=80 RETICORA_SERVER_PORT=8080 RETICORA_KEYCLOAK_PORT=8180
+    RETICORA_NATS_EDGE_HOSTS="cmdb.example.test,nats-edge,localhost"
+    RETICORA_SMTP_HOST="smtp.example.test" RETICORA_SMTP_PORT=587 RETICORA_SMTP_TLS=starttls RETICORA_SMTP_FROM="noreply@example.test"
+    ENV_FILE="$TMP_ROOT/config-shown.env"
+    local out
+    out="$(main 2>&1)"
+    grep -qF "Collector endpoint: tls://cmdb.example.test:4222 (certificate names: cmdb.example.test,nats-edge,localhost; 4222/TCP must be reachable from the customer networks)" <<< "$out" &&
+        grep -qF "Outgoing e-mail:   smtp.example.test:587 (TLS starttls, from noreply@example.test)" <<< "$out" || { printf '%s\n' "$out"; return 1; }
+    RETICORA_SMTP_HOST=""
+    out="$(main 2>&1)"
+    grep -qF "Outgoing e-mail:   <disabled — no SMTP server: self-signup and e-mail stay off>" <<< "$out"
+}
+
+run_test    "signup: SMTP, admin client and captcha key of .env reach the server container" test_signup_settings_reach_server
+run_test    "signup: compose defaults without the settings, overrides of .env pass"        test_signup_compose_defaults
+run_test    "signup: the onboarding E2E overlay still overrides the server settings"         test_signup_e2e_overlay_wins
+run_test    "signup: admin client secret and captcha key generated once, reused, not printed" test_signup_secrets_generated_and_reused
+run_test    "signup: unusable admin client id, secret or captcha key in .env is refused"     test_signup_admin_client_settings_checked
+run_test    "smtp: non-interactive from .env and environment; empty host keeps e-mail off"  test_smtp_settings_noninteractive
+run_test    "smtp: settings the server would refuse are refused, the password never shown"  test_smtp_settings_validated
+run_test    "smtp: an unreachable SMTP server stops a non-interactive run before .env"     test_smtp_unreachable_aborts
+run_test    "smtp: the TCP pre-check reaches a listener and detects a refused port"          test_smtp_relay_probe
+run_test    "signup: state after the start probed and reported in the summary"               test_signup_state_reported
+run_test    "summary: collector endpoint, port 4222 and the collector flow"                  test_summary_collector_flow
+run_test    "summary: the configuration before the start names collector endpoint and SMTP" test_config_shows_collector_endpoint
+
+# ─── Keycloak admin client of the server and realm SMTP (TLC-01, AUT-09) ─────
+
+ADMIN_SECRET_A="admin-client-secret-aaaa-0123456789"
+ADMIN_SECRET_B="admin-client-secret-bbbb-9876543210"
+
+# admin_client_kc <secret> — the fake Keycloak (fake_kcadm) without the
+# server's admin client, and the configured secret.
+# shellcheck disable=SC2034 # read by ensure_admin_client and the fake
+admin_client_kc() {
+    fake_kcadm
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_ID="reticora-server-admin"
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET="$1"
+}
+
+# no_admin_secret_in <file…> — neither admin client secret appears in them.
+no_admin_secret_in() { ! grep -q -F -e "$ADMIN_SECRET_A" -e "$ADMIN_SECRET_B" "$@"; }
+
+# First run: the confidential client with a service account only, its
+# secret over stdin, and the realm-management roles of its service account;
+# reticora-app stays untouched.
+test_admin_client_created() {
+    admin_client_kc "$ADMIN_SECRET_A"
+    local out="$TMP_ROOT/admin-client-out"
+    ensure_admin_client > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ "$(cat "$KCADM_WRITES")" = "$(printf '%s\n' \
+        'create client reticora-server-admin clientAuthenticatorType,clientId,directAccessGrantsEnabled,enabled,implicitFlowEnabled,name,protocol,publicClient,secret,serviceAccountsEnabled,standardFlowEnabled' \
+        'add-roles service-account manage-users view-users query-users')" ] || { cat "$KCADM_WRITES"; return 1; }
+    jq -e --arg s "$ADMIN_SECRET_A" '.clientId == "reticora-server-admin" and .secret == $s and .enabled == true
+        and .publicClient == false and .clientAuthenticatorType == "client-secret" and .serviceAccountsEnabled == true
+        and .standardFlowEnabled == false and .implicitFlowEnabled == false and .directAccessGrantsEnabled == false
+        and .protocol == "openid-connect"' "$KC_STATE/admin-client.json" >/dev/null || return 1
+    jq -e '. == ["manage-users", "view-users", "query-users"]' "$KC_STATE/sa-roles.json" >/dev/null || return 1
+    grep -qx 'create clients -r reticora -f - -i' "$KCADM_LOG" &&
+        grep -qx 'add-roles -r reticora --uid sa-uuid --cclientid realm-management --rolename manage-users --rolename view-users --rolename query-users' "$KCADM_LOG" &&
+        grep -qF 'Keycloak: confidential client reticora-server-admin created' "$out" &&
+        grep -qF 'Keycloak: service account of reticora-server-admin holds realm-management manage-users view-users query-users' "$out" &&
+        no_admin_secret_in "$out" "$KCADM_LOG" "$KCADM_WRITES" &&
+        [ "$(jq -r .secret "$KC_STATE/client.json")" = "client-secret-0" ]
+}
+
+# A second run with the same settings writes nothing.
+test_admin_client_unchanged() {
+    admin_client_kc "$ADMIN_SECRET_A"
+    ensure_admin_client >/dev/null 2>&1 || return 1
+    : > "$KCADM_WRITES"
+    : > "$KCADM_LOG"
+    local out="$TMP_ROOT/admin-client-unchanged-out"
+    ensure_admin_client > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ ! -s "$KCADM_WRITES" ] && [ -z "$(kc_log_writes)" ] &&
+        grep -qF 'Keycloak admin client reticora-server-admin matches the configuration (service account: realm-management manage-users view-users query-users)' "$out"
+}
+
+# A changed secret in .env is set in Keycloak with exactly one update, logged
+# by name only.
+test_admin_client_secret_rotated() {
+    admin_client_kc "$ADMIN_SECRET_A"
+    ensure_admin_client >/dev/null 2>&1 || return 1
+    : > "$KCADM_WRITES"
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET="$ADMIN_SECRET_B"
+    local out="$TMP_ROOT/admin-client-rotated-out"
+    ensure_admin_client > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ "$(cat "$KCADM_WRITES")" = "update client reticora-server-admin secret" ] || { cat "$KCADM_WRITES"; return 1; }
+    [ "$(jq -r .secret "$KC_STATE/admin-client.json")" = "$ADMIN_SECRET_B" ] &&
+        grep -qF 'Keycloak: client reticora-server-admin secret set to RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET' "$out" &&
+        no_admin_secret_in "$out" "$KCADM_LOG" "$KCADM_WRITES"
+}
+
+# Drifted settings (e.g. a browser login enabled in the console) and a
+# missing role are repaired; only the drifted fields and missing roles are
+# written.
+test_admin_client_drift_repaired() {
+    admin_client_kc "$ADMIN_SECRET_A"
+    ensure_admin_client >/dev/null 2>&1 || return 1
+    jq '.standardFlowEnabled = true | .publicClient = true' "$KC_STATE/admin-client.json" > "$KC_STATE/drift.json" &&
+        mv "$KC_STATE/drift.json" "$KC_STATE/admin-client.json"
+    printf '["view-users"]\n' > "$KC_STATE/sa-roles.json"
+    : > "$KCADM_WRITES"
+    local out="$TMP_ROOT/admin-client-drift-out"
+    ensure_admin_client > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ "$(cat "$KCADM_WRITES")" = "$(printf '%s\n' 'update client reticora-server-admin publicClient,standardFlowEnabled' \
+        'add-roles service-account manage-users query-users')" ] || { cat "$KCADM_WRITES"; return 1; }
+    jq -e '.standardFlowEnabled == false and .publicClient == false' "$KC_STATE/admin-client.json" >/dev/null &&
+        jq -e 'sort == ["manage-users", "query-users", "view-users"]' "$KC_STATE/sa-roles.json" >/dev/null &&
+        grep -qF 'Keycloak: client reticora-server-admin standardFlowEnabled set to false' "$out" &&
+        no_admin_secret_in "$out" "$KCADM_LOG" "$KCADM_WRITES"
+}
+
+# A failing update aborts the run with the hint, without the secret.
+test_admin_client_update_failure_aborts() {
+    admin_client_kc "$ADMIN_SECRET_A"
+    ensure_admin_client >/dev/null 2>&1 || return 1
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET="$ADMIN_SECRET_B"
+    KC_FAIL_UPDATE=1
+    local out rc
+    out="$( (ensure_admin_client) 2>&1)"; rc=$?
+    [ "$rc" -eq 1 ] && grep -qF "Could not update the Keycloak client reticora-server-admin" <<< "$out" &&
+        grep -qF "Keycloak admin login or rotation failed" <<< "$out" && ! grep -qF -e "$ADMIN_SECRET_A" -e "$ADMIN_SECRET_B" <<< "$out"
+}
+
+# The realm's SMTP server: set from RETICORA_SMTP_* (display name split off,
+# TLS mode as starttls/ssl), the password only in the representation on
+# stdin; settings of the operator (replyTo) are kept; without a password an
+# unchanged server is not written again; without a host nothing is done.
+# shellcheck disable=SC2034 # read by apply_realm_smtp
+test_realm_smtp_applied() {
+    fake_kcadm
+    local out="$TMP_ROOT/realm-smtp-out" pw="realm-smtp-password-42"
+    RETICORA_SMTP_HOST=smtp.example.test RETICORA_SMTP_PORT=587 RETICORA_SMTP_TLS=starttls
+    RETICORA_SMTP_USERNAME=mailer@example.test RETICORA_SMTP_PASSWORD="$pw" RETICORA_SMTP_FROM="Reticora CMDB <noreply@example.test>"
+    apply_realm_smtp > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ "$(cat "$KCADM_WRITES")" = "update realm smtpServer" ] || { cat "$KCADM_WRITES"; return 1; }
+    jq -e --arg pw "$pw" '.smtpServer == {host: "smtp.example.test", port: "587", from: "noreply@example.test",
+        fromDisplayName: "Reticora CMDB", starttls: "true", ssl: "false", auth: "true", user: "mailer@example.test", password: $pw}' \
+        "$KC_STATE/realm.json" >/dev/null || { jq -c .smtpServer "$KC_STATE/realm.json"; return 1; }
+    grep -qx 'update realms/reticora -f -' "$KCADM_LOG" && ! grep -qF "$pw" "$out" "$KCADM_LOG" "$KCADM_WRITES" &&
+        grep -qF 'Keycloak realm: SMTP server smtp.example.test:587 (TLS mode starttls) set' "$out" || return 1
+    kc_realm_edit '.smtpServer.replyTo = "ops@example.test"'
+    RETICORA_SMTP_PORT=465 RETICORA_SMTP_TLS=tls RETICORA_SMTP_USERNAME="" RETICORA_SMTP_PASSWORD="" RETICORA_SMTP_FROM="noreply@example.test"
+    : > "$KCADM_WRITES"
+    apply_realm_smtp > "$out" 2>&1 || { cat "$out"; return 1; }
+    jq -e '.smtpServer | .port == "465" and .ssl == "true" and .starttls == "false" and .auth == "false" and .user == ""
+        and .from == "noreply@example.test" and .fromDisplayName == "" and .replyTo == "ops@example.test"' "$KC_STATE/realm.json" >/dev/null \
+        || { jq -c .smtpServer "$KC_STATE/realm.json"; return 1; }
+    : > "$KCADM_WRITES"
+    apply_realm_smtp > "$out" 2>&1 || { cat "$out"; return 1; }
+    [ ! -s "$KCADM_WRITES" ] && grep -qF 'Keycloak realm: SMTP server smtp.example.test:465 matches the configuration' "$out" || return 1
+    RETICORA_SMTP_HOST=""
+    : > "$KCADM_LOG"
+    apply_realm_smtp > "$out" 2>&1 || return 1
+    [ ! -s "$KCADM_LOG" ] && grep -qF "No SMTP server configured (RETICORA_SMTP_HOST): Keycloak's realm e-mail settings are left unchanged" "$out"
+}
+
+# The realm file stays without the admin client and without users: the
+# installer creates the client through the admin CLI (the import skips an
+# existing realm), and Keycloak's own registration stays off — only
+# /onboarding creates organizations.
+test_realm_file_has_no_admin_client() {
+    realm_py "all(c['clientId'] != 'reticora-server-admin' and not c.get('serviceAccountsEnabled') for c in r['clients'])" &&
+        realm_py "not r.get('registrationAllowed', False)" && realm_py "r.get('users') == []"
+}
+
+run_test    "admin client: created with service account roles, secret only on stdin"   test_admin_client_created
+run_test    "admin client: an unchanged client causes no write"                         test_admin_client_unchanged
+run_test    "admin client: a changed secret in .env is rotated, never logged"            test_admin_client_secret_rotated
+run_test    "admin client: drifted settings and a missing role are repaired"             test_admin_client_drift_repaired
+run_test    "admin client: a failing update aborts with a hint"                          test_admin_client_update_failure_aborts
+run_test    "realm SMTP: set from RETICORA_SMTP_*, kept, skipped without a host"         test_realm_smtp_applied
+run_test    "realm file: no admin client, no users, no Keycloak registration"           test_realm_file_has_no_admin_client
+
+# ─── Keycloak steps and the frontend around the server start ─────────────────
+
+# start_stack_calls <file> — start_stack with recording stubs (compose,
+# health waits, the Keycloak steps); `ps -q` names the server and frontend
+# containers, docker inspect their start times FRONTEND_STARTED and
+# SERVER_STARTED.
+# shellcheck disable=SC2317,SC2034 # the stubs are called by the installer functions
+start_stack_calls() {
+    local calls="$1"
+    : > "$calls"
+    compose_cmd() {
+        printf 'compose %s\n' "$*" >> "$calls"
+        case "$*" in
+            "ps -q server") printf 'server-cid\n' ;;
+            "ps -q frontend") printf 'frontend-cid\n' ;;
+        esac
+    }
+    fake_docker_inspect() {
+        case "${*: -1}" in
+            server-cid) printf '%s\n' "$SERVER_STARTED" ;;
+            frontend-cid) printf '%s\n' "$FRONTEND_STARTED" ;;
+            *) return 1 ;;
+        esac
+    }
+    DOCKER=fake_docker_inspect
+    wait_for_service() { printf 'wait %s\n' "$1" >> "$calls"; }
+    sync_db_password() { :; }
+    update_timescaledb() { :; }
+    run_migrations() { :; }
+    seed_default_organization() { :; }
+    ensure_runtime_login() { :; }
+    validate_keycloak_bootstrap() { :; }
+    create_initial_admin() { printf 'create_initial_admin\n' >> "$calls"; }
+    ensure_admin_client() { printf 'ensure_admin_client\n' >> "$calls"; }
+    apply_realm_smtp() { printf 'apply_realm_smtp\n' >> "$calls"; }
+    check_issuer_from_host() { :; }
+    check_issuer_from_container() { :; }
+    RETICORA_TLS_DOMAIN=""
+}
+
+# calls_in_order <file> <line…> — the lines occur in the file in this order.
+calls_in_order() {
+    local file="$1" n prev=0 line
+    shift
+    for line in "$@"; do
+        n="$(grep -n -x -F -- "$line" "$file" | head -n 1 | cut -d: -f1)"
+        if [ -z "$n" ] || [ "$n" -le "$prev" ]; then echo "order: '$line' at ${n:-none} after $prev"; sed 's/^/  /' "$file"; return 1; fi
+        prev="$n"
+    done
+}
+
+# The admin client and the realm's SMTP server are applied after the initial
+# administrator (the admin CLI is logged in) and before the server starts.
+test_admin_client_before_server_start() {
+    local calls="$TMP_ROOT/admin-client-order-calls"
+    start_stack_calls "$calls"
+    SERVER_STARTED="2026-11-01T10:00:05Z" FRONTEND_STARTED="2026-11-01T10:00:30Z"
+    start_stack >/dev/null 2>&1 || return 1
+    calls_in_order "$calls" 'compose up -d keycloak' 'create_initial_admin' 'ensure_admin_client' 'apply_realm_smtp' \
+        'compose up -d server frontend' 'wait server'
+}
+
+# A frontend whose nginx resolved the server before the server's current
+# start is restarted (and waited for) before nats-edge; one that started
+# after the server is left alone. Fractions of a second compare as numbers.
+test_frontend_restarted_after_server_start() {
+    local calls="$TMP_ROOT/frontend-restart-calls"
+    start_stack_calls "$calls"
+    SERVER_STARTED="2026-11-01T10:00:05.5Z" FRONTEND_STARTED="2026-10-30T08:00:00.123456789Z"
+    start_stack >/dev/null 2>&1 || return 1
+    calls_in_order "$calls" 'compose up -d server frontend' 'wait server' 'wait frontend' 'compose restart frontend' \
+        'compose up -d --force-recreate nats-edge' || return 1
+    [ "$(grep -c '^wait frontend$' "$calls")" -eq 2 ] || return 1
+    start_stack_calls "$calls"
+    SERVER_STARTED="2026-11-01T10:00:05.5Z" FRONTEND_STARTED="2026-11-01T10:00:05.75Z"
+    start_stack >/dev/null 2>&1 || return 1
+    ! grep -q 'restart frontend' "$calls" || return 1
+    # Without containers (docker compose ps answers nothing) nothing happens.
+    restart_frontend_after_server_start_without_ids() { compose_cmd() { :; }; restart_frontend_after_server_start; }
+    restart_frontend_after_server_start_without_ids
+}
+
+run_test    "start: admin client and realm SMTP before the server starts"                test_admin_client_before_server_start
+run_test    "start: a frontend older than the server start is restarted"                 test_frontend_restarted_after_server_start
+
+# ─── collector NATS endpoint names (COL-08, RETICORA_NATS_EDGE_HOSTS) ────────
+# The nats-edge certificate named only the TLS domain (or localhost),
+# nats-edge and localhost: a collector of an IP installation failed the
+# handshake ("doesn't contain any IP SANs") and delivered nothing.
+
+# edge_hosts <base URL> <TLS domain> <host IP> — RETICORA_NATS_EDGE_HOSTS as
+# nats_edge_hosts derives it (no previous .env unless ENV_FILE names one).
+# shellcheck disable=SC2034 # read by nats_edge_hosts
+edge_hosts() {
+    RETICORA_PUBLIC_BASE_URL="$1" RETICORA_TLS_DOMAIN="$2" RETICORA_HOST_IP="$3"
+    nats_edge_hosts
+    printf '%s' "$RETICORA_NATS_EDGE_HOSTS"
+}
+
+# expect_hosts <want> <base URL> <TLS domain> <host IP>
+expect_hosts() {
+    local got
+    got="$(edge_hosts "$2" "$3" "$4")" || return 1
+    [ "$got" = "$1" ] || { printf 'base %s, domain %s, host IP %s: got %s, want %s\n' "$2" "${3:-none}" "${4:-none}" "$got" "$1"; return 1; }
+}
+
+# shellcheck disable=SC2034 # read by nats_edge_hosts
+test_edge_hosts_derived() {
+    ENV_FILE="$TMP_ROOT/edge-none.env"
+    rm -f "$ENV_FILE"
+    NATS_EDGE_HOSTS_OVERRIDE=""
+    # IP installation: the IP of the base URL first, then the host IP.
+    expect_hosts "192.0.2.10,10.0.0.5,nats-edge,localhost" "http://192.0.2.10:3000" "" "10.0.0.5" &&
+        expect_hosts "192.0.2.10,nats-edge,localhost" "http://192.0.2.10:3000" "" "192.0.2.10" &&
+        # Domain installation: the domain, no host IP; the base URL in other
+        # case or with port and path is the same name.
+        expect_hosts "cmdb.example.com,nats-edge,localhost" "https://cmdb.example.com" "cmdb.example.com" "10.0.0.5" &&
+        expect_hosts "cmdb.example.com,nats-edge,localhost" "https://ops@CMDB.Example.com:8443/ui/" "cmdb.example.com" "10.0.0.5" &&
+        expect_hosts "cmdb.example.com,portal.example.com,nats-edge,localhost" "https://portal.example.com" "cmdb.example.com" "" &&
+        # localhost installation: the host IP (RETICORA_HOST_IP).
+        expect_hosts "192.0.2.20,nats-edge,localhost" "http://localhost:3000" "" "192.0.2.20" &&
+        expect_hosts "192.0.2.20,nats-edge,localhost" "http://127.0.0.1:3000" "" "192.0.2.20" &&
+        # IPv6: the literal without brackets; ::1 is loopback.
+        expect_hosts "2001:db8::10,10.0.0.5,nats-edge,localhost" "http://[2001:DB8::10]:3000" "" "10.0.0.5" &&
+        expect_hosts "10.0.0.5,nats-edge,localhost" "http://[::1]:3000" "" "10.0.0.5" &&
+        # A host name without domain (no TLS): that name, no host IP.
+        expect_hosts "cmdb-vm,nats-edge,localhost" "http://cmdb-vm:3000" "" "10.0.0.5" || return 1
+    [ "$(url_host "http://[2001:db8::1]:3000/x")" = "2001:db8::1" ] && [ "$(url_host "https://a@b.example:1/p?q")" = "b.example" ] &&
+        [ "$(url_host "http://192.0.2.1")" = "192.0.2.1" ]
+}
+
+# Names of the previous .env value survive (operator additions), after the
+# derived ones and without duplicates; RETICORA_NATS_EDGE_HOSTS of the
+# environment replaces the derivation; an invalid name is refused.
+# shellcheck disable=SC2034 # read by nats_edge_hosts
+test_edge_hosts_previous_and_override() {
+    ENV_FILE="$TMP_ROOT/edge-previous.env"
+    printf 'RETICORA_NATS_EDGE_HOSTS=collector.example.com,CMDB.example.com,[2001:db8::20],nats-edge,localhost\n' > "$ENV_FILE"
+    NATS_EDGE_HOSTS_OVERRIDE=""
+    expect_hosts "cmdb.example.com,collector.example.com,2001:db8::20,nats-edge,localhost" "https://cmdb.example.com" "cmdb.example.com" "" || return 1
+    NATS_EDGE_HOSTS_OVERRIDE=" edge.example.com, 203.0.113.7 ,localhost"
+    expect_hosts "edge.example.com,203.0.113.7,nats-edge,localhost" "https://cmdb.example.com" "cmdb.example.com" "10.0.0.5" || return 1
+    local out
+    NATS_EDGE_HOSTS_OVERRIDE="edge.example.com,bad host"
+    if out="$(nats_edge_hosts 2>&1)"; then echo "accepted 'bad host'"; return 1; fi
+    grep -qF "RETICORA_NATS_EDGE_HOSTS: 'bad host' is not a host name or IP address" <<< "$out"
+}
+
+# The installer writes the names into .env, compose hands them to the server
+# (with nats-edge,localhost as before); an .env without them keeps the TLS
+# domain of the former default; a re-run keeps a name added in .env.
+test_edge_hosts_written_and_rendered() {
+    write_legacy_env edge-ip
+    RETICORA_HOST_IP=10.0.0.5
+    collect_config >/dev/null
+    write_env
+    grep -qx 'RETICORA_NATS_EDGE_HOSTS=192.0.2.10,10.0.0.5,nats-edge,localhost' "$ENV_FILE" || { grep NATS_EDGE "$ENV_FILE"; return 1; }
+    sed -i 's/^RETICORA_NATS_EDGE_HOSTS=.*/&,collector-gw.example.com/' "$ENV_FILE"
+    collect_config >/dev/null
+    write_env
+    grep -qx 'RETICORA_NATS_EDGE_HOSTS=192.0.2.10,10.0.0.5,collector-gw.example.com,nats-edge,localhost' "$ENV_FILE" || { grep NATS_EDGE "$ENV_FILE"; return 1; }
+    local env rc=0
+    env="$(server_env "$ENV_FILE")" || rc=$?
+    [ "$rc" -ne 2 ] || { echo "docker compose/jq missing: rendering not checked"; return 0; }
+    [ "$rc" -eq 0 ] || return 1
+    [ "$(jq -r .RETICORA_NATS_EDGE_HOSTS <<< "$env")" = "192.0.2.10,10.0.0.5,collector-gw.example.com,nats-edge,localhost,nats-edge,localhost" ] || { jq -r .RETICORA_NATS_EDGE_HOSTS <<< "$env"; return 1; }
+    grep -v '^RETICORA_NATS_EDGE_HOSTS=' "$ENV_FILE" | sed 's/^RETICORA_TLS_DOMAIN=.*/RETICORA_TLS_DOMAIN=cmdb.example.com/' > "$TMP_ROOT/edge-old.env"
+    env="$(server_env "$TMP_ROOT/edge-old.env")" || return 1
+    [ "$(jq -r .RETICORA_NATS_EDGE_HOSTS <<< "$env")" = "cmdb.example.com,nats-edge,localhost" ] || { jq -r .RETICORA_NATS_EDGE_HOSTS <<< "$env"; return 1; }
+    # shellcheck disable=SC2016 # literal text of docker-compose.yml
+    grep -qxF '      RETICORA_NATS_EDGE_HOSTS: "${RETICORA_NATS_EDGE_HOSTS:-${RETICORA_TLS_DOMAIN:-localhost}},nats-edge,localhost"' \
+        "$REPO_ROOT/deploy/docker-compose/docker-compose.yml"
+}
+
+run_test    "edge hosts: derived for IP, domain, localhost and IPv6 installations"     test_edge_hosts_derived
+run_test    "edge hosts: previous names kept, environment overrides, invalid refused"  test_edge_hosts_previous_and_override
+run_test    "edge hosts: written to .env, rendered by compose, old .env keeps default" test_edge_hosts_written_and_rendered
+
+# ─── documentation of the signup and collector failure modes ─────────────────
+test_signup_and_collector_documented() {
+    local ts="$REPO_ROOT/docs/troubleshooting-installation.md"
+    grep -q '^### Self-signup answers 503' "$ts" && grep -q '^### Collector delivers nothing' "$ts" &&
+        grep -qF 'collector.nats.unreachable' "$ts" && grep -qF 'openssl s_client -connect' "$ts" &&
+        ! grep -qF 'the Compose override that sets the `RETICORA_SMTP_*` variables' "$ts" &&
+        grep -qF 'reticora-collector-nats' "$REPO_ROOT/docs/betrieb/firewall-matrix.md" &&
+        grep -qF 'RETICORA_NATS_EDGE_HOSTS' "$REPO_ROOT/docs/betrieb/firewall-matrix.md" &&
+        grep -qF 'reticora-server-admin' "$REPO_ROOT/deploy/keycloak/README.md" &&
+        grep -qF 'registrationAllowed' "$REPO_ROOT/deploy/keycloak/README.md" &&
+        grep -qF '/api/v1/admin/orgs' "$REPO_ROOT/docs/README.md"
+}
+run_test    "docs: signup, SMTP, admin client and collector endpoint are documented"  test_signup_and_collector_documented
 
 # ─── summary ──────────────────────────────────────────────────────────────────
 echo

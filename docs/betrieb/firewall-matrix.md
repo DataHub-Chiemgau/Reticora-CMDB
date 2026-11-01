@@ -28,6 +28,18 @@ Collector, ein Heartbeat oder Ingest über 443 wird mit 401 abgewiesen.
 Ohne 4222 liefert ein enrollter Collector also nichts; Discovery-Ergebnisse
 warten im Spool, Metriken im Puffer.
 
+Der Collector prüft das Serverzertifikat von `nats-edge` gegen die
+Collector-CA aus dem Enrollment (Server-EKU) und gegen einen Namen: den Host,
+den er wählt, oder den festen Namen `reticora-collector-nats`, den der Server
+in jedes Zertifikat des Endpunkts schreibt (ebenso akzeptiert: `nats-edge`).
+`RETICORA_NATS_TLS_SERVER_NAME` in `collector.env` legt stattdessen genau einen
+erwarteten Namen fest. Ein Collector älter als diese Regel verlangt den Host
+seiner Server-URL; dafür nennt das Zertifikat die Namen aus
+`RETICORA_NATS_EDGE_HOSTS` (siehe Plattformseite). Passt kein Name, scheitert
+der Handshake (`x509: … doesn't contain any IP SANs`, `certificate is valid
+for …, not …`) und der Collector liefert nichts
+(`docs/troubleshooting-installation.md`, „Collector delivers nothing“).
+
 Nicht benötigt: eingehende Verbindungen in das Kundennetz, VPN, Portweiterleitungen.
 Ein Proxy für HTTPS ist möglich; für NATS (4222) muss die Verbindung direkt
 (oder per TCP-Durchleitung ohne TLS-Aufbruch) zulässig sein, weil der
@@ -42,6 +54,14 @@ Installation mit Domain (`RETICORA_TLS_DOMAIN`, Produktionsbetrieb):
 | 443/TCP | Frontend (nginx): Web-UI, API (`/api/`, `/bff/`), Keycloak-Anmeldung (`/realms/`, `/resources/`), Collector-Enrollment | Internet | TLS; Anmeldung über OIDC bzw. API-Schlüssel |
 | 80/TCP | nginx | Internet | nur ACME-Challenge und Weiterleitung auf 443 |
 | 4222/TCP | `nats-edge` (Collector-Endpunkt) | Internet | mTLS gegen die Collector-CA; jede Verbindung wird vom Server autorisiert (Callout): gesperrte Zertifikate und deaktivierte Collectors werden abgewiesen, ein Collector darf nur `collector.<org>.<collector-id>.>` und sein eigenes Antwort-Postfach nutzen |
+
+4222/TCP muss aus den Kundennetzen eingehend erreichbar sein, und zwar in der
+Host-Firewall **und** in der Firewall bzw. Security Group des Cloud-Anbieters;
+Docker veröffentlicht den Port auf allen Schnittstellen, eine vorgelagerte
+Cloud-Firewall lässt oft nur 80/443 zu. `install-cloud.sh` zeigt den Endpunkt
+vor dem Start und in der Zusammenfassung („Collector endpoint:
+tls://<name>:4222 (certificate names: …)“) und weist auf die Freigabe hin.
+Prüfung vom Kundennetz aus: `nc -vz <host> 4222`.
 
 Sonst ist nichts von außen erreichbar. REST-API (`RETICORA_SERVER_PORT`,
 8080) und Keycloak samt Admin-Konsole (`RETICORA_KEYCLOAK_PORT`, 8180) sprechen
@@ -75,7 +95,18 @@ Domain nicht):
 | `RETICORA_FRONTEND_PORT` (3000)/TCP | Frontend (nginx), Web-UI und API | **kein TLS**; Anmeldung über OIDC bzw. API-Schlüssel |
 | `RETICORA_SERVER_PORT` (8080)/TCP | REST-API direkt | **kein TLS**; Anmeldung über OIDC bzw. API-Schlüssel |
 | `RETICORA_KEYCLOAK_PORT` (8180)/TCP | Keycloak inkl. Admin-Konsole | **kein TLS**; Keycloak-Anmeldung |
-| 4222/TCP | `nats-edge` | mTLS wie oben |
+| 4222/TCP | `nats-edge` | mTLS wie oben; das Serverzertifikat nennt die IP der Installation (IP-SAN, siehe unten) |
+
+Ohne Domain wählt der Collector die IP (oder den Hostnamen) der
+Enrollment-URL, also der Adresse, unter der der Browser die Web-UI öffnet.
+`install-cloud.sh` schreibt dafür `RETICORA_NATS_EDGE_HOSTS` in `.env`: bei
+jedem Lauf abgeleitet aus dem Host von `RETICORA_PUBLIC_BASE_URL` und bei einer
+IP- oder `localhost`-Installation der Host-IP (`RETICORA_HOST_IP`, sonst die
+Quelladresse der Default-Route), ergänzt um die Namen, die schon in `.env`
+stehen, zuletzt `nats-edge,localhost`. Hinter NAT nennt die Basis-URL die
+öffentliche Adresse; weitere Namen (DNS-Alias, öffentliche IP) kommaseparat
+in `.env` oder per `RETICORA_NATS_EDGE_HOSTS=<namen> ./install-cloud.sh`
+(ersetzt die Ableitung).
 
 Eine IP-Installation ist nicht für den Betrieb am Internet gedacht: Die
 Host-Firewall soll 3000, 8080 und 8180 nur aus vertrauenswürdigen Netzen
@@ -95,10 +126,16 @@ Ports auf allen IPv4-Schnittstellen veröffentlicht.
 ## Zertifikate und Sperre
 
 - Die Collector-CA liegt verschlüsselt in der Datenbank (`collector_ca`); der
-  Server schreibt Trust-Bundle, Serverzertifikat von `nats-edge` (Hostnamen aus
-  `RETICORA_NATS_EDGE_HOSTS`) und die generierte `edge.conf` in das Volume
-  `collector-pki` (Worker `nats_edge`, täglich; das Serverzertifikat wird ab
-  60 % der Laufzeit erneuert, `nats-edge` übernimmt es beim nächsten Neustart).
+  Server schreibt Trust-Bundle, Serverzertifikat von `nats-edge` und die
+  generierte `edge.conf` in das Volume `collector-pki` (Worker `nats_edge`,
+  beim Start und täglich). Das Serverzertifikat nennt die Namen aus
+  `RETICORA_NATS_EDGE_HOSTS` (Compose: der Wert aus `.env`, ohne ihn
+  `RETICORA_TLS_DOMAIN`; jeweils dazu `nats-edge,localhost`) und immer den
+  festen Namen `reticora-collector-nats`. Der Server stellt es neu aus, sobald
+  ein konfigurierter Name oder der feste Name fehlt, und ab 60 % der Laufzeit;
+  der laufende Endpunkt lädt das neue Zertifikat ohne Neustart neu (Reload),
+  zudem erzeugt `install-cloud.sh` `nats-edge` bei jedem Lauf neu. Alle
+  Server-Instanzen brauchen dieselbe Liste.
 - Ein CA-Wechsel hält zwei Vertrauensanker bis zum Stilllegen der alten CA;
   Collectors erneuern ihr Zertifikat ab 60 % der Laufzeit selbst, über ihren
   mTLS-Kanal auf 4222 (`collector.<org>.<collector-id>.certificate.renew`)
@@ -132,6 +169,10 @@ die `install-cloud.sh` schreibt: mit Domain nur 80/443/4222 auf allen
 Schnittstellen, 8080/8180 auf `127.0.0.1`, 3000 nicht öffentlich; ohne
 Domain 8080/8180 nur mit dem Opt-in auf `0.0.0.0`, samt Warnung des
 Installers; ohne die Bindung des Installers (Compose-Standard) 8080/8180 auf
-`127.0.0.1`. Die Trennung eines deaktivierten Collectors ohne Neustart und die
+`127.0.0.1`. Derselbe Test prüft `RETICORA_NATS_EDGE_HOSTS`: mit Domain die
+Domain, ohne Domain zuerst die IP der Basis-URL, in `.env` und in der
+Umgebung des Servers; `tests/install-cloud-helpers.test.sh` prüft die
+Ableitung (IP, Domain, `localhost` mit `RETICORA_HOST_IP`, IPv6, Duplikate,
+beibehaltene Namen). Die Trennung eines deaktivierten Collectors ohne Neustart und die
 Abweisung nach dem Neustart prüft der Real-Stack-Test D08 in
 `frontend/e2e-real/discovery-override.spec.ts` (CI-Job `install-cloud-smoke`).

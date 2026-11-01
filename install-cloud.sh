@@ -54,6 +54,17 @@ IMAGE_REGISTRY_OVERRIDE="${RETICORA_IMAGE_REGISTRY:-}"
 # image's public CAs; WP-420, staging and test CAs).
 ACME_SERVER_OVERRIDE="${RETICORA_ACME_SERVER:-}"
 ACME_CA_BUNDLE_OVERRIDE="${RETICORA_ACME_CA_BUNDLE:-}"
+# Central SMTP server of the installation (TEC-13; empty: .env, otherwise
+# asked for in an interactive run, see collect_smtp_config).
+SMTP_HOST_OVERRIDE="${RETICORA_SMTP_HOST:-}"
+SMTP_PORT_OVERRIDE="${RETICORA_SMTP_PORT:-}"
+SMTP_TLS_OVERRIDE="${RETICORA_SMTP_TLS:-}"
+SMTP_USERNAME_OVERRIDE="${RETICORA_SMTP_USERNAME:-}"
+SMTP_PASSWORD_OVERRIDE="${RETICORA_SMTP_PASSWORD:-}"
+SMTP_FROM_OVERRIDE="${RETICORA_SMTP_FROM:-}"
+# Names on the server certificate of the collector NATS endpoint (empty:
+# derived on every run, see nats_edge_hosts).
+NATS_EDGE_HOSTS_OVERRIDE="${RETICORA_NATS_EDGE_HOSTS:-}"
 # E-69 (Option 1): the signed release artifacts are the default; the local
 # source build only with --build-from-source (RETICORA_BUILD_FROM_SOURCE=1).
 case "${RETICORA_BUILD_FROM_SOURCE:-0}" in
@@ -101,6 +112,17 @@ Usage:
   ./install-cloud.sh --build-from-source  build the images from this checkout
                                         — not signature-verified
                                         (RETICORA_BUILD_FROM_SOURCE=1)
+
+Settings taken from the environment, otherwise from .env (a non-interactive
+run asks for nothing):
+  RETICORA_SMTP_HOST, RETICORA_SMTP_PORT, RETICORA_SMTP_TLS (starttls|tls|none),
+  RETICORA_SMTP_USERNAME, RETICORA_SMTP_PASSWORD, RETICORA_SMTP_FROM
+                                        outgoing e-mail: self-signup (its e-mail
+                                        verification is mandatory), invitations,
+                                        notifications; empty host = no e-mail
+  RETICORA_NATS_EDGE_HOSTS              names on the collector endpoint's
+                                        certificate (default: derived from the
+                                        domain, the public base URL and the host IP)
 EOF
 }
 
@@ -332,6 +354,28 @@ ask_secret() {
     fi
 }
 
+# ask_optional_secret <variable> <prompt> [default] — hidden input that may
+# stay empty: Enter keeps the default (empty without one), '-' removes it.
+# The answer is never echoed.
+ask_optional_secret() {
+    local var="$1" prompt="$2" default="${3:-}" reply
+    if ! is_tty; then
+        printf -v "$var" '%s' "$default"
+        return
+    fi
+    if [ -n "$default" ]; then
+        read -r -s -p "$prompt [Enter keeps the current value, '-' removes it]: " reply || true
+    else
+        read -r -s -p "$prompt [Enter = none]: " reply || true
+    fi
+    echo
+    case "$reply" in
+        '') reply="$default" ;;
+        -) reply="" ;;
+    esac
+    printf -v "$var" '%s' "$reply"
+}
+
 # ask_validated <variable> <prompt> [default] <validator-function> [hint-function]
 #
 # The optional hint function receives the rejected value plus a nameref; it
@@ -457,6 +501,100 @@ valid_optional_acme_server() {
     [ -z "$1" ] || [[ "$1" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%/-]*)?$ ]]
 }
 
+# Host names (labels of letters, digits and hyphens, dot-separated; a single
+# label such as an internal relay name is allowed).
+HOST_NAME_RE='^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$'
+
+# valid_host <host> — a host name, an IPv4 address or an IPv6 address
+# (without brackets).
+valid_host() {
+    [ -n "$1" ] && [ "${#1}" -le 253 ] || return 1
+    if [[ "$1" == *:* ]]; then
+        # An IPv6 literal has at least two colons ("host:port" is refused).
+        [[ "$1" == *:*:* ]] && [[ "$1" =~ ^[0-9A-Fa-f:.]+$ ]] && [[ "$1" != *:::* ]]
+        return
+    fi
+    [[ "$1" =~ $HOST_NAME_RE ]]
+}
+
+# host_is_loopback <host> — localhost, 127.x, ::1 or the unspecified address.
+host_is_loopback() {
+    case "${1,,}" in
+        ''|localhost|*.localhost|127.*|0.0.0.0|::1|0:0:0:0:0:0:0:1|::) return 0 ;;
+    esac
+    return 1
+}
+
+# host_is_ip <host> — an IPv4 or IPv6 literal.
+host_is_ip() { [[ "$1" == *:* ]] || [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; }
+
+# url_host <url> — the host of an http(s) URL without user info, port and
+# path, lower case; an IPv6 literal without its brackets.
+url_host() {
+    local rest="${1#*://}"
+    rest="${rest%%[/?#]*}"
+    rest="${rest##*@}"
+    if [[ "$rest" == \[*\]* ]]; then
+        rest="${rest#\[}"
+        rest="${rest%%\]*}"
+    else
+        rest="${rest%%:*}"
+    fi
+    printf '%s' "${rest,,}"
+}
+
+# SMTP settings (TEC-13). The SMTP server is reached from the server and the
+# Keycloak containers: a loopback name would be the container itself.
+valid_optional_smtp_host() { [ -z "$1" ] || { valid_host "$1" && ! host_is_loopback "$1"; }; }
+# Interactive answer: '-' removes a configured server.
+valid_smtp_host_answer() { [ "$1" = - ] || valid_optional_smtp_host "$1"; }
+valid_smtp_tls() { case "$1" in starttls|tls|none) return 0 ;; esac; return 1; }
+
+# explain_smtp_host_error <value> <suggestion-nameref> — why an SMTP host was
+# rejected.
+explain_smtp_host_error() {
+    if valid_host "$1" && host_is_loopback "$1"; then
+        warn "Invalid input — '$1' is the loopback address of the server container, not of this host. Enter the host name or IP address of the SMTP relay as the containers reach it."
+    else
+        warn "Invalid input — enter a host name (e.g. smtp.example.com) or an IP address, without port (asked next)."
+    fi
+}
+
+# valid_env_value <value> — a value written unquoted to .env: no blanks,
+# control characters, quotes, backslash, backtick or '$' (docker compose
+# interpolates '$' in .env values).
+valid_env_value() {
+    case "$1" in
+        *[[:space:]]*|*[[:cntrl:]]*|*\"*|*\'*|*\`*|*\\*|*\$*) return 1 ;;
+    esac
+    return 0
+}
+# Interactive answer for the optional SMTP user name: '-' removes it.
+valid_smtp_username_answer() { [ "$1" = - ] || valid_env_value "$1"; }
+
+# valid_smtp_from <value> — the sender of the e-mails: an address or
+# 'Display Name <address>' (as net/mail parses it); no quotes, '$', '#',
+# backslash or backtick, since the value is written unquoted to .env.
+SMTP_ADDRESS_RE='^[A-Za-z0-9._%+=-]+@[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?\.[A-Za-z]{2,63}$'
+valid_smtp_from() {
+    local addr="$1" name=""
+    case "$1" in
+        *[[:cntrl:]]*|*\"*|*\'*|*\`*|*\\*|*\$*|*'#'*) return 1 ;;
+    esac
+    if [[ "$1" == *'<'*'>' ]]; then
+        name="${1%%<*}"
+        addr="${1#*<}"
+        addr="${addr%>}"
+        case "$name" in *'>'*|*:*) return 1 ;; esac
+    fi
+    [[ "$addr" =~ $SMTP_ADDRESS_RE ]]
+}
+
+# explain_smtp_from_error <value> <suggestion-nameref>
+explain_smtp_from_error() {
+    warn "Invalid input — enter an e-mail address (noreply@example.com) or 'Name <address>' (Reticora CMDB <noreply@example.com>), without quotes, '\$', '#' or '\\'."
+}
+
 # valid_optional_ca_bundle <path> — empty, or the absolute path of a readable
 # PEM certificate file. docker-compose.yml mounts it into the certbot
 # container (short volume syntax: no ':' or ',') and it is written to .env.
@@ -508,6 +646,31 @@ KEYCLOAK_ADMIN_PASSWORD=$KEYCLOAK_ADMIN_PASSWORD
 KEYCLOAK_DB_PASSWORD=$KEYCLOAK_DB_PASSWORD
 RETICORA_INITIAL_ADMIN_EMAIL=$RETICORA_INITIAL_ADMIN_EMAIL
 RETICORA_OIDC_CLIENT_SECRET=$RETICORA_OIDC_CLIENT_SECRET
+# Keycloak admin client of the server: a confidential client whose service
+# account holds realm-management manage-users, view-users and query-users.
+# The server creates the accounts of self-signups, accepted invitations and
+# operator-created organizations with it and binds org_admins to MFA. The
+# installer creates it and applies a changed secret on every run
+# (ensure_admin_client); generated once, never asked for.
+RETICORA_KEYCLOAK_ADMIN_CLIENT_ID=${RETICORA_KEYCLOAK_ADMIN_CLIENT_ID:-}
+RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET=${RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+
+# Self-signup at <RETICORA_PUBLIC_BASE_URL>/onboarding (TLC-01): key that signs
+# the ALTCHA challenges (at least 32 characters, generated once). Signup
+# also needs the SMTP server below: its e-mail verification is mandatory.
+RETICORA_SIGNUP_CAPTCHA_KEY=${RETICORA_SIGNUP_CAPTCHA_KEY:-}
+
+# Outgoing e-mail: the central SMTP server (TEC-13) for the verification
+# e-mail of the self-signup, invitations and notification mails; the realm
+# 'reticora' of Keycloak sends over it as well (apply_realm_smtp). Empty host
+# = no e-mail, self-signup disabled. With a host, the server's readiness
+# (/readyz) depends on it. TLS: starttls, tls (implicit) or none.
+RETICORA_SMTP_HOST=${RETICORA_SMTP_HOST:-}
+RETICORA_SMTP_PORT=${RETICORA_SMTP_PORT:-587}
+RETICORA_SMTP_TLS=${RETICORA_SMTP_TLS:-starttls}
+RETICORA_SMTP_USERNAME=${RETICORA_SMTP_USERNAME:-}
+RETICORA_SMTP_PASSWORD=${RETICORA_SMTP_PASSWORD:-}
+RETICORA_SMTP_FROM=${RETICORA_SMTP_FROM:-}
 
 # Credential envelope encryption (32-byte key, base64-encoded)
 RETICORA_MASTER_KEY=$RETICORA_MASTER_KEY
@@ -554,6 +717,17 @@ RETICORA_KEYCLOAK_PORT=$RETICORA_KEYCLOAK_PORT
 # RETICORA_TLS_DOMAIN (COL-08, docs/betrieb/firewall-matrix.md).
 RETICORA_PUBLISH_DIRECT_PORTS=${RETICORA_PUBLISH_DIRECT_PORTS:-false}
 RETICORA_DIRECT_PORTS_BIND=${RETICORA_DIRECT_PORTS_BIND:-127.0.0.1}
+
+# Names on the server certificate of the collector NATS endpoint (nats-edge,
+# mTLS on 4222). A collector connects to tls://<host of its server URL>:4222,
+# the URL of its enrollment command, so the list must name that host; the
+# first entry is the endpoint the installer shows. Derived on every run from
+# RETICORA_TLS_DOMAIN, the host of RETICORA_PUBLIC_BASE_URL and, for an IP or
+# localhost installation, the host IP (RETICORA_HOST_IP); names added here
+# are kept (a name that is not derived is dropped by removing it here). The
+# server reissues the certificate when the list changes
+# (docs/betrieb/firewall-matrix.md).
+RETICORA_NATS_EDGE_HOSTS=${RETICORA_NATS_EDGE_HOSTS:-}
 
 # Registry and release of the signed images (E-69: the default; both empty
 # when the images were built from this checkout with --build-from-source)
@@ -699,6 +873,25 @@ collect_config() {
     ask RETICORA_OIDC_CLIENT_ID "OIDC client ID" "${def_client_id:-reticora-app}"
     ask RETICORA_OIDC_CLIENT_SECRET "OIDC client secret" "$def_client_secret"
 
+    # The Keycloak admin client of the server (ensure_admin_client) and the
+    # key of the signup challenges (E-33): generated once and never asked
+    # for, like the runtime login's password; a changed value in .env is
+    # applied (the client secret is rotated in Keycloak).
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_ID="$(env_get RETICORA_KEYCLOAK_ADMIN_CLIENT_ID || true)"
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_ID="${RETICORA_KEYCLOAK_ADMIN_CLIENT_ID:-reticora-server-admin}"
+    [[ "$RETICORA_KEYCLOAK_ADMIN_CLIENT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+        || die "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID in $ENV_FILE must consist of letters, digits, '.', '_' and '-' (default reticora-server-admin)."
+    [ "$RETICORA_KEYCLOAK_ADMIN_CLIENT_ID" != "$RETICORA_OIDC_CLIENT_ID" ] \
+        || die "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID must name a client of its own, not the login client $RETICORA_OIDC_CLIENT_ID (default reticora-server-admin)."
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET="$(env_get RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET || true)"
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET="${RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET:-$(openssl rand -hex 24)}"
+    { [ "${#RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET}" -ge 16 ] && valid_env_value "$RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET"; } \
+        || die "RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET in $ENV_FILE must have at least 16 characters without blanks, quotes, '\\', '\`' or '\$' (remove it to generate a new one)."
+    RETICORA_SIGNUP_CAPTCHA_KEY="$(env_get RETICORA_SIGNUP_CAPTCHA_KEY || true)"
+    RETICORA_SIGNUP_CAPTCHA_KEY="${RETICORA_SIGNUP_CAPTCHA_KEY:-$(openssl rand -hex 32)}"
+    { [ "${#RETICORA_SIGNUP_CAPTCHA_KEY}" -ge 32 ] && valid_env_value "$RETICORA_SIGNUP_CAPTCHA_KEY"; } \
+        || die "RETICORA_SIGNUP_CAPTCHA_KEY in $ENV_FILE must have at least 32 characters without blanks, quotes, '\\', '\`' or '\$' (remove it to generate a new one)."
+
     if is_tty; then
         ask_secret RETICORA_MASTER_KEY "Master key for credential encryption (base64, 32 bytes)" "$def_master_key"
     else
@@ -710,6 +903,9 @@ collect_config() {
     def_base="$(env_get RETICORA_PUBLIC_BASE_URL || true)"
     def_base="${def_base:-http://localhost:3000}"
     ask_validated RETICORA_PUBLIC_BASE_URL "Public base URL of the web UI (e.g. https://cmdb.example.com)" "$def_base" valid_url explain_url_error
+    # docker-compose.yml appends the paths of the mail links to it
+    # (/onboarding, /invitations/accept): no trailing slash.
+    RETICORA_PUBLIC_BASE_URL="${RETICORA_PUBLIC_BASE_URL%/}"
 
     # The issuer URL is handed to the browser as the Keycloak authorization
     # endpoint, so it must be reachable from the users' machines — a
@@ -823,6 +1019,10 @@ collect_config() {
     def_port="$(env_get RETICORA_KEYCLOAK_PORT || true)"
     ask_validated RETICORA_KEYCLOAK_PORT "Host port for Keycloak" "${def_port:-8180}" valid_port
     select_direct_ports
+    nats_edge_hosts
+
+    # ── Outgoing e-mail (SMTP, optional) ──
+    collect_smtp_config
 
     # ── Images (E-69, Option 1) ──
     # Default: the signed release images, verified and pinned in
@@ -874,6 +1074,189 @@ select_direct_ports() {
     RETICORA_PUBLISH_DIRECT_PORTS=true
     RETICORA_DIRECT_PORTS_BIND=0.0.0.0
     warn "Installation without a TLS domain: the REST API (port $RETICORA_SERVER_PORT) and Keycloak including its admin console (port $RETICORA_KEYCLOAK_PORT) are published on all interfaces without TLS (RETICORA_PUBLISH_DIRECT_PORTS=true; the OIDC issuer of an IP installation is served on the Keycloak port of the host IP). Allow both ports only from trusted networks in the host firewall, or install with a TLS domain (docs/betrieb/firewall-matrix.md)."
+}
+
+# ─── Collector NATS endpoint (COL-08) ─────────────────────────────────────────
+# nats_edge_hosts — RETICORA_NATS_EDGE_HOSTS, the names on the server
+# certificate of nats-edge (mTLS, port 4222). A collector connects to
+# tls://<host of its server URL>:4222, and the enrollment command of the
+# Discovery page names the origin of the browser, i.e. the public base URL;
+# a certificate without that name fails the handshake ("doesn't contain any
+# IP SANs", "certificate is valid for …, not …") and the collector delivers
+# nothing. Derived on every run, in this order and without duplicates: the
+# TLS domain, the host of RETICORA_PUBLIC_BASE_URL (not a loopback name) and,
+# for a localhost or IP installation, the host IP (RETICORA_HOST_IP,
+# otherwise the source address of the default route; behind NAT the base
+# URL names the public address), then the names of the previous .env value
+# (additions of the operator are kept), last nats-edge (the server's own
+# connections) and localhost. RETICORA_NATS_EDGE_HOSTS in the environment
+# replaces the derived names. The server reissues the certificate when the
+# list changes; collectors also accept the fixed name reticora-collector-nats
+# that the server adds to every certificate.
+nats_edge_hosts() {
+    local candidates=() hosts=() h base seen=","
+    if [ -n "$NATS_EDGE_HOSTS_OVERRIDE" ]; then
+        IFS=',' read -r -a candidates <<< "$NATS_EDGE_HOSTS_OVERRIDE"
+    else
+        [ -z "${RETICORA_TLS_DOMAIN:-}" ] || candidates+=("$RETICORA_TLS_DOMAIN")
+        base="$(url_host "${RETICORA_PUBLIC_BASE_URL:-}")"
+        host_is_loopback "$base" || candidates+=("$base")
+        if host_is_loopback "$base" || host_is_ip "$base"; then
+            h="$(host_primary_ip 2>/dev/null || true)"
+            [ -z "$h" ] || candidates+=("$h")
+        fi
+        local previous=()
+        IFS=',' read -r -a previous <<< "$(env_get RETICORA_NATS_EDGE_HOSTS || true)"
+        candidates+=("${previous[@]}")
+    fi
+    for h in "${candidates[@]}"; do
+        h="$(trim "$h")"
+        h="${h#\[}"
+        h="${h%\]}"
+        h="${h,,}"
+        case "$h" in ''|nats-edge|localhost) continue ;; esac
+        valid_host "$h" \
+            || die "RETICORA_NATS_EDGE_HOSTS: '$h' is not a host name or IP address (comma-separated list of the names collectors connect to; docs/betrieb/firewall-matrix.md)."
+        [[ "$seen" == *",$h,"* ]] && continue
+        seen="$seen$h,"
+        hosts+=("$h")
+    done
+    hosts+=(nats-edge localhost)
+    RETICORA_NATS_EDGE_HOSTS="$(IFS=','; printf '%s' "${hosts[*]}")"
+}
+
+# collector_endpoint — the collector NATS endpoint the installation announces:
+# tls://<first name of RETICORA_NATS_EDGE_HOSTS>:<published port>.
+collector_endpoint() {
+    local host="${RETICORA_NATS_EDGE_HOSTS:-localhost}" port
+    host="${host%%,*}"
+    port="${RETICORA_NATS_EDGE_PORT:-$(env_get RETICORA_NATS_EDGE_PORT 2>/dev/null || true)}"
+    [[ "$host" != *:* ]] || host="[$host]"
+    printf 'tls://%s:%s' "$host" "${port:-4222}"
+}
+
+# ─── Outgoing e-mail (SMTP, TEC-13) ───────────────────────────────────────────
+SMTP_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'Self-signup answers 503'"
+
+# collect_smtp_config — the central SMTP server of the installation: from the
+# environment, otherwise from .env; an interactive run asks for it with these
+# as defaults. The server sends the verification e-mail of the self-signup,
+# invitations and the notification mails of the central_smtp channels over
+# it, and apply_realm_smtp gives it to Keycloak's realm. An empty host keeps
+# e-mail off: self-signup then stays disabled, because its e-mail
+# verification is mandatory. The other values are kept for a later run.
+collect_smtp_config() {
+    local def_host def_port def_tls def_user def_pw def_from
+    def_host="${SMTP_HOST_OVERRIDE:-$(env_get RETICORA_SMTP_HOST || true)}"
+    def_port="${SMTP_PORT_OVERRIDE:-$(env_get RETICORA_SMTP_PORT || true)}"
+    def_tls="${SMTP_TLS_OVERRIDE:-$(env_get RETICORA_SMTP_TLS || true)}"
+    def_user="${SMTP_USERNAME_OVERRIDE:-$(env_get RETICORA_SMTP_USERNAME || true)}"
+    def_pw="${SMTP_PASSWORD_OVERRIDE:-$(env_get RETICORA_SMTP_PASSWORD || true)}"
+    def_from="${SMTP_FROM_OVERRIDE:-$(env_get RETICORA_SMTP_FROM || true)}"
+    RETICORA_SMTP_HOST="$def_host"
+    RETICORA_SMTP_TLS="${def_tls:-starttls}"
+    RETICORA_SMTP_PORT="$def_port"
+    RETICORA_SMTP_USERNAME="$def_user"
+    RETICORA_SMTP_PASSWORD="$def_pw"
+    RETICORA_SMTP_FROM="$def_from"
+    while true; do
+        if is_tty; then
+            echo
+            echo "Outgoing e-mail (SMTP, optional): the server sends the verification e-mail"
+            echo "of the self-signup (${RETICORA_PUBLIC_BASE_URL}/onboarding), invitations and"
+            echo "notification mails over this relay. Without it self-signup stays disabled"
+            echo "(the e-mail verification is mandatory) and no e-mail is sent. Leave the host"
+            echo "empty to keep e-mail off; '-' removes a configured server."
+            ask_validated RETICORA_SMTP_HOST "SMTP server host name or IP (empty = no e-mail, optional)" "$RETICORA_SMTP_HOST" \
+                valid_smtp_host_answer explain_smtp_host_error
+            [ "$RETICORA_SMTP_HOST" != - ] || RETICORA_SMTP_HOST=""
+            if [ -n "$RETICORA_SMTP_HOST" ]; then
+                ask_validated RETICORA_SMTP_TLS "SMTP TLS mode: starttls (port 587), tls (implicit TLS, port 465) or none" \
+                    "$RETICORA_SMTP_TLS" valid_smtp_tls
+                if [ -z "$RETICORA_SMTP_PORT" ]; then
+                    RETICORA_SMTP_PORT=587
+                    [ "$RETICORA_SMTP_TLS" != tls ] || RETICORA_SMTP_PORT=465
+                fi
+                ask_validated RETICORA_SMTP_PORT "SMTP port" "$RETICORA_SMTP_PORT" valid_port
+                ask_validated RETICORA_SMTP_USERNAME "SMTP user name (empty = no authentication, optional; '-' removes it)" \
+                    "$RETICORA_SMTP_USERNAME" valid_smtp_username_answer
+                [ "$RETICORA_SMTP_USERNAME" != - ] || RETICORA_SMTP_USERNAME=""
+                if [ -n "$RETICORA_SMTP_USERNAME" ]; then
+                    while true; do
+                        ask_optional_secret RETICORA_SMTP_PASSWORD "SMTP password" "$RETICORA_SMTP_PASSWORD"
+                        valid_env_value "$RETICORA_SMTP_PASSWORD" && break
+                        warn "Invalid input — the password is written unquoted to $ENV_FILE: no blanks, quotes, '\\', '\`' or '\$'."
+                        RETICORA_SMTP_PASSWORD=""
+                    done
+                else
+                    RETICORA_SMTP_PASSWORD=""
+                fi
+                ask_validated RETICORA_SMTP_FROM "Sender address (From), e.g. Reticora CMDB <noreply@example.com>" \
+                    "$RETICORA_SMTP_FROM" valid_smtp_from explain_smtp_from_error
+            fi
+        fi
+        if [ -z "$RETICORA_SMTP_PORT" ]; then
+            RETICORA_SMTP_PORT=587
+            [ "$RETICORA_SMTP_TLS" != tls ] || RETICORA_SMTP_PORT=465
+        fi
+        [ -n "$RETICORA_SMTP_HOST" ] || return 0
+        validate_smtp_config
+        smtp_relay_check && return 0
+        is_tty || die "The SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT is not reachable from this host (TCP connect, ${RETICORA_SMTP_CHECK_TIMEOUT:-5} s). With RETICORA_SMTP_HOST set the server's readiness (/readyz) depends on it, so the installation would end in 'Reticora server did not become healthy'. Check host, port and the outbound firewall, or install without e-mail: remove RETICORA_SMTP_HOST from the environment and from $ENV_FILE ($SMTP_TROUBLESHOOTING)."
+        warn "The SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT is not reachable from this host (TCP connect, ${RETICORA_SMTP_CHECK_TIMEOUT:-5} s). With RETICORA_SMTP_HOST set the server's readiness (/readyz) depends on it: the installation would end in 'Reticora server did not become healthy'."
+        if confirm "Continue without e-mail? (self-signup and e-mail notifications stay off until a re-run sets a reachable SMTP server)" "yes"; then
+            RETICORA_SMTP_HOST=""
+            warn "Continuing without SMTP: self-signup is disabled; re-run the installer and enter a reachable SMTP server to enable it."
+            return 0
+        fi
+        confirm "Enter the SMTP settings again?" "yes" \
+            || die "Aborted: make $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT reachable from this host, or continue without e-mail, and re-run the installer."
+    done
+}
+
+# validate_smtp_config — the SMTP settings the server accepts (config.Validate,
+# notify.SMTPConfig) and that fit unquoted into .env; no secret is printed.
+validate_smtp_config() {
+    valid_optional_smtp_host "$RETICORA_SMTP_HOST" \
+        || die "RETICORA_SMTP_HOST ('$RETICORA_SMTP_HOST') must be the host name or IP address of the SMTP server, without port and not a loopback address (inside the server container that is the container itself) ($SMTP_TROUBLESHOOTING)."
+    valid_port "$RETICORA_SMTP_PORT" \
+        || die "RETICORA_SMTP_PORT ('$RETICORA_SMTP_PORT') must be a port number between 1 and 65535 (587 STARTTLS, 465 implicit TLS)."
+    valid_smtp_tls "$RETICORA_SMTP_TLS" \
+        || die "RETICORA_SMTP_TLS ('$RETICORA_SMTP_TLS') must be starttls, tls or none."
+    valid_env_value "$RETICORA_SMTP_USERNAME" \
+        || die "RETICORA_SMTP_USERNAME must not contain blanks, quotes, '\\', '\`' or '\$' (it is written unquoted to $ENV_FILE)."
+    valid_env_value "$RETICORA_SMTP_PASSWORD" \
+        || die "RETICORA_SMTP_PASSWORD must not contain blanks, quotes, '\\', '\`' or '\$' (it is written unquoted to $ENV_FILE)."
+    [ -z "$RETICORA_SMTP_PASSWORD" ] || [ -n "$RETICORA_SMTP_USERNAME" ] \
+        || die "RETICORA_SMTP_PASSWORD needs RETICORA_SMTP_USERNAME: the server authenticates with both or none."
+    [ -n "$RETICORA_SMTP_FROM" ] \
+        || die "RETICORA_SMTP_FROM is required with RETICORA_SMTP_HOST: the sender of the e-mails, e.g. 'Reticora CMDB <noreply@example.com>' ($SMTP_TROUBLESHOOTING)."
+    valid_smtp_from "$RETICORA_SMTP_FROM" \
+        || die "RETICORA_SMTP_FROM ('$RETICORA_SMTP_FROM') must be an e-mail address or 'Name <address>', without quotes, '\$', '#' or '\\'."
+}
+
+# smtp_relay_reachable <host> <port> — a TCP connection to the SMTP server
+# opens within RETICORA_SMTP_CHECK_TIMEOUT seconds (default 5).
+# shellcheck disable=SC2016 # expanded by the inner shell
+smtp_relay_reachable() {
+    local t="${RETICORA_SMTP_CHECK_TIMEOUT:-5}"
+    if have_cmd timeout; then
+        timeout "$t" bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$1" "$2" 2>/dev/null
+    else
+        bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$1" "$2" 2>/dev/null
+    fi
+}
+
+# smtp_relay_check — the pre-check of the SMTP server before anything starts:
+# with RETICORA_SMTP_HOST set, /readyz of the server connects to it, and an
+# unreachable relay would only surface as an unhealthy server.
+smtp_relay_check() {
+    info "Checking the SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT …"
+    if smtp_relay_reachable "$RETICORA_SMTP_HOST" "$RETICORA_SMTP_PORT"; then
+        success "SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT is reachable (TLS mode $RETICORA_SMTP_TLS)"
+        return 0
+    fi
+    return 1
 }
 
 # ─── Session signing key ──────────────────────────────────────────────────────
@@ -2019,6 +2402,10 @@ start_stack() {
     }
     validate_keycloak_bootstrap
     create_initial_admin
+    # The server reads its admin client only at start: it must exist in
+    # Keycloak, with the secret of .env, before the server (re)starts.
+    ensure_admin_client
+    apply_realm_smtp
 
     info "Starting the Reticora server and frontend …"
     # Compose itself can fail while waiting for the server healthcheck before
@@ -2037,6 +2424,7 @@ start_stack() {
         show_service_logs frontend
         die "Frontend did not become healthy — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
     }
+    restart_frontend_after_server_start
     # Serve a regenerated bootstrap certificate before the issuer checks below.
     reload_frontend_after_bootstrap
     # The collector NATS endpoint (mTLS, port 4222) starts once the server
@@ -2062,6 +2450,42 @@ start_stack() {
     # proxy, which cannot answer before the frontend runs (F-035).
     check_issuer_from_host
     check_issuer_from_container
+}
+
+# container_started_at <container id> — when the container last started, in
+# nanoseconds since the epoch.
+container_started_at() {
+    local started
+    started="$($DOCKER inspect --format '{{.State.StartedAt}}' "$1" 2>/dev/null)" && [ -n "$started" ] || return 1
+    date -d "$started" +%s%N 2>/dev/null
+}
+
+# restart_frontend_after_server_start — nginx in the frontend resolves the
+# address of the server container once, when it starts (proxy_pass
+# http://server:8080, frontend/nginx.conf). Every run stops the server for
+# the database update, and `up -d server frontend` starts or recreates it
+# (e.g. with a changed SMTP setting), possibly under a new address, but
+# leaves a running, unchanged frontend alone: its /api/ would answer 502. A
+# frontend that started before the server's current start is restarted
+# (as frontend/e2e/fixtures/setup-onboarding.sh does).
+restart_frontend_after_server_start() {
+    local server frontend server_start frontend_start
+    server="$(compose_cmd ps -q server 2>/dev/null || true)"
+    frontend="$(compose_cmd ps -q frontend 2>/dev/null || true)"
+    [ -n "$server" ] && [ -n "$frontend" ] || return 0
+    server_start="$(container_started_at "$server")" || return 0
+    frontend_start="$(container_started_at "$frontend")" || return 0
+    [ "$frontend_start" -lt "$server_start" ] || return 0
+    info "Restarting the frontend: its nginx still holds the address of the server from before the server's start …"
+    compose_cmd restart frontend >/dev/null || {
+        show_service_logs frontend
+        die "Could not restart the frontend after the server start — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
+    }
+    wait_for_service frontend || {
+        show_service_logs frontend
+        die "Frontend did not become healthy after its restart — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs frontend"
+    }
+    success "Frontend restarted: /api/ reaches the started server"
 }
 
 # update_timescaledb — a database created with an older image keeps its
@@ -2225,8 +2649,10 @@ kc_user_id() {
 KC_ROTATION_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'Keycloak admin login or rotation failed'"
 
 # .env settings that reach Keycloak (the redirect URL and the issuer feed the
-# client's redirect URIs and web origins).
-KC_ROTATED_SETTINGS=(KEYCLOAK_ADMIN_PASSWORD RETICORA_OIDC_CLIENT_SECRET RETICORA_OIDC_REDIRECT_URL RETICORA_OIDC_ISSUER_URL)
+# client's redirect URIs and web origins; the secret of the server's admin
+# client is applied by ensure_admin_client).
+KC_ROTATED_SETTINGS=(KEYCLOAK_ADMIN_PASSWORD RETICORA_OIDC_CLIENT_SECRET RETICORA_OIDC_REDIRECT_URL RETICORA_OIDC_ISSUER_URL
+    RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)
 
 # report_rotated_settings — names (never values) the settings of
 # KC_ROTATED_SETTINGS whose value differs from the one in .env.previous.
@@ -2234,7 +2660,7 @@ report_rotated_settings() {
     local key previous names=()
     for key in "${KC_ROTATED_SETTINGS[@]}"; do
         previous="$(env_get "$key" "$ENV_FILE.previous")" || continue
-        [ "$previous" = "${!key}" ] || names+=("$key")
+        [ "$previous" = "${!key:-}" ] || names+=("$key")
     done
     [ "${#names[@]}" -eq 0 ] || info "Changed since the last run: ${names[*]} — applying to Keycloak"
 }
@@ -2695,6 +3121,125 @@ create_initial_admin() {
     success "Initial administrator $email created"
 }
 
+# ─── Keycloak admin client of the server (TLC-01, TLC-03, AUT-09) ────────────
+# The server creates the accounts of self-signups, accepted invitations and
+# operator-created organizations and binds org_admins to MFA through a
+# confidential client with a service account (client credentials grant)
+# that holds realm-management manage-users, view-users and query-users.
+# Without it self-signup answers 503 and every org_admin grant fails. The
+# realm file does not carry the client: the production realm ships without
+# users, and `start --import-realm` skips an existing realm anyway.
+# ensure_admin_client creates it through the admin CLI (logged in by
+# create_initial_admin) on every run, before the server starts: missing
+# client, drifted settings, a secret that differs from .env and missing
+# roles are applied, an unchanged client is left alone. The secret travels
+# only on kcadm's stdin (-f -) and in the environment of jq, never on a
+# command line or in the log.
+KC_ADMIN_CLIENT_ROLES=(manage-users view-users query-users)
+# The settings of the client besides its secret: confidential, service
+# account only (no browser login, no password grant).
+KC_ADMIN_CLIENT_SPEC='{enabled: true, protocol: "openid-connect", publicClient: false, clientAuthenticatorType: "client-secret",
+    serviceAccountsEnabled: true, standardFlowEnabled: false, implicitFlowEnabled: false, directAccessGrantsEnabled: false}'
+
+ensure_admin_client() {
+    local id="$RETICORA_KEYCLOAK_ADMIN_CLIENT_ID" uuid current drift="" body field sa_id assigned role changed=0 missing=() args=()
+    info "Ensuring the Keycloak admin client $id of the server (service account) …"
+    uuid="$(kc_call get clients -r reticora -q clientId="$id" --fields id --format csv --noquotes </dev/null | head -n 1)" \
+        || die "Could not look up the Keycloak client $id ($KC_ROTATION_TROUBLESHOOTING)."
+    if [ -z "$uuid" ]; then
+        uuid="$(KC_CLIENT_SECRET="$RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET" \
+            jq -n -c --arg id "$id" "{clientId: \$id, name: \"Reticora server (admin API)\"} + $KC_ADMIN_CLIENT_SPEC + {secret: \$ENV.KC_CLIENT_SECRET}" \
+            | kc_call create clients -r reticora -f - -i)" && [ -n "$uuid" ] \
+            || die "Could not create the Keycloak client $id ($KC_ROTATION_TROUBLESHOOTING)."
+        success "Keycloak: confidential client $id created (service account of the server; secret RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)"
+        changed=1
+    else
+        current="$(kc_call get "clients/$uuid" -r reticora </dev/null)" \
+            || die "Could not read the Keycloak client $id ($KC_ROTATION_TROUBLESHOOTING)."
+        drift="$(jq -r "$KC_ADMIN_CLIENT_SPEC as \$want | . as \$have | [\$want | keys[] | select(\$want[.] != \$have[.])] | join(\" \")" <<< "$current")" \
+            || die "Could not read the Keycloak client $id ($KC_ROTATION_TROUBLESHOOTING)."
+        if ! kc_call get "clients/$uuid/client-secret" -r reticora </dev/null \
+            | KC_CLIENT_SECRET="$RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET" jq -e '.value == $ENV.KC_CLIENT_SECRET' >/dev/null; then
+            drift="$drift${drift:+ }secret"
+        fi
+        if [ -n "$drift" ]; then
+            # Only the differing fields go back, the secret over stdin.
+            body="$(KC_CLIENT_SECRET="$RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET" jq -n -c --arg fields "$drift" \
+                "($KC_ADMIN_CLIENT_SPEC + {secret: \$ENV.KC_CLIENT_SECRET}) as \$want | (\$fields | split(\" \")) as \$f
+                 | \$want | with_entries(select(.key as \$k | \$f | index([\$k]) != null))")"
+            printf '%s' "$body" | kc_call update "clients/$uuid" -r reticora -f - >/dev/null \
+                || die "Could not update the Keycloak client $id ($KC_ROTATION_TROUBLESHOOTING)."
+            for field in $drift; do
+                if [ "$field" = secret ]; then
+                    success "Keycloak: client $id secret set to RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET"
+                else
+                    success "Keycloak: client $id $field set to $(jq -r -n "$KC_ADMIN_CLIENT_SPEC | .$field")"
+                fi
+            done
+            changed=1
+        fi
+    fi
+
+    # The service account's roles of the client realm-management; only the
+    # missing ones are added.
+    sa_id="$(kc_call get "clients/$uuid/service-account-user" -r reticora </dev/null | jq -r '.id // empty')" && [ -n "$sa_id" ] \
+        || die "The Keycloak client $id has no service account user ($KC_ROTATION_TROUBLESHOOTING)."
+    assigned="$(kc_call get-roles -r reticora --uid "$sa_id" --cclientid realm-management </dev/null | jq -r '.[].name')" \
+        || die "Could not read the roles of the service account of $id ($KC_ROTATION_TROUBLESHOOTING)."
+    for role in "${KC_ADMIN_CLIENT_ROLES[@]}"; do
+        grep -qx -- "$role" <<< "$assigned" && continue
+        missing+=("$role")
+        args+=(--rolename "$role")
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        kc_call add-roles -r reticora --uid "$sa_id" --cclientid realm-management "${args[@]}" </dev/null \
+            || die "Could not grant realm-management ${missing[*]} to the service account of $id ($KC_ROTATION_TROUBLESHOOTING)."
+        success "Keycloak: service account of $id holds realm-management ${missing[*]}"
+        changed=1
+    fi
+    [ "$changed" -eq 1 ] \
+        || success "Keycloak admin client $id matches the configuration (service account: realm-management ${KC_ADMIN_CLIENT_ROLES[*]})"
+}
+
+# apply_realm_smtp — gives the central SMTP server to the realm 'reticora'
+# (smtpServer), so Keycloak's own e-mails work: the invitation of an
+# operator-created organization's first administrator (execute-actions-email,
+# which would otherwise fail and roll the creation back) and password
+# resets. Applied on every run with RETICORA_SMTP_HOST; the representation
+# goes back whole over stdin (Keycloak drops the realm attributes a partial
+# one does not list), the password only in the environment of jq. Without
+# RETICORA_SMTP_HOST the realm's mail settings are left alone.
+apply_realm_smtp() {
+    if [ -z "${RETICORA_SMTP_HOST:-}" ]; then
+        info "No SMTP server configured (RETICORA_SMTP_HOST): Keycloak's realm e-mail settings are left unchanged"
+        return 0
+    fi
+    local current want
+    # Keycloak's smtpServer map holds strings; the sender is split into the
+    # address (from) and the display name. Further settings of the operator
+    # (replyTo, envelopeFrom) are kept.
+    want="$(jq -n -c --arg host "$RETICORA_SMTP_HOST" --arg port "$RETICORA_SMTP_PORT" --arg tls "$RETICORA_SMTP_TLS" \
+        --arg user "${RETICORA_SMTP_USERNAME:-}" --arg from "$RETICORA_SMTP_FROM" '
+        (($from | capture("^(?<name>[^<]*?)\\s*<(?<addr>[^<>]+)>$")) // {name: "", addr: $from}) as $f
+        | {host: $host, port: $port, from: $f.addr, fromDisplayName: $f.name, starttls: ($tls == "starttls" | tostring),
+           ssl: ($tls == "tls" | tostring), auth: ($user != "" | tostring), user: $user}')" \
+        || die "Could not build the SMTP settings of the realm ($KC_REALM_TROUBLESHOOTING)."
+    current="$(kc_call get realms/reticora </dev/null)" \
+        || die "Could not read the Keycloak realm 'reticora' ($KC_REALM_TROUBLESHOOTING)."
+    # Keycloak masks a stored password, so only settings without one compare.
+    if [ -z "${RETICORA_SMTP_PASSWORD:-}" ] &&
+        jq -e --argjson want "$want" '(.smtpServer // {}) as $s | $want | to_entries | all(.value == $s[.key])' <<< "$current" >/dev/null; then
+        success "Keycloak realm: SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT matches the configuration"
+        return 0
+    fi
+    printf '%s' "$current" \
+        | KC_SMTP_PASSWORD="${RETICORA_SMTP_PASSWORD:-}" jq -c --argjson want "$want" \
+            '.smtpServer = ((.smtpServer // {}) + $want + (if $ENV.KC_SMTP_PASSWORD != "" then {password: $ENV.KC_SMTP_PASSWORD} else {} end))' \
+        | kc_call update realms/reticora -f - >/dev/null \
+        || die "Could not set the SMTP server of the Keycloak realm ($KC_REALM_TROUBLESHOOTING)."
+    success "Keycloak realm: SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT (TLS mode $RETICORA_SMTP_TLS) set for Keycloak's e-mails"
+}
+
 # ─── Health verification ──────────────────────────────────────────────────────
 verify_stack() {
     info "Verifying the installation …"
@@ -2702,12 +3247,45 @@ verify_stack() {
     while [ "$attempts" -gt 0 ]; do
         if curl -fsS "$url" >/dev/null 2>&1; then
             success "Backend health check passed ($url)"
+            check_signup
             return 0
         fi
         sleep 2
         attempts=$((attempts - 1))
     done
     die "Backend health check failed at $url — inspect the logs: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs server"
+}
+
+# State of the self-signup after check_signup: available, disabled (no SMTP
+# server) or unavailable (SMTP configured, the server refuses signups);
+# SIGNUP_HTTP_STATUS is the answer of the probe. Read by print_summary.
+SIGNUP_STATUS=""
+SIGNUP_HTTP_STATUS=""
+
+# check_signup — asks the started server whether it takes self-signups: GET
+# /api/v1/signup/challenge answers 200 only with the database, the Keycloak
+# admin client, the SMTP server and the verification page, otherwise 503
+# ("self-signup is not available"). Never fatal.
+check_signup() {
+    local url="http://127.0.0.1:${RETICORA_SERVER_PORT}/api/v1/signup/challenge" attempts=1 code=""
+    [ -z "${RETICORA_SMTP_HOST:-}" ] || attempts=3
+    while [ "$attempts" -gt 0 ]; do
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null)" || true
+        [ "$code" != 200 ] || break
+        attempts=$((attempts - 1))
+        [ "$attempts" -eq 0 ] || sleep "${RETICORA_SIGNUP_RETRY_DELAY:-2}"
+    done
+    SIGNUP_HTTP_STATUS="${code:-000}"
+    if [ "$SIGNUP_HTTP_STATUS" = 200 ]; then
+        SIGNUP_STATUS=available
+        success "Self-signup is available: ${RETICORA_PUBLIC_BASE_URL}/onboarding"
+    elif [ -z "${RETICORA_SMTP_HOST:-}" ]; then
+        SIGNUP_STATUS=disabled
+        info "Self-signup is disabled: no SMTP server configured (its e-mail verification is mandatory)"
+    else
+        SIGNUP_STATUS=unavailable
+        warn "Self-signup is not available although an SMTP server is configured: GET /api/v1/signup/challenge answered $SIGNUP_HTTP_STATUS. The server names the cause at its start: ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs server | grep -E 'self-signup|Keycloak admin client|central SMTP' ($SMTP_TROUBLESHOOTING)."
+    fi
 }
 
 # ─── Container image garbage collection ───────────────────────────────────────
@@ -2745,6 +3323,20 @@ initial_login_line() {
         printf '  Initial login:     %s (created by an earlier run; password not shown again)' "$RETICORA_INITIAL_ADMIN_EMAIL"
     fi
 }
+
+# signup_summary_line — the state of the self-signup (check_signup).
+signup_summary_line() {
+    case "$SIGNUP_STATUS" in
+        available)
+            printf '  Self-signup:       %s/onboarding  (new organizations; open it logged out or in a private window)' "$RETICORA_PUBLIC_BASE_URL" ;;
+        unavailable)
+            printf '  ⚠ Self-signup:     not available — GET /api/v1/signup/challenge answered %s although SMTP is configured; see the server log line '"'"'self-signup configured'"'"' (%s)' \
+                "$SIGNUP_HTTP_STATUS" "$SMTP_TROUBLESHOOTING" ;;
+        *)
+            printf '  ⚠ Self-signup disabled: no SMTP configured — re-run the installer and enter an SMTP server (the e-mail verification of the signup is mandatory)' ;;
+    esac
+}
+
 print_summary() {
     echo
     printf '%s%sInstallation complete%s\n' "$C_BOLD" "$C_GREEN" "$C_RESET"
@@ -2773,7 +3365,12 @@ print_summary() {
 $ports_note
 $(initial_login_line)
 ${tls_note:+$tls_note
-}
+}$(signup_summary_line)
+  Collector endpoint: $(collector_endpoint)  (mTLS; certificate names: ${RETICORA_NATS_EDGE_HOSTS:-})
+  ⚠ Port 4222/TCP:   must be reachable inbound from the customer networks — allow it in the
+                     host firewall and in the cloud firewall / security group
+                     (docs/betrieb/firewall-matrix.md); without it a collector delivers nothing
+
   Configuration:     $ENV_FILE
   Session key:       $COMPOSE_DIR/secrets/session-private.pem
 
@@ -2782,7 +3379,17 @@ ${tls_note:+$tls_note
     ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE logs -f server
     ${COMPOSE[*]} --env-file $ENV_FILE -f $COMPOSE_FILE down
 
-  Next step: install a collector in the customer network with ./install-vm.sh
+  Next steps — connect a collector in the customer network:
+    1. Install it there: ./install-vm.sh (same release).
+    2. Web UI → Discovery → "Connect collector" ("Collector verbinden"): generate the single-use enrollment
+       code and copy the enrollment command (open the UI under $RETICORA_PUBLIC_BASE_URL:
+       the command names its origin, whose host must be one of the certificate names).
+    3. On the collector host: sudo reticora-collector enroll --server <URL> --code <code>,
+       then sudo systemctl restart reticora-collector (an unenrolled collector never
+       uses the NATS endpoint; see docs/troubleshooting-installation.md,
+       'Collector delivers nothing').
+    4. Discovery page: confirm the suggested scopes (subnets the collector reports) or
+       create a scope — without an enabled scope the collector discovers nothing.
 EOF
 }
 
@@ -2795,6 +3402,10 @@ main() {
     if [ "$BUILD_FROM_SOURCE" != 1 ]; then
         image_source="$RETICORA_IMAGE_REGISTRY (signed release $RETICORA_IMAGE_TAG)"
     fi
+    local smtp_setting="<disabled — no SMTP server: self-signup and e-mail stay off>"
+    if [ -n "${RETICORA_SMTP_HOST:-}" ]; then
+        smtp_setting="$RETICORA_SMTP_HOST:${RETICORA_SMTP_PORT:-587} (TLS ${RETICORA_SMTP_TLS:-starttls}, from ${RETICORA_SMTP_FROM:-})"
+    fi
     echo
     info "Configuration:"
     cat <<EOF
@@ -2804,6 +3415,8 @@ main() {
   HTTPS (TLS):       ${RETICORA_TLS_DOMAIN:-<disabled — plain HTTP>}
   Ports:             UI=$RETICORA_FRONTEND_PORT API=$RETICORA_SERVER_PORT Keycloak=$RETICORA_KEYCLOAK_PORT
   API and Keycloak:  bound to ${RETICORA_DIRECT_PORTS_BIND:-127.0.0.1} (RETICORA_PUBLISH_DIRECT_PORTS=${RETICORA_PUBLISH_DIRECT_PORTS:-false})
+  Collector endpoint: $(collector_endpoint) (certificate names: ${RETICORA_NATS_EDGE_HOSTS:-<compose default>}; 4222/TCP must be reachable from the customer networks)
+  Outgoing e-mail:   $smtp_setting
   Image source:      $image_source
 EOF
     if [ "$BUILD_FROM_SOURCE" != 1 ]; then
