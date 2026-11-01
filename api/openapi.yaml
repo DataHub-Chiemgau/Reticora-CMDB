@@ -5468,7 +5468,10 @@ paths:
       description: >-
         The review queue of reconciliation (REC-08). Items open longer than
         14 days carry escalated = true; escalated=true lists only those (the
-        dashboard's escalation).
+        dashboard's escalation). The queue is cmdb_core like GraphQL
+        reviewInbox and the deprecated /discovery/review-items: it is read
+        without the discovery feature (CI merges open items as well); only
+        resolving a scope_suggested item needs discovery (F-400).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -5555,7 +5558,7 @@ paths:
         item stays open; new of an unclassified_device item with reason
         no_profile_match is 409 (its generic_device CI exists: set the type
         on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis,
-        403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
+        403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
         serial_mismatch and duplicate_ip dismiss. Another action is 422.
         resolved_by and the audit actor are the caller; a body with
         resolved_by is 400.
@@ -5602,6 +5605,9 @@ paths:
       x-successor: '/api/v1/review-items'
       tags: [Discovery]
       summary: List reconciliation review items (deprecated, use /api/v1/review-items)
+      description: >-
+        Alias of its successor with the same rule: the review queue is
+        cmdb_core, not gated by the discovery feature (F-400).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -5644,7 +5650,9 @@ paths:
         reached, ENT-03) is resolved with create, which adopts the device as a
         CI within max_cis (403 entitlement-limit otherwise), or with dismiss,
         which discards it; both are audited. resolved_by and the audit actor
-        are the caller; a body with resolved_by is 400.
+        are the caller; a body with resolved_by is 400. Like its successor
+        the path is cmdb_core; a scope_suggested item needs the discovery
+        feature (403 feature-not-entitled, F-400).
       requestBody:
         required: true
         content:
@@ -8667,7 +8675,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
     post:
       operationId: createDiscoveryScope
       tags: [Discovery]
@@ -8697,7 +8705,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -8721,7 +8729,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -8747,7 +8755,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -8765,7 +8773,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -12677,7 +12685,10 @@ paths:
       summary: List nodes of the location tree
       description: >-
         Nodes of the canonical location tree (LOC-10) visible in the caller's
-        scope, parents first.
+        scope, parents first. Reading the tree is cmdb_core: rack nodes with
+        their names are listed without the rack_view feature, which gates
+        the rack resource (/racks, /mounts, /rack-mounts) and the writes of
+        rack nodes here (ENT-05, F-400).
       parameters:
         - { name: parent_id, in: query, schema: { type: string }, description: Only direct children of this node }
         - { name: kind, in: query, schema: { $ref: '#/components/schemas/LocationKind' } }
@@ -12699,7 +12710,9 @@ paths:
         The parent must be of the kind the parent matrix allows (site >
         building > room > rack, site > warehouse > zone > shelf > bin). A site
         is a root and needs client_id; every other node inherits client and
-        site from its parent.
+        site from its parent. A node of kind rack needs the rack_view
+        feature like POST /racks (403 feature-not-entitled otherwise,
+        F-400).
       requestBody:
         required: true
         content:
@@ -12713,6 +12726,7 @@ paths:
               schema: { $ref: '#/components/schemas/Location' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/FeatureNotEntitled' }
         '409': { $ref: '#/components/responses/LocationNameTaken' }
         '422': { $ref: '#/components/responses/LocationViolation' }
 
@@ -12753,7 +12767,9 @@ paths:
       summary: Rename and/or move a node
       description: >-
         Moving re-derives path, site and client of the node and its subtree.
-        Sites cannot be moved.
+        Sites cannot be moved. Renaming or moving a rack node needs the
+        rack_view feature like PATCH /racks/{id} (403 feature-not-entitled
+        otherwise, the rack stays unchanged, F-400).
       requestBody:
         required: true
         content:
@@ -12767,6 +12783,7 @@ paths:
               schema: { $ref: '#/components/schemas/Location' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/FeatureNotEntitled' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/LocationNameTaken' }
         '422': { $ref: '#/components/responses/LocationViolation' }
@@ -12782,11 +12799,13 @@ paths:
         tombstone_until are bound to it (E-71). Expired tokens and tombstones
         are removed with the site. Deleting a site, building, room or rack
         through its own endpoint follows the same rules; no delete cascades
-        into the subtree.
+        into the subtree. Deleting a rack node needs the rack_view feature
+        like DELETE /racks/{id} (403 feature-not-entitled otherwise, F-400).
       responses:
         '204':
           description: Deleted
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/FeatureNotEntitled' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/LocationInUse' }
 
@@ -13480,8 +13499,9 @@ components:
     FeatureNotEntitled:
       description: >-
         Forbidden: a missing permission, or the organization's plan does not
-        include the feature of this operation (rack_view for racks and
-        mounts, api_access for API keys; type
+        include the feature of this operation (rack_view for racks, mounts
+        and rack nodes of the location tree, api_access for API keys,
+        discovery for discovery scopes; type
         https://reticora.io/problems/feature-not-entitled, ENT-05).
       content:
         application/problem+json:

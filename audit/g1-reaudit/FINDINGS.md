@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 20 |
-| P3 | 21 |
-| **Summe** | **47** |
+| P3 | 22 |
+| **Summe** | **48** |
 
 ## Übersicht
 
@@ -87,6 +87,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-401](#f-401) | P3 | Suche ohne Treffer antwortet `"data": null` statt `[]`; ebenso Historie ohne Änderungen, Verfügbarkeitsprojektion und `results` des Compliance-Scores | WP-164 (K7) | belegt | backend/internal/server/pagination_test.go | WP-672 |
 | [F-402](#f-402) | P3 | `GET /api/v1/relationships` ignoriert die dokumentierten Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` | WP-165 (K7) | belegt | backend/internal/relationship/pg_repository_integration_test.go | WP-673 |
 | [F-399](#f-399) | P2 | `max_cis` wird über Wiederherstellen, Unmerge und die Review-Auflösung `new` umgangen: über dem Limit entstehen aktive CIs | WP-073 (K7) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-670 |
+| [F-400](#f-400) | P3 | Alias-Pfade umgehen die Entitlement-Gates discovery und rack_view: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Schreibzugriffe über `/locations` und der NATS-Scope-Kanal | WP-072 (K7) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-671 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1056,6 +1057,51 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   WARN job revert failed job_id=0238f5f9-… error="entitlement limit for \"max_cis\" exceeded: 2 of 2 in use"
       t2_entitlement_gates_test.go:650: revert of the merge job at max_cis 2: 500 {"detail":"the request could not be completed","status":500,"title":"Internal Error",…}, want 403 entitlement-limit
   --- FAIL: TestT2EntitlementMaxCIsOnRestoreAndReviewNew (1.11s)
+  FAIL
+  ```
+
+<a id="f-400"></a>
+### F-400 (P3) – Alias-Pfade umgehen die Entitlement-Gates discovery und rack_view: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Schreibzugriffe über `/locations` und der NATS-Scope-Kanal
+
+- **Gefunden in:** Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von zwei Prüfern bestätigt (r1-b5, WP-072 AK1 „GraphQL-Pfade prüfen das passende Feature“; WP-471 legt rack_view für `/racks*`, `/mounts*`, `/rack-mounts*` fest) · **Betroffene Anforderungen:** ENT-05, ENT-02, ENT-03 (Nachbar ENT-07/CH21 für den Scope-Kanal) · **Komponente:** backend/internal/entitlement/middleware.go (`gatedRoutes` Zeile 23 und `RequiredFeature` Zeile 119: das Präfix `/api/v1/discovery` trifft nur `…/discovery`, `…/discovery/` und `…/discovery?`, nicht `/api/v1/discovery-scopes`; `/api/v1/review-items` und `/api/v1/locations` fehlen, der veraltete Alias `/api/v1/discovery/review-items` dagegen ist discovery), backend/internal/graphqlbff/resolver.go (`ReviewInbox` Zeile 327: `PermDiscoveryRead` mit `FeatureCMDBCore`), backend/internal/discovery/scope_handler.go (`resolveScopeSuggested` Zeile 263 legt beim `accept` einen Scope an, ohne die Lizenz zu prüfen; `ServeCollectorScopes` Zeile 516 und `SuggestScopes` Zeile 196 prüfen nie eine Lizenz), backend/cmd/server/workers.go (Zeile 189: `discovery.NewHandler(...)` des Scope-Kanals ohne `WithEdgeLicense`), backend/internal/locations/handler.go (`Create`/`Update`/`Delete` Zeilen 87/106/125 schreiben Knoten jeder Art ohne Feature-Prüfung) · **Quelle:** Probe des Gegenprüfers über die Produktionskette mit PG-Repositories (`k7/ver/r1-b5/evidence/k-reaudit-1/WP-072/verify-probe-zz_verify_b5_test.go.txt`, Log `verify-probe-entitlement-search-relationships.log`), NATS-Probe (`verify-probe-zz_verify_b5_nats_test.go.txt`, Log `verify-probe-nats-scope-channel-without-license.log`), Probe des Auditors (`k7/out/r1-b5/evidence/k-reaudit-1/WP-072/probe-b5_entitlement_probe_test.go.txt`)
+- **Reproduktion:** Organisation mit Plan Essential, `discovery` und `rack_view` per Grant `enabled=false` abgeschaltet, Durchsetzung an. Kontrollen: `GET`/`PATCH /api/v1/racks/{id}`, `GET /api/v1/discovery/review-items/{id}` und `GET /api/v1/collectors` → 403 `feature-not-entitled`. Umgangen: `GET /api/v1/locations`, `/locations/tree`, `/locations/{rackId}` → 200 mit dem Racknamen; `PATCH /api/v1/locations/{rackId}` → 200 (in der DB umbenannt); `DELETE /api/v1/locations/{rack}` → 204 (Rack gelöscht); `GET /api/v1/review-items/{id}` → 200; GraphQL `reviewInbox` → Daten; `POST /api/v1/discovery-scopes` → 201; `POST /api/v1/review-items/{scope_suggested}/resolve` `{"action":"accept"}` → 200 und legt einen `discovery_scope` an. Über NATS liefert `collector.<org>.<id>.scopes.request` die Scopes des Collectors, `subnets.report` öffnet einen `scope_suggested`-Eintrag (`{"suggested":1}`), beides bei `discovery` nicht berechtigt.
+- **Soll:** ENT-05: „Durchsetzung in REST und GraphQL“; ENT-02/ENT-03: ein nicht gebuchtes Feature ist auf jedem Weg 403 `feature-not-entitled`. WP-072 AK1: GraphQL-Pfade prüfen das passende Feature. WP-471: rack_view gilt für Racks, Mounts und Rack-Mounts. Ein Objekt eines Features ist nicht über einen zweiten Pfad schreibbar, wenn sein eigener Pfad 403 antwortet; dieselbe Ressource folgt auf allen Pfaden (REST, veralteter Alias, GraphQL) einer Regel; der Collector-Kanal prüft die Discovery-Lizenz wie der Edge-Ingest (COL-08, ENT-07).
+- **Ist:** Die Middleware vergleicht Präfixe nur bis zur Pfadgrenze; `/api/v1/discovery-scopes` ist ein eigener Pfad und bleibt Kern. Die Auflösung eines `scope_suggested`-Eintrags läuft über den Kern-Pfad `/review-items` und legt im Discovery-Effekt einen Scope an. Der Standortbaum führt Racks als Knoten (`kind = rack`) und schreibt sie ohne Feature-Prüfung. Die Review-Warteschlange ist über `/review-items` und GraphQL Kern, über den veralteten Alias `/discovery/review-items` aber discovery (zwei Regeln für dieselbe Ressource). Der Scope-Kanal wird in `workers.go` ohne Lizenzprüfung gebaut. Das Frontend behandelt Reviews und die Karte als Kern (`useEntitlements.ts`, `navFeatureFor`: `reviews` und `map` ohne Feature).
+- **Nutzerwirkung:** Ein Mandant ohne Discovery-Paket legt Discovery-Scopes an und übernimmt Scope-Vorschläge, seine Collectors erhalten weiter Scopes und öffnen Vorschläge; ohne rack_view benennt und löscht er Racks über den Standortbaum, obwohl die Rackansicht gesperrt ist. Die Paketgrenzen (ENT-06) sind damit für discovery und rack_view auf Nebenwegen wirkungslos. Lesend sieht er nur, was als Kern gedacht ist (Racknamen im Standortbaum, Review-Einträge), daher P3.
+- **Ursache (belegt):** WP-072/WP-471 haben die Gates als Präfixliste der Middleware gebaut; Ressourcen, die später neben `/discovery` (API-05: `/discovery-scopes`, `/review-items`) oder in einem gemeinsamen Baum (LOC-10: Racks als Standortknoten) entstanden, wurden nicht eingeordnet, und Prüfungen, die das Objekt kennen müssen (Art des Knotens, Art des Review-Eintrags), kann die Middleware nicht leisten. Der Scope-Kanal (DIS-09) entstand nach der Lizenzprüfung des Edge-Datenpfads und wurde nicht angeschlossen.
+- **Empfehlung:** `/api/v1/discovery-scopes` in `gatedRoutes` als discovery. Die Review-Warteschlange einheitlich als Kern (REST, veralteter Alias, GraphQL `reviewInbox`; CI-Merges öffnen ebenfalls Einträge), aber die Auflösung eines `scope_suggested`-Eintrags (accept legt einen Scope an, dismiss unterdrückt das Subnetz) verlangt im Discovery-Effekt die Discovery-Lizenz (nicht berechtigt: 403 `feature-not-entitled`, Eintrag bleibt offen; abgelaufen: erlaubt wie `POST /discovery-scopes`, CH21). Der Standortbaum bleibt lesend Kern, Racknamen eingeschlossen; Anlegen (`kind = rack`), Umbenennen, Verschieben und Löschen eines Rack-Knotens verlangen rack_view wie `/racks`. Der Scope-Kanal erhält in `workers.go` die Lizenzprüfung des Routers: ohne Discovery wird kein Subject beantwortet, nach Ablauf werden die Ergebnisse (`scopes.result`, `subnets.report`) wie der Ingest abgelehnt. Die Zuordnung Route→Feature in `docs/README.md` dokumentieren, `api/openapi.yaml` nennt die 403-Antworten.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestAuditT2EntitlementAliasPathsGated$' ./internal/server/` mit `TEST_DATABASE_URL`/`TEST_APP_DATABASE_URL` PASS: ohne discovery und rack_view `GET`/`POST /discovery-scopes`, `accept`/`dismiss` eines `scope_suggested`-Eintrags (auch über den Alias), `PATCH`/`DELETE /locations/{rack}` und `POST /locations` mit `kind = rack` je 403 `feature-not-entitled`, Rack unverändert, Vorschlag offen, kein Scope; Pfade mit `..`/`%2e%2e` hinter dem Kern-Alias erreichen keine discovery-Route; Standortbaum mit Racknamen, Umbenennen eines Raums, `/review-items`, Alias-Liste, `reviewInbox` und `dismiss` eines `unclassified_device` 200; wieder freigeschaltet 200/201/204. `go test -count=1 -v -run '^TestScopeChannelChecksTheDiscoveryLicense$' ./internal/discovery/` mit `TEST_NATS_URL` PASS (ohne Discovery alle Subjects abgelehnt, nach Ablauf `scopes.result`/`subnets.report` abgelehnt, aktiv beantwortet) und `go test -count=1 -run '^TestDiscoveryScopeWorkerChecksTheDiscoveryLicense$' ./cmd/server/` PASS (der Worker aus `buildWorkers` prüft die Lizenz).
+- **Kodierender Test:** backend/internal/server/t2_entitlement_gates_test.go (`TestAuditT2EntitlementAliasPathsGated`, Produktionsrouter mit PG-Repositories, Durchsetzung an) und backend/internal/discovery/scope_channel_license_nats_test.go (`TestScopeChannelChecksTheDiscoveryLicense`, echter NATS); auf `e5c2d86` rot (ausgeführt auf der Basis `e438b09`; `entitlement/middleware.go`, `locations/handler.go`, `discovery/scope_handler.go`, `cmd/server/workers.go`, `server/router.go` dort identisch mit `e5c2d86`). Der Worker-Test `TestDiscoveryScopeWorkerChecksTheDiscoveryLicense` (cmd/server) baut auf dem alten Code nicht (`unknown field entitlements in struct literal of type workerDeps`):
+
+  ```text
+  === RUN   TestAuditT2EntitlementAliasPathsGated
+      t2_entitlement_gates_test.go:630: GET /api/v1/discovery-scopes without discovery: 200 {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}, want 403 feature-not-entitled
+      t2_entitlement_gates_test.go:630: POST /api/v1/discovery-scopes without discovery: 201 {"id":"d97fed6e-…","organization_id":"c0de03a0-…",…,"collector_id":"…, want 403 feature-not-entitled
+      t2_entitlement_gates_test.go:630: POST /api/v1/review-items/77ad2791-…/resolve without discovery: 200 {"id":"77ad2791-…","kind":"scope_suggested",…, want 403 feature-not-entitled
+      t2_entitlement_gates_test.go:630: POST /api/v1/review-items/77ad2791-…/resolve without discovery: 409 {"detail":"review item already resolved",…}, want 403 feature-not-entitled
+      t2_entitlement_gates_test.go:630: PATCH /api/v1/locations/1e0d0dbb-… without rack_view: 200 {"id":"1e0d0dbb-…",…, want 403 feature-not-entitled
+      t2_entitlement_gates_test.go:630: DELETE /api/v1/locations/032e1c83-… without rack_view: 204 , want 403 feature-not-entitled
+      t2_entitlement_gates_test.go:630: POST /api/v1/locations without rack_view: 201 {"id":"2d6cac31-…",…, want 403 feature-not-entitled
+      t2_entitlement_gates_test.go:654: after the refused requests: rack name "alias-rack-renamed", rack two gone, suggestion resolved, discovery scopes 2, new racks 1; want unchanged, present, open, 0, 0
+      t2_entitlement_gates_test.go:673: cmdb_core GET /api/v1/discovery/review-items?kind=scope_suggested without discovery and rack_view: 403 {"detail":"feature \"discovery\" is not included in the current plan",…}
+      (Folgefehler der umbenannten bzw. gelöschten Racks und des aufgelösten Vorschlags: Zeile 673 für GET /locations* ohne "alias-rack-one", Zeilen 683/686/689 409/404 nach dem Freischalten)
+  --- FAIL: TestAuditT2EntitlementAliasPathsGated (1.53s)
+  FAIL
+  === RUN   TestRequiredFeatureMapping
+      entitlement_test.go:192: RequiredFeature("/api/v1/discovery-scopes") = ("", false), want ("discovery", true)
+      entitlement_test.go:192: RequiredFeature("/api/v1/discovery-scopes/s1") = ("", false), want ("discovery", true)
+      entitlement_test.go:204: expected "/api/v1/discovery/review-items" to stay ungated
+      entitlement_test.go:204: expected "/api/v1/discovery/review-items/r1/resolve" to stay ungated
+  --- FAIL: TestRequiredFeatureMapping (0.00s)
+  FAIL
+  === RUN   TestScopeChannelChecksTheDiscoveryLicense
+      scope_channel_license_nats_test.go:152: scopes.request without discovery: 1 scopes, error ""; want none and discovery license not_entitled
+      scope_channel_license_nats_test.go:155: jobs.request without discovery: error "", want discovery license not_entitled
+      scope_channel_license_nats_test.go:158: scopes.result without discovery: error "", last run "2026-11-01T18:21:34Z"; want refused and no run
+      scope_channel_license_nats_test.go:161: subnets.report without discovery: error "", 1 scope_suggested items; want refused and none
+      scope_channel_license_nats_test.go:171: scopes.result after expiry: error "", last run "2026-11-01T18:21:34Z"; want refused and no run
+      scope_channel_license_nats_test.go:174: subnets.report after expiry: error "", 1 scope_suggested items; want refused and none
+  --- FAIL: TestScopeChannelChecksTheDiscoveryLicense (0.58s)
   FAIL
   ```
 

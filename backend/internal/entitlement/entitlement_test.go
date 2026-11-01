@@ -182,6 +182,9 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		// WP-168 (API-05): catalog paths are gated like their predecessors.
 		"/api/v1/impact/c1":  FeatureTopology,
 		"/api/v1/exports/j1": FeatureExportCSV,
+		// WP-671 (F-400): the discovery scopes are discovery.
+		"/api/v1/discovery-scopes":    FeatureDiscovery,
+		"/api/v1/discovery-scopes/s1": FeatureDiscovery,
 	}
 	for path, want := range cases {
 		got, gated := RequiredFeature(path)
@@ -191,7 +194,12 @@ func TestRequiredFeatureMapping(t *testing.T) {
 	}
 
 	for _, path := range []string{"/api/v1/cis", "/api/v1/cis/c1", "/api/v1/auth/me", "/api/v1/entitlements", "/healthz",
-		"/api/v1/collectors/enroll", "/api/v1/users/u1/data-export"} {
+		"/api/v1/collectors/enroll", "/api/v1/users/u1/data-export",
+		// WP-671 (F-400): the review queue, its deprecated alias and the
+		// location tree are cmdb_core (rack nodes and scope_suggested items
+		// check their feature in the handler).
+		"/api/v1/review-items", "/api/v1/review-items/r1/resolve", "/api/v1/discovery/review-items",
+		"/api/v1/discovery/review-items/r1/resolve", "/api/v1/locations", "/api/v1/locations/tree", "/api/v1/locations/l1"} {
 		if _, gated := RequiredFeature(path); gated {
 			t.Errorf("expected %q to stay ungated", path)
 		}

@@ -59,6 +59,9 @@ type workerDeps struct {
 	credentials  *credential.Service
 	jobQueue     *jobs.Queue
 	ingestQueue  *discovery.NATSIngestQueue
+	// entitlements checks the discovery license on the collectors' scope
+	// channel (F-400); nil treats every organization as licensed.
+	entitlements *entitlement.Service
 	// cycle replaces the intervals of the polling workers and of the
 	// cycles of the workers that answer requests (tests); 0 keeps them.
 	cycle time.Duration
@@ -187,6 +190,12 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 			cycles.Check("database", d.pool.Ping)
 		}
 		scopeChannel := discovery.NewHandler(d.repos.Discovery, d.repos.CI).WithScopeCycles(cycles)
+		// The channel checks the discovery license like the edge data path
+		// and the entitlement middleware: without discovery no scopes, jobs
+		// or scope suggestions (ENT-05, F-400).
+		if d.entitlements != nil {
+			scopeChannel.WithEdgeLicense(server.DiscoveryLicense(d.entitlements))
+		}
 		// The collectors run their ad-hoc discovery jobs over the same
 		// channel; the status changes reach the job center (JOB-01, F-358).
 		if d.repos.Jobs != nil {

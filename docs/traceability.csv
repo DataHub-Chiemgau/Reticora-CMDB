@@ -1084,3 +1084,10 @@ API-01;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-
 API-02;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
 ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
 ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
+ENT-05;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-02;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-05;[B];B;backend/internal/entitlement/entitlement_test.go;WP-671
+ENT-05;[B];B;backend/internal/discovery/scope_channel_license_nats_test.go;WP-671
+ENT-07;[B];B;backend/internal/discovery/scope_channel_license_nats_test.go;WP-671
+ENT-05;[B];B;backend/cmd/server/scope_channel_license_test.go;WP-671

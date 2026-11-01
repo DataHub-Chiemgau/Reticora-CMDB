@@ -447,7 +447,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The collectors' edge data path checks the discovery license like the
 	// entitlement middleware on the HTTP ingest (COL-08, ENT-07).
 	if opts.Entitlements != nil {
-		discoveryHandler.WithEdgeLicense(edgeLicense{svc: opts.Entitlements})
+		discoveryHandler.WithEdgeLicense(DiscoveryLicense(opts.Entitlements))
 	}
 	if opts.CollectorCA != nil {
 		discoveryHandler.WithCA(opts.CollectorCA)
@@ -462,6 +462,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		monitoringFeatures = opts.Entitlements
 	}
 	discoveryHandler.WithEdgeMetrics(monitoringHandler, monitoringFeatures)
+	// The location tree is core; its rack nodes are written only with
+	// rack_view, like /api/v1/racks (ENT-05, F-400).
+	locationsHandler := locations.NewHandler(repos.LocationTree)
+	if opts.Entitlements != nil {
+		locationsHandler.WithFeatures(opts.Entitlements)
+	}
 	// Discovered values pass the field rules of manual writes (CI-03).
 	if opts.CIService != nil {
 		discoveryHandler.WithObservedValidator(opts.CIService)
@@ -557,7 +563,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, nil), repos.LifecycleResolver),
-		locations.NewHandler(repos.LocationTree),
+		locationsHandler,
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		composition.NewHandler(repos.Composition, opts.Dispatcher).

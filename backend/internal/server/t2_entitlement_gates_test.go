@@ -29,10 +29,19 @@
 //     that makes a CI active, not only POST /cis: the restore, the
 //     unmerge, new of a review item and the merge of a resurrected_device
 //     item are 403 entitlement-limit at the limit (PostgreSQL).
+//   - WP-671 (ENT-05, ENT-02, ENT-03), finding F-400: the alias paths of
+//     discovery and rack_view are gated on PostgreSQL with discovery and
+//     rack_view disabled: /discovery-scopes is discovery (403, nothing
+//     created), resolving a scope_suggested item needs discovery (403, the
+//     item stays open, no scope), writes of rack nodes through
+//     /locations need rack_view (403, rack unchanged), while reading the
+//     location tree with its rack names and the review queue (REST, the
+//     deprecated alias and GraphQL reviewInbox) stay cmdb_core
+//     (TestAuditT2EntitlementAliasPathsGated).
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -v -run 'TestT2EntitlementGates|TestAuditT2EntitlementRackViewGated|TestAuditT2EntitlementAPIAccessGatesAPIKeys|TestAuditT2EntitlementQuotasEnforced|TestT2EntitlementQuota|TestT2EntitlementMaxCIs' ./internal/server/
+//	cd backend && go test -count=1 -v -run 'TestT2EntitlementGates|TestAuditT2EntitlementRackViewGated|TestAuditT2EntitlementAPIAccessGatesAPIKeys|TestAuditT2EntitlementQuotasEnforced|TestT2EntitlementQuota|TestT2EntitlementMaxCIs|TestAuditT2EntitlementAliasPathsGated' ./internal/server/
 package server_test
 
 import (
@@ -55,6 +64,7 @@ import (
 	rackpkg "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
+	"strconv"
 )
 
 func t2GraphQLForbidden(body []byte) bool {
@@ -698,5 +708,165 @@ func TestT2EntitlementMaxCIsOnRestoreAndReviewNew(t *testing.T) {
 	}
 	if n := active(); n != limit+4 {
 		t.Errorf("active CIs at the end: %d, want %d", n, limit+4)
+	}
+}
+
+// TestAuditT2EntitlementAliasPathsGated (WP-671, F-400): with discovery and
+// rack_view disabled the paths beside /discovery and /racks must not reach
+// those features (ENT-05: enforcement in REST and GraphQL). The decided
+// mapping: /discovery-scopes is discovery; resolving a scope_suggested item
+// (accept creates a scope, dismiss suppresses the subnet) needs discovery;
+// creating, renaming, moving and deleting a rack node through /locations
+// needs rack_view. Reading the location tree, rack names included, and the
+// review queue (REST, the deprecated discovery alias and GraphQL
+// reviewInbox) are cmdb_core, as is resolving other review items. Enabled
+// again, the gated requests pass.
+func TestAuditT2EntitlementAliasPathsGated(t *testing.T) {
+	f := scopetest.Seed(t, "03")
+	bg := context.Background()
+	s := newT2StackFrom(t, entitlement.Options{Enforce: true}, server.PostgresRepositories(f.App, audit.NewPGRecorder()))
+	userID := f.AppUser(t, f.OrgA, "alias-admin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, f.OrgA, userID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	stamp := strconv.FormatInt(now.UnixNano(), 10)
+	token, err := s.issuer.Issue(identity.SessionClaims{Subject: userID, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+		Scope:     &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
+		SessionID: "alias-sid-" + stamp, ID: "alias-jti-" + stamp, IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		r := t2Request{method: method, path: path, body: body, bearer: token}
+		if body != "" {
+			r.contentType = "application/json"
+		}
+		return s.do(r)
+	}
+	create := func(path, body string) string {
+		t.Helper()
+		w := call(http.MethodPost, path, body)
+		var out struct {
+			ID string `json:"id"`
+		}
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.ID == "" {
+			t.Fatalf("setup POST %s: %d %s", path, w.Code, strings.TrimSpace(w.Body.String()))
+		}
+		return out.ID
+	}
+	if _, err = s.entitlements.Provision(f.OrgCtx(f.OrgA), f.OrgA, entitlement.PlanEssential); err != nil {
+		t.Fatal(err)
+	}
+	room := f.Room(t, f.Client1, "alias-room")
+	rack := create("/api/v1/racks", `{"name":"alias-rack-one","room_id":"`+room+`","height_units":42}`)
+	rack2 := create("/api/v1/racks", `{"name":"alias-rack-two","room_id":"`+room+`","height_units":42}`)
+	var collector, review, suggestion string
+	if err = f.Admin.QueryRow(bg, `INSERT INTO collector (organization_id, client_id, name, status) VALUES ($1, $2, 'alias-collector', 'active') RETURNING id::text`,
+		f.OrgA, f.Client1).Scan(&collector); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Admin.QueryRow(bg, `INSERT INTO review_item (organization_id, kind, payload, candidate_ci_ids, client_id)
+		VALUES ($1, 'unclassified_device', '{"name":"alias-review"}', '{}', $2) RETURNING id::text`, f.OrgA, f.Client1).Scan(&review); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Admin.QueryRow(bg, `INSERT INTO review_item (organization_id, kind, payload, candidate_ci_ids, client_id, object_key)
+		VALUES ($1, 'scope_suggested', jsonb_build_object('collector_id', $3::text, 'cidr', '10.97.6.0/24', 'client_id', $2::text), '{}', $2::uuid,
+		'scope:'||$3::text||':10.97.6.0/24') RETURNING id::text`, f.OrgA, f.Client1, collector).Scan(&suggestion); err != nil {
+		t.Fatal(err)
+	}
+	setFeatures := func(enabled bool) {
+		t.Helper()
+		for _, feature := range []string{entitlement.FeatureRackView, entitlement.FeatureDiscovery} {
+			if _, gerr := s.entitlements.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
+				Plan: entitlement.PlanEssential, Enabled: enabled, Source: "manual"}); gerr != nil {
+				t.Fatal(gerr)
+			}
+			if _, status, serr := s.entitlements.Status(f.OrgCtx(f.OrgA), f.OrgA, feature); serr != nil || (status == entitlement.StatusActive) != enabled {
+				t.Fatalf("setup: %s status %s (%v), want enabled = %v", feature, status, serr, enabled)
+			}
+		}
+	}
+	setFeatures(false)
+
+	scopeBody := `{"name":"alias-scope","collector_id":"` + collector + `","kind":"cidr","target":"10.97.9.0/24"}`
+	for _, r := range []struct{ feature, method, path, body string }{
+		{"discovery", http.MethodGet, "/api/v1/discovery-scopes", ""},
+		{"discovery", http.MethodPost, "/api/v1/discovery-scopes", scopeBody},
+		{"discovery", http.MethodPost, "/api/v1/review-items/" + suggestion + "/resolve", `{"action":"accept"}`},
+		{"discovery", http.MethodPost, "/api/v1/review-items/" + suggestion + "/resolve", `{"action":"dismiss"}`},
+		{"discovery", http.MethodPost, "/api/v1/discovery/review-items/" + suggestion + "/resolve", `{"action":"accept"}`},
+		{"rack_view", http.MethodPatch, "/api/v1/locations/" + rack, `{"name":"alias-rack-renamed"}`},
+		{"rack_view", http.MethodDelete, "/api/v1/locations/" + rack2, ""},
+		{"rack_view", http.MethodPost, "/api/v1/locations", `{"kind":"rack","parent_id":"` + room + `","name":"alias-rack-new"}`},
+	} {
+		w := call(r.method, r.path, r.body)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "feature-not-entitled") || !strings.Contains(w.Body.String(), r.feature) {
+			t.Errorf("%s %s without %s: %d %s, want 403 feature-not-entitled", r.method, r.path, r.feature, w.Code, strings.TrimSpace(w.Body.String()))
+		}
+	}
+	// The core alias of the review queue opens no gated route behind it.
+	for _, path := range []string{"/api/v1/discovery/review-items/../collectors", "/api/v1/discovery/review-items/%2e%2e/collectors",
+		"/api/v1/discovery/review-items/../../discovery-scopes", "/api/v1/discovery/review-items-x"} {
+		if w := call(http.MethodGet, path, ""); w.Code == http.StatusOK {
+			t.Errorf("GET %s without discovery: 200 %s, want no gated data", path, strings.TrimSpace(w.Body.String()))
+		}
+	}
+	var rackName, rack2State, suggestionStatus string
+	var scopes, newRacks int
+	state := func() {
+		t.Helper()
+		if serr := f.Admin.QueryRow(bg, `SELECT name FROM location WHERE id = $1`, rack).Scan(&rackName); serr != nil {
+			t.Fatal(serr)
+		}
+		_ = f.Admin.QueryRow(bg, `SELECT coalesce((SELECT 'present' FROM location WHERE id = $1), 'gone')`, rack2).Scan(&rack2State)
+		_ = f.Admin.QueryRow(bg, `SELECT status FROM review_item WHERE id = $1`, suggestion).Scan(&suggestionStatus)
+		_ = f.Admin.QueryRow(bg, `SELECT count(*) FROM discovery_scope WHERE organization_id = $1`, f.OrgA).Scan(&scopes)
+		_ = f.Admin.QueryRow(bg, `SELECT count(*) FROM location WHERE organization_id = $1 AND name = 'alias-rack-new'`, f.OrgA).Scan(&newRacks)
+	}
+	state()
+	if rackName != "alias-rack-one" || rack2State != "present" || suggestionStatus != "open" || scopes != 0 || newRacks != 0 {
+		t.Errorf("after the refused requests: rack name %q, rack two %s, suggestion %s, discovery scopes %d, new racks %d; want unchanged, present, open, 0, 0",
+			rackName, rack2State, suggestionStatus, scopes, newRacks)
+	}
+
+	// cmdb_core: the location tree with its rack names, writes of other
+	// nodes and the review queue.
+	for _, r := range []struct{ method, path, body, want string }{
+		{http.MethodGet, "/api/v1/locations?limit=200", "", "alias-rack-one"},
+		{http.MethodGet, "/api/v1/locations/tree", "", "alias-rack-one"},
+		{http.MethodGet, "/api/v1/locations/" + rack, "", "alias-rack-one"},
+		{http.MethodPatch, "/api/v1/locations/" + room, `{"name":"alias-room-renamed"}`, "alias-room-renamed"},
+		{http.MethodGet, "/api/v1/review-items/" + review, "", "alias-review"},
+		{http.MethodGet, "/api/v1/review-items?kind=scope_suggested", "", suggestion},
+		{http.MethodGet, "/api/v1/discovery/review-items?kind=scope_suggested", "", suggestion},
+		{http.MethodPost, "/bff/graphql", `{"query":"{ reviewInbox(kind: \"scope_suggested\") { id kind } }"}`, suggestion},
+		{http.MethodPost, "/api/v1/review-items/" + review + "/resolve", `{"action":"dismiss"}`, "dismissed"},
+	} {
+		w := call(r.method, r.path, r.body)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), r.want) || t2GraphQLForbidden(w.Body.Bytes()) {
+			t.Errorf("cmdb_core %s %s without discovery and rack_view: %d %s, want 200 with %q", r.method, r.path, w.Code, strings.TrimSpace(w.Body.String()), r.want)
+		}
+	}
+
+	// Enabled again: the gated requests pass.
+	setFeatures(true)
+	if w := call(http.MethodPatch, "/api/v1/locations/"+rack, `{"name":"alias-rack-renamed"}`); w.Code != http.StatusOK {
+		t.Errorf("PATCH rack node with rack_view: %d %s, want 200", w.Code, strings.TrimSpace(w.Body.String()))
+	}
+	if w := call(http.MethodPost, "/api/v1/discovery-scopes", scopeBody); w.Code != http.StatusCreated {
+		t.Errorf("POST /api/v1/discovery-scopes with discovery: %d %s, want 201", w.Code, strings.TrimSpace(w.Body.String()))
+	}
+	if w := call(http.MethodPost, "/api/v1/review-items/"+suggestion+"/resolve", `{"action":"accept"}`); w.Code != http.StatusOK {
+		t.Errorf("accept scope_suggested with discovery: %d %s, want 200", w.Code, strings.TrimSpace(w.Body.String()))
+	}
+	if w := call(http.MethodDelete, "/api/v1/locations/"+rack2, ""); w.Code != http.StatusNoContent {
+		t.Errorf("DELETE rack node with rack_view: %d %s, want 204", w.Code, strings.TrimSpace(w.Body.String()))
+	}
+	state()
+	if rackName != "alias-rack-renamed" || rack2State != "gone" || suggestionStatus != "resolved" || scopes != 2 {
+		t.Errorf("with the features: rack name %q, rack two %s, suggestion %s, discovery scopes %d; want renamed, gone, resolved, 2",
+			rackName, rack2State, suggestionStatus, scopes)
 	}
 }

@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-670 | 18 | 14,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-671 | 19 | 15,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **320** | **415,0** | |
+| **Summe** | | **321** | **416,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>18 WPs · 14,0 PT"]
+    K7N["K7-Nachträge<br/>19 WPs · 15,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -439,6 +439,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-672](#wp-672--leere-suche-historie-verfügbarkeit-und-compliance-score-antworten-mit--statt-null-sweep-aller-get-listen) | `k7n-search-empty-array` | Leere Suche, Historie, Verfügbarkeit und Compliance-Score antworten mit `[]` statt `null`; Sweep aller GET-Listen | K7N | 0,5 | F-401 | WP-164, WP-466 |
 | [WP-673](#wp-673--beziehungsliste-dokumentierte-filter-ci_id-source_ci_id-target_ci_id-und-rel_type-wirken-ungültige-werte-400) | `k7n-relationship-list-filters` | Beziehungsliste: dokumentierte Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken; ungültige Werte 400 | K7N | 1,0 | F-402 | WP-165, WP-609 |
 | [WP-670](#wp-670--max_cis-auf-allen-wegen-die-ein-ci-aktiv-machen-wiederherstellen-unmerge-und-review-auflösung-über-dem-limit-403-entitlement-limit) | `k7n-max-cis-all-paths` | `max_cis` auf allen Wegen, die ein CI aktiv machen: Wiederherstellen, Unmerge und Review-Auflösung über dem Limit 403 `entitlement-limit` | K7N | 1 | F-399 | WP-072, WP-073, WP-169, WP-472 |
+| [WP-671](#wp-671--entitlement-gates-discovery-und-rack_view-auf-den-alias-pfaden-discovery-scopes-auflösung-von-scope_suggested-rack-knoten-im-standortbaum-und-nats-scope-kanal) | `k7n-entitlement-alias-paths` | Entitlement-Gates discovery und rack_view auf den Alias-Pfaden: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Knoten im Standortbaum und NATS-Scope-Kanal | K7N | 1 | F-400 | WP-471, WP-072 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19377,6 +19378,72 @@ ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
 **Entscheidungsbedarf:** keiner für die Umsetzung. Die Auflösung `new` über dem Limit antwortet 403 `entitlement-limit` statt den Eintrag in `unlicensed_ci` umzuwandeln: ENT-03 verlangt für REST-Schreibpfade 403 `entitlement-limit`, WP-073 AK1 und E-22 betreffen die automatische Ingest-Neuanlage; der Gerätedatensatz liegt verlustfrei im offenen Eintrag, und die Auflösung `new` eines `unlicensed_ci`-Eintrags antwortet bereits so. Hinweise für die Leitung: (1) Die Zählung von `POST /cis` (und damit der neuen Prüfungen) läuft unter dem Scope des Aufrufers; ein auf einen Client beschränkter Principal zählt nur seine sichtbaren CIs und legt über `max_cis` an (neuer Befund, Probe `k7/ad-670-work/probe-scoped.log`, nicht in diesem WP behoben). (2) Der Agent-Telemetriepfad (`agent/handler.go:479`, `h.cis.Create` am Repository) legt Endpoint-CIs ohne `max_cis` an; das Modul `agents` ist P4 und in G1 abgeschaltet (404), über das Verhalten über dem Limit (403 oder `unlicensed_ci`) ist noch nicht entschieden.
 
 **Nicht Bestandteil:** die Sperre der `max_cis`-Zählung bei `AdoptUnlicensed` und bei `POST /cis` (SR-09, zurückgestellt; die neuen Prüfungen sind nicht nebenläufiger als `Create`); die Zählung unter dem Scope des Aufrufers (siehe Hinweis 1); der Agent-Pfad (Hinweis 2); UI-Meldungen für 403 beim Wiederherstellen und Auflösen.
+
+### WP-671 – Entitlement-Gates discovery und rack_view auf den Alias-Pfaden: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Knoten im Standortbaum und NATS-Scope-Kanal
+
+**Schlüssel:** `k7n-entitlement-alias-paths` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-471 (`t2-ent-gates`), WP-072 (Entitlement-Durchsetzung, ursprünglicher Plan)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-400](../../../audit/g1-reaudit/FINDINGS.md#f-400) | P3 | Alias-Pfade umgehen die Entitlement-Gates discovery und rack_view: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Schreibzugriffe über `/locations` und der NATS-Scope-Kanal | schließt | Wiederholungsprüfung von WP-072 (K7) auf `e5c2d86` |
+
+**Problem:** Die Entitlement-Middleware ordnet Routen über Präfixe zu (`gatedRoutes`). `/api/v1/discovery-scopes` liegt nicht unter `/api/v1/discovery/` und bleibt Kern; ohne discovery legt `POST /discovery-scopes` Scopes an (201). Die Auflösung eines `scope_suggested`-Eintrags über den Kern-Pfad `/review-items/{id}/resolve` legt mit `accept` einen Scope an. Racks sind Knoten des Standortbaums: ohne rack_view antwortet `/racks/{id}` 403, `PATCH`/`DELETE /locations/{rackId}` aber 200/204. Die Review-Warteschlange folgt zwei Regeln: `/review-items` und GraphQL `reviewInbox` sind Kern, der veraltete Alias `/discovery/review-items` ist discovery. Der NATS-Scope-Kanal (`cmd/server/workers.go`) prüft keine Lizenz: `scopes.request` liefert Scopes, `subnets.report` öffnet Vorschläge (F-400).
+
+**Akzeptanzkriterien:**
+
+- [ ] `/api/v1/discovery-scopes*` verlangt discovery (403 `feature-not-entitled`, nichts angelegt); abgelaufene Lizenz wie `/discovery/*` (nur Ingest und neue Scans gesperrt, CH21).
+- [ ] Die Review-Warteschlange ist auf allen Pfaden Kern (`/review-items*`, der veraltete Alias `/discovery/review-items*` und GraphQL `reviewInbox`, Berechtigung `discovery:read` unverändert); die Auflösung eines `scope_suggested`-Eintrags (`accept` und `dismiss`) verlangt zusätzlich discovery: nicht berechtigt 403 `feature-not-entitled`, der Eintrag bleibt offen, kein Scope; andere Einträge bleiben ohne discovery auflösbar. Die Ausnahme des Alias öffnet keine discovery-Route dahinter (`..`, `%2e%2e`, `/discovery/review-items-x`).
+- [ ] Der Standortbaum ist lesend Kern, Rack-Knoten mit Namen eingeschlossen; `POST /locations` mit `kind = rack` sowie `PATCH` (Umbenennen, Verschieben) und `DELETE` eines Rack-Knotens verlangen rack_view wie `/racks` (403 `feature-not-entitled`, Rack unverändert); Schreiben anderer Knoten bleibt Kern; eine fehlgeschlagene Entitlement-Abfrage verweigert (500, fail-closed).
+- [ ] Der Scope-Kanal erhält die Lizenzprüfung des Routers (`server.DiscoveryLicense`): ohne discovery werden `scopes.request`, `scopes.result`, `subnets.report`, `jobs.request` und `jobs.status` mit `"error":"discovery license not_entitled"` abgelehnt, nichts wird geschrieben; nach Ablauf werden `scopes.result` und `subnets.report` abgelehnt (`discovery license expired`), Scopes und Jobs weiter beantwortet; ein Fehler der Abfrage verweigert und zählt als Fehlschlag des Workers.
+- [ ] `docs/README.md` dokumentiert die Zuordnung Route→Feature der Phase-1-Features; `api/openapi.yaml` nennt 403 `FeatureNotEntitled` an `/discovery-scopes*` und an `POST`/`PATCH`/`DELETE /locations*` sowie die Regel an `/review-items*`; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestAuditT2EntitlementAliasPathsGated` und `TestScopeChannelChecksTheDiscoveryLicense` sind auf `e5c2d86` rot und mit der Korrektur grün; `TestDiscoveryScopeWorkerChecksTheDiscoveryLicense` prüft die Verdrahtung in `buildWorkers`; die neuen Tests laufen auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1` der geänderten Pakete und von `./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (16 Einträge):**
+
+- backend/internal/entitlement/middleware.go
+- backend/internal/entitlement/entitlement_test.go
+- backend/internal/locations/handler.go
+- backend/internal/discovery/scope_handler.go
+- backend/internal/discovery/scope_channel_license_nats_test.go
+- backend/internal/graphqlbff/resolver.go
+- backend/internal/server/router.go
+- backend/internal/server/report_adapters.go
+- backend/internal/server/t2_entitlement_gates_test.go
+- backend/cmd/server/workers.go
+- backend/cmd/server/main.go
+- backend/cmd/server/scope_channel_license_test.go
+- api/openapi.yaml, frontend/src/api/generated/schema.d.ts
+- docs/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Prüfungen laufen nach Authentifizierung, Tenant- und Berechtigungsprüfung; die Lesepfade unter RLS bleiben unverändert. Der Rack-Knoten wird vor dem Schreiben im Scope des Aufrufers gelesen (unsichtbar: 404 wie bisher).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestAuditT2EntitlementAliasPathsGated$' ./internal/server/`, `TEST_NATS_URL=… go test -count=1 -run '^TestScopeChannelChecksTheDiscoveryLicense$' ./internal/discovery/` und `TEST_NATS_URL=… go test -count=1 -run '^TestDiscoveryScopeWorkerChecksTheDiscoveryLicense$' ./cmd/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/entitlement/ ./internal/locations/ ./internal/discovery/ ./internal/graphqlbff/ ./internal/reviews/ ./internal/server/ ./cmd/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+ENT-05;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-02;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-05;[B];B;backend/internal/entitlement/entitlement_test.go;WP-671
+ENT-05;[B];B;backend/internal/discovery/scope_channel_license_nats_test.go;WP-671
+ENT-07;[B];B;backend/internal/discovery/scope_channel_license_nats_test.go;WP-671
+ENT-05;[B];B;backend/cmd/server/scope_channel_license_test.go;WP-671
+```
+
+**Entscheidungsbedarf:** keiner offen; im WP festgelegt und dokumentiert (`docs/README.md`): Standortbaum lesend und Review-Warteschlange Kern (wie das Frontend, `navFeatureFor`: `reviews`/`map` ohne Feature), Schreiben von Rack-Knoten rack_view, Auflösung von `scope_suggested` discovery. Falls der Lead die Warteschlange stattdessen ganz unter discovery stellen will, ist das eine Änderung von `coreRoutes` und `ReviewInbox` (CI-Merges öffnen dann für Mandanten ohne discovery unsichtbare Einträge).
+
+**Nicht Bestandteil:** Lesen der Rack-Knoten (Name, Pfad) im Standortbaum ohne rack_view (bewusst Kern); Verhalten des Collectors bei abgelehntem `scopes.request` (er behält seine zuletzt geladenen Scopes; sein Ingest ist ohne Lizenz ohnehin abgelehnt und der Status-Monitor setzt ihn auf `paused`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
 
 ## Zurückgestellte Befunde
 

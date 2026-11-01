@@ -1,10 +1,13 @@
 package locations
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -12,12 +15,64 @@ import (
 
 // Handler serves /api/v1/locations on the canonical location tree (LOC-10).
 type Handler struct {
-	repo Repository
+	repo     Repository
+	features FeatureStatus
+}
+
+// FeatureStatus reports the entitlement of a feature (entitlement.Service).
+type FeatureStatus interface {
+	Status(ctx context.Context, orgID, featureKey string) (entitlement.Entitlement, entitlement.Status, error)
 }
 
 // NewHandler creates the location tree handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithFeatures checks the rack_view feature on the writes of rack nodes as
+// the entitlement middleware does on /api/v1/racks (ENT-05, F-400): a rack
+// is created, renamed, moved or deleted through the tree only with
+// rack_view. Reading the tree, rack nodes with their names included, is
+// cmdb_core. Without it (nil) every organization is entitled.
+func (h *Handler) WithFeatures(features FeatureStatus) *Handler {
+	h.features = features
+	return h
+}
+
+// rackWriteAllowed answers 403 feature-not-entitled and reports false when
+// the write concerns a rack node and the organization is not entitled to
+// rack_view; an expired entitlement passes like on /api/v1/racks (CH21).
+// A failed lookup denies (fail-closed).
+func (h *Handler) rackWriteAllowed(w http.ResponseWriter, r *http.Request, orgID string, kind Kind) bool {
+	if h.features == nil || kind != KindRack {
+		return true
+	}
+	_, status, err := h.features.Status(r.Context(), orgID, entitlement.FeatureRackView)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "entitlement lookup failed")
+		return false
+	}
+	if status == entitlement.StatusNotEntitled {
+		refusal := &entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureRackView}
+		slog.WarnContext(r.Context(), "rack write through the location tree refused", "organization_id", orgID,
+			"method", r.Method, "path", r.URL.Path, "feature", refusal.FeatureKey)
+		api.WriteProblem(w, http.StatusForbidden, refusal.ProblemType(), "Forbidden", refusal.Error())
+		return false
+	}
+	return true
+}
+
+// nodeWriteAllowed is rackWriteAllowed for the existing node id; a node
+// that is not found is left to the write, which answers 404.
+func (h *Handler) nodeWriteAllowed(w http.ResponseWriter, r *http.Request, orgID, id string) bool {
+	if h.features == nil {
+		return true
+	}
+	item, err := h.repo.Get(r.Context(), orgID, id)
+	if err != nil {
+		return true
+	}
+	return h.rackWriteAllowed(w, r, orgID, item.Kind)
 }
 
 // RegisterRoutes registers the location routes.
@@ -94,6 +149,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.ValidationError(w, r, "invalid request body: "+err.Error())
 		return
 	}
+	if !h.rackWriteAllowed(w, r, orgID, req.Kind) {
+		return
+	}
 	item, err := h.repo.Create(r.Context(), orgID, req)
 	if err != nil {
 		writeError(w, r, err)
@@ -113,6 +171,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.ValidationError(w, r, "invalid request body: "+err.Error())
 		return
 	}
+	if !h.nodeWriteAllowed(w, r, orgID, chi.URLParam(r, "id")) {
+		return
+	}
 	item, err := h.repo.Update(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		writeError(w, r, err)
@@ -125,6 +186,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := organization(w, r)
 	if !ok {
+		return
+	}
+	if !h.nodeWriteAllowed(w, r, orgID, chi.URLParam(r, "id")) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {

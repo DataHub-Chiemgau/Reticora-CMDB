@@ -148,8 +148,16 @@ func (a overrideProvenance) Decide(ctx context.Context, w *override.Write) overr
 }
 
 // edgeLicense adapts the entitlement service to the discovery license check
-// of the collectors' edge data path.
+// of the collectors' edge data path, of their scope channel and of the
+// resolution of scope_suggested items (F-400).
 type edgeLicense struct{ svc *entitlement.Service }
+
+// DiscoveryLicense returns the discovery license check of svc for
+// discovery.Handler.WithEdgeLicense; the scope channel worker of
+// cmd/server uses it as the router does.
+func DiscoveryLicense(svc *entitlement.Service) discovery.EdgeLicense {
+	return edgeLicense{svc: svc}
+}
 
 func (l edgeLicense) DiscoveryLicense(ctx context.Context, orgID string) (state, problemType string, err error) {
 	ent, status, err := l.svc.Status(ctx, orgID, entitlement.FeatureDiscovery)

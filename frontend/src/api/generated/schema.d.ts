@@ -2751,7 +2751,7 @@ export interface paths {
     };
     /**
      * List review items
-     * @description The review queue of reconciliation (REC-08). Items open longer than 14 days carry escalated = true; escalated=true lists only those (the dashboard's escalation).
+     * @description The review queue of reconciliation (REC-08). Items open longer than 14 days carry escalated = true; escalated=true lists only those (the dashboard's escalation). The queue is cmdb_core like GraphQL reviewInbox and the deprecated /discovery/review-items: it is read without the discovery feature (CI merges open items as well); only resolving a scope_suggested item needs discovery (F-400).
      */
     get: operations['listReviewItems'];
     put?: never;
@@ -2796,7 +2796,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -2815,6 +2815,7 @@ export interface paths {
     /**
      * List reconciliation review items (deprecated, use /api/v1/review-items)
      * @deprecated
+     * @description Alias of its successor with the same rule: the review queue is cmdb_core, not gated by the discovery feature (F-400).
      */
     get: operations['listDiscoveryReviewItems'];
     put?: never;
@@ -2840,7 +2841,7 @@ export interface paths {
     /**
      * Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
      * @deprecated
-     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited. resolved_by and the audit actor are the caller; a body with resolved_by is 400. Like its successor the path is cmdb_core; a scope_suggested item needs the discovery feature (403 feature-not-entitled, F-400).
      */
     post: operations['resolveDiscoveryReviewItem'];
     delete?: never;
@@ -6441,13 +6442,13 @@ export interface paths {
     };
     /**
      * List nodes of the location tree
-     * @description Nodes of the canonical location tree (LOC-10) visible in the caller's scope, parents first.
+     * @description Nodes of the canonical location tree (LOC-10) visible in the caller's scope, parents first. Reading the tree is cmdb_core: rack nodes with their names are listed without the rack_view feature, which gates the rack resource (/racks, /mounts, /rack-mounts) and the writes of rack nodes here (ENT-05, F-400).
      */
     get: operations['listLocations'];
     put?: never;
     /**
      * Create a node of the location tree
-     * @description The parent must be of the kind the parent matrix allows (site > building > room > rack, site > warehouse > zone > shelf > bin). A site is a root and needs client_id; every other node inherits client and site from its parent.
+     * @description The parent must be of the kind the parent matrix allows (site > building > room > rack, site > warehouse > zone > shelf > bin). A site is a root and needs client_id; every other node inherits client and site from its parent. A node of kind rack needs the rack_view feature like POST /racks (403 feature-not-entitled otherwise, F-400).
      */
     post: operations['createLocation'];
     delete?: never;
@@ -6491,14 +6492,14 @@ export interface paths {
     post?: never;
     /**
      * Delete a leaf node
-     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens or merge tombstones within tombstone_until are bound to it (E-71). Expired tokens and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree.
+     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens or merge tombstones within tombstone_until are bound to it (E-71). Expired tokens and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree. Deleting a rack node needs the rack_view feature like DELETE /racks/{id} (403 feature-not-entitled otherwise, F-400).
      */
     delete: operations['deleteLocation'];
     options?: never;
     head?: never;
     /**
      * Rename and/or move a node
-     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved.
+     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved. Renaming or moving a rack node needs the rack_view feature like PATCH /racks/{id} (403 feature-not-entitled otherwise, the rack stays unchanged, F-400).
      */
     patch: operations['updateLocation'];
     trace?: never;
@@ -11466,7 +11467,7 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description Forbidden: a missing permission, or the organization's plan does not include the feature of this operation (rack_view for racks and mounts, api_access for API keys; type https://reticora.io/problems/feature-not-entitled, ENT-05). */
+    /** @description Forbidden: a missing permission, or the organization's plan does not include the feature of this operation (rack_view for racks, mounts and rack nodes of the location tree, api_access for API keys, discovery for discovery scopes; type https://reticora.io/problems/feature-not-entitled, ENT-05). */
     FeatureNotEntitled: {
       headers: {
         [name: string]: unknown;
@@ -21468,7 +21469,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
     };
   };
   createDiscoveryScope: {
@@ -21495,7 +21496,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
@@ -21522,7 +21523,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -21546,7 +21547,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -21577,7 +21578,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -28147,6 +28148,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];
     };
@@ -28215,6 +28217,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['LocationInUse'];
     };
@@ -28245,6 +28248,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];

@@ -364,7 +364,8 @@ entitlements are cached per organization for 60 seconds in the shared cache
 (Redis), so a change on one instance invalidates every instance (ENT-03). The
 middleware maps route prefixes to features (export, ingest including the
 `/api/v1/discovery/ingest` alias, topology, ...) and answers with 403
-`feature-not-entitled`; GraphQL fields check their feature as well. Quotas are
+`feature-not-entitled`; GraphQL fields check their feature as well (the
+route→feature mapping of the phase-1 features is the table below). Quotas are
 enforced in the domain service (`ci.Service.Create`) and answer with 403
 `entitlement-limit`; `max_cis` counts the active CIs and holds on every write
 that makes a CI active: the restore, the unmerge, and of a review item `new`
@@ -387,6 +388,22 @@ transaction: without its entry the change is rolled back (500) (ENT-04,
 E-12). Only the feature keys of ENT-02, the module keys and the add-ons and
 the quotas `max_cis`, `max_collectors`, `max_users`, `max_api_keys` are
 accepted; any other key is 422 with the field.
+
+Route→feature mapping of the phase-1 features (ENT-02, ENT-05;
+`gatedRoutes`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
+checks in the handlers where the middleware cannot see the object; F-400).
+Not entitled is 403 `feature-not-entitled`; an expired discovery license
+stops only ingest and new scans (CH21):
+
+| Feature | REST (middleware) | In the handler / GraphQL / NATS |
+|---------|-------------------|---------------------------------|
+| discovery | `/api/v1/ingest*`, `/api/v1/discovery/*` (except the review alias), `/api/v1/discovery-scopes*`, `/api/v1/collectors*` (except `/collectors/enroll`), `/api/v1/credentials*` | resolving a `scope_suggested` review item (accept and dismiss) on `/review-items/{id}/resolve` and its alias; the collectors' edge ingest and their scope channel: without discovery `scopes.request`, `scopes.result`, `subnets.report`, `jobs.request` and `jobs.status` are refused, after expiry `scopes.result` and `subnets.report` |
+| rack_view | `/api/v1/racks*`, `/api/v1/mounts*`, `/api/v1/rack-mounts*` | `POST /api/v1/locations` with kind `rack`, `PATCH`/`DELETE /api/v1/locations/{id}` of a rack node; GraphQL `rackLayout` |
+| topology | `/api/v1/topology*`, `/api/v1/impact*`, `/api/v1/cis/{id}/dependencies`, `/api/v1/cis/{id}/blast-radius` | GraphQL `topology` |
+| export_csv | `/api/v1/export*`, `/api/v1/exports*` | — |
+| webhooks | `/api/v1/webhooks*` | — |
+| api_access | `/api/v1/api-keys*` | every request authenticated with `X-API-Key` |
+| cmdb_core (always) | everything else, among it the location tree (`GET /api/v1/locations*`, rack nodes with their names included, and writes of the other nodes) and the review queue (`/api/v1/review-items*`, the deprecated `/api/v1/discovery/review-items*`, GraphQL `reviewInbox`; CI merges open review items as well) | — |
 Attribute rules use the JSON rule AST of `api/rules.schema.json` (MET-45,
 phase 1: required, pattern, range, enum, combined with all).
 `backend/internal/rules` evaluates them bindingly, `frontend/src/rules` for
