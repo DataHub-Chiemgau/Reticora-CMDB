@@ -451,9 +451,23 @@ func (r *MemoryRepository) MarkRedundant(_ context.Context, orgID, relType strin
 	return nil
 }
 
+// ListFilter holds the documented filters of GET /api/v1/relationships
+// (API-01, F-402): CIID keeps the edges with the CI at either end,
+// SourceCIID and TargetCIID those with the CI at that end, RelType those
+// of the type. The filters combine; an empty field does not filter.
+type ListFilter struct {
+	CIID       string
+	SourceCIID string
+	TargetCIID string
+	RelType    string
+}
+
 // Repository defines persistence operations for relationships.
 type Repository interface {
+	// List returns the relationships of the organization, of one CI when
+	// ciID is set: ListFiltered with ListFilter{CIID: ciID}.
 	List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error)
+	ListFiltered(ctx context.Context, orgID string, filter ListFilter, page api.PaginationParams) ([]Relationship, int, error)
 	Create(ctx context.Context, rel *Relationship) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Relationship, error)
 	Delete(ctx context.Context, orgID, id string) error
@@ -553,7 +567,11 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{items: make(map[string]*Relationship), suppressions: make(map[string]*Suppression)}
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
+func (r *MemoryRepository) List(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
+	return r.ListFiltered(ctx, orgID, ListFilter{CIID: ciID}, page)
+}
+
+func (r *MemoryRepository) ListFiltered(_ context.Context, orgID string, filter ListFilter, page api.PaginationParams) ([]Relationship, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -562,7 +580,12 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, ciID string, pa
 		if rel.OrganizationID != orgID {
 			continue
 		}
-		if ciID != "" && rel.SourceCIID != ciID && rel.TargetCIID != ciID {
+		if filter.CIID != "" && rel.SourceCIID != filter.CIID && rel.TargetCIID != filter.CIID {
+			continue
+		}
+		if (filter.SourceCIID != "" && rel.SourceCIID != filter.SourceCIID) ||
+			(filter.TargetCIID != "" && rel.TargetCIID != filter.TargetCIID) ||
+			(filter.RelType != "" && rel.RelType != filter.RelType) {
 			continue
 		}
 		result = append(result, *rel)
@@ -858,7 +881,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/relationship-suppressions/{id}", h.LiftSuppression)
 }
 
-// List handles GET /api/v1/cis/{id}/relationships
+// List handles GET /api/v1/cis/{id}/relationships, the edges of the CI, and
+// GET /api/v1/relationships with its documented filters ci_id,
+// source_ci_id, target_ci_id and rel_type (API-01, F-402). A CI filter
+// that is no UUID and a rel_type the catalogue does not know are 400; an
+// unknown or invisible CI lists nothing. The edges stay those of the
+// caller's tenant scope.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -866,10 +894,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciID := chi.URLParam(r, "id")
+	filter := ListFilter{CIID: chi.URLParam(r, "id")}
+	if filter.CIID == "" {
+		var ok bool
+		if filter, ok = h.listFilter(w, r, t.OrganizationID); !ok {
+			return
+		}
+	}
 	page := api.ParsePagination(r)
 
-	rels, total, err := h.repo.List(r.Context(), t.OrganizationID, ciID, page)
+	rels, total, err := h.repo.ListFiltered(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -882,6 +916,28 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// listFilter reads the query filters of GET /api/v1/relationships; on an
+// invalid one it answers 400 and reports false.
+func (h *Handler) listFilter(w http.ResponseWriter, r *http.Request, orgID string) (ListFilter, bool) {
+	q := r.URL.Query()
+	filter := ListFilter{CIID: q.Get("ci_id"), SourceCIID: q.Get("source_ci_id"), TargetCIID: q.Get("target_ci_id"), RelType: q.Get("rel_type")}
+	for _, f := range []struct{ name, value string }{
+		{"ci_id", filter.CIID}, {"source_ci_id", filter.SourceCIID}, {"target_ci_id", filter.TargetCIID},
+	} {
+		if f.value != "" && !api.IsUUID(f.value) {
+			api.WriteFieldError(w, &api.FieldError{Field: f.name, Message: "must be a UUID"})
+			return ListFilter{}, false
+		}
+	}
+	// The catalogue holds the projected types (contains, mounted_in,
+	// located_in) as well, so every listed type can be filtered.
+	if filter.RelType != "" && (api.RejectNUL("rel_type", filter.RelType) != nil || !h.validRelType(r, orgID, filter.RelType)) {
+		api.WriteFieldError(w, &api.FieldError{Field: "rel_type", Message: "must be a relationship type of the catalogue"})
+		return ListFilter{}, false
+	}
+	return filter, true
 }
 
 // Create handles POST /api/v1/relationships

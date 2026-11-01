@@ -777,3 +777,147 @@ func TestRelationshipTypeConstraintsEnforced(t *testing.T) {
 		t.Errorf("stored edges: %d %v, want 5", total, err)
 	}
 }
+
+// TestListHonoursDocumentedQueryFilters covers WP-673 (API-01, API-02),
+// finding F-402: GET /api/v1/relationships applies its documented filters
+// ci_id (either end), source_ci_id, target_ci_id and rel_type, combined,
+// to the stored and the projected edges; an unknown CI lists nothing, a CI
+// filter that is no UUID and an unknown rel_type are 400 problem+json. The
+// edges stay those of the caller's scope: a client-1 principal does not
+// see the edge to the client-2 CI through any filter, the other
+// organization's edge is never listed.
+//
+// Retest: cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestListHonoursDocumentedQueryFilters$' ./internal/relationship/
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestListHonoursDocumentedQueryFilters(t *testing.T) {
+	f := scopetest.Seed(t, "06")
+	bg := context.Background()
+	ci1 := f.CI(t, f.OrgA, f.Client1, "f402-ci1")
+	ci2 := f.CI(t, f.OrgA, f.Client1, "f402-ci2")
+	ci3 := f.CI(t, f.OrgA, f.Client1, "f402-ci3")
+	ci4 := f.CI(t, f.OrgA, f.Client2, "f402-ci4-client2")
+	foreignA, foreignB := f.CI(t, f.OrgB, "", "f402-foreign-a"), f.CI(t, f.OrgB, "", "f402-foreign-b")
+	edge := func(org, source, target, relType string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+			VALUES ($1, $2, $3, $4) RETURNING id::text`, org, source, target, relType).Scan(&id); err != nil {
+			t.Fatalf("edge %s %s → %s: %v", relType, source, target, err)
+		}
+		return id
+	}
+	e12 := edge(f.OrgA, ci1, ci2, "connected_to")
+	e23 := edge(f.OrgA, ci2, ci3, "depends_on")
+	e31 := edge(f.OrgA, ci3, ci1, "connected_to")
+	e24 := edge(f.OrgA, ci2, ci4, "hosted_on")
+	foreign := edge(f.OrgB, foreignA, foreignB, "connected_to")
+	// ci1 contains ci3: the projected edge contains ci1 → ci3.
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET parent_ci_id = $1 WHERE id = $2`, ci1, ci3); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := chi.NewRouter()
+	// As in the server (router.go): the type catalogue checks rel_type.
+	relationship.NewHandler(relationship.NewPGRepository(f.App), relationshiptype.NewPGRepository(f.App)).RegisterRoutes(mux)
+	orgWide := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	client1 := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	type listed struct {
+		ids       []string // stored edges, sorted
+		contains  bool     // the projected contains ci1 → ci3
+		projected int
+		total     int
+		status    int
+		field     string
+		mediaType string
+	}
+	list := func(ctx context.Context, query string) listed {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/relationships?limit=200"+query, nil).WithContext(ctx))
+		out := listed{ids: []string{}, status: w.Code, mediaType: w.Header().Get("Content-Type")}
+		if w.Code != http.StatusOK {
+			var problem struct {
+				Field string `json:"field"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &problem)
+			out.field = problem.Field
+			return out
+		}
+		var body api.ListResponse[relationship.Relationship]
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("GET %s: %v", query, err)
+		}
+		out.total = body.Total
+		for _, r := range body.Data {
+			if r.Projected {
+				out.projected++
+				out.contains = out.contains || (r.RelType == "contains" && r.SourceCIID == ci1 && r.TargetCIID == ci3)
+				continue
+			}
+			out.ids = append(out.ids, r.ID)
+		}
+		slices.Sort(out.ids)
+		return out
+	}
+	edges := func(ids ...string) []string {
+		out := append([]string{}, ids...)
+		slices.Sort(out)
+		return out
+	}
+
+	for _, c := range []struct {
+		name     string
+		ctx      context.Context
+		query    string
+		want     []string
+		contains bool
+	}{
+		{"control: no filter", orgWide, "", edges(e12, e23, e31, e24), true},
+		{"ci_id of ci1 (either end)", orgWide, "&ci_id=" + ci1, edges(e12, e31), true},
+		{"ci_id of ci2", orgWide, "&ci_id=" + ci2, edges(e12, e23, e24), false},
+		{"source_ci_id of ci2", orgWide, "&source_ci_id=" + ci2, edges(e23, e24), false},
+		{"target_ci_id of ci1", orgWide, "&target_ci_id=" + ci1, edges(e31), false},
+		{"target_ci_id of ci3", orgWide, "&target_ci_id=" + ci3, edges(e23), true},
+		{"rel_type connected_to", orgWide, "&rel_type=connected_to", edges(e12, e31), false},
+		{"rel_type contains (projected)", orgWide, "&rel_type=contains", edges(), true},
+		{"ci_id and rel_type", orgWide, "&ci_id=" + ci2 + "&rel_type=connected_to", edges(e12), false},
+		{"source and target", orgWide, "&source_ci_id=" + ci3 + "&target_ci_id=" + ci1, edges(e31), false},
+		{"ci_id unknown", orgWide, "&ci_id=" + f.ID(), edges(), false},
+		{"ci_id of the other organization", orgWide, "&ci_id=" + foreignA, edges(), false},
+		{"rel_type without an edge", orgWide, "&rel_type=powers", edges(), false},
+		{"empty filter values do not filter", orgWide, "&ci_id=&source_ci_id=&target_ci_id=&rel_type=", edges(e12, e23, e31, e24), true},
+		// The tenant scope stays: client 1 never sees the edge to the
+		// client-2 CI.
+		{"client 1: no filter", client1, "", edges(e12, e23, e31), true},
+		{"client 1: ci_id of the client-2 CI", client1, "&ci_id=" + ci4, edges(), false},
+		{"client 1: target_ci_id of the client-2 CI", client1, "&target_ci_id=" + ci4, edges(), false},
+		{"client 1: rel_type hosted_on", client1, "&rel_type=hosted_on", edges(), false},
+		{"client 1: source_ci_id of ci2", client1, "&source_ci_id=" + ci2, edges(e23), false},
+	} {
+		got := list(c.ctx, c.query)
+		if got.status != http.StatusOK || !slices.Equal(got.ids, c.want) || got.contains != c.contains {
+			t.Errorf("%s: %d, stored edges %v (projected contains ci1 → ci3: %v), want %v (%v)",
+				c.name, got.status, got.ids, got.contains, c.want, c.contains)
+		}
+		if slices.Contains(got.ids, foreign) {
+			t.Errorf("%s: the edge of the other organization is listed", c.name)
+		}
+		if got.status == http.StatusOK && got.total != len(got.ids)+got.projected {
+			t.Errorf("%s: total %d, but %d edges listed", c.name, got.total, len(got.ids)+got.projected)
+		}
+	}
+
+	for _, c := range []struct{ query, field string }{
+		{"&ci_id=not-a-uuid", "ci_id"},
+		{"&source_ci_id=" + ci1 + "x", "source_ci_id"},
+		{"&target_ci_id=1", "target_ci_id"},
+		{"&rel_type=no_such_type", "rel_type"},
+		{"&rel_type=a%00b", "rel_type"},
+	} {
+		got := list(orgWide, c.query)
+		if got.status != http.StatusBadRequest || got.field != c.field || got.mediaType != api.ProblemContentType {
+			t.Errorf("GET %s: %d %q field %q, want 400 problem+json on %s", c.query, got.status, got.mediaType, got.field, c.field)
+		}
+	}
+}

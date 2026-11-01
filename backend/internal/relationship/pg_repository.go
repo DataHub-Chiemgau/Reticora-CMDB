@@ -149,7 +149,11 @@ const graphEdges = `(
 // projection; with RLS the planner estimates one visible CI and, once
 // rack_mount is large (it holds the mounts of all organizations), joins
 // every CI of the organization with the projection (NFR-02).
-func listEdges(byCI bool) string {
+//
+// filters (the further filters of GET /api/v1/relationships, F-402) is
+// appended to every arm as equalities, so each reaches its branch of the
+// projection as well.
+func listEdges(byCI bool, filters string) string {
 	stored := `
 			SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
 			       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
@@ -167,6 +171,9 @@ func listEdges(byCI bool) string {
 				edges+` AND target_ci_id = $2 AND source_ci_id IS DISTINCT FROM $2`)
 		}
 	}
+	for i := range arms {
+		arms[i] += filters
+	}
 	return strings.Join(arms, `
 			UNION ALL`)
 }
@@ -174,15 +181,32 @@ func listEdges(byCI bool) string {
 // List returns the relationships of the organization (of one CI when ciID
 // is set): the stored ones and, after them, the projected structural ones.
 func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
+	return r.ListFiltered(ctx, orgID, ListFilter{CIID: ciID}, page)
+}
+
+// ListFiltered is List with the filters of GET /api/v1/relationships
+// (F-402): the CI at either end, at the source or the target end, and the
+// type. The CI ids are UUIDs (checked by the handler); the edges stay those
+// of the caller's tenant scope (RLS on ci_relationship and ci).
+func (r *PGRepository) ListFiltered(ctx context.Context, orgID string, filter ListFilter, page api.PaginationParams) ([]Relationship, int, error) {
 	items := make([]Relationship, 0)
 	var total int
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		args := []any{orgID}
-		if ciID != "" {
-			args = append(args, ciID)
+		if filter.CIID != "" {
+			args = append(args, filter.CIID)
 		}
-		edges := listEdges(ciID != "")
+		var filters strings.Builder
+		for _, f := range []struct{ column, value string }{
+			{"source_ci_id", filter.SourceCIID}, {"target_ci_id", filter.TargetCIID}, {"rel_type", filter.RelType},
+		} {
+			if f.value != "" {
+				args = append(args, f.value)
+				fmt.Fprintf(&filters, ` AND %s = $%d`, f.column, len(args))
+			}
+		}
+		edges := listEdges(filter.CIID != "", filters.String())
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ("+edges+") e", args...).Scan(&total); err != nil {
 			return fmt.Errorf("count relationships: %w", err)
 		}

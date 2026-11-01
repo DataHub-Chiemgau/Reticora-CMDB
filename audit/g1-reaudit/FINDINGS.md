@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 19 |
-| P3 | 19 |
-| **Summe** | **44** |
+| P3 | 21 |
+| **Summe** | **46** |
 
 ## Übersicht
 
@@ -84,6 +84,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-397](#f-397) | P1 | Ein API-Key, den ein client-beschränkter Erzeuger an einen Service-Account bindet, wird org-weit, sobald ein org-weiter Administrator dem Account später org-weite Rollen gibt | WP-069 (K7) | belegt | backend/internal/identity/apikey_authz_integration_test.go | WP-668 |
 | [F-396](#f-396) | P1 | Client-gebundener Inhaber von role:manage nimmt org-weiten Zuweisungen über die Rollendefinition die Rechte (PATCH /roles/{id} mit weniger Rechten, DELETE /roles/{id}, PUT /roles/{id}/permissions), obwohl er die Zuweisung selbst nicht entziehen darf | WP-066/WP-067 (K7) | belegt | backend/internal/user/role_definition_ceiling_integration_test.go | WP-667 |
 | [F-398](#f-398) | P3 | PUT /roles/{id}/permissions auf einer Standardrolle antwortet 200 mit den neuen Rechten, die Seed-Rechte (`role.permissions`) bleiben aber wirksam; Antwort, Rechteliste und Audit-Schnappschuss weichen von den wirksamen Rechten ab | WP-066 (K7) | belegt | backend/internal/permission/standard_role_permissions_integration_test.go | WP-669 |
+| [F-401](#f-401) | P3 | Suche ohne Treffer antwortet `"data": null` statt `[]`; ebenso Historie ohne Änderungen, Verfügbarkeitsprojektion und `results` des Compliance-Scores | WP-164 (K7) | belegt | backend/internal/server/pagination_test.go | WP-672 |
+| [F-402](#f-402) | P3 | `GET /api/v1/relationships` ignoriert die dokumentierten Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` | WP-165 (K7) | belegt | backend/internal/relationship/pg_repository_integration_test.go | WP-673 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -919,6 +921,92 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       standard_role_permissions_integration_test.go:226: role_permission without seed rows: GET /roles/{viewer}/permissions [], effective [agent:read … workflow:read]
       standard_role_permissions_integration_test.go:226: role_permission without seed rows: audit snapshot permission_keys [], effective [agent:read … workflow:read]
   --- FAIL: TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused (0.78s)
+  FAIL
+  ```
+
+<a id="f-401"></a>
+### F-401 (P3) – Suche ohne Treffer antwortet `"data": null` statt `[]`; ebenso Historie ohne Änderungen, Verfügbarkeitsprojektion und `results` des Compliance-Scores
+
+- **Gefunden in:** Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von zwei unabhängigen Prüfagenten bestätigt (Prüfung von WP-164, gleiche Klasse wie F-214); Sweep aller GET-Operationen der Spezifikation in WP-672 · **Betroffene Anforderungen:** API-02, SRC-01 · **Komponente:** backend/internal/search/handler.go (`Handler.Search` Zeile 58, `filterAllowed` Zeile 88 auf `e5c2d86`: `out := hits[:0]` auf einem nil-Slice bleibt nil), backend/internal/history/handler.go (`List`, eigener `ListResponse`-Typ; `PGRepository.List` liefert für andere Typen als `ci`/`location` ohne Zeilen nil), backend/internal/compliance/evaluator.go (`summarize`, `results`), backend/internal/reservation/handler.go (`Availability`), im Modus `--no-db` außerdem die Unterlisten der P2-Module (backend/internal/training, keymgmt, desk, maintenance: `map[string]any{"data": items}` mit nil aus dem Memory-Repository) · **Quelle:** Probe über den Produktionsrouter (`server.NewRouter` mit `PostgresRepositories`, `OpenAPIValidation`, `TenantMiddleware`) und über die Produktionskette mit Memory-Repositories (`newT2Stack`); Sweep jeder GET-Operation von `api/openapi.yaml` mit einer unbekannten UUID je Pfadparameter
+- **Reproduktion:** Org-weiter Benutzer mit allen Rechten. `GET /api/v1/search?q=no-such-text` → 200 `{"data":null,"total":0,"limit":50,"offset":0,"has_more":false}`; ebenso `&type=ci`, `GET /api/v1/search` ohne Text und ein auf Client 2 beschränkter Principal, dessen Treffer alle in Client 1 liegen (`?q=<Name eines Client-1-CI>`). Kontrolle: `POST /api/v1/search/query` ohne Treffer → `"data": []`. Sweep über PostgreSQL: `GET /api/v1/history/{asset|relationship|reservation|composition}/<unbekannt>` → `"data": null`, `GET /api/v1/inventory/availability` → `{"data":null}`, `GET /api/v1/compliance/score` ohne Ergebnisse → `"results": null`. Über die Memory-Repositories zusätzlich `GET /api/v1/history/{ci|location}/<unbekannt>`, `/trainings/{id}/assignments`, `/keys/{id}/assignments`, `/desks/{id}/bookings`, `/maintenance-windows/{id}/notifications` → `{"data":null}`.
+- **Soll:** API-02 (WP-164, F-214): Jede Liste antwortet auch leer mit einem Array, nie mit `null`. `SearchResponse` verlangt `data` als Pflicht-Array, `HistoryListResponse` ebenso, `ComplianceEvaluationResponse` verlangt `results` und `by_ci_type` als Arrays.
+- **Ist:** F-214/WP-164 hat die Normalisierung in `api.ListResponse.MarshalJSON` gelegt. Antworten mit eigenem Typ (`search.Result`, `history.ListResponse`, `compliance.EvaluationResponse`) oder als `map[string]any{"data": …}` laufen nicht durch sie. Die Suche ersetzt die Treffer des Backends durch `filterAllowed`; dessen `hits[:0]` auf dem nil-Slice des Backends (PostgreSQL und Memory ohne Treffer) bleibt nil und wird als `null` kodiert. Die Historie, die Verfügbarkeitsprojektion und der Compliance-Score reichen das nil ihres Repositorys ebenso durch.
+- **Nutzerwirkung:** Gering: Die eigene UI behandelt `null` wie eine leere Liste. Generierte oder streng validierende Clients der Spezifikation (z. B. die TypeScript-Typen `SearchHit[]`) erhalten einen Wert, den der Vertrag ausschließt, und brechen mit „cannot read properties of null“ oder einem Validierungsfehler ab, gerade im Normalfall „kein Treffer“.
+- **Ursache (belegt):** Das Muster `out := hits[:0]` bzw. `var out []T` ohne Treffer ergibt nil; die zentrale Normalisierung aus F-214 gilt nur für `api.ListResponse`. Der Sweep von WP-164 hat nur die `ListResponse`-Listen geprüft (`TestEmptyListsAnswerAnEmptyDataArray` mit IPAM und Credentials).
+- **Empfehlung:** `filterAllowed` legt sein Ergebnis mit `make([]Hit, 0, len(hits))` an. Ein Helfer `api.NonNilSlice` normalisiert die Listen mit eigenem Antworttyp oder als Map (Historie, Compliance-Score, Verfügbarkeit, P2-Unterlisten). Ein Sweep-Test über jede GET-Operation der Spezifikation hält die Klasse geschlossen.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestEmptyListsAnswerAnEmptyDataArray$|^TestEmptyResponsesAnswerArraysOverPostgres$' ./internal/server/` und `go test -count=1 -v -run '^TestSearchWithoutHitsAnswersAnEmptyArray$' ./internal/search/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: jede Liste der Spezifikation ohne Zeilen antwortet `"data": []`, die Suche ohne Text-, Typ- oder Scope-Treffer `"data": []` (Kontrolle: der org-weite Aufrufer findet das Client-1-CI), `GET /api/v1/compliance/score` `"results": []`.
+- **Kodierender Test:** backend/internal/server/pagination_test.go (`TestEmptyListsAnswerAnEmptyDataArray`, erweitert um `/api/v1/search?q=no-such-text`, `&type=ci`, die Historie und die P2-Unterlisten), backend/internal/server/empty_arrays_integration_test.go (`TestEmptyResponsesAnswerArraysOverPostgres`, Sweep aller GET-Operationen über PostgreSQL), backend/internal/search/empty_page_integration_test.go (`TestSearchWithoutHitsAnswersAnEmptyArray`, Client-2-Principal); auf `e5c2d86` rot (ausgeführt auf der Basis `3eca249`; die geänderten Produktionsdateien sind dort identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestSearchWithoutHitsAnswersAnEmptyArray
+      empty_page_integration_test.go:76: no matching text: GET /api/v1/search?q=no-such-text answers "data": null, want []
+      empty_page_integration_test.go:76: no matching text of a type: GET /api/v1/search?q=no-such-text&type=ci answers "data": null, want []
+      empty_page_integration_test.go:76: a type without a hit: GET /api/v1/search?q=emptypage&type=asset answers "data": null, want []
+      empty_page_integration_test.go:76: client 2, every hit in client 1: GET /api/v1/search?q=emptypage answers "data": null, want []
+      empty_page_integration_test.go:76: client 2, every hit of the type in client 1: GET /api/v1/search?q=emptypage&type=ci answers "data": null, want []
+  --- FAIL: TestSearchWithoutHitsAnswersAnEmptyArray (0.73s)
+  === RUN   TestEmptyResponsesAnswerArraysOverPostgres
+      empty_arrays_integration_test.go:77: GET /api/v1/compliance/score: "results" is null, want an array; body {"overall":{"passed":0,"failed":0,"not_applicable":0,"score":0},"by_ci_type":[],"results":null}
+      empty_arrays_integration_test.go:77: GET /api/v1/inventory/availability: "data" is null, want an array; body {"data":null}
+      empty_arrays_integration_test.go:77: GET /api/v1/search: "data" is null, want an array; body {"data":null,"total":0,"limit":50,"offset":0,"has_more":false}
+      empty_arrays_integration_test.go:77: GET /api/v1/search?q=no-such-text: "data" is null, want an array; body {"data":null,"total":0,"limit":50,"offset":0,"has_more":false}
+      empty_arrays_integration_test.go:77: GET /api/v1/search?q=no-such-text&type=ci: "data" is null, want an array; body {"data":null,"total":0,"limit":50,"offset":0,"has_more":false}
+      empty_arrays_integration_test.go:77: GET /api/v1/history/relationship/00000000-0000-4000-8000-0000000000aa: "data" is null, want an array; body {"data":null,"total":0,"limit":50,"offset":0,"has_more":false,"audit_included":false}
+      empty_arrays_integration_test.go:77: GET /api/v1/history/asset/00000000-0000-4000-8000-0000000000aa: "data" is null, want an array; body {"data":null,"total":0,"limit":50,"offset":0,"has_more":false,"audit_included":false}
+      empty_arrays_integration_test.go:77: GET /api/v1/history/reservation/00000000-0000-4000-8000-0000000000aa: "data" is null, want an array; body {"data":null,"total":0,"limit":50,"offset":0,"has_more":false,"audit_included":false}
+      empty_arrays_integration_test.go:77: GET /api/v1/history/composition/00000000-0000-4000-8000-0000000000aa: "data" is null, want an array; body {"data":null,"total":0,"limit":50,"offset":0,"has_more":false,"audit_included":false}
+  --- FAIL: TestEmptyResponsesAnswerArraysOverPostgres (1.14s)
+  === RUN   TestEmptyListsAnswerAnEmptyDataArray
+      pagination_test.go:382: GET /api/v1/search?q=no-such-text: 200 {"data":null,"total":0,"limit":50,"offset":0,"has_more":false}
+          ; want 200 with "data": []
+      pagination_test.go:382: GET /api/v1/search?q=no-such-text&type=ci: 200 {"data":null,"total":0,"limit":50,"offset":0,"has_more":false}
+          ; want 200 with "data": []
+      pagination_test.go:382: GET /api/v1/history/ci/7a2a0000-0000-4000-8000-0000000000aa: 200 {"data":null,"total":0,"limit":50,"offset":0,"has_more":false,"audit_included":true}
+          ; want 200 with "data": []
+      pagination_test.go:382: GET /api/v1/history/asset/7a2a0000-0000-4000-8000-0000000000aa: 200 {"data":null,"total":0,"limit":50,"offset":0,"has_more":false,"audit_included":false}
+          ; want 200 with "data": []
+      pagination_test.go:382: GET /api/v1/history/location/7a2a0000-0000-4000-8000-0000000000aa: 200 {"data":null,"total":0,"limit":50,"offset":0,"has_more":false,"audit_included":false}
+          ; want 200 with "data": []
+      pagination_test.go:382: GET /api/v1/trainings/7a2a0000-0000-4000-8000-0000000000aa/assignments: 200 {"data":null}
+          ; want 200 with "data": []
+      pagination_test.go:382: GET /api/v1/keys/7a2a0000-0000-4000-8000-0000000000aa/assignments: 200 {"data":null}
+          ; want 200 with "data": []
+      pagination_test.go:382: GET /api/v1/desks/7a2a0000-0000-4000-8000-0000000000aa/bookings: 200 {"data":null}
+          ; want 200 with "data": []
+      pagination_test.go:382: GET /api/v1/maintenance-windows/7a2a0000-0000-4000-8000-0000000000aa/notifications: 200 {"data":null}
+          ; want 200 with "data": []
+  --- FAIL: TestEmptyListsAnswerAnEmptyDataArray (0.06s)
+  FAIL
+  ```
+
+<a id="f-402"></a>
+### F-402 (P3) – `GET /api/v1/relationships` ignoriert die dokumentierten Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type`
+
+- **Gefunden in:** Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, von zwei unabhängigen Prüfagenten bestätigt (Prüfung von WP-165); Symptom bereits in docs/acceptance/abn-01.md (Änderung nach dem Einfrieren, 2026-10-26: „Diese Liste kennt keinen Filter `ci_id`“, install-smoke auf PR #94 „Expected: 0, Received: 58“) · **Betroffene Anforderungen:** API-01, API-02 · **Komponente:** backend/internal/relationship/relationship.go (`Handler.List`, Zeilen 862-885 auf `e5c2d86`: liest nur `chi.URLParam(r, "id")` und die Paginierung), backend/internal/relationship/pg_repository.go (`List`/`listEdges`: nur der Filter auf ein CI des Pfads), api/openapi.yaml (`listRelationships`: `rel_type` als Enum `RelationshipType`, das die Typen des Katalogs und die projizierten Typen nicht abdeckt) · **Quelle:** Probe über `relationship.Handler` mit `PGRepository` und dem Typkatalog (`relationshiptype.PGRepository`) wie in `server.NewRouter`, org-weiter und auf Client 1 beschränkter Principal über `database.ContextWithTenantScope`
+- **Reproduktion:** Organisation mit CIs ci1, ci2, ci3 (Client 1), ci4 (Client 2), Kanten ci1→ci2 `connected_to`, ci2→ci3 `depends_on`, ci3→ci1 `connected_to`, ci2→ci4 `hosted_on` und der Projektion `contains` ci1→ci3. `GET /api/v1/relationships?ci_id=<ci1>`, `?ci_id=<unbekannte UUID>`, `?source_ci_id=<ci2>`, `?target_ci_id=<ci1>`, `?rel_type=connected_to` antworten jeweils 200 mit allen fünf Kanten der Organisation; `?ci_id=not-a-uuid` und `?rel_type=no_such_type` ebenso 200 mit allen Kanten. Kein Leck: Ein auf Client 1 beschränkter Principal erhält auch mit `?ci_id=<ci4>` nur die Kanten seines Scopes, die Kante der anderen Organisation erscheint nie. Kontrolle: `GET /api/v1/cis/<ci1>/relationships` filtert richtig.
+- **Soll:** API-01/API-02: Die in `api/openapi.yaml` dokumentierten Filter wirken. `ci_id` liefert die Kanten mit dem CI an einem Ende, `source_ci_id`/`target_ci_id` die mit dem CI an diesem Ende, `rel_type` die des Typs; die Filter kombinieren sich. Ein unbekanntes oder unsichtbares CI liefert eine leere Liste; ein Filterwert, der keine UUID ist, und ein unbekannter Typ sind 400 (RFC 7807). Der Tenant-Scope bleibt unverändert.
+- **Ist:** `Handler.List` bedient beide Routen und reicht nur die Pfad-ID an `repo.List` weiter; die Query-Parameter werden nicht gelesen. Ohne Pfad-ID listet `listEdges` alle gespeicherten und projizierten Kanten des Scopes. Die Middleware `OpenAPIValidation` prüft nur Pflicht-Query-Parameter, nicht das Enum von `rel_type`.
+- **Nutzerwirkung:** Gering, kein Leck: Ein API-Client, der den Filter laut Spezifikation nutzt, erhält alle Beziehungen der Organisation statt der eines CI oder Typs und zieht falsche Schlüsse (der ABN-01-Negativfall zählte 58 statt 0 Beziehungen und musste auf `/cis/{id}/relationships` umgestellt werden). Große Organisationen laden unnötig alle Kanten.
+- **Ursache (belegt):** Die Filter wurden mit WP-165 in die Spezifikation aufgenommen, aber nie im Handler oder Repository umgesetzt; der Handler der Org-Liste ist derselbe wie der der CI-Liste. Kein Test fragte `/relationships` mit Filtern ab.
+- **Empfehlung:** `Handler.List` liest für `/relationships` die vier Filter, prüft die CI-IDs als UUID und `rel_type` gegen den Typkatalog (wie beim Anlegen; der Katalog enthält die projizierten Typen) und gibt einen `ListFilter` an `Repository.ListFiltered`. `listEdges` hängt die Filter als Gleichheiten an jeden Zweig (gespeichert und projiziert), damit der Planer sie in die Projektion schiebt; der CI-Filter nutzt die Zweige je Ende aus WP-609. Spezifikation zuerst: `rel_type` als Katalogschlüssel (string) mit 400 für unbekannte, `format: uuid` und 400 für die CI-Filter.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestListHonoursDocumentedQueryFilters$' ./internal/relationship/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: jeder Filter und jede Kombination liefert genau die erwarteten gespeicherten Kanten und die Projektion `contains`, `total` passt; unbekanntes CI und CI der anderen Organisation leer; der Client-1-Principal sieht die Kante zum Client-2-CI über keinen Filter; `ci_id`/`source_ci_id`/`target_ci_id` ohne UUID-Form und `rel_type` unbekannt oder mit NUL-Byte → 400 `application/problem+json` mit dem Feld. `TestRelationshipListPlanBudget` bleibt grün.
+- **Kodierender Test:** backend/internal/relationship/pg_repository_integration_test.go (`TestListHonoursDocumentedQueryFilters`); auf `e5c2d86` rot (ausgeführt auf der Basis `c9c14a8`; `internal/relationship` dort identisch mit `e5c2d86`), Auszug (die Kanten-IDs sind je Lauf zufällig):
+
+  ```text
+  === RUN   TestListHonoursDocumentedQueryFilters
+      pg_repository_integration_test.go:900: ci_id of ci1 (either end): 200, stored edges [036a1444-b2ec-421e-9dd1-4483482fd056 1505f8ef-35bb-4dcd-a1d5-38c893192575 5f6bad28-fed9-45d3-81d7-3027e75889c3 efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (projected contains ci1 → ci3: true), want [036a1444-b2ec-421e-9dd1-4483482fd056 efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (true)
+      pg_repository_integration_test.go:900: source_ci_id of ci2: 200, stored edges [036a1444-b2ec-421e-9dd1-4483482fd056 1505f8ef-35bb-4dcd-a1d5-38c893192575 5f6bad28-fed9-45d3-81d7-3027e75889c3 efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (projected contains ci1 → ci3: true), want [1505f8ef-35bb-4dcd-a1d5-38c893192575 5f6bad28-fed9-45d3-81d7-3027e75889c3] (false)
+      pg_repository_integration_test.go:900: target_ci_id of ci1: 200, stored edges [036a1444-b2ec-421e-9dd1-4483482fd056 1505f8ef-35bb-4dcd-a1d5-38c893192575 5f6bad28-fed9-45d3-81d7-3027e75889c3 efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (projected contains ci1 → ci3: true), want [efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (false)
+      pg_repository_integration_test.go:900: rel_type connected_to: 200, stored edges [036a1444-b2ec-421e-9dd1-4483482fd056 1505f8ef-35bb-4dcd-a1d5-38c893192575 5f6bad28-fed9-45d3-81d7-3027e75889c3 efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (projected contains ci1 → ci3: true), want [036a1444-b2ec-421e-9dd1-4483482fd056 efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (false)
+      pg_repository_integration_test.go:900: ci_id unknown: 200, stored edges [036a1444-b2ec-421e-9dd1-4483482fd056 1505f8ef-35bb-4dcd-a1d5-38c893192575 5f6bad28-fed9-45d3-81d7-3027e75889c3 efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (projected contains ci1 → ci3: true), want [] (false)
+      pg_repository_integration_test.go:900: client 1: ci_id of the client-2 CI: 200, stored edges [036a1444-b2ec-421e-9dd1-4483482fd056 1505f8ef-35bb-4dcd-a1d5-38c893192575 efb7f1d0-cb3e-4310-9a0d-eacce7a88e9d] (projected contains ci1 → ci3: true), want [] (false)
+      (… 10 weitere Filterfälle ebenso: ci_id of ci2, target_ci_id of ci3, rel_type contains, ci_id and rel_type, source and target, ci_id of the other organization, rel_type without an edge, client 1: target_ci_id/rel_type hosted_on/source_ci_id …)
+      pg_repository_integration_test.go:920: GET &ci_id=not-a-uuid: 200 "application/json" field "", want 400 problem+json on ci_id
+      pg_repository_integration_test.go:920: GET &source_ci_id=c0de06a0-0000-4000-8000-000000001001x: 200 "application/json" field "", want 400 problem+json on source_ci_id
+      pg_repository_integration_test.go:920: GET &target_ci_id=1: 200 "application/json" field "", want 400 problem+json on target_ci_id
+      pg_repository_integration_test.go:920: GET &rel_type=no_such_type: 200 "application/json" field "", want 400 problem+json on rel_type
+      pg_repository_integration_test.go:920: GET &rel_type=a%00b: 200 "application/json" field "", want 400 problem+json on rel_type
+  --- FAIL: TestListHonoursDocumentedQueryFilters (0.79s)
   FAIL
   ```
 

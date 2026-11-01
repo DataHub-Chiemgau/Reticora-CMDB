@@ -763,7 +763,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List relationships */
+    /**
+     * List relationships
+     * @description The stored and the projected relationships of the caller's tenant scope. The filters combine (all must hold); a filter without value does not filter. A CI that is unknown or outside the scope lists nothing (API-01, F-402).
+     */
     get: operations['listRelationships'];
     put?: never;
     /**
@@ -13071,11 +13074,14 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
-        /** @description Return relationships where the CI is either the source or target. */
+        /** @description Return relationships where the CI is either the source or target. Not a UUID → 400. */
         ci_id?: string;
+        /** @description Return relationships whose source is the CI. Not a UUID → 400. */
         source_ci_id?: string;
+        /** @description Return relationships whose target is the CI (projected mounted_in and located_in have none). Not a UUID → 400. */
         target_ci_id?: string;
-        rel_type?: components['schemas']['RelationshipType'];
+        /** @description Return relationships of this type: a key of the relationship type catalogue the organization sees (GET /api/v1/relationship-types), the projected types contains, mounted_in and located_in included. A key the catalogue does not know → 400. */
+        rel_type?: string;
       };
       header?: never;
       path?: never;
@@ -13092,6 +13098,7 @@ export interface operations {
           'application/json': components['schemas']['RelationshipListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };

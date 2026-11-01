@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-669 | 15 | 11,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-673 | 17 | 13,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **317** | **412,5** | |
+| **Summe** | | **319** | **414,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>15 WPs · 11,5 PT"]
+    K7N["K7-Nachträge<br/>17 WPs · 13,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -436,6 +436,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-668](#wp-668--service-account-keys-tragen-den-scope-ihres-erzeugers-spätere-rollen-des-accounts-erweitern-einen-gebundenen-key-nicht-über-den-erzeuger-hinaus) | `k7n-bound-key-creator-scope` | Service-Account-Keys tragen den Scope ihres Erzeugers: spätere Rollen des Accounts erweitern einen gebundenen Key nicht über den Erzeuger hinaus | K7N | 1,5 | F-397 | WP-069, WP-354, WP-355, WP-359, WP-601 |
 | [WP-667](#wp-667--rollendefinition-rechte-entfernen-und-rollen-löschen-nur-mit-der-entzugs-obergrenze-jeder-zuweisung) | `k7n-role-definition-ceiling` | Rollendefinition: Rechte entfernen und Rollen löschen nur mit der Entzugs-Obergrenze jeder Zuweisung | K7N | 1,0 | F-396 | WP-355, WP-394, WP-395 |
 | [WP-669](#wp-669--standardrollen-seed-rechte-nicht-entfernbar-409-rechteliste-antwort-und-audit-zeigen-die-wirksamen-rechte) | `k7n-standard-role-permissions` | Standardrollen: Seed-Rechte nicht entfernbar (409), Rechteliste, Antwort und Audit zeigen die wirksamen Rechte | K7N | 0,5 | F-398 | WP-046, WP-363, WP-394, WP-505, WP-667 |
+| [WP-672](#wp-672--leere-suche-historie-verfügbarkeit-und-compliance-score-antworten-mit--statt-null-sweep-aller-get-listen) | `k7n-search-empty-array` | Leere Suche, Historie, Verfügbarkeit und Compliance-Score antworten mit `[]` statt `null`; Sweep aller GET-Listen | K7N | 0,5 | F-401 | WP-164, WP-466 |
+| [WP-673](#wp-673--beziehungsliste-dokumentierte-filter-ci_id-source_ci_id-target_ci_id-und-rel_type-wirken-ungültige-werte-400) | `k7n-relationship-list-filters` | Beziehungsliste: dokumentierte Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken; ungültige Werte 400 | K7N | 1,0 | F-402 | WP-165, WP-609 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19205,6 +19207,118 @@ AUD-07;[B];B;backend/internal/permission/standard_role_permissions_integration_t
 **Entscheidungsbedarf:** keiner (Entscheidung zwischen 409 und „jsonb folgt“ im Rahmen von RBA-02 und E-13 getroffen, siehe F-398 Empfehlung; die Matrix selbst ändert sich nicht).
 
 **Nicht Bestandteil:** Obergrenze beim Entfernen (WP-667); das Speicher-Repository (`--no-db`) kennt keine Seeds und bleibt unverändert; Änderungen der Rollenmatrix; eine Bereinigung von `role_permission`-Altbeständen per Migration (die Lesepfade zeigen die Vereinigung, der nächste PUT schreibt die Zeilen).
+
+### WP-672 – Leere Suche, Historie, Verfügbarkeit und Compliance-Score antworten mit `[]` statt `null`; Sweep aller GET-Listen
+
+**Schlüssel:** `k7n-search-empty-array` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-164 (`c-pagination`), WP-466 (`t2-pagination-core`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-401](../../../audit/g1-reaudit/FINDINGS.md#f-401) | P3 | Suche ohne Treffer antwortet `"data": null` statt `[]`; ebenso Historie ohne Änderungen, Verfügbarkeitsprojektion und `results` des Compliance-Scores | schließt | Wiederholungsprüfung von WP-164 (K7) auf `e5c2d86` |
+
+**Problem:** F-214/WP-164 hat die Normalisierung leerer Listen in `api.ListResponse.MarshalJSON` gelegt. Antworten mit eigenem Typ oder als Map laufen nicht durch sie: `GET /api/v1/search` ohne Treffer (kein passender Text, kein Treffer des Typs, ein Client-2-Principal mit Treffern nur in Client 1) antwortet `{"data":null,"total":0}`, weil `filterAllowed` mit `hits[:0]` das nil-Slice des Backends übernimmt; `SearchResponse.data` ist ein Pflicht-Array. Der Sweep aller GET-Operationen der Spezifikation findet dieselbe Klasse in `GET /api/v1/history/{asset|relationship|reservation|composition}/{id}` (`HistoryListResponse`), `GET /api/v1/inventory/availability`, `results` von `GET /api/v1/compliance/score` und im Modus `--no-db` in der Historie von CI und Standort sowie den Unterlisten `/trainings/{id}/assignments`, `/keys/{id}/assignments`, `/desks/{id}/bookings`, `/maintenance-windows/{id}/notifications` (F-401).
+
+**Akzeptanzkriterien:**
+
+- [ ] `GET /api/v1/search` ohne sichtbaren Treffer antwortet 200 mit `"data": []`: kein passender Text, mit `type=ci`, ein Typ ohne Treffer und ein auf Client 2 beschränkter Principal, dessen Treffer alle in Client 1 liegen; Kontrolle: der org-weite Aufrufer findet das Client-1-CI. `filterAllowed` liefert nie nil.
+- [ ] Die Historie jedes Entitätstyps ohne Änderungen antwortet `"data": []`, `GET /api/v1/compliance/score` ohne Ergebnisse `"results": []`, `GET /api/v1/inventory/availability` ohne Projektion `"data": []`, die Unterlisten der P2-Module auch über die Memory-Repositories `"data": []` (Helfer `api.NonNilSlice`). Form und übrige Felder der Antworten bleiben unverändert; keine Änderung der Spezifikation.
+- [ ] `TestEmptyListsAnswerAnEmptyDataArray` (erweitert um `/api/v1/search?q=no-such-text`, `&type=ci`, Historie und P2-Unterlisten), `TestEmptyResponsesAnswerArraysOverPostgres` (jede GET-Operation von `api/openapi.yaml` über PostgreSQL, Pfadparameter als unbekannte UUID, mindestens 100 Antworten 200) und `TestSearchWithoutHitsAnswersAnEmptyArray` sind auf `e5c2d86` rot (`null`) und mit der Korrektur grün, die neuen Tests auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1` der geänderten Pakete und von `./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (14 Einträge):**
+
+- backend/internal/api/api.go
+- backend/internal/search/handler.go
+- backend/internal/history/handler.go
+- backend/internal/compliance/evaluator.go
+- backend/internal/reservation/handler.go
+- backend/internal/training/handler.go
+- backend/internal/keymgmt/handler.go
+- backend/internal/desk/handler.go
+- backend/internal/maintenance/handler.go
+- backend/internal/server/pagination_test.go
+- backend/internal/server/empty_arrays_integration_test.go
+- backend/internal/search/empty_page_integration_test.go
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Suche filtert weiter unter dem Tenant-Scope des Aufrufers (Policy von `search_document`) und nach dem Leserecht je Typ; geändert ist nur die Kodierung der leeren Seite.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestEmptyListsAnswerAnEmptyDataArray$|^TestEmptyResponsesAnswerArraysOverPostgres$' ./internal/server/` und `go test -count=1 -run '^TestSearchWithoutHitsAnswersAnEmptyArray$' ./internal/search/`, die neuen Tests außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/api/... ./internal/search/... ./internal/history/... ./internal/compliance/... ./internal/reservation/... ./internal/training/... ./internal/keymgmt/... ./internal/desk/... ./internal/maintenance/... ./internal/server/...`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-672
+API-02;[B];C;backend/internal/server/empty_arrays_integration_test.go;WP-672
+API-02;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
+SRC-01;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** `cls`, `sts` und `tms` von `GET /api/v1/me` und `/api/v1/auth/me` (`null` ist dort für die ganze Organisation dokumentiert, `SessionClaims`); Unterlisten unter einem existierenden Elternobjekt, die der Sweep mit unbekannten IDs nicht erreicht (ihre PostgreSQL-Repositories legen das Ergebnis als leeres Slice an); F-402 (WP-673, `k7n-relationship-list-filters`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-673 – Beziehungsliste: dokumentierte Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken; ungültige Werte 400
+
+**Schlüssel:** `k7n-relationship-list-filters` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-165 (`c-filters`), WP-609 (`k3n-relationships-arms`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-402](../../../audit/g1-reaudit/FINDINGS.md#f-402) | P3 | `GET /api/v1/relationships` ignoriert die dokumentierten Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` | schließt | Wiederholungsprüfung von WP-165 (K7) auf `e5c2d86` |
+
+**Problem:** `Handler.List` (backend/internal/relationship/relationship.go) bedient `/api/v1/relationships` und `/api/v1/cis/{id}/relationships` und liest nur die Pfad-ID und die Paginierung. Die in `api/openapi.yaml` dokumentierten Query-Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken nicht: Jeder Filter, auch eine unbekannte oder ungültige ID und ein unbekannter Typ, liefert 200 mit allen Beziehungen der Organisation im Scope des Aufrufers (kein Leck). Das Symptom ist in docs/acceptance/abn-01.md (2026-10-26) vermerkt; der ABN-01-Negativfall wurde damals auf `/cis/{id}/relationships` umgestellt. Das Enum `RelationshipType` des Parameters `rel_type` deckt die Typen des Katalogs (z. B. `runs_on`, `uplink_to`, eigene Typen) und die projizierten (`contains`, `mounted_in`, `located_in`) nicht ab, die die Liste liefert (F-402).
+
+**Akzeptanzkriterien:**
+
+- [ ] `GET /api/v1/relationships` wendet `ci_id` (CI an einem Ende), `source_ci_id`, `target_ci_id` und `rel_type` auf die gespeicherten und die projizierten Kanten an; die Filter kombinieren sich, ein leerer Wert filtert nicht, `total` zählt die gefilterte Menge. Ein unbekanntes CI und ein CI einer anderen Organisation liefern eine leere Liste.
+- [ ] `ci_id`, `source_ci_id` oder `target_ci_id`, die keine UUID sind, und ein `rel_type`, den der Typkatalog der Organisation nicht kennt (oder mit NUL-Byte), antworten 400 `application/problem+json` mit dem Feld. Die projizierten Typen sind filterbar.
+- [ ] Der Tenant-Scope bleibt unverändert (RLS auf `ci_relationship` und `ci`): Ein auf Client 1 beschränkter Principal sieht die Kante zu einem Client-2-CI über keinen Filter; die Kante einer anderen Organisation erscheint nie. `GET /api/v1/cis/{id}/relationships` bleibt unverändert; `TestRelationshipListPlanBudget` (NFR-02, WP-609) grün.
+- [ ] Spec-first: `api/openapi.yaml` beschreibt die Filter, `format: uuid` und 400 für die CI-Filter, `rel_type` als Schlüssel des Typkatalogs (string) mit 400 für unbekannte, und die 400-Antwort; `frontend/src/api/generated/schema.d.ts` neu erzeugt; `npx tsc --noEmit -p .` grün.
+- [ ] `TestListHonoursDocumentedQueryFilters` ist auf `e5c2d86` rot (alle Kanten, 200 statt 400) und mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Die eingefrorenen ABN-01-Artefakte bleiben unverändert (`sha256sum -c docs/acceptance/artefakte/SHA256SUMS`); docs/acceptance/abn-01.md erhält einen datierten Nachtrag. frontend/e2e-real/tenant-isolation.spec.ts (`/relationships?ci_id=<CI von A>` als B → leer) prüft mit wirkendem Filter weiter, was es soll, und bleibt unverändert.
+- [ ] Regression: `go test -p 1 ./internal/relationship/... ./internal/relationshiptype/... ./internal/topology/... ./internal/graphqlbff/... ./internal/middleware/... ./internal/server/... ./internal/tenant/rls/...` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/relationship/relationship.go
+- backend/internal/relationship/pg_repository.go
+- backend/internal/relationship/pg_repository_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/acceptance/abn-01.md
+- docs/traceability.csv
+- frontend/e2e-real/tenant-isolation.spec.ts (geprüft, unverändert)
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Filter sind Gleichheiten auf jedem Zweig von `listEdges` (gespeichert und projiziert) unter `WithRequestTenant`; die Sichtbarkeit bleibt die der Policies von `ci_relationship` und `ci`.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestListHonoursDocumentedQueryFilters$|^TestRelationshipListPlanBudget$' ./internal/relationship/`, der neue Test außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/relationship/... ./internal/server/...`; `cd frontend && npm run generate:api && npx tsc --noEmit -p .`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-01;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
+API-02;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
+```
+
+**Entscheidungsbedarf:** keiner. Hinweis: `rel_type` wird wie beim Anlegen gegen den Typkatalog geprüft, nicht gegen das Enum `RelationshipType`; das Enum von `CreateRelationshipRequest` und `Relationship` bleibt unverändert (es deckt die Katalog- und projizierten Typen ebenfalls nicht ab; kein Befund dieses WPs).
+
+**Nicht Bestandteil:** Filter für `GET /api/v1/cis/{id}/relationships` (nicht dokumentiert); das Enum `RelationshipType` der Schemas `Relationship` und `CreateRelationshipRequest`; der Real-Stack-Lauf von frontend/e2e-real/tenant-isolation.spec.ts (nur in CI); F-401 (WP-672, `k7n-search-empty-array`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
 
 ## Zurückgestellte Befunde
 
