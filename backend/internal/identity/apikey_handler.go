@@ -175,7 +175,9 @@ func userPrincipal(w http.ResponseWriter, r *http.Request) (Principal, bool) {
 
 // Create issues a key for the calling user. The key's permissions must be a
 // subset of the caller's; at use the key holds the intersection with its
-// owner's then current rights (AUT-04).
+// owner's then current rights (AUT-04). A key bound to a service account
+// records the caller's scope of its permissions; at use it holds the
+// account's then current rights within that scope (F-397).
 func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	p, ok := userPrincipal(w, r)
 	if !ok {
@@ -233,11 +235,17 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 		return
 	}
-	created, err := h.keys.Create(r.Context(), &StoredAPIKey{
+	key := &StoredAPIKey{
 		OrganizationID: p.OrganizationID, Name: req.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 		Environment: generated.Environment, Permissions: req.Permissions, CreatedBy: p.Subject, ExpiresAt: req.ExpiresAt,
 		ServiceAccountID: req.ServiceAccountID,
-	})
+	}
+	if key.ServiceAccountID != nil {
+		// The account's later roles never take the key beyond the scope
+		// the caller holds now (F-397).
+		key.CreatorScope = creatorScopeOf(&p, req.Permissions)
+	}
+	created, err := h.keys.Create(r.Context(), key)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return

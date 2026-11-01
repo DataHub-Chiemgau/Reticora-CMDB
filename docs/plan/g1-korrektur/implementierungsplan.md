@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-666 | 12 | 8,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-668 | 13 | 10,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **314** | **409,5** | |
+| **Summe** | | **315** | **411,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>12 WPs · 8,5 PT"]
+    K7N["K7-Nachträge<br/>13 WPs · 10,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -433,6 +433,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-664](#wp-664--benutzerlöschung-beendet-jeden-zugang-wie-die-deaktivierung-in-der-transaktion-der-löschung-audit-userdeleted) | `k7n-user-delete-ends-access` | Benutzerlöschung beendet jeden Zugang wie die Deaktivierung, in der Transaktion der Löschung; Audit `user.deleted` | K7N | 1 | F-393 | WP-042, WP-359, WP-571, WP-648 |
 | [WP-665](#wp-665--metrik-ingest-unsichtbare-oder-unbekannte-ci_id-404-statt-500-batch-alles-oder-nichts-dokumentiert-api-und-edge) | `k7n-metric-ingest-errors` | Metrik-Ingest: unsichtbare oder unbekannte ci_id 404 statt 500, Batch alles oder nichts dokumentiert (API und Edge) | K7N | 0,5 | F-394 | WP-343, WP-344, WP-426 |
 | [WP-666](#wp-666--login-organisationsattribut-ohne-organisation-erhält-401-login-no-organization-statt-502) | `k7n-login-unknown-org` | Login: Organisationsattribut ohne Organisation erhält 401 login-no-organization statt 502 | K7N | 0,5 | F-395 | WP-570, WP-637 |
+| [WP-668](#wp-668--service-account-keys-tragen-den-scope-ihres-erzeugers-spätere-rollen-des-accounts-erweitern-einen-gebundenen-key-nicht-über-den-erzeuger-hinaus) | `k7n-bound-key-creator-scope` | Service-Account-Keys tragen den Scope ihres Erzeugers: spätere Rollen des Accounts erweitern einen gebundenen Key nicht über den Erzeuger hinaus | K7N | 1,5 | F-397 | WP-069, WP-354, WP-355, WP-359, WP-601 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19025,6 +19026,71 @@ AUT-01;[B];B;frontend/src/pages/auth/CallbackPage.test.tsx;WP-666
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** eine Vorabprüfung der Organisation im Callback (die Existenz ergibt sich weiter aus dem Fremdschlüssel); ein Login mit unbekannter Organisation ohne verifizierte E-Mail (antwortet bereits vor der Einfügung 403 `login-not-admitted`, kein 5xx); gesperrte oder gekündigte Organisationen; weitere Befunde der Wiederholungsprüfung.
+
+### WP-668 – Service-Account-Keys tragen den Scope ihres Erzeugers: spätere Rollen des Accounts erweitern einen gebundenen Key nicht über den Erzeuger hinaus
+
+**Schlüssel:** `k7n-bound-key-creator-scope` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-069 (Service-Accounts, gebundene Keys), WP-354 (Binden nur im Scope des Erzeugers, F-007), WP-355 (Rollen eines Service-Accounts nur im Scope des Aufrufers, F-008), WP-359 mit E-64 (Service-Account-Keys überleben die Deaktivierung ihres Erzeugers), WP-601 mit E-98 (Scope-Snapshot der Webhook-Abos)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-397](../../../audit/g1-reaudit/FINDINGS.md#f-397) | P1 | Ein API-Key, den ein client-beschränkter Erzeuger an einen Service-Account bindet, wird org-weit, sobald ein org-weiter Administrator dem Account später org-weite Rollen gibt | schließt | Wiederholungsprüfung K7 (Verifikation `r1-b4`, K-2 zu WP-069) auf `e5c2d86` |
+
+**Problem:** `authorizeBinding` (`backend/internal/identity/apikey_handler.go:337` auf `e5c2d86`) prüft den Scope des Erzeugers nur beim Binden gegen die Rechte, die der Service-Account in diesem Moment hat; ein aktiver Account ohne Rollen ergibt eine leere Schnittmenge, die Prüfung besteht trivial. `Validate` (`backend/internal/identity/apikey.go:224-245`) löst für einen gebundenen Key bei jeder Anfrage nur `ServiceAccountGrants` auf. Gibt ein org-weiter Administrator dem Account später org-weite Rollen (`PUT /api/v1/service-accounts/{id}/roles`), liest ein Key, den ein auf Client 1 beschränkter `org_admin` gebunden hat, alle Clients (Fall A: Account ohne Rollen; Fall B: Account mit `viewer` für Client 1). Ein neuer Key an den erweiterten Account wird korrekt mit 403 abgewiesen (F-007). Für Webhook-Abos desselben WP hat E-98 entschieden, dass ein gebundener Account den Scope des Erzeugers nicht erweitert (Snapshot, Migration 000155); API-Keys tragen keinen solchen Snapshot.
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000185 legt `api_key.creator_scope JSONB` an (NULL = kein Snapshot; CHECK: nur bei gebundenen Keys und nur als JSON-Objekt). Beim Binden (`POST /api/v1/api-keys` mit `service_account_id`) speichert der Handler je Key-Recht den Client-, Site- und Team-Scope, in dem der Aufrufer es hält (derselbe Scope, den `GrantCeiling` prüft); der Audit-Eintrag `api_key.created` nennt ihn. Ungebundene Keys bleiben unverändert (aktuelle Rechte des Eigentümers, AUT-04).
+- [ ] `Validate` schneidet bei jeder Anfrage eines gebundenen Keys die aktuellen Rechte des Accounts mit dem Snapshot: Rechte außerhalb des Snapshots entfallen, je Recht gilt der Schnitt der Scopes, der Tenant-Scope liegt innerhalb der Vereinigung der Erzeuger-Scopes. Einschränkungen des Accounts wirken sofort; der Key bleibt bei Entzug der Rechte oder Deaktivierung des Erzeugers gültig (E-64). Eine Rotation übernimmt den Snapshot. Ein unlesbarer Snapshot führt zu 503 statt zu den ungeschnittenen Rechten (fail-closed).
+- [ ] Keys, die vor 000185 gebunden wurden (kein Snapshot), handeln höchstens mit den aktuellen Rechten ihres Erzeugers aus seinen Rollenzuweisungen (org-weit nur für einen org-weiten Erzeuger; ohne Zuweisung oder ohne Owner-Resolver nichts). `docs/betrieb/upgrade-hinweise.md` beschreibt das, die Abfrage der betroffenen Keys, die Neubindung als Abhilfe und den Rollback.
+- [ ] `TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening` (`backend/internal/identity/apikey_authz_integration_test.go`, PostgreSQL als Runtime-Login, Lesen der CIs unter RLS mit dem Tenant-Scope aus `middleware.TenantScopeFor`): Fälle A und B lesen nach der Erweiterung nur das CI aus Client 1; neuer Key an den erweiterten Account 403; Key des org-weiten Administrators liest beide; Nachfolger einer Rotation nur Client 1; nach Entzug der Rollen und Deaktivierung des Erzeugers weiter Client 1; nach Entzug der Rollen des Accounts nichts; Key ohne Snapshot folgt den aktuellen Rechten seines Erzeugers. Auf `e5c2d86` rot (der Key liest das CI aus Client 2).
+- [ ] Unittest `TestBoundKeyCreatorCeiling` (`backend/internal/identity/ceiling_test.go`): Schnitt je Recht (Erzeuger `ci:read` org-weit, `ci:write` für Client 1), Site-Snapshot gegen Client-Account, `Validate` mit Snapshot, ohne Snapshot und ohne Owner-Resolver.
+- [ ] `TestAuditT2KeyBindingNeverBroadensCreatorScope`, `TestAPIKeyBindingAuthorization`, `TestAPIKeyRotateRevokeAuthorization`, `TestAPIKeyLifecycle` und `TestDeactivationRevokesServiceAccountKeysOfCreator` bleiben grün.
+- [ ] `api/openapi.yaml` (`createAPIKey`, `service_account_id` in `APIKey` und `CreateAPIKeyRequest`) beschreibt den Erzeuger-Scope; `npm run generate:api` übernimmt die Beschreibungen in `frontend/src/api/generated/schema.d.ts`.
+- [ ] `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün, `docs/schema-baseline.md` mit `RETICORA_UPDATE_SCHEMA_BASELINE=1` erzeugt; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (17 Einträge):**
+
+- backend/migrations/000185_api_key_creator_scope.up.sql
+- backend/migrations/000185_api_key_creator_scope.down.sql
+- backend/internal/identity/apikey.go
+- backend/internal/identity/apikey_handler.go
+- backend/internal/identity/apikey_store.go
+- backend/internal/identity/apikey_authz_integration_test.go
+- backend/internal/identity/ceiling_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/betrieb/upgrade-hinweise.md
+- docs/schema-baseline.md
+- docs/security/review-g1.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/plan/g1-korrektur/entscheidungen.md (nur falls der Lead die Übergangsregel für Alt-Keys als Entscheidung festhält)
+- docs/traceability.csv
+
+**Migration/RLS:** Migration 000185 (Nummer vorläufig, der Lead nummeriert bei der Integration): neue Spalte `api_key.creator_scope JSONB` mit CHECK `api_key_creator_scope_check`; keine Datenänderung, bestehende Keys behalten NULL. RLS von `api_key` (`org_isolation`, `api_key_system_select`) unverändert; die Identifikation per Präfix liest die Spalte in der bestehenden System-Lesetransaktion mit. Der Schnitt geschieht in `Validate` vor dem Aufbau des Principals; Tenant-GUCs, Routen und Policies bleiben unverändert und erhalten nur einen engeren Scope.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/identity/... ./internal/user/... ./internal/server/... ./internal/tenant/... ./internal/middleware/... ./internal/permission/...` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`; `./internal/database/...` allein (Roundtrip, Schema-Baseline).
+- `go test -count=1 -v -run '^(TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening|TestBoundKeyCreatorCeiling)$' ./internal/identity/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RBA-08;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+AUT-04;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+AUT-04;[B];B;backend/internal/identity/ceiling_test.go;WP-668
+TEN-09;[Q];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+```
+
+**Entscheidungsbedarf:** keiner für das Kernverhalten; es folgt E-98 (gebundener Service-Account erweitert den Scope des Erzeugers nicht) und lässt E-64 unverändert (Key gehört dem Account, überlebt die Deaktivierung des Erzeugers). Für Alt-Keys ohne Snapshot gilt die fail-closed-Regel „höchstens die aktuellen Rechte des Erzeugers“ (in der Aufgabe als zulässige Variante genannt); verliert der Erzeuger seine Rollenzuweisungen, gewährt ein solcher Key nichts mehr, bis er neu gebunden ist. Soll das für Alt-Keys anders geregelt werden (z. B. einmaliges Einfrieren des aktuellen Erzeuger-Scopes per Migration), wäre das eine Entscheidung des Lead/Auftraggebers.
+
+**Nicht Bestandteil:** Anzeige des Erzeuger-Scopes in der API-Key-Liste oder UI (`creator_scope` wird nicht ausgeliefert; die Upgrade-Hinweise nennen die SQL-Abfrage); Neuberechnung des Snapshots bei der Rotation (der Nachfolger übernimmt ihn bzw. den fehlenden Snapshot); der Union-Scope ungebundener Keys über alle Rollen des Eigentümers (entspricht dem Scope seiner Sitzung, E-70); Webhook-Abos (WP-601); weitere Befunde der Wiederholungsprüfung.
 
 ## Zurückgestellte Befunde
 

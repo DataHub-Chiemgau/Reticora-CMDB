@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -29,20 +30,40 @@ func NewPGAPIKeyStore(pool *pgxpool.Pool) *PGAPIKeyStore {
 }
 
 const apiKeyColumns = `id, organization_id, name, key_hash, key_prefix, environment, permissions,
-	created_by, service_account_id, rotated_from, expires_at, revoked_at, last_used_at, created_at`
+	created_by, service_account_id, creator_scope, rotated_from, expires_at, revoked_at, last_used_at, created_at`
 
 func scanAPIKey(row pgx.Row) (*StoredAPIKey, error) {
 	var key StoredAPIKey
 	var permissions []string
+	var creatorScope []byte
 	if err := row.Scan(&key.ID, &key.OrganizationID, &key.Name, &key.KeyHash, &key.KeyPrefix, &key.Environment,
-		&permissions, &key.CreatedBy, &key.ServiceAccountID, &key.RotatedFrom, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &key.CreatedAt); err != nil {
+		&permissions, &key.CreatedBy, &key.ServiceAccountID, &creatorScope, &key.RotatedFrom, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &key.CreatedAt); err != nil {
 		return nil, err
 	}
 	key.Permissions = make([]Permission, len(permissions))
 	for i, p := range permissions {
 		key.Permissions[i] = Permission(p)
 	}
+	if creatorScope != nil {
+		// An unreadable snapshot fails closed: the lookup errs (503) instead
+		// of granting the account's rights unbounded.
+		if err := json.Unmarshal(creatorScope, &key.CreatorScope); err != nil {
+			return nil, fmt.Errorf("decode api_key creator_scope: %w", err)
+		}
+		if key.CreatorScope == nil {
+			key.CreatorScope = map[Permission]Scope{}
+		}
+	}
 	return &key, nil
+}
+
+// creatorScopeJSON encodes a key's creator scope for the column
+// creator_scope (migration 000185); nil stays NULL.
+func creatorScopeJSON(scope map[Permission]Scope) ([]byte, error) {
+	if scope == nil {
+		return nil, nil
+	}
+	return json.Marshal(scope)
 }
 
 // LookupByPrefix identifies a key by its public prefix (hash index). The key
@@ -81,12 +102,16 @@ func insertAPIKey(ctx context.Context, tx pgx.Tx, key *StoredAPIKey) (*StoredAPI
 	if environment == "" {
 		environment = APIKeyEnvironmentLive
 	}
+	creatorScope, err := creatorScopeJSON(key.CreatorScope)
+	if err != nil {
+		return nil, fmt.Errorf("encode api_key creator_scope: %w", err)
+	}
 	created, err := scanAPIKey(tx.QueryRow(ctx, `
-		INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by, service_account_id, rotated_from, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by, service_account_id, creator_scope, rotated_from, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING `+apiKeyColumns,
 		key.OrganizationID, key.Name, key.KeyHash, key.KeyPrefix, environment,
-		permissionStrings(key.Permissions), key.CreatedBy, key.ServiceAccountID, key.RotatedFrom, key.ExpiresAt))
+		permissionStrings(key.Permissions), key.CreatedBy, key.ServiceAccountID, creatorScope, key.RotatedFrom, key.ExpiresAt))
 	if err != nil {
 		return nil, fmt.Errorf("insert api_key: %w", err)
 	}
@@ -136,9 +161,13 @@ func (s *PGAPIKeyStore) Create(ctx context.Context, key *StoredAPIKey) (*StoredA
 		if created, err = insertAPIKey(ctx, tx, key); err != nil {
 			return err
 		}
-		return recordAPIKeyAudit(ctx, tx, created, "api_key.created", map[string]any{
+		changes := map[string]any{
 			"permissions": permissionStrings(created.Permissions), "environment": created.Environment, "owner": created.CreatedBy,
-		})
+		}
+		if created.CreatorScope != nil {
+			changes["creator_scope"] = created.CreatorScope
+		}
+		return recordAPIKeyAudit(ctx, tx, created, "api_key.created", changes)
 	})
 	return created, err
 }
@@ -256,7 +285,7 @@ type RotatedAPIKey struct {
 }
 
 // Rotate replaces a key: the new key takes over name, permissions, owner,
-// environment and expiry; the old key stays valid until overlapUntil (or its
+// service account, creator scope, environment and expiry; the old key stays valid until overlapUntil (or its
 // own earlier expiry) so clients can switch without downtime (SEC-06). Both
 // changes and the audit entry commit together.
 func (s *PGAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overlapUntil time.Time) (*RotatedAPIKey, error) {
@@ -276,7 +305,7 @@ func (s *PGAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overlapUnt
 		next := &StoredAPIKey{
 			OrganizationID: orgID, Name: old.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 			Environment: old.Environment, Permissions: old.Permissions, CreatedBy: old.CreatedBy,
-			ServiceAccountID: old.ServiceAccountID, RotatedFrom: &old.ID, ExpiresAt: old.ExpiresAt,
+			ServiceAccountID: old.ServiceAccountID, CreatorScope: old.CreatorScope, RotatedFrom: &old.ID, ExpiresAt: old.ExpiresAt,
 		}
 		if created, txErr = insertAPIKey(ctx, tx, next); txErr != nil {
 			return txErr
@@ -401,6 +430,12 @@ func NewMemoryAPIKeyStore() *MemoryAPIKeyStore { return &MemoryAPIKeyStore{} }
 func cloneAPIKey(k *StoredAPIKey) *StoredAPIKey {
 	c := *k
 	c.Permissions = append([]Permission(nil), k.Permissions...)
+	if k.CreatorScope != nil {
+		c.CreatorScope = make(map[Permission]Scope, len(k.CreatorScope))
+		for p, s := range k.CreatorScope {
+			c.CreatorScope[p] = intersectScope(&s, &s)
+		}
+	}
 	return &c
 }
 
@@ -518,7 +553,7 @@ func (m *MemoryAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overla
 	created, err := m.Create(ctx, &StoredAPIKey{
 		OrganizationID: orgID, Name: previous.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 		Environment: previous.Environment, Permissions: previous.Permissions, CreatedBy: previous.CreatedBy,
-		ServiceAccountID: previous.ServiceAccountID, RotatedFrom: &previous.ID, ExpiresAt: expiry,
+		ServiceAccountID: previous.ServiceAccountID, CreatorScope: previous.CreatorScope, RotatedFrom: &previous.ID, ExpiresAt: expiry,
 	})
 	if err != nil {
 		return nil, err

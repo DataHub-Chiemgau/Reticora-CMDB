@@ -356,6 +356,61 @@ Datei endet `up` mit dem Fehler oben und 110 dirty; nach `force 109` läuft
 (`backend/internal/ipam/net01_migration_integration_test.go`) prüft die
 Umbenennung samt doppelt vorhandener Suffixnamen.
 
+## Release-Hinweis: Service-Account-Keys tragen den Scope ihres Erzeugers (F-397)
+
+Stand: 2026-11-01. Umsetzung: WP-668 (Migration 000185). Anforderungen:
+RBA-08, AUT-04, TEN-09.
+
+Ein an einen Service-Account gebundener API-Key handelte bisher mit den
+jeweils aktuellen Rechten des Accounts. Der Scope seines Erzeugers wurde nur
+beim Binden geprüft: Gab ein org-weiter Administrator dem Account später
+org-weite Rollen, las ein Key, den ein auf Client 1 beschränkter Delegierter
+gebunden hatte, alle Clients.
+
+- Neue gebundene Keys speichern in `api_key.creator_scope` je Key-Recht den
+  Client-, Site- und Team-Scope, in dem der Erzeuger es beim Binden hielt
+  (wie der Scope-Snapshot der Webhook-Abos, E-98). Jede Anfrage schneidet
+  die aktuellen Rechte des Accounts damit: Einschränkungen des Accounts
+  wirken sofort, Erweiterungen nur innerhalb des Erzeuger-Scopes. Der Key
+  bleibt bei Deaktivierung des Erzeugers gültig (E-64), eine Rotation
+  übernimmt den Scope.
+- Keys, die vor 000185 gebunden wurden, haben keinen gespeicherten Scope
+  (`creator_scope` NULL): Welchen Scope ihr Erzeuger beim Binden hatte, ist
+  nicht bekannt. Sie handeln ab dem Upgrade höchstens mit den **aktuellen**
+  Rechten ihres Erzeugers aus seinen gespeicherten Rollenzuweisungen
+  (fail-closed). Ein org-weiter Erzeuger behält damit das bisherige
+  Verhalten, ein beschränkter Erzeuger begrenzt den Key auf seinen Scope.
+  Hat der Erzeuger keine Rollenzuweisung mehr (gelöscht, Rollen entzogen,
+  Rechte nur über IdP-Gruppen), gewährt der Key nichts mehr (403). Eine
+  Deaktivierung allein ändert daran nichts, die Rollenzuweisungen bleiben
+  dabei bestehen.
+- Betroffene Keys findet ein Betreiber nach dem Upgrade so (vor dem Upgrade
+  dieselbe Abfrage ohne die letzte Bedingung):
+
+  ```sql
+  SELECT organization_id, id, name, key_prefix, created_by, service_account_id
+    FROM api_key
+   WHERE service_account_id IS NOT NULL AND revoked_at IS NULL
+     AND (expires_at IS NULL OR expires_at > now())
+     AND creator_scope IS NULL;
+  ```
+
+- Soll ein solcher Key unabhängig von seinem Erzeuger weiterlaufen, legt
+  ein Administrator, dessen Scope die gewünschten Rechte deckt, einen neuen
+  Key für den Account an (`POST /api/v1/api-keys` mit `service_account_id`),
+  stellt die Integration um und widerruft den alten Key. Eine Rotation
+  genügt nicht: Der Nachfolger übernimmt den fehlenden Scope.
+- Rollback: `000185_api_key_creator_scope.down.sql` entfernt die Spalte
+  samt den gespeicherten Scopes. Ein früherer Build lässt gebundene Keys
+  dann wieder mit allen Rechten des Accounts handeln (F-397 offen).
+
+`TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening`
+(`backend/internal/identity/apikey_authz_integration_test.go`) prüft beide
+Fälle des Befunds, Rotation, Deaktivierung des Erzeugers, Einschränkung des
+Accounts und einen Key ohne gespeicherten Scope gegen PostgreSQL;
+`TestBoundKeyCreatorCeiling` (`backend/internal/identity/ceiling_test.go`)
+den Schnitt je Recht.
+
 ## Prüfung
 
 `TestMigrationsRoundtrip` (`backend/internal/database/migrations_roundtrip_integration_test.go`)

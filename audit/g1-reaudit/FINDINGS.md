@@ -31,10 +31,10 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | Priorität | Anzahl |
 |---|---:|
 | P0 | 1 |
-| P1 | 3 |
+| P1 | 4 |
 | P2 | 19 |
 | P3 | 18 |
-| **Summe** | **41** |
+| **Summe** | **42** |
 
 ## Übersicht
 
@@ -81,6 +81,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-393](#f-393) | P2 | Gelöschter Benutzer behält bis zum Ablauf seines Tokens Lese- und Schreibzugriff; API-Keys bleiben unwiderrufen, kein Audit-Eintrag `user.deleted` | WP-042 (K7) | belegt | backend/internal/identity/user_deletion_integration_test.go | WP-664 |
 | [F-394](#f-394) | P3 | Metrik-Ingest mit einer für den Aufrufer unsichtbaren oder unbekannten ci_id antwortet 500 statt 404; gemischter Batch verwirft auch die gültige Probe mit 500 | WP-040 (K7) | belegt | backend/internal/tenant/rls/metric_ingest_errors_integration_test.go | WP-665 |
 | [F-395](#f-395) | P3 | OIDC-Login mit einem Organisationsattribut, das keine Organisation bezeichnet, antwortet 502 „the login could not be completed“ mit FK-Fehler im Log statt 401 login-no-organization | WP-043 (K7) | belegt | backend/internal/identity/callback_scope_integration_test.go | WP-666 |
+| [F-397](#f-397) | P1 | Ein API-Key, den ein client-beschränkter Erzeuger an einen Service-Account bindet, wird org-weit, sobald ein org-weiter Administrator dem Account später org-weite Rollen gibt | WP-069 (K7) | belegt | backend/internal/identity/apikey_authz_integration_test.go | WP-668 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -812,6 +813,42 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
           level=ERROR msg="login failed" error="identity: provision user: ensure oidc user: ERROR: insert or update on table \"app_user\" violates foreign key constraint \"app_user_organization_id_fkey\" (SQLSTATE 23503)"
   --- FAIL: TestCallbackUnknownOrganizationIsRefused (0.58s)
   FAIL
+  ```
+
+<a id="f-397"></a>
+### F-397 (P1) – Ein API-Key, den ein client-beschränkter Erzeuger an einen Service-Account bindet, wird org-weit, sobald ein org-weiter Administrator dem Account später org-weite Rollen gibt
+
+- **Gefunden in:** Wiederholungsprüfung K7 (Verifikation `r1-b4`, Prüfkandidat K-2 zu WP-069), von zwei unabhängigen Agenten auf dem RC-Commit `e5c2d86` bestätigt · **Betroffene Anforderungen:** RBA-08, AUT-04, TEN-09 (Soll von WP-069 AK 2 und von F-007/WP-354: „ein gebundener Key ist nie breiter als sein Erzeuger“) · **Komponente:** backend/internal/identity/apikey_handler.go (`authorizeBinding`, Zeile 337 auf `e5c2d86`: Ziel `restrictGrants(grants, perms)` Zeile 358, `GrantCeiling(p, target)` Zeile 360 – nur beim Binden), backend/internal/identity/apikey.go (`Validate`, Zeilen 224-245: ein gebundener Key löst bei jeder Anfrage nur `ServiceAccountGrants` auf, Zeile 232, und übernimmt dessen Scope, Zeilen 240-243), backend/internal/user/service_account.go (`SetServiceAccountRoles`, Zeile 399: prüft nur den Aufrufer, nicht die an den Account gebundenen Keys) · **Quelle:** Verifikationsprobe über den Produktionsrouter (`server.NewRouter`, PG-Repositories, Middleware-Kette, Runtime-Login): `k7/ver/r1-b4/evidence/k-reaudit-1/WP-069/verify-probe-source-vr1b4_probe_test.go.txt` (`TestVerifyK2BoundKeyFollowsLaterServiceAccountRoles`), Log `WP-069/verify-probe-k2-bound-key-later-sa-roles.log`
+- **Reproduktion:** Organisation mit einem org-weiten Administrator (`org_admin` ohne Scope) und einem Delegierten (`org_admin` für Client 1), je ein CI in Client 1 und Client 2.
+  - Fall A: Der Delegierte legt einen Service-Account ohne Rollen an (`POST /api/v1/service-accounts` → 201) und bindet einen Key `{"permissions":["ci:read"],"service_account_id":…}` (`POST /api/v1/api-keys` → 201; ein Account ohne Rollen ergibt eine leere Schnittmenge, die Prüfung besteht trivial). `GET /api/v1/cis` mit dem Key → 403. Der Administrator setzt `PUT /api/v1/service-accounts/{id}/roles` `{"roles":[{"role_id":<viewer>}]}` (org-weit) → 200. Danach liefert `GET /api/v1/cis` mit dem Key des Delegierten 200 mit dem CI aus Client 1 **und** dem aus Client 2.
+  - Fall B: Der Delegierte gibt dem Account `viewer` für Client 1 (200) und bindet einen Key (201); der Key liest nur Client 1. Der Administrator ergänzt `viewer` org-weit (200); danach liest der Key auch Client 2.
+  - Kontrolle: Bindet der Delegierte einen neuen Key an den nun org-weiten Account, antwortet `POST /api/v1/api-keys` 403 „binding the key to the service account would grant ci:read beyond the caller's scope“ (Retest F-007 grün).
+- **Soll:** RBA-08/AUT-04: Ein an einen Service-Account gebundener Key handelt mit den Rechten des Accounts, aber nie mit mehr, als sein Erzeuger beim Binden im jeweiligen Scope hielt (WP-069 AK 2, F-007/WP-354); TEN-09: ein auf Client 1 beschränkter Principal erreicht über keinen von ihm erzeugten Zugang Daten anderer Clients. Analog E-98 für Webhook-Abos desselben WP: „ein gebundener Service-Account erweitert den Scope des Erzeugers nicht“. Der Key folgt Einschränkungen des Accounts und überlebt die Deaktivierung seines Erzeugers (E-64).
+- **Ist:** Der Scope des Erzeugers wird nur in `authorizeBinding` gegen die Rechte geprüft, die der Account **zum Zeitpunkt des Bindens** hat; am Key wird nichts davon gespeichert. `Validate` löst bei jeder Anfrage nur die aktuellen Grants des Accounts auf. Spätere Rollen des Accounts – vergeben von jemandem mit weiterem Scope – gelten damit unmittelbar für jeden schon gebundenen Key, auch für Keys beschränkter Erzeuger.
+- **Nutzerwirkung:** Ein auf einen Client beschränkter Administrator kann sich einen Key verschaffen, der später org-weit liest (bzw. mit jedem Recht des Keys org-weit handelt), sobald ein org-weiter Administrator den Account – etwa für eine Integration – erweitert; der Delegierte muss dafür nur den Account anlegen und früh einen Key binden. Der Administrator, der die Rollen vergibt, sieht nicht, dass dadurch Keys anderer Erzeuger mitwachsen. Mandantentrennung zwischen Clients gebrochen (P1).
+- **Ursache (belegt):** Die Prüfung von F-007/WP-354 ist eine Momentaufnahme beim Binden; der Key trägt keinen Scope seines Erzeugers, und `Validate` schneidet die Rechte des Accounts mit nichts außer den Key-Rechten. Für Webhook-Abos desselben WP wurde dasselbe Problem mit einem Scope-Snapshot des Erzeugers gelöst (Migration 000155, E-98), für API-Keys nicht.
+- **Empfehlung:** Den Scope des Erzeugers beim Binden je Key-Recht am Key speichern (Client-, Site- und Team-Scope, in dem der Erzeuger das Recht hält – derselbe Scope, den `GrantCeiling` prüft) und in `Validate` bei jeder Anfrage mit den aktuellen Rechten des Accounts schneiden: je Recht Schnitt der Scopes, Tenant-Scope innerhalb der Vereinigung der Erzeuger-Scopes. So folgt der Key Einschränkungen des Accounts, überlebt die Deaktivierung des Erzeugers (E-64) und wird nie breiter als der Erzeuger beim Binden; eine Rotation übernimmt den Scope. Bestehende gebundene Keys ohne Snapshot fail-closed behandeln: höchstens mit den aktuellen Rechten ihres Erzeugers (org-weit nur für einen org-weiten Erzeuger), dokumentiert in `docs/betrieb/upgrade-hinweise.md` mit Abfrage der betroffenen Keys und Neubindung als Abhilfe.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening$' ./internal/identity/` mit `TEST_DATABASE_URL` PASS: in Fall A und B liest der vom Client-1-Delegierten gebundene Key nach der org-weiten Erweiterung des Accounts das CI aus Client 1, nie das aus Client 2; Binden eines neuen Keys an den erweiterten Account 403; der vom org-weiten Administrator gebundene Key liest beide CIs; der Nachfolger einer Rotation bleibt auf Client 1; nach Entzug der Rollen und Deaktivierung des Erzeugers liest der Key weiter Client 1; nach Entzug der Rollen des Accounts nichts; ein Key ohne gespeicherten Scope (vor 000185) folgt den aktuellen Rechten seines Erzeugers. `TestAuditT2KeyBindingNeverBroadensCreatorScope`, `TestAPIKeyLifecycle` und `TestDeactivationRevokesServiceAccountKeysOfCreator` bleiben grün.
+- **Kodierender Test:** backend/internal/identity/apikey_authz_integration_test.go (`TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening`, PostgreSQL als Runtime-Login, Rechte wie beim Login aufgelöst, Tenant-Scope über `middleware.TenantScopeFor`, Lesen der CIs unter RLS); Unittest backend/internal/identity/ceiling_test.go (`TestBoundKeyCreatorCeiling`, Schnitt je Recht). Auf `e5c2d86` rot (ausgeführt auf der Basis `fb8adfe`; `backend/internal/identity` und `backend/internal/user` dort identisch mit `e5c2d86`, Migration 000185 angewandt, damit der Fall ohne gespeicherten Scope läuft):
+
+  ```text
+  === RUN   TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening
+  === RUN   TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening/case_A:_account_without_roles_at_binding
+      apikey_authz_integration_test.go:661: after the org-wide admin gave the account viewer org-wide: the key bound by the client-1 delegate reads the client-2 CI (client-1 CI: true); want client 1 at most
+  === RUN   TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening/case_B:_account_with_viewer_for_client_1
+      apikey_authz_integration_test.go:670: after the org-wide admin added viewer org-wide: the key bound by the client-1 delegate reads the client-2 CI (client-1 CI: true); want client 1 at most
+      apikey_authz_integration_test.go:695: successor after the rotation by the org-wide admin: the key bound by the client-1 delegate reads the client-2 CI (client-1 CI: true); want client 1 at most
+      apikey_authz_integration_test.go:700: after the delegate lost its roles and was deactivated: the key bound by the client-1 delegate reads the client-2 CI (client-1 CI: true); want client 1 at most
+  === RUN   TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening/key_bound_before_migration_000185
+      apikey_authz_integration_test.go:715: legacy key after the widening (creator holds client 1): the key bound by the client-1 delegate reads the client-2 CI (client-1 CI: true); want client 1 at most
+      apikey_authz_integration_test.go:717: legacy key after its creator lost its roles: the key bound by the client-1 delegate reads the client-2 CI (client-1 CI: true); want client 1 at most
+      apikey_authz_integration_test.go:717: legacy key after its creator lost its roles: key reads the client-1 CI: true, want false
+  --- FAIL: TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening (14.31s)
+      --- FAIL: TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening/case_A:_account_without_roles_at_binding (0.73s)
+      --- FAIL: TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening/case_B:_account_with_viewer_for_client_1 (0.40s)
+      --- FAIL: TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening/key_bound_before_migration_000185 (0.58s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity	14.405s
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

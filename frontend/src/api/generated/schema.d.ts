@@ -2530,7 +2530,14 @@ export interface paths {
      *     organization (otherwise 404), and what the key would grant through
      *     it, the requested permissions within the account's grants, must lie
      *     within the caller's own scope; otherwise 403. A deactivated account's
-     *     permissions are then required organization-wide.
+     *     permissions are then required organization-wide. The key records the
+     *     scope (clients, sites, teams) in which the caller holds each of its
+     *     permissions; at use it grants the account's then current rights
+     *     within that scope only, so roles the account receives later never
+     *     widen it beyond its creator (F-397, like E-98 for webhooks). It keeps
+     *     that scope when the creator is deactivated (E-64) and on rotation.
+     *     Keys bound before this rule (migration 000185) act at most with their
+     *     creator's current rights.
      *
      *     A new key counts against max_api_keys (ENT-03): at the limit of the
      *     active keys (neither revoked nor expired) the request gets 403
@@ -9916,7 +9923,7 @@ export interface components {
       environment: 'live' | 'test';
       permissions: string[];
       owner_id: string;
-      /** @description The key acts with this service account's rights (RBA-08). */
+      /** @description The key acts with this service account's rights (RBA-08), within the scope its creator held at binding (F-397). */
       service_account_id?: string;
       rotated_from?: string;
       /** Format: date-time */
@@ -9954,7 +9961,7 @@ export interface components {
        * @enum {string}
        */
       environment: 'live' | 'test';
-      /** @description The key acts with this service account's rights (RBA-08). */
+      /** @description The key acts with this service account's rights (RBA-08), within the scope its creator held at binding (F-397). */
       service_account_id?: string;
     };
     RotateAPIKeyRequest: {
