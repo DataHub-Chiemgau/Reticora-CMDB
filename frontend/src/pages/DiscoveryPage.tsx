@@ -21,6 +21,11 @@ import type {
   DiscoveryScopeKind,
 } from '../api/client';
 import { ApiError, fetchAPI } from '../api/client';
+import {
+  EnrollmentClientSelect,
+  describeEnrollmentRefusal,
+  useEnrollmentClientChoice,
+} from '../components/EnrollmentClientSelect';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -35,28 +40,36 @@ interface EnrollmentCodeResponse {
   expires_at: string;
 }
 
-function createEnrollmentCode(label: string): Promise<EnrollmentCodeResponse> {
+function createEnrollmentCode(label: string, clientId: string): Promise<EnrollmentCodeResponse> {
   return fetchAPI('/collectors/enrollment-codes', {
     method: 'POST',
-    body: JSON.stringify({ label }),
+    body: JSON.stringify({ label, ...(clientId ? { client_id: clientId } : {}) }),
   });
 }
 
-/** EnrollWizard guides connecting a collector: mint a code, show the command. */
+/**
+ * EnrollWizard guides connecting a collector: mint a code, show the command.
+ * A user restricted to several clients chooses the collector's client first
+ * (F-425); a refusal shows the server's reason.
+ */
 function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [label, setLabel] = useState('');
+  const [clientId, setClientId] = useState('');
   const [code, setCode] = useState<EnrollmentCodeResponse | null>(null);
   const [copied, setCopied] = useState(false);
+  const choice = useEnrollmentClientChoice(open);
 
   const mint = useMutation({
-    mutationFn: () => createEnrollmentCode(label || 'collector'),
+    mutationFn: () => createEnrollmentCode(label || 'collector', choice.required ? clientId : ''),
     onSuccess: (data) => {
       setCode(data);
       queryClient.invalidateQueries({ queryKey: ['collectors'] });
     },
   });
+
+  const refusal = describeEnrollmentRefusal(mint.error, t, choice.required);
 
   const enrollCommand = code
     ? `reticora-collector enroll --server ${window.location.origin} --code ${code.code}`
@@ -79,6 +92,8 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
         if (!o) {
           setCode(null);
           setLabel('');
+          setClientId('');
+          mint.reset();
           onClose();
         }
       }}
@@ -98,12 +113,25 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
             </span>
             <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="site-a" />
           </label>
-          {mint.isError ? <p className="text-sm text-danger">{t('app.error')}</p> : null}
+          <EnrollmentClientSelect
+            choice={choice}
+            value={clientId}
+            onChange={setClientId}
+            error={refusal.client}
+          />
+          {refusal.message ? (
+            <p role="alert" className="text-sm text-danger">
+              {refusal.message}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={() => mint.mutate()} disabled={mint.isPending}>
+            <Button
+              onClick={() => mint.mutate()}
+              disabled={mint.isPending || (choice.required && !clientId)}
+            >
               {mint.isPending ? t('app.loading') : t('discovery.enroll.generate', 'Code erzeugen')}
             </Button>
           </div>

@@ -8549,7 +8549,9 @@ paths:
         caller restricted to several must choose (422), and a dimension the
         caller holds org-wide stays unbound, so the collector may name a
         client of the organization when it enrolls. A site decides the
-        client.
+        client. The web UI offers the client choice when the caller's
+        collector:manage scope of GET /api/v1/me (pscp, otherwise cls) holds
+        several clients (F-425).
       requestBody:
         required: true
         content:
@@ -15186,6 +15188,30 @@ components:
           type: [array, 'null']
           items:
             type: string
+        pscp:
+          type: object
+          description: |
+            Permission scopes: for each permission whose scope differs from the
+            session scope (cls, sts, tms), the scope in which the caller holds
+            it, in the same form; a permission not listed holds the session
+            scope. The UI reads it for collector:manage to offer the client
+            choice of an enrollment code (createCollectorEnrollmentCode,
+            F-425).
+          additionalProperties:
+            type: object
+            properties:
+              cls:
+                type: [array, 'null']
+                items:
+                  type: string
+              sts:
+                type: [array, 'null']
+                items:
+                  type: string
+              tms:
+                type: [array, 'null']
+                items:
+                  type: string
         name:
           type: string
         email:

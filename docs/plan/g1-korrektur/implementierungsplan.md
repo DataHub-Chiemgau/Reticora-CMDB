@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-697 | 40 | 34,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-696 | 41 | 35,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **342** | **435,0** | |
+| **Summe** | | **343** | **436,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>40 WPs · 34,0 PT"]
+    K7N["K7-Nachträge<br/>41 WPs · 35,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -461,6 +461,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-691](#wp-691--redundanz-postfilter-versorger-außerhalb-des-client--oder-site-scopes-zählen-ohne-genannt-zu-werden) | `k7n-redundancy-hidden-supply` | Redundanz-Postfilter: Versorger außerhalb des Client- oder Site-Scopes zählen, ohne genannt zu werden | K7N | 1,0 | F-420 | WP-179, WP-513, WP-611, WP-345 |
 | [WP-692](#wp-692--eindeutige-attribute-die-prüfung-umfasst-die-cis-außerhalb-des-client--oder-site-scopes-des-schreibenden-ohne-sie-zu-nennen) | `k7n-unique-org-scope-client-writer` | Eindeutige Attribute: die Prüfung umfasst die CIs außerhalb des Client- oder Site-Scopes des Schreibenden, ohne sie zu nennen | K7N | 1,0 | F-421 | WP-142, WP-674 |
 | [WP-697](#wp-697--review-liste-unbekannte-status--und-kind-werte-sind-400-mit-feld-auch-am-veralteten-alias) | `k7n-review-list-filter-validation` | Review-Liste: unbekannte `status`- und `kind`-Werte sind 400 mit Feld, auch am veralteten Alias | K7N | 0,5 | F-426 | WP-088, WP-673 |
+| [WP-696](#wp-696--enrollment-code-in-der-oberfläche-pflichtauswahl-des-kunden-für-nutzer-mehrerer-clients-grund-der-ablehnung-statt-allgemeiner-fehlermeldung) | `k7n-enrollment-client-choice` | Enrollment-Code in der Oberfläche: Pflichtauswahl des Kunden für Nutzer mehrerer Clients, Grund der Ablehnung statt allgemeiner Fehlermeldung | K7N | 1,0 | F-425 | WP-677, WP-199, WP-524 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20647,6 +20648,69 @@ API-02;[B];D;backend/internal/reviews/handler_test.go;WP-697
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** Das GraphQL-Feld `reviewInbox(status, kind)` hat freie `String`-Argumente ohne dokumentierte Enums und filtert unbekannte Werte weiter zu einer leeren Liste; eine Angleichung wäre eine Änderung des GraphQL-Schemas und ist nicht Teil dieses Pakets. `GET /cis?status=` (ebenfalls 200 mit leerer Liste in der Probe) ist nicht Teil dieses Pakets.
+
+### WP-696 – Enrollment-Code in der Oberfläche: Pflichtauswahl des Kunden für Nutzer mehrerer Clients, Grund der Ablehnung statt allgemeiner Fehlermeldung
+
+**Schlüssel:** `k7n-enrollment-client-choice` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-677 (`k7n-enrollment-client-binding`), WP-199 (Onboarding, UI-17), WP-524 (Scope-Umschalter, Client-Liste)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-425](../../../audit/g1-reaudit/FINDINGS.md#f-425) | P2 | Enrollment-Dialog und Onboarding bieten keine Client-Auswahl: ein auf mehrere Clients beschränkter Nutzer erhält seit WP-677 422 und sieht nur „Ein Fehler ist aufgetreten“ | schließt | Kandidatenprüfung K7 auf `7cd63e0` |
+
+**Problem:** Seit WP-677 bindet `POST /api/v1/collectors/enrollment-codes` den Code an den Client, in dem der Erzeuger `collector:manage` hält, und lehnt einen auf mehrere Clients beschränkten Erzeuger ohne `client_id` mit 422 (`field` `client_id`) ab. Der Dialog „Collector verbinden“ (`DiscoveryPage.tsx`, `EnrollWizard`) sendet nur `{label}` und zeigt bei jedem Fehler „Ein Fehler ist aufgetreten“; der Onboarding-Schritt (`OnboardingPage.tsx`, `CollectorStep`) sendet `{label:"onboarding"}`. Keiner bietet eine Client-Auswahl; ein solcher Nutzer kann über die Oberfläche keinen Collector verbinden. `GET /clients` ist ihm ohne `location:read` verwehrt; seinen Scope nennt `GET /api/v1/me` (`cls`, je Recht `pscp`).
+
+**Akzeptanzkriterien:**
+
+- [ ] Ein gemeinsamer Baustein (`frontend/src/components/EnrollmentClientSelect.tsx`) liest `GET /api/v1/me` (nur bei geöffnetem Dialog bzw. im Collector-Schritt) und bestimmt die Clients von `collector:manage`: `pscp["collector:manage"].cls`, sonst `cls`. Bei mehr als einem Client zeigen Dialog und Onboarding ein Pflichtfeld „Kunde“ mit genau diesen Clients (Namen aus `GET /clients` über den Cache des Scope-Banners, ohne lesbaren Namen die ID), einem Hinweis und gesperrtem „Code erzeugen“ bzw. „Enrollment-Code erzeugen“ bis zur Wahl; der Body trägt `client_id`. Org-weite Nutzer, Nutzer mit einem Client und Nutzer, deren `collector:manage` nur einen Client umfasst, sehen keine Auswahl und senden nur `label` (unverändert). Solange `/me` lädt oder unlesbar ist, entscheidet der Server.
+- [ ] Ablehnungen zeigen den Grund des Servers: ein Problem mit `field` `client_id` bei angezeigter Auswahl am Feld („outside your scope“), sonst „Der Enrollment-Code wurde nicht erzeugt: <detail>“ als `role="alert"`; nie „Ein Fehler ist aufgetreten“.
+- [ ] i18n: `discovery.enroll.client`, `clientChoose`, `clientHint`, `failed` in de-DE und en-US; keine Rohwerte.
+- [ ] `api/openapi.yaml` (spec-first) dokumentiert `pscp` in `SessionClaims` und an `createCollectorEnrollmentCode` die Auswahl der Oberfläche; `frontend/src/api/generated/schema.d.ts` neu erzeugt. `docs/betrieb/collector-ca.md` nennt die Auswahl.
+- [ ] Vitest `DiscoveryPage.test.tsx` „offers the client choice to a user restricted to several clients (WP-677)“ (Optionen genau A und B aus `pscp`, nicht C der Sitzung; Sperre ohne Wahl; Body mit `client_id`), „shows the reason of the server instead of a generic error (WP-677)“ und „creates the code without a choice …“ (org-weit, ein Client, `pscp` mit einem Client); `OnboardingPage.test.tsx` „offers the client choice …“. Auf `e5c2d86` rot, mit der Korrektur grün; die übrigen Fälle beider Dateien unverändert grün.
+- [ ] Real-Stack `frontend/e2e-real/enrollment-client-choice.spec.ts` (nur CI): Nutzer mit Viewer in Client C und eigener Rolle `collector:manage` in A und B; E1 API ohne `client_id` 422, Dialog bietet genau A und B, mit B 201 und `client_id` B; E2 Onboarding mit A 201 und `client_id` A; E3 org-weiter Administrator ohne Auswahl, 201 ohne `client_id`. Grün in allen sechs Projekten von install-smoke.yml.
+- [ ] Regression: `npx tsc --noEmit -p .`, prettier und eslint der berührten Dateien, Vitest `src/i18n`, `src/components`, `src/api` und beide Seiten grün; Mock-Playwright `a11y.spec.ts`, `mobile-actions.spec.ts`, `review.spec.ts` in Chromium grün; die eingefrorenen ABN-01-Artefakte (u. a. `e2e/onboarding.spec.ts`) bleiben unverändert (`sha256sum -c` OK); `go test ./internal/server ./internal/middleware ./internal/identity ./internal/api` grün; Ratchet `--kinds go,vitest` 0 Fehler.
+
+**Dateien (16 Einträge):**
+
+- frontend/src/components/EnrollmentClientSelect.tsx (neu)
+- frontend/src/pages/DiscoveryPage.tsx
+- frontend/src/pages/OnboardingPage.tsx
+- frontend/src/api/client.ts
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/src/pages/DiscoveryPage.test.tsx
+- frontend/src/pages/OnboardingPage.test.tsx
+- frontend/e2e-real/enrollment-client-choice.spec.ts (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/betrieb/collector-ca.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung, keine Änderung am Server; die Bindung und ihre Prüfung bleiben im Server (WP-677). Die Oberfläche liest nur die Sitzungsdaten des Nutzers selbst (`GET /api/v1/me`, ohne Recht).
+
+**Tests:**
+
+- `cd frontend && npx vitest run src/pages/DiscoveryPage.test.tsx src/pages/OnboardingPage.test.tsx src/i18n src/components src/api`.
+- `cd frontend && CI=1 BASE_URL=http://localhost:<port> PW_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium npx playwright test e2e/a11y.spec.ts e2e/mobile-actions.spec.ts e2e/review.spec.ts --project=chromium` gegen `npx vite --port <port>`.
+- Real-Stack (nur CI, install-smoke.yml): `npx playwright test -c e2e-real/playwright.real.config.ts e2e-real/enrollment-client-choice.spec.ts`.
+- `cd backend && go test -count=1 -p 1 ./internal/server/ ./internal/middleware/ ./internal/identity/ ./internal/api/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+COL-04;[B];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-696
+TEN-09;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-696
+UI-17;[B];D;frontend/src/pages/OnboardingPage.test.tsx;WP-696
+COL-04;[B];D;frontend/e2e-real/enrollment-client-choice.spec.ts;WP-696
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Eine Site-Auswahl: ein Nutzer, dessen `collector:manage` auf mehrere Sites beschränkt ist, erhält weiter 422 `site_id`, sieht jetzt aber den Grund des Servers; eine Pflichtauswahl der Site (abhängig vom gewählten Client) ist ein eigenes Paket. Eine optionale Client-Auswahl für org-weite Nutzer (der Code bleibt ungebunden, wie WP-677 es vorsieht). API-Keys (kein `GET /me`) sind nicht betroffen.
 
 ## Zurückgestellte Befunde
 

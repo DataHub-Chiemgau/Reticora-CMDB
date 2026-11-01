@@ -366,7 +366,11 @@
       "generate": "Generate code",
       "once": "This code is shown only once and expires. Run in the customer network:",
       "expires": "Valid until",
-      "after": "Then restart the collector and confirm the suggested scopes on this page."
+      "after": "Then restart the collector and confirm the suggested scopes on this page.",
+      "client": "Client",
+      "clientChoose": "Choose a client",
+      "clientHint": "Your access covers several clients: choose the client the collector is bound to.",
+      "failed": "The enrollment code was not created: {{detail}}"
     },
     "collectorStatus": {
       "pending": "Pending",

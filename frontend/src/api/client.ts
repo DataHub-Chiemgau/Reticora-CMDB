@@ -1637,6 +1637,15 @@ export const permissionApi = {
   },
 };
 
+/** The claims of the signed-in session (GET /me, AUT-02) with its scopes. */
+export type SessionClaims = components['schemas']['SessionClaims'];
+
+export const sessionApi = {
+  me(): Promise<SessionClaims> {
+    return fetchAPI('/me');
+  },
+};
+
 export interface SLAPolicy {
   id: string;
   organization_id: string;

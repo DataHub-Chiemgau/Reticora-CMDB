@@ -4024,7 +4024,7 @@ export interface paths {
     put?: never;
     /**
      * Mint a single-use collector enrollment code
-     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client.
+     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client. The web UI offers the client choice when the caller's collector:manage scope of GET /api/v1/me (pscp, otherwise cls) holds several clients (F-425).
      */
     post: operations['createCollectorEnrollmentCode'];
     delete?: never;
@@ -7742,6 +7742,21 @@ export interface components {
       cls?: string[] | null;
       sts?: string[] | null;
       tms?: string[] | null;
+      /**
+       * @description Permission scopes: for each permission whose scope differs from the
+       *     session scope (cls, sts, tms), the scope in which the caller holds
+       *     it, in the same form; a permission not listed holds the session
+       *     scope. The UI reads it for collector:manage to offer the client
+       *     choice of an enrollment code (createCollectorEnrollmentCode,
+       *     F-425).
+       */
+      pscp?: {
+        [key: string]: {
+          cls?: string[] | null;
+          sts?: string[] | null;
+          tms?: string[] | null;
+        };
+      };
       name?: string;
       email?: string;
       /**

@@ -32,9 +32,9 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 |---|---:|
 | P0 | 1 |
 | P1 | 5 |
-| P2 | 28 |
+| P2 | 29 |
 | P3 | 35 |
-| **Summe** | **69** |
+| **Summe** | **70** |
 
 ## Übersicht
 
@@ -109,6 +109,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-420](#f-420) | P3 | Redundanz-Postfilter für Principals mit Client-Scope: ein Versorger eines anderen Clients zählt nicht, das CI gilt als betroffen | Verifier r3-b4 (WP-179) auf `bf51da7` | belegt | backend/internal/topology/redundancy_depth_integration_test.go | WP-691 |
 | [F-421](#f-421) | P3 | Eindeutigkeit mit Scope `org` gilt für Writer mit Client-Scope nur, solange ein gültiger Unique-Index existiert | Verifier r3-b4 (WP-142) auf `bf51da7` | belegt | backend/internal/ci/unique_attr_integration_test.go | WP-692 |
 | [F-426](#f-426) | P3 | Review-Liste ignoriert unbekannte `status`- und `kind`-Werte: 200 mit leerer Liste statt 400 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/reviews/handler_test.go | WP-697 |
+| [F-425](#f-425) | P2 | Enrollment-Dialog und Onboarding bieten keine Client-Auswahl: ein auf mehrere Clients beschränkter Nutzer erhält seit WP-677 422 und sieht nur „Ein Fehler ist aufgetreten“ | Kandidatenprüfung K7 auf `7cd63e0` | belegt | frontend/src/pages/DiscoveryPage.test.tsx | WP-696 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1845,6 +1846,41 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   FAIL
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews	0.016s
   FAIL
+  ```
+
+<a id="f-425"></a>
+### F-425 (P2) – Enrollment-Dialog und Onboarding bieten keine Client-Auswahl: ein auf mehrere Clients beschränkter Nutzer erhält seit WP-677 422 und sieht nur „Ein Fehler ist aufgetreten“
+
+- **Gefunden in:** Kandidatenprüfung K7 auf `7cd63e0` (API-Probe `TestKCand4EnrollmentCodeUIBody`, UI-Probe `enroll.probe.test.tsx`); Folge von WP-677 (F-406), `frontend/src/pages/DiscoveryPage.tsx` und `OnboardingPage.tsx` sind dort im Enrollment identisch mit `e5c2d86`; kodierender Test von WP-696 · **Betroffene Anforderungen:** COL-04, TEN-09, UI-17 · **Komponente:** frontend/src/pages/DiscoveryPage.tsx (`createEnrollmentCode`, `EnrollWizard`: Body nur `{label}`, Fehler als `t('app.error')`), frontend/src/pages/OnboardingPage.tsx (`CollectorStep`: Body `{label:"onboarding"}`) · **Quelle:** `k7/out/cand/evidence/k-reaudit-cand/4/probe-enrollment-code-ui-body-api.log`, `…/4/vitest-ui-probe-enroll-dialog.log`, `…/4/vitest-DiscoveryPage-OnboardingPage.log`, Proben `k7/out/cand/evidence/k-reaudit-cand/probe/kcand_probe_test.go.txt` und `…/probe/enroll.probe.test.tsx.txt`; kodierender Test von WP-696 (`k7/ad-696-697/red-696.log`)
+- **Reproduktion:** Nutzer mit einer Rolle `collector:manage`, `discovery:read` in Client 1 und Client 2. Echte API: `POST /api/v1/collectors/enrollment-codes {"label":"collector"}` (Body des Dialogs) → 422 `{"detail":"client_id: required: your scope holds several clients","field":"client_id",…}`, ebenso `{"label":"onboarding"}` (Body des Onboardings); mit `"client_id":"<Client 2>"` → 201 mit `client_id`. Ein Nutzer mit einem Client und ein org-weiter Administrator erhalten mit dem Body des Dialogs 201. Im Dialog „Collector verbinden“ derselbe Nutzer: nur das Textfeld „Bezeichnung“, kein Auswahlfeld, POST `{"label":"site-a"}`, danach „Ein Fehler ist aufgetreten“ ohne den Grund; im Onboarding POST `{"label":"onboarding"}`, Meldung `client_id: required: your scope holds several clients`, kein Auswahlfeld. `GET /clients` antwortet diesem Nutzer ohne `location:read` 403.
+- **Soll:** `createCollectorEnrollmentCode` (api/openapi.yaml, WP-677): „a caller restricted to several must choose (422)“. COL-04/UI-17: ein berechtigter Nutzer kann über die Oberfläche einen Enrollment-Code erzeugen; TEN-09: der Code wird an einen Client seines Scopes gebunden. Die Oberfläche bietet die Wahl genau dann an, wenn der Scope von `collector:manage` mehrere Clients umfasst, schickt `client_id` und zeigt eine Ablehnung mit dem Grund des Servers.
+- **Ist:** Beide Wege senden nie `client_id`. Ein auf mehrere Clients beschränkter Nutzer kann über die Oberfläche keinen Collector verbinden; der Dialog verschluckt den Grund.
+- **Nutzerwirkung:** Ein Techniker eines Dienstleisters mit mehreren Kunden kann weder im Dialog noch im Onboarding einen Collector anbinden und erfährt nicht, warum; Discovery ist für ihn nur noch über die rohe API nutzbar. Org-weite und Ein-Client-Nutzer sind nicht betroffen. Kein Leck.
+- **Ursache (belegt):** WP-677 hat die Bindung und das 422 im Server eingeführt (spec-first), die beiden Aufrufer im Frontend aber nicht angepasst; die Vitest-Fälle beider Seiten stubben das Enrollment mit 201 und prüfen den Body nicht. Die Sitzung nennt den Scope des Nutzers (`GET /api/v1/me`: `cls`, je Recht `pscp`), die Oberfläche las ihn nirgends.
+- **Empfehlung:** Ein gemeinsamer Baustein liest `GET /api/v1/me` und bestimmt die Clients von `collector:manage` (`pscp["collector:manage"].cls`, sonst `cls`); bei mehreren zeigen Dialog und Onboarding ein Pflichtfeld „Kunde“ mit diesen Clients (Namen aus `GET /clients`, sonst die ID), „Code erzeugen“ ist ohne Wahl gesperrt, der Body trägt `client_id`. Ablehnungen zeigen das `detail` des Servers, ein Problem mit `field` `client_id` am Auswahlfeld. Org-weite und Ein-Client-Nutzer bleiben ohne Auswahl und senden nur `label`. `pscp` in `SessionClaims` (api/openapi.yaml) dokumentieren. i18n in de-DE und en-US.
+- **Retest (verbindlich):** `cd frontend && npx vitest run src/pages/DiscoveryPage.test.tsx src/pages/OnboardingPage.test.tsx` PASS: „offers the client choice to a user restricted to several clients (WP-677)“ (Dialog: Pflichtfeld „Kunde“ mit genau Kunde A und B aus `pscp` von `collector:manage`, nicht Kunde C der Sitzung; „Code erzeugen“ ohne Wahl gesperrt; POST `{"label":"site-b","client_id":"client-2"}`, Code angezeigt), „shows the reason of the server instead of a generic error (WP-677)“ (ohne Sitzungsdaten 422 als „Der Enrollment-Code wurde nicht erzeugt: client_id: required: …“, mit Auswahl 403 `outside your scope` am Feld, nie „Ein Fehler ist aufgetreten“), „creates the code without a choice …“ (org-weit, ein Client, `collector:manage` in einem von zwei Clients: kein Auswahlfeld, Body `{"label":"collector"}`) und im Onboarding „offers the client choice …“ (Body `{"label":"onboarding","client_id":"client-1"}`). Real-Stack (nur CI): `frontend/e2e-real/enrollment-client-choice.spec.ts` E1–E3 in allen sechs Projekten grün.
+- **Kodierender Test:** frontend/src/pages/DiscoveryPage.test.tsx (`describe('DiscoveryPage enrollment code (COL-04, F-425)')`, fünf Fälle) und frontend/src/pages/OnboardingPage.test.tsx („offers the client choice to a user restricted to several clients (WP-677)“); dazu frontend/e2e-real/enrollment-client-choice.spec.ts (nur CI). Auf `e5c2d86` rot (ausgeführt auf der Basis `7cd63e0` mit den alten Produktionsdateien `DiscoveryPage.tsx`, `OnboardingPage.tsx`, `api/client.ts`, `de-DE.json`, `en-US.json`, `schema.d.ts` aus `HEAD`, im Enrollment identisch mit `e5c2d86`); die drei Fälle „without a choice“ sichern unverändertes Verhalten und scheitern auf dem alten Code nur, weil er `GET /me` nie liest:
+
+  ```text
+   ❯ src/pages/OnboardingPage.test.tsx (9 tests | 1 failed) 1525ms
+       × offers the client choice to a user restricted to several clients (WP-677) 1025ms
+   ❯ src/pages/DiscoveryPage.test.tsx (14 tests | 5 failed) 6415ms
+       × offers the client choice to a user restricted to several clients (WP-677) 1058ms
+       × shows the reason of the server instead of a generic error (WP-677) 1043ms
+       × creates the code without a choice for a user org-wide 1057ms
+       × creates the code without a choice for a user restricted to one client 1039ms
+       × creates the code without a choice for a user holding collector:manage in one of two clients 1044ms
+   FAIL  src/pages/DiscoveryPage.test.tsx > DiscoveryPage enrollment code (COL-04, F-425) > offers the client choice to a user restricted to several clients (WP-677)
+  TestingLibraryElementError: Unable to find role="combobox" and name "Kunde"
+   FAIL  src/pages/DiscoveryPage.test.tsx > DiscoveryPage enrollment code (COL-04, F-425) > shows the reason of the server instead of a generic error (WP-677)
+  TestingLibraryElementError: Unable to find role="alert"
+        Ein Fehler ist aufgetreten
+   FAIL  src/pages/DiscoveryPage.test.tsx > DiscoveryPage enrollment code (COL-04, F-425) > creates the code without a choice for a user org-wide
+  AssertionError: expected false to be true // Object.is equality
+   FAIL  src/pages/OnboardingPage.test.tsx > OnboardingPage > offers the client choice to a user restricted to several clients (WP-677)
+  TestingLibraryElementError: Unable to find role="combobox" and name "Kunde"
+   Test Files  2 failed (2)
+        Tests  6 failed | 17 passed (23)
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

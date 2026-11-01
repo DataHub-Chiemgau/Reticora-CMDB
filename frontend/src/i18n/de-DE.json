@@ -366,7 +366,11 @@
       "generate": "Code erzeugen",
       "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
       "expires": "Gültig bis",
-      "after": "Starten Sie danach den Collector neu und bestätigen Sie die vorgeschlagenen Scopes auf dieser Seite."
+      "after": "Starten Sie danach den Collector neu und bestätigen Sie die vorgeschlagenen Scopes auf dieser Seite.",
+      "client": "Kunde",
+      "clientChoose": "Kunde wählen",
+      "clientHint": "Ihr Zugriff umfasst mehrere Kunden: Wählen Sie den Kunden, an den der Collector gebunden wird.",
+      "failed": "Der Enrollment-Code wurde nicht erzeugt: {{detail}}"
     },
     "collectorStatus": {
       "pending": "Ausstehend",
