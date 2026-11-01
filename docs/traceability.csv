@@ -1178,3 +1178,6 @@ CI-11;[B];B;backend/internal/server/unique_attr_type_change_integration_test.go;
 MET-15;B/G1;B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
 CI-03;[B];B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
 CI-11;[B];B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
+LOC-11;B/G1;B;backend/internal/locations/enrollment_code_delete_integration_test.go;WP-701
+COL-04;[B];B;backend/internal/locations/enrollment_code_delete_integration_test.go;WP-701
+LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-701

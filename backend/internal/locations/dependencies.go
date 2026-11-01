@@ -32,6 +32,10 @@ const (
 	DependencyDiscoveryScope  = "discovery_scope"
 	DependencyEnrollmentToken = "agent_enrollment_token"
 	DependencyCIMerge         = "ci_merge"
+
+	// DependencyEnrollmentCode is a collector enrollment code bound to the
+	// site (000187), RESTRICT since 000189 (F-430).
+	DependencyEnrollmentCode = "collector_enrollment_code"
 )
 
 // dependency is a kind of object that keeps the location $1; present is
@@ -62,11 +66,12 @@ type siteObject struct {
 // siteObjects are the network and discovery objects bound to a site. E-71
 // is open; its transitional rule (option 1) applies: while one of them is
 // bound to the site, the site is not deleted (409 with the kind, RESTRICT
-// since 000157) and the objects have to be removed or moved first. Expired
-// enrollment tokens and merge tombstones past tombstone_until do not count
-// and are removed in the delete transaction (removeLapsed). Another option
-// of E-71 changes only this list and the foreign keys of a follow-up
-// migration.
+// since 000157, for collector enrollment codes since 000189) and the objects
+// have to be removed or moved first. Expired enrollment tokens, expired or
+// used collector enrollment codes and merge tombstones past tombstone_until
+// do not count and are removed in the delete transaction (removeLapsed).
+// Another option of E-71 changes only this list and the foreign keys of a
+// follow-up migration.
 var siteObjects = []siteObject{
 	{DependencyVLAN, ""},
 	{DependencySubnet, ""},
@@ -74,6 +79,9 @@ var siteObjects = []siteObject{
 	{DependencyDiscoveryScope, ""},
 	{DependencyEnrollmentToken, "expires_at <= now()"},
 	{DependencyCIMerge, "tombstone_until <= now()"},
+	// A code no longer enrolls a collector once it expired or was used
+	// (EnrollCollector).
+	{DependencyEnrollmentCode, "expires_at <= now() OR used_at IS NOT NULL"},
 }
 
 // referenceKinds maps the table of a violated foreign key to the kind it
@@ -162,7 +170,7 @@ func removeLapsed(ctx context.Context, tx pgx.Tx, id string) (map[string]int64, 
 		if o.lapsed == "" {
 			continue
 		}
-		tag, err := tx.Exec(ctx, "DELETE FROM "+o.kind+" WHERE site_id = $1 AND "+o.lapsed, id)
+		tag, err := tx.Exec(ctx, "DELETE FROM "+o.kind+" WHERE site_id = $1 AND ("+o.lapsed+")", id)
 		if err != nil {
 			return nil, fmt.Errorf("remove lapsed %s: %w", o.kind, err)
 		}

@@ -412,6 +412,7 @@ describe('LocationTreePage', () => {
         collector: true,
         discovery_scope: true,
         agent_enrollment_token: true,
+        collector_enrollment_code: true,
         ci_merge: true,
       };
       for (const lng of ['de-DE', 'en-US']) {

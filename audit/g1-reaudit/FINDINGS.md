@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 29 |
-| P3 | 42 |
-| **Summe** | **77** |
+| P3 | 43 |
+| **Summe** | **78** |
 
 ## Übersicht
 
@@ -117,6 +117,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-424](#f-424) | P3 | `unknown_relationship` accept legt die Kante trotz Typliste von `connected_to` und zu soft-gelöschten CIs an; `POST /relationships` auf ein gelöschtes CI antwortet 201 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-695 |
 | [F-431](#f-431) | P3 | Eindeutige Attribute: Der Typwechsel `POST /cis/{id}/type` prüft die eindeutigen Attribute des Zieltyps nicht (Duplikat ohne Index, mit Index 409 ohne den Attributschlüssel) | Korrektur WP-700 (K7) auf `6a499ac` | belegt | backend/internal/server/unique_attr_type_change_integration_test.go | WP-702 |
 | [F-432](#f-432) | P3 | Eindeutige Attribute im Discovery-Ingest: neue Geräte, Updates bekannter Geräte und die Umklassifizierung prüfen nicht (Duplikate ohne Index, mit Index scheitert der Datensatz als „retryable“ 500 und das Gerät fehlt) | Korrektur WP-700 (K7) auf `6a499ac` | belegt | backend/internal/discovery/ingest_unique_integration_test.go | WP-703 |
+| [F-430](#f-430) | P3 | Löschen einer Site entfernt die an sie gebundenen Collector-Enrollment-Codes still (Fremdschlüssel von 000187 ON DELETE CASCADE) | Integration der K7-Nachträge (Regressionstest) auf `7cd63e0` | belegt | backend/internal/locations/move_integration_test.go | WP-701 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -2141,6 +2142,48 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       ingest_unique_integration_test.go:210: index job for wp703_tag after the ingest: CIs share a value of the unique attribute "wp703_tag": Duplicate keys exist.
   --- FAIL: TestIngestUniqueAttributes (0.75s)
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery	0.863s
+  ```
+
+<a id="f-430"></a>
+### F-430 (P3) – Löschen einer Site entfernt die an sie gebundenen Collector-Enrollment-Codes still (Fremdschlüssel von 000187 ON DELETE CASCADE)
+
+- **Gefunden in:** Integration der K7-Nachträge (Regressionstest) auf `7cd63e0`: `TestLocationDeleteReferencesMapToSpecKinds` ist seit Migration 000187 (WP-677, F-406) rot; reproduziert auf der Basis `5dbe22a`. Auf `e5c2d86` nicht vorhanden (000187 kam mit WP-677 nach `e5c2d86`, dort endet die Migrationsreihe bei 000184) · **Betroffene Anforderungen:** LOC-11 (Löschen nur ohne Abhängigkeiten, keine Kaskade), E-71 (entschieden: Option 1, 409 mit der Abhängigkeitsart, Fremdschlüssel RESTRICT; abgelaufene bzw. widerrufene Tokens blockieren nicht und werden in der Lösch-Transaktion entfernt), COL-04 (Enrollment-Code) · **Komponente:** backend/migrations/000187_enrollment_code_client_binding.up.sql (Zeile 39 f.: `collector_enrollment_code_site_fkey FOREIGN KEY (site_id, organization_id) REFERENCES site(id, organization_id) ON DELETE CASCADE`), backend/internal/locations/dependencies.go (`siteObjects`, Zeile 70 ff. auf `5dbe22a`: ohne `collector_enrollment_code`), api/openapi.yaml (`deleteLocation`, Zeile 12951 ff.; `DependencyProblem.dependencies`, Zeile 18436) · **Quelle:** Regressionstest der Integration (`k7/ad-701/red-head.log`), kodierender Test von WP-701 (`k7/ad-701/red-701-new.log`)
+- **Reproduktion:** Organisation mit Client 1, Site `S` (Client 1). An `S` einen Enrollment-Code binden, wie ihn `POST /api/v1/collectors/enrollment-codes` mit `site_id` erzeugt (`binding_recorded`, `site_id = S`, `expires_at = now() + 1 day`, unbenutzt). Als org-weiter Principal `DELETE /api/v1/sites/{S}` → 204; der Code ist mit der Site verschwunden, kein Audit-Eintrag nennt ihn. Ebenso `DELETE /api/v1/locations/{S}`. Ein Code, den der löschende Principal nicht sieht (Client-2-Code an `S`, Principal auf Client 1 beschränkt), wird ebenfalls still gelöscht. Katalog: `SELECT confdeltype FROM pg_constraint WHERE conname = 'collector_enrollment_code_site_fkey'` → `c`.
+- **Soll:** `deleteLocation` (api/openapi.yaml): eine Site wird mit 409 abgelehnt, solange VLANs, Subnetze, Collectoren, Discovery-Scopes, unabgelaufene Agent-Enrollment-Tokens oder Merge-Tombstones an ihr hängen (E-71); abgelaufene Tokens werden mit der Site entfernt; „no delete cascades“. Ein an die Site gebundener Collector-Enrollment-Code ist ein solches Objekt: Solange er weder verbraucht noch abgelaufen ist (er kann noch einen Collector in diese Site einschreiben), antworten `DELETE /sites/{id}` und `DELETE /locations/{id}` 409 mit der Art `collector_enrollment_code` (in `DependencyProblem.dependencies`), der Code bleibt; abgelaufene und verbrauchte Codes blockieren nicht und werden in der Lösch-Transaktion entfernt und im Audit-Eintrag gezählt. Der Fremdschlüssel ist RESTRICT (Rückhalt für Codes, die der Aufrufer nicht sieht), wie `agent_enrollment_token_site_id_fkey` (000157).
+- **Ist:** `collector_enrollment_code_site_fkey` ist `ON DELETE CASCADE`; `locations.siteObjects` kennt die Tabelle nicht. Das Löschen der Site antwortet 204 und löscht jeden gebundenen Code, auch einen gültigen und einen für den Aufrufer unsichtbaren. `TestLocationDeleteReferencesMapToSpecKinds` meldet: `collector_enrollment_code_site_fkey on collector_enrollment_code: ON DELETE c follows the delete of a location silently`.
+- **Nutzerwirkung:** Ein Administrator, der eine Site löscht, entwertet ohne Hinweis einen gerade ausgegebenen Enrollment-Code (gültig bis 24 h); der Collector-Rollout vor Ort scheitert danach mit 401, ohne dass die Ursache im Audit steht. Ein auf einen Client beschränkter Principal entfernt dabei auch Codes, die er nicht sehen darf. Die Löschregel weicht vom dokumentierten Vertrag (E-71, „no delete cascades“) ab; der Regressionstest der Löschregeln ist rot.
+- **Ursache (belegt):** WP-677 hat die Bindung an die Site mit `ON DELETE CASCADE` angelegt (Akzeptanzkriterium 1 von WP-677 nennt CASCADE) und die Liste der an eine Site gebundenen Objekte von E-71 (`locations/dependencies.go`, 000157) nicht nachgezogen; das Paket `locations` mit `TestLocationDeleteReferencesMapToSpecKinds` steht nicht in der Testliste von WP-677 (`discovery`, `server`, `tenant/...`, `cmd/server`, `api`, `database`). Der Regressionstest erkennt den Fehler (rot seit 000187).
+- **Empfehlung:** Migration 000189: `collector_enrollment_code_site_fkey` auf `ON DELETE RESTRICT` (Down: zurück auf CASCADE). `collector_enrollment_code` mit der Bedingung `expires_at <= now() OR used_at IS NOT NULL` in `locations.siteObjects` (Art = Tabellenname, `DeleteError` bildet die Fremdschlüsselverletzung damit auf die Art ab); `removeLapsed` klammert die Bedingung. Spec-first: Art in `DependencyProblem.dependencies`, Beschreibung von `deleteLocation` und `createCollectorEnrollmentCode`; `schema.d.ts` neu erzeugen, Bezeichnung der Art in de-DE und en-US. `collector_enrollment_code_client_fkey` bleibt CASCADE: `DELETE /clients/{id}` hat keine Abhängigkeitsregel und entfernt seine Sites samt Agent-Enrollment-Tokens bereits heute mit (`agent_enrollment_token_client_id_fkey` CASCADE).
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^(TestSiteDeleteKeepsCollectorEnrollmentCodes|TestLocationDeleteReferencesMapToSpecKinds|TestAuditT3SiteDeleteKeepsNetworkObjects)$' ./internal/locations/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` (Datenbank auf 000189) PASS: Site mit gültigem Code → `DELETE /sites/{id}` und `/locations/{id}` 409 `[collector_enrollment_code]`, Code und Site bleiben; nur abgelaufener bzw. nur verbrauchter Code → 204, Code entfernt, `location.deleted` mit `removed = {"collector_enrollment_code": 1}`, Codes anderer Sites bleiben; gültiger plus abgelaufener plus verbrauchter Code → 409, alle drei bleiben; ein für einen Client-1-Principal unsichtbarer gültiger Code → 409 über den Fremdschlüssel; `DELETE /clients/{id}` entfernt Site und Code weiter (204). `collector_enrollment_code_site_fkey` ist RESTRICT, die Art steht in `DependencyProblem.dependencies`. `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün.
+- **Kodierender Test:** backend/internal/locations/move_integration_test.go (`TestLocationDeleteReferencesMapToSpecKinds`, Regressionstest; Liste der Arten und RESTRICT-Liste um `collector_enrollment_code` bzw. `collector_enrollment_code_site_fkey` ergänzt) und backend/internal/locations/enrollment_code_delete_integration_test.go (`TestSiteDeleteKeepsCollectorEnrollmentCodes`, neu; Lösch-Routen von `locations`, `tenantapi` und `rack` als `reticora_app`). Auf `e5c2d86` nicht anwendbar (ohne 000187 gibt es die Spalte nicht); rot auf dem Integrationsstand und auf `5dbe22a` (alte `dependencies.go` aus `HEAD`, Datenbank auf 000188):
+
+  ```text
+  === RUN   TestLocationDeleteReferencesMapToSpecKinds
+      move_integration_test.go:680: collector_enrollment_code_site_fkey on collector_enrollment_code: ON DELETE c follows the delete of a location silently
+  --- FAIL: TestLocationDeleteReferencesMapToSpecKinds (0.44s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations	0.547s
+  ```
+
+  ```text
+  === RUN   TestSiteDeleteKeepsCollectorEnrollmentCodes
+      enrollment_code_delete_integration_test.go:55: DELETE /api/v1/sites/{site with an unused, unexpired enrollment code} = 204 [], want 409 [collector_enrollment_code]
+      enrollment_code_delete_integration_test.go:55: DELETE /api/v1/locations/{site with an unused, unexpired enrollment code} = 404 [], want 409 [collector_enrollment_code]
+      enrollment_code_delete_integration_test.go:59: enrollment codes at the site after the refused deletes: 0, site rows 0; want 1 and 1 (silent loss of the code)
+      enrollment_code_delete_integration_test.go:86: /api/v1/locations/: location.deleted entries naming the removed expired code: 0, want 1
+      enrollment_code_delete_integration_test.go:86: /api/v1/sites/: location.deleted entries naming the removed expired code: 0, want 1
+      enrollment_code_delete_integration_test.go:86: /api/v1/locations/: location.deleted entries naming the removed used code: 0, want 1
+      enrollment_code_delete_integration_test.go:86: /api/v1/sites/: location.deleted entries naming the removed used code: 0, want 1
+      enrollment_code_delete_integration_test.go:101: DELETE /api/v1/locations/{site with a live, an expired and a used code} = 204 [], codes left 0; want 409 [collector_enrollment_code] and 3
+      enrollment_code_delete_integration_test.go:140: DELETE /api/v1/sites/{site with an enrollment code the caller cannot see} = 204 [], want 409 [collector_enrollment_code]
+      enrollment_code_delete_integration_test.go:143: hidden enrollment code after the refused delete: 0, site rows 0; want 1 and 1
+  --- FAIL: TestSiteDeleteKeepsCollectorEnrollmentCodes (0.64s)
+  === RUN   TestLocationDeleteReferencesMapToSpecKinds
+      move_integration_test.go:679: collector_enrollment_code_site_fkey: ON DELETE c, want RESTRICT
+      move_integration_test.go:684: collector_enrollment_code_site_fkey on collector_enrollment_code: ON DELETE c follows the delete of a location silently
+  --- FAIL: TestLocationDeleteReferencesMapToSpecKinds (0.51s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations	1.298s
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

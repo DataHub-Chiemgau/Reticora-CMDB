@@ -601,8 +601,9 @@ func TestLocationDeleteKeepsChildrenTheCallerCannotSee(t *testing.T) {
 // foreign key that refuses the delete of a location, site, building, room or
 // rack reports a dependency kind of DependencyProblem in api/openapi.yaml
 // (DeleteError), the nodes of the tree as 'location'. The tree and the
-// objects bound to a site are RESTRICT (000157); only the specialist row of
-// a node and the listed SET NULL references follow a delete.
+// objects bound to a site are RESTRICT (000157, enrollment codes 000189);
+// only the specialist row of a node and the listed SET NULL references
+// follow a delete.
 func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	f := scopetest.Seed(t, "5c")
 	raw, err := os.ReadFile("../../../api/openapi.yaml")
@@ -633,6 +634,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		locations.DependencyLocation, locations.DependencyCI, locations.DependencyAsset, locations.DependencyQuantityItem,
 		locations.DependencyAssetMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
 		"vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
+		"collector_enrollment_code",
 	}
 	if !slices.Equal(slices.Sorted(slices.Values(spec)), slices.Sorted(slices.Values(kinds))) {
 		t.Errorf("DependencyProblem.dependencies enum %v, want the kinds %v", spec, kinds)
@@ -652,12 +654,14 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The delete rules of 000157.
+	// The delete rules of 000157, and of 000189 for the enrollment codes
+	// bound to a site by 000187 (F-430).
 	restrict := map[string]bool{
 		"location_site_id_fkey": true, "location_parent_id_fkey": true, "building_site_id_fkey": true,
 		"room_building_id_fkey": true, "room_site_id_fkey": true, "rack_room_id_fkey": true, "rack_site_id_fkey": true,
 		"vlan_site_id_fkey": true, "subnet_site_id_fkey": true, "collector_site_id_fkey": true,
 		"discovery_scope_site_id_fkey": true, "agent_enrollment_token_site_id_fkey": true, "ci_merge_site_id_fkey": true,
+		"collector_enrollment_code_site_fkey": true,
 	}
 	// Foreign keys that follow a delete: the specialist row goes with its
 	// location row; a desk loses its room and a review item its site.
@@ -691,7 +695,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		}
 	}
 	if seen != len(restrict) {
-		t.Errorf("found %d of the %d foreign keys of 000157", seen, len(restrict))
+		t.Errorf("found %d of the %d foreign keys of 000157 and 000189", seen, len(restrict))
 	}
 	if err = locations.DeleteError(&pgconn.PgError{Code: "23503", TableName: "unknown_table"}); errors.As(err, new(*locations.DependencyError)) {
 		t.Errorf("a violation of an unknown table is reported as %v", err)

@@ -499,6 +499,48 @@ Bisher konnte die Laufzeitrolle `app.audit_pii_migration` selbst setzen, die
 die Rechte der Laufzeitrolle, das Siegel und die Verifikation gegen
 PostgreSQL.
 
+## Release-Hinweis: Enrollment-Codes halten ihre Site (F-430)
+
+Stand: 2026-11-01. Umsetzung: WP-701 (Migration 000189). Anforderungen:
+LOC-11, E-71, COL-04.
+
+Migration 000187 hat `collector_enrollment_code.site_id` mit `ON DELETE
+CASCADE` an die Site gebunden: Das Löschen einer Site entfernte die an sie
+gebundenen Enrollment-Codes still, obwohl kein Löschen eines Standorts
+kaskadiert und eine Site ihre Netz- und Discovery-Objekte hält (000157,
+E-71 Option 1).
+
+- Der Fremdschlüssel `collector_enrollment_code_site_fkey` ist ab 000189
+  `RESTRICT` wie der der Agent-Enrollment-Tokens. `DELETE /api/v1/sites/{id}`
+  und `DELETE /api/v1/locations/{id}` antworten 409 mit der Abhängigkeitsart
+  `collector_enrollment_code`, solange an der Site ein Code hängt, der weder
+  verbraucht noch abgelaufen ist; die Oberfläche nennt ihn „gültige
+  Collector-Enrollment-Codes“. Abgelaufene und verbrauchte Codes blockieren
+  nicht und werden in der Lösch-Transaktion entfernt (im Audit-Eintrag
+  `location.deleted` unter `removed` gezählt). Ein Code gilt höchstens
+  24 Stunden; wer die Site sofort löschen will, wartet den Ablauf ab oder
+  entfernt den Code in der Datenbank. Blockierende Codes einer Site findet
+  ein Betreiber so:
+
+  ```sql
+  SELECT id, label, expires_at
+    FROM collector_enrollment_code
+   WHERE site_id = '<site-id>' AND used_at IS NULL AND expires_at > now();
+  ```
+
+- Das Löschen eines Clients (`DELETE /api/v1/clients/{id}`) entfernt seine
+  Sites samt ihren Codes wie bisher (`collector_enrollment_code_client_fkey`
+  bleibt `CASCADE`, wie bei den Agent-Enrollment-Tokens).
+- Rollback: `000189_enrollment_code_site_restrict.down.sql` stellt `ON
+  DELETE CASCADE` wieder her (F-430 offen).
+
+`TestSiteDeleteKeepsCollectorEnrollmentCodes`
+(`backend/internal/locations/enrollment_code_delete_integration_test.go`)
+prüft gültige, abgelaufene, verbrauchte und für den Aufrufer unsichtbare
+Codes sowie das Löschen des Clients gegen PostgreSQL;
+`TestLocationDeleteReferencesMapToSpecKinds` die Löschregel aller
+Fremdschlüssel auf Standorte.
+
 ## Prüfung
 
 `TestMigrationsRoundtrip` (`backend/internal/database/migrations_roundtrip_integration_test.go`)

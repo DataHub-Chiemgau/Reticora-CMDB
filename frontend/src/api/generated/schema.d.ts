@@ -4024,7 +4024,7 @@ export interface paths {
     put?: never;
     /**
      * Mint a single-use collector enrollment code
-     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client. The web UI offers the client choice when the caller's collector:manage scope of GET /api/v1/me (pscp, otherwise cls) holds several clients (F-425).
+     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client. The web UI offers the client choice when the caller's collector:manage scope of GET /api/v1/me (pscp, otherwise cls) holds several clients (F-425). While a code bound to a site is neither used nor expired, the site is not deleted (409 collector_enrollment_code, E-71, F-430).
      */
     post: operations['createCollectorEnrollmentCode'];
     delete?: never;
@@ -6492,7 +6492,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a leaf node
-     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens or merge tombstones within tombstone_until are bound to it (E-71). Expired tokens and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree. Deleting a rack node needs the rack_view feature like DELETE /racks/{id} (403 feature-not-entitled otherwise, F-400).
+     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens, collector enrollment codes that are neither used nor expired, or merge tombstones within tombstone_until are bound to it (E-71, F-430). Expired tokens, expired or used enrollment codes and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree. Deleting a rack node needs the rack_view feature like DELETE /racks/{id} (403 feature-not-entitled otherwise, F-400).
      */
     delete: operations['deleteLocation'];
     options?: never;
@@ -9673,7 +9673,7 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -9687,6 +9687,7 @@ export interface components {
         | 'collector'
         | 'discovery_scope'
         | 'agent_enrollment_token'
+        | 'collector_enrollment_code'
         | 'ci_merge'
       )[];
     };

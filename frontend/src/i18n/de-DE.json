@@ -1495,6 +1495,7 @@
       "collector": "Collectors",
       "discovery_scope": "Discovery-Scopes",
       "agent_enrollment_token": "gültige Agent-Enrollment-Tokens",
+      "collector_enrollment_code": "gültige Collector-Enrollment-Codes",
       "ci_merge": "CI-Zusammenführungen (Tombstones)"
     }
   },

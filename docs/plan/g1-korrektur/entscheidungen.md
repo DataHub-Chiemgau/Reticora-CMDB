@@ -360,10 +360,11 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 Folgen der Entscheidung:
 - Eine Site mit einem Merge-Tombstone ist bis `tombstone_until` (höchstens 12 Monate) nicht löschbar.
 - Ein verbrauchtes, noch nicht abgelaufenes Enrollment-Token blockiert bis zu seinem Ablauf (Standard 24 h, höchstens 30 Tage). Das Schema kennt keinen Widerrufsstatus.
+- Collector-Enrollment-Codes, die 000187 an eine Site bindet, folgen derselben Regel (WP-701, Migration 000189, F-430): Ein weder verbrauchter noch abgelaufener Code blockiert mit `collector_enrollment_code`, abgelaufene und verbrauchte Codes werden in der Lösch-Transaktion entfernt.
 
 **Betroffene IDs:** LOC-11
 
-**Betroffene WPs:** WP-411
+**Betroffene WPs:** WP-411, WP-701
 
 ## E-72
 
