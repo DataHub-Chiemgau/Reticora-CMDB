@@ -520,13 +520,19 @@
   "accessibility": {
     "closeModal": "Close modal",
     "closePanel": "Close detail view",
-    "toggleDarkMode": "Toggle dark mode",
     "commandPaletteSearch": "Search commands",
     "searchCIs": "Search Configuration Items",
     "filterCIStatus": "Filter CI status",
     "primaryNavigation": "Primary navigation",
     "breadcrumb": "Breadcrumb navigation",
     "skipToContent": "Skip to content"
+  },
+  "theme": {
+    "toggle": "Toggle dark mode – current: {{current}}, next: {{next}}",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "systemResolved": "System ({{theme}})"
   },
   "asset": {
     "title": "Assets",

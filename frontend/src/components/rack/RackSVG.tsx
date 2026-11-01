@@ -21,9 +21,16 @@ export interface RackSVGProps {
 const UNIT_HEIGHT = 20;
 const LABEL_WIDTH = 30;
 
+// The default colour of an item without its own colour (indigo-600): the
+// white label reaches 6.3:1 on it, in both themes alike.
+const DEFAULT_ITEM_COLOR = '#4f46e5';
+
 /**
  * RackSVG renders a server rack diagram as an SVG element.
- * Each unit is 1U (20px), items can span multiple units.
+ * Each unit is 1U (20px), items can span multiple units. The frame, the unit
+ * lines and the unit numbers follow the theme through fill-/stroke- classes
+ * with dark: variants (as the map in MapPage); the unit numbers sit outside
+ * the frame on the card background and keep 4.5:1 there in both themes.
  */
 export const RackSVG: FC<RackSVGProps> = ({
   units,
@@ -49,9 +56,8 @@ export const RackSVG: FC<RackSVGProps> = ({
         y={1}
         width={rackWidth}
         height={totalHeight}
-        fill="#1f2937"
-        stroke="#374151"
         strokeWidth={1}
+        className="fill-gray-100 stroke-gray-300 dark:fill-gray-800 dark:stroke-gray-700"
       />
 
       {/* Unit lines and labels */}
@@ -59,13 +65,20 @@ export const RackSVG: FC<RackSVGProps> = ({
         const y = i * UNIT_HEIGHT + 1;
         return (
           <g key={`unit-${i}`}>
-            <line x1={LABEL_WIDTH} y1={y} x2={width} y2={y} stroke="#374151" strokeWidth={0.5} />
+            <line
+              x1={LABEL_WIDTH}
+              y1={y}
+              x2={width}
+              y2={y}
+              strokeWidth={0.5}
+              className="stroke-gray-300 dark:stroke-gray-700"
+            />
             <text
               x={LABEL_WIDTH - 4}
               y={y + UNIT_HEIGHT / 2 + 4}
               textAnchor="end"
               fontSize={9}
-              fill="#9ca3af"
+              className="fill-gray-600 dark:fill-gray-400"
             >
               {units - i}
             </text>
@@ -90,16 +103,16 @@ export const RackSVG: FC<RackSVGProps> = ({
               width={rackWidth - 4}
               height={itemHeight}
               rx={2}
-              fill={item.color ?? '#4f46e5'}
-              stroke="#6366f1"
+              fill={item.color ?? DEFAULT_ITEM_COLOR}
               strokeWidth={0.5}
+              className="stroke-indigo-500"
             />
             <text
               x={LABEL_WIDTH + rackWidth / 2}
               y={y + itemHeight / 2 + 4}
               textAnchor="middle"
               fontSize={10}
-              fill="#ffffff"
+              className="fill-white"
             >
               {item.label}
             </text>

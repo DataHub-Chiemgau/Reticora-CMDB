@@ -381,7 +381,7 @@ export function RoomPlanPage() {
                           max={100}
                           step={1}
                           defaultValue={percent(pos.x)}
-                          className="mt-0.5 block w-16 rounded border border-gray-300 px-1.5 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                          className="mt-0.5 block w-16 rounded border border-gray-300 bg-white px-1.5 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                         />
                       </label>
                       <label className="text-xs text-gray-600 dark:text-gray-300">
@@ -393,7 +393,7 @@ export function RoomPlanPage() {
                           max={100}
                           step={1}
                           defaultValue={percent(pos.y)}
-                          className="mt-0.5 block w-16 rounded border border-gray-300 px-1.5 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                          className="mt-0.5 block w-16 rounded border border-gray-300 bg-white px-1.5 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                         />
                       </label>
                       <button

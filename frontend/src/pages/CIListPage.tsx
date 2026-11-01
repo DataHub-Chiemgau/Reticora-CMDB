@@ -619,7 +619,7 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
             ) : null}
             <ScrollRegion label={t('ci.title')}>
               <table className="w-full text-left text-sm">
-                <thead className="border-b bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
+                <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
                   <tr>
                     <th scope="col" className="w-10 px-4 py-3">
                       <input

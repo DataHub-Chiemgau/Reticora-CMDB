@@ -15,7 +15,8 @@ import type { Handler } from './support/backend';
 // UI-18/NFR-07 (WP-193, WP-522, WP-631): every route of the router
 // (src/App.tsx) passes an automated WCAG 2.1 AA check (axe-core) in every
 // browser project of playwright.config.ts, in both UI languages of E-99
-// (de-DE and en-US) and in the light and the dark theme. The
+// (de-DE and en-US) and in the light and the dark theme, also with the
+// light theme chosen on a dark OS (colour scheme of the browser). The
 // backend is mocked with data (support/a11y-fixtures.ts): every list holds at
 // least one row, and the check waits for that row, so axe sees rows, badges
 // and links instead of an empty page. The empty states of the list pages of
@@ -24,7 +25,25 @@ import type { Handler } from './support/backend';
 const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
 
 type Theme = 'light' | 'dark';
-const THEMES: Theme[] = ['light', 'dark'];
+
+// The theme the user chose (stored like the theme toggle) and the colour
+// scheme the OS reports (prefers-color-scheme). The chosen theme alone
+// decides: before, the light theme on a dark OS kept the dark canvas of the
+// OS under the dark text of the light theme (1:1 on every route).
+interface ThemeCase {
+  theme: Theme;
+  os: Theme;
+}
+const THEMES: ThemeCase[] = [
+  { theme: 'light', os: 'light' },
+  { theme: 'dark', os: 'light' },
+  { theme: 'light', os: 'dark' },
+];
+
+/** themeName names a case in the test title: the theme, and the OS if it differs. */
+function themeName({ theme, os }: ThemeCase): string {
+  return os === theme || os === 'light' ? theme : `${theme}, ${os} OS`;
+}
 
 // The UI languages of E-99 (WP-523). The interface follows the browser
 // language; each check runs once per language, because the labels change the
@@ -245,18 +264,41 @@ async function expectLanguage(page: Page, language: Language) {
   await expect(page.locator('html')).toHaveAttribute('lang', language);
 }
 
+/**
+ * expectTheme checks that the chosen theme is in effect whatever the OS
+ * prefers: the class of the dark: variants, data-theme (which switches off the
+ * pre-JS OS fallback of src/index.css), the colour scheme of native controls
+ * and the canvas colour (white, or the dark surface hsl(220 13% 10%)).
+ */
 async function expectTheme(page: Page, theme: Theme) {
+  const html = page.locator('html');
   if (theme === 'dark') {
-    await expect(page.locator('html')).toHaveClass(/\bdark\b/);
+    await expect(html).toHaveClass(/\bdark\b/);
   } else {
-    await expect(page.locator('html')).not.toHaveClass(/\bdark\b/);
+    await expect(html).not.toHaveClass(/\bdark\b/);
+  }
+  await expect(html).toHaveAttribute('data-theme', theme);
+  await expect(html).toHaveCSS('color-scheme', theme);
+  const canvas = await html.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const channels = (canvas.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
+  expect(channels, `html background ${canvas}`).toHaveLength(3);
+  for (const channel of channels) {
+    if (theme === 'dark') {
+      expect(channel, `html background ${canvas}`).toBeLessThan(40);
+    } else {
+      expect(channel, `html background ${canvas}`).toBeGreaterThan(250);
+    }
   }
 }
 
 // Each violation names its elements with their markup, so a failure in CI
-// shows which element of the page breaks the rule.
-async function expectNoViolations(page: Page) {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+// shows which element of the page breaks the rule. include limits the check
+// to one part of the page, e.g. an open dialog (Radix hides the page behind
+// it with aria-hidden).
+async function expectNoViolations(page: Page, include?: string) {
+  const builder = new AxeBuilder({ page }).withTags(WCAG_TAGS);
+  if (include) builder.include(include);
+  const results = await builder.analyze();
   const summary = results.violations.map(
     (v) =>
       `${v.id} (${v.impact}): ${v.nodes
@@ -266,17 +308,23 @@ async function expectNoViolations(page: Page) {
   expect(summary, 'WCAG 2.1 AA violations').toEqual([]);
 }
 
-/** checkPage opens a page with data in a theme and runs axe on it. */
+/**
+ * checkPage opens a page with data in a theme on an OS colour scheme and runs
+ * axe on it (on the part named by include, if given).
+ */
 async function checkPage(
   page: Page,
-  route: Pick<A11yRoute, 'url' | 'signedIn' | 'handlers' | 'ready' | 'prepare'>,
-  theme: Theme,
+  route: Pick<A11yRoute, 'url' | 'signedIn' | 'handlers' | 'ready' | 'prepare'> & {
+    include?: string;
+  },
+  { theme, os }: ThemeCase,
   language: Language,
 ) {
   const diagnostics = pageDiagnostics(page);
   await mockBackend(page, [...(route.handlers ?? []), ...A11Y_HANDLERS]);
   if (route.signedIn !== false) await signIn(page);
   await storeTheme(page, theme);
+  await page.emulateMedia({ colorScheme: os });
   await page.goto(route.url);
   await expectVisible(page, page.locator('#main-content'), diagnostics.describe);
   await route.prepare?.(page);
@@ -289,8 +337,54 @@ async function checkPage(
   expect(diagnostics.pageErrors, `uncaught errors on ${route.url}`).toEqual([]);
   await expectLanguage(page, language);
   await expectTheme(page, theme);
-  await expectNoViolations(page);
+  await expectNoViolations(page, route.include);
 }
+
+// The dialogs of the CI type administration on the data of the a11y fixtures
+// (organisation type M.ciType, one template). Radix portals a dialog under
+// <body>, outside the App shell that gives the pages their text colour: the
+// unclassed checkbox labels of the field editor were black on the dark
+// dialog (1.18:1). The page behind an open dialog is hidden (aria-hidden),
+// so axe checks the dialog.
+const DIALOGS: {
+  name: string;
+  prepare: (page: Page) => Promise<void>;
+  /** The element whose text colour must not be the browser default black. */
+  plainText: (page: Page) => Locator;
+}[] = [
+  {
+    name: 'CI type field editor',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: M.ciType }).click();
+      await page.getByRole('button', { name: /^(feld hinzufügen|add field)$/i }).click();
+      await page
+        .getByRole('dialog')
+        .getByRole('checkbox', { name: /^(eindeutig|unique)$/i })
+        .check();
+      await expect(
+        page.getByRole('dialog').getByRole('combobox', { name: /^(eindeutig je|unique per)$/i }),
+      ).toBeVisible();
+    },
+    plainText: (page) =>
+      page
+        .getByRole('dialog')
+        .locator('label')
+        .filter({ has: page.getByRole('checkbox', { name: /^(eindeutig|unique)$/i }) }),
+  },
+  {
+    name: 'CI type templates',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /^(aus vorlage|from template)$/i }).click();
+      await expect(page.getByRole('dialog').getByRole('button', { name: /server/i })).toBeVisible();
+    },
+    plainText: (page) =>
+      page
+        .getByRole('dialog')
+        .getByRole('button', { name: /server/i })
+        .locator('p')
+        .first(),
+  },
+];
 
 test.describe('accessibility (WCAG 2.1 AA)', () => {
   test('every route of the router has a check', () => {
@@ -298,6 +392,42 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
     expect(covered, 'routes of src/App.tsx without an entry in ROUTES (or stale entries)').toEqual(
       [...new Set(routerPaths())].sort(),
     );
+  });
+
+  // The theme toggle cycles light, dark and system: a light theme stored on a
+  // dark OS returns to following the OS, and in system mode the toggle and
+  // the page follow an OS change at runtime (no stale label).
+  test.describe('theme toggle', () => {
+    test.use({ locale: 'de-DE' });
+
+    test('cycles light, dark and system', async ({ page }) => {
+      await mockBackend(page, A11Y_HANDLERS);
+      await signIn(page);
+      await storeTheme(page, 'light');
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await page.goto('/dashboard');
+      const toggle = page.getByRole('button', { name: /^Dunkelmodus umschalten/ });
+      const named = (current: string, next: string) =>
+        expect(toggle).toHaveAccessibleName(
+          `Dunkelmodus umschalten – aktuell: ${current}, als Nächstes: ${next}`,
+        );
+
+      await named('Hell', 'Dunkel');
+      await expectTheme(page, 'light');
+      await toggle.click();
+      await named('Dunkel', 'System');
+      await expectTheme(page, 'dark');
+      await toggle.click();
+      await named('System (Dunkel)', 'Hell');
+      await expectTheme(page, 'dark');
+      await page.emulateMedia({ colorScheme: 'light' });
+      await named('System (Hell)', 'Hell');
+      await expectTheme(page, 'light');
+      expect(await page.evaluate(() => localStorage.getItem('reticora-theme-mode'))).toBe('system');
+      await toggle.click();
+      await named('Hell', 'Dunkel');
+      await expectTheme(page, 'light');
+    });
   });
 
   // Each check runs once per UI language (E-99): the browser language picks
@@ -308,8 +438,30 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
 
       for (const route of ROUTES) {
         for (const theme of THEMES) {
-          test(`page ${route.path} (${theme})`, async ({ page }) => {
+          test(`page ${route.path} (${themeName(theme)})`, async ({ page }) => {
             await checkPage(page, route, theme, language);
+          });
+        }
+      }
+
+      for (const dialog of DIALOGS) {
+        for (const theme of THEMES) {
+          test(`dialog ${dialog.name} (${themeName(theme)})`, async ({ page }) => {
+            await checkPage(
+              page,
+              {
+                url: '/ci-types',
+                prepare: async (p) => {
+                  await expect(p.getByText(M.ciType).first()).toBeVisible();
+                  await dialog.prepare(p);
+                },
+                ready: (p) => p.getByRole('dialog'),
+                include: '[role="dialog"]',
+              },
+              theme,
+              language,
+            );
+            await expect(dialog.plainText(page)).not.toHaveCSS('color', 'rgb(0, 0, 0)');
           });
         }
       }
@@ -318,7 +470,7 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
       // scope control, with the notice, the counter of the hidden relationships
       // and, after "show all", the outside badge.
       for (const theme of THEMES) {
-        test(`page /cmdb/:id outside the chosen scope (${theme})`, async ({ page }) => {
+        test(`page /cmdb/:id outside the chosen scope (${themeName(theme)})`, async ({ page }) => {
           const otherClient = 'c7000000-0000-4000-8000-0000000000aa';
           await page.addInitScript((clientId) => {
             window.localStorage.setItem('reticora-scope', JSON.stringify({ clientId, siteId: '' }));
@@ -349,7 +501,7 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
 
       for (const { url, endpoint } of EMPTY_PAGES) {
         for (const theme of THEMES) {
-          test(`empty state ${url} (${theme})`, async ({ page }) => {
+          test(`empty state ${url} (${themeName(theme)})`, async ({ page }) => {
             await checkPage(
               page,
               {
@@ -358,6 +510,7 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
                 ready: (p) => p.locator('#main-content td[colspan]'),
               },
               theme,
+              language,
             );
           });
         }

@@ -16,7 +16,8 @@ import { logout, refreshSession } from './auth/session';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { useEntitlements, useModules, navFeatureFor } from './hooks/useEntitlements';
-import { useThemeStore } from './stores/theme';
+import { nextThemeMode, useThemeStore } from './stores/theme';
+import type { ThemeMode } from './stores/theme';
 import { LanguageSwitch } from './components/LanguageSwitch';
 
 // Route-level code splitting: every feature page is a separate chunk so the
@@ -112,6 +113,7 @@ function App() {
   const location = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const mode = useThemeStore((state) => state.mode);
+  const resolvedTheme = useThemeStore((state) => state.resolved);
   const setMode = useThemeStore((state) => state.setMode);
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
@@ -130,14 +132,24 @@ function App() {
     return 'Ctrl+K';
   }, []);
 
-  const isDark =
-    mode === 'dark' ||
-    (mode === 'system' &&
-      typeof document !== 'undefined' &&
-      document.documentElement.classList.contains('dark'));
+  // The theme toggle (header and command palette) cycles light, dark and
+  // system (follow the OS). Its label names the current mode, in 'system'
+  // mode with the theme in effect, and the mode the next click selects.
+  const themeLabels: Record<ThemeMode, string> = {
+    light: t('theme.light'),
+    dark: t('theme.dark'),
+    system: t('theme.system'),
+  };
+  const themeToggleLabel = t('theme.toggle', {
+    current:
+      mode === 'system'
+        ? t('theme.systemResolved', { theme: themeLabels[resolvedTheme] })
+        : themeLabels[mode],
+    next: themeLabels[nextThemeMode(mode)],
+  });
 
-  function toggleDarkMode() {
-    setMode(isDark ? 'light' : 'dark');
+  function cycleTheme() {
+    setMode(nextThemeMode(mode));
   }
 
   function handleNavigate(page: AppPage) {
@@ -259,38 +271,11 @@ function App() {
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={toggleDarkMode}
-                aria-label={t('accessibility.toggleDarkMode')}
+                onClick={cycleTheme}
+                aria-label={themeToggleLabel}
+                title={themeToggleLabel}
               >
-                {isDark ? (
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    aria-hidden="true"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <circle cx="12" cy="12" r="4" />
-                    <path d="M12 2v2" />
-                    <path d="M12 20v2" />
-                    <path d="m4.93 4.93 1.41 1.41" />
-                    <path d="m17.66 17.66 1.41 1.41" />
-                    <path d="M2 12h2" />
-                    <path d="M20 12h2" />
-                    <path d="m6.34 17.66-1.41 1.41" />
-                    <path d="m19.07 4.93-1.41 1.41" />
-                  </svg>
-                ) : (
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    aria-hidden="true"
-                    fill="currentColor"
-                  >
-                    <path d="M21 12.79A9 9 0 0 1 11.21 3c0-.34.02-.67.05-1A10 10 0 1 0 22 12c0-.05 0-.11-.01-.16-.3.63-.64.95-.99.95Z" />
-                  </svg>
-                )}
+                <ThemeIcon mode={mode} />
               </Button>
               {isAuthenticated ? (
                 <Button variant="ghost" size="sm" onClick={handleLogout}>
@@ -387,7 +372,8 @@ function App() {
         <CommandPalette
           onNavigate={handleNavigate}
           onCreateCI={openCreateCI}
-          onToggleDarkMode={toggleDarkMode}
+          onToggleDarkMode={cycleTheme}
+          themeToggleLabel={themeToggleLabel}
           isFeatureEnabled={isEnabled}
           isPageEnabled={isPageEnabled}
         />
@@ -442,6 +428,53 @@ function RequireAuth() {
   }
 
   return <Outlet />;
+}
+
+/** ThemeIcon shows the current theme mode: sun (light), moon (dark), monitor (system). */
+function ThemeIcon({ mode }: { mode: ThemeMode }) {
+  if (mode === 'light') {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-4 w-4"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2" />
+        <path d="M12 20v2" />
+        <path d="m4.93 4.93 1.41 1.41" />
+        <path d="m17.66 17.66 1.41 1.41" />
+        <path d="M2 12h2" />
+        <path d="M20 12h2" />
+        <path d="m6.34 17.66-1.41 1.41" />
+        <path d="m19.07 4.93-1.41 1.41" />
+      </svg>
+    );
+  }
+  if (mode === 'dark') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="currentColor">
+        <path d="M21 12.79A9 9 0 0 1 11.21 3c0-.34.02-.67.05-1A10 10 0 1 0 22 12c0-.05 0-.11-.01-.16-.3.63-.64.95-.99.95Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+    </svg>
+  );
 }
 
 function NavButton({

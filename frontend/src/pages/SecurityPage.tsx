@@ -68,7 +68,7 @@ export function SecurityPage() {
           <div className="flex items-center gap-2">
             <select
               aria-label={t('security.standardLabel')}
-              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               value={standard}
               onChange={(e) => setStandard(e.target.value)}
             >
@@ -180,7 +180,7 @@ export function SecurityPage() {
             <input
               type="number"
               min={0}
-              className="w-32 rounded-md border border-gray-300 px-2 py-1.5 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+              className="w-32 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               placeholder={String(retention.data?.retention_days ?? 0)}
               value={retentionDays}
               onChange={(e) => setRetentionDays(e.target.value)}
@@ -189,7 +189,7 @@ export function SecurityPage() {
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-gray-600 dark:text-gray-300">{t('security.retentionMode')}</span>
             <select
-              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               value={retentionMode}
               onChange={(e) => setRetentionMode(e.target.value as 'anonymize' | 'delete')}
             >

@@ -520,13 +520,19 @@
   "accessibility": {
     "closeModal": "Modal schließen",
     "closePanel": "Detailansicht schließen",
-    "toggleDarkMode": "Dunkelmodus umschalten",
     "commandPaletteSearch": "Befehle durchsuchen",
     "searchCIs": "Configuration Items durchsuchen",
     "filterCIStatus": "CI-Status filtern",
     "primaryNavigation": "Hauptnavigation",
     "breadcrumb": "Brotkrumen-Navigation",
     "skipToContent": "Zum Inhalt springen"
+  },
+  "theme": {
+    "toggle": "Dunkelmodus umschalten – aktuell: {{current}}, als Nächstes: {{next}}",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "system": "System",
+    "systemResolved": "System ({{theme}})"
   },
   "asset": {
     "title": "Inventar",

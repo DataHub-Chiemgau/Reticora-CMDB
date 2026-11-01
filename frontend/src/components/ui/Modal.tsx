@@ -23,6 +23,10 @@ export function Modal({ open, onOpenChange, title, description, children }: Moda
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm" />
+        {/* Portaled under <body>, outside the App shell that gives the pages
+            their text colour: the dialog sets the theme text colour itself, so
+            text without a colour class (checkbox labels) is not the browser
+            default black on the dark dialog. */}
         <Dialog.Content
           onOpenAutoFocus={() => {
             // Runs before Radix moves focus into the dialog.
@@ -38,7 +42,7 @@ export function Modal({ open, onOpenChange, title, description, children }: Moda
           }}
           aria-labelledby={titleId}
           aria-describedby={descriptionId}
-          className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[min(92vw,40rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900"
+          className="fixed left-1/2 top-1/2 z-50 max-h-[85vh] w-[min(92vw,40rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 text-gray-900 shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
         >
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
