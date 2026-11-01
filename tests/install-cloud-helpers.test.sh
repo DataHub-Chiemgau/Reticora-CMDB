@@ -486,6 +486,29 @@ run_test   "issuer: a domain issuer served by the frontend is checked after its 
 run_test   "issuer: strict checks after server and frontend, before the summary"       test_issuer_checks_order
 run_test   "issuer: a failed check shows the temporary password of this run"           test_issuer_failure_keeps_initial_login
 
+# A failed Compose dependency check must expose the container error and stop
+# before starting any later services, even before wait_for_service is reached.
+test_compose_start_failure_logs() {
+    stub_issuer_stack compose-start-failure
+    compose_cmd() {
+        printf 'compose %s\n' "$*" >> "$STACK_CALLS"
+        case "$*" in
+            "up -d server frontend") return 1 ;;
+            "logs --tail 40 server") printf 'session token setup failed: permission denied\n' ;;
+        esac
+    }
+    # Restore the real diagnostic helper shadowed by stub_issuer_stack.
+    eval "$(sed -n '/^show_service_logs() {/,/^}/p' "$HARNESS")"
+    local out rc
+    out="$( (start_stack) 2>&1)"; rc=$?
+    [ "$rc" -eq 1 ] &&
+        grep -q 'session token setup failed: permission denied' <<< "$out" &&
+        grep -q 'failed to start — see the container logs above' <<< "$out" &&
+        grep -qx 'compose logs --tail 40 frontend' "$STACK_CALLS" &&
+        ! grep -q '^wait server\|nats-edge' "$STACK_CALLS"
+}
+run_test "startup: Compose dependency failure prints container logs and aborts" test_compose_start_failure_logs
+
 # ─── re-run: .env merge and password probes (WP-096, INS-05) ─────────────────
 
 set_env_values() {

@@ -255,10 +255,21 @@ release_identity_regexp() {
 # release. Only the tag is taken from GitHub; everything installed for it is
 # verified for exactly that tag.
 latest_release_tag() {
-    local latest
+    local latest release_url tag_prefix
     ensure_command curl curl ca-certificates
-    latest="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$RELEASE_LATEST_URL" 2>/dev/null \
+    latest="$(curl -fsSL --connect-timeout 10 --max-time 30 -H 'Accept: application/vnd.github+json' "$RELEASE_LATEST_URL" 2>/dev/null \
         | tr -d '\r\n' | sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || latest=""
+    if ! is_release_tag "$latest"; then
+        # The public redirect also works when the API is unavailable or rate limited.
+        release_url="$(curl -fsSL --connect-timeout 10 --max-time 30 -o /dev/null \
+            -w '%{url_effective}' "https://github.com/$RELEASE_REPOSITORY/releases/latest" 2>/dev/null)" || release_url=""
+        tag_prefix="https://github.com/$RELEASE_REPOSITORY/releases/tag/"
+        case "$release_url" in
+            "$tag_prefix"*) latest="${release_url#"$tag_prefix"}" ;;
+            "https://github.com/$RELEASE_REPOSITORY/releases")
+                die "No published stable release is available for $RELEASE_REPOSITORY. To install main from source, run ./install.sh --cloud --build-from-source (collector: ./install.sh --vm --build-from-source). Source builds are not signature-verified ($SIGNATURE_TROUBLESHOOTING)." ;;
+        esac
+    fi
     is_release_tag "$latest" \
         || die "Could not determine the newest release of $RELEASE_REPOSITORY ($RELEASE_LATEST_URL); name the release with --release v<version> (install.sh: --ref v<version>) or build from source with --build-from-source ($SIGNATURE_TROUBLESHOOTING)."
     printf -v "$1" '%s' "$latest"
