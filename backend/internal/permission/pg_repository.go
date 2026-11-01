@@ -48,49 +48,45 @@ func (r *PGRepository) ListPermissions(ctx context.Context) ([]Permission, error
 }
 
 func (r *PGRepository) ListRolePermissions(ctx context.Context, orgID, roleID string) ([]RolePermissionGrant, error) {
-	items := make([]RolePermissionGrant, 0)
+	var items []RolePermissionGrant
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
-			SELECT organization_id::text, role_id::text, permission_key, granted_at, COALESCE(granted_by::text, '')
-			FROM role_permission
-			WHERE organization_id = $1 AND role_id = $2
-			ORDER BY permission_key`, orgID, roleID)
-		if err != nil {
-			return fmt.Errorf("list role permissions: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var item RolePermissionGrant
-			if err := rows.Scan(&item.OrganizationID, &item.RoleID, &item.PermissionKey, &item.GrantedAt, &item.GrantedBy); err != nil {
-				return fmt.Errorf("scan role permission: %w", err)
-			}
-			items = append(items, item)
-		}
-		return rows.Err()
+		var err error
+		items, err = scanRolePermissions(ctx, tx, orgID, roleID)
+		return err
 	})
-	return items, err
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 // ReplaceRolePermissions implements Repository. The role grants
-// role_permission and role.permissions (AccessGrants); keys that neither
-// holds are added and must be held by caller organization-wide
-// (checkWidening); keys it holds and the request leaves out are removed
-// from every assignment of the role, so caller must be able to revoke each
-// of them (CheckRoleNarrowing, F-396). Otherwise nothing changes. The role
-// row is locked, so no assignment is added meanwhile.
+// role_permission and role.permissions (AccessGrants). role.permissions is
+// the seed of the standard role (RBA-02 matrix, seed_standard_roles): a
+// request without one of its keys is refused (StandardRolePermissionsError,
+// 409, F-398), since the key would stay effective. Keys that neither holds
+// are added and must be held by caller organization-wide (checkWidening);
+// keys it holds and the request leaves out are removed from every
+// assignment of the role, so caller must be able to revoke each of them
+// (CheckRoleNarrowing, F-396). Otherwise nothing changes. The role row is
+// locked, so no assignment is added meanwhile. On success role_permission
+// holds every key of the role, seed keys included.
 func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID, grantedBy string, caller *identity.Principal, keys []string) ([]RolePermissionGrant, error) {
 	items := make([]RolePermissionGrant, 0)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var current, granted []string
+		var name string
+		var current, granted, seed []string
 		err := tx.QueryRow(ctx, `
-			SELECT ARRAY(SELECT rp.permission_key FROM role_permission rp
+			SELECT ro.name, ARRAY(SELECT rp.permission_key FROM role_permission rp
 			              WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
 			             UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))),
 			       ARRAY(SELECT k FROM (SELECT rp.permission_key AS k FROM role_permission rp
 			              WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
 			             UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))) keys
+			              WHERE k IN (SELECT key FROM permission) ORDER BY k),
+			       ARRAY(SELECT k FROM jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb)) AS k
 			              WHERE k IN (SELECT key FROM permission) ORDER BY k)
-			  FROM role ro WHERE ro.id = $1 AND ro.organization_id = $2 FOR UPDATE OF ro`, roleID, orgID).Scan(&current, &granted)
+			  FROM role ro WHERE ro.id = $1 AND ro.organization_id = $2 FOR UPDATE OF ro`, roleID, orgID).Scan(&name, &current, &granted, &seed)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrRoleNotFound
 		}
@@ -110,6 +106,9 @@ func (r *PGRepository) ReplaceRolePermissions(ctx context.Context, orgID, roleID
 			if !known {
 				return unknownPermission(key)
 			}
+		}
+		if seedErr := checkSeedKept(name, seed, keys); seedErr != nil {
+			return seedErr
 		}
 		if wideningErr := checkWidening(caller, current, keys); wideningErr != nil {
 			return wideningErr
@@ -323,10 +322,21 @@ func (r *PGRepository) HasPermission(ctx context.Context, orgID, userID, key str
 	return false, nil
 }
 
+// scanRolePermissions lists the permissions the role grants, as AccessGrants
+// resolves them (F-398): the rows of role_permission and the seed keys of
+// role.permissions, limited to the catalogue. A seed key without a row (an
+// earlier replacement removed it) carries the creation time of the role and
+// no granter.
 func scanRolePermissions(ctx context.Context, tx pgx.Tx, orgID, roleID string) ([]RolePermissionGrant, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT organization_id::text, role_id::text, permission_key, granted_at, COALESCE(granted_by::text, '')
-		FROM role_permission WHERE organization_id = $1 AND role_id = $2 ORDER BY permission_key`, orgID, roleID)
+		SELECT ro.organization_id::text, ro.id::text, k.key, COALESCE(rp.granted_at, ro.created_at), COALESCE(rp.granted_by::text, '')
+		  FROM role ro
+		 CROSS JOIN LATERAL (SELECT p.permission_key AS key FROM role_permission p
+		                      WHERE p.role_id = ro.id AND p.organization_id = ro.organization_id
+		                     UNION SELECT jsonb_array_elements_text(COALESCE(ro.permissions, '[]'::jsonb))) k
+		  LEFT JOIN role_permission rp ON rp.organization_id = ro.organization_id AND rp.role_id = ro.id AND rp.permission_key = k.key
+		 WHERE ro.organization_id = $1 AND ro.id = $2 AND k.key IN (SELECT key FROM permission)
+		 ORDER BY k.key`, orgID, roleID)
 	if err != nil {
 		return nil, fmt.Errorf("list role permissions: %w", err)
 	}

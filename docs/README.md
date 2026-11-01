@@ -425,7 +425,12 @@ when it is stored in the limits of a row.
 leaving them as ad-hoc JSON strings. `permission` is the global catalogue,
 `role_permission` grants catalogue entries to tenant roles, and the effective
 permissions endpoint also folds in existing custom-role JSON grants so old data
-continues to work while new code can validate against the catalogue. SLA policy
+continues to work while new code can validate against the catalogue. A
+standard role grants its `role_permission` rows and its seed keys
+(`role.permissions`, the RBA-02 matrix); `PUT /api/v1/roles/{id}/permissions`
+may add keys but answers 409 (`standard-role-permissions`) when a seed key is
+left out, and the role's permission list, that response and the route audit
+show the union (F-398, WP-669). Narrower roles are custom roles. SLA policy
 rows define priority-based response and resolution targets, while `ticket_sla`
 stores the applied policy and clock outcomes. Ticket creation, first visible
 response and resolution transitions update that state so breach listings are

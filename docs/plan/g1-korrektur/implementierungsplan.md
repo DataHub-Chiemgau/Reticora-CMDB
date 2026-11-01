@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-668 | 13 | 10,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-669 | 15 | 11,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **315** | **411,0** | |
+| **Summe** | | **317** | **412,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>13 WPs · 10,0 PT"]
+    K7N["K7-Nachträge<br/>15 WPs · 11,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -434,6 +434,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-665](#wp-665--metrik-ingest-unsichtbare-oder-unbekannte-ci_id-404-statt-500-batch-alles-oder-nichts-dokumentiert-api-und-edge) | `k7n-metric-ingest-errors` | Metrik-Ingest: unsichtbare oder unbekannte ci_id 404 statt 500, Batch alles oder nichts dokumentiert (API und Edge) | K7N | 0,5 | F-394 | WP-343, WP-344, WP-426 |
 | [WP-666](#wp-666--login-organisationsattribut-ohne-organisation-erhält-401-login-no-organization-statt-502) | `k7n-login-unknown-org` | Login: Organisationsattribut ohne Organisation erhält 401 login-no-organization statt 502 | K7N | 0,5 | F-395 | WP-570, WP-637 |
 | [WP-668](#wp-668--service-account-keys-tragen-den-scope-ihres-erzeugers-spätere-rollen-des-accounts-erweitern-einen-gebundenen-key-nicht-über-den-erzeuger-hinaus) | `k7n-bound-key-creator-scope` | Service-Account-Keys tragen den Scope ihres Erzeugers: spätere Rollen des Accounts erweitern einen gebundenen Key nicht über den Erzeuger hinaus | K7N | 1,5 | F-397 | WP-069, WP-354, WP-355, WP-359, WP-601 |
+| [WP-667](#wp-667--rollendefinition-rechte-entfernen-und-rollen-löschen-nur-mit-der-entzugs-obergrenze-jeder-zuweisung) | `k7n-role-definition-ceiling` | Rollendefinition: Rechte entfernen und Rollen löschen nur mit der Entzugs-Obergrenze jeder Zuweisung | K7N | 1,0 | F-396 | WP-355, WP-394, WP-395 |
+| [WP-669](#wp-669--standardrollen-seed-rechte-nicht-entfernbar-409-rechteliste-antwort-und-audit-zeigen-die-wirksamen-rechte) | `k7n-standard-role-permissions` | Standardrollen: Seed-Rechte nicht entfernbar (409), Rechteliste, Antwort und Audit zeigen die wirksamen Rechte | K7N | 0,5 | F-398 | WP-046, WP-363, WP-394, WP-505, WP-667 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -19091,6 +19093,118 @@ TEN-09;[Q];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
 **Entscheidungsbedarf:** keiner für das Kernverhalten; es folgt E-98 (gebundener Service-Account erweitert den Scope des Erzeugers nicht) und lässt E-64 unverändert (Key gehört dem Account, überlebt die Deaktivierung des Erzeugers). Für Alt-Keys ohne Snapshot gilt die fail-closed-Regel „höchstens die aktuellen Rechte des Erzeugers“ (in der Aufgabe als zulässige Variante genannt); verliert der Erzeuger seine Rollenzuweisungen, gewährt ein solcher Key nichts mehr, bis er neu gebunden ist. Soll das für Alt-Keys anders geregelt werden (z. B. einmaliges Einfrieren des aktuellen Erzeuger-Scopes per Migration), wäre das eine Entscheidung des Lead/Auftraggebers.
 
 **Nicht Bestandteil:** Anzeige des Erzeuger-Scopes in der API-Key-Liste oder UI (`creator_scope` wird nicht ausgeliefert; die Upgrade-Hinweise nennen die SQL-Abfrage); Neuberechnung des Snapshots bei der Rotation (der Nachfolger übernimmt ihn bzw. den fehlenden Snapshot); der Union-Scope ungebundener Keys über alle Rollen des Eigentümers (entspricht dem Scope seiner Sitzung, E-70); Webhook-Abos (WP-601); weitere Befunde der Wiederholungsprüfung.
+
+### WP-667 – Rollendefinition: Rechte entfernen und Rollen löschen nur mit der Entzugs-Obergrenze jeder Zuweisung
+
+**Schlüssel:** `k7n-role-definition-ceiling` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-355 (Service-Account-Rollen mit Grant-Obergrenze, auch beim Entfernen), WP-394 (Grant-Obergrenze, Hinzufügen über die Rollendefinition), WP-395 (Entzug von Zuweisungen mit Grant-Obergrenze)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-396](../../../audit/g1-reaudit/FINDINGS.md#f-396) | P1 | Client-gebundener Inhaber von role:manage nimmt org-weiten Zuweisungen über die Rollendefinition die Rechte (PATCH /roles/{id} mit weniger Rechten, DELETE /roles/{id}, PUT /roles/{id}/permissions), obwohl er die Zuweisung selbst nicht entziehen darf | schließt | Wiederholungsprüfung K7 (r1-b4, K-1) von WP-394/WP-395 auf `e5c2d86` |
+
+**Problem:** Eine Rollendefinition wirkt auf alle Zuweisungen der Rolle. Seit WP-394 darf sie nur Rechte hinzufügen, die der Aufrufer org-weit hält (`checkRoleWidening`, `backend/internal/user/grant_ceiling.go:300` auf `e5c2d86`; `checkWidening`, `backend/internal/permission/repository.go:67`); das Entfernen ist ausdrücklich unbegrenzt („Removing permissions is not limited“, `grant_ceiling.go:298`), und `DeleteRole` (`backend/internal/user/pg_repository.go:927`) prüft außer `is_system` nichts. Ein client-1-Delegate (org_admin mit `scope_client_id = client 1`) erhält für `DELETE /role-assignments/{org-weit}` 403 (WP-395), leert aber mit `PATCH /roles/{id} {"permissions":[]}` (200) dieselbe Custom-Rolle, löscht sie mit `DELETE /roles/{id}` (204, die `user_custom_role`-Zeilen fallen über `ON DELETE CASCADE`) und leert mit `PUT /roles/{viewer}/permissions {"permission_keys":[]}` (200) eine Standardrolle; beim nächsten Refresh hat das org-weite Opfer keine Rechte mehr (`GET /cis` → 403). Das verletzt das verbindliche Kriterium von WP-395 und die Symmetrie von WP-355/WP-394.
+
+**Akzeptanzkriterien:**
+
+- [ ] Neue Prüfung `permission.CheckRoleNarrowing` (`backend/internal/permission/role_narrowing.go`) mit der Regel des Entzugs (WP-395, keine zweite Regel): Entfernt eine Änderung mindestens ein Recht der Rolle oder löscht sie die Rolle, muss der Aufrufer `role:manage` und jedes Recht der Rolle vor der Änderung in einem Scope halten, der den Scope jeder Zuweisung der Rolle deckt (`identity.GrantCeiling` je Zuweisung). Zuweisungen: `role_assignment`, `service_account_role` (Standardrollen) und `user_custom_role` (Custom-Rollen); eine Site nennt ihren Client über `site.client_id` im RLS-Scope des Aufrufers, eine unlesbare Site verlangt alle Clients; eine Zuweisung ohne Scope-ID gilt als org-weit (fail-closed). Sonst 403 (RFC 7807, `removing permissions from the role requires … in the scope of each of its assignments` bzw. `deleting the role requires …`) und nichts ändert sich.
+- [ ] `PATCH /api/v1/roles/{id}` (`UpdateRole`) prüft das, sobald `permissions` ein bisheriges Recht weglässt; `DELETE /api/v1/roles/{id}` (`DeleteRole`, Repository erhält den Principal) prüft es immer; `PUT /api/v1/roles/{id}/permissions` (`ReplaceRolePermissions`) prüft es, sobald ein Recht aus `role_permission` ∪ `role.permissions` fehlt. Die Rollenzeile wird vorher gesperrt (`FOR UPDATE`), sodass keine Zuweisung gleichzeitig hinzukommt (jede Zuweisung sperrt sie per Fremdschlüssel). Die Speicher-Repositories folgen derselben Regel.
+- [ ] Einladungen werden nicht geprüft (Begründung in F-396: gewähren vor der Annahme nichts, werden bei der Annahme zur `role_assignment`, sind ohne Obergrenze widerrufbar). Umbenennen und Beschreibung bleiben frei; eine Rolle ohne Zuweisungen oder nur mit Zuweisungen im eigenen Scope darf der Delegate weiter einschränken und löschen.
+- [ ] `TestRoleDefinitionChangeNeverReachesBeyondCallerScope` (`internal/user/role_definition_ceiling_integration_test.go`, PG, Produktionsrouter, Sitzungen per Refresh): Delegate → 403 und unverändert für PATCH (`[]`, `[ci:read]`) einer org-weit, in Client 2 bzw. in einer Site von Client 2 zugewiesenen Custom-Rolle, DELETE dieser Rollen (Zuweisungen bleiben), PUT viewer bzw. engineer ohne das vom Admin hinzugefügte Recht (org-weite Benutzer- bzw. Service-Account-Zuweisung); Opfer hält `ci:write` und `location:write` beim nächsten Refresh; Delegate benennt um (200), schränkt eine Client-1-Rolle ein (200) und löscht sie (204), löscht eine unzugewiesene (204); org-weiter org_admin → 200/204. Auf `e5c2d86` rot (200/204).
+- [ ] `api/openapi.yaml` beschreibt die Regel an `updateRole`, `deleteRole` (neu 403) und `replaceRolePermissions`; `npm run generate:api` übernimmt sie in `frontend/src/api/generated/schema.d.ts`. `docs/security/review-g1.md` nennt F-396 im Abschnitt der fehlenden Kombinationen.
+- [ ] Bestehende Tests grün (`./internal/user/`, `./internal/permission/`, `./internal/server/`, `./internal/identity/`, `./internal/audit/`); golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neuer Test auch als Nicht-Root-Nutzer grün.
+
+**Dateien (14 Einträge):**
+
+- backend/internal/permission/role_narrowing.go (neu)
+- backend/internal/permission/pg_repository.go
+- backend/internal/permission/repository.go
+- backend/internal/permission/handler.go
+- backend/internal/user/grant_ceiling.go
+- backend/internal/user/handler.go
+- backend/internal/user/pg_repository.go
+- backend/internal/user/repository.go
+- backend/internal/user/role_definition_ceiling_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Prüfung liest die Zuweisungen in der Tenant-Transaktion des Aufrufers (`database.WithRequestTenant`, RLS über `app.org_id`; Sites im Client-/Site-Scope des Aufrufers, unlesbare Site fail-closed); kein neuer Pfad mit erweiterten Rechten, keine Funktion, keine Policy.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/user/ ./internal/permission/ ./internal/server/ ./internal/identity/ ./internal/audit/` mit `TEST_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestRoleDefinitionChangeNeverReachesBeyondCallerScope$' ./internal/user/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RBA-03;[B];B;backend/internal/user/role_definition_ceiling_integration_test.go;WP-667
+TEN-09;[Q];B;backend/internal/user/role_definition_ceiling_integration_test.go;WP-667
+```
+
+**Entscheidungsbedarf:** keiner. (Gleiche Regel wie der Entzug, WP-395; Einladungen ausgenommen, siehe F-396 Empfehlung.)
+
+**Nicht Bestandteil:** Wirkungslosigkeit des Entfernens von Seed-Rechten bei Standardrollen (`role.permissions`, F-398, WP-669); Obergrenze für Liste und Widerruf von Einladungen (WP-394 „Nicht Bestandteil“); Rollen aus IdP-Gruppen; Aussperrschutz für den letzten org_admin.
+
+### WP-669 – Standardrollen: Seed-Rechte nicht entfernbar (409), Rechteliste, Antwort und Audit zeigen die wirksamen Rechte
+
+**Schlüssel:** `k7n-standard-role-permissions` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-046 (Rollenmatrix RBA-02), WP-363 (RBA-01-Schlüssel, `seed_standard_roles`), WP-394 (Obergrenze beim Hinzufügen), WP-505 (alte und neue Werte im Routen-Audit), WP-667 (Obergrenze beim Entfernen)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-398](../../../audit/g1-reaudit/FINDINGS.md#f-398) | P3 | PUT /roles/{id}/permissions auf einer Standardrolle antwortet 200 mit den neuen Rechten, die Seed-Rechte (`role.permissions`) bleiben aber wirksam; Antwort, Rechteliste und Audit-Schnappschuss weichen von den wirksamen Rechten ab | schließt | Verifikation von K-1 (F-396), Wiederholungsprüfung K7 auf `e5c2d86` |
+
+**Problem:** Die Rechte einer Standardrolle stehen als Seed in `role.permissions` (RBA-02-Matrix, `seed_standard_roles`) und als Zeilen in `role_permission`. Alle Autorisierungspfade (`AccessGrants`, `RoleGrants`, `readStandardRole`, `ServiceAccountGrants`) lesen die Vereinigung; `ReplaceRolePermissions` (`backend/internal/permission/pg_repository.go:78` auf `e5c2d86`) ersetzt nur die Zeilen, und `GET /roles/{id}/permissions`, die PUT-Antwort (`scanRolePermissions`, `:314`) und der Routen-Audit-Schnappschuss (`backend/internal/audit/route_snapshot.go:476`) lesen nur die Zeilen. `PUT /roles/{viewer}/permissions {"permission_keys":[]}` antwortet 200 `[]`, der Audit nennt `[]`, die 35 Seed-Rechte wirken weiter; auch der org-weite org_admin kann kein Seed-Recht entfernen.
+
+**Akzeptanzkriterien:**
+
+- [ ] Entscheidung (begründet in F-398 gegen RBA-02/RBA-03, WP-046, E-13 und die Matrix-Migrationen): Seed-Rechte einer Standardrolle sind nicht entfernbar. `PUT /api/v1/roles/{id}/permissions` ohne einen Schlüssel von `role.permissions` (im Katalog) → 409 (RFC 7807, Typ `https://reticora.io/problems/standard-role-permissions`, Details mit Rolle und Schlüsseln), `role_permission` und `role.permissions` unverändert, kein Erfolgs-Audit. Reihenfolge: unbekannter Schlüssel 400, Seed 409, Hinzufügen 403 (WP-394), Entfernen 403 (WP-667). Weitere Schlüssel bleiben hinzufüg- und entfernbar.
+- [ ] Ein erfolgreicher PUT schreibt alle Schlüssel samt Seed als Zeilen. `GET /roles/{id}/permissions`, die PUT-Antwort und der Routen-Audit-Schnappschuss (`permission_keys`) lesen `role_permission ∪ role.permissions` im Katalog wie `AccessGrants`; ein Seed-Schlüssel ohne Zeile (Altbestand eines PUT vor dem Fix) trägt `created_at` der Rolle und keinen `granted_by`. Keine Migration.
+- [ ] `TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused` (`internal/permission/standard_role_permissions_integration_test.go`, PG): org-weiter org_admin `PUT []` und `PUT seed ohne location:read` → 409 mit Typ und Schlüssel, unverändert; `PUT seed + location:write` → 200 und wirksam; `PUT seed` → 200, `location:write` entzogen; nach jedem Schritt und nach Verlust der Seed-Zeilen sind PUT-Antwort, GET und Audit-Schnappschuss gleich den Rechten aus `AccessGrants`. Auf `e5c2d86` rot (200 `[]`, Liste/Schnappschuss `[]` bei 35 wirksamen Rechten).
+- [ ] `api/openapi.yaml`: `listRolePermissions` beschreibt die Vereinigung, `replaceRolePermissions` die Regel und 409; `npm run generate:api` übernimmt sie in `frontend/src/api/generated/schema.d.ts`. `docs/README.md` (Abschnitt Permissions) nennt die Regel.
+- [ ] Bestehende Tests grün (`./internal/permission/`, `./internal/audit/`, `./internal/user/`, `./internal/server/`, `./internal/identity/`, u. a. `TestStandardRolesMatchTheRoleMatrix`, `TestRoleDefinitionWideningCeiling`, `TestEveryWriteRouteAuditedOnPostgreSQL`); golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neuer Test auch als Nicht-Root-Nutzer grün.
+
+**Dateien (11 Einträge):**
+
+- backend/internal/permission/pg_repository.go
+- backend/internal/permission/repository.go
+- backend/internal/permission/handler.go
+- backend/internal/audit/route_snapshot.go
+- backend/internal/permission/standard_role_permissions_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Lese- und Schreibpfade laufen unverändert in der Tenant-Transaktion (`database.WithRequestTenant`, RLS über `app.org_id`); der Schnappschuss liest wie bisher im Scope der Anfrage.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/permission/ ./internal/audit/ ./internal/user/ ./internal/server/ ./internal/identity/` mit `TEST_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused$' ./internal/permission/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RBA-02;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+RBA-03;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+AUD-07;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+```
+
+**Entscheidungsbedarf:** keiner (Entscheidung zwischen 409 und „jsonb folgt“ im Rahmen von RBA-02 und E-13 getroffen, siehe F-398 Empfehlung; die Matrix selbst ändert sich nicht).
+
+**Nicht Bestandteil:** Obergrenze beim Entfernen (WP-667); das Speicher-Repository (`--no-db`) kennt keine Seeds und bleibt unverändert; Änderungen der Rollenmatrix; eine Bereinigung von `role_permission`-Altbeständen per Migration (die Lesepfade zeigen die Vereinigung, der nächste PUT schreibt die Zeilen).
 
 ## Zurückgestellte Befunde
 

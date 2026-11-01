@@ -4778,12 +4778,12 @@ export interface paths {
     };
     /**
      * List permissions granted to a role
-     * @description Paged with `limit` and the signed `cursor` (API-02); a client that needs every grant follows `next_cursor` to the end.
+     * @description The permissions the standard role grants, as every authorization path resolves them (RBA-02, F-398): its grants (role_permission) and its seed permissions of the RBA-02 matrix, within the catalogue. A seed permission without a grant row carries the creation time of the role and no granted_by. Paged with `limit` and the signed `cursor` (API-02); a client that needs every grant follows `next_cursor` to the end.
      */
     get: operations['listRolePermissions'];
     /**
      * Replace permissions granted to a role
-     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds to the role must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the permissions of the role stay unchanged. Permissions the request removes are taken from every assignment of the role (users and service accounts), so the caller must be able to revoke each of them (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the permissions stay unchanged.
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds to the role must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the permissions of the role stay unchanged. Permissions the request removes are taken from every assignment of the role (users and service accounts), so the caller must be able to revoke each of them (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the permissions stay unchanged. The seed permissions of a standard role (its RBA-02 matrix row) cannot be removed: a request without one of them is 409 with the problem type https://reticora.io/problems/standard-role-permissions naming them, and nothing changes (F-398); a narrower role is a custom role (RBA-03). The response lists every permission the role grants afterwards, the seed permissions included, as GET /api/v1/roles/{id}/permissions does.
      */
     put: operations['replaceRolePermissions'];
     post?: never;
@@ -23130,6 +23130,15 @@ export interface operations {
       403: components['responses']['Forbidden'];
       /** @description The role is no standard role of the organization. */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The request leaves out a seed permission of the standard role (type https://reticora.io/problems/standard-role-permissions; the detail names the role and the permissions). Nothing changes. */
+      409: {
         headers: {
           [name: string]: unknown;
         };

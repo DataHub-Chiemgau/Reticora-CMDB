@@ -100,7 +100,9 @@ func (h *Handler) ListRole(w http.ResponseWriter, r *http.Request) {
 // assignments, so permissions it adds must be held by the caller
 // organization-wide (403 otherwise, RBA-03, F-015), and permissions it
 // removes may be removed only by a caller who could revoke every assignment
-// of the role (403 otherwise, F-396). A role id that is no
+// of the role (403 otherwise, F-396). A seed permission of the standard role
+// cannot be removed (409 standard-role-permissions, F-398); the response
+// lists the permissions the role grants afterwards. A role id that is no
 // UUID or no role of the organization is 404, an unknown permission key
 // 400 naming permission_keys; database errors go through api.WriteRepoError
 // (F-047).
@@ -126,9 +128,12 @@ func (h *Handler) ReplaceRole(w http.ResponseWriter, r *http.Request) {
 	items, err := h.repo.ReplaceRolePermissions(r.Context(), t.OrganizationID, roleID, t.UserID, &p, req.PermissionKeys)
 	var widening *RoleWideningError
 	var narrowing *RoleNarrowingError
+	var seed *StandardRolePermissionsError
 	switch {
 	case err == nil:
 		api.WriteJSON(w, http.StatusOK, items)
+	case errors.As(err, &seed):
+		api.WriteTypedProblem(w, http.StatusConflict, seed)
 	case errors.As(err, &widening):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", widening.Error())
 	case errors.As(err, &narrowing):

@@ -45,6 +45,46 @@ type Repository interface {
 
 var _ identity.AccessResolver = Repository(nil)
 
+// ProblemStandardRolePermissions is the problem type of a refused removal of
+// a seed permission of a standard role (409, F-398).
+const ProblemStandardRolePermissions = "https://reticora.io/problems/standard-role-permissions"
+
+// StandardRolePermissionsError refuses replacing the permissions of a
+// standard role without one of its seed keys (role.permissions, the RBA-02
+// matrix of seed_standard_roles): the seed is the definition of the system
+// role, every grant path reads it, and the matrix migrations restore it, so
+// the key would stay effective (409, F-398). Narrower rights are a custom
+// role (RBA-03).
+type StandardRolePermissionsError struct {
+	Role    string
+	Missing []string
+}
+
+// validation: a fixed rule text with the role name and the missing keys.
+func (e *StandardRolePermissionsError) Error() string {
+	return "the standard role " + e.Role + " keeps its permissions " + strings.Join(e.Missing, ", ") +
+		" (RBA-02); a narrower role is a custom role"
+}
+
+// ProblemType names the RFC 7807 problem type (api.TypedProblem).
+func (e *StandardRolePermissionsError) ProblemType() string { return ProblemStandardRolePermissions }
+
+// checkSeedKept returns a StandardRolePermissionsError when next lacks a key
+// of seed.
+func checkSeedKept(role string, seed, next []string) error {
+	var missing []string
+	for _, key := range seed {
+		if !slices.Contains(next, key) && !slices.Contains(missing, key) {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return &StandardRolePermissionsError{Role: role, Missing: missing}
+}
+
 // RoleWideningError refuses a change of a role's permissions that adds
 // permissions the caller does not hold organization-wide (403, RBA-03,
 // F-015): the role applies to all its assignments, org-wide ones too.

@@ -31,10 +31,10 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | Priorität | Anzahl |
 |---|---:|
 | P0 | 1 |
-| P1 | 4 |
+| P1 | 5 |
 | P2 | 19 |
-| P3 | 18 |
-| **Summe** | **42** |
+| P3 | 19 |
+| **Summe** | **44** |
 
 ## Übersicht
 
@@ -82,6 +82,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-394](#f-394) | P3 | Metrik-Ingest mit einer für den Aufrufer unsichtbaren oder unbekannten ci_id antwortet 500 statt 404; gemischter Batch verwirft auch die gültige Probe mit 500 | WP-040 (K7) | belegt | backend/internal/tenant/rls/metric_ingest_errors_integration_test.go | WP-665 |
 | [F-395](#f-395) | P3 | OIDC-Login mit einem Organisationsattribut, das keine Organisation bezeichnet, antwortet 502 „the login could not be completed“ mit FK-Fehler im Log statt 401 login-no-organization | WP-043 (K7) | belegt | backend/internal/identity/callback_scope_integration_test.go | WP-666 |
 | [F-397](#f-397) | P1 | Ein API-Key, den ein client-beschränkter Erzeuger an einen Service-Account bindet, wird org-weit, sobald ein org-weiter Administrator dem Account später org-weite Rollen gibt | WP-069 (K7) | belegt | backend/internal/identity/apikey_authz_integration_test.go | WP-668 |
+| [F-396](#f-396) | P1 | Client-gebundener Inhaber von role:manage nimmt org-weiten Zuweisungen über die Rollendefinition die Rechte (PATCH /roles/{id} mit weniger Rechten, DELETE /roles/{id}, PUT /roles/{id}/permissions), obwohl er die Zuweisung selbst nicht entziehen darf | WP-066/WP-067 (K7) | belegt | backend/internal/user/role_definition_ceiling_integration_test.go | WP-667 |
+| [F-398](#f-398) | P3 | PUT /roles/{id}/permissions auf einer Standardrolle antwortet 200 mit den neuen Rechten, die Seed-Rechte (`role.permissions`) bleiben aber wirksam; Antwort, Rechteliste und Audit-Schnappschuss weichen von den wirksamen Rechten ab | WP-066 (K7) | belegt | backend/internal/permission/standard_role_permissions_integration_test.go | WP-669 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -849,6 +851,75 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       --- FAIL: TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening/key_bound_before_migration_000185 (0.58s)
   FAIL
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity	14.405s
+  ```
+
+<a id="f-396"></a>
+### F-396 (P1) – Client-gebundener Inhaber von role:manage nimmt org-weiten Zuweisungen über die Rollendefinition die Rechte (PATCH /roles/{id} mit weniger Rechten, DELETE /roles/{id}, PUT /roles/{id}/permissions), obwohl er die Zuweisung selbst nicht entziehen darf
+
+- **Gefunden in:** Wiederholungsprüfung K7 (Re-Audit r1-b4, Kandidat K-1) von WP-394/WP-395 auf dem RC-Commit `e5c2d86`, von zwei unabhängigen Agenten bestätigt (Auditor-Probe und Verifikation) · **Betroffene Anforderungen:** RBA-03, TEN-09 · **Komponente:** backend/internal/user/handler.go (`UpdateRole` Zeile 803, `DeleteRole` Zeile 839 auf `e5c2d86`), backend/internal/user/pg_repository.go (`UpdateRole` Zeile 858, nur `checkRoleWidening` Zeile 874; `DeleteRole` Zeile 927 ohne jede Obergrenze), backend/internal/user/grant_ceiling.go (`checkRoleWidening` Zeile 300, Kommentar Zeile 298 „Removing permissions is not limited“), backend/internal/permission/pg_repository.go (`ReplaceRolePermissions` Zeile 78, nur `checkWidening` Zeile 107), backend/internal/permission/repository.go (`checkWidening` Zeile 67) · **Quelle:** Verifikationsprobe `k7/ver/r1-b4/evidence/k-reaudit-1/WP-069/verify-probe-source-vr1b4_probe_test.go.txt` (`TestVerifyK1DelegateChangesOrgWideRoles`, Produktionsrouter `server.NewRouter` mit PG-Repositories, `AuditPool`, Runtime-Login), Log `k7/ver/r1-b4/evidence/k-reaudit-1/WP-066/verify-probe-k1-delegate-role-definition.log`; Auditor-Probe `k7/out/r1-b4/evidence/k-reaudit-1/WP-067/probe-source-r1b4_authz_probe_test.go.txt`
+- **Reproduktion:**
+  - Org-weiter org_admin legt zwei Custom-Rollen `{ci:read, ci:write}` an und weist sie einem Benutzer (Opfer) org-weit zu (`POST /role-assignments`, `scope_type organization`). Delegate: org_admin mit `scope_client_id = client 1`.
+  - Kontrolle (WP-395): Delegate `DELETE /api/v1/role-assignments/{org-weit}` → 403 `revoking the role assignment requires ci:read, ci:write, role:manage in its scope`, die Zeile bleibt.
+  - Derselbe Delegate `PATCH /api/v1/roles/{custom} {"permissions":[]}` → 200 `"permissions":[]`; `DELETE /api/v1/roles/{custom}` → 204, die `user_custom_role`-Zeile des Opfers verschwindet über `user_custom_role_custom_role_id_fkey ON DELETE CASCADE`; `PUT /api/v1/roles/{viewer}/permissions {"permission_keys":[]}` → 200 `[]`. Hinzufügen bleibt verwehrt (`PATCH … {"permissions":["ci:read"]}` → 403 `adding ci:read to the role requires holding them organization-wide`).
+  - Beim nächsten Refresh liefert `AccessGrants` dem Opfer `[{Permissions:[]}]`; `GET /api/v1/cis` → 403 `missing required permission: ci:read`.
+  - Ebenso für Zuweisungen in Client 2, in einer Site von Client 2 und für einer Standardrolle hinzugefügte Rechte bei org-weiten Benutzer- oder Service-Account-Zuweisungen (kodierender Test).
+- **Soll:** RBA-03 und die Grant-Obergrenze von WP-394/WP-395 (verbindliches Kriterium von WP-395: „derselbe Delegate entzieht eine org-weite Zuweisung → 403, die Zeile bleibt“; Symmetrie mit WP-355 für Service-Accounts): Wer eine Zuweisung nicht entziehen darf, erreicht dieselbe Wirkung auch nicht über die Rollendefinition. Rechte aus einer Rolle entfernen oder eine Rolle löschen, die Zuweisungen außerhalb des Aufrufer-Scopes hat (`user_custom_role`, `role_assignment`, `service_account_role`), → 403, alles unverändert. Ein org-weiter org_admin behält 200/204. TEN-09: ein Client-Scope wirkt nicht über den Client hinaus.
+- **Ist:** Die Rollendefinition wirkt auf alle Zuweisungen der Rolle; geprüft wird nur das Hinzufügen (`checkRoleWidening`/`checkWidening`, org-weit). Entfernen ist ausdrücklich unbegrenzt, `DeleteRole` prüft gar nichts außer `is_system`. Die Route verlangt nur `role:manage` in irgendeinem Scope.
+- **Nutzerwirkung:** Ein Client-Administrator entzieht org-weiten Benutzern und Service-Accounts (auch anderen Administratoren mit Custom-Rollen) beliebige Rechte oder alle Rechte einer Custom-Rolle und löscht deren Zuweisungen – Sabotage über die Client-Grenze hinweg (Verfügbarkeit, Mandantentrennung zwischen Clients). Eine Rechteausweitung ist nicht möglich.
+- **Ursache (belegt):** WP-394 hat die Rollendefinition nur als Grant-Pfad (Hinzufügen) behandelt; WP-395 hat den Entzug nur für die Zuweisung (`RevokeRoleAssignment`) mit der Obergrenze versehen. Das Einschränken und Löschen der Rolle ist ein Entzug aller ihrer Zuweisungen auf einmal und blieb ungeprüft.
+- **Empfehlung:** Eine Prüfung `permission.CheckRoleNarrowing` mit der Regel des Entzugs (keine zweite Regel): Entfernt eine Änderung mindestens ein Recht oder löscht sie die Rolle, muss der Aufrufer `role:manage` und jedes Recht der Rolle (vor der Änderung) in einem Scope halten, der den Scope jeder Zuweisung der Rolle deckt (`identity.GrantCeiling` je Zuweisung; Site über `site.client_id` im RLS-Scope des Aufrufers, unbekannte Site → alle Clients; Zuweisungen in `role_assignment`, `service_account_role`, `user_custom_role`). Sonst 403 (RFC 7807) ohne Änderung. Die Rollenzeile wird vorher gesperrt (`FOR UPDATE`), sodass keine Zuweisung gleichzeitig hinzukommt. Einladungen bleiben außen vor: Sie gewähren vor der Annahme nichts, werden bei der Annahme zur `role_assignment` und sind über `DELETE /invitations/{id}` ohnehin ohne Obergrenze widerrufbar; eine Prüfung wäre strenger als der Entzug. Umbenennen bleibt frei. OpenAPI beschreibt 403 an allen drei Routen.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestRoleDefinitionChangeNeverReachesBeyondCallerScope$' ./internal/user/` mit `TEST_DATABASE_URL` PASS: Delegate → 403 (problem+json) für PATCH ohne Rechte bzw. mit weniger Rechten (org-weit, Client 2, Site von Client 2), DELETE dieser Rollen (Zuweisungen bleiben), PUT viewer/engineer ohne die hinzugefügten Rechte (org-weite Benutzer- bzw. Service-Account-Zuweisung), alles unverändert; das Opfer hält beim nächsten Refresh `ci:write` und `location:write`; Delegate darf umbenennen, eine nur in Client 1 zugewiesene Rolle einschränken und löschen und eine unzugewiesene löschen; der org-weite org_admin → 200/204.
+- **Kodierender Test:** backend/internal/user/role_definition_ceiling_integration_test.go (`TestRoleDefinitionChangeNeverReachesBeyondCallerScope`, Produktionsrouter mit PG-Repositories, Refresh-Sitzungen aus den gespeicherten Zuweisungen); auf `e5c2d86` rot (ausgeführt auf der Basis `fb8adfe`; `user/handler.go`, `user/pg_repository.go`, `user/grant_ceiling.go`, `permission/*.go` dort identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestRoleDefinitionChangeNeverReachesBeyondCallerScope
+      role_definition_ceiling_integration_test.go:126: delegate PATCH org-wide role {permissions:[]} = 200 {"id":"345b7c2c-…","name":"narrow-org","is_system":false,"is_builtin":false,"permissions":[],…; state afterwards []; want 403 (problem+json) and the role and its assignments unchanged
+      role_definition_ceiling_integration_test.go:126: delegate PATCH org-wide role {permissions:[ci:read]} = 403 {"detail":"adding ci:read to the role requires holding them organization-wide",…}; state afterwards []; want 403 (problem+json) and the role and its assignments unchanged
+      role_definition_ceiling_integration_test.go:126: delegate PATCH client-2 role {permissions:[]} = 200 {…"name":"narrow-client2",…"permissions":[],…; state afterwards []; want 403 …
+      role_definition_ceiling_integration_test.go:126: delegate PATCH site-of-client-2 role {permissions:[ci:read]} = 200 {…"name":"narrow-site2",…"permissions":["ci:read"],…; state afterwards ["ci:read"]; want 403 …
+      role_definition_ceiling_integration_test.go:130: delegate DELETE /roles/{12ec8431-…} = 204 ; state afterwards deleted; want 403 …
+      role_definition_ceiling_integration_test.go:130: delegate DELETE /roles/{a18e072c-…} = 204 ; state afterwards deleted; want 403 …
+      role_definition_ceiling_integration_test.go:130: delegate DELETE /roles/{b88a855d-…} = 204 ; state afterwards deleted; want 403 …
+      role_definition_ceiling_integration_test.go:142: delegate PUT viewer without the added location:write = 200 [{"organization_id":"c0de7aa0-…","permission_key":"agent:read",…; state afterwards agent:read,…,workflow:read (ohne location:write); want 403 …
+      role_definition_ceiling_integration_test.go:142: delegate PUT engineer (service account org-wide) without the added webhook:manage = 200 [{…"permission_key":"agent:manage",…; state afterwards agent:manage,…,workflow:write (ohne webhook:manage); want 403 …
+      role_definition_ceiling_integration_test.go:149: victim lost ci:write or location:write at the next refresh after the refused changes
+      role_definition_ceiling_integration_test.go:173: admin DELETE /roles/{12ec8431-…} = 404 {"detail":"role not found",…}, want 204 without assignments
+      (ebenso für a18e072c-… und b88a855d-…: vom Delegate bereits gelöscht)
+  --- FAIL: TestRoleDefinitionChangeNeverReachesBeyondCallerScope (1.43s)
+  FAIL
+  ```
+
+<a id="f-398"></a>
+### F-398 (P3) – PUT /roles/{id}/permissions auf einer Standardrolle antwortet 200 mit den neuen Rechten, die Seed-Rechte (`role.permissions`) bleiben aber wirksam; Antwort, Rechteliste und Audit-Schnappschuss weichen von den wirksamen Rechten ab
+
+- **Gefunden in:** Verifikation von K-1 (F-396) der Wiederholungsprüfung K7 (r1-b4) auf dem RC-Commit `e5c2d86`, vom Verifier gefunden · **Betroffene Anforderungen:** RBA-02, RBA-03, AUD-07 · **Komponente:** backend/internal/permission/pg_repository.go (`ReplaceRolePermissions` Zeile 78, ersetzt nur `role_permission` Zeile 110; `ListRolePermissions` Zeile 50 und `scanRolePermissions` Zeile 314 lesen nur `role_permission`; `AccessGrants` Zeile 183 und `RoleGrants` Zeile 262 lesen `role_permission ∪ role.permissions`), backend/internal/user/grant_ceiling.go (`readStandardRole` Zeile 99, Vereinigung), backend/internal/user/service_account.go (`ServiceAccountGrants` Zeile 503, Vereinigung), backend/internal/audit/route_snapshot.go (Schnappschuss von `PUT /api/v1/roles/{id}/permissions` Zeile 476, nur `role_permission`) · **Quelle:** Verifikationsprobe `k7/ver/r1-b4/evidence/k-reaudit-1/WP-069/verify-probe-source-vr1b4_probe_test.go.txt` (`TestVerifyK1DelegateChangesOrgWideRoles`, Schritte 6–9), Log `k7/ver/r1-b4/evidence/k-reaudit-1/WP-066/verify-probe-k1-delegate-role-definition.log`
+- **Reproduktion:**
+  - `PUT /api/v1/roles/{viewer}/permissions {"permission_keys":[]}` → 200 `[]`; `GET /api/v1/roles/{viewer}/permissions` → `{"data":[],"total":0,…}`; `role.permissions` (jsonb) des viewer hat weiter 35 Schlüssel; ein org-weiter viewer liest danach weiter `GET /cis` (200, auch CIs von Client 2).
+  - Org-weiter org_admin `PUT /api/v1/roles/{viewer}/permissions {"permission_keys":["location:read"]}` → 200; `AccessGrants` des viewer liefert danach weiter 35 Rechte.
+  - Der Routen-Audit des PUT nennt in `changes.values` `permission_keys` alt/neu nur aus `role_permission` (z. B. `[]`), nicht die wirksamen Rechte.
+- **Soll:** RBA-02: Die Systemrollen haben die vollständige Matrix des Katalogs; RBA-03: Rechte = Vereinigung aller Rollen, narrower Rollen sind Custom-Rollen. API-Antworten und der Audit-Eintrag (AUD-07, alte und neue Werte) geben die wirksamen Rechte wieder; eine Änderung, die keine Wirkung haben kann, wird nicht mit 200 bestätigt.
+- **Ist:** Die Rechte einer Standardrolle stehen doppelt: als Seed in `role.permissions` (jsonb, `seed_standard_roles`, Migrationen 000032/000073/000081/000147 setzen ihn per `ON CONFLICT DO UPDATE` neu) und als Zeilen in `role_permission`. Alle Autorisierungspfade (`AccessGrants`, `RoleGrants`, `readStandardRole`, `ServiceAccountGrants`, `ReplaceRolePermissions.current`) lesen die Vereinigung; `ReplaceRolePermissions` ersetzt nur die Zeilen, die Rechteliste, die Antwort und der Audit-Schnappschuss lesen nur die Zeilen. Entfernen eines Seed-Rechts ist wirkungslos, wird aber mit 200 und einer falschen Liste bestätigt; selbst der org-weite org_admin kann kein Seed-Recht entfernen.
+- **Nutzerwirkung:** Ein Administrator glaubt, der viewer-Rolle Rechte entzogen zu haben (Antwort, Rechteliste und Audit zeigen es), die Rechte wirken aber weiter – falsche Sicherheit und ein irreführender Audit-Eintrag. Keine Rechteausweitung.
+- **Ursache (belegt):** Seit WP-046/WP-363 ist `role.permissions` die Matrix-Definition der Systemrollen; WP-394 hat `ReplaceRolePermissions` die Vereinigung als `current` lesen lassen (Widening), die Schreib- und Lesepfade der Route aber bei `role_permission` belassen.
+- **Empfehlung (Entscheidung):** Seed-Rechte einer Standardrolle sind nicht entfernbar: `PUT /roles/{id}/permissions` ohne einen Schlüssel von `role.permissions` (im Katalog) → 409 mit Problemtyp `https://reticora.io/problems/standard-role-permissions`, die Details nennen Rolle und Schlüssel, nichts ändert sich; Hinzufügen und Entfernen weiterer Schlüssel bleibt (mit WP-394/WP-667). Begründung gegen „jsonb folgt“: RBA-02 legt die Systemrollen als vollständige Matrix fest, `TestStandardRolesMatchTheRoleMatrix` (WP-046) verlangt Seed = Matrix, IdP-Rollen (`RoleGrants`) lösen dieselben Systemrollen auf, und jede Matrix-Migration setzt `role.permissions` per `seed_standard_roles` neu – ein Entfernen wäre beim nächsten Update stillschweigend zurückgenommen. Engere Rollen sind Custom-Rollen (RBA-03, E-13: keine Änderung der Matrix ohne Katalogtext). 409 statt 422: Die Anfrage ist gültig, widerspricht aber dem Zustand (der festen Definition) der Ressource. Rechteliste, Antwort und Audit-Schnappschuss lesen die Vereinigung im Katalog wie `AccessGrants` (ein Seed-Schlüssel ohne Zeile – Altbestand eines PUT vor dem Fix – trägt `created_at` der Rolle und keinen `granted_by`); ein erfolgreicher PUT schreibt alle Schlüssel samt Seed als Zeilen. Keine Migration.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused$' ./internal/permission/` mit `TEST_DATABASE_URL` PASS: org-weiter org_admin `PUT []` und `PUT seed ohne location:read` → 409 `standard-role-permissions` mit den Schlüsseln, `role.permissions` und Rechte unverändert; `PUT seed + location:write` → 200 und wirksam, `PUT seed` → 200 und `location:write` entzogen; nach jedem Schritt und nach Verlust der Seed-Zeilen in `role_permission` sind PUT-Antwort, `GET /roles/{viewer}/permissions` und der Routen-Audit-Schnappschuss gleich den Rechten aus `AccessGrants`.
+- **Kodierender Test:** backend/internal/permission/standard_role_permissions_integration_test.go (`TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused`, PostgreSQL mit Runtime-Login, Permission-Handler und PG-Routen-Auditor); auf `e5c2d86` rot (ausgeführt auf `a1cf649` = Basis `fb8adfe` + WP-667; `ReplaceRolePermissions` dort zusätzlich mit der Einschränkungs-Obergrenze, die der org-weite org_admin erfüllt, Lesepfade und Schnappschuss identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused
+      standard_role_permissions_integration_test.go:200: admin PUT [] = 200 []
+          ; want 409 https://reticora.io/problems/standard-role-permissions naming agent:read
+      standard_role_permissions_integration_test.go:205: admin PUT []: GET /roles/{viewer}/permissions [], effective [agent:read asset:read … workflow:read]
+      standard_role_permissions_integration_test.go:205: admin PUT []: audit snapshot permission_keys [], effective [agent:read asset:read … workflow:read]
+      standard_role_permissions_integration_test.go:205: admin PUT []: PUT response [], effective [agent:read asset:read … workflow:read]
+      standard_role_permissions_integration_test.go:200: admin PUT seed without location:read = 200 [{"organization_id":"c0de7ba0-…","permission_key":"agent:read",…}, …]; want 409 https://reticora.io/problems/standard-role-permissions naming location:read
+      standard_role_permissions_integration_test.go:205: admin PUT seed without location:read: GET /roles/{viewer}/permissions [agent:read … (ohne location:read) …], effective [… location:read …]
+      standard_role_permissions_integration_test.go:205: admin PUT seed without location:read: audit snapshot permission_keys [… ohne location:read …], effective [… location:read …]
+      standard_role_permissions_integration_test.go:205: admin PUT seed without location:read: PUT response [… ohne location:read …], effective [… location:read …]
+      standard_role_permissions_integration_test.go:226: role_permission without seed rows: GET /roles/{viewer}/permissions [], effective [agent:read … workflow:read]
+      standard_role_permissions_integration_test.go:226: role_permission without seed rows: audit snapshot permission_keys [], effective [agent:read … workflow:read]
+  --- FAIL: TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused (0.78s)
+  FAIL
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund
