@@ -47,4 +47,22 @@ describe('LoginPage', () => {
     fireEvent.click(screen.getByRole('button'));
     expect(await screen.findByText(/erfordert eine sichere Verbindung/)).toBeInTheDocument();
   });
+
+  it('asks for a fresh IdP login after a self-signup or invitation (F-351)', async () => {
+    start.mockResolvedValue('https://idp.example.com/auth');
+    renderWithProviders(<LoginPage />, {
+      route: { pathname: '/login', state: { from: '/onboarding', forceLogin: true } },
+    });
+
+    fireEvent.click(screen.getByRole('button'));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith('/onboarding', { forceLogin: true }));
+  });
+
+  it('keeps the IdP session for an ordinary sign-in', async () => {
+    start.mockResolvedValue('https://idp.example.com/auth');
+    renderWithProviders(<LoginPage />, { route: '/login' });
+
+    fireEvent.click(screen.getByRole('button'));
+    await vi.waitFor(() => expect(start).toHaveBeenCalledWith('/dashboard', { forceLogin: false }));
+  });
 });

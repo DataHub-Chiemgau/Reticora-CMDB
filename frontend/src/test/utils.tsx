@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 import type { ReactElement, ReactNode } from 'react';
 import { render } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, type MemoryRouterProps } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nextProvider } from 'react-i18next';
 import i18n from '../i18n';
@@ -15,7 +15,10 @@ export function createTestQueryClient() {
   });
 }
 
-export function renderWithProviders(ui: ReactElement, { route = '/' }: { route?: string } = {}) {
+export function renderWithProviders(
+  ui: ReactElement,
+  { route = '/' }: { route?: NonNullable<MemoryRouterProps['initialEntries']>[number] } = {},
+) {
   const queryClient = createTestQueryClient();
 
   function Wrapper({ children }: { children: ReactNode }) {

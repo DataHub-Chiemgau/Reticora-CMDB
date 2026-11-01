@@ -61,3 +61,37 @@ describe('OIDC configuration validation', () => {
     await expect(startAuthorizationCodeFlow('/dashboard')).rejects.toThrow(/redirect_uri/);
   });
 });
+
+describe('OIDC forced login', () => {
+  const config = {
+    issuer: 'https://idp.example.com/realms/reticora',
+    client_id: 'reticora-app',
+    redirect_uri: 'https://cmdb.example.com/auth/callback',
+    scopes: ['openid'],
+    authorization_endpoint: 'https://idp.example.com/realms/reticora/protocol/openid-connect/auth',
+    pkce_required: true,
+  };
+
+  // jsdom does not navigate; window.location.assign only reports that.
+  function stubNavigation() {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  }
+
+  it('asks the IdP for a fresh login when forceLogin is set (F-351)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => config }));
+    stubNavigation();
+    const { startAuthorizationCodeFlow } = await import('./oidc');
+
+    const url = new URL(await startAuthorizationCodeFlow('/onboarding', { forceLogin: true }));
+    expect(url.searchParams.get('prompt')).toBe('login');
+  });
+
+  it('keeps the single sign-on session by default', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => config }));
+    stubNavigation();
+    const { startAuthorizationCodeFlow } = await import('./oidc');
+
+    const url = new URL(await startAuthorizationCodeFlow('/dashboard'));
+    expect(url.searchParams.has('prompt')).toBe(false);
+  });
+});

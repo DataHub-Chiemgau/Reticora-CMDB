@@ -9,6 +9,8 @@ type LoginLocationState = {
   expired?: boolean;
   /** invitationAccepted is the address of an account the invitation page just created (TLC-03). */
   invitationAccepted?: string;
+  /** forceLogin asks the IdP for a fresh login instead of its SSO session (F-351). */
+  forceLogin?: boolean;
 };
 
 export function LoginPage() {
@@ -24,7 +26,7 @@ export function LoginPage() {
     setLoading(true);
 
     try {
-      await startAuthorizationCodeFlow(from);
+      await startAuthorizationCodeFlow(from, { forceLogin: state?.forceLogin === true });
     } catch (err) {
       if (err instanceof InsecureContextError) {
         setError(t('auth.secureContextRequired'));
