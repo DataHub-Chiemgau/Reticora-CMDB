@@ -76,8 +76,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// Mailer sends the verification e-mail. Until the notification channels
-// exist (WP-137) only tests provide one.
+// Mailer sends the verification e-mail. The server uses
+// notify.SignupMailer over the central SMTP server of the installation
+// (TEC-13); without that server there is no mailer and signups answer 503.
 type Mailer interface {
 	SendSignupVerification(ctx context.Context, to, organizationName, link string) error
 }
@@ -91,7 +92,8 @@ type Account struct {
 }
 
 // Inviter is implemented by Accounts that can create an account without a
-// password and let the IdP mail the user to set one (operator path).
+// password and let the IdP mail the user to set one (operator path). The
+// service uses it only after WithInvitationMail(true).
 type Inviter interface {
 	InviteAccount(ctx context.Context, a Account) (string, error)
 }
@@ -176,8 +178,11 @@ type Service struct {
 	mailer   Mailer
 	accounts Accounts
 	cfg      Config
-	now      func() time.Time
-	newOrgID func() string
+	// invitationMail: the IdP can send mail, so an operator-created
+	// organization's first org_admin is invited through an Inviter.
+	invitationMail bool
+	now            func() time.Time
+	newOrgID       func() string
 }
 
 // NewService creates the service. A nil mailer or accounts makes every
@@ -185,6 +190,21 @@ type Service struct {
 func NewService(repo Repository, mailer Mailer, accounts Accounts, cfg Config) *Service {
 	return &Service{repo: repo, mailer: mailer, accounts: accounts, cfg: cfg,
 		now: time.Now, newOrgID: newUUID}
+}
+
+// WithInvitationMail records whether the IdP can send the invitation mail
+// of an operator-created organization's first org_admin (TLC-02). Keycloak
+// sends it with execute-actions-email over the realm's own SMTP settings;
+// the server enables it only together with the central SMTP server, whose
+// settings the installer also gives the realm. Off (the default),
+// CreateOrganization creates the organization without an IdP account, as
+// without an inviting client: a refused mail would otherwise roll back
+// every creation.
+func (s *Service) WithInvitationMail(enabled bool) *Service {
+	if s != nil {
+		s.invitationMail = enabled
+	}
+	return s
 }
 
 // Available reports whether signups can be completed.
@@ -323,8 +343,10 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // CreateOrganization implements operator.OrgCreator (TLC-02): the creation
 // chain of the signup without verification, with the operator's plan and
-// limits instead of a trial. With an inviting IdP client the first
-// org_admin gets an account and the IdP's mail to set a password.
+// limits instead of a trial. With an inviting IdP client and the IdP's mail
+// (WithInvitationMail) the first org_admin gets an account and the IdP's
+// mail to set a password; otherwise the account is left to the IdP
+// (admin_invited false).
 func (s *Service) CreateOrganization(ctx context.Context, op operator.Identity, req *operator.NewOrganization) (operator.CreatedOrganization, error) {
 	if s == nil || s.repo == nil {
 		return operator.CreatedOrganization{}, operator.ErrCreationUnavailable
@@ -339,6 +361,9 @@ func (s *Service) CreateOrganization(ctx context.Context, op operator.Identity, 
 	}
 	setup := &Setup{OrganizationID: s.newOrgID(), Plan: plan, Entitlements: ents}
 	inviter, invites := s.accounts.(Inviter)
+	// Without the IdP's mail the invitation could not be delivered and its
+	// error would roll the creation back.
+	invites = invites && s.invitationMail
 
 	var accountID string
 	createAccount := func(ctx context.Context) error {

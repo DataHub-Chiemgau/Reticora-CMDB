@@ -854,8 +854,10 @@ func centralSMTP(cfg *config.Config) *notify.SMTPSender {
 }
 
 // signupService builds the self-signup flow (TLC-01). Signups need the
-// database, the Keycloak admin client and the central SMTP server for the
-// verification e-mail; without one of them every signup answers 503.
+// database, the Keycloak admin client, the central SMTP server for the
+// verification e-mail and the verify URL; without one of them every signup
+// answers 503, and the start log names what is missing. The same service
+// creates the organizations of the operator path (TLC-02).
 func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SMTPSender) *signup.Service {
 	sc := signup.DefaultConfig()
 	sc.TrialPlan = entitlement.Plan(cfg.TrialPlan)
@@ -878,9 +880,57 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SM
 	if smtpSender != nil {
 		mailer = notify.SignupMailer{Sender: smtpSender}
 	}
-	svc := signup.NewService(repo, mailer, accounts, sc)
-	slog.Info("self-signup configured", "available", svc.Available())
+	// The operator path invites the first org_admin with Keycloak's
+	// execute-actions-email, which sends over the realm's SMTP settings;
+	// the installer gives the realm the central SMTP settings. Without the
+	// central SMTP server the realm has none either: the refused mail would
+	// roll back every creation, so the account is left to the IdP.
+	invitationMail := smtpSender != nil
+	svc := signup.NewService(repo, mailer, accounts, sc).WithInvitationMail(invitationMail)
+	operatorInvites := invitationMail && accounts != nil
+	if missing := missingSignupPrerequisites(cfg, pool != nil, smtpSender != nil, accounts != nil); len(missing) > 0 {
+		slog.Warn("self-signup configured", "available", false, "missing", missing,
+			"effect", "GET /api/v1/signup/challenge and POST /api/v1/signup answer 503 until the missing settings are configured",
+			"operator_invitations", operatorInvites)
+	} else {
+		slog.Info("self-signup configured", "available", true, "verify_url", cfg.SignupVerifyURL,
+			"operator_invitations", operatorInvites)
+	}
+	if accounts != nil && !invitationMail {
+		slog.Info("no central SMTP server (RETICORA_SMTP_HOST): organizations created by an operator get no IdP invitation for their first org_admin")
+	}
 	return svc
+}
+
+// missingSignupPrerequisites names what self-signup still lacks, each by
+// the setting that provides it (TLC-01); empty when signups can be
+// completed. database, smtp and accounts report whether the database pool,
+// the central SMTP sender and the Keycloak admin client exist. The names
+// stay here: package signup knows no environment variables.
+func missingSignupPrerequisites(cfg *config.Config, database, smtp, accounts bool) []string {
+	var missing []string
+	if !database {
+		missing = append(missing, "database (the server runs with --no-db)")
+	}
+	if !smtp {
+		missing = append(missing, "RETICORA_SMTP_HOST")
+	}
+	if !accounts {
+		switch {
+		case cfg.KeycloakAdminClientID == "":
+			missing = append(missing, "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID")
+		case cfg.KeycloakAdminClientSecret == "":
+			missing = append(missing, "RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET")
+		default:
+			// Both are set, but the client could not be built; the
+			// error is logged as "Keycloak admin client disabled".
+			missing = append(missing, "a working Keycloak admin client (see \"Keycloak admin client disabled\")")
+		}
+	}
+	if cfg.SignupVerifyURL == "" {
+		missing = append(missing, "RETICORA_SIGNUP_VERIFY_URL")
+	}
+	return missing
 }
 
 // keycloakAccounts is the Keycloak admin client that creates the accounts

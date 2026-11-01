@@ -1806,16 +1806,43 @@
       "email": "E-Mail-Adresse",
       "name": "Ihr Name",
       "submit": "Konto anlegen",
-      "sent": "Wir haben einen Bestätigungslink an {{email}} geschickt. Öffnen Sie ihn, um fortzufahren."
+      "sent": "Wir haben einen Bestätigungslink an {{email}} geschickt. Öffnen Sie ihn, um fortzufahren.",
+      "unavailable": "Die Registrierung ist auf diesem Server noch nicht eingerichtet: Es ist kein E-Mail-Versand (SMTP) konfiguriert. Wenden Sie sich an den Betreiber.",
+      "temporarilyUnavailable": "Die Registrierung ist gerade nicht möglich. Bitte versuchen Sie es in einigen Minuten erneut.",
+      "rateLimited": "Zu viele Versuche. Bitte warten Sie einige Minuten und versuchen Sie es dann erneut.",
+      "emailBlocked": "Diese E-Mail-Domain wird für die Registrierung nicht angenommen (z. B. Wegwerf-Adressen). Bitte verwenden Sie Ihre geschäftliche E-Mail-Adresse.",
+      "emailInvalid": "Bitte geben Sie eine gültige E-Mail-Adresse an (z. B. name@firma.de).",
+      "organizationInvalid": "Bitte geben Sie den Namen Ihrer Organisation an (höchstens 200 Zeichen).",
+      "nameTooLong": "Ihr Name darf höchstens 200 Zeichen haben.",
+      "captchaFailed": "Die automatische Sicherheitsprüfung ist fehlgeschlagen oder abgelaufen. Bitte senden Sie das Formular erneut ab.",
+      "failed": "Die Registrierung ist fehlgeschlagen: {{detail}}"
     },
     "verify": {
       "password": "Passwort festlegen (mindestens 12 Zeichen)",
+      "policy": "Mindestens {{min}} Zeichen mit Groß- und Kleinbuchstaben, einer Ziffer und einem Sonderzeichen; nicht Ihre E-Mail-Adresse.",
+      "policyNotMet": "Das Passwort erfüllt die Richtlinie noch nicht. Es fehlt: {{rules}}.",
+      "rules": {
+        "length": "mindestens {{min}} Zeichen",
+        "upper": "ein Großbuchstabe",
+        "lower": "ein Kleinbuchstabe",
+        "digit": "eine Ziffer",
+        "special": "ein Sonderzeichen"
+      },
       "submit": "Konto bestätigen",
       "done": "Ihre Organisation „{{slug}}“ ist angelegt.",
       "login": "Jetzt anmelden und fortfahren",
       "expired": "Der Bestätigungslink ist abgelaufen. Registrieren Sie sich bitte erneut.",
       "invalid": "Der Bestätigungslink ist ungültig oder wurde bereits verwendet.",
-      "trial": "Ihr Testzeitraum läuft bis {{date}}."
+      "trial": "Ihr Testzeitraum läuft bis {{date}}.",
+      "notAccepted": "Das Konto wurde nicht bestätigt. Bitte prüfen Sie das Passwort.",
+      "passwordRejected": "Das Passwort wurde nicht angenommen. Es muss der Richtlinie entsprechen und darf nicht Ihre E-Mail-Adresse sein.",
+      "accountExists": "Für diese E-Mail-Adresse gibt es bereits ein Konto. Melden Sie sich damit an oder registrieren Sie sich mit einer anderen Adresse.",
+      "organizationTaken": "Der Name der Organisation ist bereits vergeben. Bitte registrieren Sie sich mit einem anderen Namen erneut.",
+      "unavailable": "Die Bestätigung ist auf diesem Server gerade nicht möglich. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Betreiber.",
+      "failed": "Die Bestätigung ist fehlgeschlagen: {{detail}}",
+      "signedIn": "Dieser Tab ist noch als {{user}} angemeldet. Das neue Konto wird trotzdem angelegt; melden Sie sich danach hier ab, bevor Sie sich mit dem neuen Konto anmelden.",
+      "signOutFirst": "Sie sind noch als {{user}} angemeldet. Melden Sie sich zuerst ab, sonst meldet die Anmeldung Sie wieder mit diesem Konto an statt mit dem neuen. Danach melden Sie sich mit dem neuen Konto an.",
+      "signOut": "Abmelden"
     },
     "collector": {
       "hint": "Installieren Sie den Collector in Ihrem Netz und geben Sie dort einen Enrollment-Code ein.",

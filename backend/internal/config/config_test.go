@@ -38,7 +38,8 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
-		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_EVENTS_MAX_AGE", "RETICORA_EVENTS_MAX_BYTES",
+		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
+		"RETICORA_EVENTS_MAX_BYTES",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -232,6 +233,63 @@ func TestInvitationAcceptURL(t *testing.T) {
 			} else if strings.Contains(err.Error(), "secret") {
 				t.Errorf("the start check repeats the value: %v", err)
 			}
+		}
+	}
+}
+
+// TestSignupVerifyURL covers the link of the self-signup verification mail
+// (TLC-01) with the rules of the invitation link: development defaults to
+// the Vite onboarding page; outside development there is no default (signup
+// answers 503 until it is set). Compose derives the URL from
+// RETICORA_PUBLIC_BASE_URL, so a base URL with a trailing slash must not
+// give https://host//onboarding?token=…; the doubled slash is collapsed. A
+// URL without host, a relative URL, another scheme and user info fail the
+// start check, which does not repeat the value.
+func TestSignupVerifyURL(t *testing.T) {
+	clearEnv(t)
+	if cfg := Load(); cfg.SignupVerifyURL != "http://localhost:5173/onboarding" || cfg.Validate(true) != nil {
+		t.Errorf("development default: %q, %v", cfg.SignupVerifyURL, cfg.Validate(true))
+	}
+	setAll(t, productionEnv)
+	if cfg := Load(); cfg.SignupVerifyURL != "" || cfg.Validate(false) != nil {
+		t.Errorf("production without verify URL: %q, %v; want none and a valid configuration", cfg.SignupVerifyURL, cfg.Validate(false))
+	}
+	for _, c := range []struct{ in, want string }{
+		{"http://192.0.2.10/onboarding", "http://192.0.2.10/onboarding"},
+		{"http://192.0.2.10:3000/onboarding", "http://192.0.2.10:3000/onboarding"},
+		{"https://cmdb.example.com/onboarding", "https://cmdb.example.com/onboarding"},
+		{"https://cmdb.example.com//onboarding", "https://cmdb.example.com/onboarding"},
+		{"https://cmdb.example.com///onboarding", "https://cmdb.example.com/onboarding"},
+		{"http://192.0.2.10:3000//onboarding", "http://192.0.2.10:3000/onboarding"},
+	} {
+		t.Run(c.in, func(t *testing.T) {
+			t.Setenv("RETICORA_SIGNUP_VERIFY_URL", c.in)
+			cfg := Load()
+			if err := cfg.Validate(false); err != nil || cfg.SignupVerifyURL != c.want {
+				t.Errorf("production with %q: %q, %v; want %q and a valid configuration", c.in, cfg.SignupVerifyURL, err, c.want)
+			}
+		})
+	}
+	t.Run("development keeps an explicit URL", func(t *testing.T) {
+		t.Setenv("RETICORA_ENVIRONMENT", EnvDevelopment)
+		t.Setenv("RETICORA_SIGNUP_VERIFY_URL", "http://localhost:3000//onboarding")
+		if cfg := Load(); cfg.SignupVerifyURL != "http://localhost:3000/onboarding" {
+			t.Errorf("development with an explicit URL: %q", cfg.SignupVerifyURL)
+		}
+	})
+	for _, env := range []string{EnvProduction, EnvDevelopment} {
+		for _, bad := range []string{"https:///onboarding", "/onboarding", "onboarding",
+			"ftp://cmdb.example.com/onboarding", "https://user:secret@cmdb.example.com/onboarding"} {
+			t.Run(env+" "+bad, func(t *testing.T) {
+				t.Setenv("RETICORA_ENVIRONMENT", env)
+				t.Setenv("RETICORA_SIGNUP_VERIFY_URL", bad)
+				err := Load().Validate(false)
+				if err == nil || !strings.Contains(err.Error(), "RETICORA_SIGNUP_VERIFY_URL") {
+					t.Errorf("%s with %q: %v, want an error naming RETICORA_SIGNUP_VERIFY_URL", env, bad, err)
+				} else if strings.Contains(err.Error(), "secret") {
+					t.Errorf("the start check repeats the value: %v", err)
+				}
+			})
 		}
 	}
 }

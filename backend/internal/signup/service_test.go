@@ -2,6 +2,7 @@ package signup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -365,8 +366,9 @@ func (a *stubInviter) InviteAccount(_ context.Context, acc Account) (string, err
 
 func TestOperatorCreationRunsTheSignupChain(t *testing.T) {
 	repo, accounts := newStubRepo(), &stubInviter{}
-	// No mailer: operator creation does not depend on the signup channel.
-	svc := newTestService(repo, nil, accounts)
+	// No mailer: operator creation does not depend on the signup channel;
+	// the invitation goes out through the IdP's mail.
+	svc := newTestService(repo, nil, accounts).WithInvitationMail(true)
 	op := operator.Identity{ID: "op-1", Kind: "oidc"}
 	req := &operator.NewOrganization{Name: " Acme ", Plan: "pro", AdminEmail: "admin@acme.example",
 		Limits: map[string]int64{entitlement.LimitMaxCIs: 5000, entitlement.LimitMaxCollectors: 4}}
@@ -398,7 +400,7 @@ func TestOperatorCreationRunsTheSignupChain(t *testing.T) {
 	}
 
 	// Without an inviting IdP client the organization is still created.
-	plain := newTestService(newStubRepo(), nil, &stubAccounts{})
+	plain := newTestService(newStubRepo(), nil, &stubAccounts{}).WithInvitationMail(true)
 	if created, err := plain.CreateOrganization(context.Background(), op, req); err != nil || created.AdminInvited {
 		t.Errorf("without inviter: %+v %v", created, err)
 	}
@@ -417,6 +419,113 @@ func TestOperatorCreationRunsTheSignupChain(t *testing.T) {
 	var ce *api.ConflictError
 	if _, err := svc.CreateOrganization(context.Background(), op, req); !errors.As(err, &ce) || ce.Field != "admin_email" {
 		t.Errorf("existing account: %v", err)
+	}
+}
+
+// TestChallengeAnswersUnavailableUntilConfigured: GET /signup/challenge is
+// the first request of the signup form, so an instance without one of the
+// prerequisites (central SMTP server → mailer, Keycloak admin client →
+// accounts, verify URL) answers it with 503 and the fixed detail of
+// ErrUnavailable, which the onboarding page maps to "not set up on this
+// server" (OnboardingPage.tsx, SIGNUP_UNAVAILABLE_DETAIL). The 503 of a
+// failing protection store has another detail: the page shows it as a
+// passing outage.
+func TestChallengeAnswersUnavailableUntilConfigured(t *testing.T) {
+	repo := newStubRepo()
+	p := newTestProtection(t, cache.NewMemoryStore())
+	detailOf := func(t *testing.T, w *httptest.ResponseRecorder) string {
+		t.Helper()
+		var pd struct {
+			Detail string `json:"detail"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &pd); err != nil {
+			t.Fatalf("problem body %q: %v", w.Body.String(), err)
+		}
+		return pd.Detail
+	}
+	for name, svc := range map[string]*Service{
+		"no mailer (no SMTP)":           newTestService(repo, nil, &stubAccounts{}),
+		"no accounts (no admin client)": newTestService(repo, &stubMailer{}, nil),
+		"no verify URL":                 NewService(repo, &stubMailer{}, &stubAccounts{}, DefaultConfig()),
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			NewHandler(svc).WithProtection(p).Challenge(w, httptest.NewRequest(http.MethodGet, "/api/v1/signup/challenge", nil))
+			if w.Code != http.StatusServiceUnavailable || detailOf(t, w) != "self-signup is not available" {
+				t.Errorf("challenge = %d %s, want 503 with the detail of ErrUnavailable", w.Code, w.Body.String())
+			}
+		})
+	}
+	w := httptest.NewRecorder()
+	NewHandler(newTestService(repo, &stubMailer{}, &stubAccounts{})).WithProtection(p).
+		Challenge(w, httptest.NewRequest(http.MethodGet, "/api/v1/signup/challenge", nil))
+	if w.Code != http.StatusOK {
+		t.Errorf("configured challenge = %d %s, want 200", w.Code, w.Body.String())
+	}
+
+	down := NewHandler(newTestService(repo, &stubMailer{}, &stubAccounts{})).WithProtection(newTestProtection(t, failingStore{}))
+	w = httptest.NewRecorder()
+	down.Submit(w, httptest.NewRequest(http.MethodPost, "/api/v1/signup",
+		strings.NewReader(`{"organization_name":"Acme","email":"a@example.com","altcha":"x"}`)))
+	if w.Code != http.StatusServiceUnavailable || detailOf(t, w) == "self-signup is not available" {
+		t.Errorf("store down = %d %s, want 503 with another detail than ErrUnavailable", w.Code, w.Body.String())
+	}
+}
+
+// TestOperatorCreationWithoutIdPMailDoesNotInvite: with the Keycloak admin
+// client but without the IdP's mail (no central SMTP server, so the realm
+// has no SMTP settings either) the operator path must not call the
+// inviting client. Its execute-actions-email would fail and roll back the
+// whole creation; instead the organization is created as without an
+// inviting client, and the response and the audit say that nobody was
+// invited.
+func TestOperatorCreationWithoutIdPMailDoesNotInvite(t *testing.T) {
+	op := operator.Identity{ID: "op-1", Kind: "oidc"}
+	req := &operator.NewOrganization{Name: "Acme", Plan: "standard", AdminEmail: "admin@acme.example"}
+	for name, svc := range map[string]func(Repository, Accounts) *Service{
+		"default": func(r Repository, a Accounts) *Service { return newTestService(r, nil, a) },
+		"disabled": func(r Repository, a Accounts) *Service {
+			return newTestService(r, nil, a).WithInvitationMail(false)
+		},
+		"disabled after enabled": func(r Repository, a Accounts) *Service {
+			return newTestService(r, nil, a).WithInvitationMail(true).WithInvitationMail(false)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newStubRepo()
+			// The IdP would refuse the mail: no SMTP server in the realm.
+			accounts := &stubInviter{stubAccounts: stubAccounts{err: errors.New("keycloak: invite: status 500")}}
+			created, err := svc(repo, accounts).CreateOrganization(context.Background(), op, req)
+			if err != nil {
+				t.Fatalf("CreateOrganization: %v", err)
+			}
+			if created.AdminInvited || created.ID == "" || created.Slug != "acme" {
+				t.Errorf("created = %+v, want an organization without invitation", created)
+			}
+			if len(accounts.invited) != 0 || len(accounts.created) != 0 || len(accounts.deleted) != 0 {
+				t.Errorf("IdP calls: invited %v created %v deleted %v, want none", accounts.invited, accounts.created, accounts.deleted)
+			}
+			if repo.audit == nil || repo.audit.Details["admin_invited"] != false {
+				t.Errorf("audit = %+v, want admin_invited false", repo.audit)
+			}
+		})
+	}
+
+	// With the IdP's mail the same refusal fails the creation, which then
+	// leaves nothing behind (the repository rolls back).
+	repo := newStubRepo()
+	accounts := &stubInviter{stubAccounts: stubAccounts{err: errors.New("keycloak: invite: status 500")}}
+	if _, err := newTestService(repo, nil, accounts).WithInvitationMail(true).CreateOrganization(context.Background(), op, req); err == nil {
+		t.Fatal("creation succeeded although the invitation failed")
+	}
+	if repo.setup != nil {
+		t.Errorf("organization stored after a failed invitation: %+v", repo.setup)
+	}
+
+	// A nil service stays nil.
+	var none *Service
+	if none.WithInvitationMail(true) != nil {
+		t.Error("WithInvitationMail on a nil service returned a service")
 	}
 }
 

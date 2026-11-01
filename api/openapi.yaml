@@ -282,9 +282,12 @@ paths:
         organization with its slug (derived from the name unless given), the
         default VRF and standard roles, the first user as org_admin, and the
         entitlements of the plan (source manual) with the given limits in
-        the limits of their feature. With an IdP admin client the first
-        org_admin receives an account and the IdP's mail to set a password
-        (`admin_invited`). The creation and its `org.create` entry in
+        the limits of their feature. With an IdP admin client and the
+        central SMTP server (RETICORA_SMTP_HOST, whose settings the IdP's
+        realm also uses) the first org_admin receives an account and the
+        IdP's mail to set a password (`admin_invited`); without the SMTP
+        server no IdP account is created, since the IdP could not send the
+        mail. The creation and its `org.create` entry in
         operator_audit are atomic. Reseller creation is phase 4.
       requestBody:
         required: true

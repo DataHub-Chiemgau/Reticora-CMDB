@@ -306,7 +306,9 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	})
 
 	accounts := &stubInviter{}
-	svc := NewService(NewPGRepository(appPool).WithCentralSMTP(true), nil, accounts, DefaultConfig())
+	// The central SMTP server also gives the IdP its mail: the first
+	// org_admin is invited.
+	svc := NewService(NewPGRepository(appPool).WithCentralSMTP(true), nil, accounts, DefaultConfig()).WithInvitationMail(true)
 	op := operator.Identity{ID: "op-wp113", Kind: "oidc"}
 	req := &operator.NewOrganization{Name: "Operator Test", Slug: slug, Plan: "pro", AdminEmail: "admin@op.example",
 		Limits: map[string]int64{entitlement.LimitMaxCIs: 7000, entitlement.LimitMaxUsers: 40}}

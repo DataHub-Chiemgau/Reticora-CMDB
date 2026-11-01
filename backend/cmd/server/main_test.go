@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -672,4 +675,150 @@ type countingAlerts struct {
 func (a *countingAlerts) ListEnabled(context.Context) ([]monitoring.AlertRule, error) {
 	a.calls.Add(1)
 	return nil, nil
+}
+
+// captureLog makes slog write JSON records into the returned buffer until
+// the test ends.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	var buf bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	return &buf
+}
+
+// logRecords returns the JSON records of buf with the message msg.
+func logRecords(t *testing.T, buf *bytes.Buffer, msg string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	scanner := bufio.NewScanner(bytes.NewReader(buf.Bytes()))
+	for scanner.Scan() {
+		var record map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			t.Fatalf("log line %q: %v", scanner.Text(), err)
+		}
+		if record["msg"] == msg {
+			out = append(out, record)
+		}
+	}
+	return out
+}
+
+// TestSignupServiceNamesTheMissingPrerequisites covers the start log of
+// the self-signup (TLC-01): a default install without SMTP, Keycloak admin
+// client or verify URL answers every signup with 503, so the log names
+// exactly the settings that are missing, at WARN; with all of them the
+// service is available and the log says so at INFO. The operator path
+// invites the first org_admin only with the central SMTP server (the
+// realm's mail), so an admin client alone does not turn the invitations
+// on.
+func TestSignupServiceNamesTheMissingPrerequisites(t *testing.T) {
+	// The pool never connects: building the service only stores it.
+	pool, err := pgxpool.New(context.Background(), "postgres://reticora@127.0.0.1:1/reticora?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	sender, err := notify.NewSMTPSender(&notify.SMTPConfig{Host: "smtp.example.com", Port: 587,
+		From: "cmdb@example.com", TLS: "starttls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete := func() *config.Config {
+		return &config.Config{
+			OIDCIssuerURL:             "https://id.example.com/realms/reticora",
+			KeycloakAdminClientID:     "reticora-server-admin",
+			KeycloakAdminClientSecret: "kc-admin-client-secret-value",
+			SignupVerifyURL:           "https://cmdb.example.com/onboarding",
+			SMTPHost:                  "smtp.example.com",
+			TrialPlan:                 "standard",
+			TrialDays:                 30,
+			TrialMaxCIs:               100,
+		}
+	}
+	noSMTP := func(c *config.Config) { c.SMTPHost = "" }
+	for _, tc := range []struct {
+		name            string
+		mutate          []func(*config.Config)
+		noDB            bool
+		want            []string
+		operatorInvites bool
+	}{
+		{name: "complete", operatorInvites: true},
+		{name: "no SMTP server", mutate: []func(*config.Config){noSMTP},
+			want: []string{"RETICORA_SMTP_HOST"}},
+		{name: "no admin client", mutate: []func(*config.Config){func(c *config.Config) { c.KeycloakAdminClientID = "" }},
+			want: []string{"RETICORA_KEYCLOAK_ADMIN_CLIENT_ID"}},
+		{name: "no admin client secret", mutate: []func(*config.Config){func(c *config.Config) { c.KeycloakAdminClientSecret = "" }},
+			want: []string{"RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET"}},
+		{name: "no verify URL", mutate: []func(*config.Config){func(c *config.Config) { c.SignupVerifyURL = "" }},
+			want: []string{"RETICORA_SIGNUP_VERIFY_URL"}, operatorInvites: true},
+		{name: "default install", mutate: []func(*config.Config){noSMTP, func(c *config.Config) {
+			c.KeycloakAdminClientID, c.KeycloakAdminClientSecret, c.SignupVerifyURL = "", "", ""
+		}}, want: []string{"RETICORA_SMTP_HOST", "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", "RETICORA_SIGNUP_VERIFY_URL"}},
+		{name: "without database", noDB: true, want: []string{"database (the server runs with --no-db)"}, operatorInvites: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := complete()
+			for _, m := range tc.mutate {
+				m(cfg)
+			}
+			smtp := sender
+			if cfg.SMTPHost == "" {
+				smtp = nil
+			}
+			db := pool
+			if tc.noDB {
+				db = nil
+			}
+			logs := captureLog(t)
+			svc := signupService(cfg, db, smtp)
+			if svc.Available() != (len(tc.want) == 0) {
+				t.Errorf("Available() = %v with missing %v", svc.Available(), tc.want)
+			}
+			records := logRecords(t, logs, "self-signup configured")
+			if len(records) != 1 {
+				t.Fatalf("want one \"self-signup configured\" record, got %v\n%s", records, logs)
+			}
+			record := records[0]
+			if record["operator_invitations"] != tc.operatorInvites {
+				t.Errorf("operator_invitations = %v, want %v", record["operator_invitations"], tc.operatorInvites)
+			}
+			if len(tc.want) == 0 {
+				if record["level"] != "INFO" || record["available"] != true || record["missing"] != nil {
+					t.Errorf("available service logged %v, want INFO available=true", record)
+				}
+				return
+			}
+			var missing []string
+			if list, ok := record["missing"].([]any); ok {
+				for _, v := range list {
+					missing = append(missing, v.(string))
+				}
+			}
+			if record["level"] != "WARN" || record["available"] != false || !slices.Equal(missing, tc.want) {
+				t.Errorf("logged %v, want WARN available=false missing=%v", record, tc.want)
+			}
+			if strings.Contains(logs.String(), "kc-admin-client-secret-value") {
+				t.Errorf("the log repeats the client secret:\n%s", logs)
+			}
+		})
+	}
+}
+
+// TestMissingSignupPrerequisitesNamesABrokenAdminClient: with id and secret
+// set but a client that could not be built (an unreadable CA bundle, an
+// issuer that is no realm URL) the log points to the error of the admin
+// client instead of naming a setting that is there.
+func TestMissingSignupPrerequisitesNamesABrokenAdminClient(t *testing.T) {
+	cfg := &config.Config{KeycloakAdminClientID: "reticora-server-admin", KeycloakAdminClientSecret: "secret",
+		SignupVerifyURL: "https://cmdb.example.com/onboarding"}
+	got := missingSignupPrerequisites(cfg, true, true, false)
+	if len(got) != 1 || !strings.Contains(got[0], "Keycloak admin client disabled") {
+		t.Errorf("missing = %v, want the hint to the disabled admin client", got)
+	}
+	if got := missingSignupPrerequisites(cfg, true, true, true); len(got) != 0 {
+		t.Errorf("complete prerequisites: missing = %v", got)
+	}
 }

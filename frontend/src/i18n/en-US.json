@@ -1806,16 +1806,43 @@
       "email": "E-mail address",
       "name": "Your name",
       "submit": "Create account",
-      "sent": "We sent a confirmation link to {{email}}. Open it to continue."
+      "sent": "We sent a confirmation link to {{email}}. Open it to continue.",
+      "unavailable": "Sign-up is not set up on this server yet: no e-mail delivery (SMTP) is configured. Contact the operator.",
+      "temporarilyUnavailable": "Sign-up is not possible right now. Please try again in a few minutes.",
+      "rateLimited": "Too many attempts. Please wait a few minutes and try again.",
+      "emailBlocked": "This e-mail domain is not accepted for sign-up (for example disposable addresses). Please use your business e-mail address.",
+      "emailInvalid": "Please enter a valid e-mail address (e.g. name@company.com).",
+      "organizationInvalid": "Please enter the name of your organization (at most 200 characters).",
+      "nameTooLong": "Your name may have at most 200 characters.",
+      "captchaFailed": "The automatic security check failed or expired. Please submit the form again.",
+      "failed": "Sign-up failed: {{detail}}"
     },
     "verify": {
       "password": "Set a password (at least 12 characters)",
+      "policy": "At least {{min}} characters with upper-case and lower-case letters, a digit and a special character; not your e-mail address.",
+      "policyNotMet": "The password does not meet the policy yet. Missing: {{rules}}.",
+      "rules": {
+        "length": "at least {{min}} characters",
+        "upper": "an upper-case letter",
+        "lower": "a lower-case letter",
+        "digit": "a digit",
+        "special": "a special character"
+      },
       "submit": "Confirm account",
       "done": "Your organization “{{slug}}” has been created.",
       "login": "Sign in and continue",
       "expired": "The confirmation link has expired. Please sign up again.",
       "invalid": "The confirmation link is invalid or was already used.",
-      "trial": "Your trial runs until {{date}}."
+      "trial": "Your trial runs until {{date}}.",
+      "notAccepted": "The account was not confirmed. Please check the password.",
+      "passwordRejected": "The password was not accepted. It must meet the policy and must not be your e-mail address.",
+      "accountExists": "An account with this e-mail address already exists. Sign in with it or sign up with a different address.",
+      "organizationTaken": "The organization name is already taken. Please sign up again with a different name.",
+      "unavailable": "Confirming is not possible on this server right now. Please try again later or contact the operator.",
+      "failed": "Confirming failed: {{detail}}",
+      "signedIn": "This tab is still signed in as {{user}}. The new account is created anyway; afterwards, sign out here before you sign in with the new account.",
+      "signOutFirst": "You are still signed in as {{user}}. Sign out first, otherwise signing in would use this account again instead of the new one. Then sign in with the new account.",
+      "signOut": "Sign out"
     },
     "collector": {
       "hint": "Install the collector in your network and enter an enrollment code there.",
