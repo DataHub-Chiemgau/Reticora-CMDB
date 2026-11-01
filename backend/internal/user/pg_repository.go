@@ -1469,6 +1469,11 @@ func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email
 		// The subject belongs to a user of another organization.
 		return "", false, identity.ErrFirstLoginNotPermitted
 	}
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "app_user_organization_id_fkey" {
+		// The organization attribute of the ID token names no
+		// organization: the login is refused, nothing is created (F-395).
+		return "", false, identity.ErrUnknownOrganization
+	}
 	if err != nil {
 		return "", false, fmt.Errorf("ensure oidc user: %w", err)
 	}

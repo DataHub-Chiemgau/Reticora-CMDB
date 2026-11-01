@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 3 |
 | P2 | 19 |
-| P3 | 16 |
-| **Summe** | **39** |
+| P3 | 18 |
+| **Summe** | **41** |
 
 ## Übersicht
 
@@ -79,6 +79,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-391](#f-391) | P3 | Schreibanfragen mit NUL-Byte in der Pfad-ID antworten 503 „the audit trail is unavailable“ mit ERROR-Log statt 404/400 | WP-018 bis WP-021 (K7) | belegt | backend/internal/server/route_audit_integration_test.go | WP-662 |
 | [F-392](#f-392) | P3 | NUL-Byte in einem Schlüssel des JSON-Körpers einer Schreibanfrage antwortet 503 „the audit trail is unavailable“, NUL-Byte im /admin-Pfad 500 „the operator audit entry could not be written“, jeweils mit ERROR-Log | WP-662 (K7-Nachträge) | belegt | backend/internal/server/route_audit_integration_test.go | WP-663 |
 | [F-393](#f-393) | P2 | Gelöschter Benutzer behält bis zum Ablauf seines Tokens Lese- und Schreibzugriff; API-Keys bleiben unwiderrufen, kein Audit-Eintrag `user.deleted` | WP-042 (K7) | belegt | backend/internal/identity/user_deletion_integration_test.go | WP-664 |
+| [F-394](#f-394) | P3 | Metrik-Ingest mit einer für den Aufrufer unsichtbaren oder unbekannten ci_id antwortet 500 statt 404; gemischter Batch verwirft auch die gültige Probe mit 500 | WP-040 (K7) | belegt | backend/internal/tenant/rls/metric_ingest_errors_integration_test.go | WP-665 |
+| [F-395](#f-395) | P3 | OIDC-Login mit einem Organisationsattribut, das keine Organisation bezeichnet, antwortet 502 „the login could not be completed“ mit FK-Fehler im Log statt 401 login-no-organization | WP-043 (K7) | belegt | backend/internal/identity/callback_scope_integration_test.go | WP-666 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -750,6 +752,65 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       user_deletion_revocation_integration_test.go:139: session revocations for the deleted user: 0, want 2 (in the transaction and after the commit)
       user_deletion_revocation_integration_test.go:142: user after the DELETE: exists=false key revoked=false user.deleted entries=0; want deleted, key revoked, 1 entry
   --- FAIL: TestUserDeletionRevokesOnlyOnDeletion (1.04s)
+  FAIL
+  ```
+
+<a id="f-394"></a>
+### F-394 (P3) – Metrik-Ingest mit einer für den Aufrufer unsichtbaren oder unbekannten ci_id antwortet 500 statt 404; gemischter Batch verwirft auch die gültige Probe mit 500
+
+- **Gefunden in:** Gegenprüfung (adversarialer Prüfagent r1-b3, von zwei Agenten bestätigt) der Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, Statusvertrag der Schreibwege des Monitorings · **Betroffene Anforderungen:** MON-02, API-03, TEN-06 · **Komponente:** backend/internal/monitoring/pg_store.go (`PGMetricStore.Ingest`, Zeilen 113-115 auf `e5c2d86`: `fmt.Errorf("ingest metric sample: ci %s not found", m.CIID)` ohne Sentinel), backend/internal/monitoring/monitoring.go (`IngestMetrics`, Zeilen 559-561: `api.WriteRepoError`), backend/internal/discovery/edge_ingest.go (`edgeMetrics`, Zeilen 241-243: `EdgeReply{Status: 500, Error: "metrics ingest failed"}`) · **Quelle:** Probe über den vollständigen Router des PostgreSQL-Profils (`newChannelEnv`, RLS, Tenant-Middleware); Evidenzordner `k-reaudit-1/WP-040` (`verify-probe-k1-metric-ingest.log`) und Probe-Quelltext `verify-probe-src-vk1_metric_ingest_probe_test.go.txt` (`TestVerifyK1MetricIngestStatus`)
+- **Reproduktion:** Als Benutzer mit Scope Client 1 `POST /api/v1/monitoring/metrics` mit `{"metrics":[{"ci_id":"<CI von Client 2>","name":"x","value":1}]}` → 500 `{"detail":"the request could not be completed","status":500,"title":"Internal Error",…}`, 0 Zeilen. Ebenso eine CI der Organisation B (Client-1- und organisationsweiter Aufrufer) und eine unbekannte UUID. Gemischter Batch `[{"ci_id":"<eigene CI>",…},{"ci_id":"<CI von Client 2>",…}]` → 500, auch die gültige Probe wird nicht gespeichert. Der Kollektor-Weg (Edge-Subjekt `.metrics`, `EdgeMetrics`) antwortet für eine CI außerhalb seines Scopes 500 „metrics ingest failed“ mit ERROR-Log `edge metrics ingest failed … ci … not found`. Kontrollen: eigene CI → 202 `{"ingested":1,"unassigned":0}`; `ci_id` `not-a-uuid` oder mit NUL-Byte → 400; `GET /api/v1/cis/{fremd|unbekannt}/metrics` → 404 „ci not found“.
+- **Soll:** API-03: Eine Anfrage, deren Wert keine für den Aufrufer sichtbare Ressource bezeichnet, erhält eine Client-Antwort (404 problem+json wie der Lesepfad `GET /cis/{id}/metrics`, das Feld benannt), keinen 5xx. TEN-06: unsichtbar und unbekannt sind nicht unterscheidbar. MON-02: Die Semantik eines gemischten Batches ist festgelegt und dokumentiert (alles oder nichts, die verursachende ci_id benannt; kein stilles Verwerfen).
+- **Ist:** `PGMetricStore.Ingest` erkennt die nicht sichtbare CI (die Einfügung über `metric_sample_v` mit `EXISTS (SELECT 1 FROM ci …)` trifft 0 Zeilen) und rollt die Transaktion zurück, liefert aber nur einen formatierten Fehler ohne Sentinel. `IngestMetrics` gibt ihn an `api.WriteRepoError` weiter, das weder `api.ErrNotFound` noch einen PostgreSQL-Fehler erkennt: generischer 500. `edgeMetrics` macht daraus 500 mit ERROR-Log. Die Batch-Semantik (alles oder nichts) ist nicht dokumentiert.
+- **Nutzerwirkung:** API-Clients und Kollektoren erhalten für einen Client-Fehler (veraltete oder fremde ci_id) einen Serverfehler; Clients wiederholen vergeblich, Alarme auf die 5xx-Rate und ERROR-Logs werden ohne Ausfall ausgelöst. Der Grund (welche ci_id) ist nicht erkennbar, und dass der ganze Batch verworfen wurde, ist nirgends beschrieben. Keine Daten fremder Mandanten werden offengelegt oder geschrieben.
+- **Ursache (belegt):** Der Fehlerpfad „CI nicht sichtbar“ der Speicherschicht hat keinen Typ, den der Fehlervertrag API-03 (`api.WriteRepoError`, WP-343) oder der Edge-Handler erkennt; der Lesepfad prüft die Sichtbarkeit dagegen vorab (`CIVisibility`, WP-344) und antwortet 404.
+- **Empfehlung:** `PGMetricStore.Ingest` liefert einen typisierten Fehler (`*monitoring.UnknownCIError` mit der ci_id, zugleich `api.ErrNotFound`); `IngestMetrics` antwortet darauf 404 problem+json mit `field` `ci_id` und der ci_id im `detail`, `edgeMetrics` 404 mit derselben Angabe. Der Batch bleibt alles oder nichts (Transaktion), `api/openapi.yaml` beschreibt das und die 404-Antwort.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^(TestMetricIngestForInvisibleCIIsNotFound|TestEdgeMetricIngestForInvisibleCIIsNotFound)$' ./internal/tenant/rls/` mit `TEST_DATABASE_URL` PASS: CI von Client 2, von Organisation B und unbekannte CI → 404 mit `field` `ci_id` und der ci_id, 0 Zeilen; gemischte Batches → 404, keine Probe gespeichert; eigene CI 202; `not-a-uuid`/NUL 400; Edge-Weg 404 statt 500, keine Zeile.
+- **Kodierender Test:** backend/internal/tenant/rls/metric_ingest_errors_integration_test.go (`TestMetricIngestForInvisibleCIIsNotFound`, vollständiger Router des PostgreSQL-Profils; `TestEdgeMetricIngestForInvisibleCIIsNotFound`, `discovery.Handler.EdgeMetrics` mit `PGRepository`, PG-Metrikspeicher und CI-Resolver); auf `e5c2d86` rot (ausgeführt auf der Basis `ab48c78`; `internal/monitoring` und `internal/discovery/edge_ingest.go` dort identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestMetricIngestForInvisibleCIIsNotFound
+      metric_ingest_errors_integration_test.go:96: client 1 -> CI of client 2: POST /monitoring/metrics = 500 {"detail":"the request could not be completed","status":500,"title":"Internal Error",...,"type":"https://reticora.io/problems/500"}; want 404
+      metric_ingest_errors_integration_test.go:96: client 1 -> CI of organization B: POST /monitoring/metrics = 500 ...; want 404
+      metric_ingest_errors_integration_test.go:96: org-wide -> CI of organization B: POST /monitoring/metrics = 500 ...; want 404
+      metric_ingest_errors_integration_test.go:96: org-wide -> unknown CI: POST /monitoring/metrics = 500 ...; want 404
+      metric_ingest_errors_integration_test.go:96: client 1 mixed: own + client 2: POST /monitoring/metrics = 500 ...; want 404
+      metric_ingest_errors_integration_test.go:96: org-wide mixed: unknown + own: POST /monitoring/metrics = 500 ...; want 404
+  --- FAIL: TestMetricIngestForInvisibleCIIsNotFound (0.60s)
+  === RUN   TestEdgeMetricIngestForInvisibleCIIsNotFound
+  ERROR edge metrics ingest failed organization_id=c0dec9a0-0000-4000-8000-000000000001 collector_id=4d6dad77-… error="ingest metric sample: ci c0dec9a0-0000-4000-8000-000000001002 not found"
+      metric_ingest_errors_integration_test.go:179: CI of client 2: .metrics = 500 "metrics ingest failed"; want 404
+      metric_ingest_errors_integration_test.go:182: CI of client 2: reply error "metrics ingest failed" does not name the ci_id c0dec9a0-0000-4000-8000-000000001002
+      metric_ingest_errors_integration_test.go:179: CI of organization B: .metrics = 500 "metrics ingest failed"; want 404
+      metric_ingest_errors_integration_test.go:179: unknown CI: .metrics = 500 "metrics ingest failed"; want 404
+      metric_ingest_errors_integration_test.go:179: mixed: own + client 2: .metrics = 500 "metrics ingest failed"; want 404
+  --- FAIL: TestEdgeMetricIngestForInvisibleCIIsNotFound (0.55s)
+  FAIL
+  ```
+
+<a id="f-395"></a>
+### F-395 (P3) – OIDC-Login mit einem Organisationsattribut, das keine Organisation bezeichnet, antwortet 502 „the login could not be completed“ mit FK-Fehler im Log statt 401 login-no-organization
+
+- **Gefunden in:** Gegenprüfung (adversarialer Prüfagent r1-b3, von zwei Agenten bestätigt) der Wiederholungsprüfung (K7) auf dem RC-Commit `e5c2d86`, Login-Verweigerungen des OIDC-Callbacks · **Betroffene Anforderungen:** AUT-01, CH26 (AUT-09), API-03 · **Komponente:** backend/internal/user/pg_repository.go (`EnsureUser`/`resolveLogin`: die Einfügung in `app_user` scheitert an `app_user_organization_id_fkey`, SQLSTATE 23503, ohne Abbildung), backend/internal/identity/handler.go (Fehlerabbildung des Callbacks `writeIdentityError`, Zeilen 710-732 auf `e5c2d86`: Standardzweig 502) · **Quelle:** Probe `POST /api/v1/auth/callback` über den Fake-IdP von `callback_scope_integration_test.go` mit der Produktionsprovisionierung (`user.PGRepository`) und dem Access-Resolver (`permission.PGRepository`); Evidenzordner `k-reaudit-1/WP-043` (`verify-probe-k4-unknown-org.log`) und Probe-Quelltext `verify-probe-src-vk4_unknown_org_probe_test.go.txt` (`TestVerifyK4UnknownOrganizationAttribute`)
+- **Reproduktion:** ID-Token mit verifizierter E-Mail und `organization_id` = zufällige UUID (`f7000000-0000-4000-8000-00000000dead`), Nil-UUID oder eine unbekannte Organisation für eine Adresse mit offener Einladung in Organisation A → `POST /api/v1/auth/callback` 502 `{"detail":"the login could not be completed","status":502,"title":"Bad Gateway","type":"https://reticora.io/problems/502"}`, kein `app_user`, keine Session; Server-Log `ERROR login failed error="identity: provision user: ensure oidc user: ERROR: insert or update on table \"app_user\" violates foreign key constraint \"app_user_organization_id_fkey\" (SQLSTATE 23503)"`. Kontrollen: Attribut fehlt → 401 `https://reticora.io/problems/login-no-organization`; Organisation A mit Einladung → 200 mit Session.
+- **Soll:** CH26/AUT-09: Die Organisation ist das Nutzerattribut des Realms; ein Attribut, das keine Organisation der Instanz bezeichnet, ist kein gültiges Attribut. AUT-01: Der Login wird abgewiesen, kein `app_user`, keine Session. API-03: Antwort ist eine Client-Verweigerung, 401 problem+json `https://reticora.io/problems/login-no-organization` wie ein fehlendes Attribut, die die CallbackPage lokalisiert anzeigt (F-197); kein 5xx, kein ERROR-Log, kein Datenbanktext.
+- **Ist:** `resolveLogin` findet für die unbekannte Organisation weder Benutzer noch Einladung, zählt 0 Benutzer und versucht den Erstlogin (Bootstrap); die Einfügung in `app_user` scheitert am Fremdschlüssel. `EnsureUser` bildet nur 23505 ab und reicht 23503 als `ensure oidc user: …` weiter; `writeIdentityError` fällt in den Standardzweig (502 „the login could not be completed“, ERROR-Log mit Tabellen- und Constraint-Namen).
+- **Nutzerwirkung:** Ein Benutzer, dessen Realm-Attribut auf eine gelöschte oder falsch eingetragene Organisation zeigt, sieht statt „Ihr Konto ist keiner Organisation zugeordnet“ einen allgemeinen Fehler, der einen Ausfall des IdP nahelegt; Betrieb erhält ERROR-Logs und 5xx ohne Ausfall. Es entstehen keine Daten, und keine fremde Organisation wird erreicht.
+- **Ursache (belegt):** Die Prüfung des Organisationsattributs (`organizationFromClaims`, `oidc.go`) prüft nur Vorhandensein und UUID-Format; ob die Organisation existiert, ergibt sich erst aus dem Fremdschlüssel bei der Einfügung, und dieser Fehler hat keinen Sentinel.
+- **Empfehlung:** `EnsureUser` bildet die Verletzung von `app_user_organization_id_fkey` (23503) auf einen Sentinel `identity.ErrUnknownOrganization` ab; der Callback reicht ihn unverpackt durch, `writeIdentityError` antwortet 401 mit dem Problemtyp `login-no-organization` und dem festen Text. `api/openapi.yaml` (Antwort 401 von `POST /auth/callback`) nennt den Fall; die CallbackPage zeigt den lokalisierten Text.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestCallbackUnknownOrganizationIsRefused$' ./internal/identity/` mit `TEST_DATABASE_URL` PASS: zufällige UUID, Nil-UUID und unbekannte Organisation mit Einladung in A → 401 `login-no-organization`, kein `app_user`, keine Session, kein Refresh-Cookie, kein ERROR-Log „login failed“, Einladung in A bleibt offen; Attribut fehlt 401; Organisation A mit Einladung 200. `cd frontend && npx vitest run src/pages/auth/CallbackPage.test.tsx` PASS.
+- **Kodierender Test:** backend/internal/identity/callback_scope_integration_test.go (`TestCallbackUnknownOrganizationIsRefused`, Fake-IdP mit `user.PGRepository` und `permission.PGRepository` wie router.go); frontend/src/pages/auth/CallbackPage.test.tsx (Fall 401 `login-no-organization` mit dem neuen Text); auf `e5c2d86` rot (ausgeführt auf der Basis `f852212`; `internal/identity` und `internal/user` dort identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestCallbackUnknownOrganizationIsRefused
+      callback_scope_integration_test.go:364: unknown organization (random UUID): callback 502 {"detail":"the login could not be completed","status":502,"title":"Bad Gateway","trace_id":"6d76f72cd42629676517861b2cc9edbc","type":"https://reticora.io/problems/502"}; want 401 problem+json https://reticora.io/problems/login-no-organization
+      callback_scope_integration_test.go:364: unknown organization (nil UUID): callback 502 {"detail":"the login could not be completed",...,"type":"https://reticora.io/problems/502"}; want 401 problem+json https://reticora.io/problems/login-no-organization
+      callback_scope_integration_test.go:364: unknown organization, address invited in organization A: callback 502 {"detail":"the login could not be completed",...,"type":"https://reticora.io/problems/502"}; want 401 problem+json https://reticora.io/problems/login-no-organization
+      callback_scope_integration_test.go:382: a login into an unknown organization logged an error:
+          level=ERROR msg="login failed" error="identity: provision user: ensure oidc user: ERROR: insert or update on table \"app_user\" violates foreign key constraint \"app_user_organization_id_fkey\" (SQLSTATE 23503)"
+          level=ERROR msg="login failed" error="identity: provision user: ensure oidc user: ERROR: insert or update on table \"app_user\" violates foreign key constraint \"app_user_organization_id_fkey\" (SQLSTATE 23503)"
+          level=ERROR msg="login failed" error="identity: provision user: ensure oidc user: ERROR: insert or update on table \"app_user\" violates foreign key constraint \"app_user_organization_id_fkey\" (SQLSTATE 23503)"
+  --- FAIL: TestCallbackUnknownOrganizationIsRefused (0.58s)
   FAIL
   ```
 

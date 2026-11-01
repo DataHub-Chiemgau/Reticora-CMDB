@@ -73,6 +73,12 @@ var ErrUserInactive = errors.New("identity: user is deactivated")
 // account created by an administrator or SCIM (AUT-01).
 var ErrFirstLoginNotPermitted = errors.New("identity: first login requires an invitation for this organization and e-mail")
 
+// ErrUnknownOrganization is returned when the organization attribute of the
+// ID token names no organization of the instance (AUT-01, CH26). The login
+// is refused like one without the attribute (401 login-no-organization); no
+// app_user and no session are created (F-395).
+var ErrUnknownOrganization = errors.New("identity: the organization attribute names no organization")
+
 // ErrMFAUnavailable is returned when a grant of org_admin cannot bind the
 // IdP account to the second factor (realm role mfa_required, AUT-09,
 // WP-358, WP-367): no Keycloak admin client, or the admin API refused or
@@ -112,8 +118,9 @@ type UserProvisioner interface {
 	// EnsureUser resolves the app_user of the OIDC subject in the
 	// organization, or on first login by organization and verified e-mail
 	// (empty when unverified). It creates or links a user only with an
-	// admission and returns ErrFirstLoginNotPermitted otherwise, and
-	// ErrUserInactive for a deactivated user. Only the first login, which
+	// admission and returns ErrFirstLoginNotPermitted otherwise,
+	// ErrUserInactive for a deactivated user and ErrUnknownOrganization
+	// when orgID names no organization. Only the first login, which
 	// creates the user or links an account by e-mail, assigns the standard
 	// role defaultRole (empty: none) in the same transaction, when the user
 	// then holds no role; assigned reports that it did. A later login
@@ -519,7 +526,8 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 			email = idToken.Email
 		}
 		userID, assigned, provisionErr := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, email, idToken.Name, h.defaultRole)
-		if errors.Is(provisionErr, ErrUserInactive) || errors.Is(provisionErr, ErrFirstLoginNotPermitted) {
+		if errors.Is(provisionErr, ErrUserInactive) || errors.Is(provisionErr, ErrFirstLoginNotPermitted) ||
+			errors.Is(provisionErr, ErrUnknownOrganization) {
 			return "", time.Time{}, authResult{}, provisionErr
 		}
 		if provisionErr != nil {
@@ -695,6 +703,10 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		api.WriteProblem(w, http.StatusForbidden, ProblemLoginUserInactive, "Forbidden", ErrUserInactive.Error())
 	case errors.Is(err, ErrNoRoleAssignment):
 		api.WriteProblem(w, http.StatusForbidden, ProblemLoginNoRole, "Forbidden", ErrNoRoleAssignment.Error())
+	case errors.Is(err, ErrUnknownOrganization):
+		// The attribute names no organization (CH26, F-395): like a token
+		// without one, not a failure of the provisioning.
+		api.WriteProblem(w, http.StatusUnauthorized, ProblemLoginNoOrganization, "Unauthorized", ErrUnknownOrganization.Error())
 	case api.WriteEntitlementError(w, err):
 		// A first login with an invitation while max_users is reached
 		// (ENT-03): 403 entitlement-limit, the invitation stays open.

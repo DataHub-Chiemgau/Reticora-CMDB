@@ -1063,3 +1063,7 @@ TLC-04;[B];B;backend/internal/user/user_deletion_revocation_integration_test.go;
 MON-02;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
 API-03;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
 TEN-06;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+AUT-01;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+AUT-09;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+API-03;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+AUT-01;[B];B;frontend/src/pages/auth/CallbackPage.test.tsx;WP-666

@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-664 | 10 | 7,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-666 | 12 | 8,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **312** | **408,5** | |
+| **Summe** | | **314** | **409,5** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>10 WPs · 7,5 PT"]
+    K7N["K7-Nachträge<br/>12 WPs · 8,5 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -431,6 +431,8 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-662](#wp-662--routen-audit-pfad-ids-mit-nul-byte-oder-ungültigem-utf-8-erhalten-404-vor-der-audit-absicht-statt-503) | `k7n-route-audit-nul-id` | Routen-Audit: Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 vor der Audit-Absicht statt 503 | K7N | 0,5 | F-391 | WP-504, WP-505 |
 | [WP-663](#wp-663--routen--und-operator-audit-nul-byte-im-schlüssel-des-json-körpers-erhält-400-vor-der-audit-absicht-statt-503-admin-pfade-werden-kodiert-protokolliert-statt-500) | `k7n-route-audit-body-keys` | Routen- und Operator-Audit: NUL-Byte im Schlüssel des JSON-Körpers erhält 400 vor der Audit-Absicht statt 503, /admin-Pfade werden kodiert protokolliert statt 500 | K7N | 0,5 | F-392 | WP-504, WP-505, WP-564, WP-662 |
 | [WP-664](#wp-664--benutzerlöschung-beendet-jeden-zugang-wie-die-deaktivierung-in-der-transaktion-der-löschung-audit-userdeleted) | `k7n-user-delete-ends-access` | Benutzerlöschung beendet jeden Zugang wie die Deaktivierung, in der Transaktion der Löschung; Audit `user.deleted` | K7N | 1 | F-393 | WP-042, WP-359, WP-571, WP-648 |
+| [WP-665](#wp-665--metrik-ingest-unsichtbare-oder-unbekannte-ci_id-404-statt-500-batch-alles-oder-nichts-dokumentiert-api-und-edge) | `k7n-metric-ingest-errors` | Metrik-Ingest: unsichtbare oder unbekannte ci_id 404 statt 500, Batch alles oder nichts dokumentiert (API und Edge) | K7N | 0,5 | F-394 | WP-343, WP-344, WP-426 |
+| [WP-666](#wp-666--login-organisationsattribut-ohne-organisation-erhält-401-login-no-organization-statt-502) | `k7n-login-unknown-org` | Login: Organisationsattribut ohne Organisation erhält 401 login-no-organization statt 502 | K7N | 0,5 | F-395 | WP-570, WP-637 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18911,6 +18913,118 @@ TLC-04;[B];B;backend/internal/user/user_deletion_revocation_integration_test.go;
 **Entscheidungsbedarf:** keiner für die Umsetzung; E-64 (Option 2) wird auf die Löschung so angewandt wie auf Deaktivierung und Anonymisierung (Service-Account-Keys des Erstellers bleiben gültig, Rotationshinweis an die org_admins). Hinweis für die Leitung: Der Text der Benachrichtigung `apikey.creator_deactivated` sagt „deaktiviert“ auch bei einer Löschung (`action` im Ereignis ist `user.deleted`).
 
 **Nicht Bestandteil:** Änderungen an der UI (die Aktion „Löschen“ bleibt in jeder Zeile; sie beendet jetzt jeden Zugang); SCIM `DELETE /scim/v2/Users/{id}` (deaktiviert bereits über `UpdateUser`); die Zuordnung interner Fehler der Löschung auf 404 (wie bei `PATCH` und Anonymisierung); weitere Befunde der Wiederholungsprüfung.
+
+### WP-665 – Metrik-Ingest: unsichtbare oder unbekannte ci_id 404 statt 500, Batch alles oder nichts dokumentiert (API und Edge)
+
+**Schlüssel:** `k7n-metric-ingest-errors` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-343 (Fehlervertrag API-03), WP-344 (Metrik-Kanal der CI-Detailansicht, 404 für unsichtbare CIs), WP-426 (Metriken über den Edge)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-394](../../../audit/g1-reaudit/FINDINGS.md#f-394) | P3 | Metrik-Ingest mit einer für den Aufrufer unsichtbaren oder unbekannten ci_id antwortet 500 statt 404; gemischter Batch verwirft auch die gültige Probe mit 500 | schließt | Gegenprüfung r1-b3 der Wiederholungsprüfung (K7) auf `e5c2d86` |
+
+**Problem:** `POST /api/v1/monitoring/metrics` mit einer `ci_id`, die eine CI eines anderen Clients, einer anderen Organisation oder keine CI bezeichnet, antwortet 500 „the request could not be completed“; ein gemischter Batch (eigene + unsichtbare CI) ebenfalls, und auch die gültige Probe wird nicht gespeichert. `PGMetricStore.Ingest` (`backend/internal/monitoring/pg_store.go:113-115` auf `e5c2d86`) erkennt die nicht sichtbare CI, liefert aber nur `fmt.Errorf("ingest metric sample: ci %s not found")` ohne Sentinel; `IngestMetrics` (`monitoring.go:559-561`) gibt ihn an `api.WriteRepoError` weiter → 500. Der Kollektor-Weg `edgeMetrics` (`discovery/edge_ingest.go:241-243`) antwortet 500 „metrics ingest failed“ mit ERROR-Log. Der Lesepfad `GET /cis/{id}/metrics` antwortet für dieselben CIs 404 (WP-344). Die Batch-Semantik ist nicht dokumentiert.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PGMetricStore.Ingest` liefert für eine Probe, deren `ci_id` keine im Scope sichtbare CI bezeichnet, `*monitoring.UnknownCIError` mit der ci_id (zugleich `api.ErrNotFound`); die Transaktion wird zurückgerollt, keine Probe des Batches gespeichert.
+- [ ] `POST /api/v1/monitoring/metrics` antwortet darauf 404 problem+json mit `field` `ci_id` und der gesendeten ci_id im `detail`; unsichtbar (anderer Client, andere Organisation) und unbekannt sind nicht unterscheidbar (TEN-06), die Antwort nennt weder Tabellen noch SQLSTATE. Eigene CI weiter 202, `not-a-uuid`/NUL weiter 400.
+- [ ] Gemischter Batch: alles oder nichts; 404 nennt die verursachende ci_id, auch die gültige Probe wird nicht gespeichert. `api/openapi.yaml` (`ingestMetrics`: Beschreibung und Antwort 404) dokumentiert das; `npm run generate:api` übernimmt die Beschreibung.
+- [ ] Edge-Subjekt `.metrics` (`edgeMetrics`): dieselbe Lage → 404 mit `ci_id: ci <id> not found`, kein 500, kein ERROR-Log, keine Zeile.
+- [ ] `TestMetricIngestForInvisibleCIIsNotFound` und `TestEdgeMetricIngestForInvisibleCIIsNotFound` (`internal/tenant/rls/metric_ingest_errors_integration_test.go`) auf `e5c2d86` rot (6 × 500 über HTTP, 4 × 500 über den Edge), nach der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); `TestHandlersDoNotEchoRepositoryErrors` grün.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/monitoring/pg_store.go
+- backend/internal/monitoring/monitoring.go
+- backend/internal/discovery/edge_ingest.go
+- backend/internal/tenant/rls/metric_ingest_errors_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Sichtbarkeitsprüfung bleibt die bestehende Einfügung über `metric_sample_v` mit `EXISTS (SELECT 1 FROM ci …)` in der Tenant-Transaktion (`database.WithRequestTenant`) unter RLS; geändert wird nur die Abbildung des Fehlers.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/monitoring/ ./internal/discovery/ ./internal/tenant/rls/ ./internal/server/ ./internal/agent/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`, `TEST_NATS_SERVER_BIN`.
+- `go test -count=1 -v -run '^(TestMetricIngestForInvisibleCIIsNotFound|TestEdgeMetricIngestForInvisibleCIIsNotFound)$' ./internal/tenant/rls/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MON-02;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+API-03;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+TEN-06;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+```
+
+**Entscheidungsbedarf:** keiner. Gewählt: 404 wie der Lesepfad (statt 422) und alles oder nichts für gemischte Batches (statt Teilübernahme), beides in `api/openapi.yaml` beschrieben.
+
+**Nicht Bestandteil:** Teilübernahme gemischter Batches mit Bericht je Probe; der Agenten-Telemetriepfad (`agent.Handler`, CI vom Server selbst ermittelt; erhält über `api.ErrNotFound` ebenfalls 404 statt 500); weitere Befunde der Wiederholungsprüfung.
+
+### WP-666 – Login: Organisationsattribut ohne Organisation erhält 401 login-no-organization statt 502
+
+**Schlüssel:** `k7n-login-unknown-org` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-570 (Erstlogin nur mit Zulassung), WP-637 (Standardrolle nur beim Erstlogin, F-364), F-197 (Problemtypen der Login-Verweigerungen, lokalisierte CallbackPage)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-395](../../../audit/g1-reaudit/FINDINGS.md#f-395) | P3 | OIDC-Login mit einem Organisationsattribut, das keine Organisation bezeichnet, antwortet 502 „the login could not be completed“ mit FK-Fehler im Log statt 401 login-no-organization | schließt | Gegenprüfung r1-b3 der Wiederholungsprüfung (K7) auf `e5c2d86` |
+
+**Problem:** Ein ID-Token, dessen Attribut `organization_id` eine nicht vorhandene Organisation nennt (zufällige UUID, Nil-UUID, unbekannte Organisation für eine in Organisation A eingeladene Adresse), führt in `user.PGRepository.EnsureUser` zum Bootstrap-Erstlogin; die Einfügung in `app_user` scheitert an `app_user_organization_id_fkey` (SQLSTATE 23503). `EnsureUser` bildet nur 23505 ab, `writeIdentityError` (`backend/internal/identity/handler.go:710-732` auf `e5c2d86`) antwortet im Standardzweig 502 „the login could not be completed“ mit ERROR-Log samt Tabellen- und Constraint-Namen. Ein fehlendes Attribut erhält dagegen 401 `login-no-organization`, das die CallbackPage lokalisiert anzeigt.
+
+**Akzeptanzkriterien:**
+
+- [ ] `EnsureUser` bildet die Verletzung von `app_user_organization_id_fkey` (23503) auf den neuen Sentinel `identity.ErrUnknownOrganization` ab; die Login-Transaktion rollt zurück (kein `app_user`, keine Rollenzuweisung, Einladungen anderer Organisationen bleiben offen).
+- [ ] Der Callback reicht den Sentinel unverpackt durch; `writeIdentityError` antwortet 401 problem+json mit `https://reticora.io/problems/login-no-organization` und dem festen Text, ohne Session, ohne Refresh-Cookie, ohne ERROR-Log und ohne Datenbanktext (API-03).
+- [ ] `TestCallbackUnknownOrganizationIsRefused` (`internal/identity/callback_scope_integration_test.go`, Fake-IdP mit `user.PGRepository` und `permission.PGRepository`): zufällige UUID, Nil-UUID, unbekannte Organisation mit Einladung in A → 401 `login-no-organization`, 0 `app_user`, keine Session, kein „login failed“ im Log, Einladung offen; Attribut fehlt 401; Organisation A mit Einladung 200. Auf `e5c2d86` rot (3 × 502, 3 ERROR-Logs mit SQLSTATE 23503), nach der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] CallbackPage: Der Problemtyp wird mit dem neuen Text lokalisiert angezeigt, der Detailtext nicht (`CallbackPage.test.tsx`, neuer Fall).
+- [ ] `api/openapi.yaml` (`POST /api/v1/auth/callback`, Antwort 401) nennt den Fall; `npm run generate:api` übernimmt die Beschreibung.
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); `TestHandlersDoNotEchoRepositoryErrors` grün.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/identity/handler.go
+- backend/internal/user/pg_repository.go
+- backend/internal/identity/callback_scope_integration_test.go
+- frontend/src/pages/auth/CallbackPage.test.tsx
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Login-Transaktion (`database.WithTenant` mit `loginScope`) bleibt unverändert; geändert wird nur die Abbildung des Fremdschlüsselfehlers.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/identity/ ./internal/user/ ./internal/server/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestCallbackUnknownOrganizationIsRefused$' ./internal/identity/`, auch als `nobody`.
+- `cd frontend && npx vitest run src/pages/auth/CallbackPage.test.tsx`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUT-01;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+AUT-09;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+API-03;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+AUT-01;[B];B;frontend/src/pages/auth/CallbackPage.test.tsx;WP-666
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** eine Vorabprüfung der Organisation im Callback (die Existenz ergibt sich weiter aus dem Fremdschlüssel); ein Login mit unbekannter Organisation ohne verifizierte E-Mail (antwortet bereits vor der Einfügung 403 `login-not-admitted`, kein 5xx); gesperrte oder gekündigte Organisationen; weitere Befunde der Wiederholungsprüfung.
 
 ## Zurückgestellte Befunde
 

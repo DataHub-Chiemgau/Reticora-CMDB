@@ -12143,7 +12143,7 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
-      /** @description The ID token is invalid, or it carries no valid organization attribute (type https://reticora.io/problems/login-no-organization, AUT-09, CH26). */
+      /** @description The ID token is invalid, or it carries no valid organization attribute: none, not a UUID, or one that names no organization of the instance (type https://reticora.io/problems/login-no-organization, AUT-09, CH26, F-395). No user is created and no session is issued. */
       401: {
         headers: {
           [name: string]: unknown;

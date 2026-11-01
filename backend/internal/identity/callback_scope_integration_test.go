@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -294,6 +295,98 @@ func TestCallbackDefaultRoleOnlyAtFirstLogin(t *testing.T) {
 			t.Errorf("login of a custom role user assigned %q, want no default role", got)
 		}
 	})
+}
+
+// TestCallbackUnknownOrganizationIsRefused covers AUT-01, CH26 (AUT-09) and
+// API-03 (WP-666, k7n-login-unknown-org, F-395) with the production wiring:
+// an ID token whose organization attribute names no organization of the
+// instance (a random UUID, the nil UUID, an unknown organization for an
+// address with an invitation in organization A) is refused like a token
+// without the attribute: 401 with the problem type login-no-organization,
+// which the CallbackPage shows as its own text, no app_user, no session, no
+// refresh cookie and no "login failed" error in the log. The invitation in
+// organization A stays open. Controls: attribute missing 401, organization A
+// with the invitation 200.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCallbackUnknownOrganizationIsRefused(t *testing.T) {
+	f := scopetest.Seed(t, "62")
+	bg := context.Background()
+	idp := newScopeIdP(t, f.OrgA)
+	inviter := f.AppUser(t, f.OrgA, "cb-inviter")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO user_invitation (organization_id, email, role_id, scope_type, invited_by, token_hash, expires_at)
+		SELECT $1, 'cb-invited@scopetest.invalid', id, 'org', $2, 'cb-62-unknown-org', now() + interval '7 days'
+		FROM role WHERE organization_id = $1 AND name = 'viewer'`, f.OrgA, inviter); err != nil {
+		t.Fatalf("seed invitation: %v", err)
+	}
+	handler := identity.NewHandler(idp.provider(), newIssuer(t)).
+		WithProvisioning(user.NewPGRepository(f.App), "viewer").
+		WithAccessResolver(permission.NewPGRepository(f.App))
+	var logs strings.Builder
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelError})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	users := func(subject string) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM app_user WHERE oidc_subject = $1`, subject).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	invitationOpen := func() bool {
+		t.Helper()
+		var open bool
+		if err := f.Admin.QueryRow(bg, `SELECT accepted_at IS NULL FROM user_invitation WHERE token_hash = 'cb-62-unknown-org'`).Scan(&open); err != nil {
+			t.Fatal(err)
+		}
+		return open
+	}
+
+	for _, c := range []struct {
+		label, subject, email string
+		org                   any // nil: claim removed
+	}{
+		{"unknown organization (random UUID)", "scopetest-62-cb-ghost", "cb-ghost@scopetest.invalid", "f0000000-0000-4000-8000-00000000dead"},
+		{"unknown organization (nil UUID)", "scopetest-62-cb-nil", "cb-nil@scopetest.invalid", "00000000-0000-0000-0000-000000000000"},
+		{"unknown organization, address invited in organization A", "scopetest-62-cb-ghost-inv", "cb-invited@scopetest.invalid", "f0000000-0000-4000-8000-00000000beef"},
+		{"control: attribute missing", "scopetest-62-cb-missing", "cb-missing@scopetest.invalid", nil},
+	} {
+		idp.claims[c.subject] = map[string]any{"organization_id": c.org}
+		rec := idp.login(handler, c.subject, c.email)
+		var problem struct {
+			Type   string `json:"type"`
+			Status int    `json:"status"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &problem)
+		if rec.Code != http.StatusUnauthorized || problem.Type != identity.ProblemLoginNoOrganization ||
+			!strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem+json") {
+			t.Errorf("%s: callback %d %s; want 401 problem+json %s", c.label, rec.Code, strings.TrimSpace(rec.Body.String()), identity.ProblemLoginNoOrganization)
+		}
+		if strings.Contains(rec.Body.String(), `"token"`) || hasRefreshCookie(rec) {
+			t.Errorf("%s: the refused login issued a session", c.label)
+		}
+		for _, leak := range []string{"SQLSTATE", "app_user", "fkey"} {
+			if strings.Contains(rec.Body.String(), leak) {
+				t.Errorf("%s: the answer discloses %q: %s", c.label, leak, rec.Body.String())
+			}
+		}
+		if n := users(c.subject); n != 0 {
+			t.Errorf("%s: %d app_user created, want 0", c.label, n)
+		}
+	}
+	if !invitationOpen() {
+		t.Error("the login into an unknown organization accepted the invitation of organization A")
+	}
+	if strings.Contains(logs.String(), "login failed") {
+		t.Errorf("a login into an unknown organization logged an error:\n%s", logs.String())
+	}
+
+	// Control: the invited address in organization A gets its session.
+	rec := idp.login(handler, "scopetest-62-cb-invited", "cb-invited@scopetest.invalid")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"token"`) || users("scopetest-62-cb-invited") != 1 {
+		t.Errorf("control: invited login into organization A: %d %s, want 200 with a session and one app_user", rec.Code, rec.Body.String())
+	}
 }
 
 // scopeIdP is a fake OIDC provider (discovery document, JWKS, token
