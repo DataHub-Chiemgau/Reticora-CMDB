@@ -1719,8 +1719,8 @@ paths:
         '422':
           description: >-
             The source or target CI is not visible to the caller: a CI of
-            another organization, of a client or site outside the scope, or
-            an unknown ID. `violations` names source_ci_id, target_ci_id or
+            another organization, of a client or site outside the scope, an
+            unknown ID or a soft-deleted CI (CI-05, F-424). `violations` names source_ci_id, target_ci_id or
             both ("source CI not found", "target CI not found"), the same
             answer for a foreign and an unknown CI; nothing is stored (F-145).
             A source reserved to the system (discovery, agent) names
@@ -5600,9 +5600,11 @@ paths:
         the CI (also one soft-deleted meanwhile, F-422) or the override of
         the field is gone, the override stays; new of unlicensed_ci is
         422 when the item holds no device record; accept of
-        unknown_relationship is 422 when the item names no CI ids or
-        connected_to does not allow their types and 404 when one of the CIs
-        is gone (no edge is recorded). A CI that new creates (also new of
+        unknown_relationship is 422 when the item names no CI ids or the
+        type lists of connected_to (as POST /relationships checks them) do
+        not allow their types and 404 when one of the CIs is gone (unknown,
+        not visible or soft-deleted, also when the edge exists already;
+        F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of
         unlicensed_ci) or that the merge of a resurrected_device item
         reactivates is checked against the unique attributes like POST
         /cis (MET-15): a value another active CI holds is 409

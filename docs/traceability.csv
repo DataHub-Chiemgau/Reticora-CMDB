@@ -1169,3 +1169,7 @@ OVR-01;[B];D;backend/internal/override/override_scope_integration_test.go;WP-693
 API-03;[B];D;backend/internal/server/collector_field_errors_integration_test.go;WP-694
 COL-01;[B];D;backend/internal/server/collector_field_errors_integration_test.go;WP-694
 API-03;[B];D;backend/internal/api/dberrors_test.go;WP-694
+TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
+REL-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
+REL-01;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
+CI-05;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695

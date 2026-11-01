@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-694 | 45 | 38,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699); F-429 Eindeutigkeitsprüfung auf allen Schreibwegen (WP-700); F-422 Override und Konfliktauflösung auf gelöschten CIs (WP-693); F-423 Feldfehler bei Collectors (WP-694). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-695 | 46 | 39,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699); F-429 Eindeutigkeitsprüfung auf allen Schreibwegen (WP-700); F-422 Override und Konfliktauflösung auf gelöschten CIs (WP-693); F-423 Feldfehler bei Collectors (WP-694); F-424 unknown_relationship accept mit Typliste und gelöschten CIs (WP-695). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **347** | **439,0** | |
+| **Summe** | | **348** | **440,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>45 WPs · 38,0 PT"]
+    K7N["K7-Nachträge<br/>46 WPs · 39,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -466,6 +466,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-700](#wp-700--eindeutige-attribute-auf-allen-schreibwegen-wiederherstellen-unmerge-und-review-auflösung-prüfen-wie-post-cis-409-mit-violations) | `k7n-unique-check-all-write-paths` | Eindeutige Attribute auf allen Schreibwegen: Wiederherstellen, Unmerge und Review-Auflösung prüfen wie POST /cis (409 mit violations) | K7N | 1,0 | F-429 | WP-142, WP-692, WP-670, WP-676 |
 | [WP-693](#wp-693--override-wege-auf-soft-gelöschten-cis-override_conflict-accept-override-setzenentfernen-und-feldliste-antworten-404-und-schreiben-nichts) | `k7n-override-deleted-ci` | Override-Wege auf soft-gelöschten CIs: `override_conflict` accept, Override setzen/entfernen und Feldliste antworten 404 und schreiben nichts | K7N | 0,5 | F-422 | WP-025, WP-057, WP-089, WP-676 |
 | [WP-694](#wp-694--collector-anlegen-und-ändern-feldfehler-aus-validierung-und-repository-sind-422-mit-feld-statt-500) | `k7n-collector-field-errors` | Collector anlegen und ändern: Feldfehler aus Validierung und Repository sind 422 mit Feld statt 500 | K7N | 0,5 | F-423 | WP-143, WP-144, WP-677 |
+| [WP-695](#wp-695--unknown_relationship-accept-folgt-den-regeln-von-post-relationships-typliste-von-connected_to-422-soft-gelöschtes-ci-404-keine-neue-kante-zu-gelöschten-cis) | `k7n-unknown-relationship-accept-rules` | `unknown_relationship` accept folgt den Regeln von `POST /relationships`: Typliste von `connected_to` 422, soft-gelöschtes CI 404; keine neue Kante zu gelöschten CIs | K7N | 1,0 | F-424 | WP-127, WP-158, WP-592, WP-676 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20937,6 +20938,62 @@ API-03;[B];D;backend/internal/api/dberrors_test.go;WP-694
 **Entscheidungsbedarf:** keiner.
 
 **Nicht Bestandteil:** `POST /collectors` mit leerem Namen bleibt 400 „name is required“ (Pflichtfeld des Schemas). Ein Name von 10 000 Zeichen wird weiter angenommen (keine Längengrenze im Schema). Die Prüfung der übrigen Handler, die Feldfehler bisher selbst über `api.WriteFieldError` schreiben, bleibt unverändert; sie profitieren nur, wo ein Feldfehler bisher über `WriteRepoError` als 500 endete.
+
+### WP-695 – `unknown_relationship` accept folgt den Regeln von `POST /relationships`: Typliste von `connected_to` 422, soft-gelöschtes CI 404; keine neue Kante zu gelöschten CIs
+
+**Schlüssel:** `k7n-unknown-relationship-accept-rules` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-127 (`b-rel-types`), WP-158 (`d-lldp`), WP-592 (`t6-p3-sammel`, Typlisten E-95), WP-676 (`k7n-review-resolve-errors`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-424](../../../audit/g1-reaudit/FINDINGS.md#f-424) | P3 | `unknown_relationship` accept legt die Kante trotz Typliste von `connected_to` und zu soft-gelöschten CIs an; `POST /relationships` auf ein gelöschtes CI antwortet 201 | schließt | Kandidatenprüfung K7 auf `7cd63e0` (Probe `k7/out/cand/evidence/k-reaudit-cand/3/probe-unknown-relationship-accept.log`) |
+
+**Problem:** Das accept eines `unknown_relationship`-Eintrags antwortet 200 und legt die Kante `connected_to` an, obwohl die Typliste von `connected_to` (eigener Typ der Organisation, E-95) die CI-Typen verbietet oder Quelle bzw. Ziel soft-gelöscht ist; `POST /api/v1/relationships` auf ein gelöschtes Ziel antwortet 201. `resolveUnknownRelationship` und `upsertRelationshipErr` (`backend/internal/discovery/topology.go:731–751`, `632–643` auf `7cd63e0`) bauen die Kante ohne `checkTypeLists` (unexportiert, nur `relationship.go:1002` setzt es), `relationship.PGRepository.Create` (`pg_repository.go:265–266`) prüft die Endpunkte ohne `deleted_at`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `relationship.Relationship.CheckTypeLists()` schaltet die Typlistenprüfung von `Create` ein; `upsertRelationshipErr` erhält den Schalter, `resolveUnknownRelationship` setzt ihn, der automatische Discovery-Weg (`upsertRelationship`, beobachtete Kanten) nicht.
+- [ ] `relationship.PGRepository.Create` verlangt für Quelle und Ziel `deleted_at IS NULL`; ein gelöschtes Ende ist `ErrSourceCINotFound`/`ErrTargetCINotFound` (für den manuellen und den Discovery-Weg). `POST /relationships` antwortet dafür 422 mit der Verletzung auf `source_ci_id`/`target_ci_id` wie für ein unbekanntes CI; nichts wird gespeichert.
+- [ ] accept eines `unknown_relationship`-Eintrags: Typliste verletzt → 422 problem+json; Quelle oder Ziel soft-gelöscht (auch wenn die Kante schon existiert; sie wird nicht erneut bestätigt) → 404 problem+json; der Eintrag bleibt offen, keine Kante. Lebende CIs mit erlaubten Typen bleiben 200 mit Kante.
+- [ ] `api/openapi.yaml` (spec-first): `createRelationship` (422) und `resolveReviewItem` nennen das soft-gelöschte CI und die Typlisten; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs` (`internal/server/scope_suggested_errors_integration_test.go`) und `TestCreateRefusesDeletedEndpoints` (`internal/relationship/deleted_endpoint_integration_test.go`) decken den Retest von F-424 ab; auf `e5c2d86` rot, mit der Korrektur grün, auch als Nutzer `nobody`.
+- [ ] Regression: `go test -p 1 ./internal/relationship/ ./internal/discovery/ ./internal/topology/ ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/discovery/topology.go
+- backend/internal/relationship/relationship.go
+- backend/internal/relationship/pg_repository.go
+- backend/internal/relationship/deleted_endpoint_integration_test.go
+- backend/internal/server/scope_suggested_errors_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. `Create` prüft weiter in derselben Anweisung wie das Einfügen unter der RLS des Aufrufers (`database.WithRequestTenant`, `reticora_app`); `deleted_at IS NULL` verengt nur die Sichtbarkeit. Das accept liest die CIs über `ci.Repository.GetByID` unter dem Scope des Prüfers.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestCreateRefusesDeletedEndpoints$' ./internal/relationship/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/relationship/ ./internal/discovery/ ./internal/topology/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
+REL-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
+REL-01;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
+CI-05;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
+```
+
+**Entscheidungsbedarf:** keiner. Begründung der Abgrenzung: beobachtete Discovery-Kanten bleiben ohne Typlistenprüfung (WP-592, E-95: die Typlisten gelten für Kanten, über die ein Mensch entscheidet); eine Kante zu einem soft-gelöschten CI ist dagegen auf keinem Weg sinnvoll (CI-05), der Abgleich trifft nur lebende CIs, sodass nur ein Wettlauf zwischen Löschen und Ingest betroffen ist.
+
+**Nicht Bestandteil:** Selbstschleifen (`source = target`) und die Umkehrung einer bestehenden ungerichteten Kante beim accept (Probe (c)) bleiben wie bei `POST /relationships` erlaubt. Bestehende Kanten gelöschter CIs bleiben erhalten (CI-05: „Beziehungen bleiben“). Ein Typwechsel eines CIs nach dem Anlegen einer Kante.
 
 ## Zurückgestellte Befunde
 

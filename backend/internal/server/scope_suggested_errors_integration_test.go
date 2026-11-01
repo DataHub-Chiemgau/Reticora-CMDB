@@ -277,3 +277,100 @@ func TestOverrideConflictAcceptOnDeletedCIIsNotFound(t *testing.T) {
 	}
 	notFound("GET /cis/{unknown}/fields", r.call(all, http.MethodGet, "/api/v1/cis/00000000-0000-4000-8000-0000000006d0/fields", ""))
 }
+
+// WP-695 (TOP-01, REL-01, E-95, CI-05, WP-676 AK3; F-424): the accept of an
+// unknown_relationship item records the connected_to edge only as POST
+// /api/v1/relationships would: when the type lists of connected_to (the
+// organization's type shadows the system one, E-95) do not allow the types
+// of the CIs it is 422, when one of the CIs is soft-deleted (source or
+// target, also when the edge of the pair exists already: it is not
+// re-confirmed) it is 404 application/problem+json; no edge is recorded and
+// the item stays open. POST /relationships to a deleted target is 422 as
+// for an unknown CI. The controls (both CIs live, types allowed) stay 200
+// with the edge. Before the fix the accepts answered 200 and recorded the
+// edge, the manual POST 201.
+//
+//	cd backend && TEST_DATABASE_URL=... go test -count=1 -run '^TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs$' ./internal/server/
+func TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs(t *testing.T) {
+	r := newAuditT3Router(t, "9e")
+	f := r.f
+	all := identity.AllPermissions()
+	item := func(source, target string) string {
+		return r.str(`INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids) VALUES ($1, 'unknown_relationship', 'open',
+			jsonb_build_object('source_ci_id', $2::text, 'target_ci_id', $3::text, 'type_key', 'weird'), ARRAY[$2::uuid, $3::uuid]) RETURNING id::text`,
+			f.OrgA, source, target)
+	}
+	edges := func(a, b string) string {
+		return r.str(`SELECT count(*)::text FROM ci_relationship WHERE (source_ci_id = $1 AND target_ci_id = $2) OR (source_ci_id = $2 AND target_ci_id = $1)`, a, b)
+	}
+	try := func(what, source, target string, wantCode int, wantEdges string) {
+		t.Helper()
+		id := item(source, target)
+		w := r.call(all, http.MethodPost, "/api/v1/review-items/"+id+"/resolve", `{"action":"accept"}`)
+		wantItem := "resolved"
+		if wantCode != http.StatusOK {
+			wantItem = "open"
+		}
+		if got := r.str(`SELECT status FROM review_item WHERE id = $1`, id); w.Code != wantCode || got != wantItem {
+			t.Errorf("%s: %d (item %s), want %d (item %s); body %.240s", what, w.Code, got, wantCode, wantItem, w.Body.String())
+		} else if wantCode != http.StatusOK {
+			if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+				t.Errorf("%s: Content-Type %q, want application/problem+json", what, ct)
+			}
+		}
+		if n := edges(source, target); n != wantEdges {
+			t.Errorf("%s: edges between the CIs %s, want %s", what, n, wantEdges)
+		}
+	}
+	remove := func(id string) {
+		t.Helper()
+		if w := r.call(all, http.MethodDelete, "/api/v1/cis/"+id, ""); w.Code != http.StatusNoContent {
+			t.Fatalf("delete CI: %d %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Soft-deleted source or target: 404, no edge.
+	s, d := f.CI(t, f.OrgA, "", "wp695-s"), f.CI(t, f.OrgA, "", "wp695-d")
+	try("accept, both CIs live (control)", s, d, http.StatusOK, "1")
+	// The edge of the control exists; once its target is deleted another
+	// accept of the pair is 404 too and does not re-confirm the edge.
+	confirmed := r.str(`SELECT last_confirmed_at::text FROM ci_relationship WHERE source_ci_id = $1 AND target_ci_id = $2`, s, d)
+	remove(d)
+	try("accept, edge exists, target CI soft-deleted meanwhile", s, d, http.StatusNotFound, "1")
+	if got := r.str(`SELECT last_confirmed_at::text FROM ci_relationship WHERE source_ci_id = $1 AND target_ci_id = $2`, s, d); got != confirmed {
+		t.Errorf("edge to the deleted CI re-confirmed: last_confirmed_at %s, before %s", got, confirmed)
+	}
+	goneSource, target := f.CI(t, f.OrgA, "", "wp695-gone-s"), f.CI(t, f.OrgA, "", "wp695-t")
+	remove(goneSource)
+	try("accept, source CI soft-deleted", goneSource, target, http.StatusNotFound, "0")
+	source, goneTarget := f.CI(t, f.OrgA, "", "wp695-s2"), f.CI(t, f.OrgA, "", "wp695-gone-t")
+	remove(goneTarget)
+	try("accept, target CI soft-deleted", source, goneTarget, http.StatusNotFound, "0")
+	manual := f.CI(t, f.OrgA, "", "wp695-manual")
+	if w := r.call(all, http.MethodPost, "/api/v1/relationships",
+		`{"source_ci_id":"`+manual+`","target_ci_id":"`+goneTarget+`","rel_type":"connected_to"}`); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("POST /relationships to the deleted target: %d %s, want 422 as for an unknown CI", w.Code, w.Body.String())
+	}
+	if n := r.str(`SELECT count(*)::text FROM ci_relationship WHERE source_ci_id = $1 OR target_ci_id = $1`, goneTarget); n != "0" {
+		t.Errorf("edges of the deleted target: %s, want 0", n)
+	}
+
+	// The organization restricts connected_to to switch -> switch (its own
+	// type shadows the system one, E-95): server -> server is 422, as POST
+	// /relationships answers, switch -> switch stays 200.
+	if w := r.call(all, http.MethodPost, "/api/v1/relationship-types",
+		`{"key":"connected_to","display_name":"Connected","reverse_name":"Connected","directed":false,"allowed_source_types":["switch"],"allowed_target_types":["switch"]}`); w.Code != http.StatusCreated {
+		t.Fatalf("POST /relationship-types connected_to: %d %s", w.Code, w.Body.String())
+	}
+	servers := [2]string{f.CI(t, f.OrgA, "", "wp695-srv-a"), f.CI(t, f.OrgA, "", "wp695-srv-b")}
+	if w := r.call(all, http.MethodPost, "/api/v1/relationships",
+		`{"source_ci_id":"`+servers[0]+`","target_ci_id":"`+servers[1]+`","rel_type":"connected_to"}`); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /relationships server -> server: %d %s, want the 422 the accept mirrors", w.Code, w.Body.String())
+	}
+	try("accept, connected_to does not allow server -> server", servers[0], servers[1], http.StatusUnprocessableEntity, "0")
+	switchOf := func(name string) string {
+		return r.str(`INSERT INTO ci (organization_id, ci_type_id, name, status)
+			SELECT $1, id, $2, 'active' FROM ci_type WHERE key = 'switch' AND organization_id IS NULL RETURNING id::text`, f.OrgA, name)
+	}
+	try("accept, switch -> switch (control)", switchOf("wp695-sw-a"), switchOf("wp695-sw-b"), http.StatusOK, "1")
+}

@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 29 |
-| P3 | 39 |
-| **Summe** | **74** |
+| P3 | 40 |
+| **Summe** | **75** |
 
 ## Übersicht
 
@@ -114,6 +114,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-429](#f-429) | P3 | Eindeutige Attribute: Wiederherstellen, Unmerge und die Review-Auflösungen, die ein CI anlegen oder reaktivieren, prüfen die Eindeutigkeit nicht (Duplikate ohne Index, 500 mit Index) | Korrektur WP-692 (K7) auf `7cd63e0` | belegt | backend/internal/server/unique_attr_write_paths_integration_test.go | WP-700 |
 | [F-422](#f-422) | P3 | `override_conflict` accept auf einem inzwischen soft-gelöschten CI entfernt den Override und schreibt das gelöschte CI; Override-Routen und Feldliste antworten für gelöschte CIs 200 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-693 |
 | [F-423](#f-423) | P3 | `POST /collectors` und `PATCH /collectors/{id}`: Feldfehler aus Validierung und Repository enden als 500 statt 422 mit Feld | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/collector_field_errors_integration_test.go | WP-694 |
+| [F-424](#f-424) | P3 | `unknown_relationship` accept legt die Kante trotz Typliste von `connected_to` und zu soft-gelöschten CIs an; `POST /relationships` auf ein gelöschtes CI antwortet 201 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/server/scope_suggested_errors_integration_test.go | WP-695 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -2030,6 +2031,46 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
       dberrors_test.go:120: status 500 field "" ({"detail":"the request could not be completed","status":500,…}), want 422 on site_id
   --- FAIL: TestWriteRepoErrorWritesFieldErrors (0.00s)
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api	0.006s
+  ```
+
+<a id="f-424"></a>
+### F-424 (P3) – `unknown_relationship` accept legt die Kante trotz Typliste von `connected_to` und zu soft-gelöschten CIs an; `POST /relationships` auf ein gelöschtes CI antwortet 201
+
+- **Gefunden in:** Kandidatenprüfung K7 auf `7cd63e0` (Kandidat 3 des Auditors, Probe `TestKCand3UnknownRelationshipAccept`), Wiederholung von WP-676 AK3; die Endpunktprüfung in `relationship.PGRepository.Create` ist auf `e5c2d86` identisch (`EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid)`, Zeile 241), das accept prüfte dort ebenfalls keine Typliste; kodierender Test von WP-695 · **Betroffene Anforderungen:** TOP-01 [B], REL-01 [B] (`allowed_source_types`/`allowed_target_types`, E-95), CI-05 [B] (DELETE setzt `deleted_at`; „Traversal ignoriert gelöschte Knoten“), WP-676 AK3 · **Komponente:** backend/internal/discovery/topology.go (`resolveUnknownRelationship`, Zeile 731–751 auf `7cd63e0`, und `upsertRelationshipErr`, Zeile 632–643: die dort gebaute `relationship.Relationship` setzt `checkTypeLists` nicht; das unexportierte Feld setzt nur der manuelle Weg, `relationship.go:1002`), backend/internal/relationship/pg_repository.go (`Create`, Zeile 265–266: `source_visible`/`target_visible` ohne `deleted_at`) · **Quelle:** `k7/out/cand/evidence/k-reaudit-cand/3/probe-unknown-relationship-accept.log`, Probe `k7/out/cand/evidence/k-reaudit-cand/probe/kcand_probe_test.go.txt` (über `go test -overlay`); kodierender Test von WP-695 (`k7/ad-693/red-695.log`)
+- **Reproduktion:** (a) Offener Eintrag `unknown_relationship` (Quelle s2, Ziel d2); `DELETE /api/v1/cis/{s2}` → 204; `POST /api/v1/review-items/{id}/resolve {"action":"accept"}` → 200, Eintrag `resolved/accept` („recorded as connected_to“), eine Kante s2 → d2. (a') `POST /api/v1/relationships` mit gelöschtem Ziel → 201. (b) Die Organisation schränkt `connected_to` über einen eigenen Typ (überschattet den Systemtyp, E-95) auf `switch → switch` ein: `POST /relationships` server → server → 422 mit Verletzung auf `source_ci_id` und `target_ci_id`; das accept eines Eintrags server → server → 200, Kante `connected_to` mit `source = discovery` gespeichert. Kontrollen: accept zwischen lebenden CIs 200; Client-1-Prüfer mit Ziel in Client 2 → 404.
+- **Soll:** Spezifikation von `resolveReviewItem`: „accept of unknown_relationship is 422 when … connected_to does not allow their types and 404 when one of the CIs is gone (no edge is recorded)“; der Eintrag bleibt offen (F-404, F-405). Das accept ist eine menschliche Entscheidung und folgt den Regeln von `POST /relationships` (REL-01, E-95). Ein soft-gelöschtes CI ist kein Endpunkt einer neuen Kante (CI-05): `POST /relationships` antwortet dafür 422 mit der Verletzung auf `source_ci_id`/`target_ci_id` wie für ein unbekanntes CI (Spezifikation von `createRelationship`, F-145).
+- **Ist:** Der Discovery-Weg baut die Kante ohne Typlistenprüfung (für beobachtete Kanten beabsichtigt), das accept nutzt denselben Weg. `Create` prüft die Endpunkte nur auf Sichtbarkeit unter der RLS; ein gelöschtes CI gilt als sichtbar. Besteht die Kante bereits, bestätigt das accept sie erneut (`last_confirmed_at`), auch wenn ein Ende inzwischen gelöscht ist.
+- **Nutzerwirkung:** Prüfer legen über die Review-Inbox Kanten an, die die Organisation über die Typlisten ausdrücklich verbietet (z. B. `connected_to` nur zwischen Switches), und Kanten zu gelöschten CIs, die nach einem Restore unerwartet in Topologie und Impact erscheinen; API-Clients können Kanten zu gelöschten CIs anlegen. Die Typregeln der Organisation sind auf diesem Weg wirkungslos. Keine Mandantenwirkung (Scope-Prüfung greift), daher P3.
+- **Ursache (belegt):** WP-592 (F-313, E-95) hat die Typlisten nur für `POST /relationships` eingeführt (`checkTypeLists`, unexportiert) und den Discovery-Ingest bewusst ausgenommen; WP-676 (F-405) hat das accept auf `upsertRelationshipErr` gestützt, ohne die Typprüfung einzuschalten. Die Endpunktprüfung von F-145 berücksichtigt `deleted_at` nicht.
+- **Empfehlung:** `relationship.Relationship.CheckTypeLists()` (exportiert) schaltet die Prüfung für Kanten ein, über die ein Mensch außerhalb des Pakets entscheidet; `upsertRelationshipErr` erhält den Schalter, `resolveUnknownRelationship` setzt ihn, der automatische Discovery-Weg (`upsertRelationship`) nicht. `Create` verlangt für beide Enden `deleted_at IS NULL` (auch für den Discovery-Weg: der Abgleich trifft nur lebende CIs, eine beobachtete Kante zu einem gelöschten CI ist ein Wettlauf und wird verworfen). Vor dem Upsert liest das accept beide CIs (`ci.Repository.GetByID`, nur lebende, unter dem Scope): ein gelöschtes oder unbekanntes CI ist 404 auch dann, wenn die Kante schon existiert; nichts wird bestätigt. Spec-first: `createRelationship` (422) und `resolveReviewItem` nennen das soft-gelöschte CI.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: accept zwischen lebenden CIs 200 mit einer Kante; nach dem Löschen des Ziels ein weiteres accept des Paars 404 problem+json, Eintrag `open`, Kante nicht erneut bestätigt (`last_confirmed_at` unverändert); accept mit gelöschter Quelle bzw. gelöschtem Ziel 404, Eintrag `open`, keine Kante; `POST /relationships` auf das gelöschte Ziel 422, keine Kante des gelöschten CIs; mit `connected_to` der Organisation auf `switch → switch` beschränkt: `POST /relationships` server → server 422 und accept server → server 422, Eintrag `open`, keine Kante; accept switch → switch 200 mit Kante. Dazu `go test -count=1 -v -run '^TestCreateRefusesDeletedEndpoints$' ./internal/relationship/` PASS (`POST /relationships` mit gelöschtem Ziel bzw. gelöschter Quelle 422 mit Verletzung auf `target_ci_id` bzw. `source_ci_id`, Kontrolle 201; `Create` ohne Typprüfung mit `source = discovery` auf das gelöschte CI `ErrTargetCINotFound`; keine Kante des gelöschten CIs) und `TestReviewResolutionKeepsErrorContract`, `TestRelationshipTypeConstraintsEnforced` unverändert grün.
+- **Kodierender Test:** backend/internal/server/scope_suggested_errors_integration_test.go (`TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs`, Produktionsrouter mit Autorisierung und OpenAPI-Validierung gegen PostgreSQL), dazu backend/internal/relationship/deleted_endpoint_integration_test.go (`TestCreateRefusesDeletedEndpoints`); auf `e5c2d86` rot (ausgeführt auf der Basis `7cd63e0` mit den alten Produktionsdateien `discovery/topology.go`, `relationship/relationship.go` und `relationship/pg_repository.go` aus `HEAD`; seit `e5c2d86` haben WP-673 und WP-676 diese Dateien geändert, die Endpunktprüfung von `Create` und das accept ohne Typprüfung sind unverändert; lange Zeilen gekürzt):
+
+  ```text
+  === RUN   TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs
+      scope_suggested_errors_integration_test.go:339: accept, edge exists, target CI soft-deleted meanwhile: 200 (item resolved), want 404 (item open); body {"id":"2484f8e8-…","kind":"unknown_relationship","status":"res…
+      scope_suggested_errors_integration_test.go:341: edge to the deleted CI re-confirmed: last_confirmed_at 2026-11-01 21:52:10.653985+00, before 2026-11-01 21:52:10.55979+00
+      scope_suggested_errors_integration_test.go:345: accept, source CI soft-deleted: 200 (item resolved), want 404 (item open); body {"id":"77a34ea7-…","kind":"unknown_relationship","status":"resolved",…
+      scope_suggested_errors_integration_test.go:345: accept, source CI soft-deleted: edges between the CIs 1, want 0
+      scope_suggested_errors_integration_test.go:348: accept, target CI soft-deleted: 200 (item resolved), want 404 (item open); body {"id":"5c1deddf-…","kind":"unknown_relationship","status":"resolved",…
+      scope_suggested_errors_integration_test.go:348: accept, target CI soft-deleted: edges between the CIs 1, want 0
+      scope_suggested_errors_integration_test.go:352: POST /relationships to the deleted target: 201 {"id":"21760f86-…","source_ci_id":"c0de9ea0-0000-4000-8000-000000001009","target_ci_id":"c0de9ea0-…",…}
+          , want 422 as for an unknown CI
+      scope_suggested_errors_integration_test.go:355: edges of the deleted target: 2, want 0
+      scope_suggested_errors_integration_test.go:370: accept, connected_to does not allow server -> server: 200 (item resolved), want 422 (item open); body {"id":"6da6bc4f-…","kind":"unknown_relationship","status":"reso…
+      scope_suggested_errors_integration_test.go:370: accept, connected_to does not allow server -> server: edges between the CIs 1, want 0
+  --- FAIL: TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs (0.98s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	1.158s
+  === RUN   TestCreateRefusesDeletedEndpoints
+      deleted_endpoint_integration_test.go:79: POST /relationships, deleted target: 201 {"id":"20b54b66-…","source_ci_id":"c0de6fa0-0000-4000-8000-000000001002","target_ci_id":"c0de6fa0-0000-4000-8000-000000001004",…}
+          , want 422 with violations [target_ci_id]
+      deleted_endpoint_integration_test.go:79: POST /relationships, deleted source: 201 {"id":"ddd2974b-…","source_ci_id":"c0de6fa0-0000-4000-8000-000000001004","target_ci_id":"c0de6fa0-0000-4000-8000-000000001002",…}
+          , want 422 with violations [source_ci_id]
+      deleted_endpoint_integration_test.go:87: discovery edge to the deleted CI: <nil>, want ErrTargetCINotFound
+      deleted_endpoint_integration_test.go:90: edges of the deleted CI: 3, want 0
+      deleted_endpoint_integration_test.go:93: edges of the live CI: 3, want the control edge only
+  --- FAIL: TestCreateRefusesDeletedEndpoints (0.71s)
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship	0.930s
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

@@ -252,7 +252,8 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		// The endpoints are checked under the caller's scope in the same
 		// statement as the insert: a CI the caller cannot see (another
 		// organization, a client or site outside the scope, an unknown id)
-		// inserts nothing and is named by its sentinel (F-145). With
+		// or a soft-deleted CI (CI-05, F-424) inserts nothing and is named
+		// by its sentinel (F-145). With
 		// checkTypeLists the type of a visible end must be in the allowed
 		// list of the relationship type the caller sees (the organization's
 		// shadows the system one); an empty list allows every type (E-95,
@@ -262,8 +263,8 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 				SELECT allowed_source_types, allowed_target_types FROM relationship_type
 				WHERE key = $4 AND $16::boolean ORDER BY organization_id NULLS LAST LIMIT 1
 			), ends AS (
-				SELECT EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid) AS source_visible,
-				       EXISTS (SELECT 1 FROM ci WHERE ci.id = $3::uuid) AS target_visible,
+				SELECT EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid AND ci.deleted_at IS NULL) AS source_visible,
+				       EXISTS (SELECT 1 FROM ci WHERE ci.id = $3::uuid AND ci.deleted_at IS NULL) AS target_visible,
 				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $2::uuid LEFT JOIN ci_type t ON t.id = ci.ci_type_id
 				                   WHERE jsonb_array_length(rel_type.allowed_source_types) > 0
 				                     AND NOT COALESCE(rel_type.allowed_source_types ? t.key, false)) AS source_allowed,

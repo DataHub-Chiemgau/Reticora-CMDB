@@ -59,9 +59,17 @@ type Relationship struct {
 	// checkTypeLists makes the PostgreSQL repository check the CI types of
 	// the ends against allowed_source_types and allowed_target_types of the
 	// relationship type (ErrSourceCITypeNotAllowed, ErrTargetCITypeNotAllowed).
-	// POST /relationships sets it (E-95); the discovery ingest does not.
+	// POST /relationships sets it (E-95), as does the accept of an
+	// unknown_relationship item (CheckTypeLists); the discovery ingest does
+	// not.
 	checkTypeLists bool
 }
+
+// CheckTypeLists makes Create check the CI types of the ends against the
+// type lists of the relationship type, as POST /relationships does (E-95):
+// for an edge a person decides on outside this package, the accept of an
+// unknown_relationship item (TOP-01, F-424).
+func (r *Relationship) CheckTypeLists() { r.checkTypeLists = true }
 
 // StructuralRelTypes are projected, never stored (REL-01, CH27).
 var StructuralRelTypes = map[string]bool{
@@ -177,7 +185,8 @@ var ErrSuppressionType = errors.New("the relationship type has no catalogue entr
 
 // ErrSourceCINotFound and ErrTargetCINotFound refuse an edge whose source or
 // target CI the caller cannot see: a CI of another organization, of a client
-// or site outside the scope, or an unknown id (F-145). Create answers 422 on
+// or site outside the scope, an unknown id (F-145) or a soft-deleted CI
+// (F-424). Create answers 422 on
 // source_ci_id or target_ci_id, the same for each of them, so the answer does
 // not tell a foreign CI from an unknown one. A repository joins both when
 // neither endpoint is visible.

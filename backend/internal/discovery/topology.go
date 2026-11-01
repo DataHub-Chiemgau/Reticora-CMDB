@@ -600,14 +600,17 @@ type edgeFinder interface {
 // another source between the same CIs stays untouched (source policy,
 // REL-08). It reports whether a new edge was created.
 func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d DerivedRelationship) bool {
-	created, _ := h.upsertRelationshipErr(ctx, orgID, d)
+	created, _ := h.upsertRelationshipErr(ctx, orgID, d, false)
 	return created
 }
 
 // upsertRelationshipErr is upsertRelationship with the error of the
 // creation, for a caller that answers for it (the accept of an
-// unknown_relationship item, F-405).
-func (h *Handler) upsertRelationshipErr(ctx context.Context, orgID string, d DerivedRelationship) (bool, error) {
+// unknown_relationship item, F-405). checkTypes makes the creation check
+// the type lists of the relationship type as POST /relationships does: an
+// edge a person decides on (F-424); an observed edge is recorded without.
+// A soft-deleted CI is refused either way (relationship.PGRepository.Create).
+func (h *Handler) upsertRelationshipErr(ctx context.Context, orgID string, d DerivedRelationship, checkTypes bool) (bool, error) {
 	confidence := d.Confidence
 	if finder, ok := h.repo.(edgeFinder); ok {
 		id, source, found, err := finder.DiscoveryEdge(ctx, orgID, d.SourceCIID, d.TargetCIID, d.RelType)
@@ -637,6 +640,9 @@ func (h *Handler) upsertRelationshipErr(ctx context.Context, orgID string, d Der
 		Source:         RelationshipSource,
 		Attributes:     edgeAttributes(d.Attributes),
 		Confidence:     &confidence,
+	}
+	if checkTypes {
+		rel.CheckTypeLists()
 	}
 	if err := h.relRepo.Create(ctx, rel); err != nil {
 		return false, err
@@ -726,8 +732,10 @@ func (h *Handler) acceptedEdgeHolds(ctx context.Context, item *ReviewItem) (bool
 // resolveUnknownRelationship: accept records the neighbor as connected_to
 // (confidence 0.5); dismiss keeps the edge away. An accept that records no
 // edge is refused and the item stays open (TOP-01, F-405): CIs that are no
-// UUIDs or whose types connected_to does not allow are 422, a CI that is
-// gone or not visible 404.
+// UUIDs or whose types the type lists of connected_to do not allow are 422,
+// a CI that is gone (unknown, not visible or soft-deleted) 404 (F-424). The
+// accept is a human decision: it checks the type lists like POST
+// /relationships.
 func (h *Handler) resolveUnknownRelationship(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	if res.Action != reviews.ActionAccept || h.relRepo == nil {
 		return false, nil
@@ -737,7 +745,19 @@ func (h *Handler) resolveUnknownRelationship(ctx context.Context, item *ReviewIt
 	if !isUUID(d.SourceCIID) || !isUUID(d.TargetCIID) {
 		return false, refused(http.StatusUnprocessableEntity, "the item names no CIs")
 	}
-	if _, err := h.upsertRelationshipErr(ctx, item.OrganizationID, d); err != nil {
+	// A CI deleted meanwhile is gone also when the edge exists already, which
+	// the creation (it refuses a deleted end) would only re-confirm.
+	if h.ciRepo != nil {
+		for _, id := range []string{d.SourceCIID, d.TargetCIID} {
+			if _, err := h.ciRepo.GetByID(ctx, item.OrganizationID, id); err != nil {
+				if errors.Is(err, ci.ErrNotFound) || isNotFound(err) {
+					return false, refused(http.StatusNotFound, "the source or target CI was not found")
+				}
+				return false, err
+			}
+		}
+	}
+	if _, err := h.upsertRelationshipErr(ctx, item.OrganizationID, d, true); err != nil {
 		switch {
 		case errors.Is(err, relationship.ErrSourceCINotFound), errors.Is(err, relationship.ErrTargetCINotFound):
 			return false, refused(http.StatusNotFound, "the source or target CI was not found")
