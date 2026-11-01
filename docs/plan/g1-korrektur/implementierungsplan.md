@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-692 | 39 | 33,5 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692). |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-697 | 40 | 34,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **341** | **434,5** | |
+| **Summe** | | **342** | **435,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>39 WPs · 33,5 PT"]
+    K7N["K7-Nachträge<br/>40 WPs · 34,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -460,6 +460,7 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-690](#wp-690--bulk-operation-dieselbe-uuid-in-anderer-schreibweise-zählt-einmal-bericht-je-kanonischer-id) | `k7n-bulk-uuid-dedupe` | Bulk-Operation: dieselbe UUID in anderer Schreibweise zählt einmal, Bericht je kanonischer ID | K7N | 0,5 | F-419 | WP-181, WP-368, WP-517 |
 | [WP-691](#wp-691--redundanz-postfilter-versorger-außerhalb-des-client--oder-site-scopes-zählen-ohne-genannt-zu-werden) | `k7n-redundancy-hidden-supply` | Redundanz-Postfilter: Versorger außerhalb des Client- oder Site-Scopes zählen, ohne genannt zu werden | K7N | 1,0 | F-420 | WP-179, WP-513, WP-611, WP-345 |
 | [WP-692](#wp-692--eindeutige-attribute-die-prüfung-umfasst-die-cis-außerhalb-des-client--oder-site-scopes-des-schreibenden-ohne-sie-zu-nennen) | `k7n-unique-org-scope-client-writer` | Eindeutige Attribute: die Prüfung umfasst die CIs außerhalb des Client- oder Site-Scopes des Schreibenden, ohne sie zu nennen | K7N | 1,0 | F-421 | WP-142, WP-674 |
+| [WP-697](#wp-697--review-liste-unbekannte-status--und-kind-werte-sind-400-mit-feld-auch-am-veralteten-alias) | `k7n-review-list-filter-validation` | Review-Liste: unbekannte `status`- und `kind`-Werte sind 400 mit Feld, auch am veralteten Alias | K7N | 0,5 | F-426 | WP-088, WP-673 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20597,6 +20598,55 @@ MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-692
 **Entscheidungsbedarf:** keiner. Dass ein eingeschränkter Principal aus der 409 auf die Existenz des Werts außerhalb seines Scopes schließen kann, folgt aus `unique_scope` `org` (MET-15) selbst; welches CI ihn trägt, bleibt verborgen.
 
 **Nicht Bestandteil:** Wege, die CIs am Service vorbei über das Repository schreiben (Discovery-Ingest, Review-Auflösung `new`, `adoptUnlicensed`) und das Wiederherstellen (`Restore`) prüfen die Eindeutigkeit weiterhin nur über den Unique-Index, auch für org-weite Aufrufer; im Fenster ohne Index können dort Duplikate entstehen (unverändert seit WP-142). Eine Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben.
+
+### WP-697 – Review-Liste: unbekannte `status`- und `kind`-Werte sind 400 mit Feld, auch am veralteten Alias
+
+**Schlüssel:** `k7n-review-list-filter-validation` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-088 (Review-Modell und Ressource `review-items`), WP-673 (`k7n-relationship-list-filters`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-426](../../../audit/g1-reaudit/FINDINGS.md#f-426) | P3 | Review-Liste ignoriert unbekannte `status`- und `kind`-Werte: 200 mit leerer Liste statt 400 | schließt | Kandidatenprüfung K7 auf `7cd63e0` |
+
+**Problem:** `GET /api/v1/review-items?status=bogus`, `?kind=bogus` und `GET /api/v1/discovery/review-items?status=bogus` antworten 200 mit leerer Liste. `Handler.List` (`backend/internal/reviews/handler.go`) gibt `status` und `kind` ungeprüft als Gleichheitsfilter an das Repository, obwohl `api/openapi.yaml` beide als Enums definiert und an `listReviewItems` 400 dokumentiert. Ein Tippfehler (`status=OPEN`) liest sich als leere Queue; `/relationships?rel_type` (WP-673) und `escalated` lehnen ungültige Werte dagegen mit 400 ab.
+
+**Akzeptanzkriterien:**
+
+- [ ] `Handler.List` lehnt einen nicht leeren `status` außerhalb von `open|resolved|dismissed` und einen nicht leeren `kind` außerhalb von `reviews.Kinds` mit 400 `application/problem+json` (`urn:reticora:problem:invalid-field`) und `field` `status` bzw. `kind` ab, bevor das Repository gelesen wird; das gilt für `/api/v1/review-items` und den veralteten Alias `/api/v1/discovery/review-items`. Groß-/Kleinschreibung und NUL-Bytes werden nicht toleriert. Ein leerer Wert und kein Filter listen wie bisher; jeder dokumentierte Wert listet unverändert.
+- [ ] `TestListReviewItemsRejectsUnknownStatusAndKind` (`internal/reviews/handler_test.go`): sieben ungültige Kombinationen je Pfad → 400 mit dem Feld; alle drei Status, alle elf Typen, `status=`, `kind=` und `escalated=false` → 200; `status=open&kind=duplicate_ip` listet den offenen Eintrag. Auf `e5c2d86` rot (14-mal 200 mit leerer Liste), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an `status` und `kind` beider Operationen die Ablehnung mit 400 und dem Feld; `listDiscoveryReviewItems` deklariert die Antwort 400; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/reviews/ ./internal/server/ ./internal/middleware/ ./internal/graphqlbff/ ./internal/entitlement/ ./internal/discovery/` grün; die UI sendet nur dokumentierte Werte (Review-Inbox, Dashboard, Onboarding; leerer Wert für „alle“); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/reviews/handler.go
+- backend/internal/reviews/model.go
+- backend/internal/reviews/handler_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung; die Prüfung liegt im Handler vor jedem Datenbankzugriff, der Tenant-Scope (RLS) bleibt unverändert.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -v -run '^TestListReviewItemsRejectsUnknownStatusAndKind$' ./internal/reviews/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/reviews/ ./internal/server/ ./internal/middleware/ ./internal/graphqlbff/ ./internal/entitlement/ ./internal/discovery/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-01;[B];D;backend/internal/reviews/handler_test.go;WP-697
+API-02;[B];D;backend/internal/reviews/handler_test.go;WP-697
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Das GraphQL-Feld `reviewInbox(status, kind)` hat freie `String`-Argumente ohne dokumentierte Enums und filtert unbekannte Werte weiter zu einer leeren Liste; eine Angleichung wäre eine Änderung des GraphQL-Schemas und ist nicht Teil dieses Pakets. `GET /cis?status=` (ebenfalls 200 mit leerer Liste in der Probe) ist nicht Teil dieses Pakets.
 
 ## Zurückgestellte Befunde
 

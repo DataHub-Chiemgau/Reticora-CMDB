@@ -17741,7 +17741,9 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Return items of this status. Another value → 400 with field status (F-426). */
         status?: 'open' | 'resolved' | 'dismissed';
+        /** @description Return items of this review type. Another value → 400 with field kind (F-426). */
         kind?:
           | 'unclassified_device'
           | 'ambiguous_identity'
@@ -17861,7 +17863,9 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Return items of this status. Another value → 400 with field status (F-426). */
         status?: 'open' | 'resolved' | 'dismissed';
+        /** @description Return items of this review type. Another value → 400 with field kind (F-426). */
         kind?:
           | 'unclassified_device'
           | 'ambiguous_identity'
@@ -17890,6 +17894,7 @@ export interface operations {
           'application/json': components['schemas']['ReviewItemListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };

@@ -1150,3 +1150,5 @@ IMP-04;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-6
 IMP-07;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-691
 IMP-07;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-691
 MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-692
+API-01;[B];D;backend/internal/reviews/handler_test.go;WP-697
+API-02;[B];D;backend/internal/reviews/handler_test.go;WP-697

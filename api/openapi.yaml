@@ -5496,11 +5496,13 @@ paths:
           schema:
             type: string
             enum: [open, resolved, dismissed]
+          description: Return items of this status. Another value → 400 with field status (F-426).
         - name: kind
           in: query
           schema:
             type: string
             enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
+          description: Return items of this review type. Another value → 400 with field kind (F-426).
         - name: escalated
           in: query
           schema:
@@ -5649,11 +5651,13 @@ paths:
           schema:
             type: string
             enum: [open, resolved, dismissed]
+          description: Return items of this status. Another value → 400 with field status (F-426).
         - name: kind
           in: query
           schema:
             type: string
             enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
+          description: Return items of this review type. Another value → 400 with field kind (F-426).
       responses:
         '200':
           description: Paginated list of review items
@@ -5661,6 +5665,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReviewItemListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':

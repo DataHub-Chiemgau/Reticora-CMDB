@@ -51,6 +51,9 @@ const (
 	StatusDismissed = "dismissed"
 )
 
+// Statuses lists the review statuses, the enum of the status filter.
+var Statuses = []string{StatusOpen, StatusResolved, StatusDismissed}
+
 // Resolution actions of REC-08.
 const (
 	ActionMerge   = "merge"

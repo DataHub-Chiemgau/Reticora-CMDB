@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 28 |
-| P3 | 34 |
-| **Summe** | **68** |
+| P3 | 35 |
+| **Summe** | **69** |
 
 ## Übersicht
 
@@ -108,6 +108,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-419](#f-419) | P3 | Bulk-Operation entfernt doppelte IDs nur bei identischer Schreibweise: dieselbe UUID in anderer Groß-/Kleinschreibung wird zweimal geschrieben und zweimal gemeldet | Verifier r3-b4 (WP-181) auf `bf51da7` | belegt | backend/internal/ci/bulk_test.go | WP-690 |
 | [F-420](#f-420) | P3 | Redundanz-Postfilter für Principals mit Client-Scope: ein Versorger eines anderen Clients zählt nicht, das CI gilt als betroffen | Verifier r3-b4 (WP-179) auf `bf51da7` | belegt | backend/internal/topology/redundancy_depth_integration_test.go | WP-691 |
 | [F-421](#f-421) | P3 | Eindeutigkeit mit Scope `org` gilt für Writer mit Client-Scope nur, solange ein gültiger Unique-Index existiert | Verifier r3-b4 (WP-142) auf `bf51da7` | belegt | backend/internal/ci/unique_attr_integration_test.go | WP-692 |
+| [F-426](#f-426) | P3 | Review-Liste ignoriert unbekannte `status`- und `kind`-Werte: 200 mit leerer Liste statt 400 | Kandidatenprüfung K7 auf `7cd63e0` | belegt | backend/internal/reviews/handler_test.go | WP-697 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1795,6 +1796,54 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   --- FAIL: TestUniqueAttributeOrgScopeForClientWriter (0.60s)
   FAIL
   FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci	0.735s
+  FAIL
+  ```
+
+<a id="f-426"></a>
+### F-426 (P3) – Review-Liste ignoriert unbekannte `status`- und `kind`-Werte: 200 mit leerer Liste statt 400
+
+- **Gefunden in:** Kandidatenprüfung K7 auf `7cd63e0` (Probe `TestKCand5NotificationReadAndStatusFilter`); `backend/internal/reviews/handler.go` ist dort in `List` identisch mit `e5c2d86`; kodierender Test von WP-697 · **Betroffene Anforderungen:** API-01, API-02 (WP-088) · **Komponente:** backend/internal/reviews/handler.go (`Handler.List`: `Filter{Status: q.Get("status"), Kind: q.Get("kind")}` ungeprüft an das Repository; dieselbe Funktion bedient den veralteten Alias `GET /api/v1/discovery/review-items`) · **Quelle:** `k7/out/cand/evidence/k-reaudit-cand/5/probe-notification-read-status-filter.log`, Probe `k7/out/cand/evidence/k-reaudit-cand/probe/kcand_probe_test.go.txt`; kodierender Test von WP-697 (`k7/wp697-red.log`)
+- **Reproduktion:** Organisation mit einem offenen Review-Eintrag `duplicate_ip`. `GET /api/v1/review-items?status=open` → 200 mit dem Eintrag (Kontrolle). `GET /api/v1/review-items?status=bogus` → 200 `{"data":[],"total":0,…}`; `?kind=bogus` → 200 leer; `GET /api/v1/discovery/review-items?status=bogus` → 200 leer. Zum Vergleich: `?escalated=maybe` → 400, `GET /relationships?rel_type=bogus` → 400 problem+json mit `field` `rel_type` (WP-673), `GET /jobs?status=bogus` → 422 mit `field` `status`.
+- **Soll:** `api/openapi.yaml` (`listReviewItems`, `listDiscoveryReviewItems`) definiert `status` als Enum `open|resolved|dismissed` und `kind` als Enum der elf Review-Typen; `listReviewItems` dokumentiert 400. API-01/API-02: ein Wert außerhalb der Spezifikation wird mit 400 problem+json und dem Feld abgelehnt, wie `rel_type` an `/relationships`; der Alias verhält sich wie sein Nachfolger.
+- **Ist:** Jeder Wert wird als Gleichheitsfilter an die Datenbank gegeben; ein Tippfehler (`status=OPEN`, `kind=Duplicate_IP`) liefert 200 mit leerer Liste. Der Alias dokumentiert kein 400.
+- **Nutzerwirkung:** Ein API-Client oder ein Skript, das einen falschen Status oder Typ sendet, erhält „keine offenen Einträge“ statt eines Fehlers und hält die Review-Queue für leer; eskalierte oder offene Einträge bleiben unbemerkt. Kein Leck, kein Schreibzugriff.
+- **Ursache (belegt):** WP-088 hat die Filter ohne Prüfung gegen die Enums übernommen; nur `escalated` wird geparst. WP-673 hat die Prüfung für `/relationships` nachgezogen, die Review-Liste nicht.
+- **Empfehlung:** `Handler.List` prüft `status` gegen `open|resolved|dismissed` und `kind` gegen `reviews.Kinds` und antwortet sonst 400 problem+json (`urn:reticora:problem:invalid-field`) mit `field` `status` bzw. `kind`, für `/review-items` und den Alias; ein leerer Wert filtert nicht. `api/openapi.yaml` beschreibt das an beiden Operationen, der Alias erhält die Antwort 400.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestListReviewItemsRejectsUnknownStatusAndKind$' ./internal/reviews/` PASS: für `/api/v1/review-items` und `/api/v1/discovery/review-items` antworten `status=bogus`, `status=OPEN`, `status=open%00`, `kind=bogus`, `kind=Duplicate_IP`, `status=open&kind=bogus` und `status=bogus&kind=duplicate_ip` mit 400 `application/problem+json` und dem Feld; jeder dokumentierte Status und Typ, `status=`, `kind=` und kein Filter antworten 200, `status=open&kind=duplicate_ip` listet den offenen Eintrag. Dazu `go test -count=1 -p 1 ./internal/reviews/ ./internal/server/ ./internal/middleware/` grün.
+- **Kodierender Test:** backend/internal/reviews/handler_test.go (`TestListReviewItemsRejectsUnknownStatusAndKind`, Produktionsrouter des Pakets mit Speicher-Repository); auf `e5c2d86` rot (ausgeführt auf der Basis `7cd63e0` mit der unveränderten Produktionsdatei `handler.go`, in `List` identisch mit `e5c2d86`):
+
+  ```text
+  --- FAIL: TestListReviewItemsRejectsUnknownStatusAndKind (0.00s)
+      handler_test.go:55: GET /api/v1/review-items?status=bogus = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field status
+      handler_test.go:55: GET /api/v1/review-items?status=OPEN = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field status
+      handler_test.go:55: GET /api/v1/review-items?status=open%00 = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field status
+      handler_test.go:55: GET /api/v1/review-items?kind=bogus = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field kind
+      handler_test.go:55: GET /api/v1/review-items?kind=Duplicate_IP = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field kind
+      handler_test.go:55: GET /api/v1/review-items?status=open&kind=bogus = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field kind
+      handler_test.go:55: GET /api/v1/review-items?status=bogus&kind=duplicate_ip = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field status
+      handler_test.go:55: GET /api/v1/discovery/review-items?status=bogus = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field status
+      handler_test.go:55: GET /api/v1/discovery/review-items?status=OPEN = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field status
+      handler_test.go:55: GET /api/v1/discovery/review-items?status=open%00 = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field status
+      handler_test.go:55: GET /api/v1/discovery/review-items?kind=bogus = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field kind
+      handler_test.go:55: GET /api/v1/discovery/review-items?kind=Duplicate_IP = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field kind
+      handler_test.go:55: GET /api/v1/discovery/review-items?status=open&kind=bogus = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field kind
+      handler_test.go:55: GET /api/v1/discovery/review-items?status=bogus&kind=duplicate_ip = 200 application/json {"data":[],"total":0,"limit":50,"offset":0,"has_more":false}
+          , want 400 problem+json with field status
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews	0.016s
   FAIL
   ```
 
