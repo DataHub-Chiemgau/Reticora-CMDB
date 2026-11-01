@@ -174,7 +174,7 @@ func (d *AttributeDefinition) Validate() error {
 		d.Required = d.Required || required
 	}
 	if err := fieldmeta.ValidateDefinition(d.definition()); err != nil {
-		return &api.FieldError{Field: "data_type", Message: err.Error()}
+		return &api.FieldError{Field: definitionField(err), Message: err.Error()}
 	}
 	if len(d.Default) > 0 && string(d.Default) != "null" {
 		var value any
@@ -192,6 +192,23 @@ func (d *AttributeDefinition) Validate() error {
 		}
 	}
 	return nil
+}
+
+// definitionField is the request field of a fieldmeta.ValidateDefinition
+// rejection (F-408): the field name is the key, the other attributes keep
+// their request names; an error without attribute stays data_type.
+func definitionField(err error) string {
+	var de *fieldmeta.DefinitionError
+	if !errors.As(err, &de) {
+		return "data_type"
+	}
+	switch de.Attribute {
+	case "name":
+		return "key"
+	case "reference_target", "validation", "conditional":
+		return de.Attribute
+	}
+	return "data_type"
 }
 
 // apply changes d; a validation that is no valid rule is a *api.FieldError.

@@ -13799,7 +13799,7 @@ components:
       additionalProperties: false
       properties:
         ci_type_id: { type: string, description: Omitted for a global definition. }
-        key: { type: string, minLength: 1, maxLength: 100 }
+        key: { type: string, minLength: 1, maxLength: 100, description: 'The reserved namespaces _overrides, _observed, _provenance and _instance are no keys (GLO-13): 400 with field key; the other definition checks name their own field (data_type, reference_target, validation, conditional, default; F-408).' }
         display_name:
           oneOf:
             - $ref: '#/components/schemas/LocalizedText'

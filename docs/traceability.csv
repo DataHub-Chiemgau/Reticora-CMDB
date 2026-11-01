@@ -1123,3 +1123,6 @@ CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-687
 CI-12;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
 JOB-03;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
 NFR-10;[Q];LT;tests/load/evaluate-runs.test.sh;WP-688
+GLO-13;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
+API-03;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
+MET-10;B/G1, Teil P2/G2;D;backend/internal/citype/attrdef_integration_test.go;WP-679

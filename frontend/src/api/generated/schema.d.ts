@@ -6834,6 +6834,7 @@ export interface components {
     AttributeDefinitionCreate: {
       /** @description Omitted for a global definition. */
       ci_type_id?: string;
+      /** @description The reserved namespaces _overrides, _observed, _provenance and _instance are no keys (GLO-13): 400 with field key; the other definition checks name their own field (data_type, reference_target, validation, conditional, default; F-408). */
       key: string;
       display_name?: components['schemas']['LocalizedText'] | string;
       description?: string;
