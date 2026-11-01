@@ -7307,6 +7307,7 @@ export interface components {
         [key: string]: number[];
       };
     };
+    /** @description An omitted height_u or face takes its default; an explicit value outside minimum or enum (height_u 0 or below, face "") is 400 with field height_u or face, nothing is stored and an existing mount stays unchanged (F-415). */
     PutRackMountRequest: {
       position_u: number;
       /** @default 1 */
@@ -10667,6 +10668,7 @@ export interface components {
       ci_name: string;
       ci_type: string;
     };
+    /** @description An omitted height_u or face takes its default (1, front); an explicit value outside minimum or enum (height_u 0 or below, face "") is 400 with field height_u or face and nothing is stored (F-415). */
     CreateRackMountRequest: {
       ci_id: string;
       position_u: number;

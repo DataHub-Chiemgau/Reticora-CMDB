@@ -1131,3 +1131,6 @@ REL-08;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-6
 ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
 TEN-09;[Q];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
 ENT-03;[B];B;backend/internal/entitlement/entitlement_test.go;WP-685
+RCK-01;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+API-03;[B];C;backend/internal/rack/layout_integration_test.go;WP-686

@@ -41,9 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
-| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-688 | 30 | 27,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-686 | 34 | 29,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400. |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **332** | **428,0** | |
+| **Summe** | | **336** | **430,0** | |
 
 ```mermaid
 flowchart LR
@@ -59,7 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
-    K7N["K7-Nachträge<br/>30 WPs · 27,0 PT"]
+    K7N["K7-Nachträge<br/>34 WPs · 29,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -451,6 +451,10 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-684](#wp-684--offline-detektor-statuswechsel-in-ci-historie-und-audit-log-in-der-transaktion-des-wechsels) | `k7n-offline-status-history` | Offline-Detektor: Statuswechsel in CI-Historie und Audit-Log, in der Transaktion des Wechsels | K7N | 0,5 | F-413 | WP-157, WP-171, WP-487, WP-683 |
 | [WP-687](#wp-687--unmerge-in-merge-ketten-409-mit-dem-späteren-merge-solange-der-survivor-teil-eines-offenen-merges-ist-auch-mit-force-und-beim-job-revert) | `k7n-unmerge-chain` | Unmerge in Merge-Ketten: 409 mit dem späteren Merge, solange der Survivor Teil eines offenen Merges ist, auch mit force und beim Job-Revert | K7N | 1 | F-416 | WP-173, WP-174, WP-182, WP-485, WP-670 |
 | [WP-688](#wp-688--lastnachweis-drei-läufe-nur-desselben-server-commits-mit-allen-fünf-jobs-bewertbar-teilbewertung-als-eigener-modus) | `k7n-load-evidence-same-commit` | Lastnachweis: drei Läufe nur desselben Server-Commits mit allen fünf Jobs bewertbar, Teilbewertung als eigener Modus | K7N | 0,5 | F-417 | WP-206, WP-439, WP-612 |
+| [WP-679](#wp-679--attributdefinition-jede-abgelehnte-definition-nennt-ihr-eigenes-feld-reservierter-schlüssel-400-mit-field-key) | `k7n-attribute-definition-key-field` | Attributdefinition: jede abgelehnte Definition nennt ihr eigenes Feld; reservierter Schlüssel 400 mit `field` `key` | K7N | 0,5 | F-408 | WP-091, WP-116 |
+| [WP-682](#wp-682--kanten-cleanup-prüft-verifikation-und-frist-beim-löschen-während-des-laufs-verifizierte-oder-bestätigte-kanten-bleiben-ohne-event) | `k7n-relationship-cleanup-race` | Kanten-Cleanup prüft Verifikation und Frist beim Löschen: während des Laufs verifizierte oder bestätigte Kanten bleiben, ohne Event | K7N | 0,5 | F-411 | WP-159, WP-383, WP-497 |
+| [WP-685](#wp-685--kontingent-ablehnung-nennt-den-bestand-der-organisation-nur-org-weiten-aufrufern) | `k7n-entitlement-limit-detail` | Kontingent-Ablehnung nennt den Bestand der Organisation nur org-weiten Aufrufern | K7N | 0,5 | F-414 | WP-072, WP-472, WP-674 |
+| [WP-686](#wp-686--rack-montage-explizites-height_u-0-und-leeres-face-sind-400-mit-feld-nichts-gespeichert-weggelassene-felder-behalten-die-vorgabe) | `k7n-rack-mount-explicit-zero` | Rack-Montage: explizites `height_u` 0 und leeres `face` sind 400 mit Feld, nichts gespeichert; weggelassene Felder behalten die Vorgabe | K7N | 0,5 | F-415 | WP-175, WP-126, WP-500 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -20092,6 +20096,213 @@ NFR-10;[Q];LT;tests/load/evaluate-runs.test.sh;WP-688
 **Entscheidungsbedarf:** keiner. Die Ergänzung zu E-58 (Median über drei Läufe) bleibt unverändert; die Voraussetzung „drei vollständige Läufe desselben Codes“ stammt aus WP-206/WP-439 AK 3 und wird jetzt im Skript geprüft. Eine Teilbewertung ist nie G1-Nachweis.
 
 **Nicht Bestandteil:** Prüfung weiterer Felder von `ergebnis.md` (Lauf-Commit von `tests/load`, Versuch 1, Eingaben `objects`/`duration`, „Vollständig“ – der fehlende Job wird über Zeile „Jobs“ und Verzeichnis erkannt); ein neuer Lauf von `load-evidence.yml` (Wiederholungsläufe nach WP-658/WP-659 stehen ohnehin aus); die Übernahme der Archive ins Repository (WP-204).
+
+### WP-679 – Attributdefinition: jede abgelehnte Definition nennt ihr eigenes Feld; reservierter Schlüssel 400 mit `field` `key`
+
+**Schlüssel:** `k7n-attribute-definition-key-field` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-091 (`glo13-ns`, reservierte Namensräume), WP-116 (`b-met-attrdef`, Ressource `attribute-definitions`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-408](../../../audit/g1-reaudit/FINDINGS.md#f-408) | P3 | Attributdefinition mit reserviertem Schlüssel: 400 nennt das Feld `data_type` statt `key` | schließt | K7-Wiederholungsprüfung r2-b3 (Verifier auf `96bb4d0`, bestätigt durch einen zweiten Agenten) |
+
+**Problem:** `POST /api/v1/attribute-definitions` mit einem reservierten Namensraum als `key` (`_overrides`, `_observed`, `_provenance`, `_instance`) antwortet 400 mit `"field":"data_type"` und `detail` `data_type: field name "_instance" is a reserved namespace (GLO-13)`. `AttributeDefinition.Validate` (`backend/internal/citype/attribute_definition.go:176–177` auf `e5c2d86`) meldet jeden Fehler von `fieldmeta.ValidateDefinition` unter `data_type`, auch das unbekannte `reference_target` und ungültige `conditional`-Prädikate. Ein leerer Schlüssel nennt dagegen korrekt `key`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `fieldmeta.ValidateDefinition` gibt bei einer Ablehnung einen `*fieldmeta.DefinitionError` mit dem betroffenen Attribut zurück (`name`, `data_type`, `reference_target`, `validation`, `conditional`); `Error()` ist der bisherige Text, die Feld-Endpunkte `/ci-types/{id}/fields` und `/cis/{id}/field-definitions` antworten unverändert.
+- [ ] `AttributeDefinition.Validate` ordnet die Ablehnung dem Feld der Anfrage zu: `name` → `key`, `data_type`, `reference_target`, `validation` und `conditional` gleichnamig; ein Fehler ohne Attribut bleibt `data_type`.
+- [ ] `TestAttributeDefinitionReservedKeyNamesKeyField` (`internal/citype/attribute_definition_test.go`): jeder reservierte Namensraum als `key` → `api.FieldError` und Problem 400 mit `field` `key` und einem `detail`, das den reservierten Namensraum nennt; leerer Schlüssel → `key`, unbekannter Typ → `data_type`, unbekanntes Referenzziel → `reference_target`, ungültiger Operator und Prädikat ohne Feld → `conditional`. Auf `e5c2d86` rot (alle reservierten Namen und die drei übrigen Fälle unter `data_type`), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestAttributeDefinitionsAgainstPostgres` prüft über HTTP und PostgreSQL: `_overrides` als `key` → 400 `"field":"key"`, nichts gespeichert.
+- [ ] `api/openapi.yaml` (spec-first) nennt am Feld `key` von `AttributeDefinitionCreate` die reservierten Namensräume (400 mit `field` `key`) und das eigene Feld der übrigen Ablehnungen; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/citype/ ./internal/fieldmeta/ ./internal/ci/ ./internal/override/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/fieldmeta/fieldmeta.go
+- backend/internal/citype/attribute_definition.go
+- backend/internal/citype/attribute_definition_test.go (neu)
+- backend/internal/citype/attrdef_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung; reine Fehlerzuordnung vor dem Schreiben.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -v -run '^TestAttributeDefinitionReservedKeyNamesKeyField$' ./internal/citype/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -p 1 ./internal/citype/ ./internal/fieldmeta/ ./internal/ci/ ./internal/override/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+GLO-13;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
+API-03;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
+MET-10;B/G1, Teil P2/G2;D;backend/internal/citype/attrdef_integration_test.go;WP-679
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Feldangabe (`field`) in den Problemen der Legacy-Feld-Endpunkte `PUT /ci-types/{id}/fields` und `PUT /cis/{id}/field-definitions` (sie antworten wie bisher 400 ohne `field`, der Text nennt den Grund). Eine Formatregel für Schlüssel (Leerzeichen, Großbuchstaben); die Probe zeigt `Bad Key` nur am Systemtyp (422).
+
+### WP-682 – Kanten-Cleanup prüft Verifikation und Frist beim Löschen: während des Laufs verifizierte oder bestätigte Kanten bleiben, ohne Event
+
+**Schlüssel:** `k7n-relationship-cleanup-race` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-159 (`d-topo-refresh`, TOP-02/REL-08), WP-383 (`t4-scope-zone-isolation`), WP-497 (`t4-cleanup-cron`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-411](../../../audit/g1-reaudit/FINDINGS.md#f-411) | P3 | Kanten-Cleanup löscht Discovery-Kanten, die während des Laufs verifiziert oder bestätigt wurden: 70–99 % der mit 200 beantworteten Verifikationen gehen verloren | schließt | K7-Wiederholungsprüfung r2-b4 (Verifier auf `7845e9d`, ohne Hook) |
+
+**Problem:** `Cleanup.RunOrg` (`backend/internal/relationship/cleanup.go:170` auf `e5c2d86`) liest die Kandidaten in einem SELECT ohne Sperre (`verification_state <> 'verified'`, Zeile 190–209) und löscht jede Kante mit `DELETE … WHERE id = $1 AND organization_id = $2 AND source = 'discovery'` (Zeile 234), ohne Verifikation und Frist erneut zu prüfen. Wird eine Kante zwischen SELECT und DELETE verifiziert (`PATCH /relationships/{id}`, Antwort 200) oder von Discovery neu bestätigt, löscht der Cleanup sie trotzdem und meldet `relationship.removed`. In der Probe gingen 81–99 % der erfolgreich beantworteten Verifikationen verloren.
+
+**Akzeptanzkriterien:**
+
+- [ ] Das DELETE des Cleanups prüft auf der aktuellen Zeile `verification_state <> 'verified'` und für abgelaufene Kanten `COALESCE(last_confirmed_at, last_seen_at, created_at) < now − max(7 Tage, 5 × Intervall)`; unterdrückte Kanten ohne Frist. Unter READ COMMITTED wartet es auf einen gleichzeitigen Schreiber der Zeile und entscheidet auf dessen festgeschriebener Version.
+- [ ] Trifft das DELETE keine Zeile, bleibt die Kante: kein `relationship.removed`, kein Zähler im Ergebnis, Logeintrag `discovery edge kept`. Das Event einer gelöschten Kante trägt den Bestätigungszeitpunkt der gelöschten Zeile (`RETURNING`).
+- [ ] `TestCleanupKeepsEdgeVerifiedDuringRun` (`internal/relationship/cleanup_race_integration_test.go`, PostgreSQL als `reticora_app`): (1) eine offene Transaktion verifiziert Kante A und bestätigt Kante B neu, der Cleanup wartet nachweislich auf die Zeilensperre; nach dem Commit bestehen A und B ohne Event, die unberührte abgelaufene Kante C ist mit genau einem Event gelöscht, Ergebnis `{Stale:1}`; (2) zwei Runden mit je 200 abgelaufenen Kanten und acht verifizierenden Workern über `PGRepository.Update`: keine Kante gelöscht, deren Verifikation erfolgreich antwortete, jede Kante verifiziert oder mit genau einem Event entfernt. Auf `e5c2d86` rot (A und B gelöscht, `{Stale:3}`; 140 von 146 bzw. 120 von 127 verifizierten Kanten gelöscht), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an `Relationship.source`, dass eine verifizierte oder neu bestätigte Kante auch während eines Cleanup-Laufs bleibt; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/relationship/` grün (`TestDiscoveryEdgeCleanup`, Fristen-Tests); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/relationship/cleanup.go
+- backend/internal/relationship/cleanup_race_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Der Cleanup läuft wie bisher in `database.WithTenant` mit org-weitem Scope als `reticora_app`; das DELETE trägt nur zusätzliche Bedingungen. Keine neue Sperre über die Zeilensperre des DELETE hinaus.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestCleanupKeepsEdgeVerifiedDuringRun$' ./internal/relationship/`, außerdem als Nutzer `nobody` und dreifach (`-count=3`) auf Stabilität.
+- `cd backend && go test -count=1 -p 1 ./internal/relationship/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TOP-02;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-682
+REL-08;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-682
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Eine Suppression, die während eines Laufs aufgehoben wird (die Kante wird nach dem Stand des SELECT entfernt; Discovery legt sie beim nächsten Sweep neu an). Andere Schreibwege, die eine Kante während des Laufs auf eine andere Quelle umstellen (bereits durch `source = 'discovery'` im DELETE abgedeckt). Parallele Läufe (Single-Runner über den Advisory-Lock des Schedulers, JOB-02).
+
+### WP-685 – Kontingent-Ablehnung nennt den Bestand der Organisation nur org-weiten Aufrufern
+
+**Schlüssel:** `k7n-entitlement-limit-detail` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-072 (`ent-enforce`), WP-472 (`t2-ent-quotas`), WP-674 (`k7n-max-cis-org-count`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-414](../../../audit/g1-reaudit/FINDINGS.md#f-414) | P3 | Ablehnung eines Kontingents nennt eingeschränkten Principals den Bestand der ganzen Organisation („N of L in use“) | schließt | Härtungshinweis des Agenten von WP-674 (`22e24ff`) |
+
+**Problem:** Die 403-Ablehnung `entitlement-limit` lautet `entitlement limit for "<quota>" exceeded: N of L in use` (`LimitExceededError.Error`, `backend/internal/entitlement/entitlement.go:262` auf `e5c2d86`). N ist der Bestand der ganzen Organisation: `max_cis` seit WP-674, `max_users`, `max_api_keys` und `max_collectors` schon vorher. Ein auf Client 1 beschränkter Principal erfährt so bei jeder Ablehnung die Zahl der CIs, Nutzer, API-Keys und Collectors aller Clients.
+
+**Akzeptanzkriterien:**
+
+- [ ] `entitlement.Service.AllowCreate` setzt `LimitExceededError.HideCurrent`, wenn der Kontext keinen Principal mit org-weitem Client- und Site-Scope trägt (`database.TenantScopeFromContext`: Scope vorhanden, `UserID` gesetzt, `Clients` und `Sites` org-weit). `Error()` lautet dann `entitlement limit for "<quota>" exceeded: the limit of the plan is reached` (ohne N und L, weil bei der Ablehnung meist N = L gilt); org-weite Aufrufer behalten `N of L in use`. `Limit` und `Current` bleiben als Felder gesetzt (Ingest-Spuren, `unlicensed_ci`).
+- [ ] Die Regel gilt für alle vier Kontingente und alle Wege, weil sie beim Entstehen des Fehlers greift: REST, GraphQL, Jobs mit dem Scope ihres Erzeugers; Einladung, Erstanmeldung, Enrollment und Collector-Ingest (Kontexte ohne Principal) erhalten den Text ohne Zahlen.
+- [ ] `TestEntitlementLimitDetailHidesOrgCountFromScopedCallers` (`internal/server/t2_entitlement_gates_test.go`, Produktionsrouter mit PG-Repositories): an `max_cis`, `max_users`, `max_api_keys` und `max_collectors` (je am Bestand der Organisation, Bestand von Client 2 für den Client-1-Principal unsichtbar) erhält der Client-1-Principal 403 `entitlement-limit` mit genau dem Text ohne Zahlen, der org-weite Principal `N of N in use`; nichts angelegt. Auf `e5c2d86`-Stand von `entitlement.go` rot (alle vier Details des Client-1-Principals nennen den Bestand), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestLimitExceededDetailFollowsCallerScope` (`internal/entitlement/entitlement_test.go`): org-weiter Principal mit Zahlen; Client-Scope, Site-Scope, System-Scope ohne Nutzer und Kontext ohne Scope ohne Zahlen; `Limit`/`Current` gesetzt.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an der Antwort `EntitlementLimit` die Regel; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Der vorbestehende goimports-Befund in `t2_entitlement_gates_test.go` (`strconv` außerhalb der Standardbibliotheksgruppe) ist behoben; Lint-Schuld sinkt um 1.
+- [ ] Regression: `go test -p 1 ./internal/entitlement/ ./internal/identity/ ./internal/user/ ./internal/discovery/ ./internal/reviews/ ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/entitlement/entitlement.go
+- backend/internal/entitlement/entitlement_test.go
+- backend/internal/server/t2_entitlement_gates_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Zähler bleiben org-weit (F-403, E-56); nur der Text der Ablehnung hängt vom Scope des Aufrufers ab. Der Scope kommt aus dem Kontext, den die Tenant-Middleware aus dem authentifizierten Principal setzt (`middleware.TenantScopeFor`); ein fehlender Scope gilt als eingeschränkt (fail-closed).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestEntitlementLimitDetailHidesOrgCountFromScopedCallers$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -run '^TestLimitExceededDetailFollowsCallerScope$' ./internal/entitlement/`.
+- `cd backend && go test -count=1 -p 1 ./internal/entitlement/ ./internal/identity/ ./internal/user/ ./internal/discovery/ ./internal/reviews/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
+TEN-09;[Q];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
+ENT-03;[B];B;backend/internal/entitlement/entitlement_test.go;WP-685
+```
+
+**Entscheidungsbedarf:** keiner (Umsetzung des Hinweises aus dem Entscheidungsbedarf von WP-674; E-56 und E-08 unverändert). Hinweis für die Leitung: Auch das Limit L entfällt für eingeschränkte Aufrufer, weil es bei der Ablehnung in der Regel dem Bestand entspricht; wer L wissen muss, liest es mit `entitlement:read` über die Entitlement-Ansicht.
+
+**Nicht Bestandteil:** Andere Zähler, die eingeschränkten Principals Bestände der Organisation zeigen könnten (Dashboards, Lizenzansicht, Warn-Benachrichtigungen zu Kontingenten): sie sind an Rechte wie `entitlement:read` gebunden und nicht Gegenstand von F-414. Der Text von `feature-not-entitled` und `license-expired` (ohne Zähler).
+
+### WP-686 – Rack-Montage: explizites `height_u` 0 und leeres `face` sind 400 mit Feld, nichts gespeichert; weggelassene Felder behalten die Vorgabe
+
+**Schlüssel:** `k7n-rack-mount-explicit-zero` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-175 (`c-rack-api`), WP-126 (`b-rack-rules`), WP-500 (`t6-location-conflicts`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-415](../../../audit/g1-reaudit/FINDINGS.md#f-415) | P3 | Rack-Montage mit explizitem `height_u` 0 wird als 1 HE gespeichert (201/200), leeres `face` als `front` | schließt | K7-Wiederholungsprüfung r2-b5 (Verifier auf `22e24ff`, bestätigt durch einen zweiten Agenten) |
+
+**Problem:** `PUT /api/v1/racks/{id}/mounts/{ci_id}` mit `"height_u": 0` antwortet 201 und speichert 1 HE; eine bestehende 3-HE-Montage wird mit `"height_u": 0` per 200 auf 1 HE verkleinert; `-1` ist 400. `"face": ""` ergibt 201 mit `front`, obwohl `""` nicht im Enum liegt. Ursache: `PutMountRequest.HeightU int` mit `omitempty` (`backend/internal/rack/handler.go:296` auf `e5c2d86`) unterscheidet ein fehlendes Feld nicht von 0, Zeile 313–318 setzen den Nullwert auf die Vorgabe; dasselbe Muster in `CreateMountRequest` (`model.go:66`) und `CreateMount` (`handler.go:419–426`) für die veralteten Montagewege. Die Spezifikation verlangt `PutRackMountRequest.height_u` `minimum: 1`, `default: 1` und `face` im Enum.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PutMountRequest` und `CreateMountRequest` tragen `height_u` und `face` als Zeiger; `mountDefaults` setzt für weggelassene Felder die Vorgabe (1, `front`) und lehnt explizite Werte außerhalb der Spezifikation mit 400 und `field` ab: `height_u` < 1 (auch 0 und -1) → `height_u`, `face` außerhalb `front`, `rear`, `both` (auch `""`) → `face`. Nichts wird gespeichert, eine bestehende Montage bleibt unverändert.
+- [ ] Dieselbe Prüfung gilt für `PUT /racks/{id}/mounts/{ci_id}` (Anlage und Verschiebung), die veralteten `POST /racks/{id}/mounts` und `POST /mounts` sowie `PATCH /rack-mounts/{id}` (dort bisher 400 ohne `field`).
+- [ ] Subtest „explicit height_u 0 and empty face are 400 and store nothing“ in `TestRackLayoutAgainstPostgres` (`internal/rack/layout_integration_test.go`): neun Schreibvorgänge (neue Montage mit 0, -1 und `""`, Verschiebung der 2-HE-Montage mit 0 und `""`, beide veralteten POST-Wege, PATCH mit 0 und `""`) → 400 mit dem Feld; keine Montage von CI 3, die Montage von CI 1 bleibt U7, 2 HE, `front`; ohne `height_u` und `face` → 201 mit 1 HE `front`. Auf `e5c2d86` rot (201/200 bzw. 400 ohne Feld), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first): `PutRackMountRequest` und `CreateRackMountRequest` beschreiben, dass ein weggelassenes Feld die Vorgabe erhält und ein expliziter Wert außerhalb von Minimum und Enum 400 mit `field` ist; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/rack/ ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/rack/handler.go
+- backend/internal/rack/model.go
+- backend/internal/rack/layout_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung; die Prüfung liegt im Handler vor dem Repository. Die Belegungsregeln (`validateMountFit`, Sperre der Rackhöhe) bleiben unverändert.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestRackLayoutAgainstPostgres$' ./internal/rack/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/rack/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RCK-01;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+API-03;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Eine Verschiebung per `PUT` ohne `height_u` setzt wie spezifiziert die Vorgabe 1 HE (der PUT ersetzt die Montage, `default: 1`); wer die Höhe behalten will, sendet sie mit oder nutzt `PATCH /rack-mounts/{id}`. Eine allgemeine Validierung von Request-Bodies gegen die OpenAPI-Schemas im Produktionsrouter.
 
 ## Zurückgestellte Befunde
 

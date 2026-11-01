@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 26 |
-| P3 | 27 |
-| **Summe** | **59** |
+| P3 | 31 |
+| **Summe** | **63** |
 
 ## Übersicht
 
@@ -99,6 +99,10 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-413](#f-413) | P3 | Statuswechsel des Offline-Detektors fehlen in Historie und Audit-Log: der Wechsel nach `unknown` ist nirgends nachvollziehbar | WP-157/WP-171 (K7) | belegt | backend/internal/lifecycle/offline_integration_test.go | WP-684 |
 | [F-416](#f-416) | P2 | Unmerge in einer Merge-Kette: das Unmerge des früheren Merges belebt den Survivor, der Opfer eines offenen Merges ist, und verschiebt danach die Referenzen auf das falsche CI | WP-174 (K7) | belegt | backend/internal/ci/unmerge_integration_test.go | WP-687 |
 | [F-417](#f-417) | P3 | Lastnachweis: `evaluate-runs.sh` bewertet drei Läufe verschiedener Server-Commits mit nur einem Job als „alle Budgets gehalten“ (Exit 0) | WP-206 (K7) | belegt | tests/load/evaluate-runs.test.sh | WP-688 |
+| [F-408](#f-408) | P3 | Attributdefinition mit reserviertem Schlüssel: 400 nennt das Feld `data_type` statt `key` | WP-091 (K7) | belegt | backend/internal/citype/attribute_definition_test.go | WP-679 |
+| [F-411](#f-411) | P3 | Kanten-Cleanup löscht Discovery-Kanten, die während des Laufs verifiziert oder bestätigt wurden: 70–99 % der mit 200 beantworteten Verifikationen gehen verloren | WP-159 (K7) | belegt | backend/internal/relationship/cleanup_race_integration_test.go | WP-682 |
+| [F-414](#f-414) | P3 | Ablehnung eines Kontingents nennt eingeschränkten Principals den Bestand der ganzen Organisation („N of L in use“) | WP-674 (K7-Nachträge) | belegt | backend/internal/server/t2_entitlement_gates_test.go | WP-685 |
+| [F-415](#f-415) | P3 | Rack-Montage mit explizitem `height_u` 0 wird als 1 HE gespeichert (201/200), leeres `face` als `front` | WP-175 (K7) | belegt | backend/internal/rack/layout_integration_test.go | WP-686 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1460,6 +1464,147 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
   FAIL the same runs without --partial: exit 1: exit 0, want 1
   …
   33 passed, 45 failed
+  ```
+
+<a id="f-408"></a>
+### F-408 (P3) – Attributdefinition mit reserviertem Schlüssel: 400 nennt das Feld `data_type` statt `key`
+
+- **Gefunden in:** K7-Wiederholungsprüfung r2-b3 (Verifier, Probe `TestK7VerifyK2AttributeDefinitionField` auf `96bb4d0`), bestätigt durch einen zweiten Agenten; `backend/internal/citype/attribute_definition.go` und `backend/internal/fieldmeta/fieldmeta.go` sind dort identisch mit `e5c2d86`; kodierender Test von WP-679 · **Betroffene Anforderungen:** GLO-13, API-03 (verknüpft WP-091, MET-10) · **Komponente:** backend/internal/citype/attribute_definition.go (`AttributeDefinition.Validate`, Zeile 176–177 auf `e5c2d86`: jeder Fehler von `fieldmeta.ValidateDefinition` wird als `api.FieldError{Field: "data_type"}` gemeldet), backend/internal/fieldmeta/fieldmeta.go (`ValidateDefinition`, Zeile 213–246: einfache `fmt.Errorf`-Fehler ohne Angabe des betroffenen Attributs) · **Quelle:** `k7/ver/r2-b3/evidence/k-reaudit-2/WP-091/verify-k2-attribute-definition-field.log`; kodierender Test von WP-679 (`k7/ad-679/red-679.log`)
+- **Reproduktion:** `POST /api/v1/attribute-definitions` als Administrator mit `{"ci_type_id":"<Typ der Organisation>","key":"_instance","data_type":"text"}` → 400 `{"detail":"data_type: field name \"_instance\" is a reserved namespace (GLO-13)","field":"data_type",…}`; ebenso für `_overrides`, `_observed` und `_provenance`. Kontrolle: leerer `key` → 400 `"field":"key"`; `data_type` `nope` → 400 `"field":"data_type"`. Gespeichert wird nichts. Im kodierenden Test zusätzlich: unbekanntes `reference_target` und ungültige `conditional`-Prädikate (Operator `nope`, Prädikat ohne Feld) → `"field":"data_type"`.
+- **Soll:** GLO-13: die Namensräume `_overrides`, `_observed`, `_provenance` und `_instance` sind keine Feldnamen; die Ablehnung nennt das Feld, das den Namen trägt. API-03: ein Validierungsfehler ist ein Problem mit dem abgelehnten Feld (`field`). Bei der Attributdefinition trägt `key` den Namen: ein reservierter Schlüssel → 400 mit `field` `key`. Jede andere Ablehnung der Definition nennt ihr eigenes Feld (`data_type`, `reference_target`, `validation`, `conditional`).
+- **Ist:** `Validate` meldet jeden Fehler von `fieldmeta.ValidateDefinition` unter `data_type`, auch den reservierten Namen, das unbekannte Referenzziel und die ungültige bedingte Regel.
+- **Nutzerwirkung:** Ein Client (UI-Formular, Import, Automatisierung) markiert das falsche Feld: Der Nutzer sucht den Fehler am Datentyp, obwohl der Schlüssel unzulässig ist. Kein Sicherheits- oder Datenproblem; die Definition wird korrekt abgelehnt.
+- **Ursache (belegt):** `ValidateDefinition` stammt aus dem Feld-Endpunkt `/ci-types/{id}/fields` (Fehler ohne Feldangabe); die Ressource `attribute-definitions` (WP-116) hat die Prüfung übernommen und alle ihre Fehler pauschal `data_type` zugeordnet. Der Test der Ressource (`TestAttributeDefinitionsAgainstPostgres`, Fall `reserved key`) prüfte nur den Status 400.
+- **Empfehlung:** `fieldmeta.ValidateDefinition` gibt einen `*fieldmeta.DefinitionError` mit dem betroffenen Attribut zurück (`name`, `data_type`, `reference_target`, `validation`, `conditional`); `Error()` bleibt der bisherige Text, sodass die Feld-Endpunkte unverändert antworten. `AttributeDefinition.Validate` ordnet das Attribut dem Feld der Anfrage zu (`name` → `key`, die übrigen gleichnamig; ohne Attribut wie bisher `data_type`). `api/openapi.yaml` (spec-first) nennt am Feld `key` die reservierten Namensräume und das Feld der Ablehnung.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestAttributeDefinitionReservedKeyNamesKeyField$' ./internal/citype/` PASS: jeder reservierte Namensraum als `key` → `api.FieldError` und Problem 400 mit `field` `key`, `detail` beginnt mit `key: ` und nennt den reservierten Namensraum (GLO-13); leerer Schlüssel → `key`; unbekannter Typ → `data_type`; unbekanntes Referenzziel → `reference_target`; ungültiger Operator und Prädikat ohne Feld → `conditional`. Zusätzlich `TestAttributeDefinitionsAgainstPostgres` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` grün (`POST /attribute-definitions` mit `_overrides` → 400 `"field":"key"`).
+- **Kodierender Test:** backend/internal/citype/attribute_definition_test.go (`TestAttributeDefinitionReservedKeyNamesKeyField`); auf `e5c2d86` rot (ausgeführt auf der Basis `bf51da7` mit den alten Produktionsdateien `fieldmeta.go` und `attribute_definition.go` aus `HEAD`, beide identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestAttributeDefinitionReservedKeyNamesKeyField
+      attribute_definition_test.go:51: conditional field: field "data_type" (conditional predicate requires a field), want "conditional"
+      attribute_definition_test.go:66: conditional field: 400 field="data_type" detail="data_type: conditional predicate requires a field", want 400 field "conditional"
+      attribute_definition_test.go:51: conditional op: field "data_type" (unsupported predicate operator "nope"), want "conditional"
+      attribute_definition_test.go:66: conditional op: 400 field="data_type" detail="data_type: unsupported predicate operator \"nope\"", want 400 field "conditional"
+      attribute_definition_test.go:51: reference target: field "data_type" (unsupported reference target "nope"), want "reference_target"
+      attribute_definition_test.go:66: reference target: 400 field="data_type" detail="data_type: unsupported reference target \"nope\"", want 400 field "reference_target"
+      attribute_definition_test.go:51: reserved _instance: field "data_type" (field name "_instance" is a reserved namespace (GLO-13)), want "key"
+      attribute_definition_test.go:66: reserved _instance: 400 field="data_type" detail="data_type: field name \"_instance\" is a reserved namespace (GLO-13)", want 400 field "key"
+      attribute_definition_test.go:51: reserved _observed: field "data_type" (field name "_observed" is a reserved namespace (GLO-13)), want "key"
+      attribute_definition_test.go:66: reserved _observed: 400 field="data_type" detail="data_type: field name \"_observed\" is a reserved namespace (GLO-13)", want 400 field "key"
+      attribute_definition_test.go:51: reserved _overrides: field "data_type" (field name "_overrides" is a reserved namespace (GLO-13)), want "key"
+      attribute_definition_test.go:66: reserved _overrides: 400 field="data_type" detail="data_type: field name \"_overrides\" is a reserved namespace (GLO-13)", want 400 field "key"
+      attribute_definition_test.go:51: reserved _provenance: field "data_type" (field name "_provenance" is a reserved namespace (GLO-13)), want "key"
+      attribute_definition_test.go:66: reserved _provenance: 400 field="data_type" detail="data_type: field name \"_provenance\" is a reserved namespace (GLO-13)", want 400 field "key"
+  --- FAIL: TestAttributeDefinitionReservedKeyNamesKeyField (0.00s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype	0.011s
+  FAIL
+  ```
+
+<a id="f-411"></a>
+### F-411 (P3) – Kanten-Cleanup löscht Discovery-Kanten, die während des Laufs verifiziert oder bestätigt wurden: 70–99 % der mit 200 beantworteten Verifikationen gehen verloren
+
+- **Gefunden in:** K7-Wiederholungsprüfung r2-b4 (Verifier, Probe `TestVR2B4CleanupVsVerify` auf `7845e9d`, ohne Hook und ohne gehaltene Sperre); `backend/internal/relationship/cleanup.go` ist dort identisch mit `e5c2d86`; kodierender Test von WP-682 · **Betroffene Anforderungen:** TOP-02, REL-08 (WP-159 AK1) · **Komponente:** backend/internal/relationship/cleanup.go (`Cleanup.RunOrg`, Zeile 170 auf `e5c2d86`: Kandidaten in einem SELECT ohne Sperre gelesen, Zeile 190–209 mit `r.verification_state <> 'verified'`; Zeile 234 `DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND source = 'discovery'` ohne erneute Prüfung von Verifikation und Frist) · **Quelle:** `k7/ver/r2-b4/evidence/k-reaudit-2/WP-159/verify-probe-relationship-source.go.txt`, `…/WP-159/verify-probe-cleanup-vs-verify.log`; kodierender Test von WP-682 (`k7/ad-679/red-682.log`)
+- **Reproduktion:** 200 Discovery-Kanten, unverifiziert, zuletzt vor 8 Tagen bestätigt (abgelaufen). Acht Worker verifizieren sie über `relationship.PGRepository.Update` (Schreibweg von `PATCH /api/v1/relationships/{id}` mit `"verification_state":"verified"`), gleichzeitig läuft `Cleanup.RunOrg`. In der Probe antworteten 91, 143 bzw. 179 Verifikationen erfolgreich; davon löschte der Cleanup danach 74, 142 bzw. 162 (81–99 %), jeweils mit `relationship.removed`. Deterministisch im kodierenden Test: eine offene Transaktion verifiziert eine abgelaufene Kante und bestätigt eine zweite neu; der Cleanup hat beide als Kandidaten gelesen und wartet auf die Zeilensperre; nach dem Commit löscht er beide (`{Stale:3}` statt 1).
+- **Soll:** TOP-02: „Unbestätigte Discovery-Kanten werden nach max(7 Tage, 5× Scope-Intervall) entfernt, mit Event“; REL-08/WP-159 AK1: verifizierte Kanten entfernt der Cleanup nie. Maßgeblich ist der Zustand der Kante beim Löschen: Eine während des Laufs verifizierte oder von Discovery neu bestätigte Kante bleibt, ohne `relationship.removed`; eine mit 200 beantwortete Verifikation wird nicht nachträglich zurückgenommen. Eine Verifikation, die auf eine bereits gelöschte Kante trifft, antwortet 404.
+- **Ist:** Der Cleanup entscheidet auf dem Stand seines SELECT; das DELETE prüft nur Id, Organisation und Quelle. Eine dazwischen verifizierte oder bestätigte Kante wird gelöscht und als `relationship.removed` (`reason` `stale`) gemeldet; der Nutzer sah zuvor 200 mit `verification_state` `verified`.
+- **Nutzerwirkung:** Eine vom Nutzer ausdrücklich bestätigte Topologiekante verschwindet kurz nach der erfolgreichen Verifikation; der Nutzer muss sie manuell neu anlegen und weiß nicht, warum sie fehlt. Ebenso geht eine von Discovery gerade wieder gesehene Kante verloren und erscheint erst beim nächsten Sweep wieder. Das Fenster ist ein Cleanup-Lauf (stündlich), betroffen sind nur abgelaufene, unverifizierte Discovery-Kanten.
+- **Ursache (belegt):** WP-159 hat den Cleanup als „lesen, dann einzeln löschen“ gebaut und die Kandidatenbedingung (`verification_state <> 'verified'`, Frist) nur im SELECT geprüft; unter READ COMMITTED sieht das spätere DELETE die inzwischen festgeschriebene Version, prüft aber keine Bedingung, die sie ausschließt. Kein Test verifizierte während eines Laufs.
+- **Empfehlung:** Das DELETE prüft auf der aktuellen Zeile erneut: `AND verification_state <> 'verified'` und für abgelaufene Kanten `AND COALESCE(last_confirmed_at, last_seen_at, created_at) < $deadline` (`now − max(7 Tage, 5 × Intervall)`; für unterdrückte Kanten keine Frist), `RETURNING` des Bestätigungszeitpunkts für das Event. Unter READ COMMITTED wartet das DELETE auf einen gleichzeitigen Schreiber der Zeile und wertet die Bedingung auf dessen festgeschriebener Version neu aus. Trifft das DELETE keine Zeile, bleibt die Kante, es entsteht kein Event und kein Zähler (Log `discovery edge kept`). Alternative `FOR UPDATE SKIP LOCKED` im SELECT ist nicht nötig. `api/openapi.yaml` beschreibt das Verhalten an `Relationship.source`.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestCleanupKeepsEdgeVerifiedDuringRun$' ./internal/relationship/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: (1) offene Transaktion verifiziert Kante A und bestätigt Kante B neu, der Cleanup wartet nachweislich auf die Zeilensperre (`pg_stat_activity`, `wait_event_type` `Lock`); nach dem Commit bestehen A und B ohne `relationship.removed`, die unberührte abgelaufene Kante C ist mit genau einem Event gelöscht, Ergebnis `{Stale:1}`. (2) In zwei Runden mit je 200 abgelaufenen Kanten und acht verifizierenden Workern ist keine Kante gelöscht, deren Verifikation erfolgreich antwortete; jede Kante ist entweder verifiziert oder mit genau einem Event entfernt, `Stale` = Zahl der gelöschten. Zusätzlich `go test -count=1 ./internal/relationship/` grün.
+- **Kodierender Test:** backend/internal/relationship/cleanup_race_integration_test.go (`TestCleanupKeepsEdgeVerifiedDuringRun`, PostgreSQL als `reticora_app`); auf `e5c2d86` rot (ausgeführt auf der Basis `bf51da7` mit der alten Produktionsdatei `cleanup.go` aus `HEAD`, identisch mit `e5c2d86`; Logzeilen `discovery edge removed` ausgeblendet):
+
+  ```text
+  === RUN   TestCleanupKeepsEdgeVerifiedDuringRun
+  === RUN   TestCleanupKeepsEdgeVerifiedDuringRun/verified_and_re-confirmed_while_the_run_waits
+      cleanup_race_integration_test.go:111: edge verified during the run was deleted by the cleanup
+      cleanup_race_integration_test.go:114: edge verified during the run: 1 relationship.removed events, want 0
+      cleanup_race_integration_test.go:111: edge re-confirmed during the run was deleted by the cleanup
+      cleanup_race_integration_test.go:114: edge re-confirmed during the run: 1 relationship.removed events, want 0
+      cleanup_race_integration_test.go:121: cleanup result {Stale:3 Suppressed:0}, want Stale 1 (only the untouched edge)
+  === RUN   TestCleanupKeepsEdgeVerifiedDuringRun/verifications_answered_OK_during_a_run_are_kept
+      cleanup_race_integration_test.go:179: round 0: cleanup {Stale:194 Suppressed:0}; verifications answered OK 146 of 200; deleted 194; of the verified ones deleted 140
+      cleanup_race_integration_test.go:181: round 0: 140 of 146 edges whose verification answered OK were deleted by the cleanup
+      cleanup_race_integration_test.go:184: round 0: verified 146 + deleted 194 of 200, events 194, result {Stale:194 Suppressed:0}: every edge is either verified or removed with one event
+      cleanup_race_integration_test.go:179: round 1: cleanup {Stale:193 Suppressed:0}; verifications answered OK 127 of 200; deleted 193; of the verified ones deleted 120
+      cleanup_race_integration_test.go:181: round 1: 120 of 127 edges whose verification answered OK were deleted by the cleanup
+      cleanup_race_integration_test.go:184: round 1: verified 127 + deleted 193 of 200, events 193, result {Stale:193 Suppressed:0}: every edge is either verified or removed with one event
+  --- FAIL: TestCleanupKeepsEdgeVerifiedDuringRun (5.31s)
+      --- FAIL: TestCleanupKeepsEdgeVerifiedDuringRun/verified_and_re-confirmed_while_the_run_waits (0.13s)
+      --- FAIL: TestCleanupKeepsEdgeVerifiedDuringRun/verifications_answered_OK_during_a_run_are_kept (4.01s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship	5.491s
+  FAIL
+  ```
+
+<a id="f-414"></a>
+### F-414 (P3) – Ablehnung eines Kontingents nennt eingeschränkten Principals den Bestand der ganzen Organisation („N of L in use“)
+
+- **Gefunden in:** Härtungshinweis des Agenten von WP-674 (`22e24ff`, Entscheidungsbedarf von WP-674); kodierender Test von WP-685 · **Betroffene Anforderungen:** ENT-03, TEN-09 (verknüpft WP-072, WP-472, WP-670, WP-674; F-403) · **Komponente:** backend/internal/entitlement/entitlement.go (`LimitExceededError.Error`, Zeile 262 auf `e5c2d86`: `entitlement limit for %q exceeded: %d of %d in use`; `Service.AllowCreate`, Zeile 502: der Fehler trägt den übergebenen Bestand ohne Rücksicht auf den Scope des Aufrufers); die Zähler der Aufrufer zählen die ganze Organisation: `max_cis` seit WP-674 (`ci.CountActive`), `max_users` (`app_user` ohne Client-Spalte), `max_api_keys` (`api_key` mit reiner Org-Policy), `max_collectors` (`discovery.PGRepository.CountCollectors` unter `OrgWideScope`) · **Quelle:** Entscheidungsbedarf im Planblock von WP-674 (`docs/plan/g1-korrektur/implementierungsplan.md`); kodierender Test von WP-685 (`k7/ad-679/red-685.log`)
+- **Reproduktion:** Produktionsrouter mit PG-Repositories, Durchsetzung an. Ein `org_admin`, dessen Sitzung auf Client 1 beschränkt ist, und derselbe Nutzer org-weit. Org-weit 5 CIs und 5 Collectors in Client 2, 5 API-Keys und 5 weitere Nutzer anlegen; die Limits `max_cis`, `max_users`, `max_api_keys`, `max_collectors` auf den Bestand setzen (5, 6, 5, 5). Der Client-1-Principal sieht in `GET /cis` und `GET /collectors` keinen Eintrag von Client 2. `POST /api/v1/cis` (Client 1) als Client-1-Principal → 403 `entitlement-limit` mit `detail` `entitlement limit for "max_cis" exceeded: 5 of 5 in use`; ebenso `POST /users` (`6 of 6`), `POST /api-keys` (`5 of 5`) und `POST /collectors` (`5 of 5`).
+- **Soll:** ENT-03: Limits werden durchgesetzt, die Ablehnung ist 403 `entitlement-limit`. TEN-09/E-08: ein auf Clients oder Sites beschränkter Principal erfährt keine Daten anderer Clients, auch keine Zähler. Die Zahl N (Bestand der Organisation) erscheint nur einem Aufrufer mit org-weitem Client- und Site-Scope; ein eingeschränkter Aufrufer und ein Kontext ohne Principal (Einladung, Erstanmeldung, Enrollment, Ingest) erhalten „the limit of the plan is reached“. Da bei der Ablehnung meist N = L gilt, entfällt für sie auch L.
+- **Ist:** Jede Ablehnung nennt „N of L in use“ mit dem Bestand der ganzen Organisation, auch dem auf Client 1 beschränkten Principal.
+- **Nutzerwirkung:** Ein Techniker oder Administrator eines Kunden (MSP) erfährt bei einer Ablehnung die Zahl der aktiven CIs, Nutzer, API-Keys und Collectors aller Kunden der Organisation; nach einem Downgrade unter den Bestand auch, wie weit dieser über dem Limit liegt. Es werden keine Objekte genannt; das Leck ist auf Zähler beschränkt.
+- **Ursache (belegt):** `LimitExceededError` wurde mit WP-072 für org-weite Administratoren entworfen; mit WP-674 zählt `max_cis` bewusst die ganze Organisation (F-403), die anderen drei Kontingente zählten schon vorher org-weit. Der Text des Fehlers kennt den Scope des Aufrufers nicht. WP-674 hat das als Entscheidungsbedarf benannt, aber nicht umgesetzt.
+- **Empfehlung:** `AllowCreate` bestimmt aus dem Tenant-Scope des Kontexts (`database.TenantScopeFromContext`), ob der Aufrufer den Bestand erfahren darf: nur ein Principal (`UserID` gesetzt) mit org-weitem Client- und Site-Scope. Sonst setzt es `LimitExceededError.HideCurrent`, `Error()` lautet dann `entitlement limit for "<quota>" exceeded: the limit of the plan is reached`; `Limit` und `Current` bleiben als Felder für die Aufrufer im Code (Ingest-Spuren, `unlicensed_ci`). Da die Entscheidung beim Entstehen des Fehlers fällt, gilt sie für REST, GraphQL, Jobs (Scope des Erzeugers) und Logs gleich. `api/openapi.yaml` (spec-first) beschreibt die Regel an der Antwort `EntitlementLimit`.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestEntitlementLimitDetailHidesOrgCountFromScopedCallers$' ./internal/server/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: an `max_cis`, `max_users`, `max_api_keys` und `max_collectors` (je am Bestand der Organisation) erhält der Client-1-Principal 403 `entitlement-limit` mit genau `entitlement limit for "<quota>" exceeded: the limit of the plan is reached` (ohne die Zahl), der org-weite Principal `… exceeded: N of N in use`; nichts angelegt. Zusätzlich `go test -count=1 -run '^TestLimitExceededDetailFollowsCallerScope$' ./internal/entitlement/` PASS: org-weiter Principal mit Zahlen; Client-Scope, Site-Scope, System-Scope ohne Nutzer und Kontext ohne Scope ohne Zahlen; `Limit`/`Current` in allen Fällen gesetzt.
+- **Kodierender Test:** backend/internal/server/t2_entitlement_gates_test.go (`TestEntitlementLimitDetailHidesOrgCountFromScopedCallers`, Produktionsrouter mit PG-Repositories); rot auf der Basis `bf51da7` mit der alten Produktionsdatei `entitlement.go` aus `HEAD` (identisch mit `e5c2d86`; auf `e5c2d86` selbst zählte `max_cis` noch nur die sichtbaren CIs, F-403, die drei anderen Kontingente verhalten sich gleich):
+
+  ```text
+  === RUN   TestEntitlementLimitDetailHidesOrgCountFromScopedCallers
+      t2_entitlement_gates_test.go:1158: client-1 caller POST /api/v1/cis at max_cis 5: detail "entitlement limit for \"max_cis\" exceeded: 5 of 5 in use", want "entitlement limit for \"max_cis\" exceeded: the limit of the plan is reached"
+      t2_entitlement_gates_test.go:1161: client-1 caller POST /api/v1/cis: detail "entitlement limit for \"max_cis\" exceeded: 5 of 5 in use" names the organization's count 5
+      t2_entitlement_gates_test.go:1158: client-1 caller POST /api/v1/users at max_users 6: detail "entitlement limit for \"max_users\" exceeded: 6 of 6 in use", want "entitlement limit for \"max_users\" exceeded: the limit of the plan is reached"
+      t2_entitlement_gates_test.go:1161: client-1 caller POST /api/v1/users: detail "entitlement limit for \"max_users\" exceeded: 6 of 6 in use" names the organization's count 6
+      t2_entitlement_gates_test.go:1158: client-1 caller POST /api/v1/api-keys at max_api_keys 5: detail "entitlement limit for \"max_api_keys\" exceeded: 5 of 5 in use", want "entitlement limit for \"max_api_keys\" exceeded: the limit of the plan is reached"
+      t2_entitlement_gates_test.go:1161: client-1 caller POST /api/v1/api-keys: detail "entitlement limit for \"max_api_keys\" exceeded: 5 of 5 in use" names the organization's count 5
+      t2_entitlement_gates_test.go:1158: client-1 caller POST /api/v1/collectors at max_collectors 5: detail "entitlement limit for \"max_collectors\" exceeded: 5 of 5 in use", want "entitlement limit for \"max_collectors\" exceeded: the limit of the plan is reached"
+      t2_entitlement_gates_test.go:1161: client-1 caller POST /api/v1/collectors: detail "entitlement limit for \"max_collectors\" exceeded: 5 of 5 in use" names the organization's count 5
+  --- FAIL: TestEntitlementLimitDetailHidesOrgCountFromScopedCallers (0.74s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server	0.880s
+  FAIL
+  ```
+
+<a id="f-415"></a>
+### F-415 (P3) – Rack-Montage mit explizitem `height_u` 0 wird als 1 HE gespeichert (201/200), leeres `face` als `front`
+
+- **Gefunden in:** K7-Wiederholungsprüfung r2-b5 (Verifier, Probe `TestVerifyK7RackHeightZero` auf `22e24ff`), bestätigt durch einen zweiten Agenten; `backend/internal/rack/handler.go` und `backend/internal/rack/model.go` sind dort identisch mit `e5c2d86`; kodierender Test von WP-686 · **Betroffene Anforderungen:** RCK-01, RCK-02, API-03 (WP-175) · **Komponente:** backend/internal/rack/handler.go (`PutMountRequest`, Zeile 296 auf `e5c2d86`: `HeightU int` mit `omitempty`, ein fehlendes Feld und 0 sind nicht unterscheidbar; `PutMount`, Zeile 313–318: der Nullwert von `height_u` wird 1, ein leeres `face` wird `front`; `CreateMount`, Zeile 419–426, dasselbe für `POST /racks/{id}/mounts` und `POST /mounts`), backend/internal/rack/model.go (`CreateMountRequest`, Zeile 66) · **Quelle:** `k7/ver/r2-b5/evidence/k-reaudit-2/WP-175/verify-probe-rack-height-zero.go.txt`, `…/WP-175/verify-probe-rack-height-zero.log`; kodierender Test von WP-686 (`k7/ad-679/red-686.log`)
+- **Reproduktion:** `PUT /api/v1/racks/{id}/mounts/{ci_id}` mit `{"position_u":1,"height_u":0}` → 201, gespeichert 1 HE `front`; `{"position_u":1,"height_u":-1}` → 400 `height_u must be >= 1` ohne `field`. Eine bestehende 3-HE-Montage mit `{"position_u":6,"height_u":0}` verschieben → 200, die Montage hat danach 1 HE. `{"position_u":9,"face":""}` → 201 mit `front`. Im kodierenden Test zusätzlich: die veralteten `POST /racks/{id}/mounts` und `POST /mounts` mit `height_u` 0 bzw. `face` `""` laufen in die Belegungsprüfung (409 statt 400), `PATCH /rack-mounts/{id}` mit 0 bzw. `""` → 400 ohne `field`.
+- **Soll:** RCK-02/WP-175: `PUT mounts/{ci_id}` mit dem Fehlervertrag der Spezifikation: `PutRackMountRequest.height_u` `minimum: 1`, `default: 1`; `face` Enum `front`, `rear`, `both`, `default: front`. Ein weggelassenes Feld erhält die Vorgabe; ein expliziter Wert außerhalb von Minimum und Enum (0, -1, `""`) → 400 mit `field` `height_u` bzw. `face` (API-03), nichts gespeichert, eine bestehende Montage unverändert. RCK-01: die Belegung entspricht den gesendeten Höhen.
+- **Ist:** Ein explizites `height_u` 0 und ein leeres `face` werden als fehlend behandelt und durch die Vorgabe ersetzt: neue Montagen werden mit 1 HE bzw. `front` angelegt, bestehende auf 1 HE verkleinert. `-1` wird erst im Repository abgelehnt, ohne Feldangabe.
+- **Nutzerwirkung:** Ein Client, der die Höhe aus einem leeren oder ungültigen Formularfeld als 0 sendet, erhält eine Erfolgsmeldung, und die Montage belegt eine falsche Höhe; eine 3-HE-Montage schrumpft unbemerkt auf 1 HE, die frei gewordenen Einheiten erscheinen als frei und können doppelt belegt werden. Die Fehlermeldung bei -1 nennt kein Feld.
+- **Ursache (belegt):** WP-175 hat `PutMountRequest` mit Wertfeldern und `omitempty` gebaut und die Vorgabe am Nullwert festgemacht, wie es `CreateMountRequest` schon tat. Der Test der Route prüfte nur weggelassene Felder und Konflikte; die Router-Tests validieren Request-Bodies nicht gegen die OpenAPI-Schemas.
+- **Empfehlung:** `height_u` und `face` in `PutMountRequest` und `CreateMountRequest` als Zeiger; eine gemeinsame Prüfung (`mountDefaults`) setzt für weggelassene Felder die Vorgabe und lehnt explizite Werte außerhalb der Spezifikation mit `api.FieldError` (400, `field`) ab. Sie gilt für `PUT /racks/{id}/mounts/{ci_id}`, die veralteten POST-Wege und `PATCH /rack-mounts/{id}`. `api/openapi.yaml` beschreibt die Unterscheidung an `PutRackMountRequest` und `CreateRackMountRequest`.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestRackLayoutAgainstPostgres$' ./internal/rack/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS, darin der Subtest „explicit height_u 0 and empty face are 400 and store nothing“: neue Montage mit `height_u` 0, -1 und `face` `""`, Verschiebung der 2-HE-Montage mit 0 und `""`, `POST /racks/{id}/mounts` mit 0, `POST /mounts` mit `""`, `PATCH /rack-mounts/{id}` mit 0 und `""` → jeweils 400 mit dem Feld; danach keine Montage von CI 3, die Montage von CI 1 unverändert U7, 2 HE, `front`; ohne `height_u` und `face` → 201 mit 1 HE `front`. Die übrigen Subtests (Layout, Konflikte, Deprecation) bleiben grün.
+- **Kodierender Test:** backend/internal/rack/layout_integration_test.go (`TestRackLayoutAgainstPostgres`, Subtest „explicit height_u 0 and empty face are 400 and store nothing“, Handler mit PG-Repository als `reticora_app`); auf `e5c2d86` rot (ausgeführt auf der Basis `bf51da7` mit den alten Produktionsdateien `handler.go` und `model.go` aus `HEAD`, identisch mit `e5c2d86`; Antwortkörper gekürzt; der Folge-Subtest scheitert, weil die verkleinerte Montage U8 frei gibt):
+
+  ```text
+  === RUN   TestRackLayoutAgainstPostgres/explicit_height_u_0_and_empty_face_are_400_and_store_nothing
+      layout_integration_test.go:191: new mount with height_u 0: PUT {"position_u":1,"height_u":0} = 201 {"id":"6f4432d4-…","position_u":1,"height_u":1,"face":"front",…}, want 400 with field height_u
+      layout_integration_test.go:191: new mount with height_u -1: PUT {"position_u":1,"height_u":-1} = 400 {"detail":"height_u must be >= 1","status":400,"title":"Bad Request",…}, want 400 with field height_u
+      layout_integration_test.go:191: new mount with empty face: PUT {"position_u":1,"face":""} = 200 {"id":"6f4432d4-…","position_u":1,"height_u":1,"face":"front",…}, want 400 with field face
+      layout_integration_test.go:191: move of the 2U mount with height_u 0: PUT {"position_u":7,"height_u":0} = 200 {"id":"924e9b74-…","position_u":7,"height_u":1,"face":"front",…}, want 400 with field height_u
+      layout_integration_test.go:191: move of the 2U mount with empty face: PUT {"position_u":7,"face":""} = 200 {"id":"924e9b74-…","position_u":7,"height_u":1,"face":"front",…}, want 400 with field face
+      layout_integration_test.go:191: deprecated POST with height_u 0: POST {"ci_id":"c0dedba0-…-000000001003","position_u":1,"height_u":0} = 409 {"detail":"overlaps mount at position 1U (front)",…}, want 400 with field height_u
+      layout_integration_test.go:191: deprecated POST with empty face: POST {"rack_id":"4230c478-…","ci_id":"c0dedba0-…-000000001003","position_u":1,"face":""} = 409 {"detail":"overlaps mount at position 1U (front)",…}, want 400 with field face
+      layout_integration_test.go:191: PATCH with height_u 0: PATCH {"height_u":0} = 400 {"detail":"height_u must be >= 1",…}, want 400 with field height_u
+      layout_integration_test.go:191: PATCH with empty face: PATCH {"face":""} = 400 {"detail":"invalid face",…}, want 400 with field face
+      layout_integration_test.go:195: ci 3 has 1 mounts after the refused writes, want 0
+      layout_integration_test.go:201: ci 1 after the refused writes: U7 1U front (<nil>), want U7 2U front
+      layout_integration_test.go:207: PUT without height_u and face = 200 {…"height_u":1,"face":"front",…}, want 201 with 1U front
+  === RUN   TestRackLayoutAgainstPostgres/filled_layout_names_CI_and_type_under_RLS
+      layout_integration_test.go:264: free front [1 2 4 5 6 8 9 10] holds the occupied unit 8
+  --- FAIL: TestRackLayoutAgainstPostgres (1.57s)
+      --- PASS: TestRackLayoutAgainstPostgres/empty_rack (0.07s)
+      --- PASS: TestRackLayoutAgainstPostgres/PUT_mounts_and_moves (0.23s)
+      --- PASS: TestRackLayoutAgainstPostgres/PUT_conflicts_are_409_and_store_nothing (0.02s)
+      --- FAIL: TestRackLayoutAgainstPostgres/explicit_height_u_0_and_empty_face_are_400_and_store_nothing (0.08s)
+      --- FAIL: TestRackLayoutAgainstPostgres/filled_layout_names_CI_and_type_under_RLS (0.03s)
+      --- PASS: TestRackLayoutAgainstPostgres/old_rack_paths_carry_Deprecation_and_Sunset (0.16s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack	1.766s
+  FAIL
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

@@ -14417,6 +14417,11 @@ components:
     PutRackMountRequest:
       type: object
       required: [position_u]
+      description: >-
+        An omitted height_u or face takes its default; an explicit value
+        outside minimum or enum (height_u 0 or below, face "") is 400 with
+        field height_u or face, nothing is stored and an existing mount stays
+        unchanged (F-415).
       properties:
         position_u: { type: integer, minimum: 1 }
         height_u: { type: integer, minimum: 1, default: 1 }
@@ -19967,6 +19972,10 @@ components:
     CreateRackMountRequest:
       type: object
       required: [ci_id, position_u]
+      description: >-
+        An omitted height_u or face takes its default (1, front); an explicit
+        value outside minimum or enum (height_u 0 or below, face "") is 400
+        with field height_u or face and nothing is stored (F-415).
       properties:
         ci_id:
           type: string
