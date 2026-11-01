@@ -1143,3 +1143,6 @@ UI-18;[B];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
 TEN-05;[B];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
 TEN-09;[Q];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
 UI-18;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-698
+API-08;[B];C;backend/internal/ci/bulk_test.go;WP-690
+BLK-01;[B];C;backend/internal/ci/bulk_test.go;WP-690
+API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-690

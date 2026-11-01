@@ -33,8 +33,8 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | P0 | 1 |
 | P1 | 5 |
 | P2 | 28 |
-| P3 | 31 |
-| **Summe** | **65** |
+| P3 | 32 |
+| **Summe** | **66** |
 
 ## Übersicht
 
@@ -105,6 +105,7 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
 | [F-415](#f-415) | P3 | Rack-Montage mit explizitem `height_u` 0 wird als 1 HE gespeichert (201/200), leeres `face` als `front` | WP-175 (K7) | belegt | backend/internal/rack/layout_integration_test.go | WP-686 |
 | [F-418](#f-418) | P2 | Ein auf einen Client gebundener Inhaber von `notification:manage` verwaltet die Benachrichtigungskanäle der Organisation und liest alle Zustellungen; ein von ihm angelegter Webhook-Kanal erhält die Benachrichtigungen anderer Clients mit Name und E-Mail fremder Empfänger | Verifier r3-b4 (WP-138/139) auf `bf51da7` | belegt | backend/internal/server/notification_channel_scope_integration_test.go | WP-689 |
 | [F-427](#f-427) | P2 | Raumlayout behält und akzeptiert Schlüssel von CIs eines anderen Clients: client-beschränkte Nutzer lesen deren ID und Position, können den Raum über die UI nicht mehr positionieren (422), und ein direkter PATCH löscht die fremde Position | Verifier r3-b5 (WP-193) auf `7cd63e0` | belegt | backend/internal/tenantapi/room_layout_integration_test.go | WP-698 |
+| [F-419](#f-419) | P3 | Bulk-Operation entfernt doppelte IDs nur bei identischer Schreibweise: dieselbe UUID in anderer Groß-/Kleinschreibung wird zweimal geschrieben und zweimal gemeldet | Verifier r3-b4 (WP-181) auf `bf51da7` | belegt | backend/internal/ci/bulk_test.go | WP-690 |
 
 <a id="f-355"></a>
 ### F-355 (P2) – Graue Sekundärtexte ohne Dark-Variante (und `text-gray-400` im Inventar, helles Thema) unterschreiten den WCAG-AA-Kontrast
@@ -1697,6 +1698,46 @@ Defekttests: Go-Defekttests tragen das Build-Tag `auditdefect` und stehen in `te
    FAIL  src/pages/RoomPlanPage.test.tsx > RoomPlanPage saving (F-342) > reloads room and objects when a layout key is no object of the room any more (F-427)
   TestingLibraryElementError: Unable to find an element with the text: /nicht mehr zugeordnet|no longer assigned/.
         Tests  1 failed | 9 passed (10)
+  ```
+
+<a id="f-419"></a>
+### F-419 (P3) – Bulk-Operation entfernt doppelte IDs nur bei identischer Schreibweise: dieselbe UUID in anderer Groß-/Kleinschreibung wird zweimal geschrieben und zweimal gemeldet
+
+- **Gefunden in:** K7-Wiederholungsprüfung r3-b4 (Verifier, Probe `TestVR3B4K2BulkCaseDuplicates` auf `bf51da7`), Wiederholungsprüfung von WP-181; `backend/internal/ci/bulk.go` ist dort identisch mit `e5c2d86`; kodierender Test von WP-690 · **Betroffene Anforderungen:** API-08, BLK-01 (WP-181), API-07 (Version steigt nur mit einer Änderung) · **Komponente:** backend/internal/ci/bulk.go (`validateBulk`, Zeile 136–140 auf `e5c2d86`: `seen[id]` auf der rohen, nur getrimmten Zeichenkette; `api.IsUUID` akzeptiert Groß- und Kleinbuchstaben, PostgreSQL vergleicht `::uuid` unabhängig von der Schreibweise) · **Quelle:** `k7/ver/r3-b4/k-reaudit-3/WP-181/verify-probe-k1-k2.log`, Probe `k7/ver/r3-b4/k-reaudit-3/WP-137/verify-probe-k1-k2.go.txt`; kodierender Test von WP-690 (`k7/ad-690/red-690.log`, `k7/ad-690/red-690-pg.log`)
+- **Reproduktion:** CI mit der Id `c0dee8a0-…-000000001002` (Version 1, keine `ci_change`-Zeile). `POST /api/v1/cis/bulk {"action":"set_status","status":"inactive","ids":[id, UPPER(id), Mixed(id)]}` → 200 `{"total":2,"succeeded":2,"failed":0,"items":[{"id":"c0dee8a0-…","result":"ok"},{"id":"C0DEE8A0-…","result":"ok"}]}`; danach `ci.version` 3 statt 2 und eine `ci_change`-Zeile; die zweite Schreiboperation erhöht die Version ohne Änderung. Kontrolle: `ids:[id, id]` → `total` 1.
+- **Soll:** API-08/BLK-01: Ergebnis je ID; eine ID, die mehrfach vorkommt, zählt einmal. Eine UUID ist dieselbe ID unabhängig von der Schreibweise (RFC 4122/9562; PostgreSQL und alle Einzelwege `GET`/`PATCH /cis/{id}` behandeln sie so). Das CI wird einmal geändert (Version +1, eine Historienzeile, API-07) und einmal gemeldet, unter der kanonischen Kleinschreibung.
+- **Ist:** `validateBulk` entfernt nur Duplikate gleicher Schreibweise. Jede Schreibvariante wird als eigene ID angewendet und gemeldet: `total` und `succeeded` zählen dasselbe CI mehrfach, die Version steigt je Variante, ein Bulk-Job ab 100 IDs schreibt jedes CI so oft, wie es Varianten gibt.
+- **Nutzerwirkung:** Der Teilfehlerbericht zählt CIs doppelt („2 erfolgreich“ für ein CI) und nennt die ID in der Schreibweise des Aufrufers. Jede zusätzliche Schreibweise erhöht die Version des CI: ein anderer Client mit der vorherigen Version erhält danach 409/412, obwohl sich nichts geändert hat. Das 500-ID-Limit kann mit Varianten derselben CIs ausgeschöpft werden.
+- **Ursache (belegt):** WP-181/WP-517 haben die Duplikatprüfung vor der UUID-Prüfung auf der rohen Zeichenkette gebaut; die Tests nutzten nur kleingeschriebene IDs (`TestBulkStatusReportsEachID` mit `ids[0]` zweimal).
+- **Empfehlung:** In `validateBulk` jede gültige UUID vor der Duplikatprüfung in die kanonische Kleinschreibung bringen; Bericht und Job-Parameter tragen diese Form. Ungültige IDs bleiben unverändert (400 „invalid CI id“ je ID, F-327). `api/openapi.yaml` beschreibt die Regel an `POST /cis/bulk`.
+- **Retest (verbindlich):** `cd backend && go test -count=1 -v -run '^TestBulkDeduplicatesUUIDCase$' ./internal/ci/` PASS: synchron `[id0, UPPER(id0), Mixed(id0), UPPER(id1)]` → `total` 2, `succeeded` 2, Einträge `id0`, `id1` in Kleinschreibung, jedes CI genau einmal geschrieben (Version 2, manuelle Änderung des Aufrufers); als Job 100 IDs in Klein- und Großschreibung (200 Einträge) → Bericht mit 100 Einträgen, jedes CI einmal geschrieben. Dazu `go test -count=1 -v -run '^TestBulkAgainstPostgres$' ./internal/ci/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL` PASS: `[own1, UPPER(own1)]` als Client-1-Principal → ein Eintrag `own1`, Version und `ci_change` je +1.
+- **Kodierender Test:** backend/internal/ci/bulk_test.go (`TestBulkDeduplicatesUUIDCase`, Repository mit Hex-IDs, das IDs wie PostgreSQL unabhängig von der Schreibweise findet) und backend/internal/ci/bulk_integration_test.go (`TestBulkAgainstPostgres`, letzter Abschnitt, PG-Repository als `reticora_app`); auf `e5c2d86` rot (ausgeführt auf der Basis `7cd63e0` mit der alten Produktionsdatei `bulk.go` aus `HEAD`, identisch mit `e5c2d86`):
+
+  ```text
+  === RUN   TestBulkDeduplicatesUUIDCase
+  === RUN   TestBulkDeduplicatesUUIDCase/synchronous
+      bulk_test.go:268: report totals: total 4, succeeded 4, failed 0, 4 items, want 2 ids once each
+      bulk_test.go:268: item 1: {ID:C0DEA000-ABCD-4EF0-8ABC-000000DEF000 Result:ok Code:200 Error:}, want ok for the canonical id c0dea001-abcd-4ef0-8abc-000000def001
+      bulk_test.go:268: c0dea000-abcd-4ef0-8abc-000000def000: written 3 times (version 4), want once (version 2)
+      bulk_test.go:268: 1 of 2 CIs not written exactly once
+  === RUN   TestBulkDeduplicatesUUIDCase/job
+      bulk_test.go:298: report totals: total 200, succeeded 200, failed 0, 200 items, want 100 ids once each
+      bulk_test.go:298: c0dea000-abcd-4ef0-8abc-000000def000: written 2 times (version 3), want once (version 2)
+      bulk_test.go:298: 100 of 100 CIs not written exactly once
+  --- FAIL: TestBulkDeduplicatesUUIDCase (0.02s)
+      --- FAIL: TestBulkDeduplicatesUUIDCase/synchronous (0.00s)
+      --- FAIL: TestBulkDeduplicatesUUIDCase/job (0.02s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci	0.172s
+  FAIL
+  === RUN   TestBulkAgainstPostgres
+      bulk_integration_test.go:124: bulk in two letter cases: {"action":"set_status","total":2,"succeeded":2,"failed":0,"items":[{"id":"c0deb9a0-0000-4000-8000-000000001001","result":"ok","code":200},{"id":"C0DEB9A0-0000-4000-8000-000000001001","result":"ok","code":200}]}
+          , want one item for c0deb9a0-0000-4000-8000-000000001001
+      bulk_integration_test.go:127: bulk in two letter cases: version 2 -> 4, changes 1 -> 2, want one write
+  --- FAIL: TestBulkAgainstPostgres (1.06s)
+  FAIL
+  FAIL	github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci	1.170s
+  FAIL
   ```
 
 ## Geprüfte Kandidaten ohne neuen Befund

@@ -1262,6 +1262,9 @@ paths:
         the change runs as a job of kind ci.bulk (JOB-04): 202 with the job,
         whose result is the report (GET /api/v1/jobs/{id}). More than 500
         ids is 422. Requires ci:write.
+        An id that occurs more than once counts once, also when it is the
+        same UUID in another letter case: the CI is changed once and the
+        report names it once, a UUID in its canonical lower-case form.
         Every change is a manual change like a PATCH of status (CI-04,
         OVR-01): the status is set also over an existing override and gets
         a protected override with the requesting user (for a job its
