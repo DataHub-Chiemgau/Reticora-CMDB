@@ -844,7 +844,7 @@ func loadRepository(t *testing.T) repository {
 			return cerr
 		})
 	}
-	if err := repo.catalog.AddCoverages(coverages...); err != nil {
+	if err = repo.catalog.AddCoverages(coverages...); err != nil {
 		t.Fatalf("coverages: %v", err)
 	}
 	repo.phase2 = coverages[len(coverages)-1]
@@ -1023,7 +1023,7 @@ func TestCoverageTagsMustAgreeBetweenFiles(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	catalog := testCatalog(t)
-	if err := catalog.AddCoverages(phase1, same); err != nil {
+	if err = catalog.AddCoverages(phase1, same); err != nil {
 		t.Errorf("';' and ',' must be equal: %v", err)
 	}
 	other, err := ParseCoverage("docs/plan/phase2/abdeckung.csv", strings.NewReader("id;tag;abschluss_wp\nAPI-01;[P2];WP-243\n"))
