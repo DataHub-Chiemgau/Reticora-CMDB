@@ -1192,3 +1192,5 @@ ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-244
 SRC-01;[B];B;backend/internal/search/plan_integration_test.go;WP-836
 NFR-02;[B];B;backend/internal/ci/attr_filter_plan_integration_test.go;WP-836
 REC-02;[B];B;backend/internal/tenant/rls/index_catalog_integration_test.go;WP-836
+RBA-05;[P2–P4], [A];B;backend/internal/permission/role_matrix_integration_test.go;WP-245
+RBA-06;[P2];B;backend/internal/permission/role_matrix_integration_test.go;WP-245

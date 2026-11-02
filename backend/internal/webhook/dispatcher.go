@@ -144,8 +144,13 @@ func EventReadPermission(event string) string {
 	switch prefix {
 	case "ci", "relationship", "ci_type", "ci_attribute", "lifecycle", "override":
 		return "ci:read"
-	case "asset", "inventory", "reservation", "composition":
+	case "asset", "inventory", "composition":
+		// inventory.movement carries asset and quantity movements of
+		// POST /stock-movements (asset:move) and stays with asset:read.
 		return "asset:read"
+	case "reservation":
+		// The read right of the reservations route (RBA-05, E-106).
+		return "reservation:read"
 	case "discovery", "reconciliation":
 		return "discovery:read"
 	}

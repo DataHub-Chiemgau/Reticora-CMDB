@@ -213,7 +213,8 @@ func TestEveryOperationRequiresItsExpectedPermission(t *testing.T) {
 }
 
 // TestSpecialActionsRequireTheirOwnPermission pins the corrections of WP-045
-// (RBA-04, RBA-06, MET-14, CI-10).
+// (RBA-04, RBA-06, MET-14, CI-10) and the special rights of WP-245 (RBA-06,
+// E-106).
 func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
 	for _, c := range []struct {
 		method, path string
@@ -237,6 +238,13 @@ func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
 		{http.MethodPost, "/api/v1/cis/{id}/contacts", identity.PermContactWrite},
 		{http.MethodPost, "/api/v1/cis/{id}/interfaces", identity.PermIPAMWrite},
 		{http.MethodGet, "/api/v1/cis/{id}/relationships", identity.PermRelationshipRead},
+		// RBA-06 special rights and the stocktake completion (E-106, WP-245).
+		{http.MethodPost, "/api/v1/relationship-types", identity.PermRelationshipTypeManage},
+		{http.MethodPatch, "/api/v1/relationship-types/{key}", identity.PermRelationshipTypeManage},
+		{http.MethodDelete, "/api/v1/relationship-types/{key}", identity.PermRelationshipTypeManage},
+		{http.MethodPost, "/api/v1/lifecycle-definitions", identity.PermLifecycleManage},
+		{http.MethodDelete, "/api/v1/lifecycle-definitions/{id}", identity.PermLifecycleManage},
+		{http.MethodPost, "/api/v1/stocktakes/{id}/complete", identity.PermStocktakeComplete},
 	} {
 		got, access := PermissionForRoute(c.method, c.path)
 		if access != routeProtected || got != c.want {

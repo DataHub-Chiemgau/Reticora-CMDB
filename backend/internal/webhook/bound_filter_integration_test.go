@@ -38,9 +38,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
 
-// boundFixture is organization A with a role granting ci:read and
-// asset:read and service accounts holding it in client 1, in site 1 and
-// org-wide.
+// boundFixture is organization A with a role granting ci:read, asset:read
+// and reservation:read (the read right of reservation events since WP-245;
+// migration 000192 adds it to every holder of asset:read) and service
+// accounts holding it in client 1, in site 1 and org-wide.
 type boundFixture struct {
 	*scopetest.Fixture
 	sa1, saSite, saAll string
@@ -60,7 +61,7 @@ func newBoundFixture(t *testing.T, tag string) *boundFixture {
 	orgCtx := f.OrgCtx(f.OrgA)
 
 	readRole := f.ID()
-	if _, err := f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 't2-webhook-reader', '["ci:read", "asset:read"]')`, readRole, f.OrgA); err != nil {
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 't2-webhook-reader', '["ci:read", "asset:read", "reservation:read"]')`, readRole, f.OrgA); err != nil {
 		t.Fatal(err)
 	}
 	saRepo := user.NewPGServiceAccounts(f.App)

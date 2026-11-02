@@ -34,17 +34,50 @@ var rba02 = []struct {
 	{[]string{"user:manage", "team:manage", "role:manage", "entitlement:manage", "audit:read", "apikey:manage"}, "✓", "–", "–", "–"},
 }
 
-// retiredKeys are the catalogue keys migration 000147 removed (WP-363).
+// p2 are the phase-2 rows of the matrix (RBA-05, E-106, WP-245): the module
+// keys stock:*, reservation:* and contract:* and the action keys. "C" marks
+// a right the client technician holds only in its client scope.
+var p2 = []struct {
+	keys                                    []string
+	orgAdmin, engineer, viewer, clientTechn string
+}{
+	{[]string{"stock:read", "reservation:read", "contract:read"}, "✓", "✓", "✓", "C"},
+	{[]string{"stock:write", "reservation:write", "contract:write"}, "✓", "✓", "–", "–"},
+	{[]string{"stocktake:complete"}, "✓", "✓", "–", "C"},
+	{[]string{"import:run", "tag:manage"}, "✓", "✓", "–", "–"},
+	{[]string{"metamodel:publish", "field_permission:manage", "import:manage", "saved_view:manage"}, "✓", "–", "–", "–"},
+	// The current rights stay: engineer approves no order and writes no
+	// SLA; the client technician keeps ticket:write and stocktake:write.
+	{[]string{"order:approve", "sla:write"}, "✓", "–", "–", "–"},
+	{[]string{"ticket:write", "stocktake:write"}, "✓", "✓", "–", "C"},
+}
+
+// rba06 are the special rights of RBA-06 per standard role (E-106).
+var rba06 = []struct {
+	keys                                    []string
+	orgAdmin, engineer, viewer, clientTechn string
+}{
+	{[]string{"lifecycle:transition", "reconciliation:manage", "override:write", "ci_instance_attribute:manage"}, "✓", "✓", "–", "–"},
+	{[]string{"lifecycle:manage", "relationship_type:manage"}, "✓", "–", "–", "–"},
+}
+
+// retiredKeys are the catalogue keys migration 000147 removed (WP-363) and
+// the keys migration 000192 replaced (WP-245: consumable:*,
+// inventory:manage and asset:reserve by stock:* and reservation:write).
 var retiredKeys = []string{
 	"asset:assign", "ci_type:manage", "credential:decrypt", "credential:write",
 	"permission:write", "role:write", "user:write", "webhook:write",
+	"asset:reserve", "consumable:read", "consumable:write", "inventory:manage",
 }
 
-// TestStandardRolesMatchTheRoleMatrix covers WP-046 (RBA-02): the roles the
-// database seeds into an organization equal the target matrix
-// permission.StandardRoles, which follows the RBA-02 text; the viewer holds
-// no credential right; the client technician grants only within a client
-// scope; IdP roles resolve to the database roles of the organization.
+// TestStandardRolesMatchTheRoleMatrix covers WP-046 (RBA-02) and WP-245
+// (RBA-05, RBA-06, E-106): the roles the database seeds into an
+// organization equal the target matrix permission.StandardRoles, which
+// follows the RBA-02 text, the phase-2 rows (p2) and the RBA-06 special
+// rights (rba06) of E-106; no role holds a retired or replaced key; the
+// viewer holds no credential right; the client technician grants only
+// within a client scope, its phase-2 keys included; IdP roles resolve to
+// the database roles of the organization.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestStandardRolesMatchTheRoleMatrix(t *testing.T) {
@@ -103,11 +136,25 @@ func TestStandardRolesMatchTheRoleMatrix(t *testing.T) {
 		}
 		return false
 	}
-	for _, row := range rba02 {
-		for _, key := range row.keys {
-			for role, cell := range map[string]string{"org_admin": row.orgAdmin, "engineer": row.engineer, "viewer": row.viewer, "client_technician": row.clientTechn} {
-				if want := cell != "–"; holds(role, key) != want {
-					t.Errorf("RBA-02: %s holds %s = %v, want %v (%s)", role, key, !want, want, cell)
+	for _, table := range []struct {
+		name string
+		rows []struct {
+			keys                                    []string
+			orgAdmin, engineer, viewer, clientTechn string
+		}
+	}{{"RBA-02", rba02}, {"P2 (E-106)", p2}, {"RBA-06 (E-106)", rba06}} {
+		for _, row := range table.rows {
+			for _, key := range row.keys {
+				if !slices.Contains(catalogue, key) {
+					t.Errorf("%s: %s is not in the catalogue", table.name, key)
+				}
+				for role, cell := range map[string]string{"org_admin": row.orgAdmin, "engineer": row.engineer, "viewer": row.viewer, "client_technician": row.clientTechn} {
+					if want := cell != "–"; holds(role, key) != want {
+						t.Errorf("%s: %s holds %s = %v, want %v (%s)", table.name, role, key, !want, want, cell)
+					}
+					if cell == "C" && scopes[role] != "client" {
+						t.Errorf("%s: %s holds %s in scope %q, want client (C)", table.name, role, key, scopes[role])
+					}
 				}
 			}
 		}
@@ -159,7 +206,13 @@ func TestStandardRolesMatchTheRoleMatrix(t *testing.T) {
 	}
 	grants, err := repo.AccessGrants(bg, f.OrgA, tech)
 	if err != nil || len(grants) != 1 || len(grants[0].Clients) != 1 || grants[0].Clients[0] != f.Client1 {
-		t.Errorf("client technician in client 1: %+v, %v", grants, err)
+		t.Fatalf("client technician in client 1: %+v, %v", grants, err)
+	}
+	// The phase-2 keys of the client technician hold in its client only.
+	for _, key := range []identity.Permission{identity.PermStockRead, identity.PermReservationRead, identity.PermContractRead, identity.PermStocktakeComplete} {
+		if !slices.Contains(grants[0].Permissions, key) {
+			t.Errorf("client technician in client 1 lacks %s", key)
+		}
 	}
 
 	// IdP roles resolve to the organization's database roles; the client

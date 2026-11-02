@@ -73,5 +73,5 @@ var ReadPermission = map[string]string{
 	"contact":     "contact:read",
 	"compliance":  "compliance:read",
 	"location":    "location:read",
-	"reservation": "asset:read",
+	"reservation": "reservation:read", // RBA-05, E-106 (WP-245)
 }

@@ -40,7 +40,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"assignments":          identity.PermAssignmentRead,
 	"documents":            identity.PermDocumentRead,
 	"stocktakes":           identity.PermStocktakeRead,
-	"consumables":          identity.PermConsumableRead,
+	"consumables":          identity.PermStockRead, // RBA-05, E-106: stock:* replaces consumable:*
 	"orders":               identity.PermOrderRead,
 	"maintenance-windows":  identity.PermMaintenanceRead,
 	"disposal-records":     identity.PermDisposalRead,
@@ -119,11 +119,13 @@ var readPermissionFor = map[string]identity.Permission{
 	"relationship-types":    identity.PermRelationshipRead,
 	"lifecycle-definitions": identity.PermAssetRead,
 	"lifecycle-transitions": identity.PermAssetRead,
+	"lifecycle-models":      identity.PermAssetRead, // E-38 successor of lifecycle-definitions (E-106)
+	"templates":             identity.PermCIRead,    // metamodel templates read like ci-types (E-38, E-106)
 	"locations":             identity.PermLocationRead,
 	"stock-movements":       identity.PermAssetRead,
-	"inventory":             identity.PermAssetRead,
+	"inventory":             identity.PermStockRead, // inventory items and availability are stock (E-106)
 	"movements":             identity.PermAssetRead,
-	"reservations":          identity.PermAssetRead,
+	"reservations":          identity.PermReservationRead,
 	"children":              identity.PermAssetRead,
 	"compositions":          identity.PermAssetRead,
 	"fields":                identity.PermCIRead,
@@ -205,11 +207,13 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"relationship-types":    identity.PermRelationshipTypeManage,
 	"lifecycle-definitions": identity.PermLifecycleManage,
 	"lifecycle-transitions": identity.PermLifecycleManage,
+	"lifecycle-models":      identity.PermLifecycleManage,
+	"templates":             identity.PermCITypeManage, // metamodel resources write like ci-types (E-106)
 	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
-	"inventory":             identity.PermInventoryManage,
+	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
 	"movements":             identity.PermAssetMove,
-	"reservations":          identity.PermAssetReserve,
+	"reservations":          identity.PermReservationWrite,
 	"children":              identity.PermAssetWrite,
 	"compositions":          identity.PermAssetWrite,
 	"override":              identity.PermOverrideWrite,
@@ -265,6 +269,16 @@ var routeRules = []routeRule{
 	{http.MethodGet, "cis/*/relationships", identity.PermRelationshipRead},
 	{http.MethodGet, "cis/*/dependencies", identity.PermTopologyRead},
 	{http.MethodGet, "cis/*/blast-radius", identity.PermTopologyRead},
+	// Completing a stocktake is its own action (E-106); holders of
+	// stocktake:write received stocktake:complete with migration 000192.
+	{http.MethodPost, "stocktakes/*/complete", identity.PermStocktakeComplete},
+	// Action paths of phase 2 below assets (E-106): handing out, taking
+	// back and transferring an asset is an assignment (WP-275), reserving it
+	// a reservation (WP-277); without a rule they would derive asset:write.
+	{http.MethodPost, "assets/*/assign", identity.PermAssignmentWrite},
+	{http.MethodPost, "assets/*/return", identity.PermAssignmentWrite},
+	{http.MethodPost, "assets/*/transfer", identity.PermAssignmentWrite},
+	{http.MethodPost, "assets/*/reserve", identity.PermReservationWrite},
 	// Approving or rejecting an order is not editing it.
 	{http.MethodPost, "orders/*/approve", identity.PermOrderApprove},
 	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},
