@@ -10216,7 +10216,7 @@ Weitere offene Punkte stehen in `docs/acceptance/lasttest-g1.md` (Offene Punkte)
 
 - [ ] `database.WithRequestTenant` tritt einer Transaktion bei, die der Kontext bereits trägt (`database.ContextWithTx`); Scope-Prüfung und `set_config` bleiben die der äußeren Transaktion. Repositories bleiben unverändert.
 - [ ] Die Discovery verarbeitet jeden Record in genau einer Transaktion: Identitätskandidaten, gelöschte Kandidaten, Anlage bzw. Update, Provenienz und Suchindex. Ein Fehler rollt den ganzen Record zurück; die Queue stellt ihn erneut zu (REC-01).
-- [ ] Rahmen und Ledger eines Batches laufen in einer Transaktion; der Ledger schreibt mit einem `unnest`-INSERT. Die Typ-Lookups des Identitätskontexts (`generic_device`, virtuelle Typen) werden je Batch einmal gelesen.
+- [ ] Der Rahmen eines Batches läuft in einer kurzen Transaktion vor den Records, der Ledger nach den Records in einer zweiten mit einem `unnest`-INSERT; zusammen höchstens 8 Statements in 2 Transaktionen je Batch, unabhängig von der Batchgröße. Die Typ-Lookups des Identitätskontexts (`generic_device`, virtuelle Typen) werden je Batch einmal gelesen. (Fassung nach [E-101](g1-korrektur/entscheidungen.md#e-101), Option 1, entschieden 2026-11-02; WP-657, F-386.)
 - [ ] Statement-Budget als Integrationstest: höchstens 12 Statements und eine Transaktion je neuem Record bei einem Batch von 20 (Zähler wie in `querybudget_integration_test.go`).
 - [ ] Der Architekturtest zu `WithSystem` (WP-041) und die Konkurrenzmatrix (WP-207) bleiben grün; `TestDiscoveryConcurrency` deckt den Beitritt zur Transaktion ab.
 

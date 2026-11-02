@@ -18609,7 +18609,7 @@ AUT-10;[B];B;backend/internal/operator/operator_test.go;WP-658
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-657
 ```
 
-**Entscheidungsbedarf:** [E-101](entscheidungen.md#e-101) „WP-332 AK 3: Rahmen und Ledger eines Batches in einer oder in zwei Transaktionen“. Option 1 (empfohlen): Plantext an den Entwurf angleichen, zwei Transaktionen je Batch, keine Codeänderung. Option 2: Zusammenlegung mit eigener Verbindungsbegrenzung, sodass ein Batch nur eine Verbindung belegt; Aufwand rund 2 PT, Gewinn 2 Statements je Batch. Option 3: Savepoints statt Record-Transaktionen; widerspricht WP-332 AK 2 und AK 4 sowie WP-334 und wird nicht empfohlen.
+**Entscheidungsbedarf:** entschieden – [E-101](entscheidungen.md#e-101), Option 1 (Auftraggeber, 2026-11-02): Plantext angeglichen (docs/plan/implementierungsplan.md, WP-332 AK 3), `TestIngestStatementBudget` unverändert grün („frame 8 statements in 2 transactions“). Zur Entscheidung standen: Option 1 (empfohlen): Plantext an den Entwurf angleichen, zwei Transaktionen je Batch, keine Codeänderung. Option 2: Zusammenlegung mit eigener Verbindungsbegrenzung, sodass ein Batch nur eine Verbindung belegt; Aufwand rund 2 PT, Gewinn 2 Statements je Batch. Option 3: Savepoints statt Record-Transaktionen; widerspricht WP-332 AK 2 und AK 4 sowie WP-334 und wird nicht empfohlen.
 
 **Nicht Bestandteil:** Änderungen an Ledger-Semantik, Dedupe-Fenster (REC-01), Spuren und Sperren (WP-334) oder Poison-Record-Isolierung (WP-481); weitere Befunde der Wiederholungsprüfung.
 
