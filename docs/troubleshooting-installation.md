@@ -931,7 +931,8 @@ Notes:
   `/readyz` (EHLO only) stays green. The installer refuses the combination
   (`RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls`), an
   interactive run asks for no user name with `none`, and the server refuses
-  it at its start (`invalid central SMTP configuration`). Use `none` only
+  it at its start (`invalid configuration` with `RETICORA_SMTP_USERNAME needs
+  RETICORA_SMTP_TLS=starttls or tls`). Use `none` only
   for a relay without authentication.
 - The installer checks the sender the way the server parses it (Go
   `net/mail`): no `,` `;` `:` `@` `[` `]` `(` `)` `<` `>` in the name

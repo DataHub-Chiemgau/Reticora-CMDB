@@ -10,9 +10,10 @@ import (
 // TestSMTPLoginNeedsTLS covers TEC-13: with TLS mode none a login fails on
 // every send, because net/smtp's PlainAuth refuses an unencrypted connection
 // to any host but localhost, while /readyz (EHLO only) stays green. Validate
-// refuses that configuration by the same rule, so the server stops at its
-// start ("invalid central SMTP configuration") and an organization's own
-// channel is refused when stored. A relay without login (the mailpit of the
+// refuses that configuration by the same rule, and config.Validate does so
+// even earlier, so the server stops at its start ("invalid configuration",
+// "RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls") and an
+// organization's own channel is refused when stored. A relay without login (the mailpit of the
 // E2E overlay) and a login over starttls or tls pass.
 func TestSMTPLoginNeedsTLS(t *testing.T) {
 	for _, host := range []string{"smtp.example.org", "mailpit", "172.17.0.1", "host.docker.internal", "LOCALHOST",
