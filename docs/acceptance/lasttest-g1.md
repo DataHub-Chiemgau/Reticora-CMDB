@@ -590,7 +590,9 @@ Transaktion (kein N+1) und prüfen per `EXPLAIN` die Indexnutzung.
   - Record für Record: genau eine Transaktion je neuem Record mit höchstens 12
     Statements (mit den Produktionsextras höchstens 15). Der Rahmen eines
     Batches kostet höchstens 8 Statements in 2 Transaktionen, gleich für 5
-    und 20 Records.
+    und 20 Records: Der Rahmen läuft vor den Records, der Ledger danach in
+    einer eigenen Transaktion. WP-332 AK 3 ist nach E-101 (Korrekturplan,
+    Auftraggeber 2026-11-02, WP-657) an diesen Entwurf angeglichen.
   - Batch: 20 neue Geräte in einer Transaktion mit höchstens 15 Statements,
     ohne eigenes Lock-Statement. Die Audit-Kette bleibt intakt
     (`audit.Verify`) und hält die Einträge lückenlos in Record-Reihenfolge.
