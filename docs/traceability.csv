@@ -1210,3 +1210,4 @@ API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/modules_test.go;WP-706
 RBA-05;[P2–P4], [A];B;backend/internal/server/modules_test.go;WP-706
 EVT-03;[P2–P3];B;backend/internal/events/types_test.go;WP-246
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/parity_test.go;WP-247
+EVT-03;[P2–P3];B;backend/internal/events/outbox_integration_test.go;WP-707

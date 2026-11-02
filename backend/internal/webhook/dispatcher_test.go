@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -397,15 +398,21 @@ func TestDispatcherClaimsTheFirstAttempt(t *testing.T) {
 
 // TestDispatcherConsumesOutboxEvents covers EVT-02 (WP-136): the outbox
 // publisher hands domain events to the dispatcher; subscriptions of the
-// event type and of its former names receive them once, a status-only
-// change also reaches ci.status_changed.
+// event type and of its former names receive them once. A status change
+// reaches ci.status_changed only as an event of its own, once and under
+// its name, also with further changed fields; ci.changed with
+// changed_fields [status] does not reach it (WP-707, EVT-03).
 func TestDispatcherConsumesOutboxEvents(t *testing.T) {
 	repo := NewMemoryRepository()
 	var mu sync.Mutex
 	received := map[string][]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
-		received[r.URL.Path] = append(received[r.URL.Path], r.Header.Get("X-Webhook-Event"))
+		event := r.Header.Get("X-Webhook-Event")
+		if reticora := r.Header.Get("X-Reticora-Event"); reticora != event {
+			event += " (X-Reticora-Event " + reticora + ")"
+		}
+		received[r.URL.Path] = append(received[r.URL.Path], event)
 		mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -427,8 +434,13 @@ func TestDispatcherConsumesOutboxEvents(t *testing.T) {
 		defer cancel()
 		_ = d.Shutdown(ctx)
 	}()
-	for _, data := range []string{`{"id":"ci-1","changed_fields":["name"]}`, `{"id":"ci-1","changed_fields":["status"]}`} {
-		if err := d.Consume(context.Background(), &events.Envelope{ID: "e", Type: events.CIChanged, OrgID: "org-1", Data: json.RawMessage(data)}); err != nil {
+	for i, env := range []struct{ typ, data string }{
+		{events.CIChanged, `{"id":"ci-1","changed_fields":["name"]}`},
+		{events.CIChanged, `{"id":"ci-1","changed_fields":["status","name"]}`},
+		{events.CIStatusChanged, `{"id":"ci-1","changed_fields":["status","name"],"from":"active","to":"maintenance"}`},
+	} {
+		if err := d.Consume(context.Background(), &events.Envelope{ID: fmt.Sprintf("e%d", i), Type: env.typ, OrgID: "org-1",
+			Data: json.RawMessage(env.data)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -446,6 +458,9 @@ func TestDispatcherConsumesOutboxEvents(t *testing.T) {
 	defer mu.Unlock()
 	if len(received["/new"]) != 2 || len(received["/legacy"]) != 2 || len(received["/both"]) != 2 || len(received["/status"]) != 1 {
 		t.Errorf("deliveries: %v", received)
+	}
+	if !slices.Equal(received["/status"], []string{events.CIStatusChanged}) {
+		t.Errorf("deliveries to the ci.status_changed subscription: %v, want one under ci.status_changed", received["/status"])
 	}
 	if received["/legacy"][0] != "ci.changed" {
 		t.Errorf("event name for a legacy subscription: %v", received["/legacy"])

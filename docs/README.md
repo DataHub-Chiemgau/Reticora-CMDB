@@ -943,6 +943,26 @@ type (both allow further fields).
 | `document.scanned` | document | plan addition | WP-734 |
 | `import.completed` | import run | plan addition | WP-302 |
 
+**`ci.status_changed`** (WP-707): an update of a CI
+(`ci.PGRepository.Update`, e.g. `PATCH /api/v1/cis/{id}` and the bulk status
+change) whose `changed_fields` contain `status` writes, in the same
+transaction and right after `ci.changed`, the event `ci.status_changed`; its
+`entity_seq` follows that of `ci.changed`. Its data are the CI snapshot of
+`ci.changed` with `changed_fields`, plus `from` and `to` (old and new
+status). The audit action stays as before (`ci.status_changed` for a status
+change alone, else `ci.updated`). Behaviour change for webhooks: until
+WP-707 a `ci.changed` with `changed_fields == [status]` also reached the
+subscriptions of `ci.status_changed`, delivered under
+`X-Reticora-Event`/`X-Webhook-Event: ci.changed`, and a status change
+together with other fields did not reach them. Now these subscriptions
+receive every status change exactly once as the event `ci.status_changed`,
+under `X-Reticora-Event`/`X-Webhook-Event: ci.status_changed`, also when
+further fields change at the same time; `ci.changed` no longer reaches them.
+Other status changes raise no `ci.status_changed`: the offline detector
+(`backend/internal/lifecycle/offline.go`) reports its changes
+(`active` ↔ `unknown`) only as `ci.offline`/`ci.online`, deleting
+(`decommissioned`) only as `ci.deleted`, restoring only as `ci.restored`.
+
 Until its producer is merged a phase 2 type is registered without being
 written; `TestEveryEVT02TypeHasAProducer` requires one producer case for every
 type without a frame in `events.Payloads` and accepts one for a phase 2 type.
@@ -951,7 +971,10 @@ type without a frame in `events.Payloads` and accepts one for a phase 2 type.
 `events.Types` without `webhook.dead` and `apikey.creator_deactivated` (both
 notify the org_admins only), the former names of `legacyNames` and the
 `deprecatedEvents`. `webhook.test` cannot be subscribed to either. The OpenAPI
-enum `WebhookEvent` lists the same names.
+enum `WebhookEvent` lists the same names. The WebhooksPage offers new
+subscriptions only the subscribable types of the register (WP-707); former
+and deprecated names stay valid for existing subscriptions and are shown
+unchanged in their list.
 
 - **Former names** (`legacyNames`): `ci.updated` → `ci.changed`,
   `relationship.deleted` → `relationship.removed`, `lifecycle.transitioned` →

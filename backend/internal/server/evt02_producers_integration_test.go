@@ -228,6 +228,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 
 	var (
 		changed, deleted, restored, seen   string
+		statusChanged                      string
 		deletedState                       string
 		survivor, victim                   string
 		relSource, relTarget, removedEdge  string
@@ -283,6 +284,26 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				if data["id"] != entity || data["status"] != "maintenance" || len(fields) != 1 || fields[0] != "status" {
 					t.Errorf("ci.changed data: id %v, status %v, changed_fields %v; want %s, maintenance, [status]",
 						data["id"], data["status"], data["changed_fields"], entity)
+				}
+			}},
+		// A status change is its own event next to ci.changed (EVT-03,
+		// WP-707); its data follow the $def ci.status_changed.
+		{typ: events.CIStatusChanged,
+			setup: func(t *testing.T) { statusChanged = f.CI(t, f.OrgA, "", "evt02-status-changed") },
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPatch, "/api/v1/cis/"+statusChanged, `{"status":"maintenance","manufacturer":"evt02"}`)
+				answered(t, "PATCH /cis/{id}", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "CI status", ciStatus(t, statusChanged), "active")
+				}
+				return statusChanged
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				fields, _ := data["changed_fields"].([]any)
+				if data["id"] != entity || data["from"] != "active" || data["to"] != "maintenance" || data["status"] != "maintenance" ||
+					!slices.Contains(fields, any("status")) || !slices.Contains(fields, any("manufacturer")) {
+					t.Errorf("ci.status_changed data: id %v, from %v, to %v, status %v, changed_fields %v; want %s, active, maintenance, maintenance, [status manufacturer]",
+						data["id"], data["from"], data["to"], data["status"], data["changed_fields"], entity)
 				}
 			}},
 		{typ: events.CIDeleted,

@@ -378,24 +378,15 @@ var legacyNames = map[string][]string{
 
 // Consume implements events.Consumer: the outbox publisher hands every
 // committed domain event to the subscriptions of its type and of its
-// former names (WP-136). A status-only change also reaches the
-// subscriptions of ci.status_changed until WP-707 writes that type to the
-// outbox; until then the outbox does not raise it, so no subscription
-// receives a status change twice. A failed subscription lookup or
+// former names (WP-136). A status change is an event ci.status_changed of
+// its own next to ci.changed (WP-707); ci.changed no longer reaches the
+// subscriptions of ci.status_changed. A failed subscription lookup or
 // delivery persistence is returned, so the publisher keeps the event
 // pending and hands it over again (at least once, F-151); the deliveries
 // are idempotent per event and subscription, a repeated hand-off adds none
 // (WP-506).
 func (d *Dispatcher) Consume(ctx context.Context, env *events.Envelope) error {
-	aliases := append([]string(nil), legacyNames[env.Type]...)
-	if env.Type == events.CIChanged {
-		var data struct {
-			ChangedFields []string `json:"changed_fields"`
-		}
-		if json.Unmarshal(env.Data, &data) == nil && len(data.ChangedFields) == 1 && data.ChangedFields[0] == "status" {
-			aliases = append(aliases, "ci.status_changed")
-		}
-	}
+	aliases := legacyNames[env.Type]
 	var origin *eventOrigin
 	if env.ID != "" {
 		origin = &eventOrigin{id: env.ID, sequence: env.Sequence, entitySeq: env.EntitySeq}

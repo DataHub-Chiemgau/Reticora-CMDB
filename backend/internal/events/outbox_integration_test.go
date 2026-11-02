@@ -51,7 +51,9 @@ func (r *recorder) Consume(_ context.Context, env *events.Envelope) error {
 //   - an event is written in the transaction of its mutation: a rollback
 //     leaves none;
 //   - the CI repository writes ci.created, ci.changed (with the changed
-//     fields) and ci.deleted; sequence and entity_seq count per
+//     fields), ci.status_changed for a status change (WP-707, details:
+//     TestCIStatusChangedFollowsCIChanged) and ci.deleted; sequence and
+//     entity_seq count per
 //     organization and entity without gaps, also for concurrent writers;
 //   - the publisher delivers in sequence order, marks the events published,
 //     stops an organization's batch at a failed delivery (order kept) and
@@ -142,7 +144,8 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 3 || got[0].typ != events.CICreated || got[1].typ != events.CIChanged || got[2].typ != events.CIDeleted {
+	if len(got) != 4 || got[0].typ != events.CICreated || got[1].typ != events.CIChanged || got[2].typ != events.CIStatusChanged ||
+		got[3].typ != events.CIDeleted {
 		t.Fatalf("CI events: %+v", got)
 	}
 	for i, g := range got {
@@ -185,8 +188,8 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 			FROM event_outbox WHERE organization_id = $1`, f.OrgA).Scan(&maxSeq, &minSeq, &distinct, &maxEntity, &counter); qErr != nil {
 			t.Fatal(qErr)
 		}
-		if maxSeq != 23 || minSeq != 1 || distinct != 23 || maxEntity != 10 || counter != 23 {
-			t.Errorf("after concurrent writers: sequence %d..%d, distinct %d, review-0 entity_seq %d, counter %d; want 1..23, 23, 10, 23",
+		if maxSeq != 24 || minSeq != 1 || distinct != 24 || maxEntity != 10 || counter != 24 {
+			t.Errorf("after concurrent writers: sequence %d..%d, distinct %d, review-0 entity_seq %d, counter %d; want 1..24, 24, 10, 24",
 				minSeq, maxSeq, distinct, maxEntity, counter)
 		}
 	}) {
@@ -243,8 +246,8 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := ofA()
-	if len(a) != 23 {
-		t.Fatalf("delivered: %d, want 23", len(a))
+	if len(a) != 24 {
+		t.Fatalf("delivered: %d, want 24", len(a))
 	}
 	for i := range a {
 		if a[i].Sequence != int64(i+1) {
@@ -272,7 +275,7 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 			t.Fatal(getErr)
 		}
 		var env events.Envelope
-		if err = json.Unmarshal(msg.Data, &env); err != nil || env.EntityID != item.ID || env.Sequence != 3 {
+		if err = json.Unmarshal(msg.Data, &env); err != nil || env.EntityID != item.ID || env.Sequence != 4 {
 			t.Errorf("stream message: %+v %v", env, err)
 		}
 		info, _ := stream.Info(bg)
@@ -290,12 +293,12 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 	if err = f.Admin.QueryRow(bg, `SELECT array_agg(sequence ORDER BY sequence) FROM event_outbox WHERE organization_id = $1`, f.OrgA).Scan(&left); err != nil {
 		t.Fatal(err)
 	}
-	if len(left) != 3 || left[2] != 23 {
+	if len(left) != 3 || left[2] != 24 {
 		t.Errorf("after cleanup: %v (newest of the CI, of each review and of the organization)", left)
 	}
 	if err = inOrg(f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
 		env, appendErr := outbox.Append(ctx, tx, &events.Event{OrgID: f.OrgA, Type: events.CIChanged, EntityID: item.ID})
-		if appendErr == nil && (env.Sequence != 24 || env.EntitySeq != 4) {
+		if appendErr == nil && (env.Sequence != 25 || env.EntitySeq != 5) {
 			return fmt.Errorf("numbering after cleanup: %d/%d", env.Sequence, env.EntitySeq)
 		}
 		return appendErr
@@ -606,5 +609,100 @@ func TestOutboxCleanupDropsAnchorData(t *testing.T) {
 	if next.Sequence != 7 || next.EntitySeq != 4 || again.Sequence != 8 || again.EntitySeq != 2 || org.Sequence != 9 {
 		t.Errorf("numbering after the cleanup: CI %d/%d, invitation %d/%d, organization %d; want 7/4, 8/2, 9",
 			next.Sequence, next.EntitySeq, again.Sequence, again.EntitySeq, org.Sequence)
+	}
+}
+
+// TestCIStatusChangedFollowsCIChanged covers EVT-03 (WP-707): an update
+// through ci.PGRepository.Update whose changed fields contain status
+// writes ci.changed and, in the same transaction, ci.status_changed; the
+// entity_seq of ci.status_changed follows that of ci.changed directly, its
+// data are the CI snapshot of ci.changed with changed_fields and the old
+// and new status as from and to. A status change together with a name
+// change writes the same; a name change alone only ci.changed.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCIStatusChangedFollowsCIChanged(t *testing.T) {
+	f := scopetest.Seed(t, "98")
+	bg := context.Background()
+	repo := ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox())
+	ctx := f.OrgCtx(f.OrgA)
+	var typeID string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&typeID); err != nil {
+		t.Fatal(err)
+	}
+	item := &ci.Item{OrganizationID: f.OrgA, CITypeID: typeID, Name: "evt-status", Status: "active", Attributes: map[string]any{}}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		typ       string
+		entitySeq int64
+		data      map[string]any
+	}
+	// eventsOf returns the events of the CI after its entity_seq after.
+	eventsOf := func(t *testing.T, after int64) []row {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT type, entity_seq, data FROM event_outbox
+			WHERE organization_id = $1 AND entity_id = $2 AND entity_seq > $3 ORDER BY sequence`, f.OrgA, item.ID, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
+			var x row
+			scanErr := r.Scan(&x.typ, &x.entitySeq, &x.data)
+			return x, scanErr
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	ptr := func(s string) *string { return &s }
+	seq := int64(1) // ci.created
+	for _, c := range []struct {
+		name     string
+		req      ci.UpdateRequest
+		fields   []any
+		from, to string // empty: no ci.status_changed
+	}{
+		{"status", ci.UpdateRequest{Status: ptr("maintenance")}, []any{"status"}, "active", "maintenance"},
+		{"status and name", ci.UpdateRequest{Status: ptr("inactive"), Name: ptr("evt-status-renamed")}, []any{"name", "status"}, "maintenance", "inactive"},
+		{"name only", ci.UpdateRequest{Name: ptr("evt-status-again")}, []any{"name"}, "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := repo.Update(ctx, f.OrgA, item.ID, c.req); err != nil {
+				t.Fatal(err)
+			}
+			got := eventsOf(t, seq)
+			want := []string{events.CIChanged}
+			if c.to != "" {
+				want = append(want, events.CIStatusChanged)
+			}
+			var types []string
+			for _, g := range got {
+				types = append(types, g.typ)
+			}
+			if !slices.Equal(types, want) {
+				t.Fatalf("events of the update: %v, want %v", types, want)
+			}
+			for i, g := range got {
+				if g.entitySeq != seq+int64(i)+1 {
+					t.Errorf("%s: entity_seq %d, want %d", g.typ, g.entitySeq, seq+int64(i)+1)
+				}
+				fields, _ := g.data["changed_fields"].([]any)
+				slices.SortFunc(fields, func(a, b any) int { return strings.Compare(fmt.Sprint(a), fmt.Sprint(b)) })
+				if g.data["id"] != item.ID || !slices.Equal(fields, c.fields) {
+					t.Errorf("%s data: id %v, changed_fields %v; want %s and %v", g.typ, g.data["id"], g.data["changed_fields"], item.ID, c.fields)
+				}
+			}
+			if c.to != "" {
+				status := got[1].data
+				if status["from"] != c.from || status["to"] != c.to || status["status"] != c.to || status["name"] != got[0].data["name"] {
+					t.Errorf("ci.status_changed data: from %v, to %v, status %v, name %v; want %s, %s and the snapshot of ci.changed (%v)",
+						status["from"], status["to"], status["status"], status["name"], c.from, c.to, got[0].data)
+				}
+			}
+			seq += int64(len(got))
+		})
 	}
 }

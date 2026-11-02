@@ -125,17 +125,50 @@ func (r *PGRepository) recordEvent(ctx context.Context, tx pgx.Tx, eventType str
 	item = snapshot(item)
 	var data any = item
 	if changedFields != nil {
-		raw, err := json.Marshal(item)
+		m, err := changeEventData(item, changedFields)
 		if err != nil {
-			return fmt.Errorf("encode event data: %w", err)
+			return err
 		}
-		m := map[string]any{}
-		if err = json.Unmarshal(raw, &m); err != nil {
-			return fmt.Errorf("encode event data: %w", err)
-		}
-		m["changed_fields"] = changedFields
 		data = m
 	}
+	return r.appendEvent(ctx, tx, eventType, item, data)
+}
+
+// recordStatusEvent writes ci.status_changed after the ci.changed of an
+// update whose changed fields contain status (EVT-03, WP-707): the data of
+// ci.changed (CI snapshot with changed_fields) and the old and new status
+// as from and to. Its entity_seq follows that of ci.changed.
+func (r *PGRepository) recordStatusEvent(ctx context.Context, tx pgx.Tx, w *rowUpdate, changedFields []string) error {
+	if r.outbox == nil || !slices.Contains(changedFields, "status") {
+		return nil
+	}
+	item := snapshot(w.after)
+	m, err := changeEventData(item, changedFields)
+	if err != nil {
+		return err
+	}
+	m["from"] = w.before.Status
+	m["to"] = item.Status
+	return r.appendEvent(ctx, tx, events.CIStatusChanged, item, m)
+}
+
+// changeEventData is the data of ci.changed: the CI snapshot item with the
+// changed fields.
+func changeEventData(item *Item, changedFields []string) (map[string]any, error) {
+	raw, err := json.Marshal(item)
+	if err != nil {
+		return nil, fmt.Errorf("encode event data: %w", err)
+	}
+	m := map[string]any{}
+	if err = json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("encode event data: %w", err)
+	}
+	m["changed_fields"] = changedFields
+	return m, nil
+}
+
+// appendEvent writes the event of CI item with data in tx (lastInTx).
+func (r *PGRepository) appendEvent(ctx context.Context, tx pgx.Tx, eventType string, item *Item, data any) error {
 	return lastInTx(ctx, func() error {
 		_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: item.OrganizationID, Type: eventType, EntityID: item.ID, Data: data})
 		return err
@@ -996,7 +1029,12 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if err := r.recordUpdateAudit(ctx, tx, w); err != nil {
 			return err
 		}
-		return r.recordEvent(ctx, tx, events.CIChanged, item, changedFieldNames(w.changes))
+		changed := changedFieldNames(w.changes)
+		if err := r.recordEvent(ctx, tx, events.CIChanged, item, changed); err != nil {
+			return err
+		}
+		// A status change is also its own event (EVT-03, WP-707).
+		return r.recordStatusEvent(ctx, tx, w, changed)
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
