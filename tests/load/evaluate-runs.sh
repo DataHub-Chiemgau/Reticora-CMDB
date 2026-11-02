@@ -2,7 +2,7 @@
 # Evaluates the load-test evidence of three load.yml runs by the rule of
 # E-58 (supplement of 2026-10-26, WP-439):
 #
-#   tests/load/evaluate-runs.sh <archive-1> <archive-2> <archive-3>
+#   tests/load/evaluate-runs.sh [--partial] <archive-1> <archive-2> <archive-3>
 #
 # Every argument is the archive of one run, the directory <run-id>/ that
 # tests/load/archive-run.sh builds and docs/acceptance/artefakte/lasttest/
@@ -16,16 +16,38 @@
 # its run and a value that is not there as missed: the median is then the
 # worse of the other two values, and there is none when two are missing.
 #
-# The report goes to stdout as Markdown: the three runs, per job a table
-# with every threshold, its value per run, the median and whether it is
-# held, the status of the job per run, the verdict of the job, and last
-# the line "Bewertung nach E-58 (Median über drei Läufe): ...". The script
-# exits 0 when every threshold of every job is held in the median and no
-# job is red in two runs, 1 when not, 2 on wrong arguments.
+# The evidence of NFR-10 (WP-206, WP-612: "Drei vollständige Läufe",
+# F-417) needs three runs of the same code, each complete: the three runs
+# name the same commit under "Server, Seed und Migrationen" in ergebnis.md,
+# and every run has each of the five jobs of load.yml (api, ingest,
+# ingest-spool, ingest-rediscover, nfr01-volume), listed under "Jobs" and
+# with its directory. Otherwise the runs are not evaluable: the last line
+# of the report is "Bewertung nach E-58 (Median über drei Läufe): nicht
+# bewertbar: ...", each reason also goes to stderr, and the script exits 1.
+# The medians are still reported.
+#
+# --partial is a separate mode for a diagnosis, never the evidence: it
+# evaluates the jobs any of the three runs lists or has (a job missing in a
+# run counts as red there, as above), needs the same server commit as
+# well, and its last line starts with "Teilbewertung nach E-58 (Median
+# über drei Läufe, kein G1-Nachweis)".
+#
+# The report goes to stdout as Markdown: the three runs, the
+# preconditions, per job a table with every threshold, its value per run,
+# the median and whether it is held, the status of the job per run, the
+# verdict of the job, and last the line "Bewertung nach E-58 (Median über
+# drei Läufe): ..." (--partial: "Teilbewertung ..."). The script exits 0
+# when the runs are evaluable, every threshold of every job is held in the
+# median and no job is red in two runs, 1 when not, 2 on wrong arguments.
 set -euo pipefail
 
+partial=false
+if [ "${1:-}" = --partial ]; then
+	partial=true
+	shift
+fi
 if [ "$#" -ne 3 ]; then
-	echo "usage: $0 <archive-1> <archive-2> <archive-3>" >&2
+	echo "usage: $0 [--partial] <archive-1> <archive-2> <archive-3>" >&2
 	exit 2
 fi
 runs=() ids=()
@@ -63,8 +85,19 @@ row() {
 	echo "${v:-–}"
 }
 
+# The five jobs of load.yml (scenarios=all); a complete run has each.
+all_jobs=(api ingest ingest-spool ingest-rediscover nfr01-volume)
+
+# join ITEM...: the items separated by ", ".
+join() {
+	local out
+	out="$(printf '%s, ' "$@")"
+	echo "${out%, }"
+}
+
 # The jobs of the three runs: those ergebnis.md lists and those with a
-# directory, in the order of the runs.
+# directory, in the order of the runs; without --partial the five jobs of
+# load.yml first.
 jobs=()
 addjob() {
 	local j
@@ -93,6 +126,13 @@ if [ "${#jobs[@]}" -eq 0 ]; then
 	echo "evaluate-runs: no job in the archives" >&2
 	exit 2
 fi
+if ! $partial; then
+	archived=("${jobs[@]}")
+	jobs=()
+	for job in "${all_jobs[@]}" "${archived[@]}"; do
+		addjob "$job"
+	done
+fi
 for dir in "${runs[@]}"; do
 	for job in "${jobs[@]}"; do
 		f="$dir/$job/$job.json"
@@ -102,6 +142,51 @@ for dir in "${runs[@]}"; do
 		fi
 	done
 done
+
+# The preconditions (F-417): the same server commit in the three runs and,
+# without --partial, each of the five jobs in every run (listed under
+# "Jobs" and with its directory). blocked collects what is not met.
+blocked=() commits=() nocommit=()
+for i in 0 1 2; do
+	c="$(row "${runs[$i]}/ergebnis.md" "Server, Seed und Migrationen")"
+	commits+=("$c")
+	case "$c" in
+	'' | '–' | "\`–\`" | "\`\`") nocommit+=("${ids[$i]}") ;;
+	esac
+done
+if [ "${#nocommit[@]}" -gt 0 ]; then
+	blocked+=("kein Server-Commit (Server, Seed und Migrationen) in Lauf $(join "${nocommit[@]}")")
+elif [ "${commits[0]}" != "${commits[1]}" ] || [ "${commits[0]}" != "${commits[2]}" ]; then
+	blocked+=("verschiedene Server-Commits (Server, Seed und Migrationen): ${ids[0]} ${commits[0]}, ${ids[1]} ${commits[1]}, ${ids[2]} ${commits[2]}")
+fi
+if ! $partial; then
+	for job in "${all_jobs[@]}"; do
+		without=()
+		for i in 0 1 2; do
+			IFS=',' read -ra listed <<<"$(row "${runs[$i]}/ergebnis.md" Jobs | tr -d ' ')"
+			found=false
+			for l in "${listed[@]}"; do
+				if [ "$l" = "$job" ]; then
+					found=true
+				fi
+			done
+			if ! $found || [ ! -d "${runs[$i]}/$job" ]; then
+				without+=("${ids[$i]}")
+			fi
+		done
+		if [ "${#without[@]}" -gt 0 ]; then
+			blocked+=("Job \`$job\` fehlt in Lauf $(join "${without[@]}")")
+		fi
+	done
+fi
+for b in "${blocked[@]}"; do
+	echo "evaluate-runs: nicht bewertbar: $b" >&2
+done
+if $partial; then
+	prefix="Teilbewertung nach E-58 (Median über drei Läufe, kein G1-Nachweis)"
+else
+	prefix="Bewertung nach E-58 (Median über drei Läufe)"
+fi
 
 # summaries: per job and run one object {job, run, status, metrics}: the
 # status of result-<job>.txt ("fehlt" without the job's directory) and the
@@ -130,7 +215,8 @@ summaries() {
 # one), so the median of three is the worse of two present values.
 evaluate() {
 	jq -rn --argjson jobs "$(printf '%s\n' "${jobs[@]}" | jq -R . | jq -sc .)" \
-		--argjson ids "$(printf '%s\n' "${ids[@]}" | jq -R . | jq -sc .)" '
+		--argjson ids "$(printf '%s\n' "${ids[@]}" | jq -R . | jq -sc .)" \
+		--argjson blocked "$(printf '%s\n' "${blocked[@]}" | jq -R 'select(. != "")' | jq -sc .)" --arg prefix "$prefix" '
 		def unit($m): if ($m | test("duration|delay|flush")) then " ms"
 			elif ($m | test("records_per_s$")) then " Records/s" else "" end;
 		def num: if . > -1 and . < 1 then (. * 10000 | round) / 10000 else (. * 10 | round) / 10 end | tostring;
@@ -174,7 +260,8 @@ evaluate() {
 			(.rows[] | .row), .status, "",
 			"Urteil: \(if (.missed | length) == 0 then "gehalten" else "**verfehlt**" end) (Schwellen im Median: \([.rows[] | select(.held)] | length) von \(.rows | length) gehalten; rot in \(.red) von 3 Läufen)."),
 		"",
-		"Bewertung nach E-58 (Median über drei Läufe): \([$res[].missed[]] | if length == 0 then "alle Budgets gehalten" else "verfehlt: \(join("; "))" end)"
+		"\($prefix): \(if ($blocked | length) > 0 then "nicht bewertbar: \($blocked | join("; "))"
+			else [$res[].missed[]] | if length == 0 then "alle Budgets gehalten" else "verfehlt: \(join("; "))" end end)"
 	'
 }
 
@@ -187,6 +274,19 @@ report="$(
 	echo "gescheitert, wenn er in mindestens zwei der drei Läufe rot ist. Ein Job ohne Artefakt zählt in"
 	echo "seinem Lauf als rot, ein fehlender Messwert als verfehlt."
 	echo
+	if $partial; then
+		echo "Teilbewertung (\`--partial\`), kein G1-Nachweis: bewertet sind die Jobs, die einer der drei Läufe"
+		echo "nennt oder hat. Voraussetzung: derselbe Server-Commit in allen drei Läufen."
+	else
+		echo "Voraussetzungen (WP-206, NFR-10): derselbe Server-Commit in allen drei Läufen und in jedem Lauf"
+		echo "jeder der fünf Jobs $(printf "\`%s\`, " "${all_jobs[@]}" | sed 's/, $//') (in der Zeile Jobs genannt und mit Verzeichnis)."
+	fi
+	if [ "${#blocked[@]}" -eq 0 ]; then
+		echo "Voraussetzungen erfüllt."
+	else
+		echo "Voraussetzungen **nicht erfüllt**: $(printf '%s; ' "${blocked[@]}" | sed 's/; $//')."
+	fi
+	echo
 	echo "| Lauf-ID | Lauf | Server, Seed und Migrationen | Eingaben | Vollständig | Ergebnis |"
 	echo "|---|---|---|---|---|---|"
 	for i in 0 1 2; do
@@ -196,7 +296,7 @@ report="$(
 	summaries | evaluate
 )"
 printf '%s\n' "$report"
-if [ "${report##*$'\n'}" = "Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten" ]; then
+if [ "${report##*$'\n'}" = "$prefix: alle Budgets gehalten" ]; then
 	exit 0
 fi
 exit 1

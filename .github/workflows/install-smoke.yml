@@ -462,8 +462,10 @@ jobs:
           }
           frontend_port="$(value RETICORA_FRONTEND_PORT)"
           code="$(openssl rand -hex 24)"
-          org="$(psql_stack "INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at)
-            SELECT id, encode(sha256(convert_to('$code', 'UTF8')), 'hex'), 'install-smoke INS-06', now() + interval '30 minutes'
+          # binding_recorded: an unbound code as an org-wide creator mints it;
+          # codes without a recorded binding are not redeemed (000187, F-406).
+          org="$(psql_stack "INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at, binding_recorded)
+            SELECT id, encode(sha256(convert_to('$code', 'UTF8')), 'hex'), 'install-smoke INS-06', now() + interval '30 minutes', true
             FROM organization WHERE name LIKE 'Muster E2E %' ORDER BY created_at DESC LIMIT 1 RETURNING organization_id")"
           [ -n "$org" ] || { echo "FAIL: no organization of the onboarding suite"; exit 1; }
           out="$RUNNER_TEMP/collector-install"

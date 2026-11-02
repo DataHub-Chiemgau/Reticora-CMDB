@@ -49,6 +49,7 @@ func (h *Handler) dispatch(r *http.Request, orgID, event string, payload any) {
 
 // ListForCI handles GET /api/v1/cis/{id}/fields — the provenance view of
 // every tracked field with discovered/override/effective values (spec §13).
+// A CI that is unknown, not visible or soft-deleted is 404 (F-422).
 func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -56,6 +57,10 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.repo.ListForCI(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if errors.Is(err, ErrNotFound) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+		return
+	}
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return

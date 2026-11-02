@@ -165,6 +165,54 @@ with a quote or a control character, storable only since 000158, ends the
 re-chain of its organization, and the restored function cannot verify that
 chain.
 
+### Sealed audit entries (AUD-04, SEC-05)
+
+Audit entries are append-only for the application: `reticora_app` has no
+UPDATE on `audit_log`, `reticora_owner` (reached by `SET ROLE`) is refused by
+the trigger, and no function recomputes a stored hash (migration 000188,
+WP-680; until then `app.audit_pii_migration` and `audit_rechain` let the
+runtime role rewrite and re-chain entries, F-409). The one change the
+application may still make is the seal of the system job `pii.backfill`
+(daily, WP-241, WP-656): it replaces plaintext personal values of entries
+written before migration 000125 with vault surrogates. It goes through
+`audit_seal_pii(entry, changes)`, a SECURITY DEFINER function of the role
+`reticora_audit_sealer` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS, no login or
+application role is a member; the server refuses to start when its login
+reaches it). The database accepts the new changes only if they are the old
+ones with non-empty string values of personal keys (`audit_personal_keys()`,
+the keys of `pii.PersonalKeys`) replaced by `{"$pii": "<id>"}` references to
+value subjects of the entry's organization, or by the redaction
+`{"$pii": ""}` of a run without vault; every other column, `hash` and
+`previous_hash` included, stays. A sealed entry records:
+
+| Column | Content |
+|---|---|
+| `chained_digest` | SHA-256 of the canonical JSON the entry was chained with, from its first seal on |
+| `sealed_refs` | the references the seals introduced |
+| `sealed_hash` | SHA-256(`hash` ‖ SHA-256(canonical JSON of the sealed entry)) |
+
+`audit-verify` (and `POST /api/v1/audit/verify`) checks a sealed entry in
+three steps: its link with `chained_digest` (`hash` = SHA-256(`previous_hash`
+‖ `chained_digest`)), its present content with `sealed_hash` (break `sealed
+entry changed after its seal`), and, when the vault is available, that the
+values of `sealed_refs` put back in place give `chained_digest` again (break
+`sealed value differs from the original`, e.g. after a value subject was
+changed). The server always has the vault; the command uses it when
+`RETICORA_MASTER_KEY` (and during a rotation `RETICORA_MASTER_KEY_PREVIOUS`)
+is set. Its output names the sealed entries and how many of them the vault
+did not confirm:
+
+```
+audit chain intact for organization <id> (812 entries verified, 3 of them sealed, 0 sealed entries not confirmed against the vault)
+```
+
+An unconfirmed entry is not a break: without the master key nothing is
+confirmed, and a value redacted or deleted with its person (crypto-shredding,
+SEC-05) cannot be restored by design. Entries sealed before migration 000188
+were re-chained by the former backfill and verify like any other entry. The
+down migration re-chains each organization from its first sealed entry, as
+the former backfill did.
+
 ## Container logs (NFR-06)
 
 The logs of the containers (server, frontend, Keycloak, databases, NATS, …)

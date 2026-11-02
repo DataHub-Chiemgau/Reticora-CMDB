@@ -419,6 +419,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 				// after the merge refuses the revert (E-80). A repository
 				// error reaches the client sanitized (API-03).
 				_, err := opts.CIService.RevertMerge(ctx, job.OrganizationID, job.RefID)
+				// A later open merge of the survivor blocks the revert like
+				// the unmerge; the refusal names that merge (F-416).
+				var later *ci.UnmergeLaterMergeError
+				if errors.As(err, &later) {
+					return &jobs.RevertRefusedError{Reason: later}
+				}
 				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrUnmergeConflict, ci.ErrMergeUnsupported} {
 					if errors.Is(err, refusal) {
 						return &jobs.RevertRefusedError{Reason: refusal}
@@ -447,7 +453,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The collectors' edge data path checks the discovery license like the
 	// entitlement middleware on the HTTP ingest (COL-08, ENT-07).
 	if opts.Entitlements != nil {
-		discoveryHandler.WithEdgeLicense(edgeLicense{svc: opts.Entitlements})
+		discoveryHandler.WithEdgeLicense(DiscoveryLicense(opts.Entitlements))
 	}
 	if opts.CollectorCA != nil {
 		discoveryHandler.WithCA(opts.CollectorCA)
@@ -462,6 +468,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		monitoringFeatures = opts.Entitlements
 	}
 	discoveryHandler.WithEdgeMetrics(monitoringHandler, monitoringFeatures)
+	// The location tree is core; its rack nodes are written only with
+	// rack_view, like /api/v1/racks (ENT-05, F-400).
+	locationsHandler := locations.NewHandler(repos.LocationTree)
+	if opts.Entitlements != nil {
+		locationsHandler.WithFeatures(opts.Entitlements)
+	}
 	// Discovered values pass the field rules of manual writes (CI-03).
 	if opts.CIService != nil {
 		discoveryHandler.WithObservedValidator(opts.CIService)
@@ -557,7 +569,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, nil), repos.LifecycleResolver),
-		locations.NewHandler(repos.LocationTree),
+		locationsHandler,
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		composition.NewHandler(repos.Composition, opts.Dispatcher).

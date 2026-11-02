@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -272,5 +274,179 @@ func TestUnmergeConflictAndForceAgainstPostgres(t *testing.T) {
 	}
 	if !force || !slices.Equal(overwritten, []string{"name", "serial_number"}) {
 		t.Errorf("audit of the forced unmerge: force=%v overwritten=%v", force, overwritten)
+	}
+}
+
+// TestUnmergeRefusesWhileSurvivorIsMergedVictim (WP-687, F-416): an unmerge
+// restores exactly the state before its merge and never touches another
+// open merge (CI-12). After a->b and b->c the unmerge of a is 409
+// unmerge-later-merge naming the merge b->c, also with force=true and as
+// the revert of the merge job; nothing changes, b stays a tombstone (301
+// to c). Unmerged in order (b->c, then a->b) the references return to
+// their CI: the relationship a->x starts at a again, and the 409 for the
+// later change of b names the fields. Another CI merged into the survivor
+// later blocks the unmerge in the same way.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestUnmergeRefusesWhileSurvivorIsMergedVictim(t *testing.T) {
+	f := scopetest.Seed(t, "d7")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	svc := ci.NewService(ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()),
+		search.NewCIIndexer(search.NewPGRepository(f.App))))
+	mux := chi.NewRouter()
+	ci.NewHandler(svc).RegisterRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx))
+		return w
+	}
+	merge := func(survivor, victim string) string {
+		t.Helper()
+		w := call(http.MethodPost, "/api/v1/cis/"+survivor+"/merge", `{"victim_id":"`+victim+`"}`)
+		var out struct {
+			MergeID string `json:"merge_id"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+			t.Fatalf("merge %s into %s: %d %s", victim, survivor, w.Code, w.Body.String())
+		}
+		return out.MergeID
+	}
+	// state reads the CI rows, the open merges, the source of the
+	// relationship and the unmerge audits: what a refused unmerge must
+	// leave alone.
+	state := func(rel string, ids ...string) string {
+		t.Helper()
+		var out string
+		if err := f.Admin.QueryRow(bg, `SELECT string_agg(format('%s deleted=%s into=%s v=%s open_as_victim=%s', c.id, c.deleted_at IS NOT NULL,
+				COALESCE(c.merged_into_id::text, '-'), c.version,
+				(SELECT count(*) FROM ci_merge m WHERE m.victim_id = c.id AND m.unmerged_at IS NULL)), '; ' ORDER BY c.id)
+				|| ' rel_source=' || COALESCE((SELECT source_ci_id::text FROM ci_relationship WHERE id = $2::uuid), '-')
+				|| ' audits=' || (SELECT count(*) FROM audit_log WHERE action = 'ci.unmerged' AND resource_id = ANY($1::uuid[]))
+			FROM ci c WHERE c.id = ANY($1::uuid[])`, ids, rel).Scan(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	refused := func(what string, w *httptest.ResponseRecorder, mergeID, victim, survivor string) {
+		t.Helper()
+		var p struct {
+			Type                 string `json:"type"`
+			Status               int    `json:"status"`
+			Detail               string `json:"detail"`
+			LaterMergeID         string `json:"later_merge_id"`
+			LaterMergeVictimID   string `json:"later_merge_victim_id"`
+			LaterMergeSurvivorID string `json:"later_merge_survivor_id"`
+		}
+		if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &p) != nil || p.Type != "urn:reticora:problem:unmerge-later-merge" ||
+			p.Status != http.StatusConflict || p.LaterMergeID != mergeID || p.LaterMergeVictimID != victim ||
+			p.LaterMergeSurvivorID != survivor || !strings.Contains(p.Detail, mergeID) ||
+			!strings.HasPrefix(w.Header().Get("Content-Type"), "application/problem+json") {
+			t.Errorf("%s: %d %s, want 409 unmerge-later-merge naming the later merge %s of %s into %s", what, w.Code, w.Body.String(),
+				mergeID, victim, survivor)
+		}
+	}
+
+	a, b, c, x := f.CI(t, f.OrgA, f.Client1, "chain-a"), f.CI(t, f.OrgA, f.Client1, "chain-b"),
+		f.CI(t, f.OrgA, f.Client1, "chain-c"), f.CI(t, f.OrgA, f.Client1, "chain-x")
+	for i, id := range []string{a, b, c} {
+		if _, err := f.Admin.Exec(bg, `UPDATE ci SET serial_number = $2 WHERE id = $1`, id, fmt.Sprintf("SN-CHAIN-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var rel string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+		VALUES ($1, $2, $3, 'depends_on') RETURNING id::text`, f.OrgA, a, x).Scan(&rel); err != nil {
+		t.Fatal(err)
+	}
+	mergeAB := merge(b, a)
+	mergeBC := merge(c, b)
+	before := state(rel, a, b, c)
+
+	refused("unmerge of a while b is merged into c", call(http.MethodPost, "/api/v1/cis/"+a+"/unmerge", ""), mergeBC, b, c)
+	refused("forced unmerge of a while b is merged into c", call(http.MethodPost, "/api/v1/cis/"+a+"/unmerge?force=true", ""), mergeBC, b, c)
+	// The job revert is an unmerge without force and refuses in the same way.
+	_, err := svc.RevertMerge(ctx, f.OrgA, mergeAB)
+	if err == nil || !strings.Contains(err.Error(), "unmerge that merge first: merge "+mergeBC) {
+		t.Errorf("revert of the merge a->b while b is merged into c: %v, want the refusal naming the merge %s", err, mergeBC)
+	}
+	if after := state(rel, a, b, c); after != before {
+		t.Errorf("the refused unmerges changed\n%s\nbefore\n%s", after, before)
+	}
+	if g := call(http.MethodGet, "/api/v1/cis/"+b, ""); g.Code != http.StatusMovedPermanently || !strings.Contains(g.Header().Get("Location"), c) {
+		t.Errorf("GET b (victim of the open merge b->c): %d %q, want 301 to c", g.Code, g.Header().Get("Location"))
+	}
+
+	// In order: b->c first, then a->b; the relationship returns step by step.
+	if w := call(http.MethodPost, "/api/v1/cis/"+b+"/unmerge", ""); w.Code != http.StatusOK {
+		t.Fatalf("unmerge of b: %d %s", w.Code, w.Body.String())
+	}
+	var src string
+	if err = f.Admin.QueryRow(bg, `SELECT source_ci_id::text FROM ci_relationship WHERE id = $1`, rel).Scan(&src); err != nil || src != b {
+		t.Errorf("relationship after the unmerge of b->c starts at %s (err %v), want b %s", src, err, b)
+	}
+	// b changed after the merge a->b (merged into c and back): the 409 names
+	// the fields of those changes.
+	w := call(http.MethodPost, "/api/v1/cis/"+a+"/unmerge", "")
+	var conflict struct {
+		Detail string   `json:"detail"`
+		Fields []string `json:"fields"`
+	}
+	if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &conflict) != nil ||
+		!slices.Contains(conflict.Fields, "merged_into_id") || strings.HasSuffix(conflict.Detail, ": ") {
+		t.Errorf("unmerge of a after b was merged and unmerged: %d %s, want 409 naming the changed fields", w.Code, w.Body.String())
+	}
+	if w = call(http.MethodPost, "/api/v1/cis/"+a+"/unmerge?force=true", ""); w.Code != http.StatusOK {
+		t.Fatalf("forced unmerge of a: %d %s", w.Code, w.Body.String())
+	}
+	if err = f.Admin.QueryRow(bg, `SELECT source_ci_id::text FROM ci_relationship WHERE id = $1`, rel).Scan(&src); err != nil || src != a {
+		t.Errorf("relationship after both unmerges starts at %s (err %v), want a %s", src, err, a)
+	}
+	var open int
+	if err = f.Admin.QueryRow(bg, `SELECT
+			(SELECT count(*) FROM ci WHERE id = ANY($1::uuid[]) AND (deleted_at IS NOT NULL OR merged_into_id IS NOT NULL))
+			+ (SELECT count(*) FROM ci_merge WHERE (victim_id = ANY($1::uuid[]) OR survivor_id = ANY($1::uuid[])) AND unmerged_at IS NULL)`,
+		[]string{a, b, c}).Scan(&open); err != nil || open != 0 {
+		t.Errorf("after both unmerges %d CIs still merged or merges open (err %v): %s", open, err, state(rel, a, b, c))
+	}
+
+	// A CI merged into the survivor later: its merge is unmerged first.
+	s2, v1, v2 := f.CI(t, f.OrgA, f.Client1, "later-s"), f.CI(t, f.OrgA, f.Client1, "later-v1"), f.CI(t, f.OrgA, f.Client1, "later-v2")
+	merge(s2, v1)
+	mergeV2 := merge(s2, v2)
+	before = state(rel, s2, v1, v2)
+	refused("forced unmerge of v1 after v2 was merged into the same survivor",
+		call(http.MethodPost, "/api/v1/cis/"+v1+"/unmerge?force=true", ""), mergeV2, v2, s2)
+	if after := state(rel, s2, v1, v2); after != before {
+		t.Errorf("the refused unmerge changed\n%s\nbefore\n%s", after, before)
+	}
+	if w = call(http.MethodPost, "/api/v1/cis/"+v2+"/unmerge", ""); w.Code != http.StatusOK {
+		t.Fatalf("unmerge of v2: %d %s", w.Code, w.Body.String())
+	}
+	if w = call(http.MethodPost, "/api/v1/cis/"+v1+"/unmerge?force=true", ""); w.Code != http.StatusOK {
+		t.Errorf("forced unmerge of v1 after v2 was unmerged: %d %s", w.Code, w.Body.String())
+	}
+
+	// The later merge into a CI of another client is outside the scope of a
+	// client-1 principal (the merge row carries the client of its
+	// survivor): the tombstone of b still blocks, the merge stays unnamed.
+	a3, b3, c3 := f.CI(t, f.OrgA, f.Client1, "scoped-a"), f.CI(t, f.OrgA, f.Client1, "scoped-b"), f.CI(t, f.OrgA, f.Client2, "scoped-c")
+	merge(b3, a3)
+	mergeBC3 := merge(c3, b3)
+	before = state(rel, a3, b3, c3)
+	scoped := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/cis/"+a3+"/unmerge?force=true", nil).WithContext(scoped))
+	var p struct {
+		Type               string `json:"type"`
+		LaterMergeVictimID string `json:"later_merge_victim_id"`
+	}
+	if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &p) != nil || p.Type != "urn:reticora:problem:unmerge-later-merge" ||
+		p.LaterMergeVictimID != b3 || strings.Contains(w.Body.String(), c3) || strings.Contains(w.Body.String(), mergeBC3) {
+		t.Errorf("forced unmerge of a by a client-1 principal while b is merged into a CI of client 2: %d %s, "+
+			"want 409 unmerge-later-merge naming b only", w.Code, w.Body.String())
+	}
+	if after := state(rel, a3, b3, c3); after != before {
+		t.Errorf("the refused scoped unmerge changed\n%s\nbefore\n%s", after, before)
 	}
 }

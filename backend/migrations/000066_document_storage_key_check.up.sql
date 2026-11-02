@@ -4,24 +4,68 @@
 -- the content). Accepted besides: '' (no content yet) and the key format of
 -- uploads before this migration, documents/<organization_id>/<document id>/.
 -- Keys that clients set freely on creation may point at another tenant's
--- object; they are reported and cleared, so the document has no content
--- until it is uploaded again.
+-- object; they are cleared, so the document has no content until it is
+-- uploaded again. Each cleared key is reported first, one row per document
+-- in migration_quarantine (WP-560, F-187, E-72): source_table 'document',
+-- migration '000066', row_data with id, organization_id and the old
+-- storage_key. The down migration removes the report.
+
+-- Databases that applied 000056 before E-26 have no migration_quarantine,
+-- and this is the first migration that writes to it (F-378, E-100). Create
+-- it here exactly as 000056 does (and 000089 for databases that applied this
+-- migration before WP-560); on every other database nothing happens.
+-- Migration 000078 hands the table to reticora_owner; the grants are those
+-- the default privileges of 000056 give a table created there.
+DO $$
+BEGIN
+    IF to_regclass('public.migration_quarantine') IS NULL THEN
+        CREATE TABLE migration_quarantine (
+            id              BIGSERIAL PRIMARY KEY,
+            organization_id UUID NOT NULL,
+            source_table    TEXT NOT NULL,
+            row_data        JSONB NOT NULL,
+            reason          TEXT NOT NULL,
+            migration       TEXT NOT NULL,
+            quarantined_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE INDEX idx_migration_quarantine_org ON migration_quarantine (organization_id, source_table);
+        ALTER TABLE migration_quarantine ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE migration_quarantine FORCE ROW LEVEL SECURITY;
+        CREATE POLICY migration_quarantine_isolation ON migration_quarantine
+            USING (organization_id = current_setting('app.org_id')::UUID)
+            WITH CHECK (organization_id = current_setting('app.org_id')::UUID);
+        GRANT SELECT, INSERT, UPDATE, DELETE ON migration_quarantine TO reticora_app;
+        GRANT USAGE, SELECT ON SEQUENCE migration_quarantine_id_seq TO reticora_app;
+    END IF;
+END
+$$;
 
 DO $$
 DECLARE
     cleared INTEGER;
 BEGIN
-    UPDATE document
-       SET storage_key = ''
-     WHERE storage_key <> ''
-       AND NOT (
-           (storage_key LIKE 'org/' || organization_id::text || '/%'
-            OR storage_key LIKE 'documents/' || organization_id::text || '/' || id::text || '/%')
-           AND position('..' IN storage_key) = 0
-       );
+    WITH cleared_keys AS (
+        UPDATE document d
+           SET storage_key = ''
+          FROM document old
+         WHERE old.id = d.id
+           AND old.storage_key <> ''
+           AND NOT (
+               (old.storage_key LIKE 'org/' || old.organization_id::text || '/%'
+                OR old.storage_key LIKE 'documents/' || old.organization_id::text || '/' || old.id::text || '/%')
+               AND position('..' IN old.storage_key) = 0
+           )
+        RETURNING d.id, d.organization_id, old.storage_key
+    )
+    INSERT INTO migration_quarantine (organization_id, source_table, row_data, reason, migration)
+    SELECT organization_id, 'document',
+           jsonb_build_object('id', id, 'organization_id', organization_id, 'storage_key', storage_key),
+           'storage key outside the organization prefix (TEN-06): cleared, the content has to be uploaded again',
+           '000066'
+      FROM cleared_keys;
     GET DIAGNOSTICS cleared = ROW_COUNT;
     IF cleared > 0 THEN
-        RAISE NOTICE 'cleared % document storage keys outside the organization prefix', cleared;
+        RAISE NOTICE 'cleared % document storage keys outside the organization prefix, reported in migration_quarantine (migration 000066)', cleared;
     END IF;
 END
 $$;

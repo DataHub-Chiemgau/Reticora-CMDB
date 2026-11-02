@@ -382,6 +382,10 @@ func (r *MemoryRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode
 		r.mu.Unlock()
 		return nil, fmt.Errorf("enrollment code invalid, expired or already used")
 	}
+	if err := applyEnrollmentBinding(code.ClientID, code.SiteID, c); err != nil {
+		r.mu.Unlock()
+		return nil, err
+	}
 	if quota != nil {
 		if err := quota.AllowCreate(ctx, code.OrganizationID, entitlement.LimitMaxCollectors, r.countCollectors(code.OrganizationID)); err != nil {
 			r.mu.Unlock()
@@ -431,12 +435,20 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID strin
 // enroll. Only the SHA-256 hash is persisted; the raw code is carried on the
 // struct only transiently between creation and hashing.
 type EnrollmentCode struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organization_id"`
-	Label          string     `json:"label,omitempty"`
-	ExpiresAt      time.Time  `json:"expires_at"`
-	UsedAt         *time.Time `json:"used_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	// ClientID and SiteID bind the enrolled collector (F-406, migration
+	// 000187): "" leaves the dimension to the collector, which a creator
+	// holding collector:manage org-wide there allows. A site decides the
+	// client.
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	// CreatedBy is the user that minted the code.
+	CreatedBy string     `json:"created_by,omitempty"`
+	Label     string     `json:"label,omitempty"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 
 	// rawCode is never serialized; it exists only so the handler can return
 	// the code once at creation time.
@@ -858,9 +870,21 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Label      string `json:"label"`
 		TTLMinutes int    `json:"ttl_minutes,omitempty"`
+		// ClientID and SiteID bind the code to a client and site within
+		// the creator's scope (F-406).
+		ClientID string `json:"client_id,omitempty"`
+		SiteID   string `json:"site_id,omitempty"`
 	}
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	// The code binds the collector to the client and site the creator may
+	// register collectors in (F-406, E-08): a body client_id at enrollment
+	// cannot leave them.
+	clientID, siteID, err := enrollmentBinding(r.Context(), req.ClientID, req.SiteID)
+	if err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	// Enrollment codes are valid for 24 hours (COL-04); a shorter validity
@@ -877,21 +901,33 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 	}
 	code := &EnrollmentCode{
 		OrganizationID: t.OrganizationID,
+		ClientID:       clientID,
+		SiteID:         siteID,
 		Label:          req.Label,
+		CreatedBy:      t.UserID,
 		ExpiresAt:      time.Now().UTC().Add(ttl),
 	}
 	code.SetRawCode(raw)
 	if err := h.repo.CreateEnrollmentCode(r.Context(), code); err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, map[string]any{
+	out := map[string]any{
 		"id":         code.ID,
 		"code":       raw,
 		"label":      code.Label,
 		"expires_at": code.ExpiresAt.UTC().Format(time.RFC3339),
-	})
+	}
+	if code.ClientID != "" {
+		out["client_id"] = code.ClientID
+	}
+	if code.SiteID != "" {
+		out["site_id"] = code.SiteID
+	}
+	api.WriteJSON(w, http.StatusCreated, out)
 }
 
 // EnrollCollector handles POST /api/v1/collectors/enroll. The enrollment code
@@ -919,7 +955,8 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 
 	// The code is consumed and the collector registered (active) in one
 	// step: the request is unauthenticated, the code authorizes registration
-	// for its organization (E-08); a code works exactly once (COL-04).
+	// for its organization and in the client and site it is bound to (E-08,
+	// F-406); a code works exactly once (COL-04).
 	c := &Collector{
 		Name:     req.Name,
 		Version:  req.Version,
@@ -945,7 +982,9 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case api.WriteEntitlementError(w, err):
 		case errors.As(err, &fe):
-			api.WriteRepoError(w, err)
+			// A client or site outside the code's binding (F-406) or an
+			// unknown site: 422, the code stays unused.
+			api.WriteFieldError(w, err)
 		case errors.Is(err, ErrInvalidCSR):
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		default:
@@ -1268,6 +1307,10 @@ type batchFrame struct {
 	// blocked marks the records an earlier transient record failure holds
 	// back (WP-481); the batch of their window leaves them.
 	blocked []bool
+	// uniqueKeys are the keys of the unique attributes (MET-15), global
+	// ones included, per id of the types the frame looked up; nil when the
+	// repository cannot read them with the types (mayHoldUnique, F-432).
+	uniqueKeys map[string][]string
 }
 
 // recordOutcome is what processing one record changed.
@@ -1305,10 +1348,11 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 	// (organization_id IS NULL) and org-specific types. Items whose type can
 	// be resolved neither as UUID nor by name are queued for review instead of
 	// failing the whole batch with a 500.
-	types, err := h.lookupTypes(ctx, orgID, frameTypeNames(items))
+	types, unique, err := h.lookupFrameTypes(ctx, orgID, frameTypeNames(items))
 	if err != nil {
 		return nil, err
 	}
+	frame.uniqueKeys = unique
 	frame.typeIDs = resolveCITypeIDs(items, types)
 	frame.noProfile = make([]bool, len(items))
 	for i := range items {
@@ -1338,14 +1382,15 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 		}
 	}
 
-	// The CI count for max_cis; identity candidates are looked up per item
-	// over the whole inventory (REC-02).
+	// The CI count for max_cis, over every active CI of the organization
+	// whatever the scope of the sender (F-403); identity candidates are
+	// looked up per item over the whole inventory (REC-02).
 	if h.limits != nil {
-		_, total, countErr := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+		total, countErr := ci.CountActive(ctx, h.ciRepo, orgID)
 		if countErr != nil {
 			return nil, countErr
 		}
-		frame.total = int64(total)
+		frame.total = total
 	}
 	if frame.identity, err = h.identityContext(ctx, orgID, types); err != nil {
 		return nil, err
@@ -1486,6 +1531,13 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			}
 		}
 		withoutTakenIdentity(&item, candidates)
+		// Likewise a value of a unique attribute another active CI holds
+		// (MET-15, F-432).
+		takenDropped, takenErr := h.withoutTakenUnique(ctx, frame, orgID, typeID, &item)
+		if takenErr != nil {
+			return takenErr
+		}
+		resp.InvalidValues += takenDropped
 		if h.beforeCreate != nil {
 			h.beforeCreate(ctx)
 		}
@@ -1574,14 +1626,12 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		// ci.RecordUpdater). It is dated by the record's observed_at
 		// (GLO-12): the repository keeps the later of the two times, and a
 		// record not newer than the last sighting brings no CI back and
-		// raises no ci.online.
+		// raises no ci.online. The repository decides on the locked row
+		// (UpdateRequest.Sighting): a CI the offline detector set unknown
+		// after the match read it is active again as well (F-412).
 		seen := seenAt(&item)
 		lastSeen := seen.Format(time.RFC3339Nano)
-		update := ci.UpdateRequest{LastSeenAt: &lastSeen}
-		if matched.Status == "unknown" && (matched.LastSeenAt == nil || seen.After(*matched.LastSeenAt)) {
-			active := "active"
-			update.Status = &active
-		}
+		update := ci.UpdateRequest{LastSeenAt: &lastSeen, Sighting: true}
 		for _, f := range []struct {
 			name           string
 			value, current string
@@ -1613,6 +1663,16 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 				override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource)),
 			"raw_data": item.RawData,
 		}
+		if txErr != nil {
+			return txErr
+		}
+		// A value of a unique attribute another active CI holds is not
+		// written (MET-15, F-432), as for a new device.
+		dropped, takenErr := h.withoutTakenUniqueWrites(ctx, frame, orgID, matched, attributes, writes)
+		if takenErr != nil {
+			return takenErr
+		}
+		resp.InvalidValues += dropped
 		// In a fixed order: two transactions that write field values of
 		// one CI take their row locks in the same order (WP-334).
 		for _, k := range slices.Sorted(maps.Keys(attributes)) {
@@ -1919,10 +1979,17 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 	var pending []pendingCI
 	for _, k := range fresh {
 		i := start + k
+		typeID := frame.typeIDs[i]
+		// A new device with a value of a unique attribute (MET-15, F-432)
+		// is left to its own transaction, which checks the value against
+		// the other CIs and the devices of the batch before it.
+		if frame.mayHoldUnique(typeID, discoveredAttributes(&frame.items[i])) {
+			w.prefetched[k], w.candidates[k] = false, nil
+			continue
+		}
 		// The batch works on a copy: a record it leaves is processed on its
 		// own from what it reported.
 		item := cloneItem(&frame.items[i])
-		typeID := frame.typeIDs[i]
 		held, reviewed, err := h.resurrectionWith(ctx, orgID, &item, frame.identity, deleted[k])
 		if err != nil {
 			return err

@@ -647,7 +647,14 @@ func (r *PGRepository) ListRooms(ctx context.Context, orgID, buildingID string, 
 			}
 			out = append(out, *rm)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		ptrs := make([]*Room, len(out))
+		for i := range out {
+			ptrs[i] = &out[i]
+		}
+		return showLayouts(ctx, tx, orgID, ptrs...)
 	})
 	return out, total, err
 }
@@ -660,7 +667,10 @@ func (r *PGRepository) GetRoom(ctx context.Context, orgID, id string) (*Room, er
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		return showLayouts(ctx, tx, orgID, rm)
 	})
 	return rm, err
 }
@@ -685,10 +695,13 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 	var rm *Room
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		// The row lock orders concurrent editors: the second one reads the
-		// first one's updated_at and fails its If-Match (F-342). A room
-		// outside the scope is "not found" before any other check.
+		// first one's updated_at and fails its If-Match (F-342), and the
+		// layout merge below reads the stored layout under it. A room outside
+		// the scope is "not found" before any other check.
 		var current time.Time
-		err := tx.QueryRow(ctx, "SELECT updated_at FROM room WHERE organization_id = $1 AND id = $2 AND "+roomVisible+" FOR UPDATE", orgID, id).Scan(&current)
+		var storedLayout []byte
+		var roomID string
+		err := tx.QueryRow(ctx, "SELECT id::text, updated_at, COALESCE(layout,'{}'::jsonb) FROM room WHERE organization_id = $1 AND id = $2 AND "+roomVisible+" FOR UPDATE", orgID, id).Scan(&roomID, &current, &storedLayout)
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("not found")
 		}
@@ -698,8 +711,12 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 		if req.IfMatch != nil && !sameRoomVersion(current, *req.IfMatch) {
 			return errRoomChanged
 		}
-		if invalid := checkLayoutCIs(ctx, tx, orgID, req.Layout); invalid != nil {
-			return invalid
+		if req.Layout != nil {
+			merged, invalid := mergeLayout(ctx, tx, orgID, roomID, storedLayout, req.Layout)
+			if invalid != nil {
+				return invalid
+			}
+			req.Layout = merged
 		}
 		sets := []string{}
 		args := []any{orgID, id}
@@ -742,44 +759,107 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 			return fieldDBError(err)
 		}
 		// The update may move the row under an object outside the scope.
-		return requireVisible(ctx, tx, "room", roomVisible, id)
+		if err := requireVisible(ctx, tx, "room", roomVisible, id); err != nil {
+			return err
+		}
+		return showLayouts(ctx, tx, orgID, rm)
 	})
 	return rm, err
 }
 
-// checkLayoutCIs refuses a layout key that is not a CI of the organization
-// visible in the transaction's tenant scope (422, F-341): the CI policies
-// filter the lookup, so a CI of another client counts as unknown.
-func checkLayoutCIs(ctx context.Context, tx pgx.Tx, orgID string, layout map[string]LayoutPosition) error {
-	if len(layout) == 0 {
-		return nil
-	}
-	keys := layoutKeys(layout)
+// layoutCIRooms looks up the CIs named by the UUID keys among keys as the
+// transaction's tenant scope sees them (the CI policies filter the lookup,
+// so a CI of another client is missing like an unknown id): CI id → the
+// room the CI is located in, "" for a deleted CI or one outside any room.
+func layoutCIRooms(ctx context.Context, tx pgx.Tx, orgID string, keys []string) (map[string]string, error) {
 	ids := make([]string, 0, len(keys))
 	for _, k := range keys {
-		if !audit.IsUUID(k) {
-			return unknownLayoutCI(k)
+		if audit.IsUUID(k) {
+			ids = append(ids, k)
 		}
-		ids = append(ids, k)
 	}
-	rows, err := tx.Query(ctx, "SELECT id::text FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[])", orgID, ids)
+	rooms := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return rooms, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text, CASE WHEN deleted_at IS NULL THEN COALESCE(room_id::text, '') ELSE '' END
+		FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[])`, orgID, ids)
 	if err != nil {
-		return fmt.Errorf("check layout CIs: %w", err)
+		return nil, fmt.Errorf("look up layout CIs: %w", err)
 	}
-	known, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	defer rows.Close()
+	for rows.Next() {
+		var id, room string
+		if err := rows.Scan(&id, &room); err != nil {
+			return nil, fmt.Errorf("look up layout CIs: %w", err)
+		}
+		rooms[id] = room
+	}
+	return rooms, rows.Err()
+}
+
+// showLayouts reduces each room's layout to what the caller may see: the
+// entries of CIs visible in the tenant scope, not deleted and located in
+// that room (F-427). Entries of CIs of another client and stale entries of
+// CIs moved out of the room or deleted are left out.
+func showLayouts(ctx context.Context, tx pgx.Tx, orgID string, rooms ...*Room) error {
+	var keys []string
+	for _, rm := range rooms {
+		for k := range rm.Layout {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	located, err := layoutCIRooms(ctx, tx, orgID, keys)
 	if err != nil {
-		return fmt.Errorf("check layout CIs: %w", err)
+		return err
 	}
-	seen := make(map[string]bool, len(known))
-	for _, id := range known {
-		seen[id] = true
-	}
-	for _, k := range keys {
-		if !seen[k] {
-			return unknownLayoutCI(k)
+	for _, rm := range rooms {
+		for k := range rm.Layout {
+			if located[k] != rm.ID {
+				delete(rm.Layout, k)
+			}
 		}
 	}
 	return nil
+}
+
+// mergeLayout checks a PATCH layout of room roomID and merges it into the
+// stored one (F-341, F-427). Every requested key must be a CI the caller
+// sees, not deleted and located in the room; otherwise 422 naming
+// layout.<key>, the same answer for an unknown id and a CI of another
+// client. The request replaces the entries the caller sees; stored entries
+// of CIs the caller does not see are kept, stored entries of CIs the caller
+// sees that are deleted or no longer in the room are dropped. The caller
+// holds the room's row lock.
+func mergeLayout(ctx context.Context, tx pgx.Tx, orgID, roomID string, stored []byte, req map[string]LayoutPosition) (map[string]LayoutPosition, error) {
+	var current map[string]LayoutPosition
+	if len(stored) > 0 {
+		if err := json.Unmarshal(stored, &current); err != nil {
+			return nil, fmt.Errorf("decode room layout: %w", err)
+		}
+	}
+	keys := layoutKeys(req)
+	keys = append(keys, layoutKeys(current)...)
+	located, err := layoutCIRooms(ctx, tx, orgID, keys)
+	if err != nil {
+		return nil, err
+	}
+	merged := make(map[string]LayoutPosition, len(req)+len(current))
+	for _, k := range layoutKeys(req) {
+		if located[k] != roomID {
+			return nil, unknownLayoutCI(k)
+		}
+		merged[k] = req[k]
+	}
+	for k, p := range current {
+		if _, seen := located[k]; !seen && audit.IsUUID(k) {
+			merged[k] = p
+		}
+	}
+	return merged, nil
 }
 
 func (r *PGRepository) DeleteRoom(ctx context.Context, orgID, id string) error {

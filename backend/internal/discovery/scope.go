@@ -640,6 +640,23 @@ func (r *PGRepository) ScopeCollector(ctx context.Context, orgID, collectorID st
 	return out, err
 }
 
+// SiteClient implements SiteClientReader: the client of a site the scope
+// of ctx sees (site_isolation); "not found" for another.
+func (r *PGRepository) SiteClient(ctx context.Context, orgID, siteID string) (string, error) {
+	if !audit.IsUUID(siteID) {
+		return "", fmt.Errorf("not found")
+	}
+	var client string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT client_id::text FROM site WHERE id = $1 AND organization_id = $2`, siteID, orgID).Scan(&client)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		return err
+	})
+	return client, err
+}
+
 // DiscoveryIntervals implements ScopeRepository.
 func (r *PGRepository) DiscoveryIntervals(ctx context.Context, orgID string) (DiscoveryIntervals, error) {
 	var settings map[string]any

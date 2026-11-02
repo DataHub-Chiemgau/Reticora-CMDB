@@ -262,6 +262,9 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no deleted CI with this id")
 		return
+	case api.WriteEntitlementError(w, err):
+		// max_cis is reached: the CI stays deleted (ENT-03).
+		return
 	case err != nil:
 		if api.WriteFieldError(w, err) {
 			return
@@ -347,11 +350,16 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
+// ProblemUnmergeLaterMerge is the problem type of an unmerge a later open
+// merge of the survivor blocks (409, F-416).
+const ProblemUnmergeLaterMerge = "urn:reticora:problem:unmerge-later-merge"
+
 // Unmerge handles POST /api/v1/cis/{id}/unmerge: the merged CI of the path
 // and its survivor return to their state before the merge, within 30 days
 // (CI-12); afterwards 410. A survivor changed after the merge answers 409
 // with the changed fields; ?force=true restores the snapshot over them
-// (E-80).
+// (E-80). A survivor that is part of a later open merge answers 409
+// unmerge-later-merge naming that merge, also with force (F-416).
 func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -369,7 +377,24 @@ func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.svc.Unmerge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), force)
 	var changed *UnmergeConflictError
+	var later *UnmergeLaterMergeError
 	switch {
+	case errors.As(err, &later):
+		// A later open merge of the survivor is unmerged first; force does
+		// not override it (F-416).
+		api.WriteProblemBody(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			LaterMergeID         string `json:"later_merge_id,omitempty"`
+			LaterMergeVictimID   string `json:"later_merge_victim_id"`
+			LaterMergeSurvivorID string `json:"later_merge_survivor_id,omitempty"`
+		}{
+			ProblemDetail: api.ProblemDetail{
+				Type: ProblemUnmergeLaterMerge, Title: "Conflict", Status: http.StatusConflict,
+				Detail: later.Error(),
+			},
+			LaterMergeID: later.MergeID, LaterMergeVictimID: later.VictimID, LaterMergeSurvivorID: later.SurvivorID,
+		})
+		return
 	case errors.As(err, &changed):
 		w.Header().Set("ETag", api.ETag(changed.Current))
 		api.WriteProblemBody(w, http.StatusConflict, struct {
@@ -395,6 +420,9 @@ func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no merge of this CI to revert")
+		return
+	case api.WriteEntitlementError(w, err):
+		// max_cis is reached: the merge stays (ENT-03).
 		return
 	case err != nil:
 		if api.WriteFieldError(w, err) {
@@ -639,22 +667,11 @@ func writeValidationError(w http.ResponseWriter, err error) bool {
 		return true
 	}
 	// A value of a unique attribute another CI holds (MET-15): 409 with the
-	// attributes.
+	// attributes (UniqueError.ConflictViolations), as every handler that
+	// passes the error to api.WriteFieldError answers it.
 	var taken *UniqueError
 	if errors.As(err, &taken) {
-		violations := make([]Violation, len(taken.Fields))
-		for i, f := range taken.Fields {
-			violations[i] = Violation{Field: f, Detail: "another CI already holds this value of the unique attribute"}
-		}
-		api.WriteJSON(w, http.StatusConflict, struct {
-			api.ProblemDetail
-			Violations []Violation `json:"violations"`
-		}{
-			ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
-				Status: http.StatusConflict, Detail: taken.Error()},
-			Violations: violations,
-		})
-		return true
+		return api.WriteFieldError(w, taken)
 	}
 	ve, ok := AsValidationError(err)
 	if !ok {

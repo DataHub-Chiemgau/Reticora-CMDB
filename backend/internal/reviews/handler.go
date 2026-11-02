@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -51,7 +52,9 @@ func deprecated(successor string, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// List handles GET /api/v1/review-items.
+// List handles GET /api/v1/review-items and its deprecated alias. A status
+// or kind outside the documented enums is 400 with the field (API-01,
+// F-426), as rel_type of /relationships, not an empty list.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -60,6 +63,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	filter := Filter{Status: q.Get("status"), Kind: q.Get("kind")}
+	if filter.Status != "" && !slices.Contains(Statuses, filter.Status) {
+		api.WriteFieldError(w, &api.FieldError{Field: "status", Message: "must be one of " + strings.Join(Statuses, ", ")})
+		return
+	}
+	if filter.Kind != "" && !slices.Contains(Kinds, filter.Kind) {
+		api.WriteFieldError(w, &api.FieldError{Field: "kind", Message: "must be a review type: " + strings.Join(Kinds, ", ")})
+		return
+	}
 	if v := q.Get("escalated"); v != "" {
 		escalated, err := strconv.ParseBool(v)
 		if err != nil {
@@ -130,6 +141,12 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.As(err, &refused):
 		api.WriteError(w, refused.Status, http.StatusText(refused.Status), refused.Message)
 	default:
+		// A refusal of the effect as the resource it writes reports it
+		// (e.g. the scope of a scope_suggested item: 409 on target, 422 on
+		// collector_id, as POST /discovery-scopes answers, F-405).
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		var typed api.TypedProblem
 		if errors.As(err, &typed) && typed.ProblemType() != "" {
 			api.WriteTypedProblem(w, http.StatusForbidden, err)

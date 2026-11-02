@@ -21,8 +21,9 @@ import (
 // runtime role with the principal's tenant scope:
 //   - PATCH /rooms/{id} refuses coordinates outside 0..1 with 422 naming
 //     layout.<ci>.x|y, and layout keys that are no CI of the organization
-//     visible to the caller (another client's CI, another organization's CI,
-//     an unknown id, no UUID) with 422 naming layout.<ci>; nothing is stored;
+//     visible to the caller and located in the room (another client's CI,
+//     another organization's CI, an unknown id, no UUID; WP-698) with 422
+//     naming layout.<ci>; nothing is stored;
 //   - x = 0.25 is stored (200) and GET returns it;
 //   - a client-1 principal gets 404 on a client-2 room, also with a client-2
 //     CI key, and the room stays unchanged;
@@ -44,6 +45,12 @@ func TestRoomLayoutValidationAgainstPostgres(t *testing.T) {
 	ci1 := f.CI(t, f.OrgA, f.Client1, "wp526-ci-c1")
 	ci2 := f.CI(t, f.OrgA, f.Client2, "wp526-ci-c2")
 	ciOrgB := f.CI(t, f.OrgB, "", "wp526-ci-org-b")
+	// A layout key is a CI located in the room (WP-698).
+	for ci, room := range map[string]string{ci1: room1, ci2: room2} {
+		if _, err := f.Admin.Exec(bg, `UPDATE ci SET location_id = $2 WHERE id = $1`, ci, room); err != nil {
+			t.Fatalf("locate %s in %s: %v", ci, room, err)
+		}
+	}
 
 	client1 := f.ClientCtx(f.Client1)
 	orgWide := f.OrgCtx(f.OrgA)
@@ -210,5 +217,199 @@ func TestRoomLayoutValidationAgainstPostgres(t *testing.T) {
 	}
 	if x := storedX(room1, ci1); x != winner {
 		t.Fatalf("layout after concurrent editors: x=%v, want the accepted %v", x, winner)
+	}
+}
+
+// TestRoomLayoutForeignClientEntriesAgainstPostgres covers WP-698 (UI-18,
+// TEN-05, TEN-09; retest F-427) through the room handler over PostgreSQL as
+// the runtime role with the principal's tenant scope:
+//   - a CI that moved to a room of client 2 (client and location changed)
+//     drops out of the old room's layout for client 1 and for the org-wide
+//     principal; client 1 positions its remaining CI with what the room plan
+//     sends (server layout plus the moved marker): 200, not 422;
+//   - the org-wide principal cannot put a client-2 CI into a client-1 room's
+//     layout (422); with such an entry stored earlier, a client-1 principal
+//     reads only its own entry (GET and list), a PATCH with only its own CI
+//     keeps the client-2 position, and the client-2 key is refused exactly
+//     like an unknown id (same status, field and detail: no existence
+//     oracle);
+//   - a layout key must be a CI located in the room: a CI of the
+//     organization elsewhere is 422, a deleted CI drops out of GET and is
+//     removed by the next PATCH of a principal who sees it.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRoomLayoutForeignClientEntriesAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "21")
+	bg := context.Background()
+	mux := chi.NewRouter()
+	tenantapi.NewHandler(tenantapi.NewPGRepository(f.App)).RegisterRoutes(mux)
+
+	client1 := f.ClientCtx(f.Client1)
+	client2 := f.ClientCtx(f.Client2)
+	orgWide := f.OrgCtx(f.OrgA)
+	call := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r = r.WithContext(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	type position = tenantapi.LayoutPosition
+	patch := func(ctx context.Context, room string, layout map[string]position) *httptest.ResponseRecorder {
+		t.Helper()
+		b, _ := json.Marshal(map[string]any{"layout": layout})
+		return call(ctx, "PATCH", "/api/v1/rooms/"+room, string(b))
+	}
+	read := func(ctx context.Context, room string) map[string]position {
+		t.Helper()
+		w := call(ctx, "GET", "/api/v1/rooms/"+room, "")
+		var rm tenantapi.Room
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &rm) != nil {
+			t.Fatalf("GET room %s: %d %s", room, w.Code, w.Body.String())
+		}
+		if rm.Layout == nil {
+			rm.Layout = map[string]position{}
+		}
+		return rm.Layout
+	}
+	stored := func(room string) map[string]position {
+		t.Helper()
+		var raw []byte
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(layout, '{}'::jsonb) FROM room WHERE id = $1`, room).Scan(&raw); err != nil {
+			t.Fatalf("read layout of %s: %v", room, err)
+		}
+		out := map[string]position{}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("decode layout of %s: %v", room, err)
+		}
+		return out
+	}
+	locate := func(ci, client, room string) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, `UPDATE ci SET client_id = $2, location_id = $3 WHERE id = $1`, ci, client, room); err != nil {
+			t.Fatalf("locate %s in %s: %v", ci, room, err)
+		}
+	}
+	type problem struct {
+		Status int    `json:"status"`
+		Field  string `json:"field"`
+		Detail string `json:"detail"`
+	}
+	refusal := func(w *httptest.ResponseRecorder, key string) problem {
+		t.Helper()
+		var p problem
+		_ = json.Unmarshal(w.Body.Bytes(), &p)
+		// Field and detail name the key; apart from it both answers are equal.
+		p.Detail = strings.ReplaceAll(p.Detail, key, "<key>")
+		p.Field = strings.ReplaceAll(p.Field, key, "<key>")
+		return p
+	}
+
+	// A CI moved to client 2 (the UI path: PATCH /cis/{id} with client_id
+	// and location_id; here the same row change through the maintenance pool).
+	room1 := f.Room(t, f.Client1, "wp698-room-c1")
+	room2 := f.Room(t, f.Client2, "wp698-room-c2")
+	m := f.CI(t, f.OrgA, f.Client1, "wp698-moved")
+	d := f.CI(t, f.OrgA, f.Client1, "wp698-stays")
+	locate(m, f.Client1, room1)
+	locate(d, f.Client1, room1)
+	if w := patch(client1, room1, map[string]position{m: {X: 0.2, Y: 0.2}, d: {X: 0.8, Y: 0.8}}); w.Code != http.StatusOK {
+		t.Fatalf("client 1 positions m and d: %d %s", w.Code, w.Body.String())
+	}
+	locate(m, f.Client2, room2)
+	seen := read(client1, room1)
+	if _, ok := seen[m]; ok {
+		t.Errorf("client 1 GET room1 after the move still shows the client-2 CI m: %v", seen)
+	}
+	seen[d] = position{X: 0.4, Y: 0.4}
+	if w := patch(client1, room1, seen); w.Code != http.StatusOK {
+		t.Errorf("client 1 PATCH of what the room plan sends (server layout + moved d): %d %s, want 200", w.Code, w.Body.String())
+	}
+	if p := stored(room1)[d]; p.X != 0.4 {
+		t.Errorf("position of d after the client-1 PATCH: %+v, want x=0.4", p)
+	}
+	all := read(orgWide, room1)
+	if _, ok := all[m]; ok {
+		t.Errorf("org-wide GET room1 shows m, which is no longer located in the room: %v", all)
+	}
+	if w := patch(orgWide, room1, all); w.Code != http.StatusOK {
+		t.Fatalf("org-wide PATCH of room1: %d %s", w.Code, w.Body.String())
+	}
+	if _, ok := stored(room1)[m]; ok {
+		t.Errorf("the org-wide PATCH kept the stale entry of m: %v", stored(room1))
+	}
+	if w := patch(orgWide, room1, map[string]position{d: {X: 0.4, Y: 0.4}, m: {X: 0.1, Y: 0.1}}); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("org-wide PATCH naming m, located in another room: %d %s, want 422", w.Code, w.Body.String())
+	}
+
+	// The variant over the API: the org-wide principal names a client-2 CI
+	// (located in a client-2 room) in a client-1 room's layout. It is no CI
+	// of that room: 422. Every site has a client and a CI's location has the
+	// CI's client, so CIs of two clients never share a room. A layout stored
+	// like this before (the old code accepted it) is seeded directly.
+	shared := f.Room(t, f.Client1, "wp698-room-c1-legacy")
+	c1 := f.CI(t, f.OrgA, f.Client1, "wp698-legacy-c1")
+	c2 := f.CI(t, f.OrgA, f.Client2, "wp698-legacy-c2")
+	locate(c1, f.Client1, shared)
+	locate(c2, f.Client2, room2)
+	if w := patch(orgWide, shared, map[string]position{c1: {X: 0.2, Y: 0.2}, c2: {X: 0.8, Y: 0.8}}); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("org-wide PATCH of a client-1 room naming a client-2 CI: %d %s, want 422", w.Code, w.Body.String())
+	}
+	legacy, _ := json.Marshal(map[string]position{c1: {X: 0.2, Y: 0.2}, c2: {X: 0.8, Y: 0.8}})
+	if _, err := f.Admin.Exec(bg, `UPDATE room SET layout = $2::jsonb WHERE id = $1`, shared, string(legacy)); err != nil {
+		t.Fatalf("seed legacy layout: %v", err)
+	}
+	if got := read(client1, shared); len(got) != 1 || got[c1] != (position{X: 0.2, Y: 0.2}) {
+		t.Errorf("client 1 GET of its room: %v, want only its own c1", got)
+	}
+	if got := read(orgWide, shared); len(got) != 1 {
+		t.Errorf("org-wide GET of the client-1 room: %v, want only c1 (c2 is located elsewhere)", got)
+	}
+	if w := call(client2, "GET", "/api/v1/rooms/"+shared, ""); w.Code != http.StatusNotFound {
+		t.Errorf("client 2 GET of the client-1 room: %d, want 404", w.Code)
+	}
+	list := call(client1, "GET", "/api/v1/rooms?limit=100", "")
+	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), c2) {
+		t.Errorf("client 1 room list shows the client-2 CI: %d %s", list.Code, list.Body.String())
+	}
+	own := patch(client1, shared, map[string]position{c1: {X: 0.3, Y: 0.3}})
+	if own.Code != http.StatusOK || strings.Contains(own.Body.String(), c2) {
+		t.Errorf("client 1 PATCH {c1}: %d %s, want 200 without the client-2 entry", own.Code, own.Body.String())
+	}
+	if got := stored(shared); got[c2] != (position{X: 0.8, Y: 0.8}) || got[c1] != (position{X: 0.3, Y: 0.3}) {
+		t.Errorf("layout after the client-1 PATCH {c1}: %v, want c1 moved and the client-2 position kept", got)
+	}
+	unknown := "c0de2100-0000-4000-8000-00000000fffe"
+	foreign := patch(client1, shared, map[string]position{c1: {X: 0.3, Y: 0.3}, c2: {X: 0.5, Y: 0.5}})
+	missing := patch(client1, shared, map[string]position{c1: {X: 0.3, Y: 0.3}, unknown: {X: 0.5, Y: 0.5}})
+	if foreign.Code != http.StatusUnprocessableEntity || refusal(foreign, c2) != refusal(missing, unknown) {
+		t.Errorf("client 1 PATCH with the client-2 key: %d %s; unknown key: %d %s; want the same 422",
+			foreign.Code, foreign.Body.String(), missing.Code, missing.Body.String())
+	}
+	if got := stored(shared); got[c2] != (position{X: 0.8, Y: 0.8}) {
+		t.Errorf("refused PATCH changed the client-2 position: %v", got)
+	}
+
+	// A deleted CI drops out of GET; the room plan's next PATCH works and
+	// removes it.
+	gone := f.CI(t, f.OrgA, f.Client1, "wp698-deleted")
+	locate(gone, f.Client1, room1)
+	if w := patch(client1, room1, map[string]position{d: {X: 0.4, Y: 0.4}, gone: {X: 0.6, Y: 0.6}}); w.Code != http.StatusOK {
+		t.Fatalf("client 1 positions the CI to delete: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, gone); err != nil {
+		t.Fatalf("delete CI: %v", err)
+	}
+	seen = read(client1, room1)
+	if _, ok := seen[gone]; ok {
+		t.Errorf("client 1 GET shows the deleted CI: %v", seen)
+	}
+	seen[d] = position{X: 0.45, Y: 0.4}
+	if w := patch(client1, room1, seen); w.Code != http.StatusOK {
+		t.Errorf("client 1 PATCH after the deletion: %d %s", w.Code, w.Body.String())
+	}
+	if _, ok := stored(room1)[gone]; ok {
+		t.Errorf("the deleted CI stays in the layout after the PATCH: %v", stored(room1))
 	}
 }

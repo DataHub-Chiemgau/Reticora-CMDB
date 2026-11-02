@@ -45,6 +45,46 @@ type Repository interface {
 
 var _ identity.AccessResolver = Repository(nil)
 
+// ProblemStandardRolePermissions is the problem type of a refused removal of
+// a seed permission of a standard role (409, F-398).
+const ProblemStandardRolePermissions = "https://reticora.io/problems/standard-role-permissions"
+
+// StandardRolePermissionsError refuses replacing the permissions of a
+// standard role without one of its seed keys (role.permissions, the RBA-02
+// matrix of seed_standard_roles): the seed is the definition of the system
+// role, every grant path reads it, and the matrix migrations restore it, so
+// the key would stay effective (409, F-398). Narrower rights are a custom
+// role (RBA-03).
+type StandardRolePermissionsError struct {
+	Role    string
+	Missing []string
+}
+
+// validation: a fixed rule text with the role name and the missing keys.
+func (e *StandardRolePermissionsError) Error() string {
+	return "the standard role " + e.Role + " keeps its permissions " + strings.Join(e.Missing, ", ") +
+		" (RBA-02); a narrower role is a custom role"
+}
+
+// ProblemType names the RFC 7807 problem type (api.TypedProblem).
+func (e *StandardRolePermissionsError) ProblemType() string { return ProblemStandardRolePermissions }
+
+// checkSeedKept returns a StandardRolePermissionsError when next lacks a key
+// of seed.
+func checkSeedKept(role string, seed, next []string) error {
+	var missing []string
+	for _, key := range seed {
+		if !slices.Contains(next, key) && !slices.Contains(missing, key) {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return &StandardRolePermissionsError{Role: role, Missing: missing}
+}
+
 // RoleWideningError refuses a change of a role's permissions that adds
 // permissions the caller does not hold organization-wide (403, RBA-03,
 // F-015): the role applies to all its assignments, org-wide ones too.
@@ -63,7 +103,7 @@ func (e *RoleWideningError) Error() string {
 
 // checkWidening returns a RoleWideningError unless caller holds every key of
 // next that current lacks organization-wide (identity.GrantCeiling with an
-// org-wide target). Removing permissions is not limited.
+// org-wide target). Removing permissions is limited by CheckRoleNarrowing.
 func checkWidening(caller *identity.Principal, current, next []string) error {
 	var added []identity.Permission
 	for _, key := range next {
@@ -78,6 +118,16 @@ func checkWidening(caller *identity.Principal, current, next []string) error {
 		return &RoleWideningError{Missing: missing}
 	}
 	return nil
+}
+
+// removes reports whether next leaves out a key of current.
+func removes(current, next []string) bool {
+	for _, key := range current {
+		if !slices.Contains(next, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -149,8 +199,46 @@ func (r *MemoryRepository) ReplaceRolePermissions(_ context.Context, orgID, role
 	if err := checkWidening(caller, current, keys); err != nil {
 		return nil, err
 	}
+	if removes(current, keys) {
+		if err := r.checkNarrowing(orgID, roleID, caller, current); err != nil {
+			return nil, err
+		}
+	}
 	r.roleGrants[grantKey(orgID, roleID)] = unique
 	return grantsToSlice(unique), nil
+}
+
+// checkNarrowing is CheckRoleNarrowing over the assignments of the memory
+// repository: caller must cover role:manage and the role's permissions
+// (current) in the scope of each assignment of the role; a site whose client
+// is unknown needs them in all clients.
+func (r *MemoryRepository) checkNarrowing(orgID, roleID string, caller *identity.Principal, current []string) error {
+	var missing []identity.Permission
+	for key, assignments := range r.assignments {
+		if !strings.HasPrefix(key, orgID+":") {
+			continue
+		}
+		for _, a := range assignments {
+			if a.roleID != roleID {
+				continue
+			}
+			target := identity.Grant{Permissions: append(toPermissions(current), identity.PermRoleManage),
+				Clients: slices.Clone(a.clients), Sites: slices.Clone(a.sites)}
+			if len(a.sites) > 0 && len(a.clients) == 0 {
+				target.Clients, _ = r.assignmentClients(orgID, a)
+			}
+			for _, perm := range identity.GrantCeiling(caller, []identity.Grant{target}) {
+				if !slices.Contains(missing, perm) {
+					missing = append(missing, perm)
+				}
+			}
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return &RoleNarrowingError{Missing: missing}
+	}
+	return nil
 }
 
 func (r *MemoryRepository) EffectivePermissions(_ context.Context, orgID, userID string) ([]string, error) {

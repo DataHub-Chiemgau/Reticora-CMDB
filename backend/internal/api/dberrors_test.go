@@ -90,6 +90,45 @@ func TestWriteRepoErrorSanitizesPostgresErrors(t *testing.T) {
 	}
 }
 
+// TestWriteRepoErrorWritesFieldErrors covers WP-694 (API-03, F-423): a
+// field error of the validation or the repository that reaches
+// WriteRepoError, also wrapped, is its field problem instead of 500: the
+// status it names (400 without one), 409 for a conflict, with the field;
+// the text of an error wrapping it is not written.
+func TestWriteRepoErrorWritesFieldErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+		field  string
+	}{
+		"field error with 422": {fmt.Errorf("update collector secret_internal_table: %w",
+			&FieldError{Field: "site_id", Message: "site not found", Status: http.StatusUnprocessableEntity}), http.StatusUnprocessableEntity, "site_id"},
+		"field error without status": {&FieldError{Field: "name", Message: "name must not be empty"}, http.StatusBadRequest, "name"},
+		"conflict":                   {fmt.Errorf("register: %w", &ConflictError{Field: "name", Message: "taken"}), http.StatusConflict, "name"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			WriteRepoError(w, tc.err)
+			var problem struct {
+				Field  string `json:"field"`
+				Detail string `json:"detail"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("response is not JSON: %v (%s)", err, w.Body.String())
+			}
+			if w.Code != tc.status || problem.Field != tc.field {
+				t.Fatalf("status %d field %q (%s), want %d on %s", w.Code, problem.Field, w.Body.String(), tc.status, tc.field)
+			}
+			if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+				t.Errorf("Content-Type %q, want application/problem+json", ct)
+			}
+			if strings.Contains(w.Body.String(), "secret_internal_table") {
+				t.Errorf("answer names the wrapping error: %s", w.Body.String())
+			}
+		})
+	}
+}
+
 // TestWriteRepoErrorUnavailableDependency covers WP-449 (OPS-06, F-136): a
 // dependency that is unreachable before anything was stored (ErrUnavailable,
 // e.g. the ingest queue while NATS is down, or a database connection that

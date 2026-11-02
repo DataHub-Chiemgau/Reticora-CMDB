@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
@@ -445,6 +447,47 @@ func TestOperatorActionsFailWithoutTheirAuditEntry(t *testing.T) {
 	}
 	if svc.IsEnabled(context.Background(), org, entitlement.FeatureTicketing) {
 		t.Error("grant without audit entry took effect")
+	}
+}
+
+// TestFailedOperatorAuthenticationCountsWithoutItsAuditEntry covers WP-658
+// (AUT-10, review of F-387): a failed operator authentication spends its
+// unit of the pre-auth budget of the IP even when its operator_audit entry
+// cannot be written and the request is answered 500 (F-208). 20 requests
+// without credentials from one IP get 500, the 21st 429; before, the 500
+// gave the unit back and the failures were never counted. A request with
+// the break-glass token keeps its unit only while it is served.
+func TestFailedOperatorAuthenticationCountsWithoutItsAuditEntry(t *testing.T) {
+	if left := 60 - time.Now().UTC().Unix()%60; left < 5 {
+		time.Sleep(time.Duration(left)*time.Second + 100*time.Millisecond)
+	}
+	issuer := testIssuer(t)
+	handler := middleware.PreAuthRateLimiter(middleware.DefaultPreAuthPerMinute, cache.NewMemoryStore())(
+		testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, issuer, nil, nil),
+			&memoryAudit{fail: errors.New("insert operator audit: disk full")})))
+	serve := func(ip string, header map[string]string) int {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/me", nil)
+		req.RemoteAddr = ip + ":40000"
+		for k, v := range header {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w.Code
+	}
+	codes := map[int]int{}
+	for range middleware.DefaultPreAuthPerMinute + 1 {
+		codes[serve("198.51.100.58", nil)]++
+	}
+	if want := map[int]int{http.StatusInternalServerError: middleware.DefaultPreAuthPerMinute, http.StatusTooManyRequests: 1}; !maps.Equal(codes, want) {
+		t.Errorf("21 operator requests without credentials of one IP, audit failing: %v, want %v (a failed authentication counts)", codes, want)
+	}
+	codes = map[int]int{}
+	for range middleware.DefaultPreAuthPerMinute + 1 {
+		codes[serve("198.51.100.59", map[string]string{BreakGlassHeader: testBreakGlass})]++
+	}
+	if want := map[int]int{http.StatusInternalServerError: middleware.DefaultPreAuthPerMinute + 1}; !maps.Equal(codes, want) {
+		t.Errorf("21 operator requests with the break-glass token, audit failing: %v, want %v (an authenticated request spends nothing)", codes, want)
 	}
 }
 

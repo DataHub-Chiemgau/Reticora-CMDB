@@ -41,7 +41,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 const auditSMTPSecret = "audit-e8-corp-secret"
@@ -53,7 +52,7 @@ func auditChannelAPI(t *testing.T, policy egress.Options) (*Center, func(method,
 	NewHandler(center).WithEgress(policy).RegisterRoutes(mux)
 	return center, func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-e8", UserID: "user-e8"}))
+		req = req.WithContext(adminContext(req.Context(), "org-e8", "user-e8"))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w

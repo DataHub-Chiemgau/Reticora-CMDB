@@ -29,6 +29,26 @@ Laufs wächst damit um etwa ein Fünftel (32 auf 38 VUs).
 Der Job `nfr01-volume` von `load.yml` führt `api.js` mit denselben
 Schwellen auf den Volumina von NFR-01 aus (Abschnitt „NFR-01-Volumina“).
 
+**Fehlgeschlagene Anfragen (F-388, WP-659):** Kein Lauf ist mit einer
+fehlgeschlagenen Anfrage grün. Jedes Skript hat `http_req_failed: rate==0`
+für den ganzen Lauf (mit `setup`) und je Szenario
+(`http_req_failed{scenario:<name>}`; `api.js` alle zwölf Szenarien,
+`ingest.js` `ingest` und `probe` bzw. `spool`). Als fehlgeschlagen zählt
+k6 jede Antwort außerhalb 200–399 und jede Anfrage ohne Antwort (Status 0),
+auch die Abfragen der Sichtbarkeit und `/readyz`. `api.js` verlangt
+zusätzlich, dass jeder der drei Bulk-Jobs gelingt (`bulk_jobs_succeeded:
+count==3`, `checks{scenario:bulk}: rate==1`); `bulk_500_duration` erfasst
+nur gelungene Bulk-Jobs, eine abgewiesene Bulk-Anfrage (wenige ms) zählt
+also nicht als schneller Bulk. `checks: rate>0.99` bleibt für die
+inhaltlichen Prüfungen der Antworten. `tests/load/lib.js` (`failed`)
+schreibt jede fehlgeschlagene Anfrage mit Name, Status, Methode, Pfad und
+Anfang der Antwort auf die k6-Konsole; `load.yml` legt sie als
+`console-<job>.log` ab, `tests/load/failed-requests.sh` zählt sie je Name
+und Status für die Zusammenfassung des Jobs und `failed-<job>.txt`.
+Selbsttest: `tests/load/thresholds.test.sh` (k6 `inspect` aller Skripte und
+`api.js` gegen eine Attrappe der API: abgewiesene oder gescheiterte
+Bulk-Jobs und eine einzelne 503 machen den Lauf rot), im Job `prepare`.
+
 ## Ablauf
 
 ```sh
@@ -142,7 +162,9 @@ Server-Commit, Lauf-URL, Skript, Szenario,
 `objects`, `duration`, Seed-Optionen, Spurzahl, Rate-Limits, Versionen von
 k6, Go, PostgreSQL und TimescaleDB, Container-Images, vollständiges `lscpu`,
 `/proc/meminfo` und `free -h`), das Ergebnis des Jobs und seiner Schritte
-(`result-<job>.txt`), `/readyz` und das Server-Log; die `api.js`-Jobs
+(`result-<job>.txt`), `/readyz`, das Server-Log, die k6-Konsole
+(`console-<job>.log`) und die fehlgeschlagenen Anfragen je Name und Status
+(`failed-<job>.txt`, auch in der Zusammenfassung des Jobs); die `api.js`-Jobs
 zusätzlich die Pläne langsamer Statements und das CPU-Profil des Servers
 (siehe Ursachenanalyse NFR-02). Das Ergebnis des G1-Laufs steht in
 `docs/acceptance/lasttest-g1.md`.
@@ -160,14 +182,16 @@ wird:
   `--summary-export`), `<job>.txt` (k6-Ausgabe ohne die Fortschrittszeilen),
   `run-<job>.txt`, `result-<job>.txt`, `seed-<job>.txt`, `volumes-<job>.txt`,
   `integrity-<job>.txt`, `statements-<job>.txt` und, soweit vorhanden,
-  `slow-plans-<job>.txt`, `cpu-<job>.txt` und `readyz-<job>.json`. Server-
+  `slow-plans-<job>.txt`, `cpu-<job>.txt`, `readyz-<job>.json` und
+  `failed-<job>.txt`. Server-
   und PostgreSQL-Logs und das binäre CPU-Profil bleiben in den
   Job-Artefakten des Laufs.
 - `<Lauf-ID>/ergebnis.md`: Lauf (Link, Versuch, Ereignis, Branch), Lauf- und
   Server-Commit, Eingaben, ob jeder ausgewählte Job ein Artefakt hat
   („Vollständig“) und ob alle grün sind, je Job Status (Seed, Volumina, k6,
-  Integritätsprüfung), CPU, RAM, Konfiguration, Datenbestand und jede
-  k6-Schwelle mit Messwert und Ergebnis. Dieselbe Übersicht steht in der
+  Integritätsprüfung), CPU, RAM, Konfiguration, Datenbestand, die
+  fehlgeschlagenen Anfragen je Name und Status und jede k6-Schwelle mit
+  Messwert und Ergebnis. Dieselbe Übersicht steht in der
   Zusammenfassung des Laufs auf GitHub.
 - `<Lauf-ID>/SHA256SUMS`: Prüfsummen aller Dateien des Verzeichnisses.
 
@@ -220,17 +244,41 @@ a=docs/acceptance/artefakte/lasttest
 tests/load/evaluate-runs.sh "$a/<Lauf-ID-1>" "$a/<Lauf-ID-2>" "$a/<Lauf-ID-3>"
 ```
 
-Bewertet werden alle Jobs, die eines der drei `ergebnis.md` nennt. Die
-Ausgabe (Markdown) nennt die drei Läufe (Link, Server-Commit, Eingaben,
-Vollständigkeit und Ergebnis aus `ergebnis.md`), je Job jede Schwelle mit
-dem Messwert je Lauf, dem Median und „gehalten“ ja/nein, den Status des Jobs
-je Lauf („rot in n von 3“) und das Urteil des Jobs, zuletzt die Zeile
+**Voraussetzungen des Nachweises** (WP-206/WP-612 „Drei vollständige
+Läufe“, NFR-10, F-417): Die drei Läufe nennen in `ergebnis.md` unter
+„Server, Seed und Migrationen“ denselben Commit, und jeder Lauf hat jeden
+der fünf Jobs `api`, `ingest`, `ingest-spool`, `ingest-rediscover` und
+`nfr01-volume` (in der Zeile „Jobs“ genannt und mit seinem Verzeichnis im
+Archiv, also `scenarios=all`). Sonst sind die Läufe **nicht bewertbar**:
+Die letzte Zeile lautet „Bewertung nach E-58 (Median über drei Läufe):
+nicht bewertbar: <Gründe>“ (verschiedene oder fehlende Server-Commits mit
+Lauf-ID und Commit, je fehlendem Job die Läufe ohne ihn), jeder Grund steht
+zusätzlich auf stderr, Exit 1. Die Tabellen und Mediane stehen trotzdem im
+Bericht.
+
+Bewertet werden die fünf Jobs und alle weiteren, die eines der drei
+`ergebnis.md` nennt. Die Ausgabe (Markdown) nennt die drei Läufe (Link,
+Server-Commit, Eingaben, Vollständigkeit und Ergebnis aus `ergebnis.md`),
+die Voraussetzungen und ob sie erfüllt sind, je Job jede Schwelle mit dem
+Messwert je Lauf, dem Median und „gehalten“ ja/nein, den Status des Jobs je
+Lauf („rot in n von 3“) und das Urteil des Jobs, zuletzt die Zeile
 „Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten“ bzw.
 „… verfehlt: <Liste>“ (verfehlte Schwellen und Jobs, die in zwei oder drei
-Läufen rot sind). Exit 0, wenn jede Schwelle jedes Jobs im Median gehalten
-und kein Job in mindestens zwei Läufen rot ist, sonst 1; falsche Argumente (nicht genau
-drei Archive, ein Verzeichnis ohne `ergebnis.md`, derselbe Lauf zweimal,
-eine unlesbare k6-Zusammenfassung) Exit 2.
+Läufen rot sind) bzw. „… nicht bewertbar: …“. Exit 0 nur, wenn die
+Voraussetzungen erfüllt sind, jede Schwelle jedes Jobs im Median gehalten
+und kein Job in mindestens zwei Läufen rot ist, sonst 1; falsche Argumente
+(nicht genau drei Archive, ein Verzeichnis ohne `ergebnis.md`, derselbe
+Lauf zweimal, eine unlesbare k6-Zusammenfassung, kein Job) Exit 2.
+
+**Teilbewertung** (`tests/load/evaluate-runs.sh --partial <Archiv-1>
+<Archiv-2> <Archiv-3>`): eigener Modus zur Diagnose, **kein G1-Nachweis**.
+Bewertet werden nur die Jobs, die einer der drei Läufe nennt oder als
+Verzeichnis hat (etwa drei Läufe mit `scenarios=nfr01-volume`); ein Job, der
+in einem Lauf fehlt, zählt dort als rot (Regel oben). Voraussetzung ist
+auch hier derselbe Server-Commit in allen drei Läufen. Die letzte Zeile
+beginnt mit „Teilbewertung nach E-58 (Median über drei Läufe, kein
+G1-Nachweis)“, nie mit „Bewertung nach E-58“; Exit wie oben.
+`load-evidence.yml` ruft das Skript immer ohne `--partial` auf.
 
 In GitHub Actions macht das der Workflow `load-evidence.yml` (WP-612,
 manuell, Eingaben `run_1` bis `run_3`: die Lauf-IDs der drei

@@ -45,6 +45,12 @@ interface ServerState {
   cis: number;
   /** resolveFails answers the resolve with a 500 problem (WP-529). */
   resolveFails?: boolean;
+  /** session answers GET /me (session claims); without it /me is 404. */
+  session?: unknown;
+  /** clients answers GET /clients. */
+  clients?: unknown[];
+  /** enroll answers POST /collectors/enrollment-codes; default 201 with a code. */
+  enroll?: (body: { label?: string; client_id?: string }) => Response;
 }
 
 function stubServer(state: ServerState) {
@@ -53,8 +59,13 @@ function stubServer(state: ServerState) {
     if (url.endsWith('/signup/challenge')) return json(challenge);
     if (url.endsWith('/signup') && init?.method === 'POST')
       return json({ status: 'verification_sent' }, 202);
-    if (url.endsWith('/collectors/enrollment-codes'))
-      return json({ code: 'ABCD-EFGH', expires_at: '2026-10-15T00:00:00Z' }, 201);
+    if (url.endsWith('/collectors/enrollment-codes')) {
+      return state.enroll
+        ? state.enroll(JSON.parse(String(init?.body)))
+        : json({ code: 'ABCD-EFGH', expires_at: '2026-10-15T00:00:00Z' }, 201);
+    }
+    if (url.endsWith('/api/v1/me') && state.session) return json(state.session);
+    if (url.includes('/clients')) return json(page(state.clients ?? []));
     if (url.includes('/review-items/') && init?.method === 'POST') {
       if (state.resolveFails) {
         return json(
@@ -175,6 +186,67 @@ describe('OnboardingPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Enrollment-Code erzeugen' }));
     expect(await screen.findByText('ABCD-EFGH')).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2');
+  });
+
+  it('offers the client choice to a user restricted to several clients (WP-677)', async () => {
+    signIn();
+    // The server binds the code to the client of collector:manage and refuses
+    // a creator of several clients without client_id (F-425, COL-04).
+    const fetchMock = stubServer({
+      collectors: 0,
+      scopes: [],
+      cis: 0,
+      session: {
+        sub: 'user-1',
+        org: 'org-1',
+        scopes: ['collector:manage', 'discovery:read', 'location:read'],
+        cls: ['client-1', 'client-2'],
+        sts: null,
+        tms: null,
+        iat: 1,
+        exp: 2,
+      },
+      clients: [
+        { id: 'client-1', organization_id: 'org-1', name: 'Kunde A', slug: 'kunde-a' },
+        { id: 'client-2', organization_id: 'org-1', name: 'Kunde B', slug: 'kunde-b' },
+      ],
+      enroll: (body) =>
+        body.client_id
+          ? json(
+              { code: 'ABCD-EFGH', client_id: body.client_id, expires_at: '2026-10-15T00:00:00Z' },
+              201,
+            )
+          : json(
+              {
+                type: 'urn:reticora:problem:invalid-field',
+                title: 'Unprocessable Entity',
+                status: 422,
+                detail: 'client_id: required: your scope holds several clients',
+                field: 'client_id',
+              },
+              422,
+            ),
+    });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    const select = await screen.findByRole('combobox', { name: 'Kunde' });
+    await waitFor(() =>
+      expect(Array.from((select as HTMLSelectElement).options, (o) => o.textContent)).toEqual([
+        'Kunde wählen',
+        'Kunde A',
+        'Kunde B',
+      ]),
+    );
+    const create = screen.getByRole('button', { name: 'Enrollment-Code erzeugen' });
+    expect(create).toBeDisabled();
+    fireEvent.change(select, { target: { value: 'client-1' } });
+    fireEvent.click(create);
+
+    expect(await screen.findByText('ABCD-EFGH')).toBeInTheDocument();
+    const posts = fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST');
+    expect(posts.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+      { label: 'onboarding', client_id: 'client-1' },
+    ]);
   });
 
   it('confirms a reported scope', async () => {

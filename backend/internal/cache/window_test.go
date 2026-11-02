@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -138,4 +139,82 @@ func TestStoreWindowIsAtomic(t *testing.T) {
 			t.Errorf("window = %+v (%v), want 5 events", w, err)
 		}
 	})
+}
+
+// TestStoreIncrementBelow covers the bounded counter of WP-658 (F-387, the
+// pre-auth limit): IncrementBelow increments only below the limit and
+// reads the other counter in the same step (0 when missing); a counter it
+// refuses stays unchanged, and concurrent calls of two replicas never
+// pass the limit.
+func TestStoreIncrementBelow(t *testing.T) {
+	forEachWindowStore(t, func(t *testing.T, a, b Store) {
+		ctx := context.Background()
+		key, other := windowKey(t, a), windowKey(t, a)
+		for i := int64(1); i <= 3; i++ {
+			res, err := a.IncrementBelow(ctx, key, 3, time.Minute, other)
+			if want := (BoundedCount{Added: true, Count: i}); err != nil || res != want {
+				t.Fatalf("increment %d below 3: %+v (%v), want %+v", i, res, err, want)
+			}
+		}
+		for range 2 {
+			if _, err := b.Increment(ctx, other, time.Minute); err != nil {
+				t.Fatal(err)
+			}
+		}
+		res, err := b.IncrementBelow(ctx, key, 3, time.Minute, other)
+		if want := (BoundedCount{Count: 3, Other: 2}); err != nil || res != want {
+			t.Errorf("increment at the limit: %+v (%v), want %+v", res, err, want)
+		}
+		if v, _, err := a.Get(ctx, key); err != nil || v != "3" {
+			t.Errorf("counter after a refused increment: %q (%v), want 3", v, err)
+		}
+		if n, err := a.Decrement(ctx, key); err != nil || n != 2 {
+			t.Fatalf("decrement: %d (%v)", n, err)
+		}
+		if res, err := b.IncrementBelow(ctx, key, 3, time.Minute, other); err != nil || !res.Added || res.Count != 3 {
+			t.Errorf("increment after a unit was given back: %+v (%v), want added, 3", res, err)
+		}
+
+		bounded := windowKey(t, a)
+		var (
+			wg    sync.WaitGroup
+			added atomic.Int64
+		)
+		for i := range 50 {
+			s := a
+			if i%2 == 1 {
+				s = b
+			}
+			wg.Go(func() {
+				res, err := s.IncrementBelow(ctx, bounded, 20, time.Minute, other)
+				if err != nil {
+					t.Errorf("IncrementBelow: %v", err)
+				}
+				if res.Added {
+					added.Add(1)
+				}
+			})
+		}
+		wg.Wait()
+		if n := added.Load(); n != 20 {
+			t.Errorf("50 concurrent increments below 20: %d incremented, want 20", n)
+		}
+	})
+}
+
+// TestMemoryStoreIncrementBelowExpires: the counter IncrementBelow
+// creates expires after its TTL like one of Increment.
+func TestMemoryStoreIncrementBelowExpires(t *testing.T) {
+	m := NewMemoryStore()
+	ctx := context.Background()
+	if res, _ := m.IncrementBelow(ctx, "k", 1, 50*time.Millisecond, "o"); !res.Added {
+		t.Fatal("first increment refused")
+	}
+	if res, _ := m.IncrementBelow(ctx, "k", 1, 50*time.Millisecond, "o"); res.Added {
+		t.Fatal("increment at the limit added")
+	}
+	time.Sleep(80 * time.Millisecond)
+	if res, _ := m.IncrementBelow(ctx, "k", 1, 50*time.Millisecond, "o"); !res.Added || res.Count != 1 {
+		t.Errorf("increment after the TTL: %+v, want a new counter of 1", res)
+	}
 }

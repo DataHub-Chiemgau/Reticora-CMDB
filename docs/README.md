@@ -364,9 +364,14 @@ entitlements are cached per organization for 60 seconds in the shared cache
 (Redis), so a change on one instance invalidates every instance (ENT-03). The
 middleware maps route prefixes to features (export, ingest including the
 `/api/v1/discovery/ingest` alias, topology, ...) and answers with 403
-`feature-not-entitled`; GraphQL fields check their feature as well. Quotas are
+`feature-not-entitled`; GraphQL fields check their feature as well (the
+route→feature mapping of the phase-1 features is the table below). Quotas are
 enforced in the domain service (`ci.Service.Create`) and answer with 403
-`entitlement-limit`. After `valid_until` only discovery stops (CH21): ingest
+`entitlement-limit`; `max_cis` counts the active CIs of the whole
+organization, also those outside the writer's client and site scope
+(`ci_active_count()`, migration 000186), and holds on every write
+that makes a CI active: the restore, the unmerge, and of a review item `new`
+and the merge of a `resurrected_device` item (the item stays open). After `valid_until` only discovery stops (CH21): ingest
 and new scans answer 403 `license-expired` (counter
 `reticora_ingest_refused_license_expired_total`), reading, editing, export and
 every other feature stay available; the heartbeat response carries
@@ -385,6 +390,22 @@ transaction: without its entry the change is rolled back (500) (ENT-04,
 E-12). Only the feature keys of ENT-02, the module keys and the add-ons and
 the quotas `max_cis`, `max_collectors`, `max_users`, `max_api_keys` are
 accepted; any other key is 422 with the field.
+
+Route→feature mapping of the phase-1 features (ENT-02, ENT-05;
+`gatedRoutes`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
+checks in the handlers where the middleware cannot see the object; F-400).
+Not entitled is 403 `feature-not-entitled`; an expired discovery license
+stops only ingest and new scans (CH21):
+
+| Feature | REST (middleware) | In the handler / GraphQL / NATS |
+|---------|-------------------|---------------------------------|
+| discovery | `/api/v1/ingest*`, `/api/v1/discovery/*` (except the review alias), `/api/v1/discovery-scopes*`, `/api/v1/collectors*` (except `/collectors/enroll`), `/api/v1/credentials*` | resolving a `scope_suggested` review item (accept and dismiss) on `/review-items/{id}/resolve` and its alias; the collectors' edge ingest and their scope channel: without discovery `scopes.request`, `scopes.result`, `subnets.report`, `jobs.request` and `jobs.status` are refused, after expiry `scopes.result` and `subnets.report` |
+| rack_view | `/api/v1/racks*`, `/api/v1/mounts*`, `/api/v1/rack-mounts*` | `POST /api/v1/locations` with kind `rack`, `PATCH`/`DELETE /api/v1/locations/{id}` of a rack node; GraphQL `rackLayout` |
+| topology | `/api/v1/topology*`, `/api/v1/impact*`, `/api/v1/cis/{id}/dependencies`, `/api/v1/cis/{id}/blast-radius` | GraphQL `topology` |
+| export_csv | `/api/v1/export*`, `/api/v1/exports*` | — |
+| webhooks | `/api/v1/webhooks*` | — |
+| api_access | `/api/v1/api-keys*` | every request authenticated with `X-API-Key` |
+| cmdb_core (always) | everything else, among it the location tree (`GET /api/v1/locations*`, rack nodes with their names included, and writes of the other nodes) and the review queue (`/api/v1/review-items*`, the deprecated `/api/v1/discovery/review-items*`, GraphQL `reviewInbox`; CI merges open review items as well) | — |
 Attribute rules use the JSON rule AST of `api/rules.schema.json` (MET-45,
 phase 1: required, pattern, range, enum, combined with all).
 `backend/internal/rules` evaluates them bindingly, `frontend/src/rules` for
@@ -425,7 +446,12 @@ when it is stored in the limits of a row.
 leaving them as ad-hoc JSON strings. `permission` is the global catalogue,
 `role_permission` grants catalogue entries to tenant roles, and the effective
 permissions endpoint also folds in existing custom-role JSON grants so old data
-continues to work while new code can validate against the catalogue. SLA policy
+continues to work while new code can validate against the catalogue. A
+standard role grants its `role_permission` rows and its seed keys
+(`role.permissions`, the RBA-02 matrix); `PUT /api/v1/roles/{id}/permissions`
+may add keys but answers 409 (`standard-role-permissions`) when a seed key is
+left out, and the role's permission list, that response and the route audit
+show the union (F-398, WP-669). Narrower roles are custom roles. SLA policy
 rows define priority-based response and resolution targets, while `ticket_sla`
 stores the applied policy and clock outcomes. Ticket creation, first visible
 response and resolution transitions update that state so breach listings are
@@ -1004,7 +1030,7 @@ The server is configured via environment variables:
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
 - `RETICORA_AIR_GAPPED` — `true` disables every external AI call (air-gapped profile, AI-02; default `false`).
-- `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` — the CI offline detector, worker `offline_detector` (scheduler run `ci.offline_detector`, every 5 min; REC-09, LCY-05): an observable, discovered CI (not `is_manual`, source not manual/import) whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` with the event `ci.offline`, and `active` again with `ci.online` once seen; without a scope the organization's `settings.discovery.sweep_interval` (default 24 h) applies. Default `true`. The former `RETICORA_OFFLINE_DETECTOR_ENABLED` still applies without it and is logged as deprecated (docs/ops/workers.md).
+- `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` — the CI offline detector, worker `offline_detector` (scheduler run `ci.offline_detector`, every 5 min; REC-09, LCY-05): an observable, discovered CI (not `is_manual`, source not manual/import) whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` with the event `ci.offline`, and `active` again with `ci.online` once seen; without a scope the organization's `settings.discovery.sweep_interval` (default 24 h) applies. The run changes a CI only as it read it (same status and `last_seen_at`, no other writer holding the row); a sighting the ingest writes during the run keeps the CI active, and a CI it set unknown before the sighting reached it is active again with `ci.online` (F-412). Each change is part of the CI's history and the audit log in the transaction of the change: a change set `status_changed` (source `system`, comment `ci.offline_detector`, the version stays) and the audit entry `ci.status_changed` (actor type `system`, `changes.job` `ci.offline_detector`; F-413). Default `true`. The former `RETICORA_OFFLINE_DETECTOR_ENABLED` still applies without it and is logged as deprecated (docs/ops/workers.md).
 - `RETICORA_MODULES` — the late modules (phase tag P2 and later or add-on [A]; API-06, RBA-05) this release serves (WP-214, E-03). Empty (default) switches them all off: their routes are not registered (404), their workers and system jobs do not start (alert evaluator, reservation sweeper) and the UI hides their navigation (`GET /api/v1/modules`). `all` switches every module on; otherwise a comma list of `inventory`, `documents`, `stocktake`, `ticketing` (P2), `maintenance`, `workflows`, `compliance`, `findings`, `alerting` (P3), `keys`, `trainings`, `desks`, `disposal`, `agents` (P4), `iga`, `ai` (add-ons, still gated by their entitlement). An unknown key stops the start. Their operations carry `x-phase` in `api/openapi.yaml`.
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
 - `RETICORA_S3_PUBLIC_URL` — base URL under which browsers reach the object store for signed downloads of exports and documents (`download_url`). The signature stays the one over `RETICORA_S3_ENDPOINT`; the URL names this base instead. The compose stack sets `<RETICORA_PUBLIC_BASE_URL>/objects`, which the frontend nginx forwards read-only (GET of the buckets `exports` and `reticora-documents`, `Host` of the internal endpoint) to MinIO (`frontend/objects-proxy.conf`). Empty keeps the internal endpoint in the URL, which a browser can only use if it resolves that name; from an HTTPS page an `http://` URL is blocked as mixed content (F-376). Other deployments point it at a reverse-proxy path that forwards the same way.
@@ -1013,7 +1039,7 @@ The server is configured via environment variables:
 - `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
 - `RETICORA_PPROF_ADDR` — loopback address (e.g. `127.0.0.1:6060`) of a separate listener with the Go profiles of the server (`/debug/pprof/`, CPU profile `/debug/pprof/profile?seconds=N`; no command line), for load runs (`load.yml`, WP-438). Empty (default) starts no listener; the server refuses to start with a non-loopback address, outside `RETICORA_ENVIRONMENT=development` and together with `RETICORA_EGRESS_ALLOW_PRIVATE=true`. The API never serves the profiles.
 - `RETICORA_EGRESS_ALLOW_PRIVATE` — set to `true` to let webhooks, IGA connectors and organizations' own SMTP servers reach private, loopback and link-local destinations, SMTP servers also on ports other than 25, 465 and 587 (dedicated, on-premises and air-gapped installations with an internal relay; default `false`). Cloud metadata endpoints stay blocked; DNS pinning and the 3-redirect limit always apply (SEC-08, [`docs/ops/workers.md`](ops/workers.md#destinations-of-the-notifier-sec-08)).
-- `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh`, `/collectors/enroll`, `/signup`, `/signup/verify` and `/invitations/accept` and every failed authentication count; once spent, the IP gets 429 until the minute is over.
+- `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh`, `/collectors/enroll`, `/signup`, `/signup/verify` and `/invitations/accept` and every failed authentication count (`/auth/refresh` only when it fails); once spent, the IP gets 429 until the minute is over. Concurrent requests with valid credentials do not spend it: a credential check holds a unit only until it succeeds, and a request that finds every unit held by checks in flight waits for one (at most 2.5 s) instead of getting 429 (F-387). Per server instance at most twice this budget of requests of one IP and 256 of all IPs wait; further requests get 429 at once. The budget belongs to fixed UTC-minute windows: checks admitted at the end of a minute keep their units, so right after the minute changes up to twice the budget can run at once, and two adjacent minutes together admit up to twice the budget of failed attempts.
 - `RETICORA_RATE_LIMIT_RPM` — requests per minute per API key or session (default `600`, API-04).
 - `RETICORA_RATE_LIMIT_ORG_RPM` — requests per minute of all credentials of an organization together (default `6000`, API-04; must not be below `RETICORA_RATE_LIMIT_RPM`). Responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; a 429 adds `Retry-After`.
 - `RETICORA_WORKER_<NAME>_ENABLED` — operator switch per background worker (OPS-02, default `true`): `WEBHOOK_DISPATCHER`, `EXPORT`, `INGEST`, `MONITORING`, `SCHEDULER`, `JOBS`, `EVENTS`, `NOTIFIER`. A disabled worker is not started in that process; see [`docs/ops/workers.md`](ops/workers.md).

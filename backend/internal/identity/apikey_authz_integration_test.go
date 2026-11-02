@@ -34,6 +34,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // t2KeyFixture is organization A with an org-wide key administrator and a
@@ -562,4 +563,157 @@ func TestAuditT2ServiceAccountRolesWithinCallerRights(t *testing.T) {
 	if w := k.call(k.admin, http.MethodPut, "/api/v1/service-accounts/"+adminSA.ID+"/roles", `{"roles":[{"role_id":"`+k.saRole+`"}]}`); w.Code != http.StatusOK {
 		t.Errorf("control: org-wide admin assigns {ci:read} to a service account: %d %s, want 200", w.Code, w.Body.String())
 	}
+}
+
+// keyReads authenticates key like the auth middleware (Validate, principal
+// of the key's holder, middleware.TenantScopeFor) and returns which of ciIDs
+// it reads: none without ci:read among its effective permissions, otherwise
+// those its tenant scope shows under RLS, read as the runtime login.
+func (k *t2KeyFixture) keyReads(t *testing.T, key string, ciIDs ...string) map[string]bool {
+	t.Helper()
+	bg := context.Background()
+	info, err := k.service.Validate(bg, key)
+	if err != nil {
+		t.Fatalf("validate key: %v", err)
+	}
+	seen := map[string]bool{}
+	p := identity.Principal{Subject: info.OwnerID, OrganizationID: info.OrganizationID, ClientScope: info.ClientScope,
+		Scope: info.Scope, PermissionScopes: info.PermissionScopes, Permissions: info.Scopes, Type: identity.PrincipalTypeAPIKey}
+	if !p.Has(identity.PermCIRead) {
+		return seen
+	}
+	scope := middleware.TenantScopeFor(&p)
+	if err = database.WithTenant(bg, k.f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, qErr := tx.Query(ctx, `SELECT id::text FROM ci WHERE id = ANY($1::uuid[])`, ciIDs)
+		if qErr != nil {
+			return qErr
+		}
+		ids, qErr := pgx.CollectRows(rows, pgx.RowTo[string])
+		for _, id := range ids {
+			seen[id] = true
+		}
+		return qErr
+	}); err != nil {
+		t.Fatalf("read CIs with the key's scope: %v", err)
+	}
+	return seen
+}
+
+// TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening (WP-668,
+// F-397; RBA-08, AUT-04, TEN-09; WP-069 AK2, F-007): a key a client-1
+// delegate binds to a service account never reads more than the delegate
+// held at binding, even after an org-wide administrator widens the account
+// to org-wide roles. Case A: account without roles at binding; case B:
+// account with viewer for client 1. The key still follows reductions of the
+// account's rights, survives the loss of its creator's rights (E-64), and a
+// rotation keeps the creator's scope. A key bound before migration 000185
+// (no recorded creator scope) is limited to its creator's current rights.
+// Binding a new key to the widened account stays refused (F-007).
+func TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening(t *testing.T) {
+	k := newT2KeyFixture(t)
+	bg := context.Background()
+	delegateID := k.f.AppUser(t, k.f.OrgA, "t2-key-delegate")
+	k.exec(`INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id)
+		SELECT $1, $2, id, $3 FROM role WHERE organization_id = $1 AND name = 'org_admin'`, k.f.OrgA, delegateID, k.f.Client1)
+	delegate := k.resolve(k.f.OrgA, delegateID)
+	var viewer string
+	if err := k.f.Admin.QueryRow(bg, `SELECT id::text FROM role WHERE organization_id = $1 AND name = 'viewer'`, k.f.OrgA).Scan(&viewer); err != nil {
+		t.Fatal(err)
+	}
+	ci1 := k.f.CI(t, k.f.OrgA, k.f.Client1, "t2-widen-ci-client1")
+	ci2 := k.f.CI(t, k.f.OrgA, k.f.Client2, "t2-widen-ci-client2")
+	newSA := func(name string) string {
+		t.Helper()
+		w := k.call(delegate, http.MethodPost, "/api/v1/service-accounts", `{"name":"`+name+`"}`)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("delegate creates service account %s: %d %s", name, w.Code, w.Body.String())
+		}
+		var sa user.ServiceAccount
+		if err := json.Unmarshal(w.Body.Bytes(), &sa); err != nil {
+			t.Fatal(err)
+		}
+		return sa.ID
+	}
+	setRoles := func(p identity.Principal, sa, roles string) {
+		t.Helper()
+		if w := k.call(p, http.MethodPut, "/api/v1/service-accounts/"+sa+"/roles", `{"roles":[`+roles+`]}`); w.Code != http.StatusOK {
+			t.Fatalf("set roles [%s] of %s: %d %s", roles, sa, w.Code, w.Body.String())
+		}
+	}
+	orgWideViewer := `{"role_id":"` + viewer + `"}`
+	client1Viewer := `{"role_id":"` + viewer + `","scope_client_id":"` + k.f.Client1 + `"}`
+	want := func(t *testing.T, step, key string, wantCI1 bool) {
+		t.Helper()
+		seen := k.keyReads(t, key, ci1, ci2)
+		if seen[ci2] {
+			t.Errorf("%s: the key bound by the client-1 delegate reads the client-2 CI (client-1 CI: %v); want client 1 at most", step, seen[ci1])
+		}
+		if seen[ci1] != wantCI1 {
+			t.Errorf("%s: key reads the client-1 CI: %v, want %v", step, seen[ci1], wantCI1)
+		}
+	}
+
+	t.Run("case A: account without roles at binding", func(t *testing.T) {
+		sa := newSA("t2-widen-sa-empty")
+		_, key := k.createKey(t, delegate, `{"name":"t2-widen-key-a","permissions":["ci:read"],"service_account_id":"`+sa+`"}`)
+		want(t, "before the widening", key, false)
+		setRoles(k.orgAdmin, sa, orgWideViewer)
+		want(t, "after the org-wide admin gave the account viewer org-wide", key, true)
+	})
+
+	t.Run("case B: account with viewer for client 1", func(t *testing.T) {
+		sa := newSA("t2-widen-sa-client1")
+		setRoles(delegate, sa, client1Viewer)
+		keyID, key := k.createKey(t, delegate, `{"name":"t2-widen-key-b","permissions":["ci:read"],"service_account_id":"`+sa+`"}`)
+		want(t, "before the widening", key, true)
+		setRoles(k.orgAdmin, sa, client1Viewer+","+orgWideViewer)
+		want(t, "after the org-wide admin added viewer org-wide", key, true)
+
+		// Control (F-007): binding a new key to the widened account is refused.
+		if w := k.call(delegate, http.MethodPost, "/api/v1/api-keys", `{"name":"t2-widen-key-c","permissions":["ci:read"],"service_account_id":"`+sa+`"}`); w.Code != http.StatusForbidden {
+			t.Errorf("delegate binds a new key to the org-wide account: %d %s, want 403", w.Code, w.Body.String())
+		}
+		// Control: the org-wide admin's own binding reads org-wide.
+		_, adminKey := k.createKey(t, k.orgAdmin, `{"name":"t2-widen-key-admin","permissions":["ci:read"],"service_account_id":"`+sa+`"}`)
+		if seen := k.keyReads(t, adminKey, ci1, ci2); !seen[ci1] || !seen[ci2] {
+			t.Errorf("control: key bound by the org-wide admin reads %v, want both CIs", seen)
+		}
+
+		// A rotation keeps the creator's scope.
+		w := k.call(k.orgAdmin, http.MethodPost, "/api/v1/api-keys/"+keyID+"/rotate", `{"overlap_seconds":0}`)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("rotate: %d %s", w.Code, w.Body.String())
+		}
+		var rotated struct {
+			Key struct {
+				Key string `json:"key"`
+			} `json:"key"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &rotated); err != nil {
+			t.Fatal(err)
+		}
+		want(t, "successor after the rotation by the org-wide admin", rotated.Key.Key, true)
+
+		// The key survives the loss of its creator's rights (E-64) ...
+		k.exec(`DELETE FROM role_assignment WHERE organization_id = $1 AND user_id = $2`, k.f.OrgA, delegateID)
+		k.exec(`UPDATE app_user SET is_active = false WHERE id = $1`, delegateID)
+		want(t, "after the delegate lost its roles and was deactivated", rotated.Key.Key, true)
+		// ... and follows reductions of the account's rights.
+		setRoles(k.orgAdmin, sa, "")
+		want(t, "after the account lost its roles", rotated.Key.Key, false)
+	})
+
+	t.Run("key bound before migration 000185", func(t *testing.T) {
+		creatorID := k.f.AppUser(t, k.f.OrgA, "t2-key-legacy-creator")
+		k.exec(`INSERT INTO role_assignment (organization_id, user_id, role_id, scope_client_id)
+			SELECT $1, $2, id, $3 FROM role WHERE organization_id = $1 AND name = 'org_admin'`, k.f.OrgA, creatorID, k.f.Client1)
+		sa := newSA("t2-widen-sa-legacy")
+		keyID, key := k.createKey(t, k.resolve(k.f.OrgA, creatorID), `{"name":"t2-widen-key-legacy","permissions":["ci:read"],"service_account_id":"`+sa+`"}`)
+		// A key bound before the migration carries no creator scope.
+		k.exec(`UPDATE api_key SET creator_scope = NULL WHERE id = $1`, keyID)
+		setRoles(k.orgAdmin, sa, orgWideViewer)
+		want(t, "legacy key after the widening (creator holds client 1)", key, true)
+		k.exec(`DELETE FROM role_assignment WHERE organization_id = $1 AND user_id = $2`, k.f.OrgA, creatorID)
+		want(t, "legacy key after its creator lost its roles", key, false)
+	})
 }

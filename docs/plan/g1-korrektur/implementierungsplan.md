@@ -41,8 +41,9 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 | [K5-Nachträge](#k5-nachträge) | WP-636 – WP-647 | 12 | 12,0 | Funde aus der Umsetzung von K5 behoben (F-363 bis F-376): Standardrolle nur beim Erstlogin, Cross-Org-Referenzen der Module, org-weite Inventur nur org-weit, Discovery-Ergebnisse folgen der Collector-Bindung, Lauffehler für TLS-Abweisung und unerreichbare Ziele, Master-Key-Rotation auf Compose und Kubernetes, bereinigte Jobfehler, Clientliste für `client_technician`, LLDP-Kanten des ersten Zyklus unabhängig von der Lane-Reihenfolge, WebKit-Nachweise über einen TLS-Origin, Exportdownload über den öffentlichen Origin. |
 | [K6 Geringfügige Mängel](#k6-geringfügige-mängel) | WP-559 – WP-594 | 36 | 41,0 | P3-Befunde behoben oder mit Begründung zurückgestellt (E-60). |
 | [K6-Nachträge](#k6-nachträge) | WP-648 – WP-654 | 7 | 3,5 | Funde aus der Umsetzung von K6 behoben (F-377 bis F-383) und der Rest von F-297: eigenes Konto per API nicht deaktivierbar oder löschbar; Upgrade von Datenbanken mit 000056 vor E-26 ohne `migration_quarantine`; Rack-Platzierung durch Principals mit eingeschränktem Scope ohne stille Standortabweichung; Einbauten auf beiden Rackseiten vorn und hinten angezeigt; kein neues `unknown_relationship`-Review für ein angenommenes Paar; Benachrichtigungssprache je Empfänger über den Login-Claim und die eigenen Präferenzen setzbar; Entwicklungsabhängigkeiten (Vitest 4) ohne Critical- und High-Advisories. |
+| [K7-Nachträge](#k7-nachträge) | WP-655 – WP-701 | 49 | 41,0 | Funde der Wiederholungsprüfung (K7) vor der Gate-Entscheidung behoben (ab F-384): Goroutinen-Spitze des Sweeps auch unter CPU-Last begrenzt; Unterzeichner von Zuweisungen nur als PII-Surrogat; gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP ohne 429 durch das Pre-Auth-Limit; Rahmen und Ledger des Ingest nach E-101 (Plantext an den gebauten Entwurf angeglichen, Entscheidung offen); Audit-Liste zeigt eingeschränkten Principals nur Einträge über Objekte ihres Scopes; Credentials mit ungültiger ID antworten 404 statt 500; Lastläufe scheitern bei jeder fehlgeschlagenen Anfrage und jedem gescheiterten Bulk-Job; Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 statt 503; NUL-Byte in Schlüsseln des JSON-Körpers und im Operator-Pfad ergibt 4xx statt 5xx; Operator-Audit-Kette bleibt bei großgeschriebener UUID gültig; gelöschte Benutzer verlieren jeden Zugang sofort wie deaktivierte; Metrik-Ingest mit unsichtbarer oder unbekannter ci_id antwortet 404 statt 500; Login mit Organisationsattribut ohne Organisation antwortet 401 statt 502; an Service-Accounts gebundene API-Keys bleiben im Scope ihres Erzeugers; Rollendefinitionen lassen sich nur im Scope jeder Zuweisung einschränken oder löschen; Seed-Rechte von Standardrollen sind nicht entfernbar, Liste und Audit zeigen die wirksamen Rechte; leere Listen antworten mit [] statt null; Beziehungsliste wertet die dokumentierten Filter aus; max_cis gilt auch für Wiederherstellen, Unmerge und Review-Auflösung; Lizenzsperren discovery und rack_view gelten auch auf den Nachbarpfaden; max_cis zählt alle aktiven CIs der Organisation unabhängig vom Scope des Aufrufers; Review-Einträge werden genau einmal aufgelöst; abgelehnte Review-Wirkungen antworten mit 409/422/404 statt 500; Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers; Edge-Ingest bindet die Records eines Collectors an dessen Client; Audit-Einträge für die Laufzeitrolle unveränderlich, Siegel nur über audit_seal_pii; die CI-Historie zeigt auch die Routeneinträge des CI und seiner Unterobjekte; Offline-Detektor und Ingest überschreiben sich nicht; Statuswechsel des Offline-Detektors in Historie und Audit; Unmerge in Merge-Ketten verweigert, solange der Survivor Teil eines offenen Merges ist; Lastnachweis nur aus drei vollständigen Läufen desselben Server-Commits; abgelehnte Attributdefinitionen nennen ihr eigenes Feld; Kanten-Cleanup löscht keine während des Laufs verifizierten Kanten; Kontingent-Ablehnungen nennen den Bestand nur org-weiten Aufrufern; explizite Nullwerte bei Rack-Montagen ergeben 400; F-418 Benachrichtigungskanäle und Zustellungen nur org-weit (WP-689); F-427 Raumlayout im Scope des Aufrufers (WP-698); F-419 Bulk-Duplikate über UUID-Schreibweise (WP-690); F-420 Redundanz mit unsichtbaren Versorgern (WP-691); F-421 Eindeutigkeit org-weit für Writer mit Client-Scope (WP-692); F-426 Review-Liste prüft status und kind (WP-697); F-425 Kundenauswahl beim Enrollment-Code in der Oberfläche (WP-696); F-428 SR-Zeilen für die Befunde ab F-355 und GATE-01-Prüfung (WP-699); F-429 Eindeutigkeitsprüfung auf allen Schreibwegen (WP-700); F-422 Override und Konfliktauflösung auf gelöschten CIs (WP-693); F-423 Feldfehler bei Collectors (WP-694); F-424 unknown_relationship accept mit Typliste und gelöschten CIs (WP-695); F-431 Eindeutigkeit beim Typwechsel (WP-702); F-432 Eindeutigkeit im Discovery-Ingest (WP-703); F-430 Enrollment-Code blockiert Site-Löschung wie Agent-Token (WP-701). |
 | [K7 Wiederholungsprüfung und Gate G1](#k7-wiederholungsprüfung-und-gate-g1) | WP-595 – WP-600 | 6 | 11,0 | Wiederholungsprüfung aller 149 nicht bestandenen WPs bestanden; Gate G1 erneut entschieden. |
-| **Summe** | | **302** | **401,0** | |
+| **Summe** | | **351** | **442,0** | |
 
 ```mermaid
 flowchart LR
@@ -58,6 +59,7 @@ flowchart LR
     K5N["K5-Nachträge<br/>12 WPs · 12,0 PT"]
     K6["K6 Geringfügige Mängel<br/>36 WPs · 41,0 PT"]
     K6N["K6-Nachträge<br/>7 WPs · 3,5 PT"]
+    K7N["K7-Nachträge<br/>49 WPs · 41,0 PT"]
     K7["K7 Wiederholungsprüfung und Gate G1<br/>6 WPs · 11,0 PT"]
     K0 --> K1
     K1 --> K1N
@@ -78,6 +80,7 @@ flowchart LR
     K6 --> K6N
     K6N --> K7
     K6 --> K7
+    K7N --> K7
 ```
 
 Die Kanten zeigen die Priorität, keine harte Sperre: Ein WP darf beginnen, sobald seine eigenen Voraussetzungen gemergt sind. Harte Sperren sind nur WP-336 und WP-337 (vor allen anderen WPs, Konvention 11) und WP-600 (nach allen anderen WPs). WP-338 sperrt nur die WPs, die es als Voraussetzung nennen. WP-595 (`t5-rc-evidence`) wartet nicht auf die Lieferungs-WPs WP-457, WP-453, WP-454, WP-455 (externe Lieferungen A-02, A-07, A-11); die Wiederholungsprüfung WP-598 und das Gate WP-600 dagegen schon.
@@ -418,6 +421,55 @@ Für die Korrektur entstehen 37 neue Entscheidungen ([E-59](entscheidungen.md#e-
 | [WP-598](#wp-598--wiederholungsprüfung-installation-betrieb-fundament-epic-b-und-oberfläche) | `k-reaudit-3` | Wiederholungsprüfung Installation, Betrieb, Fundament (Epic B) und Oberfläche | K7 | 2,0 | – | 112 WPs (siehe Block) |
 | [WP-599](#wp-599--abnahmeprüfung-der-nicht-auditierten-g1-pflicht-wps-wp-214-wp-240--wp-242-wp-332--wp-335) | `k-audit-ext` | Abnahmeprüfung der nicht auditierten G1-Pflicht-WPs (WP-214, WP-240 – WP-242, WP-332 – WP-335) | K7 | 2,0 | – | WP-338, WP-595 |
 | [WP-600](#wp-600--gate-g1-nach-der-korrektur-checkliste-sicherheitsreview-und-freigabeentscheidung) | `k-gate` | Gate G1 nach der Korrektur: Checkliste, Sicherheitsreview und Freigabeentscheidung | K7 | 1,5 | – | WP-532, WP-595, WP-596, WP-597, WP-598, WP-599 |
+| [WP-655](#wp-655--sweep-fester-worker-pool-statt-goroutine-je-ziel-goroutinen-spitze-auch-unter-last-begrenzt) | `k7n-sweep-pool` | Sweep: fester Worker-Pool statt Goroutine je Ziel; Goroutinen-Spitze auch unter Last begrenzt | K7N | 0,5 | F-384 | WP-494 |
+| [WP-656](#wp-656--unterzeichner-von-zuweisungen-als-pii-surrogat-bestandsnamen-über-den-backfill-in-den-vault) | `k7n-assignment-signature-surrogate` | Unterzeichner von Zuweisungen als PII-Surrogat; Bestandsnamen über den Backfill in den Vault | K7N | 1,0 | F-385 | WP-241, WP-242 |
+| [WP-658](#wp-658--pre-auth-limit-gleichzeitige-anfragen-mit-gültigen-anmeldedaten-warten-statt-429-fehlversuche-bleiben-begrenzt) | `k7n-preauth-concurrency` | Pre-Auth-Limit: gleichzeitige Anfragen mit gültigen Anmeldedaten warten statt 429; Fehlversuche bleiben begrenzt | K7N | 1,0 | F-387 | WP-462 |
+| [WP-657](#wp-657--ingest-rahmen-und-ledger-eines-batches-wp-332-ak-3-mit-dem-gebauten-entwurf-abgleichen) | `k7n-ingest-frame-ledger-tx` | Ingest: Rahmen und Ledger eines Batches (WP-332 AK 3) mit dem gebauten Entwurf abgleichen | K7N | 0,5 | F-386 | WP-332, WP-333, WP-334, WP-481 |
+| [WP-660](#wp-660--audit-liste-scope-regel-für-jeden-typ-der-auditoren-domänentypen-und-routensegmente-unbekannte-typen-fail-closed) | `k7n-audit-log-scope` | Audit-Liste: Scope-Regel für jeden Typ der Auditoren (Domänentypen und Routensegmente), unbekannte Typen fail-closed | K7N | 1,5 | F-389 | WP-504, WP-505 |
+| [WP-661](#wp-661--credentials-ungültige-id-wie-unbekannte-404-repository-fehler-über-den-fehlervertrag-api-03) | `k7n-credential-invalid-id` | Credentials: ungültige ID wie unbekannte (404), Repository-Fehler über den Fehlervertrag API-03 | K7N | 0,5 | F-390 | WP-343 |
+| [WP-659](#wp-659--lastskripte-keine-fehlgeschlagene-anfrage-je-szenario-schwelle-für-gelungene-bulk-jobs-statuscodes-in-der-job-zusammenfassung) | `k7n-load-thresholds` | Lastskripte: keine fehlgeschlagene Anfrage je Szenario, Schwelle für gelungene Bulk-Jobs, Statuscodes in der Job-Zusammenfassung | K7N | 0,5 | F-388 | WP-204, WP-206, WP-439, WP-658 |
+| [WP-662](#wp-662--routen-audit-pfad-ids-mit-nul-byte-oder-ungültigem-utf-8-erhalten-404-vor-der-audit-absicht-statt-503) | `k7n-route-audit-nul-id` | Routen-Audit: Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 vor der Audit-Absicht statt 503 | K7N | 0,5 | F-391 | WP-504, WP-505 |
+| [WP-663](#wp-663--routen--und-operator-audit-nul-byte-im-schlüssel-des-json-körpers-erhält-400-vor-der-audit-absicht-statt-503-admin-pfade-werden-kodiert-protokolliert-statt-500) | `k7n-route-audit-body-keys` | Routen- und Operator-Audit: NUL-Byte im Schlüssel des JSON-Körpers erhält 400 vor der Audit-Absicht statt 503, /admin-Pfade werden kodiert protokolliert statt 500 | K7N | 0,5 | F-392 | WP-504, WP-505, WP-564, WP-662 |
+| [WP-664](#wp-664--benutzerlöschung-beendet-jeden-zugang-wie-die-deaktivierung-in-der-transaktion-der-löschung-audit-userdeleted) | `k7n-user-delete-ends-access` | Benutzerlöschung beendet jeden Zugang wie die Deaktivierung, in der Transaktion der Löschung; Audit `user.deleted` | K7N | 1 | F-393 | WP-042, WP-359, WP-571, WP-648 |
+| [WP-665](#wp-665--metrik-ingest-unsichtbare-oder-unbekannte-ci_id-404-statt-500-batch-alles-oder-nichts-dokumentiert-api-und-edge) | `k7n-metric-ingest-errors` | Metrik-Ingest: unsichtbare oder unbekannte ci_id 404 statt 500, Batch alles oder nichts dokumentiert (API und Edge) | K7N | 0,5 | F-394 | WP-343, WP-344, WP-426 |
+| [WP-666](#wp-666--login-organisationsattribut-ohne-organisation-erhält-401-login-no-organization-statt-502) | `k7n-login-unknown-org` | Login: Organisationsattribut ohne Organisation erhält 401 login-no-organization statt 502 | K7N | 0,5 | F-395 | WP-570, WP-637 |
+| [WP-668](#wp-668--service-account-keys-tragen-den-scope-ihres-erzeugers-spätere-rollen-des-accounts-erweitern-einen-gebundenen-key-nicht-über-den-erzeuger-hinaus) | `k7n-bound-key-creator-scope` | Service-Account-Keys tragen den Scope ihres Erzeugers: spätere Rollen des Accounts erweitern einen gebundenen Key nicht über den Erzeuger hinaus | K7N | 1,5 | F-397 | WP-069, WP-354, WP-355, WP-359, WP-601 |
+| [WP-667](#wp-667--rollendefinition-rechte-entfernen-und-rollen-löschen-nur-mit-der-entzugs-obergrenze-jeder-zuweisung) | `k7n-role-definition-ceiling` | Rollendefinition: Rechte entfernen und Rollen löschen nur mit der Entzugs-Obergrenze jeder Zuweisung | K7N | 1,0 | F-396 | WP-355, WP-394, WP-395 |
+| [WP-669](#wp-669--standardrollen-seed-rechte-nicht-entfernbar-409-rechteliste-antwort-und-audit-zeigen-die-wirksamen-rechte) | `k7n-standard-role-permissions` | Standardrollen: Seed-Rechte nicht entfernbar (409), Rechteliste, Antwort und Audit zeigen die wirksamen Rechte | K7N | 0,5 | F-398 | WP-046, WP-363, WP-394, WP-505, WP-667 |
+| [WP-672](#wp-672--leere-suche-historie-verfügbarkeit-und-compliance-score-antworten-mit--statt-null-sweep-aller-get-listen) | `k7n-search-empty-array` | Leere Suche, Historie, Verfügbarkeit und Compliance-Score antworten mit `[]` statt `null`; Sweep aller GET-Listen | K7N | 0,5 | F-401 | WP-164, WP-466 |
+| [WP-673](#wp-673--beziehungsliste-dokumentierte-filter-ci_id-source_ci_id-target_ci_id-und-rel_type-wirken-ungültige-werte-400) | `k7n-relationship-list-filters` | Beziehungsliste: dokumentierte Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken; ungültige Werte 400 | K7N | 1,0 | F-402 | WP-165, WP-609 |
+| [WP-670](#wp-670--max_cis-auf-allen-wegen-die-ein-ci-aktiv-machen-wiederherstellen-unmerge-und-review-auflösung-über-dem-limit-403-entitlement-limit) | `k7n-max-cis-all-paths` | `max_cis` auf allen Wegen, die ein CI aktiv machen: Wiederherstellen, Unmerge und Review-Auflösung über dem Limit 403 `entitlement-limit` | K7N | 1 | F-399 | WP-072, WP-073, WP-169, WP-472 |
+| [WP-671](#wp-671--entitlement-gates-discovery-und-rack_view-auf-den-alias-pfaden-discovery-scopes-auflösung-von-scope_suggested-rack-knoten-im-standortbaum-und-nats-scope-kanal) | `k7n-entitlement-alias-paths` | Entitlement-Gates discovery und rack_view auf den Alias-Pfaden: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Knoten im Standortbaum und NATS-Scope-Kanal | K7N | 1 | F-400 | WP-471, WP-072 |
+| [WP-674](#wp-674--max_cis-zählt-alle-aktiven-cis-der-organisation-unabhängig-vom-scope-des-schreibenden) | `k7n-max-cis-org-count` | `max_cis` zählt alle aktiven CIs der Organisation, unabhängig vom Scope des Schreibenden | K7N | 1 | F-403 | WP-072, WP-073, WP-334, WP-064, WP-670 |
+| [WP-675](#wp-675--review-auflösung-genau-einmal-eintrag-gesperrt-wirkung-und-auflösung-in-einer-transaktion-gleichzeitige-zweite-auflösung-409) | `k7n-review-resolve-once` | Review-Auflösung genau einmal: Eintrag gesperrt, Wirkung und Auflösung in einer Transaktion, gleichzeitige zweite Auflösung 409 | K7N | 1,5 | F-404 | WP-088, WP-089, WP-087, WP-554, WP-643 |
+| [WP-676](#wp-676--review-auflösung-abgelehnte-wirkungen-mit-dem-fehlervertrag-der-ressource-409422404-statt-500-unknown_relationship-accept-ohne-kante-abgelehnt) | `k7n-review-resolve-errors` | Review-Auflösung: abgelehnte Wirkungen mit dem Fehlervertrag der Ressource (409/422/404 statt 500); `unknown_relationship` accept ohne Kante abgelehnt | K7N | 1,0 | F-405 | WP-088, WP-089, WP-643, WP-671, WP-675 |
+| [WP-677](#wp-677--enrollment-code-bindet-den-collector-an-client-und-site-seines-erzeugers) | `k7n-enrollment-client-binding` | Enrollment-Code bindet den Collector an Client und Site seines Erzeugers | K7N | 1,5 | F-406 | WP-144, WP-145, WP-147, WP-153, WP-668 |
+| [WP-678](#wp-678--edge-ingest-bindet-die-records-eines-collectors-an-dessen-client) | `k7n-edge-ingest-collector-client` | Edge-Ingest bindet die Records eines Collectors an dessen Client | K7N | 1 | F-407 | WP-146, WP-153, WP-481, WP-334, WP-677 |
+| [WP-680](#wp-680--audit-einträge-für-die-laufzeitrolle-unveränderlich-siegel-personenbezogener-werte-nur-über-audit_seal_pii-keine-neuverkettung-audit-verify-prüft-versiegelte-einträge-gegen-das-original) | `k7n-audit-append-only-runtime` | Audit-Einträge für die Laufzeitrolle unveränderlich: Siegel personenbezogener Werte nur über `audit_seal_pii`, keine Neuverkettung, `audit-verify` prüft versiegelte Einträge gegen das Original | K7N | 2,5 | F-409 | WP-132, WP-241, WP-064, WP-656 |
+| [WP-681](#wp-681--ci-historie-mit-audit-auch-die-routeneinträge-des-ci-und-seiner-kontaktverknüpfungen-und-schnittstellen-im-scope-der-audit-liste) | `k7n-ci-history-route-audit` | CI-Historie mit Audit: auch die Routeneinträge des CI und seiner Kontaktverknüpfungen und Schnittstellen, im Scope der Audit-Liste | K7N | 0,5 | F-410 | WP-171, WP-475, WP-505, WP-660 |
+| [WP-683](#wp-683--offline-detektor-und-ingest-statuswechsel-nur-auf-der-gelesenen-zeile-rückkehr-nach-active-auf-der-gesperrten-zeile) | `k7n-offline-detector-race` | Offline-Detektor und Ingest: Statuswechsel nur auf der gelesenen Zeile, Rückkehr nach `active` auf der gesperrten Zeile | K7N | 1 | F-412 | WP-157, WP-383, WP-585, WP-487 |
+| [WP-684](#wp-684--offline-detektor-statuswechsel-in-ci-historie-und-audit-log-in-der-transaktion-des-wechsels) | `k7n-offline-status-history` | Offline-Detektor: Statuswechsel in CI-Historie und Audit-Log, in der Transaktion des Wechsels | K7N | 0,5 | F-413 | WP-157, WP-171, WP-487, WP-683 |
+| [WP-687](#wp-687--unmerge-in-merge-ketten-409-mit-dem-späteren-merge-solange-der-survivor-teil-eines-offenen-merges-ist-auch-mit-force-und-beim-job-revert) | `k7n-unmerge-chain` | Unmerge in Merge-Ketten: 409 mit dem späteren Merge, solange der Survivor Teil eines offenen Merges ist, auch mit force und beim Job-Revert | K7N | 1 | F-416 | WP-173, WP-174, WP-182, WP-485, WP-670 |
+| [WP-688](#wp-688--lastnachweis-drei-läufe-nur-desselben-server-commits-mit-allen-fünf-jobs-bewertbar-teilbewertung-als-eigener-modus) | `k7n-load-evidence-same-commit` | Lastnachweis: drei Läufe nur desselben Server-Commits mit allen fünf Jobs bewertbar, Teilbewertung als eigener Modus | K7N | 0,5 | F-417 | WP-206, WP-439, WP-612 |
+| [WP-679](#wp-679--attributdefinition-jede-abgelehnte-definition-nennt-ihr-eigenes-feld-reservierter-schlüssel-400-mit-field-key) | `k7n-attribute-definition-key-field` | Attributdefinition: jede abgelehnte Definition nennt ihr eigenes Feld; reservierter Schlüssel 400 mit `field` `key` | K7N | 0,5 | F-408 | WP-091, WP-116 |
+| [WP-682](#wp-682--kanten-cleanup-prüft-verifikation-und-frist-beim-löschen-während-des-laufs-verifizierte-oder-bestätigte-kanten-bleiben-ohne-event) | `k7n-relationship-cleanup-race` | Kanten-Cleanup prüft Verifikation und Frist beim Löschen: während des Laufs verifizierte oder bestätigte Kanten bleiben, ohne Event | K7N | 0,5 | F-411 | WP-159, WP-383, WP-497 |
+| [WP-685](#wp-685--kontingent-ablehnung-nennt-den-bestand-der-organisation-nur-org-weiten-aufrufern) | `k7n-entitlement-limit-detail` | Kontingent-Ablehnung nennt den Bestand der Organisation nur org-weiten Aufrufern | K7N | 0,5 | F-414 | WP-072, WP-472, WP-674 |
+| [WP-686](#wp-686--rack-montage-explizites-height_u-0-und-leeres-face-sind-400-mit-feld-nichts-gespeichert-weggelassene-felder-behalten-die-vorgabe) | `k7n-rack-mount-explicit-zero` | Rack-Montage: explizites `height_u` 0 und leeres `face` sind 400 mit Feld, nichts gespeichert; weggelassene Felder behalten die Vorgabe | K7N | 0,5 | F-415 | WP-175, WP-126, WP-500 |
+| [WP-689](#wp-689--benachrichtigungskanäle-und-zustellungen-nur-für-org-weite-inhaber-von-notificationmanage-webhook-kanäle-bleiben-org-weite-ziele) | `k7n-notification-admin-org-wide` | Benachrichtigungskanäle und Zustellungen nur für org-weite Inhaber von `notification:manage`; Webhook-Kanäle bleiben org-weite Ziele | K7N | 1,0 | F-418 | WP-139, WP-398, WP-409, WP-633 |
+| [WP-698](#wp-698--raumlayout-im-scope-des-aufrufers-nur-sichtbare-cis-des-raums-unsichtbare-einträge-bleiben-veraltete-blockieren-nicht) | `k7n-room-layout-client-scope` | Raumlayout im Scope des Aufrufers: nur sichtbare CIs des Raums, unsichtbare Einträge bleiben, veraltete blockieren nicht | K7N | 1,0 | F-427 | WP-526 |
+| [WP-690](#wp-690--bulk-operation-dieselbe-uuid-in-anderer-schreibweise-zählt-einmal-bericht-je-kanonischer-id) | `k7n-bulk-uuid-dedupe` | Bulk-Operation: dieselbe UUID in anderer Schreibweise zählt einmal, Bericht je kanonischer ID | K7N | 0,5 | F-419 | WP-181, WP-368, WP-517 |
+| [WP-691](#wp-691--redundanz-postfilter-versorger-außerhalb-des-client--oder-site-scopes-zählen-ohne-genannt-zu-werden) | `k7n-redundancy-hidden-supply` | Redundanz-Postfilter: Versorger außerhalb des Client- oder Site-Scopes zählen, ohne genannt zu werden | K7N | 1,0 | F-420 | WP-179, WP-513, WP-611, WP-345 |
+| [WP-692](#wp-692--eindeutige-attribute-die-prüfung-umfasst-die-cis-außerhalb-des-client--oder-site-scopes-des-schreibenden-ohne-sie-zu-nennen) | `k7n-unique-org-scope-client-writer` | Eindeutige Attribute: die Prüfung umfasst die CIs außerhalb des Client- oder Site-Scopes des Schreibenden, ohne sie zu nennen | K7N | 1,0 | F-421 | WP-142, WP-674 |
+| [WP-697](#wp-697--review-liste-unbekannte-status--und-kind-werte-sind-400-mit-feld-auch-am-veralteten-alias) | `k7n-review-list-filter-validation` | Review-Liste: unbekannte `status`- und `kind`-Werte sind 400 mit Feld, auch am veralteten Alias | K7N | 0,5 | F-426 | WP-088, WP-673 |
+| [WP-696](#wp-696--enrollment-code-in-der-oberfläche-pflichtauswahl-des-kunden-für-nutzer-mehrerer-clients-grund-der-ablehnung-statt-allgemeiner-fehlermeldung) | `k7n-enrollment-client-choice` | Enrollment-Code in der Oberfläche: Pflichtauswahl des Kunden für Nutzer mehrerer Clients, Grund der Ablehnung statt allgemeiner Fehlermeldung | K7N | 1,0 | F-425 | WP-677, WP-199, WP-524 |
+| [WP-699](#wp-699--sicherheitsreview-und-gate-01-erfassen-die-befunde-der-korrektur-sr-27-bis-sr-49-begründung-ohne-sicherheitswirkung-maschinelle-prüfung-über-die-befundliste) | `k7n-sr-coverage-reaudit-findings` | Sicherheitsreview und GATE-01 erfassen die Befunde der Korrektur: SR-27 bis SR-49, Begründung ohne Sicherheitswirkung, maschinelle Prüfung über die Befundliste | K7N | 1,0 | F-428 | WP-452, WP-451, WP-633, WP-634, WP-636, WP-639, WP-642, WP-643, WP-656, WP-660, WP-663, WP-664, WP-667, WP-669, WP-677, WP-678, WP-680, WP-682, WP-685, WP-687, WP-689, WP-692, WP-698 |
+| [WP-700](#wp-700--eindeutige-attribute-auf-allen-schreibwegen-wiederherstellen-unmerge-und-review-auflösung-prüfen-wie-post-cis-409-mit-violations) | `k7n-unique-check-all-write-paths` | Eindeutige Attribute auf allen Schreibwegen: Wiederherstellen, Unmerge und Review-Auflösung prüfen wie POST /cis (409 mit violations) | K7N | 1,0 | F-429 | WP-142, WP-692, WP-670, WP-676 |
+| [WP-693](#wp-693--override-wege-auf-soft-gelöschten-cis-override_conflict-accept-override-setzenentfernen-und-feldliste-antworten-404-und-schreiben-nichts) | `k7n-override-deleted-ci` | Override-Wege auf soft-gelöschten CIs: `override_conflict` accept, Override setzen/entfernen und Feldliste antworten 404 und schreiben nichts | K7N | 0,5 | F-422 | WP-025, WP-057, WP-089, WP-676 |
+| [WP-694](#wp-694--collector-anlegen-und-ändern-feldfehler-aus-validierung-und-repository-sind-422-mit-feld-statt-500) | `k7n-collector-field-errors` | Collector anlegen und ändern: Feldfehler aus Validierung und Repository sind 422 mit Feld statt 500 | K7N | 0,5 | F-423 | WP-143, WP-144, WP-677 |
+| [WP-695](#wp-695--unknown_relationship-accept-folgt-den-regeln-von-post-relationships-typliste-von-connected_to-422-soft-gelöschtes-ci-404-keine-neue-kante-zu-gelöschten-cis) | `k7n-unknown-relationship-accept-rules` | `unknown_relationship` accept folgt den Regeln von `POST /relationships`: Typliste von `connected_to` 422, soft-gelöschtes CI 404; keine neue Kante zu gelöschten CIs | K7N | 1,0 | F-424 | WP-127, WP-158, WP-592, WP-676 |
+| [WP-702](#wp-702--eindeutige-attribute-beim-typwechsel-post-cisidtype-prüft-die-eindeutigen-attribute-des-zieltyps-409-mit-violations) | `k7n-unique-check-type-change` | Eindeutige Attribute beim Typwechsel: POST /cis/{id}/type prüft die eindeutigen Attribute des Zieltyps (409 mit violations) | K7N | 0,5 | F-431 | WP-142, WP-172, WP-700 |
+| [WP-703](#wp-703--eindeutige-attribute-im-discovery-ingest-vergebener-wert-wird-nicht-gespeichert-invalid_values-der-datensatz-und-der-batch-laufen-weiter) | `k7n-unique-check-ingest` | Eindeutige Attribute im Discovery-Ingest: vergebener Wert wird nicht gespeichert (invalid_values), der Datensatz und der Batch laufen weiter | K7N | 1,0 | F-432 | WP-142, WP-501, WP-333, WP-481, WP-700, WP-702 |
+| [WP-701](#wp-701--enrollment-codes-halten-ihre-site-löschen-einer-site-mit-gültigem-collector-enrollment-code-ist-409-abgelaufene-und-verbrauchte-codes-gehen-mit-000189-restrict) | `k7n-enrollment-code-site-restrict` | Enrollment-Codes halten ihre Site: Löschen einer Site mit gültigem Collector-Enrollment-Code ist 409, abgelaufene und verbrauchte Codes gehen mit (000189 RESTRICT) | K7N | 0,5 | F-430 | WP-411, WP-677 |
 | [WP-601](#wp-601--webhook-abos-tragen-den-scope-ihres-erzeugers) | `k1n-webhook-scope` | Webhook-Abos tragen den Scope ihres Erzeugers | K1N | 2,0 | – | WP-404, WP-409 |
 | [WP-602](#wp-602--topologie-ohne-root-kanten-des-knotensatzes-in-einer-abfrage) | `k1n-topology-batch` | Topologie ohne Root: Kanten des Knotensatzes in einer Abfrage | K1N | 1,0 | – | WP-403 |
 | [WP-603](#wp-603--iga-zugriffsanfrage-startet-ihren-workflow-lauf-submit_form-ohne-ungültige-akteur-uuid) | `k1n-iga-workflow` | IGA-Zugriffsanfrage startet ihren Workflow-Lauf; submit_form ohne ungültige Akteur-UUID | K1N | 1,0 | – | WP-407 |
@@ -18346,6 +18398,2772 @@ SEQ-01;[Q];G1;tests/rep01-structure.test.sh;WP-600
 **Entscheidungsbedarf:** [E-59](entscheidungen.md#e-59) Einordnung des Korrekturplans vor Phase 2 und Freigabe des Phase-2-Starts; [E-60](entscheidungen.md#e-60) Zurückgestellte P3-Befunde und Risikoakzeptanz für G1
 
 **Nicht Bestandteil:** Phase-2-Umfang; RC-Läufe und endgültige Statuspflege in `docs/acceptance/g1-gate.md`, `docs/security/review-g1.md` und `docs/acceptance/g1-installation.md` (WP-595 (`t5-rc-evidence`); bei `v1.0.0-rc.<n+1>` trägt dieses WP dort nur Commit und Lauf-IDs nach).
+
+## K7-Nachträge
+
+Funde der Wiederholungsprüfung (WP-596 bis WP-599) und des Basislaufs auf dem Release-Kandidaten, die kein Korrektur-WP abdeckt (Konvention 16). Die Befunde stehen ab F-384 in [`audit/g1-reaudit/FINDINGS.md`](../../../audit/g1-reaudit/FINDINGS.md) mit Reproduktion, Soll, Ist, Ursache, Empfehlung und Retest; jeder ist auf dem RC-Commit `e5c2d86` ausgeführt belegt. Die WPs werden vor WP-600 (`k-gate`) gemergt; ein Code-Commit nach dem RC-Tag führt nach WP-600 AK 7 zu `v1.0.0-rc.<n+1>`.
+
+### WP-655 – Sweep: fester Worker-Pool statt Goroutine je Ziel; Goroutinen-Spitze auch unter Last begrenzt
+
+**Schlüssel:** `k7n-sweep-pool` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-494 (`t4-scope-expansion`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-384](../../../audit/g1-reaudit/FINDINGS.md#f-384) | P3 | Sweep: Goroutinen-Spitze unter CPU-Last über MaxConcurrency + 50 (`TestSweepGoroutinePeakBounded` schlägt zeitweise fehl) | schließt | Basislauf K7 auf `e5c2d86` |
+
+**Problem:** WP-494 hat die Semaphore vor `go` gelegt (F-262): Eine Probe belegt ihren Platz, bevor ihre Goroutine startet. Die Goroutine gibt den Platz per `defer` frei und endet erst danach; unter CPU-Last laufen so neben 256 aktiven Proben weitere Goroutinen aus, die ihren Platz schon abgegeben haben. Der Retest von F-262 (`TestSweepGoroutinePeakBounded`, Spitze ≤ MaxConcurrency + 50 bei 65.536 Zielen) scheitert dadurch zeitweise (Basislauf auf `e5c2d86`: Spitze 321; allein 2 von 10 und 1 von 30 Läufen rot, Spitze 322). Die Zahl paralleler Proben (≤ 256, DIS-01) ist nicht betroffen.
+
+**Akzeptanzkriterien:**
+
+- [ ] Der Sweep arbeitet mit einem festen Pool von höchstens `min(Concurrency, Anzahl Ziele)` Workern, die die Ziele nacheinander aus einem Kanal nehmen; ein Abbruch über den Kontext beendet die Zuteilung. Verhalten, Ergebnisse und die Obergrenze von 256 parallelen Proben bleiben unverändert (`go test ./plugins/sweep/` grün, auch mit `-race`).
+- [ ] `TestSweepGoroutinePeakBounded` mit unveränderter Schranke (MaxConcurrency + 50) besteht 30 von 30 Läufen bei paralleler Last auf derselben Maschine (`go test -count=30 -run TestSweepGoroutinePeakBounded ./plugins/sweep/`); auf `e5c2d86` ist mindestens ein roter Lauf belegt.
+- [ ] golangci-lint mit der Repo-Konfiguration ohne neue Befunde.
+
+**Dateien (6 Einträge):**
+
+- collector/plugins/sweep/sweep.go
+- collector/plugins/sweep/sweep_test.go
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `cd collector && go test -count=1 -race ./plugins/sweep/` und `go test -count=30 -run TestSweepGoroutinePeakBounded ./plugins/sweep/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-655
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** weitere Befunde der Wiederholungsprüfung (eigene WPs ab WP-656).
+
+### WP-656 – Unterzeichner von Zuweisungen als PII-Surrogat; Bestandsnamen über den Backfill in den Vault
+
+**Schlüssel:** `k7n-assignment-signature-surrogate` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-241 (`b-pii-surrogates`), WP-242 (`b-pii-contacts`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-385](../../../audit/g1-reaudit/FINDINGS.md#f-385) | P3 | Unterschriften von Zuweisungen speichern den Namen des Unterzeichners im Klartext statt als PII-Surrogat | schließt | Erweiterte Prüfung von WP-241 (K7) auf `e5c2d86` |
+
+**Problem:** WP-241 AK 1 verlangt, dass Assignments für Personen nur Surrogat-IDs speichern. `PGRepository.Create` und `Update` (backend/internal/assignment/pg_repository.go) schreiben `Signature{SignerName}` aber im Klartext nach `assignment.checkout_signature` bzw. `return_signature`. Belegt ist das über den echten Handler mit dem Vault wie in `cmd/server/main.go`: Nach `POST /assignments` und `POST /assignments/{id}/return` hält die Tabelle `"signer_name": "Max Verifier"` bzw. `"Rita Rueckgabe"`, und `pii_subject` ist leer. Audit und Events versiegeln die Felder (`pii.personalKeys`), die Tabelle nicht, und der Backfill `pii.backfill` erfasst keine Bestandszeilen. Der Commit von WP-241 (`d880b54`) hat die Zuweisungen fälschlich als erledigt beschrieben. Im G1-Release ist das Inventarmodul nach E-03 abgeschaltet; der Klartext entsteht nur mit `RETICORA_MODULES=inventory`.
+
+**Akzeptanzkriterien:**
+
+- [ ] Mit gesetztem Vault legt das Repository den Namen des Unterzeichners als Vault-Eintrag ab (`pii_subject`: verschlüsselter Payload unter dem Datenschlüssel der Organisation, `dek_ref`). Die Signatur-JSON in `checkout_signature`/`return_signature` hält nur die Surrogat-Referenz `{"$pii": "<surrogate_id>"}`; Bild, Objektschlüssel, Zeitpunkt und Methode bleiben unverändert. Ohne Vault (Entwicklung ohne Hauptschlüssel) bleibt der Name wie bei den Kontakten im Klartext.
+- [ ] Der REST-Vertrag bleibt unverändert: `POST /assignments`, `POST /assignments/{id}/return`, `GET /assignments/{id}` und `GET /assignments` liefern `signer_name` aus dem Vault aufgelöst; `api/openapi.yaml` ändert sich nicht. Ist der Vault-Eintrag gelöscht, fehlt der Name (Crypto-Shredding), die übrigen Felder bleiben. Eine andere Organisation löst das Surrogat nicht auf.
+- [ ] Ein Transfer oder eine Rückgabe ohne neue Unterschrift behält die gespeicherte Unterschrift und legt keinen Vault-Eintrag an. Eine neue Rückgabe-Unterschrift ersetzt die alte, deren Vault-Eintrag gelöscht wird. Das Löschen einer Zuweisung löscht die Vault-Einträge ihrer Unterzeichner.
+- [ ] Bestandszeilen mit Klartextnamen verschiebt der Lauf `pii.backfill` (`jobs.PIIBackfill.RunOrg`, neuer Zähler `assignments` im Ergebnis und im Audit-Eintrag des Laufs) je Organisation in den Vault; ein zweiter Lauf findet nichts mehr. Eine Migration ist nicht nötig: Das Schema ändert sich nicht (JSONB), und der Hauptschlüssel ist in SQL nicht verfügbar (wie bei WP-241/WP-242, Migrationen 000125/000126).
+- [ ] `TestAssignmentSignatureKeepsSurrogate` ist auf `e5c2d86` rot (Klartextnamen in `checkout_signature`/`return_signature`) und mit der Korrektur grün, auch als Nicht-Root-Nutzer; `go test ./internal/assignment/ ./internal/jobs/ ./internal/pii/ ./internal/contact/` grün; golangci-lint ohne neue Befunde.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/assignment/model.go
+- backend/internal/assignment/pg_repository.go
+- backend/internal/assignment/signature.go (neu)
+- backend/internal/assignment/pii_integration_test.go (neu)
+- backend/internal/jobs/pii_backfill.go
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Unterschriften bleiben JSONB-Spalten von `assignment`; Vault-Zugriffe laufen in der Tenant-Transaktion des Repositorys bzw. des Backfill-Laufs (RLS auf `assignment` und `pii_subject`, `ResolveTx`/`DeleteTx` mit Organisationsprüfung).
+
+**Tests:**
+
+- `cd backend && go test -count=1 -run TestAssignmentSignatureKeepsSurrogate ./internal/assignment/` gegen PostgreSQL (`TEST_DATABASE_URL`), außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/assignment/ ./internal/jobs/ ./internal/pii/ ./internal/contact/ ./internal/privacy/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SEC-05;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
+AUD-04;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** das Unterschriftsbild selbst (`image_base64`/`object_key`) als Personendatum im Vault und die Ablage als Dokument mit `signature_hash` in `stock_movement` (Phase-2-WP-276 `ast-signature`); Zuweisungen im Löschworkflow der Aufbewahrungsrichtlinie (`internal/privacy`); die Versiegelung verschachtelter Personenfelder in Objekten unter `checkout_signature`/`return_signature` durch `pii.SealTx` (als neuer Kandidat gemeldet; Audit und Events speichern Unterschriften derzeit nicht); weitere Befunde der Wiederholungsprüfung (eigene WPs ab WP-657).
+
+### WP-658 – Pre-Auth-Limit: gleichzeitige Anfragen mit gültigen Anmeldedaten warten statt 429; Fehlversuche bleiben begrenzt
+
+**Schlüssel:** `k7n-preauth-concurrency` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-462 (`t2-preauth-budget`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-387](../../../audit/g1-reaudit/FINDINGS.md#f-387) | P2 | Pre-Auth-Limit weist gleichzeitige Anfragen mit gültigen Anmeldedaten einer IP mit 429 ab (Lastlauf: 19 bzw. 23 fehlgeschlagene Anfragen, alle Bulk-Anfragen) | schließt | Lastlauf `load.yml` 40713089267 (K7) auf `e5c2d86` |
+
+**Problem:** `PreAuthRateLimiter` (`backend/internal/middleware/ratelimit.go:290-351` auf `e5c2d86`) nimmt seit WP-462 für jede Anfrage an einen authentifizierten Pfad vor der Prüfung eine Einheit des IP-Budgets (20/min) und gibt sie erst nach gelungener Authentifizierung zurück (`releasePreAuthSlot`, `auth.go:121`); erfolgreiche Refreshes halten sie bis zum Ende des Handlers. Laufen mehr als 20 Prüfungen einer IP gleichzeitig, erhält jede weitere Anfrage sofort 429, auch mit gültigem Key oder Token und ohne Fehlversuch. Folge: Lauf 40713089267 auf `e5c2d86` mit 19 von 17.879 (`api`) und 23 von 13.920 (`nfr01-volume`) fehlgeschlagenen Anfragen, darunter alle 3 Bulk-Anfragen; lokal 60 gleichzeitige Anfragen mit gültigem API-Key einer IP → 29 × 429. Der Retest von F-063 prüfte nur sequentielle Refreshes. Der Schutzzweck des Limits (AUT-10: Erraten von Anmeldedaten begrenzen; F-063/WP-462: nur Fehlversuche zählen, atomare Zulassung) muss erhalten bleiben.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Zulassung bleibt atomar (der Store erhöht den Zähler `preauth:<ip>:<minute>` vor dem Handler nur, solange er unter dem Budget liegt, in einem Schritt für alle Replikate): je IP und Minutenfenster (feste UTC-Minute) laufen höchstens 20 in diesem Fenster zugelassene Prüfungen gleichzeitig, und höchstens 20 Fehlversuche werden zugelassen. Prüfungen, die am Ende eines Fensters zugelassen wurden, behalten dessen Einheiten: direkt nach dem Fensterwechsel können kurzzeitig bis zu 40 Prüfungen einer IP gleichzeitig laufen, und ein 60-s-Intervall über eine Fenstergrenze kann bis zu 40 Fehlversuche enthalten (wie vor WP-462 und wie die Budgets von API-04). Ein zweiter Zähler `preauth-spent:<ip>:<minute>` zählt die verbrauchten Einheiten (Fehlversuche: 401 authentifizierter Pfade, auch nach gelungener Authentifizierung, `/auth/refresh` außerhalb 2xx; jede Anfrage an Login-Callback, Signup, Signup-Verify, Einladungsannahme, Enrollment und Operator-Callback).
+- [ ] Findet eine Anfrage alle Einheiten belegt, aber nicht alle verbraucht, wartet sie auf eine frei werdende Einheit (eine zurückgegebene Einheit weckt eine wartende Anfrage derselben IP auf demselben Replikat; sonst Abfrage mit wachsendem Intervall 25–250 ms mit Jitter, ein Store-Aufruf je Abfrage) statt 429 zu erhalten, höchstens 2,5 s; danach oder wenn der Client weg ist 429 mit `Retry-After`. Füllen die verbrauchten Einheiten das Budget, erhält die IP sofort 429 mit `Retry-After` bis zum Ende der Minute (wie bisher, auch für gültige Anmeldedaten). Header X-RateLimit-* und Store-Fehler (fail closed) wie bisher.
+- [ ] `TestValidCredentialsNeverHit429UnderConcurrency` (`middleware/ratelimit_test.go`), innerhalb der Wartegrenze je IP: 30 gleichzeitige Anfragen mit gültigem API-Key, 30 mit gültigem Bearer-Token und 20 erfolgreiche Refreshes einer IP über zwei Replikate sowie 60 gleichzeitige Anfragen mit gültigem API-Key einer IP auf einem Replikat (Reproduktion von F-387), jede Prüfung 25 ms, Memory- und Redis-Store → 0 × 429, alle erreichen den Handler; danach hat die IP ihr volles Budget (20 ungültige Keys 401, der 21. 429). Auf `e5c2d86` rot (in der ersten Fassung mit 150 Anfragen 130 × 429).
+- [ ] `TestPreAuthBruteForceStillTripsUnderConcurrency`: 60 gleichzeitige ungültige Keys einer IP über zwei Replikate → genau 20 geprüft und 401, 40 × 429 mit `Retry-After` und `X-RateLimit-Remaining: 0`, ohne die Wartegrenze abzuwarten; danach gültiger Key derselben IP 429, einer anderen IP 200; die 40 abgewiesenen erhalten 429 vor der Wartegrenze. `TestPreAuthWaitIsBounded`: eine wartende Anfrage erhält die erste frei werdende Einheit, ohne frei werdende Einheit nach der Wartegrenze 429, ein abgebrochener Client wartet nicht weiter. Unverändert grün: `TestPreAuthAdmissionIsAtomic`, `TestAuditT2SuccessfulRefreshDoesNotConsumePreAuthBudget`, `TestPreAuthLimitCountsFailedAuthentication`, die Kettentests in `cmd/server/main_test.go` und `internal/server`.
+- [ ] Review-Nachtrag D1 (P2, Warteschlange): Je Replikat warten höchstens doppelt so viele Anfragen einer IP wie ihr Budget (Standard 40) und höchstens 256 Anfragen aller IPs; jede weitere erhält sofort 429 mit `Retry-After` wie vor WP-658. Eine zurückgegebene Einheit weckt genau eine wartende Anfrage ihrer IP (Warteschlange je IP), eine Rückgabe oder ein Fehlversuch einer anderen IP weckt niemanden; füllen die verbrauchten Einheiten das Budget, werden die wartenden Anfragen der IP auf dem Replikat geweckt und abgewiesen. Jede Abfrage ist ein Store-Aufruf (`cache.Store.IncrementBelow`: erhöht `preauth:` nur unter dem Budget und liest `preauth-spent:` mit, in Redis ein Lua-Skript); eine abgewiesene Anfrage verändert den Zähler nicht mehr (kein Increment/Decrement-Paar). `TestPreAuthWaitingRequestsAreBounded`: 20 gehaltene Einheiten, 40 wartende Refreshes der IP A, der 41. sofort 429; Grenze des Replikats 41 → die zweite wartende Anfrage der IP B sofort 429; nach der Rückgabe alle 41 wartenden 200. `TestPreAuthWaitersCostBoundedStoreOps`: 300 Refreshes der IP A bei gehaltenen Einheiten, gleichzeitig 8 andere IPs mit gültigem Key und eine Messanfrage → 260 sofort 429, Store-Aufrufe auf A's Schlüssel ≤ 300 + 40 · (2 · Wartegrenze / 250 ms + 6), unabhängig von der Zahl der Rückgaben anderer IPs; Durchsatz der anderen IPs ≥ die Hälfte und Median der Messanfrage ≤ das Dreifache (+1 ms) der Phase ohne wartende Anfragen im selben Lauf; Memory- und Redis-Store. Auf `d7aec4b` rot (Redis: 62.046 Store-Aufrufe, Durchsatz anderer IPs 20.619 → 822, Median 0,59 → 14,5 ms). `TestStoreIncrementBelow` (`internal/cache`): Grenze, unveränderter Zähler bei Ablehnung, Mitlesen, 50 gleichzeitige Aufrufe zweier Clients → genau 20.
+- [ ] Review-Nachtrag D2 (P3, verlorene Einheiten): Bricht ein Handler ab, während seine Anfrage eine Einheit hält (Panik; Recovery liegt außerhalb der Pre-Auth-Stufe; Refresh und Operator-Pfad halten die Einheit über den Handler), wird die Einheit verbraucht statt bis zum Fensterende belegt zu bleiben; die Panik läuft unverändert weiter. `TestPreAuthPanicSpendsHeldUnit`: 20 Refreshes mit Panik → 20 verbrauchte Einheiten, der nächste Refresh sofort 429 (nicht nach der Wartegrenze); eine Panik nach gelungener Schlüsselprüfung verbraucht nichts. Auf `d7aec4b` rot (`spent` leer, 429 erst nach 2 s). Verbleibende Fälle (Absturz eines Replikats, gescheitertes `Decrement` oder `INCR` von `preauth-spent:`) belegen die Einheit bis zum Fensterende; eine Anfrage wartet dann höchstens 2,5 s.
+- [ ] Review-Nachtrag (Bemerkungen): Die Wartezeit läuft nach dem Lesen der Kopfzeilen und vor dem Lesen des Bodys; von `ReadTimeout` und `WriteTimeout` des Servers (je 15 s, `cmd/server/main.go`) bleiben Body und Handler mindestens 12,5 s (mit der ersten Fassung nur 5 s). Ein gescheiterter Operator-Anmeldeversuch verbraucht seine Einheit auch dann, wenn sein `operator_audit`-Eintrag scheitert und er mit 500 beantwortet wird (`middleware.SpendPreAuthSlot` in `operator.Middleware`); `TestFailedOperatorAuthenticationCountsWithoutItsAuditEntry` (`internal/operator`): 21 Anfragen ohne Anmeldedaten einer IP bei scheiterndem Audit → 20 × 500, 1 × 429; mit Break-Glass-Token 21 × 500 (nichts verbraucht). Auf `d7aec4b` rot (21 × 500).
+- [ ] `api/openapi.yaml` (`info.description`, Pre-Auth-Limit) und `docs/README.md` (`RETICORA_PREAUTH_RATE_LIMIT_RPM`) beschreiben das Warten, die Wartegrenzen und die festen Minutenfenster; `npm run generate:api` ohne Änderung (`info.description` geht nicht in `schema.d.ts` ein). `docs/acceptance/lasttest-g1.md` nennt Ursache und lokale Messung.
+- [ ] Lastnachweis: lokal mit den Servereinstellungen aus `load.yml` und Seed 10.000 Objekte `api.js` 60 s ohne fehlgeschlagene Anfrage und ohne 429 (auch mit dem Review-Nachtrag); Wiederholung von `load.yml` auf GitHub mit `http_req_failed` 0 in `api` und `nfr01-volume` und Check `bulk 200/202` 3 von 3 (CI).
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (16 Einträge):**
+
+- backend/internal/middleware/ratelimit.go
+- backend/internal/middleware/ratelimit_test.go
+- backend/internal/middleware/ratelimit_probe_test.go
+- backend/internal/cache/cache.go
+- backend/internal/cache/memory.go
+- backend/internal/cache/redis.go
+- backend/internal/cache/window_test.go
+- backend/internal/operator/auth.go
+- backend/internal/operator/operator_test.go
+- api/openapi.yaml
+- docs/README.md
+- docs/acceptance/lasttest-g1.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `cd backend && go test -count=3 -race ./internal/middleware/` mit `TEST_REDIS_URL` (Memory- und Redis-Store); `go test ./internal/cache/ ./internal/server/ ./cmd/server/ ./internal/operator/ ./internal/signup/ ./internal/identity/`.
+- Lokal: Server von WP-658 mit den Einstellungen aus `load.yml`, Seed 10.000 Objekte, 60 gleichzeitige Anfragen mit gültigem API-Key einer IP (zweimal) und `k6 run tests/load/api.js` 60 s; CI: `load.yml`.
+- Review-Nachtrag: die adversarialen Tests des Reviews (`TestAdvHerd` mit 300 und 2.000 wartenden Anfragen, `TestAdvHerdValidKey` mit 1.000 Verbindungen und 50 ms RTT, `TestAdvPanicLeaksHeldUnit`, `TestAdvSpentWriteFails`, `TestAdvBruteForceBound`, `TestAdvBoundaryConcurrency`) über `-overlay` gegen `d7aec4b`, den Stand vor WP-658 und den Nachtrag im selben Lauf.
+
+**Nachtrag 2026-10-28 (adversariale Prüfung von `d7aec4b`):** Die erste Fassung (`d7aec4b`) ließ beliebig viele Anfragen warten. Jede zurückgegebene oder verbrauchte Einheit, gleich welcher IP, weckte alle wartenden Anfragen des Replikats, und jede Abfrage kostete zwei bis vier Store-Aufrufe im Abstand von 2–50 ms, bis zu 10 s lang. Gemessen mit 300 wartenden Anfragen einer IP: 160–318 Store-Aufrufe je wartender Anfrage (vorher 2), Durchsatz anderer IPs in 1,5–3 s um 96 % gesunken, Median einer unbeteiligten Anfrage 0,75 → 17,7 ms (D1, P2). Eine gehaltene Einheit blieb nach einer Panik im Handler bis zum Fensterende belegt; danach wartete jede Anfrage der IP die volle Wartegrenze ab (D2, P3). Dazu kamen drei Bemerkungen: die Formulierung „höchstens 20 gleichzeitig“ trotz fester Fenster, die 10-s-Wartegrenze gegenüber den 15-s-Timeouts des Servers und der Operator-Pfad, der einen gescheiterten Anmeldeversuch mit scheiterndem Audit nicht zählte. Der zweite Commit von WP-658 behebt D1 und D2 und die Bemerkungen (Akzeptanzkriterien „Review-Nachtrag“). Den gleitenden Zähler (`WindowAdd`) für verbrauchte Einheiten haben wir verworfen: Der Zähler `preauth:` bliebe ein festes Fenster, und die Zulassung müsste dann zwei Fensterarten in einem Schritt verbinden. Der Gewinn wäre nur, dass in 60 s über eine Minutengrenze höchstens 20 statt 40 Fehlversuche fallen; feste Fenster galten schon vor WP-462 und gelten für die Budgets von API-04.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
+API-04;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
+AUT-10;[B];B;backend/internal/cache/window_test.go;WP-658
+AUT-10;[B];B;backend/internal/operator/operator_test.go;WP-658
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Höhe des Pre-Auth-Budgets (`RETICORA_PREAUTH_RATE_LIMIT_RPM`, Standard 20); Weckruf über Replikate hinweg (andere Replikate fragen den Zähler ab); gleitendes Fenster für das Pre-Auth-Budget; Rückgabe gehaltener Einheiten nach dem Absturz eines Replikats; Lockout-Signal aus Keycloak (AUT-10 zweiter Teil); weitere Befunde der Wiederholungsprüfung.
+
+### WP-657 – Ingest: Rahmen und Ledger eines Batches (WP-332 AK 3) mit dem gebauten Entwurf abgleichen
+
+**Schlüssel:** `k7n-ingest-frame-ledger-tx` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** G1 · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-332 (`nfr03-tx`), WP-333 (`nfr03-batch`), WP-334 (`nfr03-lanes`), WP-481 (`t3-ingest-poison`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-386](../../../audit/g1-reaudit/FINDINGS.md#f-386) | P3 | Ingest: Rahmen und Ledger eines Batches laufen in zwei Transaktionen statt in einer (WP-332 AK 3) | schließt (nach Entscheidung) | Erweiterte Prüfung von WP-332 (K7) auf `e5c2d86` |
+
+**Problem:** WP-332 AK 3 verlangt: „Rahmen und Ledger eines Batches laufen in einer Transaktion“. Gebaut und gemessen sind zwei Transaktionen: Der Rahmen (Ledger lesen, Typ-Lookup, VRF, Reviews unbekannter Typen) läuft vor den Records, der Ledger (`MarkRecordsProcessed`, ein `unnest`-INSERT) nach den Records und der Topologie. `TestIngestStatementBudget` meldet „frame 8 statements in 2 transactions“ und verlangt selbst zwei Transaktionen; `docs/acceptance/lasttest-g1.md` nennt denselben Wert. Die Trennung folgt aus der Ledger-Semantik: Der Ledger darf nur Records nennen, deren Transaktion committet hat, und der Rahmen muss den Ledger vor den Records lesen. Eine gemeinsame Transaktion müsste deshalb über den ganzen Batch auf einer zweiten Pool-Verbindung offen bleiben. Im Prototyp hängt damit ein Ingest über einen Pool mit einer Verbindung, und zwei Organisationen über einen Pool mit zwei Verbindungen hängen bis zum Timeout (5 von 5 Runden). Im Betrieb ohne NATS blockieren 25 gleichzeitig ingestierende Organisationen den Pool. Mit Queue verdoppelt sich der Verbindungsbedarf des Ingest gegenüber `processingSlots` (WP-334). Savepoints (alle Records in der Batch-Transaktion) widersprächen WP-332 AK 2 und AK 4 und der deadlockfreien Sperrreihenfolge von WP-334. Funktional wirkt die Abweichung nicht; die Budgets halten, und ein verlorener Ledger-Schreibvorgang führt zu idempotenter Neuanwendung.
+
+**Akzeptanzkriterien:**
+
+- [ ] Kundenentscheidung [E-101](entscheidungen.md#e-101) zur Formulierung von WP-332 AK 3 liegt vor. Empfehlung: Der Plantext folgt dem gebauten Entwurf: „Der Rahmen eines Batches läuft in einer kurzen Transaktion vor den Records, der Ledger nach den Records in einer zweiten mit einem `unnest`-INSERT; zusammen höchstens 8 Statements in 2 Transaktionen je Batch, unabhängig von der Batchgröße.“
+- [ ] Mit der Empfehlung: docs/plan/implementierungsplan.md (WP-332 AK 3) mit Verweis auf die Entscheidung angepasst; `TestIngestStatementBudget` bleibt unverändert grün („frame 8 statements in 2 transactions“), `docs/acceptance/lasttest-g1.md` bleibt beim gemessenen Wert und verweist auf die Entscheidung.
+- [ ] Nur falls stattdessen die Zusammenlegung entschieden wird: Rahmen und Ledger in einer Transaktion, ohne dass ein Batch zwei Pool-Verbindungen gleichzeitig belegt. Ein Ingest über einen Pool mit einer Verbindung läuft durch (kodierender Test, auf `e5c2d86` mit einer Rahmentransaktion über den Batch rot). `TestIngestStatementBudget` verlangt `len(frame) == 1`. Kein Record steht im Ledger, dessen Transaktion nicht committet hat; eine Neuzustellung nach verlorenem Ledger wendet idempotent an. `TestPoisonRecordDoesNotTakeValidRecordsDown`, `TestDiscoveryConcurrency`, `TestIngestBatchMatchesRecordPath` und `TestRediscoverStatementBudget` bleiben grün; `docs/acceptance/lasttest-g1.md` nennt den neuen Wert.
+
+**Dateien (5 Einträge):**
+
+- docs/plan/implementierungsplan.md (WP-332 AK 3, nach Entscheidung)
+- docs/plan/g1-korrektur/entscheidungen.md (neue Entscheidung)
+- docs/acceptance/lasttest-g1.md (Verweis auf die Entscheidung)
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/abdeckung-befunde.csv, docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Mit der Empfehlung keine Codeänderung; Tenant-Transaktionen, RLS und Ledger bleiben unverändert.
+
+**Tests:**
+
+- `cd backend && go test -p 1 -count=1 -v -run '^(TestIngestStatementBudget|TestIngestBatchMatchesRecordPath|TestRediscoverStatementBudget|TestPoisonRecordDoesNotTakeValidRecordsDown|TestDiscoveryConcurrency|TestIngestKeepsPrefixOfFailedBatch)$' ./internal/discovery/` gegen PostgreSQL (`TEST_DATABASE_URL`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-657
+```
+
+**Entscheidungsbedarf:** [E-101](entscheidungen.md#e-101) „WP-332 AK 3: Rahmen und Ledger eines Batches in einer oder in zwei Transaktionen“. Option 1 (empfohlen): Plantext an den Entwurf angleichen, zwei Transaktionen je Batch, keine Codeänderung. Option 2: Zusammenlegung mit eigener Verbindungsbegrenzung, sodass ein Batch nur eine Verbindung belegt; Aufwand rund 2 PT, Gewinn 2 Statements je Batch. Option 3: Savepoints statt Record-Transaktionen; widerspricht WP-332 AK 2 und AK 4 sowie WP-334 und wird nicht empfohlen.
+
+**Nicht Bestandteil:** Änderungen an Ledger-Semantik, Dedupe-Fenster (REC-01), Spuren und Sperren (WP-334) oder Poison-Record-Isolierung (WP-481); weitere Befunde der Wiederholungsprüfung.
+
+### WP-660 – Audit-Liste: Scope-Regel für jeden Typ der Auditoren (Domänentypen und Routensegmente), unbekannte Typen fail-closed
+
+**Schlüssel:** `k7n-audit-log-scope` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-504 (`t6-route-audit-gapless`), WP-505 (`t6-route-audit-values`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-389](../../../audit/g1-reaudit/FINDINGS.md#f-389) | P2 | Audit-Liste zeigt client- und site-beschränkten Principals die Einträge des Routen-Audits über Objekte fremder Clients und Sites (Namen, alte und neue Werte) | schließt | Wiederholungsprüfung von WP-016 und WP-020 (K7) auf `e5c2d86` |
+
+**Problem:** `GET /api/v1/audit-log` (und der Alias `/api/v1/audit`) filtert für Principals mit eingeschränktem Client-, Site- oder Team-Scope über `restrictedResource` (backend/internal/audit/audit.go). Die Bedingung kennt nur die Domänentypen `ci`, `asset`, `contact`, `credential`, `document`, `ticket` und lässt jeden anderen `resource_type` mit `ELSE true` durch. Der Routen-Audit schreibt seit WP-133/WP-504/WP-505 das erste Routensegment (`racks`, `relationships`, `assets`, `tickets`, `slas` …) mit den alten und neuen Werten der Zeile. Ein Client-1-Principal mit `audit:read` liest so Namen, Kennungen und Werte von Racks, Beziehungen, Assets und Modulobjekten von Client 2, ein Site-1-Principal die Racks anderer Sites; dieselben Objekte antworten direkt mit 404 (F-389). `audit_log` hat keine Client- oder Site-Spalte; die Einträge im Log tragen beide Typformen und bleiben hash-verkettet.
+
+**Akzeptanzkriterien:**
+
+- [ ] Scope-Register `backend/internal/audit/scope.go`: Jeder Typ, den ein Auditor schreibt, hat eine Regel – die Domänentypen im Singular (auch die nur noch in Bestandseinträgen vorkommenden `contact`, `credential`, `document`, `ticket`) und die Routensegmente einschließlich SCIM (`Users`, `Groups`). Ein Eintrag ist für einen eingeschränkten Principal sichtbar, wenn die Zeile, die `resource_id` nennt, in einer der Tabellen des Typs unter seinem Scope existiert (RLS der Tabelle; bei Tabellen ohne eigene Client- oder Site-Policy zusätzlich die referenzierten Zeilen von Asset, CI, Site, Netzwerkschnittstelle, Bestand, Ticket, Bestellung, Dokument, die Client-/Site-Grants von Rollen und Einladungen bzw. der Scope-Schnappschuss eines Exportauftrags). Einträge über die Organisation selbst (Organisation, Schlüsselrotation, Aufbewahrung, Kettenprüfung, Metamodell nach Schlüssel, Suchindex, Quellpolitik) sieht jeder Principal der Organisation. Unbekannte Typen, Typen ohne zuordenbare Zeile (Benachrichtigungspräferenzen, Datenschutz) und Einträge über gelöschte Objekte sind für eingeschränkte Principals verborgen; org-weite Principals sehen das ganze Log. `total` zählt nur die sichtbaren Einträge; der Filter `resource_type` schränkt nur innerhalb der sichtbaren ein.
+- [ ] Keine Normalisierung von `resource_type` beim Schreiben und keine Migration: Bestandseinträge mit Pluraltypen werden über dieselbe Regel gefiltert, der Filter `resource_type=racks` und die Hash-Kette bleiben unverändert.
+- [ ] `TestAuditLogHidesForeignClientRouteEntries` (Produktionsrouter, PostgreSQL-Routen-Auditor, Module eingeschaltet) über `/api/v1/audit-log` und `/api/v1/audit`: Der Client-1-Principal sieht keine Einträge über Rack, Beziehung, Asset, CI, Ticket (auch Kommentar), Dokument, Wartungsfenster, SLA, Schreibtisch, Schlüssel, Bestellung, Formular, Verbrauchsmaterial, Inventarposten und Lagerbewegung von Client 2 und keinen Eintrag eines unbekannten Typs, wohl aber die über Racks, Asset, SLA und Schlüssel von Client 1; der Client-1/Site-1-Principal zusätzlich nicht das Rack von Client 1 in einer anderen Site; der org-weite Principal sieht alle (Kontrolle). Auf `e5c2d86` rot, mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Architekturtests: `TestEveryAuditedRouteHasAScopeRule` (jede auditierte Schreibroute der Routentabelle hat für ihren Typ eine Regel; ein neues Segment fällt auf) und `TestEveryRecordedResourceTypeHasAScopeRule` (jeder Typ, den ein Domänen-Recorder im Backend schreibt, hat eine Regel), `TestRestrictedResourceRule` (Aufbau der Bedingung, unbekannter Typ verborgen).
+- [ ] `api/openapi.yaml` beschreibt die Sichtbarkeit für beide Listen-Endpunkte (spec-first), `frontend/src/api/generated/schema.d.ts` neu erzeugt; `docs/security/review-g1.md` nennt den HTTP-Lauf je Scope-Art für das Audit-Log.
+- [ ] Regression: `go test -p 1 ./internal/audit/ ./internal/server/ ./internal/history/ ./internal/middleware/ ./internal/pii/ ./internal/tenant/rls/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/audit/audit.go
+- backend/internal/audit/scope.go (neu)
+- backend/internal/audit/scope_test.go (neu)
+- backend/internal/server/audit_coverage_test.go
+- backend/internal/server/audit_log_scope_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Bedingung läuft in der Tenant-Transaktion des Principals (`database.WithRequestTenant`) als `reticora_app`; die Unterabfragen sehen nur, was die RLS der jeweiligen Tabelle dem Principal zeigt. Kosten (gemessen mit 20.000 Einträgen einer Organisation, `jit=off` wie in den Anwendungspools): Ausführung rund 30 ms je Abfrage gegenüber 7 ms vorher; Planung 75–110 ms bei den ersten Ausführungen, mit dem Anweisungscache von pgx ab der sechsten Ausführung generischer Plan (0,15 ms). Org-weite Principals sind nicht betroffen.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestAuditLogHidesForeignClientRouteEntries$|^TestEveryAuditedRouteHasAScopeRule$' ./internal/server/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 ./internal/audit/` (`TestEveryRecordedResourceTypeHasAScopeRule`, `TestRestrictedResourceRule`, `TestAuditScope`, `TestAuditListWithoutScope`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-06;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+TEN-09;[Q];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+AUD-05;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+AUD-05;[B];B;backend/internal/audit/scope_test.go;WP-660
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** die Vollständigkeit der CI-Historie (`/history/ci/{id}` liest nur Audit-Einträge vom Typ `ci`, nicht die Routeneinträge `cis`; kein Leck, eigener Kandidat); Sichtbarkeit nach Personen statt nach Scope (Einträge über Gespräche des KI-Assistenten und private gespeicherte Sichten anderer Benutzer bleiben für Principals mit `audit:read` sichtbar, solange die Zeile besteht, da sie keinem Client zugeordnet sind); eine Client-/Site-Spalte in `audit_log`; F-390 (WP-661, `k7n-credential-invalid-id`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-661 – Credentials: ungültige ID wie unbekannte (404), Repository-Fehler über den Fehlervertrag API-03
+
+**Schlüssel:** `k7n-credential-invalid-id` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-343 (`t1-err-core`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-390](../../../audit/g1-reaudit/FINDINGS.md#f-390) | P3 | Credentials: `GET`/`DELETE /api/v1/credentials/{id}` mit einer ID, die keine UUID ist, antworten 500; Datenbankfehler beim Anlegen ebenso | schließt | Wiederholungsprüfung von WP-011 (K7) auf `e5c2d86` |
+
+**Problem:** Der Credential-Handler (backend/internal/credential/handler.go) nutzt nach F-047 weiter seinen eigenen `writeError`: `get` und `delete` bilden nur `ErrNotFound` auf 404 ab und antworten für jeden anderen Fehler 500, `create`, `list` und `rotateKeys` ebenso. `PGRepository.Get`/`Delete` geben eine ID, die keine UUID ist, an PostgreSQL weiter (SQLSTATE 22P02). `GET` und `DELETE /api/v1/credentials/not-a-uuid` antworten deshalb 500 („failed to get/delete credential“), das Anlegen mit NUL-Byte, ungültiger, unbekannter oder fremder `client_id` ebenfalls 500 (F-390).
+
+**Akzeptanzkriterien:**
+
+- [ ] `PGRepository.Get` und `Delete` liefern für eine ID, die keine UUID ist, `ErrNotFound` ohne Datenbankabfrage; `GET` und `DELETE /api/v1/credentials/not-a-uuid` antworten 404 „credential not found“ wie für eine unbekannte UUID.
+- [ ] Alle übrigen Repository-Fehler der Handler `create`, `list`, `get`, `delete` und `rotateKeys` laufen über `api.WriteRepoError` (bereinigter RFC-7807-Vertrag): Name mit NUL-Byte oder `client_id`, die keine UUID ist → 400, unbekannte `client_id` → 422, `client_id` außerhalb des Client-Scopes → 403, sonst 500 ohne Datenbanktext; `ErrNotFound` und `ErrInvalidKind` werden per `errors.Is` erkannt. Die 422 für eine unbekannte `kind` und die 404 der Schlüsselrotation ohne Schlüsselmaterial bleiben.
+- [ ] Spec-first: `api/openapi.yaml` nennt für `GET`/`DELETE /credentials/{id}` die 404 bei einer ID, die keine UUID ist, und für `POST /credentials/` die 403 und die Abbildung der Datenbankfehler; `frontend/src/api/generated/schema.d.ts` neu erzeugt; `TestRoutesAndSpecificationAreInParity` grün.
+- [ ] `TestRepositoryErrorsAreSanitized` mit den Fällen „WP-011 credential …“ (ungültige ID für GET und DELETE, NUL-Byte, unbekannte, ungültige und fremde `client_id`; Kontrolle: unbekannte UUID 404) ist auf `e5c2d86` rot (500) und mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1 ./internal/credential/... ./internal/tenant/rls/ ./internal/server/ ./internal/middleware/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/credential/handler.go
+- backend/internal/credential/pg_repository.go
+- backend/internal/tenant/rls/error_sanitization_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Scope-Prüfung beim Anlegen bleibt die Policy `credential_isolation` (WITH CHECK); neu ist nur ihre Abbildung auf 403 statt 500.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestRepositoryErrorsAreSanitized$' ./internal/tenant/rls/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/credential/... ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-03;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-661
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-661
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** die übrigen 5xx des ID-Sweeps (`/api/v1/admin/orgs/{id}/entitlements` ohne konfiguriertes Operator-Audit, `/api/v1/documents/{id}/content` 503 ohne Blob-Speicher – Testaufbau ohne diese Dienste, kein Befund dieses WPs); die 503 von `api.WriteRepoError` bei nicht erreichbarer Datenbank (allgemeiner Vertrag, nicht je Route in der Spezifikation); F-389 (WP-660, `k7n-audit-log-scope`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-659 – Lastskripte: keine fehlgeschlagene Anfrage je Szenario, Schwelle für gelungene Bulk-Jobs, Statuscodes in der Job-Zusammenfassung
+
+**Schlüssel:** `k7n-load-thresholds` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-204 (`lt-harness`), WP-206 (`lt-run`), WP-439 (`t4-load-report`); der grüne `load.yml`-Lauf braucht zusätzlich WP-658 (`k7n-preauth-concurrency`, F-387, parallel in Arbeit)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-388](../../../audit/g1-reaudit/FINDINGS.md#f-388) | P3 | Lastskripte ohne Schwelle auf fehlgeschlagene Anfragen: Lauf bleibt grün, obwohl alle Bulk-Anfragen scheitern; `bulk_500_duration` zählt abgewiesene Bulk-Anfragen | schließt | Lastlauf `load.yml` 40713089267 (K7) auf `e5c2d86` |
+
+**Problem:** `tests/load/api.js` bewertet Fehlschläge nur über `checks: rate>0.99` und hat keine Schwelle auf `http_req_failed`; `bulk()` trägt die Dauer auch für abgewiesene Bulk-Anfragen und gescheiterte Jobs in `bulk_500_duration` ein. Lauf 40713089267 auf `e5c2d86` blieb so im Job `api` grün, obwohl 19 von 17.879 Anfragen und alle 3 Bulk-Anfragen fehlschlugen (429, F-387; `bulk_500_duration` 1 bis 15 ms), und im Job `nfr01-volume` mit 23 von 13.920 fehlgeschlagenen Anfragen. `tests/load/ingest.js` prüft `http_req_failed` nur für die Anfragen namens `ingest` bzw. `spool`, nicht für Setup, Sichtbarkeitsabfragen und `/readyz`. Statuscodes fehlgeschlagener Anfragen stehen weder in der Zusammenfassung des Jobs noch im Archiv. E-58 sieht keine Toleranz vor.
+
+**Akzeptanzkriterien:**
+
+- [ ] `api.js` und `ingest.js` (alle drei `SCENARIO`) haben `http_req_failed: rate==0` für den ganzen Lauf und je k6-Szenario (`http_req_failed{scenario:<name>}`); die bisherigen Schwellen bleiben unverändert, `checks: rate>0.99` gilt weiter für die inhaltlichen Prüfungen. Keine Toleranz (E-58).
+- [ ] `api.js`: Jeder der drei Bulk-Jobs muss gelingen (`bulk_jobs_succeeded: count==3`, `checks{scenario:bulk}: rate==1`); `bulk_500_duration` erfasst nur gelungene Bulk-Jobs; ein abgewiesener, gescheiterter oder nach der Wartezeit noch laufender Job ergibt den fehlgeschlagenen Check `bulk job succeeded` und eine Konsolenzeile mit seinem Zustand.
+- [ ] Jede fehlgeschlagene Anfrage (Status 0, < 200, ≥ 400) steht mit Name, Status, Methode, Pfad und Anfang der Antwort auf der k6-Konsole (`tests/load/lib.js` `failed`); `load.yml` schreibt die Konsole nach `console-<job>.log`, `tests/load/failed-requests.sh` zählt die Anfragen je Name und Status für die Zusammenfassung des Jobs und `failed-<job>.txt`; `archive-run.sh` übernimmt `failed-<job>.txt` und nennt die Anzahl je Name und Status in `ergebnis.md`.
+- [ ] `tests/load/thresholds.test.sh` (im Job `prepare` von `load.yml`, k6 0.54.0): `k6 inspect` aller Skripte; `api.js` gegen eine Attrappe der API: alles gelingt → keine Schwelle außer Latenz verletzt, drei Bulk-Dauern; jede `POST /cis/bulk` 429 → exit 99, `http_req_failed{scenario:bulk}` verletzt, keine Bulk-Dauer, Zusammenfassung „`bulk` 429 3“; gescheiterte Bulk-Jobs → exit 99; eine einzelne 503 → exit 99. Auf `e5c2d86` rot (25 von 26 Fällen, u. a. `bulk429: k6 exit 0, want 99`). `tests/load/archive-run.test.sh` deckt `failed-<job>.txt` ab.
+- [ ] `docs/acceptance/lasttest-g1.md` (Messumgebung und Bewertung nach E-58) und `tests/load/README.md` beschreiben die Regel; shellcheck und actionlint ohne Befund.
+- [ ] Nächster `load.yml`-Lauf nach WP-658 (CI): Jobs `api` und `nfr01-volume` mit `http_req_failed` 0 je Szenario, `bulk_jobs_succeeded` 3, `bulk_500_duration` im Sekundenbereich, „Fehlgeschlagene Anfragen: keine.“ in jeder Job-Zusammenfassung.
+
+**Dateien (14 Einträge):**
+
+- tests/load/api.js
+- tests/load/ingest.js
+- tests/load/lib.js
+- tests/load/failed-requests.sh (neu)
+- tests/load/thresholds.test.sh (neu)
+- tests/load/archive-run.sh
+- tests/load/archive-run.test.sh
+- tests/load/README.md
+- .github/workflows/load.yml
+- docs/acceptance/lasttest-g1.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `K6=<k6 0.54.0> ./tests/load/thresholds.test.sh`, `./tests/load/archive-run.test.sh`, `./tests/load/evaluate-runs.test.sh`, `k6 inspect` der Skripte, shellcheck, actionlint `.github/workflows/load.yml`.
+- CI: `load.yml` (Job `prepare` mit dem Selbsttest; nächster vollständiger Lauf nach WP-658).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-10;[Q];LT;tests/load/thresholds.test.sh;WP-659
+NFR-02;[B];LT;tests/load/api.js;WP-659
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-659
+```
+
+**Entscheidungsbedarf:** keiner (E-58 sieht keine Toleranz für fehlgeschlagene Anfragen vor; die Schwelle ist 0).
+
+**Nicht Bestandteil:** die Ursache der 429 im Lauf 40713089267 (F-387, WP-658); Übernahme der Archive nach `docs/acceptance/artefakte/lasttest/`; inhaltliche Prüfung der Bulk-Berichte je ID; weitere Befunde der Wiederholungsprüfung.
+
+### WP-662 – Routen-Audit: Pfad-IDs mit NUL-Byte oder ungültigem UTF-8 erhalten 404 vor der Audit-Absicht statt 503
+
+**Schlüssel:** `k7n-route-audit-nul-id` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-504 (Audit-Absicht vor dem Handler), WP-505 (alte und neue Werte im Routen-Audit)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-391](../../../audit/g1-reaudit/FINDINGS.md#f-391) | P3 | Schreibanfragen mit NUL-Byte in der Pfad-ID antworten 503 „the audit trail is unavailable“ mit ERROR-Log statt 404/400 | schließt | Gegenprüfung r1-b2 der Wiederholungsprüfung (K7) auf `e5c2d86` |
+
+**Problem:** `AuditRoute` (`backend/internal/middleware/middleware.go:135-170` auf `e5c2d86`) speichert für Schreibrouten ohne Domänen-Recorder die Audit-Absicht vor dem Handler und übernimmt dabei den Pfadparameter (`routeResourceID`) ungeprüft als `resource_key`. Ein NUL-Byte (`%00`) oder ungültiges UTF-8 (`%FF`) lässt `PGRouteAuditor.Intend` mit SQLSTATE 22021 scheitern; `AuditRoute` behandelt das als Ausfall des Audit-Speichers: 503 „the audit trail is unavailable“ mit `Retry-After` und ERROR-Log. Betroffen sind die G1-Kernrouten (`PATCH /api/v1/assets/%00`, `DELETE /api/v1/racks/%00`) und 65 Schreiboperationen der Module. Jeder angemeldete Schreiber kann so falsche 5xx und ERROR-Logs auslösen. Leserouten, IDs ohne UUID-Format und Routen mit Domänen-Recorder antworten bereits 404/400.
+
+**Akzeptanzkriterien:**
+
+- [ ] `AuditRoute` prüft bei Routen mit Audit-Absicht vor der Absicht alle Pfadparameter der Route; enthält einer ein NUL-Byte oder ist er kein gültiges UTF-8, antwortet die Route 404 (`the requested resource was not found`, wie eine unbekannte ID) ohne Absicht, ohne Schnappschuss, ohne Handler und ohne ERROR-Log.
+- [ ] AUD-07 bleibt unverändert: Bei gültigen Parametern wird die Absicht vor dem Handler gespeichert; scheitert das, bleibt es bei 503 mit `Retry-After` und ohne Änderung. Routen mit Domänen-Recorder und ausgenommene Routen verhalten sich wie bisher.
+- [ ] `TestRouteAuditNulPathIDIsClientError` (`internal/server/route_audit_integration_test.go`, Produktionsrouter mit `AuditPool` und PG-Routen-Auditor): `PATCH /assets/%00`, `DELETE /racks/%00`, `PATCH`/`DELETE /tickets/%00`, `POST /orders/%00/submit`, `PATCH /inventory/items/%00`, `DELETE /saved-views/%00`, NUL im zweiten Pfadparameter, `x%00y`, `%FF`, `%C3%28` → 404/400, keine Absicht übrig, kein ERROR-Log, kein Audit-Eintrag; gültige unbekannte ID weiter 404 über die Absicht; `POST /vrfs` mit nicht speicherbarer Absicht weiter 503 ohne Zeile. Auf `e5c2d86` rot (10 × 503, 10 ERROR-Logs mit SQLSTATE 22021).
+- [ ] Unittest `TestAuditRouteAnswersInvalidPathParamsBeforeTheIntent` (`internal/middleware/middleware_test.go`): ungültiger erster oder zweiter Parameter → 404 auch bei ausgefallenem Audit-Speicher, Handler läuft nicht; gültiges UTF-8 (`%C3%A4`) bei ausgefallenem Speicher weiter 503. Auf `e5c2d86` rot.
+- [ ] `api/openapi.yaml` (`info.description`, Absatz OPS-06/AUD-07) beschreibt die 404-Antwort; `npm run generate:api` ohne Änderung.
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/middleware/middleware.go
+- backend/internal/middleware/middleware_test.go
+- backend/internal/server/route_audit_integration_test.go
+- api/openapi.yaml
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Prüfung liegt vor jedem Datenbankzugriff der Route; Absicht, Schnappschuss und Eintrag laufen unverändert in der Tenant-Transaktion.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/middleware/ ./internal/server/ ./internal/audit/` mit `TEST_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestRouteAuditNulPathIDIsClientError$' ./internal/server/` und `-run '^TestAuditRoute' ./internal/middleware/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-662
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-662
+AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-662
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Pfadparameter mit NUL-Byte auf Routen mit Domänen-Recorder (antworten bereits 400/404 über den Handler bzw. `api.WriteDBError`); ungültige Werte in Query-Parametern und im Anfragekörper; weitere Befunde der Wiederholungsprüfung.
+
+### WP-663 – Routen- und Operator-Audit: NUL-Byte im Schlüssel des JSON-Körpers erhält 400 vor der Audit-Absicht statt 503, /admin-Pfade werden kodiert protokolliert statt 500
+
+**Schlüssel:** `k7n-route-audit-body-keys` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-504 (Audit-Absicht vor dem Handler), WP-505 (alte und neue Werte im Routen-Audit), WP-564 (Operator-Audit atomar, F-208), WP-662 (Pfad-IDs mit NUL-Byte erhalten 404 vor der Absicht)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-392](../../../audit/g1-reaudit/FINDINGS.md#f-392) | P3 | NUL-Byte in einem Schlüssel des JSON-Körpers einer Schreibanfrage antwortet 503 „the audit trail is unavailable“, NUL-Byte im /admin-Pfad 500 „the operator audit entry could not be written“, jeweils mit ERROR-Log | schließt | Bearbeitung von WP-662 (K7-Nachträge) auf `e5c2d86` |
+
+**Problem:** `AuditRoute` (`backend/internal/middleware/middleware.go:155-167` auf `e5c2d86`) übernimmt die Schlüssel der obersten Ebene eines JSON-Körpers (`writtenFields`) ungeprüft als `fields` der Audit-Absicht (`TEXT[]`) und des Eintrags (`changes.fields`, jsonb). Ein Schlüssel mit `\u0000` lässt `PGRouteAuditor.Intend` mit SQLSTATE 22021 scheitern; `AuditRoute` behandelt das als Ausfall des Audit-Speichers: 503 „the audit trail is unavailable“ mit `Retry-After` und ERROR-Log (`POST /api/v1/vrfs` mit `{"name":"zz-a","\u0000":1}`, `PATCH /api/v1/assets/{id}`, `PUT /api/v1/notifications/preferences`). Auf Routen mit Domänen-Recorder fiele der Ersatzeintrag nach einer erfolgreichen Antwort aus. Dieselbe Ursache im Operator-Pfad (`backend/internal/operator/auth.go:179/190`, `audit.go:270`): `actionFor(r.Method, r.URL.Path)` schreibt den dekodierten Pfad in `operator_audit.action`; `%00`, `%FF` oder `%C3%28` unter `/api/v1/admin/…` lassen den Eintrag scheitern, und die Anfrage wird – auch anonym – mit 500 „the operator audit entry could not be written“ und ERROR-Log beantwortet und fehlt im Operator-Audit. `targetOrg` übernimmt jedes 36 Zeichen lange Segment nach `/admin/orgs/` in die UUID-Spalte `target_org` (SQLSTATE 22P02 → 500); eine großgeschriebene UUID wird gespeichert, aber über die Eingabe statt über den kleingeschriebenen Spaltenwert gehasht, sodass `GET /api/v1/admin/audit/verify` die Kette danach als gebrochen meldet. Andere vom Client bestimmte Werte (Korrelations-ID, Query-Parameter, Header) erreichen den Audit nicht ungeprüft.
+
+**Akzeptanzkriterien:**
+
+- [ ] `AuditRoute` prüft bei auditierten Schreibrouten (Absicht und Domänen-Recorder) nach den Pfadparametern die Schlüssel der obersten Ebene eines JSON-Körpers; enthält einer ein NUL-Byte oder ist er kein gültiges UTF-8, antwortet die Route 400 (problem+json, `invalid request body: a field name must not contain NUL characters`) ohne Absicht, ohne Schnappschuss, ohne Handler und ohne ERROR-Log. Keine maskierte Feldliste: Ein solcher Schlüssel bezeichnet kein Feld der API, und der Eintrag nennt nur geschriebene Felder (AUD-07).
+- [ ] NUL in einem Wert oder in einem verschachtelten Schlüssel erreicht wie bisher den Handler (4xx dort); ein gültiger Körper nennt seine Felder im Eintrag. AUD-07 bleibt unverändert: Bei gültigen Eingaben wird die Absicht vor dem Handler gespeichert; scheitert das, bleibt es bei 503 mit `Retry-After` und ohne Änderung.
+- [ ] Der Operator-Audit nennt den Pfad in `action` prozentkodiert (RFC 3986, `(&url.URL{Path: p}).EscapedPath()`; gewöhnliche Pfade unverändert, z. B. `GET /orgs`) und setzt `target_org` nur für eine UUID, kleingeschrieben wie die Spalte sie zurückgibt. /admin-Anfragen mit `%00`, `%FF`, `%C3%28` oder einer Nicht-UUID werden wie jede andere beantwortet (401 anonym, 4xx mit Operator) und protokolliert; die Kette verifiziert. Ein Ausfall von `operator_audit` bleibt 500 (F-208).
+- [ ] `TestRouteAuditInvalidBodyKeyIsClientError` (`internal/server/route_audit_integration_test.go`, Produktionsrouter mit `AuditPool` und PG-Routen-Auditor): `POST /vrfs` (`"\u0000"`, `"x\u0000y"`), `PATCH /assets/{id}`, `PUT /notifications/preferences`, `POST /cis` → 400 problem+json; NUL im Wert und im verschachtelten Schlüssel → 4xx; keine Absicht, keine VRF, kein Eintrag, kein ERROR-Log; gültiger Körper → 201 mit `fields` `["description","name"]`; `POST /vrfs` mit nicht speicherbarer Absicht weiter 503 ohne Zeile. Auf `e5c2d86` rot (4 × 503, 4 ERROR-Logs mit SQLSTATE 22021).
+- [ ] `TestOperatorAuditRecordsAnyRequestPath` (`internal/operator/audit_integration_test.go`, PostgreSQL): acht /admin-Anfragen (anonym `%00`, `%FF`; Break-Glass `x%00y`, `%C3%28`, `%2500`, Nicht-UUID, unbekannte UUID klein und groß) → 4xx, acht Einträge mit kodierter `action` und `target_org` nur für die UUID (kleingeschrieben), kein „operator audit failed“, Kette gültig. Auf `e5c2d86` rot (5 × 500, 2 von 7 Einträgen; mit großgeschriebener UUID `verify` ungültig).
+- [ ] Unittest `TestAuditRouteAnswersInvalidBodyKeysBeforeTheIntent` (`internal/middleware/middleware_test.go`): Absichtsroute und Domänenroute → 400 vor dem Handler, mit und ohne ausgefallenen Audit-Speicher; NUL im Wert bei ausgefallenem Speicher weiter 503; gültiger Körper mit `fields`. Auf `e5c2d86` rot.
+- [ ] `api/openapi.yaml` (`info.description`, Absatz OPS-06/AUD-07; `OperatorAuditEntry.action` und `target_org`) beschreibt das; `npm run generate:api` übernimmt die Beschreibungen in `frontend/src/api/generated/schema.d.ts`.
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (12 Einträge):**
+
+- backend/internal/middleware/middleware.go
+- backend/internal/middleware/middleware_test.go
+- backend/internal/operator/audit.go
+- backend/internal/operator/auth.go
+- backend/internal/operator/audit_integration_test.go
+- backend/internal/server/route_audit_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Prüfung des Körpers liegt vor jedem Datenbankzugriff der Route; Absicht, Schnappschuss und Eintrag laufen unverändert in der Tenant-Transaktion. `operator_audit` bleibt unverändert (Hash-Kette über `action` und `target_org` wie bisher, nur mit kodiertem Pfad).
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/middleware/ ./internal/operator/ ./internal/server/ ./internal/audit/` mit `TEST_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestRouteAuditInvalidBodyKeyIsClientError$' ./internal/server/`, `-run '^TestOperatorAuditRecordsAnyRequestPath$' ./internal/operator/` und `-run '^TestAuditRouteAnswersInvalidBodyKeysBeforeTheIntent$' ./internal/middleware/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
+AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-663
+SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-663
+```
+
+**Entscheidungsbedarf:** keiner. (400 statt maskierter Feldliste ist durch API-03 und AUD-07 gedeckt, siehe F-392 Empfehlung.)
+
+**Nicht Bestandteil:** Pfadparameter mit NUL-Byte (WP-662); ungültige Werte in Feldern, die der Handler bzw. `api.WriteDBError` bereits mit 400 beantwortet; die übrigen Kandidaten der Prüfrunde, aus der K-3 stammt (K-3 selbst wird durch dieses WP mit abgedeckt, sofern die Verifikation dieselbe Ursache bestätigt); weitere Befunde der Wiederholungsprüfung.
+
+### WP-664 – Benutzerlöschung beendet jeden Zugang wie die Deaktivierung, in der Transaktion der Löschung; Audit `user.deleted`
+
+**Schlüssel:** `k7n-user-delete-ends-access` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-042 (Deaktivierung beendet Sessions, Refresh und API-Keys), WP-359 (Session-Widerruf in der Transaktion, Rollback bei Ausfall), WP-571 (Benutzerverwaltung in der UI), WP-648 (eigenes Konto nicht löschbar, F-377)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-393](../../../audit/g1-reaudit/FINDINGS.md#f-393) | P2 | Gelöschter Benutzer behält bis zum Ablauf seines Tokens Lese- und Schreibzugriff; API-Keys bleiben unwiderrufen, kein Audit-Eintrag `user.deleted` | schließt | Wiederholungsprüfung (K7) auf `e5c2d86`, Auditor und Gegenprüfung r1-b3 (K2) |
+
+**Problem:** `DELETE /api/v1/users/{id}` (`Handler.DeleteUser`, `backend/internal/user/handler.go:308-333` auf `e5c2d86`; `PGRepository.DeleteUser`, `pg_repository.go:389-411`) prüft offene Objekte und löscht die Zeile, beendet aber keinen Zugang: Das Bearer-Token des gelöschten Benutzers liest und schreibt bis zum Ablauf weiter (`GET /cis` 200, `POST /cis` 201), sein API-Key bleibt unwiderrufen (`revoked_at` NULL; 403 statt 401, nur weil die Rollen kaskadieren), es gibt keinen Eintrag `user.deleted` (mit `AuditPool` nur den generischen Routen-Eintrag `users.delete`). Die Deaktivierung per `PATCH` macht all das in ihrer Transaktion (WP-042/WP-359). Die UI aus WP-571 bietet „Löschen“ in jeder Zeile, auch für aktive Benutzer.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PGRepository.DeleteUserTx` (und `DeleteUser` als Aufruf ohne Hook) sperrt die Zeile des Benutzers in der Organisation (`FOR UPDATE`), prüft offene Objekte (409 unverändert), ruft in derselben Transaktion `deactivateInTx(…, "user.deleted")` (eigene API-Keys widerrufen, Service-Account-Keys nach E-64 Option 2 behalten, in `service_account_keys_kept` nennen und per `apikey.creator_deactivated` zur Rotation melden), löscht die Zeile und ruft danach, vor dem Commit, den `DeactivationHook`. Ein Fehler in einem dieser Schritte rollt die Löschung zurück.
+- [ ] `Handler.DeleteUser` widerruft die Sessions und Refresh-Familien des Benutzers im Hook (wie `PATCH` und Anonymisierung) und nach dem Commit ein zweites Mal; scheitert der Widerruf im Hook, antwortet die Route 503 „sessions could not be revoked; the user was not deleted“ und nichts ist geändert. F-377 (eigenes Konto 400 vor jedem Schreiben) und 409 bei offenen Objekten oder Referenzen bleiben; eine abgelehnte Löschung (400, 404, 409) beendet keine Session.
+- [ ] `DELETE /api/v1/users/{id}` ist Route mit Domänen-Recorder (`domainRecordedRoutes`, kein Eintrag mehr im Schnappschuss-Register): je Löschung genau ein Audit-Eintrag `user.deleted` (Akteur, `api_keys_revoked`, `service_account_keys_kept`, `sessions_revoked`), kein zusätzlicher `users.delete`.
+- [ ] `TestUserDeletionEndsAccess` (`internal/identity/user_deletion_integration_test.go`, Produktionsrouter mit `AuditPool`, `AuthMiddlewareWithAPIKeys`, `TenantMiddleware`, Redis): nach `DELETE` → 204 Bearer `GET`/`POST /api/v1/cis` 401 (kein CI angelegt), `X-API-Key` 401, Refresh 401, `revoked_at` gesetzt, Service-Account-Key behalten, genau ein `user.deleted`; ein anderer Benutzer der Organisation 200/201; eigenes Konto 400 und Benutzer mit offenem Ticket 409 ohne Widerruf, Blacklist-Eintrag oder Audit. Auf `e5c2d86` rot (200, 201, 403, NULL, `[users.delete]`).
+- [ ] `TestUserDeletionRevocationFailureRollsBack` und `TestUserDeletionRevokesOnlyOnDeletion` (`internal/user/user_deletion_revocation_integration_test.go`): Blacklist-Ausfall → 503, ein Widerrufsversuch, Benutzer, Key und Audit unverändert; Benutzer einer fremden Organisation und unbekannte/ungültige ID 404, offene Objekte 409, jeweils ohne Widerruf; Löschung in der eigenen Organisation widerruft zweimal und die Session ist gesperrt. Auf `e5c2d86` rot.
+- [ ] `api/openapi.yaml` (`deleteUser`) beschreibt Zugangsentzug, E-64 und 503 (spec-first); `npm run generate:api` nachgeführt.
+- [ ] Bestehende Tests grün (`TestOwnAccountDeletionRefused`, `TestDeactivationRevocationFailureRollsBack`, `TestEveryWriteRouteAuditedOnPostgreSQL`, `TestEveryWriteRouteHasASnapshotEntry`, Datenschutz-Aufbewahrung mit `mode=delete`); golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (13 Einträge):**
+
+- backend/internal/user/handler.go
+- backend/internal/user/pg_repository.go
+- backend/internal/user/repository.go
+- backend/internal/user/user_deletion_revocation_integration_test.go
+- backend/internal/identity/user_deletion_integration_test.go
+- backend/internal/server/authz.go
+- backend/internal/audit/route_snapshot.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Sperre, Key-Widerruf, Audit, Outbox und `DELETE` laufen als `reticora_app` in der Tenant-Transaktion (`database.WithRequestTenant`); der Session-Widerruf wird erst erreicht, wenn die Zeile der Organisation des Aufrufers gelöscht ist, eine Anfrage für eine fremde Organisation schreibt nichts in die Blacklist (TEN-04).
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/user/ ./internal/identity/ ./internal/server/ ./internal/audit/ ./internal/privacy/ ./internal/iga/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestUserDeletionEndsAccess$' ./internal/identity/` und `-run '^TestUserDeletion' ./internal/user/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TLC-04;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+AUT-02;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+AUT-04;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+TLC-04;[B];B;backend/internal/user/user_deletion_revocation_integration_test.go;WP-664
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung; E-64 (Option 2) wird auf die Löschung so angewandt wie auf Deaktivierung und Anonymisierung (Service-Account-Keys des Erstellers bleiben gültig, Rotationshinweis an die org_admins). Hinweis für die Leitung: Der Text der Benachrichtigung `apikey.creator_deactivated` sagt „deaktiviert“ auch bei einer Löschung (`action` im Ereignis ist `user.deleted`).
+
+**Nicht Bestandteil:** Änderungen an der UI (die Aktion „Löschen“ bleibt in jeder Zeile; sie beendet jetzt jeden Zugang); SCIM `DELETE /scim/v2/Users/{id}` (deaktiviert bereits über `UpdateUser`); die Zuordnung interner Fehler der Löschung auf 404 (wie bei `PATCH` und Anonymisierung); weitere Befunde der Wiederholungsprüfung.
+
+### WP-665 – Metrik-Ingest: unsichtbare oder unbekannte ci_id 404 statt 500, Batch alles oder nichts dokumentiert (API und Edge)
+
+**Schlüssel:** `k7n-metric-ingest-errors` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-343 (Fehlervertrag API-03), WP-344 (Metrik-Kanal der CI-Detailansicht, 404 für unsichtbare CIs), WP-426 (Metriken über den Edge)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-394](../../../audit/g1-reaudit/FINDINGS.md#f-394) | P3 | Metrik-Ingest mit einer für den Aufrufer unsichtbaren oder unbekannten ci_id antwortet 500 statt 404; gemischter Batch verwirft auch die gültige Probe mit 500 | schließt | Gegenprüfung r1-b3 der Wiederholungsprüfung (K7) auf `e5c2d86` |
+
+**Problem:** `POST /api/v1/monitoring/metrics` mit einer `ci_id`, die eine CI eines anderen Clients, einer anderen Organisation oder keine CI bezeichnet, antwortet 500 „the request could not be completed“; ein gemischter Batch (eigene + unsichtbare CI) ebenfalls, und auch die gültige Probe wird nicht gespeichert. `PGMetricStore.Ingest` (`backend/internal/monitoring/pg_store.go:113-115` auf `e5c2d86`) erkennt die nicht sichtbare CI, liefert aber nur `fmt.Errorf("ingest metric sample: ci %s not found")` ohne Sentinel; `IngestMetrics` (`monitoring.go:559-561`) gibt ihn an `api.WriteRepoError` weiter → 500. Der Kollektor-Weg `edgeMetrics` (`discovery/edge_ingest.go:241-243`) antwortet 500 „metrics ingest failed“ mit ERROR-Log. Der Lesepfad `GET /cis/{id}/metrics` antwortet für dieselben CIs 404 (WP-344). Die Batch-Semantik ist nicht dokumentiert.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PGMetricStore.Ingest` liefert für eine Probe, deren `ci_id` keine im Scope sichtbare CI bezeichnet, `*monitoring.UnknownCIError` mit der ci_id (zugleich `api.ErrNotFound`); die Transaktion wird zurückgerollt, keine Probe des Batches gespeichert.
+- [ ] `POST /api/v1/monitoring/metrics` antwortet darauf 404 problem+json mit `field` `ci_id` und der gesendeten ci_id im `detail`; unsichtbar (anderer Client, andere Organisation) und unbekannt sind nicht unterscheidbar (TEN-06), die Antwort nennt weder Tabellen noch SQLSTATE. Eigene CI weiter 202, `not-a-uuid`/NUL weiter 400.
+- [ ] Gemischter Batch: alles oder nichts; 404 nennt die verursachende ci_id, auch die gültige Probe wird nicht gespeichert. `api/openapi.yaml` (`ingestMetrics`: Beschreibung und Antwort 404) dokumentiert das; `npm run generate:api` übernimmt die Beschreibung.
+- [ ] Edge-Subjekt `.metrics` (`edgeMetrics`): dieselbe Lage → 404 mit `ci_id: ci <id> not found`, kein 500, kein ERROR-Log, keine Zeile.
+- [ ] `TestMetricIngestForInvisibleCIIsNotFound` und `TestEdgeMetricIngestForInvisibleCIIsNotFound` (`internal/tenant/rls/metric_ingest_errors_integration_test.go`) auf `e5c2d86` rot (6 × 500 über HTTP, 4 × 500 über den Edge), nach der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); `TestHandlersDoNotEchoRepositoryErrors` grün.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/monitoring/pg_store.go
+- backend/internal/monitoring/monitoring.go
+- backend/internal/discovery/edge_ingest.go
+- backend/internal/tenant/rls/metric_ingest_errors_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Sichtbarkeitsprüfung bleibt die bestehende Einfügung über `metric_sample_v` mit `EXISTS (SELECT 1 FROM ci …)` in der Tenant-Transaktion (`database.WithRequestTenant`) unter RLS; geändert wird nur die Abbildung des Fehlers.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/monitoring/ ./internal/discovery/ ./internal/tenant/rls/ ./internal/server/ ./internal/agent/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`, `TEST_NATS_SERVER_BIN`.
+- `go test -count=1 -v -run '^(TestMetricIngestForInvisibleCIIsNotFound|TestEdgeMetricIngestForInvisibleCIIsNotFound)$' ./internal/tenant/rls/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MON-02;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+API-03;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+TEN-06;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+```
+
+**Entscheidungsbedarf:** keiner. Gewählt: 404 wie der Lesepfad (statt 422) und alles oder nichts für gemischte Batches (statt Teilübernahme), beides in `api/openapi.yaml` beschrieben.
+
+**Nicht Bestandteil:** Teilübernahme gemischter Batches mit Bericht je Probe; der Agenten-Telemetriepfad (`agent.Handler`, CI vom Server selbst ermittelt; erhält über `api.ErrNotFound` ebenfalls 404 statt 500); weitere Befunde der Wiederholungsprüfung.
+
+### WP-666 – Login: Organisationsattribut ohne Organisation erhält 401 login-no-organization statt 502
+
+**Schlüssel:** `k7n-login-unknown-org` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-570 (Erstlogin nur mit Zulassung), WP-637 (Standardrolle nur beim Erstlogin, F-364), F-197 (Problemtypen der Login-Verweigerungen, lokalisierte CallbackPage)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-395](../../../audit/g1-reaudit/FINDINGS.md#f-395) | P3 | OIDC-Login mit einem Organisationsattribut, das keine Organisation bezeichnet, antwortet 502 „the login could not be completed“ mit FK-Fehler im Log statt 401 login-no-organization | schließt | Gegenprüfung r1-b3 der Wiederholungsprüfung (K7) auf `e5c2d86` |
+
+**Problem:** Ein ID-Token, dessen Attribut `organization_id` eine nicht vorhandene Organisation nennt (zufällige UUID, Nil-UUID, unbekannte Organisation für eine in Organisation A eingeladene Adresse), führt in `user.PGRepository.EnsureUser` zum Bootstrap-Erstlogin; die Einfügung in `app_user` scheitert an `app_user_organization_id_fkey` (SQLSTATE 23503). `EnsureUser` bildet nur 23505 ab, `writeIdentityError` (`backend/internal/identity/handler.go:710-732` auf `e5c2d86`) antwortet im Standardzweig 502 „the login could not be completed“ mit ERROR-Log samt Tabellen- und Constraint-Namen. Ein fehlendes Attribut erhält dagegen 401 `login-no-organization`, das die CallbackPage lokalisiert anzeigt.
+
+**Akzeptanzkriterien:**
+
+- [ ] `EnsureUser` bildet die Verletzung von `app_user_organization_id_fkey` (23503) auf den neuen Sentinel `identity.ErrUnknownOrganization` ab; die Login-Transaktion rollt zurück (kein `app_user`, keine Rollenzuweisung, Einladungen anderer Organisationen bleiben offen).
+- [ ] Der Callback reicht den Sentinel unverpackt durch; `writeIdentityError` antwortet 401 problem+json mit `https://reticora.io/problems/login-no-organization` und dem festen Text, ohne Session, ohne Refresh-Cookie, ohne ERROR-Log und ohne Datenbanktext (API-03).
+- [ ] `TestCallbackUnknownOrganizationIsRefused` (`internal/identity/callback_scope_integration_test.go`, Fake-IdP mit `user.PGRepository` und `permission.PGRepository`): zufällige UUID, Nil-UUID, unbekannte Organisation mit Einladung in A → 401 `login-no-organization`, 0 `app_user`, keine Session, kein „login failed“ im Log, Einladung offen; Attribut fehlt 401; Organisation A mit Einladung 200. Auf `e5c2d86` rot (3 × 502, 3 ERROR-Logs mit SQLSTATE 23503), nach der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] CallbackPage: Der Problemtyp wird mit dem neuen Text lokalisiert angezeigt, der Detailtext nicht (`CallbackPage.test.tsx`, neuer Fall).
+- [ ] `api/openapi.yaml` (`POST /api/v1/auth/callback`, Antwort 401) nennt den Fall; `npm run generate:api` übernimmt die Beschreibung.
+- [ ] golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); `TestHandlersDoNotEchoRepositoryErrors` grün.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/identity/handler.go
+- backend/internal/user/pg_repository.go
+- backend/internal/identity/callback_scope_integration_test.go
+- frontend/src/pages/auth/CallbackPage.test.tsx
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Login-Transaktion (`database.WithTenant` mit `loginScope`) bleibt unverändert; geändert wird nur die Abbildung des Fremdschlüsselfehlers.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/identity/ ./internal/user/ ./internal/server/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestCallbackUnknownOrganizationIsRefused$' ./internal/identity/`, auch als `nobody`.
+- `cd frontend && npx vitest run src/pages/auth/CallbackPage.test.tsx`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUT-01;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+AUT-09;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+API-03;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+AUT-01;[B];B;frontend/src/pages/auth/CallbackPage.test.tsx;WP-666
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** eine Vorabprüfung der Organisation im Callback (die Existenz ergibt sich weiter aus dem Fremdschlüssel); ein Login mit unbekannter Organisation ohne verifizierte E-Mail (antwortet bereits vor der Einfügung 403 `login-not-admitted`, kein 5xx); gesperrte oder gekündigte Organisationen; weitere Befunde der Wiederholungsprüfung.
+
+### WP-668 – Service-Account-Keys tragen den Scope ihres Erzeugers: spätere Rollen des Accounts erweitern einen gebundenen Key nicht über den Erzeuger hinaus
+
+**Schlüssel:** `k7n-bound-key-creator-scope` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-069 (Service-Accounts, gebundene Keys), WP-354 (Binden nur im Scope des Erzeugers, F-007), WP-355 (Rollen eines Service-Accounts nur im Scope des Aufrufers, F-008), WP-359 mit E-64 (Service-Account-Keys überleben die Deaktivierung ihres Erzeugers), WP-601 mit E-98 (Scope-Snapshot der Webhook-Abos)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-397](../../../audit/g1-reaudit/FINDINGS.md#f-397) | P1 | Ein API-Key, den ein client-beschränkter Erzeuger an einen Service-Account bindet, wird org-weit, sobald ein org-weiter Administrator dem Account später org-weite Rollen gibt | schließt | Wiederholungsprüfung K7 (Verifikation `r1-b4`, K-2 zu WP-069) auf `e5c2d86` |
+
+**Problem:** `authorizeBinding` (`backend/internal/identity/apikey_handler.go:337` auf `e5c2d86`) prüft den Scope des Erzeugers nur beim Binden gegen die Rechte, die der Service-Account in diesem Moment hat; ein aktiver Account ohne Rollen ergibt eine leere Schnittmenge, die Prüfung besteht trivial. `Validate` (`backend/internal/identity/apikey.go:224-245`) löst für einen gebundenen Key bei jeder Anfrage nur `ServiceAccountGrants` auf. Gibt ein org-weiter Administrator dem Account später org-weite Rollen (`PUT /api/v1/service-accounts/{id}/roles`), liest ein Key, den ein auf Client 1 beschränkter `org_admin` gebunden hat, alle Clients (Fall A: Account ohne Rollen; Fall B: Account mit `viewer` für Client 1). Ein neuer Key an den erweiterten Account wird korrekt mit 403 abgewiesen (F-007). Für Webhook-Abos desselben WP hat E-98 entschieden, dass ein gebundener Account den Scope des Erzeugers nicht erweitert (Snapshot, Migration 000155); API-Keys tragen keinen solchen Snapshot.
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000185 legt `api_key.creator_scope JSONB` an (NULL = kein Snapshot; CHECK: nur bei gebundenen Keys und nur als JSON-Objekt). Beim Binden (`POST /api/v1/api-keys` mit `service_account_id`) speichert der Handler je Key-Recht den Client-, Site- und Team-Scope, in dem der Aufrufer es hält (derselbe Scope, den `GrantCeiling` prüft); der Audit-Eintrag `api_key.created` nennt ihn. Ungebundene Keys bleiben unverändert (aktuelle Rechte des Eigentümers, AUT-04).
+- [ ] `Validate` schneidet bei jeder Anfrage eines gebundenen Keys die aktuellen Rechte des Accounts mit dem Snapshot: Rechte außerhalb des Snapshots entfallen, je Recht gilt der Schnitt der Scopes, der Tenant-Scope liegt innerhalb der Vereinigung der Erzeuger-Scopes. Einschränkungen des Accounts wirken sofort; der Key bleibt bei Entzug der Rechte oder Deaktivierung des Erzeugers gültig (E-64). Eine Rotation übernimmt den Snapshot. Ein unlesbarer Snapshot führt zu 503 statt zu den ungeschnittenen Rechten (fail-closed).
+- [ ] Keys, die vor 000185 gebunden wurden (kein Snapshot), handeln höchstens mit den aktuellen Rechten ihres Erzeugers aus seinen Rollenzuweisungen (org-weit nur für einen org-weiten Erzeuger; ohne Zuweisung oder ohne Owner-Resolver nichts). `docs/betrieb/upgrade-hinweise.md` beschreibt das, die Abfrage der betroffenen Keys, die Neubindung als Abhilfe und den Rollback.
+- [ ] `TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening` (`backend/internal/identity/apikey_authz_integration_test.go`, PostgreSQL als Runtime-Login, Lesen der CIs unter RLS mit dem Tenant-Scope aus `middleware.TenantScopeFor`): Fälle A und B lesen nach der Erweiterung nur das CI aus Client 1; neuer Key an den erweiterten Account 403; Key des org-weiten Administrators liest beide; Nachfolger einer Rotation nur Client 1; nach Entzug der Rollen und Deaktivierung des Erzeugers weiter Client 1; nach Entzug der Rollen des Accounts nichts; Key ohne Snapshot folgt den aktuellen Rechten seines Erzeugers. Auf `e5c2d86` rot (der Key liest das CI aus Client 2).
+- [ ] Unittest `TestBoundKeyCreatorCeiling` (`backend/internal/identity/ceiling_test.go`): Schnitt je Recht (Erzeuger `ci:read` org-weit, `ci:write` für Client 1), Site-Snapshot gegen Client-Account, `Validate` mit Snapshot, ohne Snapshot und ohne Owner-Resolver.
+- [ ] `TestAuditT2KeyBindingNeverBroadensCreatorScope`, `TestAPIKeyBindingAuthorization`, `TestAPIKeyRotateRevokeAuthorization`, `TestAPIKeyLifecycle` und `TestDeactivationRevokesServiceAccountKeysOfCreator` bleiben grün.
+- [ ] `api/openapi.yaml` (`createAPIKey`, `service_account_id` in `APIKey` und `CreateAPIKeyRequest`) beschreibt den Erzeuger-Scope; `npm run generate:api` übernimmt die Beschreibungen in `frontend/src/api/generated/schema.d.ts`.
+- [ ] `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün, `docs/schema-baseline.md` mit `RETICORA_UPDATE_SCHEMA_BASELINE=1` erzeugt; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neue Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (17 Einträge):**
+
+- backend/migrations/000185_api_key_creator_scope.up.sql
+- backend/migrations/000185_api_key_creator_scope.down.sql
+- backend/internal/identity/apikey.go
+- backend/internal/identity/apikey_handler.go
+- backend/internal/identity/apikey_store.go
+- backend/internal/identity/apikey_authz_integration_test.go
+- backend/internal/identity/ceiling_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/betrieb/upgrade-hinweise.md
+- docs/schema-baseline.md
+- docs/security/review-g1.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/plan/g1-korrektur/entscheidungen.md (nur falls der Lead die Übergangsregel für Alt-Keys als Entscheidung festhält)
+- docs/traceability.csv
+
+**Migration/RLS:** Migration 000185 (Nummer vorläufig, der Lead nummeriert bei der Integration): neue Spalte `api_key.creator_scope JSONB` mit CHECK `api_key_creator_scope_check`; keine Datenänderung, bestehende Keys behalten NULL. RLS von `api_key` (`org_isolation`, `api_key_system_select`) unverändert; die Identifikation per Präfix liest die Spalte in der bestehenden System-Lesetransaktion mit. Der Schnitt geschieht in `Validate` vor dem Aufbau des Principals; Tenant-GUCs, Routen und Policies bleiben unverändert und erhalten nur einen engeren Scope.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/identity/... ./internal/user/... ./internal/server/... ./internal/tenant/... ./internal/middleware/... ./internal/permission/...` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`; `./internal/database/...` allein (Roundtrip, Schema-Baseline).
+- `go test -count=1 -v -run '^(TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening|TestBoundKeyCreatorCeiling)$' ./internal/identity/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RBA-08;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+AUT-04;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+AUT-04;[B];B;backend/internal/identity/ceiling_test.go;WP-668
+TEN-09;[Q];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+```
+
+**Entscheidungsbedarf:** keiner für das Kernverhalten; es folgt E-98 (gebundener Service-Account erweitert den Scope des Erzeugers nicht) und lässt E-64 unverändert (Key gehört dem Account, überlebt die Deaktivierung des Erzeugers). Für Alt-Keys ohne Snapshot gilt die fail-closed-Regel „höchstens die aktuellen Rechte des Erzeugers“ (in der Aufgabe als zulässige Variante genannt); verliert der Erzeuger seine Rollenzuweisungen, gewährt ein solcher Key nichts mehr, bis er neu gebunden ist. Soll das für Alt-Keys anders geregelt werden (z. B. einmaliges Einfrieren des aktuellen Erzeuger-Scopes per Migration), wäre das eine Entscheidung des Lead/Auftraggebers.
+
+**Nicht Bestandteil:** Anzeige des Erzeuger-Scopes in der API-Key-Liste oder UI (`creator_scope` wird nicht ausgeliefert; die Upgrade-Hinweise nennen die SQL-Abfrage); Neuberechnung des Snapshots bei der Rotation (der Nachfolger übernimmt ihn bzw. den fehlenden Snapshot); der Union-Scope ungebundener Keys über alle Rollen des Eigentümers (entspricht dem Scope seiner Sitzung, E-70); Webhook-Abos (WP-601); weitere Befunde der Wiederholungsprüfung.
+
+### WP-667 – Rollendefinition: Rechte entfernen und Rollen löschen nur mit der Entzugs-Obergrenze jeder Zuweisung
+
+**Schlüssel:** `k7n-role-definition-ceiling` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-355 (Service-Account-Rollen mit Grant-Obergrenze, auch beim Entfernen), WP-394 (Grant-Obergrenze, Hinzufügen über die Rollendefinition), WP-395 (Entzug von Zuweisungen mit Grant-Obergrenze)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-396](../../../audit/g1-reaudit/FINDINGS.md#f-396) | P1 | Client-gebundener Inhaber von role:manage nimmt org-weiten Zuweisungen über die Rollendefinition die Rechte (PATCH /roles/{id} mit weniger Rechten, DELETE /roles/{id}, PUT /roles/{id}/permissions), obwohl er die Zuweisung selbst nicht entziehen darf | schließt | Wiederholungsprüfung K7 (r1-b4, K-1) von WP-394/WP-395 auf `e5c2d86` |
+
+**Problem:** Eine Rollendefinition wirkt auf alle Zuweisungen der Rolle. Seit WP-394 darf sie nur Rechte hinzufügen, die der Aufrufer org-weit hält (`checkRoleWidening`, `backend/internal/user/grant_ceiling.go:300` auf `e5c2d86`; `checkWidening`, `backend/internal/permission/repository.go:67`); das Entfernen ist ausdrücklich unbegrenzt („Removing permissions is not limited“, `grant_ceiling.go:298`), und `DeleteRole` (`backend/internal/user/pg_repository.go:927`) prüft außer `is_system` nichts. Ein client-1-Delegate (org_admin mit `scope_client_id = client 1`) erhält für `DELETE /role-assignments/{org-weit}` 403 (WP-395), leert aber mit `PATCH /roles/{id} {"permissions":[]}` (200) dieselbe Custom-Rolle, löscht sie mit `DELETE /roles/{id}` (204, die `user_custom_role`-Zeilen fallen über `ON DELETE CASCADE`) und leert mit `PUT /roles/{viewer}/permissions {"permission_keys":[]}` (200) eine Standardrolle; beim nächsten Refresh hat das org-weite Opfer keine Rechte mehr (`GET /cis` → 403). Das verletzt das verbindliche Kriterium von WP-395 und die Symmetrie von WP-355/WP-394.
+
+**Akzeptanzkriterien:**
+
+- [ ] Neue Prüfung `permission.CheckRoleNarrowing` (`backend/internal/permission/role_narrowing.go`) mit der Regel des Entzugs (WP-395, keine zweite Regel): Entfernt eine Änderung mindestens ein Recht der Rolle oder löscht sie die Rolle, muss der Aufrufer `role:manage` und jedes Recht der Rolle vor der Änderung in einem Scope halten, der den Scope jeder Zuweisung der Rolle deckt (`identity.GrantCeiling` je Zuweisung). Zuweisungen: `role_assignment`, `service_account_role` (Standardrollen) und `user_custom_role` (Custom-Rollen); eine Site nennt ihren Client über `site.client_id` im RLS-Scope des Aufrufers, eine unlesbare Site verlangt alle Clients; eine Zuweisung ohne Scope-ID gilt als org-weit (fail-closed). Sonst 403 (RFC 7807, `removing permissions from the role requires … in the scope of each of its assignments` bzw. `deleting the role requires …`) und nichts ändert sich.
+- [ ] `PATCH /api/v1/roles/{id}` (`UpdateRole`) prüft das, sobald `permissions` ein bisheriges Recht weglässt; `DELETE /api/v1/roles/{id}` (`DeleteRole`, Repository erhält den Principal) prüft es immer; `PUT /api/v1/roles/{id}/permissions` (`ReplaceRolePermissions`) prüft es, sobald ein Recht aus `role_permission` ∪ `role.permissions` fehlt. Die Rollenzeile wird vorher gesperrt (`FOR UPDATE`), sodass keine Zuweisung gleichzeitig hinzukommt (jede Zuweisung sperrt sie per Fremdschlüssel). Die Speicher-Repositories folgen derselben Regel.
+- [ ] Einladungen werden nicht geprüft (Begründung in F-396: gewähren vor der Annahme nichts, werden bei der Annahme zur `role_assignment`, sind ohne Obergrenze widerrufbar). Umbenennen und Beschreibung bleiben frei; eine Rolle ohne Zuweisungen oder nur mit Zuweisungen im eigenen Scope darf der Delegate weiter einschränken und löschen.
+- [ ] `TestRoleDefinitionChangeNeverReachesBeyondCallerScope` (`internal/user/role_definition_ceiling_integration_test.go`, PG, Produktionsrouter, Sitzungen per Refresh): Delegate → 403 und unverändert für PATCH (`[]`, `[ci:read]`) einer org-weit, in Client 2 bzw. in einer Site von Client 2 zugewiesenen Custom-Rolle, DELETE dieser Rollen (Zuweisungen bleiben), PUT viewer bzw. engineer ohne das vom Admin hinzugefügte Recht (org-weite Benutzer- bzw. Service-Account-Zuweisung); Opfer hält `ci:write` und `location:write` beim nächsten Refresh; Delegate benennt um (200), schränkt eine Client-1-Rolle ein (200) und löscht sie (204), löscht eine unzugewiesene (204); org-weiter org_admin → 200/204. Auf `e5c2d86` rot (200/204).
+- [ ] `api/openapi.yaml` beschreibt die Regel an `updateRole`, `deleteRole` (neu 403) und `replaceRolePermissions`; `npm run generate:api` übernimmt sie in `frontend/src/api/generated/schema.d.ts`. `docs/security/review-g1.md` nennt F-396 im Abschnitt der fehlenden Kombinationen.
+- [ ] Bestehende Tests grün (`./internal/user/`, `./internal/permission/`, `./internal/server/`, `./internal/identity/`, `./internal/audit/`); golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neuer Test auch als Nicht-Root-Nutzer grün.
+
+**Dateien (14 Einträge):**
+
+- backend/internal/permission/role_narrowing.go (neu)
+- backend/internal/permission/pg_repository.go
+- backend/internal/permission/repository.go
+- backend/internal/permission/handler.go
+- backend/internal/user/grant_ceiling.go
+- backend/internal/user/handler.go
+- backend/internal/user/pg_repository.go
+- backend/internal/user/repository.go
+- backend/internal/user/role_definition_ceiling_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Prüfung liest die Zuweisungen in der Tenant-Transaktion des Aufrufers (`database.WithRequestTenant`, RLS über `app.org_id`; Sites im Client-/Site-Scope des Aufrufers, unlesbare Site fail-closed); kein neuer Pfad mit erweiterten Rechten, keine Funktion, keine Policy.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/user/ ./internal/permission/ ./internal/server/ ./internal/identity/ ./internal/audit/` mit `TEST_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestRoleDefinitionChangeNeverReachesBeyondCallerScope$' ./internal/user/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RBA-03;[B];B;backend/internal/user/role_definition_ceiling_integration_test.go;WP-667
+TEN-09;[Q];B;backend/internal/user/role_definition_ceiling_integration_test.go;WP-667
+```
+
+**Entscheidungsbedarf:** keiner. (Gleiche Regel wie der Entzug, WP-395; Einladungen ausgenommen, siehe F-396 Empfehlung.)
+
+**Nicht Bestandteil:** Wirkungslosigkeit des Entfernens von Seed-Rechten bei Standardrollen (`role.permissions`, F-398, WP-669); Obergrenze für Liste und Widerruf von Einladungen (WP-394 „Nicht Bestandteil“); Rollen aus IdP-Gruppen; Aussperrschutz für den letzten org_admin.
+
+### WP-669 – Standardrollen: Seed-Rechte nicht entfernbar (409), Rechteliste, Antwort und Audit zeigen die wirksamen Rechte
+
+**Schlüssel:** `k7n-standard-role-permissions` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-046 (Rollenmatrix RBA-02), WP-363 (RBA-01-Schlüssel, `seed_standard_roles`), WP-394 (Obergrenze beim Hinzufügen), WP-505 (alte und neue Werte im Routen-Audit), WP-667 (Obergrenze beim Entfernen)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-398](../../../audit/g1-reaudit/FINDINGS.md#f-398) | P3 | PUT /roles/{id}/permissions auf einer Standardrolle antwortet 200 mit den neuen Rechten, die Seed-Rechte (`role.permissions`) bleiben aber wirksam; Antwort, Rechteliste und Audit-Schnappschuss weichen von den wirksamen Rechten ab | schließt | Verifikation von K-1 (F-396), Wiederholungsprüfung K7 auf `e5c2d86` |
+
+**Problem:** Die Rechte einer Standardrolle stehen als Seed in `role.permissions` (RBA-02-Matrix, `seed_standard_roles`) und als Zeilen in `role_permission`. Alle Autorisierungspfade (`AccessGrants`, `RoleGrants`, `readStandardRole`, `ServiceAccountGrants`) lesen die Vereinigung; `ReplaceRolePermissions` (`backend/internal/permission/pg_repository.go:78` auf `e5c2d86`) ersetzt nur die Zeilen, und `GET /roles/{id}/permissions`, die PUT-Antwort (`scanRolePermissions`, `:314`) und der Routen-Audit-Schnappschuss (`backend/internal/audit/route_snapshot.go:476`) lesen nur die Zeilen. `PUT /roles/{viewer}/permissions {"permission_keys":[]}` antwortet 200 `[]`, der Audit nennt `[]`, die 35 Seed-Rechte wirken weiter; auch der org-weite org_admin kann kein Seed-Recht entfernen.
+
+**Akzeptanzkriterien:**
+
+- [ ] Entscheidung (begründet in F-398 gegen RBA-02/RBA-03, WP-046, E-13 und die Matrix-Migrationen): Seed-Rechte einer Standardrolle sind nicht entfernbar. `PUT /api/v1/roles/{id}/permissions` ohne einen Schlüssel von `role.permissions` (im Katalog) → 409 (RFC 7807, Typ `https://reticora.io/problems/standard-role-permissions`, Details mit Rolle und Schlüsseln), `role_permission` und `role.permissions` unverändert, kein Erfolgs-Audit. Reihenfolge: unbekannter Schlüssel 400, Seed 409, Hinzufügen 403 (WP-394), Entfernen 403 (WP-667). Weitere Schlüssel bleiben hinzufüg- und entfernbar.
+- [ ] Ein erfolgreicher PUT schreibt alle Schlüssel samt Seed als Zeilen. `GET /roles/{id}/permissions`, die PUT-Antwort und der Routen-Audit-Schnappschuss (`permission_keys`) lesen `role_permission ∪ role.permissions` im Katalog wie `AccessGrants`; ein Seed-Schlüssel ohne Zeile (Altbestand eines PUT vor dem Fix) trägt `created_at` der Rolle und keinen `granted_by`. Keine Migration.
+- [ ] `TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused` (`internal/permission/standard_role_permissions_integration_test.go`, PG): org-weiter org_admin `PUT []` und `PUT seed ohne location:read` → 409 mit Typ und Schlüssel, unverändert; `PUT seed + location:write` → 200 und wirksam; `PUT seed` → 200, `location:write` entzogen; nach jedem Schritt und nach Verlust der Seed-Zeilen sind PUT-Antwort, GET und Audit-Schnappschuss gleich den Rechten aus `AccessGrants`. Auf `e5c2d86` rot (200 `[]`, Liste/Schnappschuss `[]` bei 35 wirksamen Rechten).
+- [ ] `api/openapi.yaml`: `listRolePermissions` beschreibt die Vereinigung, `replaceRolePermissions` die Regel und 409; `npm run generate:api` übernimmt sie in `frontend/src/api/generated/schema.d.ts`. `docs/README.md` (Abschnitt Permissions) nennt die Regel.
+- [ ] Bestehende Tests grün (`./internal/permission/`, `./internal/audit/`, `./internal/user/`, `./internal/server/`, `./internal/identity/`, u. a. `TestStandardRolesMatchTheRoleMatrix`, `TestRoleDefinitionWideningCeiling`, `TestEveryWriteRouteAuditedOnPostgreSQL`); golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); neuer Test auch als Nicht-Root-Nutzer grün.
+
+**Dateien (11 Einträge):**
+
+- backend/internal/permission/pg_repository.go
+- backend/internal/permission/repository.go
+- backend/internal/permission/handler.go
+- backend/internal/audit/route_snapshot.go
+- backend/internal/permission/standard_role_permissions_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Lese- und Schreibpfade laufen unverändert in der Tenant-Transaktion (`database.WithRequestTenant`, RLS über `app.org_id`); der Schnappschuss liest wie bisher im Scope der Anfrage.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/permission/ ./internal/audit/ ./internal/user/ ./internal/server/ ./internal/identity/` mit `TEST_DATABASE_URL`, `TEST_REDIS_URL`.
+- `go test -count=1 -v -run '^TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused$' ./internal/permission/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RBA-02;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+RBA-03;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+AUD-07;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+```
+
+**Entscheidungsbedarf:** keiner (Entscheidung zwischen 409 und „jsonb folgt“ im Rahmen von RBA-02 und E-13 getroffen, siehe F-398 Empfehlung; die Matrix selbst ändert sich nicht).
+
+**Nicht Bestandteil:** Obergrenze beim Entfernen (WP-667); das Speicher-Repository (`--no-db`) kennt keine Seeds und bleibt unverändert; Änderungen der Rollenmatrix; eine Bereinigung von `role_permission`-Altbeständen per Migration (die Lesepfade zeigen die Vereinigung, der nächste PUT schreibt die Zeilen).
+
+### WP-672 – Leere Suche, Historie, Verfügbarkeit und Compliance-Score antworten mit `[]` statt `null`; Sweep aller GET-Listen
+
+**Schlüssel:** `k7n-search-empty-array` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-164 (`c-pagination`), WP-466 (`t2-pagination-core`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-401](../../../audit/g1-reaudit/FINDINGS.md#f-401) | P3 | Suche ohne Treffer antwortet `"data": null` statt `[]`; ebenso Historie ohne Änderungen, Verfügbarkeitsprojektion und `results` des Compliance-Scores | schließt | Wiederholungsprüfung von WP-164 (K7) auf `e5c2d86` |
+
+**Problem:** F-214/WP-164 hat die Normalisierung leerer Listen in `api.ListResponse.MarshalJSON` gelegt. Antworten mit eigenem Typ oder als Map laufen nicht durch sie: `GET /api/v1/search` ohne Treffer (kein passender Text, kein Treffer des Typs, ein Client-2-Principal mit Treffern nur in Client 1) antwortet `{"data":null,"total":0}`, weil `filterAllowed` mit `hits[:0]` das nil-Slice des Backends übernimmt; `SearchResponse.data` ist ein Pflicht-Array. Der Sweep aller GET-Operationen der Spezifikation findet dieselbe Klasse in `GET /api/v1/history/{asset|relationship|reservation|composition}/{id}` (`HistoryListResponse`), `GET /api/v1/inventory/availability`, `results` von `GET /api/v1/compliance/score` und im Modus `--no-db` in der Historie von CI und Standort sowie den Unterlisten `/trainings/{id}/assignments`, `/keys/{id}/assignments`, `/desks/{id}/bookings`, `/maintenance-windows/{id}/notifications` (F-401).
+
+**Akzeptanzkriterien:**
+
+- [ ] `GET /api/v1/search` ohne sichtbaren Treffer antwortet 200 mit `"data": []`: kein passender Text, mit `type=ci`, ein Typ ohne Treffer und ein auf Client 2 beschränkter Principal, dessen Treffer alle in Client 1 liegen; Kontrolle: der org-weite Aufrufer findet das Client-1-CI. `filterAllowed` liefert nie nil.
+- [ ] Die Historie jedes Entitätstyps ohne Änderungen antwortet `"data": []`, `GET /api/v1/compliance/score` ohne Ergebnisse `"results": []`, `GET /api/v1/inventory/availability` ohne Projektion `"data": []`, die Unterlisten der P2-Module auch über die Memory-Repositories `"data": []` (Helfer `api.NonNilSlice`). Form und übrige Felder der Antworten bleiben unverändert; keine Änderung der Spezifikation.
+- [ ] `TestEmptyListsAnswerAnEmptyDataArray` (erweitert um `/api/v1/search?q=no-such-text`, `&type=ci`, Historie und P2-Unterlisten), `TestEmptyResponsesAnswerArraysOverPostgres` (jede GET-Operation von `api/openapi.yaml` über PostgreSQL, Pfadparameter als unbekannte UUID, mindestens 100 Antworten 200) und `TestSearchWithoutHitsAnswersAnEmptyArray` sind auf `e5c2d86` rot (`null`) und mit der Korrektur grün, die neuen Tests auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1` der geänderten Pakete und von `./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (14 Einträge):**
+
+- backend/internal/api/api.go
+- backend/internal/search/handler.go
+- backend/internal/history/handler.go
+- backend/internal/compliance/evaluator.go
+- backend/internal/reservation/handler.go
+- backend/internal/training/handler.go
+- backend/internal/keymgmt/handler.go
+- backend/internal/desk/handler.go
+- backend/internal/maintenance/handler.go
+- backend/internal/server/pagination_test.go
+- backend/internal/server/empty_arrays_integration_test.go
+- backend/internal/search/empty_page_integration_test.go
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Suche filtert weiter unter dem Tenant-Scope des Aufrufers (Policy von `search_document`) und nach dem Leserecht je Typ; geändert ist nur die Kodierung der leeren Seite.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestEmptyListsAnswerAnEmptyDataArray$|^TestEmptyResponsesAnswerArraysOverPostgres$' ./internal/server/` und `go test -count=1 -run '^TestSearchWithoutHitsAnswersAnEmptyArray$' ./internal/search/`, die neuen Tests außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/api/... ./internal/search/... ./internal/history/... ./internal/compliance/... ./internal/reservation/... ./internal/training/... ./internal/keymgmt/... ./internal/desk/... ./internal/maintenance/... ./internal/server/...`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-672
+API-02;[B];C;backend/internal/server/empty_arrays_integration_test.go;WP-672
+API-02;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
+SRC-01;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** `cls`, `sts` und `tms` von `GET /api/v1/me` und `/api/v1/auth/me` (`null` ist dort für die ganze Organisation dokumentiert, `SessionClaims`); Unterlisten unter einem existierenden Elternobjekt, die der Sweep mit unbekannten IDs nicht erreicht (ihre PostgreSQL-Repositories legen das Ergebnis als leeres Slice an); F-402 (WP-673, `k7n-relationship-list-filters`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-673 – Beziehungsliste: dokumentierte Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken; ungültige Werte 400
+
+**Schlüssel:** `k7n-relationship-list-filters` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-165 (`c-filters`), WP-609 (`k3n-relationships-arms`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-402](../../../audit/g1-reaudit/FINDINGS.md#f-402) | P3 | `GET /api/v1/relationships` ignoriert die dokumentierten Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` | schließt | Wiederholungsprüfung von WP-165 (K7) auf `e5c2d86` |
+
+**Problem:** `Handler.List` (backend/internal/relationship/relationship.go) bedient `/api/v1/relationships` und `/api/v1/cis/{id}/relationships` und liest nur die Pfad-ID und die Paginierung. Die in `api/openapi.yaml` dokumentierten Query-Filter `ci_id`, `source_ci_id`, `target_ci_id` und `rel_type` wirken nicht: Jeder Filter, auch eine unbekannte oder ungültige ID und ein unbekannter Typ, liefert 200 mit allen Beziehungen der Organisation im Scope des Aufrufers (kein Leck). Das Symptom ist in docs/acceptance/abn-01.md (2026-10-26) vermerkt; der ABN-01-Negativfall wurde damals auf `/cis/{id}/relationships` umgestellt. Das Enum `RelationshipType` des Parameters `rel_type` deckt die Typen des Katalogs (z. B. `runs_on`, `uplink_to`, eigene Typen) und die projizierten (`contains`, `mounted_in`, `located_in`) nicht ab, die die Liste liefert (F-402).
+
+**Akzeptanzkriterien:**
+
+- [ ] `GET /api/v1/relationships` wendet `ci_id` (CI an einem Ende), `source_ci_id`, `target_ci_id` und `rel_type` auf die gespeicherten und die projizierten Kanten an; die Filter kombinieren sich, ein leerer Wert filtert nicht, `total` zählt die gefilterte Menge. Ein unbekanntes CI und ein CI einer anderen Organisation liefern eine leere Liste.
+- [ ] `ci_id`, `source_ci_id` oder `target_ci_id`, die keine UUID sind, und ein `rel_type`, den der Typkatalog der Organisation nicht kennt (oder mit NUL-Byte), antworten 400 `application/problem+json` mit dem Feld. Die projizierten Typen sind filterbar.
+- [ ] Der Tenant-Scope bleibt unverändert (RLS auf `ci_relationship` und `ci`): Ein auf Client 1 beschränkter Principal sieht die Kante zu einem Client-2-CI über keinen Filter; die Kante einer anderen Organisation erscheint nie. `GET /api/v1/cis/{id}/relationships` bleibt unverändert; `TestRelationshipListPlanBudget` (NFR-02, WP-609) grün.
+- [ ] Spec-first: `api/openapi.yaml` beschreibt die Filter, `format: uuid` und 400 für die CI-Filter, `rel_type` als Schlüssel des Typkatalogs (string) mit 400 für unbekannte, und die 400-Antwort; `frontend/src/api/generated/schema.d.ts` neu erzeugt; `npx tsc --noEmit -p .` grün.
+- [ ] `TestListHonoursDocumentedQueryFilters` ist auf `e5c2d86` rot (alle Kanten, 200 statt 400) und mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Die eingefrorenen ABN-01-Artefakte bleiben unverändert (`sha256sum -c docs/acceptance/artefakte/SHA256SUMS`); docs/acceptance/abn-01.md erhält einen datierten Nachtrag. frontend/e2e-real/tenant-isolation.spec.ts (`/relationships?ci_id=<CI von A>` als B → leer) prüft mit wirkendem Filter weiter, was es soll, und bleibt unverändert.
+- [ ] Regression: `go test -p 1 ./internal/relationship/... ./internal/relationshiptype/... ./internal/topology/... ./internal/graphqlbff/... ./internal/middleware/... ./internal/server/... ./internal/tenant/rls/...` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/relationship/relationship.go
+- backend/internal/relationship/pg_repository.go
+- backend/internal/relationship/pg_repository_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/acceptance/abn-01.md
+- docs/traceability.csv
+- frontend/e2e-real/tenant-isolation.spec.ts (geprüft, unverändert)
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Filter sind Gleichheiten auf jedem Zweig von `listEdges` (gespeichert und projiziert) unter `WithRequestTenant`; die Sichtbarkeit bleibt die der Policies von `ci_relationship` und `ci`.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestListHonoursDocumentedQueryFilters$|^TestRelationshipListPlanBudget$' ./internal/relationship/`, der neue Test außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/relationship/... ./internal/server/...`; `cd frontend && npm run generate:api && npx tsc --noEmit -p .`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-01;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
+API-02;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
+```
+
+**Entscheidungsbedarf:** keiner. Hinweis: `rel_type` wird wie beim Anlegen gegen den Typkatalog geprüft, nicht gegen das Enum `RelationshipType`; das Enum von `CreateRelationshipRequest` und `Relationship` bleibt unverändert (es deckt die Katalog- und projizierten Typen ebenfalls nicht ab; kein Befund dieses WPs).
+
+**Nicht Bestandteil:** Filter für `GET /api/v1/cis/{id}/relationships` (nicht dokumentiert); das Enum `RelationshipType` der Schemas `Relationship` und `CreateRelationshipRequest`; der Real-Stack-Lauf von frontend/e2e-real/tenant-isolation.spec.ts (nur in CI); F-401 (WP-672, `k7n-search-empty-array`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-670 – `max_cis` auf allen Wegen, die ein CI aktiv machen: Wiederherstellen, Unmerge und Review-Auflösung über dem Limit 403 `entitlement-limit`
+
+**Schlüssel:** `k7n-max-cis-all-paths` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-072 (`ent-enforce`, `max_cis` in `ci.Service.Create`), WP-073 (`ent-unlic`, `unlicensed_ci` beim Ingest), WP-169 (Review-Auflösung), WP-472 (`t2-ent-quotas`, Gates über die Produktionskette in `t2_entitlement_gates_test.go`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-399](../../../audit/g1-reaudit/FINDINGS.md#f-399) | P2 | `max_cis` wird über Wiederherstellen, Unmerge und die Review-Auflösung `new` umgangen: über dem Limit entstehen aktive CIs | schließt | Wiederholungsprüfung (K7) auf `e5c2d86`, Gegenprüfung r1-b5 (WP-073 AK1) |
+
+**Problem:** Nur `ci.Service.Create` (`backend/internal/ci/service.go:286` auf `e5c2d86`), der Ingest (`discovery/unlicensed.go:210`) und die Übernahme eines `unlicensed_ci`-Eintrags (`unlicensed.go:337`) prüfen `max_cis`. `POST /cis/{id}/restore` (`Service.Restore`, `service.go:395`), `POST /cis/{id}/unmerge` und der Revert des Jobs `ci.merge` (`Service.Unmerge`/`RevertMerge`, `merge.go:680/901`), die Review-Auflösung `new` von `unclassified_device`, `ambiguous_identity` und `resurrected_device` (`createReviewedDevice` → `h.ciRepo.Create`, `review.go:368/402`) und der `merge` eines `resurrected_device`-Eintrags (`restorer.Restore`, `review.go:290`) machen ein CI ohne Prüfung aktiv: bei `max_cis` 1 Wiederherstellen 200 (2 aktive CIs), `new` 200 (3 aktive CIs). E-56 legt fest: „`max_cis` wird exakt durchgesetzt“; ENT-03/ENT-08: REST-Schreibpfade über dem Limit 403 `entitlement-limit`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `ci.Service` prüft `max_cis` in einer gemeinsamen Prüfung (`allowActive`, Zählung und Sperrverhalten wie bisher `Create`: aktive CIs über `repo.List`, keine zusätzliche Sperre) vor `Create`, `Restore` und `Unmerge` (damit auch `RevertMerge`). Über dem Limit 403 `entitlement-limit`, das CI bleibt gelöscht bzw. der Merge bleibt; `POST /jobs/{id}/revert` beantwortet die Ablehnung ebenfalls mit 403 `entitlement-limit` (bisher 500).
+- [ ] Die Discovery prüft `max_cis` (`allowActiveCI`, Zählung wie `adoptUnlicensed`) vor dem Anlegen in `createReviewedDevice` (nach Typ- und Mandantenprüfung, in der Transaktion der Auflösung) und vor der Reaktivierung beim `merge` eines `resurrected_device`-Eintrags. Über dem Limit 403 `entitlement-limit`, kein CI, der Eintrag bleibt offen mit seinem Gerätedatensatz (keine Umwandlung in `unlicensed_ci`, Begründung unter Entscheidungsbedarf).
+- [ ] `TestT2EntitlementMaxCIsOnRestoreAndReviewNew` (`internal/server/t2_entitlement_gates_test.go`, PostgreSQL, Produktionsrouter): bei `max_cis` = aktive CIs `POST /cis` (Kontrolle), Wiederherstellen, Unmerge, Revert des Merge-Jobs, `new` von `unclassified_device` und `ambiguous_identity`, `merge` von `resurrected_device` je 403 `entitlement-limit`; aktive CIs nie über dem Limit; gelöschte CIs bleiben gelöscht, das Opfer bleibt zusammengeführt, die Einträge bleiben offen ohne CI; unterhalb eines angehobenen Limits Wiederherstellen, `new`, Unmerge und Reaktivierung je 200. Auf `e5c2d86` rot (200/200, 7 aktive CIs bei `max_cis` 2; Revert 500 mit altem `jobs/handler.go`).
+- [ ] `api/openapi.yaml` (spec-first): Antwort `EntitlementLimit` nennt `max_cis` und gilt für `createCI`, `restoreCI`, `unmergeCI`, `revertJob` und beide Auflösungs-Endpunkte; Beschreibungen nennen das Verhalten; `npm run generate:api` nachgeführt.
+- [ ] Bestehende Tests der Pakete `ci`, `discovery`, `server`, `reviews`, `entitlement`, `api`, `jobs` grün; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); der neue Test auch als Nicht-Root-Nutzer grün.
+
+**Dateien (14 Einträge):**
+
+- backend/internal/ci/service.go
+- backend/internal/ci/merge.go
+- backend/internal/ci/handler.go
+- backend/internal/discovery/review.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/jobs/handler.go
+- backend/internal/server/t2_entitlement_gates_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/README.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Die Zählung läuft wie bei `POST /cis` als `reticora_app` mit den Tenant-GUCs der Anfrage (`database.WithRequestTenant`); bei `new` in der Transaktion der Auflösung.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/ci/ ./internal/discovery/ ./internal/server/ ./internal/reviews/ ./internal/entitlement/ ./internal/api/ ./internal/jobs/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL` (bekannter lokaler Ausfall `TestCIQueryBudget` übersprungen).
+- `go test -count=1 -v -run '^TestT2EntitlementMaxCIsOnRestoreAndReviewNew$' ./internal/server/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung. Die Auflösung `new` über dem Limit antwortet 403 `entitlement-limit` statt den Eintrag in `unlicensed_ci` umzuwandeln: ENT-03 verlangt für REST-Schreibpfade 403 `entitlement-limit`, WP-073 AK1 und E-22 betreffen die automatische Ingest-Neuanlage; der Gerätedatensatz liegt verlustfrei im offenen Eintrag, und die Auflösung `new` eines `unlicensed_ci`-Eintrags antwortet bereits so. Hinweise für die Leitung: (1) Die Zählung von `POST /cis` (und damit der neuen Prüfungen) läuft unter dem Scope des Aufrufers; ein auf einen Client beschränkter Principal zählt nur seine sichtbaren CIs und legt über `max_cis` an (neuer Befund, Probe `k7/ad-670-work/probe-scoped.log`, nicht in diesem WP behoben). (2) Der Agent-Telemetriepfad (`agent/handler.go:479`, `h.cis.Create` am Repository) legt Endpoint-CIs ohne `max_cis` an; das Modul `agents` ist P4 und in G1 abgeschaltet (404), über das Verhalten über dem Limit (403 oder `unlicensed_ci`) ist noch nicht entschieden.
+
+**Nicht Bestandteil:** die Sperre der `max_cis`-Zählung bei `AdoptUnlicensed` und bei `POST /cis` (SR-09, zurückgestellt; die neuen Prüfungen sind nicht nebenläufiger als `Create`); die Zählung unter dem Scope des Aufrufers (siehe Hinweis 1); der Agent-Pfad (Hinweis 2); UI-Meldungen für 403 beim Wiederherstellen und Auflösen.
+
+### WP-671 – Entitlement-Gates discovery und rack_view auf den Alias-Pfaden: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Knoten im Standortbaum und NATS-Scope-Kanal
+
+**Schlüssel:** `k7n-entitlement-alias-paths` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-471 (`t2-ent-gates`), WP-072 (Entitlement-Durchsetzung, ursprünglicher Plan)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-400](../../../audit/g1-reaudit/FINDINGS.md#f-400) | P3 | Alias-Pfade umgehen die Entitlement-Gates discovery und rack_view: `/discovery-scopes`, Auflösung von `scope_suggested`, Rack-Schreibzugriffe über `/locations` und der NATS-Scope-Kanal | schließt | Wiederholungsprüfung von WP-072 (K7) auf `e5c2d86` |
+
+**Problem:** Die Entitlement-Middleware ordnet Routen über Präfixe zu (`gatedRoutes`). `/api/v1/discovery-scopes` liegt nicht unter `/api/v1/discovery/` und bleibt Kern; ohne discovery legt `POST /discovery-scopes` Scopes an (201). Die Auflösung eines `scope_suggested`-Eintrags über den Kern-Pfad `/review-items/{id}/resolve` legt mit `accept` einen Scope an. Racks sind Knoten des Standortbaums: ohne rack_view antwortet `/racks/{id}` 403, `PATCH`/`DELETE /locations/{rackId}` aber 200/204. Die Review-Warteschlange folgt zwei Regeln: `/review-items` und GraphQL `reviewInbox` sind Kern, der veraltete Alias `/discovery/review-items` ist discovery. Der NATS-Scope-Kanal (`cmd/server/workers.go`) prüft keine Lizenz: `scopes.request` liefert Scopes, `subnets.report` öffnet Vorschläge (F-400).
+
+**Akzeptanzkriterien:**
+
+- [ ] `/api/v1/discovery-scopes*` verlangt discovery (403 `feature-not-entitled`, nichts angelegt); abgelaufene Lizenz wie `/discovery/*` (nur Ingest und neue Scans gesperrt, CH21).
+- [ ] Die Review-Warteschlange ist auf allen Pfaden Kern (`/review-items*`, der veraltete Alias `/discovery/review-items*` und GraphQL `reviewInbox`, Berechtigung `discovery:read` unverändert); die Auflösung eines `scope_suggested`-Eintrags (`accept` und `dismiss`) verlangt zusätzlich discovery: nicht berechtigt 403 `feature-not-entitled`, der Eintrag bleibt offen, kein Scope; andere Einträge bleiben ohne discovery auflösbar. Die Ausnahme des Alias öffnet keine discovery-Route dahinter (`..`, `%2e%2e`, `/discovery/review-items-x`).
+- [ ] Der Standortbaum ist lesend Kern, Rack-Knoten mit Namen eingeschlossen; `POST /locations` mit `kind = rack` sowie `PATCH` (Umbenennen, Verschieben) und `DELETE` eines Rack-Knotens verlangen rack_view wie `/racks` (403 `feature-not-entitled`, Rack unverändert); Schreiben anderer Knoten bleibt Kern; eine fehlgeschlagene Entitlement-Abfrage verweigert (500, fail-closed).
+- [ ] Der Scope-Kanal erhält die Lizenzprüfung des Routers (`server.DiscoveryLicense`): ohne discovery werden `scopes.request`, `scopes.result`, `subnets.report`, `jobs.request` und `jobs.status` mit `"error":"discovery license not_entitled"` abgelehnt, nichts wird geschrieben; nach Ablauf werden `scopes.result` und `subnets.report` abgelehnt (`discovery license expired`), Scopes und Jobs weiter beantwortet; ein Fehler der Abfrage verweigert und zählt als Fehlschlag des Workers.
+- [ ] `docs/README.md` dokumentiert die Zuordnung Route→Feature der Phase-1-Features; `api/openapi.yaml` nennt 403 `FeatureNotEntitled` an `/discovery-scopes*` und an `POST`/`PATCH`/`DELETE /locations*` sowie die Regel an `/review-items*`; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestAuditT2EntitlementAliasPathsGated` und `TestScopeChannelChecksTheDiscoveryLicense` sind auf `e5c2d86` rot und mit der Korrektur grün; `TestDiscoveryScopeWorkerChecksTheDiscoveryLicense` prüft die Verdrahtung in `buildWorkers`; die neuen Tests laufen auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1` der geänderten Pakete und von `./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (16 Einträge):**
+
+- backend/internal/entitlement/middleware.go
+- backend/internal/entitlement/entitlement_test.go
+- backend/internal/locations/handler.go
+- backend/internal/discovery/scope_handler.go
+- backend/internal/discovery/scope_channel_license_nats_test.go
+- backend/internal/graphqlbff/resolver.go
+- backend/internal/server/router.go
+- backend/internal/server/report_adapters.go
+- backend/internal/server/t2_entitlement_gates_test.go
+- backend/cmd/server/workers.go
+- backend/cmd/server/main.go
+- backend/cmd/server/scope_channel_license_test.go
+- api/openapi.yaml, frontend/src/api/generated/schema.d.ts
+- docs/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Prüfungen laufen nach Authentifizierung, Tenant- und Berechtigungsprüfung; die Lesepfade unter RLS bleiben unverändert. Der Rack-Knoten wird vor dem Schreiben im Scope des Aufrufers gelesen (unsichtbar: 404 wie bisher).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestAuditT2EntitlementAliasPathsGated$' ./internal/server/`, `TEST_NATS_URL=… go test -count=1 -run '^TestScopeChannelChecksTheDiscoveryLicense$' ./internal/discovery/` und `TEST_NATS_URL=… go test -count=1 -run '^TestDiscoveryScopeWorkerChecksTheDiscoveryLicense$' ./cmd/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/entitlement/ ./internal/locations/ ./internal/discovery/ ./internal/graphqlbff/ ./internal/reviews/ ./internal/server/ ./cmd/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+ENT-05;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-02;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-05;[B];B;backend/internal/entitlement/entitlement_test.go;WP-671
+ENT-05;[B];B;backend/internal/discovery/scope_channel_license_nats_test.go;WP-671
+ENT-07;[B];B;backend/internal/discovery/scope_channel_license_nats_test.go;WP-671
+ENT-05;[B];B;backend/cmd/server/scope_channel_license_test.go;WP-671
+```
+
+**Entscheidungsbedarf:** keiner offen; im WP festgelegt und dokumentiert (`docs/README.md`): Standortbaum lesend und Review-Warteschlange Kern (wie das Frontend, `navFeatureFor`: `reviews`/`map` ohne Feature), Schreiben von Rack-Knoten rack_view, Auflösung von `scope_suggested` discovery. Falls der Lead die Warteschlange stattdessen ganz unter discovery stellen will, ist das eine Änderung von `coreRoutes` und `ReviewInbox` (CI-Merges öffnen dann für Mandanten ohne discovery unsichtbare Einträge).
+
+**Nicht Bestandteil:** Lesen der Rack-Knoten (Name, Pfad) im Standortbaum ohne rack_view (bewusst Kern); Verhalten des Collectors bei abgelehntem `scopes.request` (er behält seine zuletzt geladenen Scopes; sein Ingest ist ohne Lizenz ohnehin abgelehnt und der Status-Monitor setzt ihn auf `paused`); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-674 – `max_cis` zählt alle aktiven CIs der Organisation, unabhängig vom Scope des Schreibenden
+
+**Schlüssel:** `k7n-max-cis-org-count` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-072 (`ent-enforce`, `max_cis` in `ci.Service.Create`), WP-073 (`ent-unlic`, `unlicensed_ci` beim Ingest), WP-334 (`max_cis`-Sperre der Ingest-Spuren), WP-064 (Rollenvertrag `reticora_app`/`reticora_owner`), WP-670 (`k7n-max-cis-all-paths`, gemeinsame Prüfung `allowActive`/`allowActiveCI`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-403](../../../audit/g1-reaudit/FINDINGS.md#f-403) | P2 | `max_cis` zählt nur die CIs im Scope des Schreibenden: ein auf einen Client beschränkter Principal legt über das Limit der Organisation an | schließt | K7-Nachtrag WP-670 (Probe `k7/ad-670-work/probe-scoped.log`), reproduziert auf `3eca249` (Zählung wie `e5c2d86`) |
+
+**Problem:** Alle Prüfungen von `max_cis` zählen die aktiven CIs unter der RLS der Anfrage: `ci.Service.Create` über `repo.List` (`backend/internal/ci/service.go:282` auf `e5c2d86`; seit WP-670 `allowActive`, `service.go:315` auf `55b6e7d`, auch für `Restore`, `Unmerge`, `RevertMerge`), die Discovery über `h.ciRepo.List` (`allowActiveCI`, `discovery/unlicensed.go:334`, für `adoptUnlicensed`, `AdoptUnlicensed`, `new` und die Reaktivierung eines `resurrected_device`; `openFrame`, `discovery.go:1344`) und die Neuzählung unter der `max_cis`-Sperre (`LockCICount`, `discovery/pg_repository.go:772`). `ci_isolation` filtert nach Client- und Site-Scope: ein auf Client 1 beschränkter Principal und ein an einen Client oder eine Site gebundener Collector zählen nur ihre sichtbaren CIs. Bei `max_cis` 2 und zwei CIs in Client 2 antwortet `POST /cis` org-weit 403, als Client-1-Principal zweimal 201 (4 aktive CIs). E-56: „`max_cis` wird exakt durchgesetzt“; ENT-03/ENT-08.
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000186 legt `ci_active_count()` an: Zahl der nicht gelöschten CIs der Organisation in `app.org_id`, nur Client- und Site-Scope für das eine Aggregat erweitert (`app_scope_widen`/`app_scope_restore`, 000139) und danach wiederhergestellt, `app.org_id` bleibt; ohne Tenant (Nil-Organisation, `WithSystem`) 0. Kein SECURITY DEFINER (Muster 000141/000181: der erweiterte Scope, nicht eine andere Rolle, macht die CIs sichtbar; FORCE ROW LEVEL SECURITY gilt weiter), fester `search_path`, `EXECUTE` nur für `reticora_app`, nicht PUBLIC. Down entfernt die Funktion; Roundtrip und Schema-Baseline grün.
+- [ ] `ci.ActiveCounter` (optionale Schnittstelle) mit `ci.PGRepository.CountActive` (`SELECT ci_active_count()` über `database.WithRequestTenant`, in der Transaktion des Aufrufers, wenn der Kontext eine trägt) und `ci.CountActive` (Rückfall auf die Summe von `List` für Repositories ohne Scope); der Index-Dekorator reicht `CountActive` weiter (SR-11, `TestIndexingRepositoryCoversPGRepositoryMethods`, `TestIndexingRepositoryForwardsOptionalInterfaces`).
+- [ ] Jede Prüfung von `max_cis` zählt über `ci.CountActive` bzw. `ci_active_count()`: `ci.Service.allowActive` (`Create`, `Restore`, `Unmerge`, `RevertMerge`), `discovery.allowActiveCI` (`adoptUnlicensed`, `AdoptUnlicensed`, `new` von `unclassified_device`/`ambiguous_identity`/`resurrected_device`, Reaktivierung beim `merge` eines `resurrected_device`), `openFrame` (Zählung des Ingest-Frames) und `LockCICount` (Neuzählung unter der `max_cis`-Sperre, WP-334). Antwort, Sperrverhalten und `unlicensed_ci`-Verhalten bleiben unverändert. Eine Nutzungsanzeige mit dieser Zählung gibt es nicht (`GET /entitlements` liefert nur Limits).
+- [ ] `TestT2EntitlementMaxCIsCountsTheWholeOrganization` (`internal/server/t2_entitlement_gates_test.go`, PostgreSQL, Produktionsrouter): `max_cis` = aktive CIs der Organisation (vier in Client 2); `POST /cis` org-weit (Kontrolle) und als Client-1-Principal, Wiederherstellen eines gelöschten Client-1-CI und `new` eines `unclassified_device`-Eintrags von Client 1 je 403 `entitlement-limit`; aktive CIs nie über dem Limit, das CI bleibt gelöscht, der Eintrag bleibt offen ohne CI; nach Anheben um 1 legt der Client-1-Principal an (201), das Wiederherstellen ist wieder 403. Auf `e5c2d86` rot (201/200/200, 7 aktive CIs bei `max_cis` 4).
+- [ ] `TestCIActiveCountIgnoresCallerScope` (`internal/ci/active_count_integration_test.go`, PostgreSQL): `CountActive`, `ci.CountActive` und `LockCICount` liefern als Client-1-, Site-1- und org-weiter Principal die Zahl der Organisation (ohne gelöschte CIs, ohne Organisation B), Organisation B ihre eigene; in der Transaktion des Aufrufers bleibt dessen Scope unverändert und er liest danach weiter nur seine CIs; ohne Tenant 0; Eigenschaften der Funktion wie im ersten Kriterium.
+- [ ] `api/openapi.yaml` (spec-first): Antwort `EntitlementLimit` nennt die Zählung über die ganze Organisation; `npm run generate:api` nachgeführt; `docs/README.md` beschreibt sie.
+- [ ] Bestehende Tests der Pakete `ci`, `discovery`, `server`, `reviews`, `entitlement`, `api`, `jobs`, `tenant/...` und `database` (allein) grün; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline); die neuen Tests auch als Nicht-Root-Nutzer grün.
+
+**Dateien (19 Einträge):**
+
+- backend/migrations/000186_ci_active_count.up.sql
+- backend/migrations/000186_ci_active_count.down.sql
+- backend/internal/ci/service.go
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/indexing_repository.go
+- backend/internal/ci/indexing_repository_test.go
+- backend/internal/ci/active_count_integration_test.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/discovery/discovery.go
+- backend/internal/discovery/pg_repository.go
+- backend/internal/server/t2_entitlement_gates_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/README.md
+- docs/schema-baseline.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** Migration 000186 (`ci_active_count()`), keine Änderung an Tabellen oder Policies. Die Funktion läuft als `reticora_app` mit den Tenant-GUCs der Anfrage (`database.WithRequestTenant`); sie erweitert nur Client- und Site-Scope für ein `count(*)` auf `ci` und stellt beide wieder her, `app.org_id` begrenzt auf die eigene Organisation, zurück kommt nur die Zahl. Kein SECURITY DEFINER, keine neuen Rechte außer `EXECUTE` für `reticora_app`. Kein `WithSystem`-Pfad (keine Änderung an `withSystemCallers`): `ci` ist keine System-Ausnahme (000060).
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/discovery/ ./internal/server/ ./internal/reviews/ ./internal/entitlement/ ./internal/jobs/ ./internal/tenant/... ./internal/api/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`, `TEST_NATS_SERVER_BIN` (bekannter lokaler Ausfall `TestCIQueryBudget` übersprungen).
+- `go test -count=1 -p 1 ./internal/database/...` allein (`TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`, Rollenvertrag).
+- `go test -count=1 -v -run '^TestT2EntitlementMaxCIs' ./internal/server/` und `-run '^TestCIActiveCountIgnoresCallerScope$' ./internal/ci/`, beide auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-674
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-674
+ENT-03;[B];B;backend/internal/ci/active_count_integration_test.go;WP-674
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung (E-56: `max_cis` exakt; das Limit gilt je Organisation). Hinweis für die Leitung: Die Ablehnung nennt wie bisher „N of L in use“ (`entitlement.LimitExceededError`); für einen auf einen Client beschränkten Principal ist N jetzt die Zahl der aktiven CIs der ganzen Organisation statt seiner sichtbaren. Die Zahl erscheint nur bei einer Ablehnung (N ≥ L), sie nennt kein CI, und das Limit selbst war schon vorher sichtbar; nach einem Downgrade unter den Bestand verrät sie aber den Gesamtbestand an CIs anderer Clients. Falls das nicht gewollt ist, wäre die Detailangabe für eingeschränkte Principals zu kürzen (z. B. nur „limit L reached“); das ist eine Produktentscheidung und hier nicht umgesetzt.
+
+**Nicht Bestandteil:** der Agent-Telemetriepfad (`backend/internal/agent/handler.go:479`, `h.cis.Create` am Repository) legt Endpoint-CIs ohne `max_cis`-Prüfung an; das Modul `agents` ist P4 und in G1 abgeschaltet (404), über das Verhalten über dem Limit (403 oder `unlicensed_ci`) ist noch nicht entschieden. Die Sperre der `max_cis`-Zählung bei `POST /cis` und `AdoptUnlicensed` (SR-09, zurückgestellt; unverändert). Die anderen Kontingente haben die Lücke nicht (geprüft, nicht geändert): `app_user` und `api_key` filtern per RLS nur nach der Organisation (`user_isolation`, `org_isolation`), `max_collectors` zählt in einer eigenen org-weiten Transaktion (`CountCollectors`, `OrgWideScope`). Eine Nutzungsanzeige (Bestand gegen Limit) für Administratoren oder die UI gibt es nicht; sie ist nicht Teil dieses WP.
+
+### WP-675 – Review-Auflösung genau einmal: Eintrag gesperrt, Wirkung und Auflösung in einer Transaktion, gleichzeitige zweite Auflösung 409
+
+**Schlüssel:** `k7n-review-resolve-once` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-088 (`review-model`), WP-089 (`conflict`), WP-087 (`resurrect`), WP-554 (`t7-review-merge-job`), WP-643 (`k5n-review-merge-errors`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-404](../../../audit/g1-reaudit/FINDINGS.md#f-404) | P2 | Gleichzeitige Auflösung desselben Review-Eintrags: beide Anfragen 200, die Wirkung läuft zweimal (zwei CIs, zwei `review.resolved`, `resolved_by` = letzter Schreiber) | schließt | Wiederholungsprüfung von WP-088 (K7, r2-b2) auf `8e761c2`, Verifier |
+
+**Problem:** `reviews.Service.Resolve` prüft `status = 'open'` auf einem ungesperrten Lesen, führt die Wirkung des Typs in eigenen Transaktionen aus und schreibt die Auflösung mit `PGRepository.ResolveReviewItem` ohne Statusbedingung (`UPDATE review_item … WHERE id = $2 AND organization_id = $3 AND <visible>`). Zwei gleichzeitige Auflösungen desselben Eintrags antworten beide 200: `new` ‖ `new` eines `unclassified_device` legt zwei CIs an (CI-13), `dismiss` ‖ `dismiss` schreibt zwei `review.resolved` und `resolved_by` des letzten Schreibers, `new` ‖ `dismiss` meldet dem Dismisser „dismissed“ bei gespeichertem `resolved/new`, `accept` ‖ `dismiss` eines `override_conflict` entfernt den Override (je 6–8 von 8 Runden, F-404). Sequentiell schützt nur die vorgelagerte Prüfung (200, dann 409).
+
+**Akzeptanzkriterien:**
+
+- [ ] `Service.Resolve` sperrt den Eintrag in einer Transaktion des Tenant-Scopes (`SELECT … FOR UPDATE`, `reviews.Locker` des PostgreSQL-Repositorys), prüft den Status dort erneut und führt Wirkung und Auflösung in derselben Transaktion aus: die zweite gleichzeitige Auflösung wartet und erhält 409 `review item already resolved`, ohne ihre Wirkung auszuführen; eine gescheiterte Wirkung hinterlässt weder ihre Schreibvorgänge noch eine Auflösung. `ResolveReviewItem` ist zusätzlich bedingt (`AND status = 'open'`; keine Zeile → `ErrAlreadyResolved` bzw. `ErrNotFound`), auch für die Auflösungen außerhalb des Service (Reklassifizierung im Ingest überspringt einen inzwischen aufgelösten Eintrag; die Adoption von `unlicensed_ci` sperrt den Eintrag, legt das CI an und löst in einer Transaktion auf, ein inzwischen aufgelöster Eintrag wird übersprungen).
+- [ ] Alle Wirkungen jedes Review-Typs laufen in dieser Transaktion: CI anlegen (`new`), Werte übernehmen und Merge in einen Kandidaten, Reaktivierung (`resurrected_device`), CI-12-Merge (`probable_duplicate`), Override entfernen (`override_conflict`), Scope anlegen (`scope_suggested`), Kante anlegen (`unknown_relationship`), Adoption (`unlicensed_ci`).
+- [ ] Die Jobs der Merge-Auflösung (`review.merge`, JOB-04) und der CI-12-Merge (`ci.merge`) werden außerhalb der Transaktion geführt: Start, sobald der Eintrag gesperrt ist; ein gescheiterter Merge behält seinen fehlgeschlagenen Job (bereinigter Fehler, F-372), ein Retry läuft im selben Job (F-330); `ci.merge` endet `succeeded` nach dem Commit, der Merge läuft unter einem Savepoint. Der Verlierer einer gleichzeitigen Auflösung berührt keinen Job.
+- [ ] `TestConcurrentResolutionResolvesOnce` (je 6 Runden `new` ‖ `new` und `new` ‖ `dismiss` von `unclassified_device`, `dismiss` ‖ `dismiss` von `duplicate_ip`, `accept` ‖ `dismiss` von `override_conflict`; sequentielle Kontrolle) ist auf `e5c2d86` rot (beide 200, zwei CIs, zwei Ereignisse) und mit der Korrektur grün, auch als Nicht-Root-Nutzer: genau eine 200 und eine 409, ein CI, ein `review.resolved`, Status/Aktion/`resolved_by` des Gewinners.
+- [ ] Spec-first: `api/openapi.yaml` beschreibt bei `resolveReviewItem` die einmalige Auflösung und 409 der gleichzeitigen zweiten; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/reviews/ ./internal/discovery/... ./internal/ci/ ./internal/override/ ./internal/relationship/ ./internal/jobs/ ./internal/server/` grün (`TestReviewMergeRetryJobStatus`, `TestReviewMergeJobThroughRouter`, `TestAuditReviewMergeIntoDeletedCandidateIsNotFound` unverändert); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (12 Einträge):**
+
+- backend/internal/reviews/model.go
+- backend/internal/reviews/service.go
+- backend/internal/reviews/pg_repository.go
+- backend/internal/reviews/memory_repository.go
+- backend/internal/discovery/review.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/ci/merge.go
+- backend/internal/server/review_resolve_concurrency_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Die Sperre ist `SELECT … FOR UPDATE OF review_item` unter `WithRequestTenant` mit derselben Sichtbarkeitsbedingung wie `GetReviewItem` (die restriktiven Update-Policies von Migration 000140 gelten); die Wirkungen treten der Transaktion über `database.ContextWithTx` bei, ihr Scope ist der der Anfrage. Audit-Kette und Outbox bleiben in der Transaktion (BeforeCommit); Job-Schreibvorgänge außerhalb laufen nur, während die Transaktion außer der Zeilensperre des Eintrags nichts hält, bzw. nach ihrem Ende.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestConcurrentResolutionResolvesOnce$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/reviews/ ./internal/discovery/... ./internal/ci/ ./internal/override/ ./internal/relationship/ ./internal/jobs/ ./internal/server/` (lokal ohne `TestCIQueryBudget`).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+REC-08;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+API-05;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+REC-12;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+CI-13;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** die Fehlerabbildung abgelehnter Wirkungen (F-405, WP-676 `k7n-review-resolve-errors`); ein `ci.merge`-Job, dessen Merge gelang, dessen Auflösungstransaktion danach aber scheiterte, bleibt `running`, bis ein Retry ihn abschließt (Restrisiko, nur bei Datenbankfehler nach dem Merge); weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-676 – Review-Auflösung: abgelehnte Wirkungen mit dem Fehlervertrag der Ressource (409/422/404 statt 500); `unknown_relationship` accept ohne Kante abgelehnt
+
+**Schlüssel:** `k7n-review-resolve-errors` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-088 (`review-model`), WP-089 (`conflict`), WP-643 (`k5n-review-merge-errors`), WP-671 (`k7n-entitlement-alias-paths`), WP-675 (`k7n-review-resolve-once`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-405](../../../audit/g1-reaudit/FINDINGS.md#f-405) | P3 | Review-Auflösung: abgelehnte Wirkung (`*api.FieldError`, fehlende Abhängigkeit) antwortet 500 statt 409/422/404; `unknown_relationship` accept mit ungültiger Quelle 200 ohne Kante | schließt | Wiederholungsprüfung von WP-088 (K7, r2-b2) auf `8e761c2`, Prüfer und Verifier |
+
+**Problem:** `reviews.writeError` (backend/internal/reviews/handler.go) bildet nur `*reviews.Error`, `ErrNotFound`, `ErrAlreadyResolved` und `TypedProblem` ab; jeder andere Fehler einer Wirkung wird über `api.WriteRepoError` zu 500. Betroffen: accept eines `scope_suggested`-Eintrags, dessen CIDR der Kollektor schon als Scope hat (`POST /discovery-scopes` antwortet 409 auf `target`), mit unbekannter Kollektor-UUID, mit Kollektor-ID ohne UUID-Form und mit ungültiger CIDR (`*api.FieldError` aus `Scope.Validate`/`scopeError`); accept eines `override_conflict` ohne Zeile in `ci_field_value` (`override.ErrNotFound`); `new` eines `unlicensed_ci` mit leerem Payload. `resolveUnknownRelationship` verschluckt den Fehler von `upsertRelationship`: accept mit `source_ci_id` ohne UUID-Form oder mit unbekanntem CI meldet 200 `resolved` ohne Kante (TOP-01). Seit WP-675 läuft die Wirkung in der Transaktion der Auflösung; ein verschluckter Anweisungsfehler würde dort als 500 enden.
+
+**Akzeptanzkriterien:**
+
+- [ ] `writeError` bildet `*api.FieldError` und `*api.ConflictError` mit `api.WriteFieldError` ab (Status und Feld der Ressource, `application/problem+json`): `scope_suggested` accept bei bestehendem Scope 409 Feld `target`, unbekannter Kollektor und Kollektor ohne UUID 422 Feld `collector_id`, ungültige CIDR 422 Feld `target`, wie `POST /api/v1/discovery-scopes`; der Eintrag bleibt offen, kein Scope entsteht.
+- [ ] `override_conflict` accept: ein CI, das fehlt, oder ein Feld ohne Feldwert (`override.ErrNotFound`) 404, ein Eintrag ohne CI-UUID oder Feld bzw. mit reserviertem Namen 422; `unlicensed_ci` new: ein Eintrag ohne Gerätesatz oder ohne Typ-UUID 422, ein Validierungsfehler des CI 422 mit Feld; der Eintrag bleibt offen.
+- [ ] `unknown_relationship` accept (TOP-01): Quelle oder Ziel ohne UUID-Form 422, ein unbekanntes oder unsichtbares CI 404, ein vom Typ `connected_to` nicht erlaubter CI-Typ 422; keine Kante, der Eintrag bleibt offen. Die Ingest-Ableitung (`upsertRelationship`) verhält sich unverändert.
+- [ ] Die bisher richtigen Abbildungen bleiben: `conflicting_values` accept mit vergebener Seriennummer 409, Merge eines `resurrected_device` mit vergebener Seriennummer 409, ungültige `management_ip` 400, unbekannter `ci_type_id` 422 auf `ci_type_id`, Merge in einen inzwischen gelöschten Kandidaten 404.
+- [ ] `TestReviewResolutionKeepsErrorContract` ist auf `e5c2d86` rot (sechs Fälle 500, `unknown_relationship` 200 ohne Kante) und mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Spec-first: `api/openapi.yaml` beschreibt bei `resolveReviewItem` die Antworten abgelehnter Wirkungen (409/422 mit Feld, 404); `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/reviews/ ./internal/discovery/... ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/reviews/handler.go
+- backend/internal/discovery/review.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/discovery/topology.go
+- backend/internal/server/scope_suggested_errors_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Nur die Abbildung von Fehlern und Vorprüfungen vor der Wirkung; die Wirkungen laufen weiter unter dem Scope der Anfrage in der Transaktion der Auflösung (WP-675).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestReviewResolutionKeepsErrorContract$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -p 1 -count=1 ./internal/reviews/ ./internal/discovery/... ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+REC-08;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+API-03;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+API-05;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+DIS-09;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** `override_conflict` accept auf einem inzwischen gelöschten CI (Probe: 200, der Override des gelöschten CI wird entfernt) und `probable_duplicate` merge mit einer `ci_id` ohne UUID-Form im Payload (400 statt 404/422) – als Kandidaten gemeldet, nicht Teil von F-405; die Adoption nach Erhöhung von `max_cis` (`AdoptUnlicensed`) bricht an einem Eintrag ohne Gerätesatz weiter ab wie bisher; weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-677 – Enrollment-Code bindet den Collector an Client und Site seines Erzeugers
+
+**Schlüssel:** `k7n-enrollment-client-binding` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-144 (`d-col-token`, Enrollment-Code, COL-04), WP-145 (`d-col-cert`, Collector-CA), WP-147 (`d-col-bundle`), WP-153 (`d-scope`, `scope_suggested` nach dem Enrollment), WP-668 (`k7n-bound-key-creator-scope`, Erzeuger-Scope gebundener API-Keys, Muster E-98)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-406](../../../audit/g1-reaudit/FINDINGS.md#f-406) | P2 | Enrollment-Code ohne Client-Bindung: ein auf Client 1 beschränkter Engineer schreibt über das unauthentifizierte Enrollment einen aktiven Collector in Client 2 oder org-weit ein | schließt | K7-Wiederholungsprüfung r2-b3 (Auditor und adversarialer Verifier auf `96bb4d0`, Probe `k7/ver/r2-b3/evidence/k-reaudit-2/WP-145/verify-k1-enrollment-client-binding.log`) |
+
+**Problem:** `collector_enrollment_code` (000042) trägt nur die Organisation. `POST /collectors/enrollment-codes` (`discovery.go:851` auf `e5c2d86`) speichert keinen Scope des Erzeugers, und das unauthentifizierte `POST /collectors/enroll` (`discovery.go:901`) übernimmt die `client_id` des Bodys; `EnrollCollectorWithQuota` (`pg_repository.go:806`) registriert unter `OrgWideScope`. Ein Engineer, dem `collector:manage` nur in Client 1 zugewiesen ist und dem `POST /collectors` für Client 2 und org-weit 403 antwortet, schreibt so einen aktiven Collector mit mTLS-Zertifikat in Client 2 oder org-weit ein. Er sieht ihn danach nicht mehr; der Collector meldet Daten und Scope-Vorschläge in den fremden Client und erhält dort angelegte Zugangsdaten über den Scope-Kanal (COL-04, TEN-09, E-08).
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000187: `collector_enrollment_code` erhält `binding_recorded` (BOOLEAN, Default false), `client_id` und `site_id` (Fremdschlüssel auf `client(id, organization_id)` bzw. `site(id, organization_id)`, `ON DELETE CASCADE`), Check `binding_recorded OR (client_id IS NULL AND site_id IS NULL)`, einen Trigger, der den Client aus der Site ableitet und einen abweichenden ablehnt (fester `search_path`, kein SECURITY DEFINER), und die restriktiven Policies `collector_enrollment_code_scope_select|insert|update|delete`, die Client- und Site-Scope wie die Policies von `collector` anwenden (Lesen zeigt auch ungebundene Codes; das System-Flag darf nur lesen). Down entfernt alles; Roundtrip, Schema-Baseline, `TestRLSCatalog` und `TestRLSMatrix` grün.
+- [ ] `POST /api/v1/collectors/enrollment-codes` (spec-first) nimmt optional `client_id` und `site_id` an und nennt die Bindung in der Antwort. Maßgeblich ist der Scope, in dem der Erzeuger `collector:manage` hält (`Principal.ScopeFor`, geschnitten mit dem Scope der Anfrage; API-Keys: Scope der Anfrage; ohne Scope 403): eine gewählte ID außerhalb → 403; ohne Wahl bindet genau ein Client bzw. eine Site, mehrere → 422, keiner → 403; eine org-weite Dimension bleibt ungebunden. Eine Site eines anderen Clients → 422. `created_by` wird belegt.
+- [ ] `POST /api/v1/collectors/enroll` registriert den Collector im Client und in der Site des Codes; eine abweichende `client_id` → 422, nichts angelegt, der Code bleibt unbenutzt (Prüfung vor Quota und Verbrauch, `api.WriteFieldError` statt 500). Der Code eines org-weiten Erzeugers verhält sich wie bisher (beliebiger Client der Organisation oder org-weit). Codes ohne `binding_recorded` (vor 000187 oder von einem älteren Build erzeugt) werden nicht eingelöst (401).
+- [ ] `TestEnrollmentCodeBindsCreatorClients` (`internal/server/enrollment_client_binding_integration_test.go`, PostgreSQL, Produktionsrouter mit Collector-CA und OpenAPI-Validierung) deckt die Fälle des Retests von F-406 ab; auf `e5c2d86` rot (201 mit Collector in Client 2), grün nach der Korrektur, auch als `nobody`.
+- [ ] `docs/betrieb/upgrade-hinweise.md` beschreibt die Behandlung offener Altcodes (fail-closed, Abfrage für Betreiber, Prüfung bereits eingeschriebener Collectors); `docs/betrieb/collector-ca.md` nennt die Bindung.
+- [ ] Bestehende Tests der Pakete `discovery`, `server`, `tenant/...`, `cmd/server`, `api` und `database` (allein) grün; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline).
+
+**Dateien (18 Einträge):**
+
+- backend/migrations/000187_enrollment_code_client_binding.up.sql
+- backend/migrations/000187_enrollment_code_client_binding.down.sql
+- backend/internal/discovery/discovery.go
+- backend/internal/discovery/enrollment_binding.go
+- backend/internal/discovery/pg_repository.go
+- backend/internal/discovery/collector_quota_test.go
+- backend/internal/server/enrollment_client_binding_integration_test.go
+- backend/internal/tenant/rls/fixtures_test.go
+- backend/internal/tenant/rls/system_worker_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/schema-baseline.md
+- docs/betrieb/upgrade-hinweise.md
+- docs/betrieb/collector-ca.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** Migration 000187 (Spalten, Fremdschlüssel, Check, Trigger `trg_collector_enrollment_code_site_binding`, vier restriktive Policies). Bestehende Policies (`collector_enrollment_code_isolation`, `_system_select`) bleiben. Die Erzeugung läuft als `reticora_app` mit den Tenant-GUCs der Anfrage (`database.WithRequestTenant`), das Einlösen wie bisher: Suche nach dem Hash unter `WithSystem` (nur Lesen), Registrierung unter `OrgWideScope` der Organisation des Codes. Keine neuen Rechte, keine Änderung an `withSystemCallers`.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/discovery/ ./internal/server/ ./internal/tenant/... ./cmd/server/ ./internal/api/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`, `TEST_NATS_SERVER_BIN`.
+- `go test -count=1 -p 1 ./internal/database/...` allein (`TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`).
+- `go test -count=1 -v -run '^TestEnrollmentCodeBindsCreatorClients$' ./internal/server/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+COL-04;[B];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677
+TEN-09;[Q];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung (E-08 fail-closed; Muster E-98/WP-668 für den Scope des Erzeugers). Hinweis für die Leitung: Die Web-Oberfläche (`DiscoveryPage`, `OnboardingPage`) erzeugt Codes ohne `client_id`; ein auf mehrere Clients beschränkter Nutzer erhält dort jetzt 422 statt eines unbeschränkten Codes und muss den Client über die API wählen. Eine Client-Auswahl im Dialog ist nicht Teil dieses WP.
+
+**Nicht Bestandteil:** Client-/Site-Auswahl beim Erzeugen eines Codes in der Web-Oberfläche. Bereits eingeschriebene Collectors werden nicht umgebunden (Hinweis zur Prüfung in `upgrade-hinweise.md`). Die Bindung der Edge-Ingest-Records an den Client des Collectors (F-407, WP-678). Beobachtung ohne Änderung: `PATCH /collectors/{id}` und `POST /collectors` geben eine `api.FieldError` des Repositorys (`collectorError`, etwa „the site belongs to another client“) über `api.WriteRepoError` als 500 statt 422 aus.
+
+### WP-678 – Edge-Ingest bindet die Records eines Collectors an dessen Client
+
+**Schlüssel:** `k7n-edge-ingest-collector-client` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-146 (`d-col-nats`, Edge-Datenpfad), WP-153 (`d-scope`), WP-481 (`t3-ingest-poison`, Fehler je Record, F-090), WP-334 (`nfr03-lanes`, Ingest-Spuren), WP-677 (`k7n-enrollment-client-binding`, F-406)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-407](../../../audit/g1-reaudit/FINDINGS.md#f-407) | P2 | Edge-Ingest bindet die Records eines client-gebundenen Collectors nicht an dessen Client: CIs in fremden Clients angelegt und geändert | schließt | K7-Wiederholungsprüfung r2-b3 (adversarialer Verifier auf `96bb4d0`, Probe `k7/ver/r2-b3/evidence/k-reaudit-2/WP-153/verify-k3-edge-record-client.log`) |
+
+**Problem:** `edgeIngest` (`backend/internal/discovery/edge_ingest.go:146` auf `e5c2d86`) läuft im org-weiten Systemkontext des NATS-Endpunkts und übernimmt `client_id`, `site_id` und `scope_id` jedes Records ungeprüft (`itemFromRecord`, `newIngestMessages`); `collectorScopeContext` gilt nur für Metriken. Ein an Client 1 gebundener Collector legt so CIs in Client 2 oder org-weit an und ändert über einen passenden Identitätsschlüssel CIs von Client 2 (`updated` 1, `management_ip` geändert), während ein Engineer von Client 1 über `POST /discovery/ingest` dafür 403 erhält. Über die Queue trägt die Nachricht denselben org-weiten Scope (DIS-05, TEN-09, E-08).
+
+**Akzeptanzkriterien:**
+
+- [ ] `edgeIngest` liest den Collector und verarbeitet die Records in seinem Client-Scope (`collectorIngestContext`); die Queue-Nachricht trägt diesen Scope zum Consumer. Die Site-Dimension bleibt beim Ingest org-weit (ein entdecktes CI erhält seine Site aus einer Location; begründet im Code und in `docs/betrieb/ingest-spuren.md`). Metriken behalten Client- und Site-Scope (`collectorScopeContext`, F-394).
+- [ ] Records eines client-gebundenen Collectors: ohne `client_id` → Client des Collectors (bei Site-Bindung auch dessen Site); fremde `client_id`, fremde Site, eine Site eines anderen Clients oder eine `scope_id`, die der Client nicht sieht oder die einem anderen Client gehört → Fehler je Record (403, nicht wiederholbar), nicht veröffentlicht; die übrigen Records des Batches werden verarbeitet (WP-481); sind alle abgewiesen, antwortet die Edge 403. Eine fehlgeschlagene Nachschlage-Abfrage ist ein vorübergehender Fehler des Records. Records org-weiter Collectors bleiben unverändert.
+- [ ] Die Identitätsauflösung sieht nur CIs des Collector-Clients: Ein Record mit der Seriennummer eines CI eines anderen Clients ändert dieses nicht (Abweisung 409 an der Eindeutigkeit der Seriennummer je Organisation, wie über die API).
+- [ ] `TestEdgeIngestBindsRecordsToCollectorClient` (`internal/discovery/edge_record_client_integration_test.go`, PostgreSQL) deckt die Fälle des Retests von F-407 ab, auch den Queue-Weg; auf `e5c2d86` rot (CI in Client 2, Client-2-CI geändert), grün nach der Korrektur, auch als `nobody`.
+- [ ] `TestIngestStatementBudget`, `TestRediscoverStatementBudget`, die Spur- und Poison-Tests und die übrigen Tests der Pakete `discovery`, `tenant/...`, `server` und `cmd/server` grün; golangci-lint ohne neue Befunde (Lint-Schuld ≤ Baseline).
+
+**Dateien (9 Einträge):**
+
+- backend/internal/discovery/edge_ingest.go
+- backend/internal/discovery/consumer.go
+- backend/internal/discovery/scope.go
+- backend/internal/discovery/edge_record_client_integration_test.go
+- docs/betrieb/ingest-spuren.md
+- audit/g1-reaudit/FINDINGS.md
+- docs/plan/g1-korrektur/abdeckung-befunde.csv
+- docs/plan/g1-korrektur/implementierungsplan.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine. Der Edge-Ingest läuft als `reticora_app` mit dem Client-Scope des Collectors (`database.WithRequestTenant` über den Kontext des Requests bzw. den Scope der Queue-Nachricht); die Policies von `ci`, `review_item` und `site` (`SiteClient`) wirken unverändert. Keine neuen Rechte, kein `WithSystem`-Pfad.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -p 1 ./internal/discovery/ ./internal/tenant/... ./internal/server/ ./cmd/server/` mit `TEST_DATABASE_URL`, `TEST_APP_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_NATS_URL`, `TEST_NATS_SERVER_BIN`.
+- `go test -count=1 -v -run '^TestEdgeIngestBindsRecordsToCollectorClient$' ./internal/discovery/`, auch als `nobody`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+DIS-05;[B];D;backend/internal/discovery/edge_record_client_integration_test.go;WP-678
+TEN-09;[Q];D;backend/internal/discovery/edge_record_client_integration_test.go;WP-678
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung. Hinweise für die Leitung: (1) Ein an eine Site gebundener Collector bindet seine Records an seinen Client und seine Site (Review-Items tragen sie), die entdeckten CIs aber nur an den Client, weil ein CI seine Site aus einer Location ableitet; eine Platzierung der CIs an der Site des Collectors wäre eine Produktentscheidung. (2) Der 409 für einen Record mit der Seriennummer eines fremden CI wird wie bisher (WP-334, `retryReason` „identity“) als wiederholbar eingestuft: Über die Queue wird der Record bis `MaxDeliver` erneut zugestellt und landet dann im Dead Letter; der Collector zählt ihn in der 202-Antwort als verloren. Er verrät, dass die Seriennummer in der Organisation existiert, wie für einen Client-1-Principal über die API.
+
+**Nicht Bestandteil:** Nachrichten, die vor dem Update mit org-weitem Scope in der Queue liegen, werden noch org-weit verarbeitet (höchstens bis zu ihrer Zustellung). Der HTTP-Ingest (`POST /discovery/ingest`) eines eingeschränkten Principals ohne `client_id` (403 per RLS, unverändert). Die Bindung des Enrollment-Codes (F-406, WP-677).
+
+### WP-680 – Audit-Einträge für die Laufzeitrolle unveränderlich: Siegel personenbezogener Werte nur über `audit_seal_pii`, keine Neuverkettung, `audit-verify` prüft versiegelte Einträge gegen das Original
+
+**Schlüssel:** `k7n-audit-append-only-runtime` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 2,5 PT
+
+**Voraussetzungen (gemergt):** WP-132 (`b-audit-chain`), WP-241 (`b-pii-surrogates`), WP-064 (`ddl-contract`), WP-656 (`k7n-assignment-signature-surrogate`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-409](../../../audit/g1-reaudit/FINDINGS.md#f-409) | P2 | Laufzeitrolle schreibt Audit-Einträge um und verkettet neu: `app.audit_pii_migration` und `audit_rechain` stehen der Anwendung offen, `audit-verify` meldet die Kette intakt | schließt | Wiederholungsprüfung von WP-132 (K7, Verifier r3-b3) auf `55b6e7d` |
+
+**Problem:** Migration 000125 (WP-241) lässt im Append-only-Trigger `reject_audit_log_mutation()` ein UPDATE der `changes` zu, sobald die Sitzung `app.audit_pii_migration = 'on'` setzt, und `audit_rechain(org, seq)` berechnet `previous_hash` und `hash` der Organisation ab einem beliebigen Eintrag neu. Beides prüft nur die Einstellung, die jede Sitzung selbst setzt; `reticora_app` hat UPDATE auf `audit_log` und EXECUTE auf `audit_rechain`, weil der Backfill (`pii.backfill`, `sealAudit`) als Systemjob auf dem Laufzeit-Pool läuft. Die Laufzeitrolle (auch als `reticora_owner` über `SET ROLE`) schreibt damit beliebige Einträge um, verkettet neu, und `audit-verify` meldet die Kette intakt (AUD-04, WP-132 AK1).
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000188 (Nummer vorläufig): Die GUC-Ausnahme im Trigger und `audit_rechain` entfallen, `reticora_app` verliert UPDATE auf `audit_log` (DELETE bleibt für den Aufbewahrungslauf, 000119); keine Funktion berechnet einen gespeicherten Hash neu. Als Laufzeit-Login, als `reticora_app` und als `reticora_owner` scheitern UPDATE unter `app.audit_pii_migration` und `audit_rechain`; Einträge und Hashes bleiben, `audit.Verify` meldet die Kette intakt über die Originaleinträge (`TestRuntimeRoleCannotRewriteAuditChain`, auf `e5c2d86` rot).
+- [ ] Versiegeln nur über `audit_seal_pii(entry uuid, changes jsonb)`: SECURITY DEFINER der neuen Rolle `reticora_audit_sealer` (NOLOGIN, NOSUPERUSER, NOBYPASSRLS, ohne Mitglieder; Rechte nur SELECT (`id`, `organization_id`) und UPDATE (`changes`) auf `audit_log`, SELECT (`surrogate_id`, `organization_id`, `kind`) auf `pii_subject`), fester `search_path`, EXECUTE nur für `reticora_app`, nicht PUBLIC; RLS mit `app.org_id` des Aufrufers (Eintrag einer anderen Organisation: nicht gefunden).
+- [ ] Der Trigger nimmt ein UPDATE nur von `reticora_audit_sealer` an und nur, wenn die neuen `changes` die alten sind mit mindestens einer nicht leeren Zeichenkette personenbezogener Schlüssel (`audit_personal_keys()` = `pii.PersonalKeys`; Kennzeichen eines Schlüssels geht in Arrays über, nicht in Objekte, wie `pii.SealTx`) ersetzt durch `{"$pii": "<id>"}` auf ein Wert-Subjekt (`kind = 'value'`) derselben Organisation oder durch `{"$pii": ""}` (ohne Vault); alles andere bleibt textgleich, alle übrigen Spalten einschließlich `hash` und `previous_hash` unverändert. Abgelehnt: anderer Wert geändert, nicht personenbezogenes Feld versiegelt, unbekannte, fremde oder Kontakt-Referenz, Referenz ohne UUID oder mit zweitem Schlüssel, geänderter Zahlentext, entfernter oder hinzugefügter Schlüssel, Siegel ohne Referenz.
+- [ ] Der Trigger hält das Siegel fest: `chained_digest` (SHA-256 des kanonischen JSON, mit dem der Eintrag verkettet wurde; ab dem ersten Siegel unverändert), `sealed_refs` (eingeführte Referenzen, kumuliert), `sealed_hash` = SHA-256(`hash` ‖ SHA-256(kanonisches JSON des versiegelten Eintrags)); ein neuer Eintrag trägt keines. `audit_entry_hash` behält Signatur und Wert (zerlegt in `audit_entry_digest` und `audit_chain_link`).
+- [ ] `audit.Verify` (Endpunkt, Compliance-Bericht, `audit-verify`): versiegelter Eintrag verkettet über `chained_digest`; Inhalt geändert seit dem Siegel → Bruch „sealed entry changed after its seal“; mit Vault werden die Werte von `sealed_refs` zurückgesetzt (`audit_unseal`) und müssen `chained_digest` ergeben, sonst Bruch „sealed value differs from the original“; redigierter oder gelöschter Wert (Crypto-Shredding) → unbestätigt, kein Bruch. `VerifyResult` zählt `Sealed` und `Unconfirmed` (nicht in der API-Antwort); spec-first nennt `api/openapi.yaml` (`AuditVerifyResult.broken_reason`) die beiden neuen Gründe, `frontend/src/api/generated/schema.d.ts` neu erzeugt; eine Datenbank vor 000188 (wiederhergestelltes Backup) wird wie bisher geprüft (`TestAuditRechainAfterHashFix`); `audit-verify` nutzt den Vault mit `RETICORA_MASTER_KEY` (und `RETICORA_MASTER_KEY_PREVIOUS`) und nennt versiegelte und unbestätigte Einträge in der Ausgabe.
+- [ ] Der Backfill (`pii.backfill`, WP-241/WP-656) versiegelt Audit-Einträge über `audit_seal_pii` ohne Neuverkettung und ohne Kettensperre; Zahlen behalten ihren gespeicherten Text (`pii.SealStoredTx`, `json.Number`). `TestHistoryKeepsSurrogates` (Hashes unverändert, 1 versiegelt, bestätigt), `TestAssignmentSignatureKeepsSurrogate`, `TestContactsThroughTheVault` grün; `TestAuditSealOnlyReplacesPersonalValues` (Ablehnungen, Backfill mit Teil-Siegel, Verify mit und ohne Vault, geänderter und gelöschter Vault-Wert, Änderung nach dem Siegel) grün.
+- [ ] Rollenvertrag (WP-064): `VerifyRoleContract` meldet ein `current_user` oder `session_user`, das `reticora_audit_sealer` erreicht (`TestRoleContractStartupCheck`); `TestOwnerCannotTruncateTenantTables`, `TestAdminPoolCallersAreListed` unverändert grün. Kein Backfill über `NewAdminPool` (nur Kommandozeilenwerkzeuge, wechselt ohnehin in `reticora_app`).
+- [ ] Down-Migration stellt den Stand von 000125 her und verkettet jede Organisation ab ihrem ersten versiegelten Eintrag neu (wie der frühere Backfill); `reticora_audit_sealer` wird entfernt, wenn keine andere Datenbank des Clusters sie nutzt. `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` grün, `docs/schema-baseline.md` neu erzeugt.
+- [ ] Doku: `docs/ops/workers.md` („Sealed audit entries“: Siegel, Spalten, Prüfschritte von `audit-verify`, unbestätigte Einträge), `docs/backup-dr.md` (Schritt 7), `docs/betrieb/upgrade-hinweise.md` (Release-Hinweis, Rolle im geteilten Cluster), `docs/security/threat-model.md` (T16).
+- [ ] Regression: `go test -p 1` von `internal/audit`, `internal/jobs`, `internal/pii`, `internal/assignment`, `internal/contact`, `internal/compliance`, `internal/operator`, `internal/events`, `internal/tenant/...`, `cmd/audit-verify`, `internal/database` (allein) grün; neue Tests als Nicht-Root-Nutzer grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (23 Einträge):**
+
+- backend/migrations/000188_audit_seal_append_only.up.sql (neu)
+- backend/migrations/000188_audit_seal_append_only.down.sql (neu)
+- backend/internal/audit/audit.go
+- backend/internal/audit/append_only_integration_test.go (neu)
+- backend/internal/audit/seal_integration_test.go (neu)
+- backend/internal/jobs/pii_backfill.go
+- backend/internal/pii/surrogate.go
+- backend/internal/pii/surrogate_integration_test.go
+- backend/internal/database/role_check.go
+- backend/internal/database/role_check_integration_test.go
+- backend/cmd/audit-verify/main.go
+- backend/cmd/audit-verify/main_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/ops/workers.md
+- docs/backup-dr.md
+- docs/betrieb/upgrade-hinweise.md
+- docs/security/threat-model.md
+- docs/schema-baseline.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md (Lead)
+- docs/plan/g1-korrektur/implementierungsplan.md (Lead)
+- docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** Migration 000188 (Nummer vorläufig; 000187/000188 ggf. durch parallele WPs belegt). Neue Rolle `reticora_audit_sealer` (clusterweit, angelegt wenn nicht vorhanden, wie `reticora_owner` in 000078; dem Migrations-Login mit SET, ohne INHERIT gewährt, damit es die Funktion übergeben kann). Drei Spalten auf `audit_log` (`chained_digest`, `sealed_refs`, `sealed_hash`), Funktionen `audit_entry_digest`, `audit_chain_link`, `audit_personal_keys`, `audit_changes_seal`, `audit_unseal`, `audit_seal_pii`; `audit_entry_hash`, `reject_audit_log_mutation` und `audit_log_chain_trigger` neu definiert, `audit_rechain` entfernt; REVOKE UPDATE auf `audit_log` von `reticora_app`. Keine Policy-Änderung: `audit_isolation` und `pii_subject_isolation` gelten für PUBLIC und binden auch die Siegelrolle an `app.org_id`. Geprüft als Laufzeit-Login, als `reticora_app` mit den Tenant-GUCs (`database.WithTenant`) und nach `SET ROLE reticora_owner`.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^(TestRuntimeRoleCannotRewriteAuditChain|TestAuditSealOnlyReplacesPersonalValues)$' ./internal/audit/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -run '^(TestHistoryKeepsSurrogates|TestAssignmentSignatureKeepsSurrogate|TestContactsThroughTheVault)$' ./internal/pii/ ./internal/assignment/ ./internal/contact/`; `go test -count=1 ./cmd/audit-verify/` (`TestRunNamesSealedEntries`).
+- `cd backend && go test -count=1 ./internal/database/...` allein (`TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`, `TestRoleContractStartupCheck`, `TestOwnerCannotTruncateTenantTables`, `TestAdminPoolCallersAreListed`).
+- `cd backend && go test -count=1 -run '^TestAuditRechainAfterHashFix$' ./internal/audit/` (Prüfung einer Datenbank vor 000188).
+- Probe `verify-tamper-guc.sql` als Laufzeit-Login; `audit-verify` mit und ohne `RETICORA_MASTER_KEY` auf einem vom Backfill versiegelten Eintrag, danach mit im Vault geändertem Wert (Exit 1).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUD-04;[B];B;backend/internal/audit/append_only_integration_test.go;WP-680
+AUD-04;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
+SEC-05;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
+TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-680
+```
+
+**Entscheidungsbedarf:** keiner. Die Wahl des Wegs (SECURITY DEFINER einer eigenen Rolle ohne Mitglieder statt `reticora_owner` oder Admin-Pool) folgt aus dem Rollenvertrag: `reticora_owner` ist für `reticora_app` per `SET ROLE` erreichbar, `NewAdminPool` ist Kommandozeilenwerkzeugen vorbehalten und wechselt in `reticora_app`.
+
+**Nicht Bestandteil:** Wert-Subjekte im Vault bleiben für die Laufzeitrolle änderbar (`pii.Vault.UpdateTx`, `ReencryptTx` bei der Schlüsselrotation): Für Einträge, die seit 000125 schon beim Schreiben mit Referenz verkettet wurden, deckt die Kette nur die Referenz, nicht den angezeigten Wert; eine Änderung des Wert-Subjekts zeigt `audit-verify` dort nicht (für vom Backfill versiegelte Einträge schon, mit Vault). Als Kandidat gemeldet. Ein externer Anker des Kettenendes (gegen Neuverkettung mit Superuser-Rechten) und das Aufbewahrungs-Löschen über `app.audit_retention` (NFR-06, älter als 10 Jahre, mit Anker-Eintrag) bleiben unverändert; weitere Befunde der Wiederholungsprüfung (eigene WPs).
+
+### WP-681 – CI-Historie mit Audit: auch die Routeneinträge des CI und seiner Kontaktverknüpfungen und Schnittstellen, im Scope der Audit-Liste
+
+**Schlüssel:** `k7n-ci-history-route-audit` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-171 (`f-history`), WP-475 (`t3-history-access`), WP-505 (`t6-route-audit-values`), WP-660 (`k7n-audit-log-scope`, Scope-Register der Audit-Liste)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-410](../../../audit/g1-reaudit/FINDINGS.md#f-410) | P3 | CI-Historie mit Audit zeigt nur die Audit-Einträge vom Typ `ci`: die Routeneinträge der Unterressourcen (`cis`, `ci-contacts`, `network-interfaces`) fehlen | schließt | Wiederholungsprüfung von WP-171 (K7, Verifier r2-b4 auf `7845e9d`, zweiter Verifier r3-b3 auf `55b6e7d`) |
+
+**Problem:** `GET /api/v1/history/ci/{id}` liest für Leser mit `audit:read` nur die Audit-Einträge mit `resource_type = 'ci'` (`unifiedCIAudit`, `backend/internal/history/pg_repository.go:140–144` auf `e5c2d86`). Der Routen-Audit schreibt die Schreibvorgänge an den Unterressourcen eines CI unter dem Routensegment `cis` (`POST /cis/{id}/interfaces`, `/contacts`, `/lifecycle-transitions`, `/unmerge` …, `resource_id` = CI) und die an seinen Kontaktverknüpfungen und Netzwerkschnittstellen unter `ci-contacts` bzw. `network-interfaces` mit der Id der Verknüpfung oder Schnittstelle; das CI steht dort in den Werten (`values`, WP-505). Diese Einträge fehlen in der Historie, obwohl `audit_included: true` ist; `GET /audit-log?resource_id={id}` listet die `cis`-Einträge. Im kodierenden Test fehlen 7 von 8 Einträgen.
+
+**Akzeptanzkriterien:**
+
+- [ ] `unifiedCIAudit` liest die Einträge mit `resource_type IN ('ci', 'cis')` und `resource_id` = CI sowie die Einträge `ci-contacts` und `network-interfaces`, deren `resource_id` eine bestehende Kontaktverknüpfung bzw. Schnittstelle des CI ist oder deren Werte das CI als `ci_id` nennen (alt oder neu: Löschen, Anlegen, Umhängen). Einträge über andere CIs und andere Typen erscheinen nicht.
+- [ ] Für eingeschränkte Principals gilt im Audit-Anteil der Historie dieselbe Bedingung wie in der Audit-Liste: `audit.VisibleEntries(ctx)` (Register von WP-660, `scope.go`) liefert `true` für org-weite Principals und die Scope-Regel für eingeschränkte; `listTx` der Audit-Liste nutzt dieselbe Funktion. Ein eingeschränkter Principal sieht in der Historie keinen Eintrag, den ihm die Liste nicht zeigt (Einträge über gelöschte Verknüpfungen oder Schnittstellen bleiben ihm verborgen); das CI eines fremden Clients bleibt 404.
+- [ ] `TestCIHistoryIncludesRouteAuditOfCISubresources` (`internal/server/history_route_audit_integration_test.go`, Produktionsrouter, PostgreSQL-Routen-Auditor): Der org-weite Leser sieht alle Einträge, die `/audit-log?resource_id=` für das CI, seine Schnittstellen und seine gelöschte Kontaktverknüpfung listet (`ci.updated`, 2× `cis.interfaces`, 2× `cis.contacts`, `network-interfaces.update`, `network-interfaces.delete`, `ci-contacts.delete`), keinen Eintrag über die Schnittstelle eines anderen CI; der Client-1-Leser sieht nur Einträge der Liste und alle davon über das CI; die Historie des CI von Client 2 ist für ihn 404. Auf `e5c2d86` rot (7 von 8 fehlen), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt den Umfang des Audit-Anteils und die Sichtbarkeit für eingeschränkte Principals; `frontend/src/api/generated/schema.d.ts` neu erzeugt; `docs/security/review-g1.md` nennt die gemeinsame Regel.
+- [ ] Regression: `go test -p 1 ./internal/audit/ ./internal/history/ ./internal/server/ ./internal/middleware/ ./internal/pii/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/history/pg_repository.go
+- backend/internal/audit/scope.go
+- backend/internal/audit/audit.go
+- backend/internal/server/history_route_audit_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Abfrage läuft wie bisher in der Tenant-Transaktion des Lesers (`database.WithRequestTenant`) als `reticora_app`; die Unterabfragen auf `ci_contact` und `network_interface` und die Scope-Regel sehen nur, was die RLS dem Leser zeigt. Die Wertesuche (`changes->'values' @> …`) ist auf die zwei Typen `ci-contacts` und `network-interfaces` der Organisation beschränkt (Index `idx_audit_resource` auf `resource_type, resource_id`).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestCIHistoryIncludesRouteAuditOfCISubresources$' ./internal/server/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/audit/ ./internal/history/ ./internal/server/ ./internal/middleware/ ./internal/pii/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+CI-06;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
+AUD-05;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
+```
+
+**Entscheidungsbedarf:** keiner (E-78 regelt die Berechtigung `audit:read`, unverändert).
+
+**Nicht Bestandteil:** Routeneinträge anderer Objekte, die ein CI nur referenzieren (Beziehungen `relationships`, Rack-Montagen `rack-mounts`/`mounts`, Zuweisungen, Kompositionen, Dokumentverknüpfungen): Beziehungen erscheinen in der Historie bereits als `ci_change` (`relationship_added`/`relationship_removed`), die übrigen haben eigene Historien bzw. das Audit-Log. Einträge über gelöschte Verknüpfungen für eingeschränkte Principals (bewusst verborgen wie in der Audit-Liste, WP-660). Statuswechsel des Offline-Detektors in der Historie (F-413, WP-684). Eine Client-/Site-Spalte in `audit_log`.
+
+### WP-683 – Offline-Detektor und Ingest: Statuswechsel nur auf der gelesenen Zeile, Rückkehr nach `active` auf der gesperrten Zeile
+
+**Schlüssel:** `k7n-offline-detector-race` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-157 (`d-offline-detector`), WP-383 (Organisationsisolation des Detektors, F-108), WP-585 (`ci.online` in der Transaktion des Ingest, F-268), WP-487 (Änderungssätze `ci_change`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-412](../../../audit/g1-reaudit/FINDINGS.md#f-412) | P3 | Offline-Detektor gegen parallelen Ingest: rund ein Viertel frisch gesehener CIs endet `unknown` mit `ci.offline` | schließt | Wiederholungsprüfung von WP-157 (K7, Verifier r2-b4 auf `7845e9d`, echter Ingest-Pfad ohne Hook) |
+
+**Problem:** `OfflineDetector.RunOrg` (`backend/internal/lifecycle/offline.go`) liest die beobachtbaren CIs einer Organisation ohne Sperre und setzt den Status danach mit `UPDATE ci SET status = $3 WHERE id = $1 AND organization_id = $2` (Zeile 210 auf `e5c2d86`), ohne Bedingung auf `last_seen_at` oder `status`. Schreibt der Ingest die Sichtung dazwischen, überschreibt der Detektor sie mit `unknown` und meldet `ci.offline`. Umgekehrt entscheidet der Ingest über die Rückkehr nach `active` aus dem ungesperrten Abgleichsstand (`matched.Status == "unknown"`, `backend/internal/discovery/discovery.go:1581`); setzt der Detektor das CI nach diesem Lesen auf `unknown`, schreibt der Ingest nach dessen Commit nur `last_seen_at`. Über den echten Ingest-Pfad enden 40–50 von 200 frisch gesehenen CIs `unknown` (Probe: 48–50 von 200), bis der nächste Lauf sie zurückstellt.
+
+**Akzeptanzkriterien:**
+
+- [ ] Der Detektor setzt den Status nur, wenn die Zeile noch dem gelesenen Stand entspricht (`status`, `last_seen_at`, `deleted_at IS NULL`), und überspringt eine von einem anderen Schreiber gesperrte Zeile: `UPDATE ci SET status = $3 WHERE id = (SELECT … AND status = $4 AND last_seen_at = $5 FOR UPDATE SKIP LOCKED)`. Trifft das UPDATE keine Zeile, entstehen kein Ereignis und kein Zählerstand; der nächste Lauf entscheidet auf dem neuen Stand. Ein Status, den eine Person oder ein anderer Job dazwischen setzt (z. B. `maintenance`), bleibt ebenso erhalten.
+- [ ] Der Ingest übergibt die Sichtung als `ci.UpdateRequest.Sighting`; `ci.PGRepository.updateRow` entscheidet auf der mit `FOR UPDATE` gelesenen Zeile: ein `unknown`-CI, dessen `last_seen_at` älter als die Sichtung ist, wird im selben UPDATE `active` (Änderungssatz `status_changed`, `ci.online` wie bisher nach WP-585); eine ältere Sichtung bringt kein CI zurück (GLO-12), eine Override-Sperre des Status bleibt wirksam (`dropOverriddenFields`). `ci.MemoryRepository` entscheidet gleich. Die Entscheidung aus `matched.Status` in `discovery.go` entfällt.
+- [ ] `TestOfflineDetectorSkipsCISeenDuringRun` (`internal/lifecycle/offline_race_integration_test.go`, PostgreSQL, echter Ingest über `POST /api/v1/discovery/ingest` mit den Repositories wie `server.PostgresRepositories`, vier parallele Spuren und `RunOrg` mit 0, 20, 40 ms Versatz): kein CI mit der Sichtung der Runde endet `unknown`; `ci.offline` nur für die vom Detektor geänderten CIs, jedem folgt ein `ci.online`. Auf `e5c2d86` rot (50/50/40 von 200), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestUpdateSightingRevivesUnknownCI` (`internal/ci/sighting_test.go`): neuere Sichtung bringt `unknown` zurück, ältere nicht, ohne `Sighting` keine Änderung, `maintenance` bleibt, ungültige Zeit ist ein Validierungsfehler.
+- [ ] Regression: `go test -p 1 ./internal/ci/ ./internal/discovery/ ./internal/lifecycle/ ./internal/agent/ ./internal/reviews/ ./internal/server/` grün (bekannter lokaler Ausfall `TestCIQueryBudget` übersprungen), insbesondere `TestOfflineDetector`, `TestOfflineDetectorOrgIsolation` und die Ingest-Tests zu `ci.online` (WP-585); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (12 Einträge):**
+
+- backend/internal/lifecycle/offline.go
+- backend/internal/lifecycle/offline_race_integration_test.go (neu)
+- backend/internal/ci/model.go
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/memory_repo.go
+- backend/internal/ci/sighting_test.go (neu)
+- backend/internal/discovery/discovery.go
+- docs/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Der Detektor läuft wie bisher als `reticora_app` mit org-weitem Scope der Organisation (`database.WithTenant`, `OrgWideScope`); `FOR UPDATE SKIP LOCKED` sperrt nur die eine Zeile, die er ändert, und wartet nie auf die Zeilensperre eines Ingest, so dass zwischen Detektor und Ingest kein Sperrzyklus entsteht. Der Ingest sperrt wie bisher in `updateRow`.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestOfflineDetectorSkipsCISeenDuringRun$' ./internal/lifecycle/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -run '^TestUpdateSightingRevivesUnknownCI$' ./internal/ci/`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/discovery/ ./internal/lifecycle/ ./internal/agent/ ./internal/reviews/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+REC-09;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
+LCY-05;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
+REC-07;[B];D;backend/internal/ci/sighting_test.go;WP-683
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** dass ein CI, das zu Laufbeginn tatsächlich drei Intervalle nicht gesehen war und dessen Sichtung erst nach dem Statuswechsel eintrifft, kurz `ci.offline` und gleich danach `ci.online` meldet (beides zutreffend: der Detektor entscheidet auf dem Stand, den er liest). Der Agent-Telemetriepfad (`backend/internal/agent/handler.go`, Modul `agents` P4) setzt `Sighting` nicht; endpoint-CIs sind nicht Teil des Detektors, solange ihr Typ nicht beobachtbar ist. Die Historie der Statuswechsel des Detektors (F-413, WP-684).
+
+### WP-684 – Offline-Detektor: Statuswechsel in CI-Historie und Audit-Log, in der Transaktion des Wechsels
+
+**Schlüssel:** `k7n-offline-status-history` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-157 (`d-offline-detector`), WP-171 (`f-history`), WP-487 (Änderungssätze `ci_change`, AUD-03), WP-683 (`k7n-offline-detector-race`, Statuswechsel nur auf der gelesenen Zeile)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-413](../../../audit/g1-reaudit/FINDINGS.md#f-413) | P3 | Statuswechsel des Offline-Detektors fehlen in Historie und Audit-Log: der Wechsel nach `unknown` ist nirgends nachvollziehbar | schließt | Wiederholungsprüfung von WP-157/WP-171 (K7, Verifier r2-b4 auf `7845e9d`) |
+
+**Problem:** `OfflineDetector.RunOrg` (`backend/internal/lifecycle/offline.go`) ändert den Status eines CI (`active` → `unknown` und `unknown` → `active`) mit einem direkten UPDATE, ohne `ci_change`-Zeile und ohne Audit-Eintrag (Zeile 210 auf `e5c2d86`). Die Historie zeigt nach einer Rückkehr per Ingest nur `status_changed: unknown → active`, nie den Wechsel nach `unknown`; kehrt das CI durch den Detektor zurück, fehlen beide. AUD-03 nennt `status_changed` als Änderungsart, AUD-07 verlangt die Herkunft jeder Änderung; der Ingest schreibt seinen Statuswechsel als Änderungssatz mit Audit `ci.status_changed`.
+
+**Akzeptanzkriterien:**
+
+- [ ] Je Statuswechsel, der eine Zeile trifft (WP-683), schreibt der Detektor in derselben Transaktion eine `ci_change`-Zeile: `change_kind` `status_changed`, `change_type` `status_change`, `field_name` `status`, alter und neuer Status, `ci_version` = Version des CI, eigener `change_set_id`, `source` `system`, ohne `actor_id`/`actor_user_id`, Kommentar `ci.offline_detector`; dazu einen Audit-Eintrag `ci.status_changed` (`resource_type` `ci`, `resource_id` = CI, `actor_type` `system`, `source` `system`, `changes`: `fields` [{`field`, `old_value`, `new_value`}] wie beim Ingest, `job` `ci.offline_detector`, `last_seen_at`, `scope_interval`). Trifft der Wechsel keine Zeile, entsteht nichts.
+- [ ] `ci.version` bleibt unverändert (Systemschreibvorgang unter Rang 92, API-07, wie die Statusänderung des Ingest); `updated_at` setzt wie bisher der Trigger `trg_ci_updated_at`.
+- [ ] Audit-Einträge (`RecordMany`) und Ereignisse (`AppendMany`, `ci.offline`/`ci.online` unverändert) schreibt der Lauf gesammelt nach den Statuswechseln, in der Reihenfolge des Ingest (Audit-Kette, dann Outbox): Er hält keine der beiden organisationsweiten Sperren, während er Zeilen ändert, und Lauf und Ingest warten nicht im Zyklus aufeinander. Die Audit-Kette bleibt intakt.
+- [ ] `TestOfflineDetectorRecordsStatusChange` (`internal/lifecycle/offline_integration_test.go`, PostgreSQL): je CI genau eine `ci_change`-Zeile und genau ein Audit-Eintrag wie oben, für beide Richtungen; Version 1 unverändert; `audit.Verify` intakt; `history.List` mit `change_kind=status_changed` zeigt den Wechsel nach `unknown` mit Quelle `system`; ein zweiter Lauf schreibt nichts. Auf `e5c2d86` rot (0 Zeilen), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `docs/README.md` (Abschnitt `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED`) nennt Historie und Audit-Eintrag.
+- [ ] Regression: `go test -p 1 ./internal/lifecycle/ ./internal/history/ ./internal/audit/ ./internal/events/ ./internal/discovery/ ./internal/server/` grün, insbesondere `TestOfflineDetector`, `TestOfflineDetectorOrgIsolation`, `TestOfflineDetectorSkipsCISeenDuringRun`; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/lifecycle/offline.go
+- backend/internal/lifecycle/offline_integration_test.go
+- docs/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine. Der Detektor schreibt als `reticora_app` mit dem org-weiten Scope der Organisation (`database.WithTenant`, `OrgWideScope`) in `ci_change` (Policy `org_isolation`, Trigger `ci_change_scope` setzt Client und Site) und über `audit.PGRecorder` in `audit_log` (Kettentrigger). Eine eigene Quelle `offline-detector` ist ohne Migration nicht möglich (`audit_log_source_check`, `chk_ci_change_source`: `ui`, `api`, `collector`, `import`, `system`); der Job steht in `changes.job` bzw. im Kommentar.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestOfflineDetectorRecordsStatusChange$' ./internal/lifecycle/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/lifecycle/ ./internal/history/ ./internal/audit/ ./internal/events/ ./internal/discovery/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+AUD-03;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+AUD-07;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+```
+
+**Entscheidungsbedarf:** keiner für die Umsetzung. Hinweis für die Leitung: Soll der Detektor als eigene Quelle (`offline-detector`) statt `system` erscheinen, braucht es eine Migration der beiden CHECK-Constraints und der Filterwerte von `GET /audit-log?source=`; hier nicht umgesetzt.
+
+**Nicht Bestandteil:** die Statuswechsel anderer Systemjobs, die `ci` direkt ändern (nicht geprüft); die Historie des Collector-Status (`collector.offline`, eigener Job); eine Quelle `offline-detector` (siehe Entscheidungsbedarf).
+
+### WP-687 – Unmerge in Merge-Ketten: 409 mit dem späteren Merge, solange der Survivor Teil eines offenen Merges ist, auch mit force und beim Job-Revert
+
+**Schlüssel:** `k7n-unmerge-chain` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1 PT
+
+**Voraussetzungen (gemergt):** WP-173 (`c-ci-merge`), WP-174 (`c-ci-unmerge`), WP-182 (`c-jobs-api`), WP-485 (`t3-unmerge-conflict`), WP-670 (`k7n-max-cis-all-paths`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-416](../../../audit/g1-reaudit/FINDINGS.md#f-416) | P2 | Unmerge in einer Merge-Kette: das Unmerge des früheren Merges belebt den Survivor, der Opfer eines offenen Merges ist, und verschiebt danach die Referenzen auf das falsche CI | schließt | Wiederholungsprüfung von WP-174 (K7, Verifier r2-b5 auf `22e24ff`, adversarial bestätigt) |
+
+**Problem:** `PGRepository.Unmerge` (backend/internal/ci/merge.go) schreibt die Snapshot-Zeile des Survivors zurück, ohne zu prüfen, ob der Survivor inzwischen selbst Opfer eines offenen `ci_merge` ist. Nach a→b und b→c macht `POST /cis/{a}/unmerge?force=true` b aktiv, während der Merge b→c offen bleibt: `GET` b antwortet 200 statt 301, b lässt sich nicht mehr mergen, und das folgende Unmerge von b stellt aus seinem Snapshot die Beziehungen von a am Stand „bei b“ wieder her, obwohl a aktiv ist. Ohne force antwortet das Unmerge 409 mit `"fields":[]`, weil `laterSurvivorChanges` die Zeile `merged_ci` des Merges nicht mehr beim Survivor findet (sie ist mit der Historie nach c gewandert); der `detail` nennt weder Feld noch den späteren Merge. Der Revert des Jobs `ci.merge` läuft über dasselbe Unmerge.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PGRepository.Unmerge` weist nach dem Sperren beider CIs ab, solange ein anderer offener `ci_merge` den Survivor hält: als Opfer (der Survivor wurde später in ein anderes CI gemergt) oder als Survivor eines späteren Merges (`merged_at` ≥ dem eigenen). Die Ablehnung gilt auch mit `force=true`; sie ändert nichts (CI-Zeilen, offene Merges, Referenzen, Audit) und nennt den späteren Merge (`*ci.UnmergeLaterMergeError`, Sentinel `ci.ErrUnmergeLaterMerge`). Ist der spätere Merge für den Aufrufer unsichtbar (die Merge-Zeile trägt den Client ihres Survivors, RLS), blockiert der Tombstone des Survivors (`merged_into_id`) ebenso; die Ablehnung nennt dann nur den Survivor, keine Id außerhalb des Scopes.
+- [ ] `POST /api/v1/cis/{id}/unmerge` antwortet darauf 409 problem+json mit `type` `urn:reticora:problem:unmerge-later-merge`, `detail` „the survivor is part of a later merge; unmerge that merge first: merge … of the CI … into the CI …“ und den Feldern `later_merge_id`, `later_merge_victim_id`, `later_merge_survivor_id` (außerhalb des Scopes nur `later_merge_victim_id`); `POST /api/v1/jobs/{id}/revert` des Jobs `ci.merge` antwortet 409 mit demselben `detail` (Reverter in `router.go`), nicht 500.
+- [ ] In der richtigen Reihenfolge (zuerst b→c, dann a→b) kehren die Referenzen zum jeweiligen Opfer zurück: die Beziehung a→x startet nach dem Unmerge von b→c an b, nach dem Unmerge von a→b an a; danach ist keines der CIs gemergt und kein Merge offen. `GET` des Opfers eines offenen Merges bleibt 301 auf seinen Survivor.
+- [ ] Die 409 für spätere Änderungen des Survivors nennt die Felder: Fehlt die Zeile `merged_ci` des Merges in der Historie des Survivors, gilt die Version nach dem Snapshot des Survivors (Snapshot-Version + 1) als Version des Merges; ohne aufgezeichnete Felder nennt der `detail` die Version, statt mit „: “ zu enden.
+- [ ] `TestUnmergeRefusesWhileSurvivorIsMergedVictim` (`internal/ci/unmerge_integration_test.go`) und `TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim` (`internal/server/merge_chain_revert_integration_test.go`, Produktionsrouter) auf `e5c2d86` rot (force-Unmerge 200, b aktiv mit offenem Merge, GET b 200, Beziehung an b), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt die Ablehnung am Unmerge (Schema `UnmergeLaterMergeProblem`) und am Job-Revert; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/ci/ ./internal/server/ ./internal/jobs/` grün (ohne `TestCIQueryBudget`); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (11 Einträge):**
+
+- backend/internal/ci/merge.go
+- backend/internal/ci/handler.go
+- backend/internal/server/router.go
+- backend/internal/ci/unmerge_integration_test.go
+- backend/internal/server/merge_chain_revert_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die neue Abfrage auf `ci_merge` läuft in der Tenant-Transaktion des Unmerge (`database.WithRequestTenant`, `reticora_app`) mit `organization_id` der Anfrage; die RLS auf `ci_merge` gilt unverändert. Weil sie einem Client-Principal den Merge in ein CI eines anderen Clients verbirgt, prüft das Unmerge zusätzlich `merged_into_id` der (sichtbaren, gesperrten) Survivor-Zeile; im kodierenden Test belegt (Client-1-Principal, Survivor in Client 1 nach Client 2 gemergt: ohne diese Prüfung 200 und b aktiv). Die Prüfung liegt nach den Sperren `FOR UPDATE NOWAIT` auf Merge-Zeile und beiden CIs, ein paralleler Merge des Survivors ist damit ausgeschlossen (er bräuchte dieselbe CI-Sperre).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUnmergeRefusesWhileSurvivorIsMergedVictim$' ./internal/ci/` und `go test -count=1 -v -run '^TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim$' ./internal/server/` gegen PostgreSQL, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/server/ ./internal/jobs/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-687
+CI-12;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
+JOB-03;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
+```
+
+**Entscheidungsbedarf:** keiner. E-80 (force überschreibt spätere Änderungen des Survivors) bleibt unverändert; ein offener späterer Merge ist keine „Änderung“ im Sinne von E-80, sondern ein eigener Merge, den force nicht rückgängig macht.
+
+**Nicht Bestandteil:** ein Unmerge, das eine Kette in einem Schritt rückwärts auflöst (der Nutzer macht die späteren Merges nacheinander rückgängig); eine Integritätsprüfung auf „aktives CI mit offenem Merge als Opfer“ (der Zustand entsteht mit diesem WP nicht mehr; Altbestände aus force-Unmerges vor dem Fix sind nicht untersucht); eine Bereinigung der Konflikt-409 nach einem Merge-und-Unmerge des Survivors ohne Nettoänderung (sie nennt die Felder `merged_into_id`/`unmerged_ci`; force stellt dann den Snapshot her); Anzeige im Frontend (es ruft das Unmerge nicht auf).
+
+### WP-688 – Lastnachweis: drei Läufe nur desselben Server-Commits mit allen fünf Jobs bewertbar, Teilbewertung als eigener Modus
+
+**Schlüssel:** `k7n-load-evidence-same-commit` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** LT · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-206 (`lt-run`), WP-439 (`t4-load-report`), WP-612 (`k3n-load-evidence`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-417](../../../audit/g1-reaudit/FINDINGS.md#f-417) | P3 | Lastnachweis: `evaluate-runs.sh` bewertet drei Läufe verschiedener Server-Commits mit nur einem Job als „alle Budgets gehalten“ (Exit 0) | schließt | Wiederholungsprüfung von WP-206/WP-612 (K7, Verifier r2-b5 auf `22e24ff`) |
+
+**Problem:** `tests/load/evaluate-runs.sh` (und damit `load-evidence.yml`) übernimmt „Server, Seed und Migrationen“ und „Vollständig“ aus `ergebnis.md` nur in die Lauftabelle. Drei Läufe mit den Server-Commits `commit1`, `commit2`, `commit3` und nur dem Job `api` (`scenarios=api`) ergeben „Bewertung nach E-58 (Median über drei Läufe): alle Budgets gehalten“, Exit 0. WP-206/WP-612 verlangen drei vollständige Läufe (`scenarios=all`) desselben Codes.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ohne Option prüft `evaluate-runs.sh` vor dem Urteil: alle drei Läufe nennen denselben, nicht leeren Commit unter „Server, Seed und Migrationen“, und jeder Lauf hat jeden der fünf Jobs `api`, `ingest`, `ingest-spool`, `ingest-rediscover`, `nfr01-volume` (in der Zeile „Jobs“ genannt und mit Verzeichnis). Sonst lautet die letzte Zeile „Bewertung nach E-58 (Median über drei Läufe): nicht bewertbar: <Gründe>“ (verschiedene Commits mit Lauf-ID und Commit, ein Lauf ohne Commit, je fehlendem Job die Läufe ohne ihn), jeder Grund steht auf stderr, Exit 1. Tabellen und Mediane bleiben im Bericht; ein Abschnitt „Voraussetzungen“ nennt, ob sie erfüllt sind.
+- [ ] Die fünf Jobs erscheinen ohne Option immer, in der Reihenfolge von `load.yml`; die Medianregel von E-58 (Median, „rot in zwei von drei“, fehlender Messwert als verfehlt) bleibt unverändert.
+- [ ] `--partial` ist ein eigener Modus zur Diagnose: bewertet die Jobs, die einer der Läufe nennt oder hat (ein fehlender Job zählt in seinem Lauf als rot), verlangt ebenfalls denselben Server-Commit und beginnt die letzte Zeile mit „Teilbewertung nach E-58 (Median über drei Läufe, kein G1-Nachweis)“, nie mit „Bewertung nach E-58“. `load-evidence.yml` ruft das Skript ohne `--partial` auf.
+- [ ] `tests/load/evaluate-runs.test.sh`: neue Fälle „mixed server commits: exit 1“, „a run without server commit: exit 1“, „missing job: exit 1“, „three runs of scenarios=api and three server commits: exit 1“ (die Probe von F-417), „--partial with three server commits: exit 1“ und „the same runs without --partial: exit 1“; „all held: exit 0“ mit fünf Jobs eines Commits; die bisherigen Fälle der Medianregel laufen mit `--partial`. Auf `e5c2d86` rot (gemischte Commits und fehlender Job Exit 0), mit der Korrektur grün (78 von 78).
+- [ ] `shellcheck` auf `evaluate-runs.sh` und `evaluate-runs.test.sh`, `actionlint` auf `load-evidence.yml` und `load.yml` ohne Befund; `./tests/load/archive-run.test.sh` grün; Ratchet `--kinds sh` 0 Fehler.
+- [ ] `tests/load/README.md`, `docs/acceptance/lasttest-g1.md` (Nachtrag und Abschnitt „Bewertung nach E-58“), `docs/acceptance/artefakte/lasttest/README.md` und der Kopf von `load-evidence.yml` beschreiben die Voraussetzungen und den Modus `--partial`. Die anerkannte Bewertung von N1 bis N3 (Run 40320307297: alle drei auf `3910aae`, je fünf Jobs) bleibt gültig.
+
+**Dateien (9 Einträge):**
+
+- tests/load/evaluate-runs.sh
+- tests/load/evaluate-runs.test.sh
+- .github/workflows/load-evidence.yml (Kopfkommentar)
+- tests/load/README.md
+- docs/acceptance/lasttest-g1.md
+- docs/acceptance/artefakte/lasttest/README.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `./tests/load/evaluate-runs.test.sh` und `./tests/load/archive-run.test.sh`.
+- `shellcheck tests/load/evaluate-runs.sh tests/load/evaluate-runs.test.sh`; `actionlint .github/workflows/load-evidence.yml .github/workflows/load.yml`.
+- Probe des Verifiers (`verify-evaluate-runs-commit-and-jobs.sh`) gegen das neue Skript: Exit 1, „nicht bewertbar: verschiedene Server-Commits …; Job `ingest` fehlt in Lauf 900001, 900002, 900003; …“.
+- CI: der Selbsttest läuft im Job `prepare` von `load.yml`; ein Lauf von `load-evidence.yml` auf drei Archiven steht aus (nur in GitHub Actions).
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NFR-10;[Q];LT;tests/load/evaluate-runs.test.sh;WP-688
+```
+
+**Entscheidungsbedarf:** keiner. Die Ergänzung zu E-58 (Median über drei Läufe) bleibt unverändert; die Voraussetzung „drei vollständige Läufe desselben Codes“ stammt aus WP-206/WP-439 AK 3 und wird jetzt im Skript geprüft. Eine Teilbewertung ist nie G1-Nachweis.
+
+**Nicht Bestandteil:** Prüfung weiterer Felder von `ergebnis.md` (Lauf-Commit von `tests/load`, Versuch 1, Eingaben `objects`/`duration`, „Vollständig“ – der fehlende Job wird über Zeile „Jobs“ und Verzeichnis erkannt); ein neuer Lauf von `load-evidence.yml` (Wiederholungsläufe nach WP-658/WP-659 stehen ohnehin aus); die Übernahme der Archive ins Repository (WP-204).
+
+### WP-679 – Attributdefinition: jede abgelehnte Definition nennt ihr eigenes Feld; reservierter Schlüssel 400 mit `field` `key`
+
+**Schlüssel:** `k7n-attribute-definition-key-field` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-091 (`glo13-ns`, reservierte Namensräume), WP-116 (`b-met-attrdef`, Ressource `attribute-definitions`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-408](../../../audit/g1-reaudit/FINDINGS.md#f-408) | P3 | Attributdefinition mit reserviertem Schlüssel: 400 nennt das Feld `data_type` statt `key` | schließt | K7-Wiederholungsprüfung r2-b3 (Verifier auf `96bb4d0`, bestätigt durch einen zweiten Agenten) |
+
+**Problem:** `POST /api/v1/attribute-definitions` mit einem reservierten Namensraum als `key` (`_overrides`, `_observed`, `_provenance`, `_instance`) antwortet 400 mit `"field":"data_type"` und `detail` `data_type: field name "_instance" is a reserved namespace (GLO-13)`. `AttributeDefinition.Validate` (`backend/internal/citype/attribute_definition.go:176–177` auf `e5c2d86`) meldet jeden Fehler von `fieldmeta.ValidateDefinition` unter `data_type`, auch das unbekannte `reference_target` und ungültige `conditional`-Prädikate. Ein leerer Schlüssel nennt dagegen korrekt `key`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `fieldmeta.ValidateDefinition` gibt bei einer Ablehnung einen `*fieldmeta.DefinitionError` mit dem betroffenen Attribut zurück (`name`, `data_type`, `reference_target`, `validation`, `conditional`); `Error()` ist der bisherige Text, die Feld-Endpunkte `/ci-types/{id}/fields` und `/cis/{id}/field-definitions` antworten unverändert.
+- [ ] `AttributeDefinition.Validate` ordnet die Ablehnung dem Feld der Anfrage zu: `name` → `key`, `data_type`, `reference_target`, `validation` und `conditional` gleichnamig; ein Fehler ohne Attribut bleibt `data_type`.
+- [ ] `TestAttributeDefinitionReservedKeyNamesKeyField` (`internal/citype/attribute_definition_test.go`): jeder reservierte Namensraum als `key` → `api.FieldError` und Problem 400 mit `field` `key` und einem `detail`, das den reservierten Namensraum nennt; leerer Schlüssel → `key`, unbekannter Typ → `data_type`, unbekanntes Referenzziel → `reference_target`, ungültiger Operator und Prädikat ohne Feld → `conditional`. Auf `e5c2d86` rot (alle reservierten Namen und die drei übrigen Fälle unter `data_type`), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestAttributeDefinitionsAgainstPostgres` prüft über HTTP und PostgreSQL: `_overrides` als `key` → 400 `"field":"key"`, nichts gespeichert.
+- [ ] `api/openapi.yaml` (spec-first) nennt am Feld `key` von `AttributeDefinitionCreate` die reservierten Namensräume (400 mit `field` `key`) und das eigene Feld der übrigen Ablehnungen; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/citype/ ./internal/fieldmeta/ ./internal/ci/ ./internal/override/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/fieldmeta/fieldmeta.go
+- backend/internal/citype/attribute_definition.go
+- backend/internal/citype/attribute_definition_test.go (neu)
+- backend/internal/citype/attrdef_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung; reine Fehlerzuordnung vor dem Schreiben.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -v -run '^TestAttributeDefinitionReservedKeyNamesKeyField$' ./internal/citype/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -p 1 ./internal/citype/ ./internal/fieldmeta/ ./internal/ci/ ./internal/override/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+GLO-13;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
+API-03;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
+MET-10;B/G1, Teil P2/G2;D;backend/internal/citype/attrdef_integration_test.go;WP-679
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Feldangabe (`field`) in den Problemen der Legacy-Feld-Endpunkte `PUT /ci-types/{id}/fields` und `PUT /cis/{id}/field-definitions` (sie antworten wie bisher 400 ohne `field`, der Text nennt den Grund). Eine Formatregel für Schlüssel (Leerzeichen, Großbuchstaben); die Probe zeigt `Bad Key` nur am Systemtyp (422).
+
+### WP-682 – Kanten-Cleanup prüft Verifikation und Frist beim Löschen: während des Laufs verifizierte oder bestätigte Kanten bleiben, ohne Event
+
+**Schlüssel:** `k7n-relationship-cleanup-race` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-159 (`d-topo-refresh`, TOP-02/REL-08), WP-383 (`t4-scope-zone-isolation`), WP-497 (`t4-cleanup-cron`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-411](../../../audit/g1-reaudit/FINDINGS.md#f-411) | P3 | Kanten-Cleanup löscht Discovery-Kanten, die während des Laufs verifiziert oder bestätigt wurden: 70–99 % der mit 200 beantworteten Verifikationen gehen verloren | schließt | K7-Wiederholungsprüfung r2-b4 (Verifier auf `7845e9d`, ohne Hook) |
+
+**Problem:** `Cleanup.RunOrg` (`backend/internal/relationship/cleanup.go:170` auf `e5c2d86`) liest die Kandidaten in einem SELECT ohne Sperre (`verification_state <> 'verified'`, Zeile 190–209) und löscht jede Kante mit `DELETE … WHERE id = $1 AND organization_id = $2 AND source = 'discovery'` (Zeile 234), ohne Verifikation und Frist erneut zu prüfen. Wird eine Kante zwischen SELECT und DELETE verifiziert (`PATCH /relationships/{id}`, Antwort 200) oder von Discovery neu bestätigt, löscht der Cleanup sie trotzdem und meldet `relationship.removed`. In der Probe gingen 81–99 % der erfolgreich beantworteten Verifikationen verloren.
+
+**Akzeptanzkriterien:**
+
+- [ ] Das DELETE des Cleanups prüft auf der aktuellen Zeile `verification_state <> 'verified'` und für abgelaufene Kanten `COALESCE(last_confirmed_at, last_seen_at, created_at) < now − max(7 Tage, 5 × Intervall)`; unterdrückte Kanten ohne Frist. Unter READ COMMITTED wartet es auf einen gleichzeitigen Schreiber der Zeile und entscheidet auf dessen festgeschriebener Version.
+- [ ] Trifft das DELETE keine Zeile, bleibt die Kante: kein `relationship.removed`, kein Zähler im Ergebnis, Logeintrag `discovery edge kept`. Das Event einer gelöschten Kante trägt den Bestätigungszeitpunkt der gelöschten Zeile (`RETURNING`).
+- [ ] `TestCleanupKeepsEdgeVerifiedDuringRun` (`internal/relationship/cleanup_race_integration_test.go`, PostgreSQL als `reticora_app`): (1) eine offene Transaktion verifiziert Kante A und bestätigt Kante B neu, der Cleanup wartet nachweislich auf die Zeilensperre; nach dem Commit bestehen A und B ohne Event, die unberührte abgelaufene Kante C ist mit genau einem Event gelöscht, Ergebnis `{Stale:1}`; (2) zwei Runden mit je 200 abgelaufenen Kanten und acht verifizierenden Workern über `PGRepository.Update`: keine Kante gelöscht, deren Verifikation erfolgreich antwortete, jede Kante verifiziert oder mit genau einem Event entfernt. Auf `e5c2d86` rot (A und B gelöscht, `{Stale:3}`; 140 von 146 bzw. 120 von 127 verifizierten Kanten gelöscht), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an `Relationship.source`, dass eine verifizierte oder neu bestätigte Kante auch während eines Cleanup-Laufs bleibt; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/relationship/` grün (`TestDiscoveryEdgeCleanup`, Fristen-Tests); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/relationship/cleanup.go
+- backend/internal/relationship/cleanup_race_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Der Cleanup läuft wie bisher in `database.WithTenant` mit org-weitem Scope als `reticora_app`; das DELETE trägt nur zusätzliche Bedingungen. Keine neue Sperre über die Zeilensperre des DELETE hinaus.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestCleanupKeepsEdgeVerifiedDuringRun$' ./internal/relationship/`, außerdem als Nutzer `nobody` und dreifach (`-count=3`) auf Stabilität.
+- `cd backend && go test -count=1 -p 1 ./internal/relationship/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TOP-02;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-682
+REL-08;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-682
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Eine Suppression, die während eines Laufs aufgehoben wird (die Kante wird nach dem Stand des SELECT entfernt; Discovery legt sie beim nächsten Sweep neu an). Andere Schreibwege, die eine Kante während des Laufs auf eine andere Quelle umstellen (bereits durch `source = 'discovery'` im DELETE abgedeckt). Parallele Läufe (Single-Runner über den Advisory-Lock des Schedulers, JOB-02).
+
+### WP-685 – Kontingent-Ablehnung nennt den Bestand der Organisation nur org-weiten Aufrufern
+
+**Schlüssel:** `k7n-entitlement-limit-detail` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-072 (`ent-enforce`), WP-472 (`t2-ent-quotas`), WP-674 (`k7n-max-cis-org-count`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-414](../../../audit/g1-reaudit/FINDINGS.md#f-414) | P3 | Ablehnung eines Kontingents nennt eingeschränkten Principals den Bestand der ganzen Organisation („N of L in use“) | schließt | Härtungshinweis des Agenten von WP-674 (`22e24ff`) |
+
+**Problem:** Die 403-Ablehnung `entitlement-limit` lautet `entitlement limit for "<quota>" exceeded: N of L in use` (`LimitExceededError.Error`, `backend/internal/entitlement/entitlement.go:262` auf `e5c2d86`). N ist der Bestand der ganzen Organisation: `max_cis` seit WP-674, `max_users`, `max_api_keys` und `max_collectors` schon vorher. Ein auf Client 1 beschränkter Principal erfährt so bei jeder Ablehnung die Zahl der CIs, Nutzer, API-Keys und Collectors aller Clients.
+
+**Akzeptanzkriterien:**
+
+- [ ] `entitlement.Service.AllowCreate` setzt `LimitExceededError.HideCurrent`, wenn der Kontext keinen Principal mit org-weitem Client- und Site-Scope trägt (`database.TenantScopeFromContext`: Scope vorhanden, `UserID` gesetzt, `Clients` und `Sites` org-weit). `Error()` lautet dann `entitlement limit for "<quota>" exceeded: the limit of the plan is reached` (ohne N und L, weil bei der Ablehnung meist N = L gilt); org-weite Aufrufer behalten `N of L in use`. `Limit` und `Current` bleiben als Felder gesetzt (Ingest-Spuren, `unlicensed_ci`).
+- [ ] Die Regel gilt für alle vier Kontingente und alle Wege, weil sie beim Entstehen des Fehlers greift: REST, GraphQL, Jobs mit dem Scope ihres Erzeugers; Einladung, Erstanmeldung, Enrollment und Collector-Ingest (Kontexte ohne Principal) erhalten den Text ohne Zahlen.
+- [ ] `TestEntitlementLimitDetailHidesOrgCountFromScopedCallers` (`internal/server/t2_entitlement_gates_test.go`, Produktionsrouter mit PG-Repositories): an `max_cis`, `max_users`, `max_api_keys` und `max_collectors` (je am Bestand der Organisation, Bestand von Client 2 für den Client-1-Principal unsichtbar) erhält der Client-1-Principal 403 `entitlement-limit` mit genau dem Text ohne Zahlen, der org-weite Principal `N of N in use`; nichts angelegt. Auf `e5c2d86`-Stand von `entitlement.go` rot (alle vier Details des Client-1-Principals nennen den Bestand), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestLimitExceededDetailFollowsCallerScope` (`internal/entitlement/entitlement_test.go`): org-weiter Principal mit Zahlen; Client-Scope, Site-Scope, System-Scope ohne Nutzer und Kontext ohne Scope ohne Zahlen; `Limit`/`Current` gesetzt.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an der Antwort `EntitlementLimit` die Regel; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Der vorbestehende goimports-Befund in `t2_entitlement_gates_test.go` (`strconv` außerhalb der Standardbibliotheksgruppe) ist behoben; Lint-Schuld sinkt um 1.
+- [ ] Regression: `go test -p 1 ./internal/entitlement/ ./internal/identity/ ./internal/user/ ./internal/discovery/ ./internal/reviews/ ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/entitlement/entitlement.go
+- backend/internal/entitlement/entitlement_test.go
+- backend/internal/server/t2_entitlement_gates_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Zähler bleiben org-weit (F-403, E-56); nur der Text der Ablehnung hängt vom Scope des Aufrufers ab. Der Scope kommt aus dem Kontext, den die Tenant-Middleware aus dem authentifizierten Principal setzt (`middleware.TenantScopeFor`); ein fehlender Scope gilt als eingeschränkt (fail-closed).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestEntitlementLimitDetailHidesOrgCountFromScopedCallers$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -run '^TestLimitExceededDetailFollowsCallerScope$' ./internal/entitlement/`.
+- `cd backend && go test -count=1 -p 1 ./internal/entitlement/ ./internal/identity/ ./internal/user/ ./internal/discovery/ ./internal/reviews/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
+TEN-09;[Q];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
+ENT-03;[B];B;backend/internal/entitlement/entitlement_test.go;WP-685
+```
+
+**Entscheidungsbedarf:** keiner (Umsetzung des Hinweises aus dem Entscheidungsbedarf von WP-674; E-56 und E-08 unverändert). Hinweis für die Leitung: Auch das Limit L entfällt für eingeschränkte Aufrufer, weil es bei der Ablehnung in der Regel dem Bestand entspricht; wer L wissen muss, liest es mit `entitlement:read` über die Entitlement-Ansicht.
+
+**Nicht Bestandteil:** Andere Zähler, die eingeschränkten Principals Bestände der Organisation zeigen könnten (Dashboards, Lizenzansicht, Warn-Benachrichtigungen zu Kontingenten): sie sind an Rechte wie `entitlement:read` gebunden und nicht Gegenstand von F-414. Der Text von `feature-not-entitled` und `license-expired` (ohne Zähler).
+
+### WP-686 – Rack-Montage: explizites `height_u` 0 und leeres `face` sind 400 mit Feld, nichts gespeichert; weggelassene Felder behalten die Vorgabe
+
+**Schlüssel:** `k7n-rack-mount-explicit-zero` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-175 (`c-rack-api`), WP-126 (`b-rack-rules`), WP-500 (`t6-location-conflicts`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-415](../../../audit/g1-reaudit/FINDINGS.md#f-415) | P3 | Rack-Montage mit explizitem `height_u` 0 wird als 1 HE gespeichert (201/200), leeres `face` als `front` | schließt | K7-Wiederholungsprüfung r2-b5 (Verifier auf `22e24ff`, bestätigt durch einen zweiten Agenten) |
+
+**Problem:** `PUT /api/v1/racks/{id}/mounts/{ci_id}` mit `"height_u": 0` antwortet 201 und speichert 1 HE; eine bestehende 3-HE-Montage wird mit `"height_u": 0` per 200 auf 1 HE verkleinert; `-1` ist 400. `"face": ""` ergibt 201 mit `front`, obwohl `""` nicht im Enum liegt. Ursache: `PutMountRequest.HeightU int` mit `omitempty` (`backend/internal/rack/handler.go:296` auf `e5c2d86`) unterscheidet ein fehlendes Feld nicht von 0, Zeile 313–318 setzen den Nullwert auf die Vorgabe; dasselbe Muster in `CreateMountRequest` (`model.go:66`) und `CreateMount` (`handler.go:419–426`) für die veralteten Montagewege. Die Spezifikation verlangt `PutRackMountRequest.height_u` `minimum: 1`, `default: 1` und `face` im Enum.
+
+**Akzeptanzkriterien:**
+
+- [ ] `PutMountRequest` und `CreateMountRequest` tragen `height_u` und `face` als Zeiger; `mountDefaults` setzt für weggelassene Felder die Vorgabe (1, `front`) und lehnt explizite Werte außerhalb der Spezifikation mit 400 und `field` ab: `height_u` < 1 (auch 0 und -1) → `height_u`, `face` außerhalb `front`, `rear`, `both` (auch `""`) → `face`. Nichts wird gespeichert, eine bestehende Montage bleibt unverändert.
+- [ ] Dieselbe Prüfung gilt für `PUT /racks/{id}/mounts/{ci_id}` (Anlage und Verschiebung), die veralteten `POST /racks/{id}/mounts` und `POST /mounts` sowie `PATCH /rack-mounts/{id}` (dort bisher 400 ohne `field`).
+- [ ] Subtest „explicit height_u 0 and empty face are 400 and store nothing“ in `TestRackLayoutAgainstPostgres` (`internal/rack/layout_integration_test.go`): neun Schreibvorgänge (neue Montage mit 0, -1 und `""`, Verschiebung der 2-HE-Montage mit 0 und `""`, beide veralteten POST-Wege, PATCH mit 0 und `""`) → 400 mit dem Feld; keine Montage von CI 3, die Montage von CI 1 bleibt U7, 2 HE, `front`; ohne `height_u` und `face` → 201 mit 1 HE `front`. Auf `e5c2d86` rot (201/200 bzw. 400 ohne Feld), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first): `PutRackMountRequest` und `CreateRackMountRequest` beschreiben, dass ein weggelassenes Feld die Vorgabe erhält und ein expliziter Wert außerhalb von Minimum und Enum 400 mit `field` ist; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/rack/ ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/rack/handler.go
+- backend/internal/rack/model.go
+- backend/internal/rack/layout_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung; die Prüfung liegt im Handler vor dem Repository. Die Belegungsregeln (`validateMountFit`, Sperre der Rackhöhe) bleiben unverändert.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestRackLayoutAgainstPostgres$' ./internal/rack/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/rack/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+RCK-01;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+API-03;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Eine Verschiebung per `PUT` ohne `height_u` setzt wie spezifiziert die Vorgabe 1 HE (der PUT ersetzt die Montage, `default: 1`); wer die Höhe behalten will, sendet sie mit oder nutzt `PATCH /rack-mounts/{id}`. Eine allgemeine Validierung von Request-Bodies gegen die OpenAPI-Schemas im Produktionsrouter.
+
+### WP-689 – Benachrichtigungskanäle und Zustellungen nur für org-weite Inhaber von `notification:manage`; Webhook-Kanäle bleiben org-weite Ziele
+
+**Schlüssel:** `k7n-notification-admin-org-wide` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-139 (`b-ntf-delivery`), WP-398 (`t6-ntf-authz`), WP-409 (`t1-channel-matrix`), WP-633 (`k4n-org-fields-scope`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-418](../../../audit/g1-reaudit/FINDINGS.md#f-418) | P2 | Ein auf einen Client gebundener Inhaber von `notification:manage` verwaltet die Benachrichtigungskanäle der Organisation und liest alle Zustellungen; ein von ihm angelegter Webhook-Kanal erhält die Benachrichtigungen anderer Clients mit Name und E-Mail fremder Empfänger | schließt | Verifier r3-b4 (Wiederholungsprüfung von WP-138/WP-139 auf `bf51da7`, Kandidat K-1) |
+
+**Problem:** Die Routen `/api/v1/notification-channels` und `/api/v1/notification-deliveries` verlangen `notification:manage` in irgendeinem Scope (`backend/internal/server/authz.go`); die Handler (`backend/internal/notify/handler.go`: `ListChannels`, `CreateChannel`, `GetChannel`, `UpdateChannel`, `DeleteChannel`, `ListDeliveries`) prüfen über `org(w, r)` nur die Organisation. Kanäle und Zustellungen haben keine Client-Dimension: Ein Kanal erhält die Benachrichtigungen aller Clients (`Notifier.Notify`, Fall `KindWebhook`, mit allen Empfängern), eine Zustellung nennt Empfänger aller Clients. Ein Inhaber einer Custom-Rolle `{notification:manage, webhook:manage}` mit Client-Scope liest auf `e5c2d86` alle Kanäle (200), legt einen Webhook-Kanal an (201), deaktiviert und löscht den In-App-Kanal der Organisation (200, 204) und liest alle Zustellungen mit Name und E-Mail der Empfänger von Client 2 (200); sein Webhook-Kanal erhält ein `review.created` von Client 2 mit dem Reviewer von Client 2 als Empfänger. Die Kanalmatrix hatte keine Zeile für diese Routen.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Prüfung von F-359 (`holdsOrgWide` in `tenantapi`) ist als `identity.HoldsOrgWide(ctx, perm)` exportiert (Grant-Obergrenze gegen eine org-weite Zuweisung, ohne Principal false) und wird von `PATCH /org` und den sechs Routen der Benachrichtigungsverwaltung genutzt; `PATCH /org` verhält sich unverändert (`go test ./internal/tenantapi/` grün).
+- [ ] `GET/POST /notification-channels`, `GET/PATCH/DELETE /notification-channels/{id}` und `GET /notification-deliveries` antworten einem Inhaber von `notification:manage`, der das Recht nur für Clients, Sites oder Teams hält (auch je Recht über `PermissionScopes`, client-gebundene API-Keys), und einer Anfrage ohne Principal mit 403 problem+json, bevor gelesen oder geschrieben wird, auch für eine unbekannte ID; nichts wird angelegt, geändert oder gelöscht. Org-weite Inhaber behalten 200/201/204 und 404 für Kanäle anderer Organisationen.
+- [ ] `TestNotificationAdministrationRequiresOrgWideScope` (`internal/server/notification_channel_scope_integration_test.go`, Produktionsrouter mit PG-Repositories): Custom-Rolle `{notification:manage, webhook:manage}` über `POST /roles` und `POST /role-assignments` mit Client-Scope (Client 1) und Site-Scope, Principal wie beim Login aus `AccessGrants`/`ResolveAccess`: auf allen sechs Routen 403, die Antwort nennt weder Kanal noch Empfänger von Client 2, Zahl der Kanäle und In-App-Kanal der Organisation unverändert, kein Webhook-Kanal angelegt; Kontrolle ohne `notification:manage` (Viewer) 403; dieselbe Rolle org-weit zugewiesen 200/200/201/200/200/204 und liest die Zustellung an den Empfänger von Client 2. Auf `e5c2d86`-Stand von `notify/handler.go` rot (Client-1-Inhaber: Zustellungen und Kanäle 200, POST 201, PATCH 200, DELETE 204), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestChannelAdministrationNeedsOrgWideScope` (`internal/notify/handler_test.go`, ohne Datenbank): Client-, Site- und Team-Scope sowie ohne Principal 403 auf allen sechs Routen, gespeicherter Kanal unverändert; org-weit 200/201/200/200/204/200. Ebenso 403 für einen Principal, der `notification:manage` nur je Recht (`PermissionScopes`) in Client 1 hält, und für einen client-gebundenen API-Key (`ClientScope`). Die übrigen Handler-Tests des Pakets und `TestNotifyHandlerUsesTheEgressPolicy` (`internal/server/notify_egress_test.go`) rufen als org-weiter Inhaber auf.
+- [ ] `rls.Channels` und `TestChannelMatrix` haben die Zeile `notification-channels` (lesend: Liste und Detail der Kanäle, Zustellungsliste; schreibend: POST, PATCH, DELETE mit Prüfung des gespeicherten Zustands): Client, Site, Team und Mehrfach 403 auf jeder Route ohne Wirkung und ohne die IDs der Kanäle und Zustellungen; Org und zweiter Nutzer sehen und schreiben die Kanäle ihrer Organisation, der Kanal der anderen Organisation ist 404 wie eine unbekannte ID. Auf `e5c2d86` rot für Client, Site, Team und Mehrfach.
+- [ ] `api/openapi.yaml` (spec-first): Die sechs Operationen nennen die Regel; die 403 verweist auf die neue Antwort `NotificationAdminForbidden`; `POST /notification-channels` dokumentiert Webhook-Kanäle als org-weite Ziele (sie erhalten die Benachrichtigungen aller Clients mit Name und E-Mail der Empfänger), die nur org-weite Administratoren anlegen. `frontend/src/api/generated/schema.d.ts` neu erzeugt. Das Frontend hat keine Seite der Kanalverwaltung; keine weitere Änderung.
+- [ ] `docs/security/review-g1.md` beschreibt F-418 und die Regel im Abschnitt „Kanalmatrix: Kanal × Scope-Art“ und nennt die neue Matrixzeile.
+- [ ] Regression: `go test -p 1 ./internal/notify/ ./internal/identity/ ./internal/tenantapi/ ./internal/tenant/rls/ ./internal/server/ ./internal/user/ ./internal/permission/ ./internal/operator/ ./internal/audit/ ./internal/webhook/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (18 Einträge):**
+
+- backend/internal/identity/ceiling.go
+- backend/internal/tenantapi/handler.go
+- backend/internal/notify/handler.go
+- backend/internal/notify/notifier.go (Kommentar)
+- backend/internal/notify/handler_test.go
+- backend/internal/notify/channel_test.go
+- backend/internal/notify/channel_secret_test.go
+- backend/internal/server/authz.go (Kommentar)
+- backend/internal/server/notification_channel_scope_integration_test.go (neu)
+- backend/internal/server/notify_egress_test.go
+- backend/internal/tenant/rls/matrix_fixtures.go
+- backend/internal/tenant/rls/channel_matrix_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. `notification_channel` und `notification_delivery` bleiben org-isoliert (RLS je Organisation) ohne Client-Dimension; die Scope-Regel liegt im Handler, wie für `PATCH /org` (F-359). Der Scope kommt aus dem authentifizierten Principal (`identity.PrincipalFromContext`); ohne Principal gilt die Anfrage als nicht org-weit (fail-closed).
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestNotificationAdministrationRequiresOrgWideScope$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -run '^TestChannelAdministrationNeedsOrgWideScope$' ./internal/notify/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestChannelMatrix$' ./internal/tenant/rls/`.
+- `cd backend && go test -count=1 -p 1 ./internal/notify/ ./internal/identity/ ./internal/tenantapi/ ./internal/tenant/rls/ ./internal/server/ ./internal/user/ ./internal/permission/ ./internal/operator/ ./internal/audit/ ./internal/webhook/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+NTF-03;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+NTF-04;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+TEN-06;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+NTF-04;[B];B;backend/internal/notify/handler_test.go;WP-689
+TEN-09;[Q];B;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-689
+```
+
+**Entscheidungsbedarf:** keiner (Option A entschieden: nur org-weite Inhaber verwalten Kanäle und lesen Zustellungen). Hinweis für die Leitung: Ein client-gebundener Kunden-Administrator kann Benachrichtigungen für seinen Client nicht mehr über eigene Kanäle umleiten; dafür bleiben die eigenen Präferenzen (`/notifications/preferences`) und Webhook-Abonnements (`POST /webhooks`), die seit WP-601 den Scope ihres Erzeugers tragen. Kanäle mit Client-Bezug (Option B) wären eine Erweiterung mit Migration.
+
+**Nicht Bestandteil:** Client-gebundene Benachrichtigungskanäle (Option B, Client-Dimension in `notification_channel` und Filter der Zustellung je Kanal); Scope-Filter der Zustellungsliste; Bestandskanäle, die vor der Korrektur ein client-gebundener Inhaber angelegt hat (sie bleiben org-weite Kanäle und sind für org-weite Administratoren sichtbar und löschbar); eine Frontend-Seite der Kanalverwaltung.
+
+### WP-698 – Raumlayout im Scope des Aufrufers: nur sichtbare CIs des Raums, unsichtbare Einträge bleiben, veraltete blockieren nicht
+
+**Schlüssel:** `k7n-room-layout-client-scope` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-526 (`t7-room-layout`; schloss F-341 und F-342)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-427](../../../audit/g1-reaudit/FINDINGS.md#f-427) | P2 | Raumlayout behält und akzeptiert Schlüssel von CIs eines anderen Clients: client-beschränkte Nutzer lesen deren ID und Position, können den Raum über die UI nicht mehr positionieren (422), und ein direkter PATCH löscht die fremde Position | schließt | K7-Wiederholungsprüfung r3-b5 (Verifier der Wiederholungsprüfung von WP-193 auf `7cd63e0`) |
+
+**Problem:** `room.layout` (CI-Id → Position) wird von `GET /rooms`, `GET /rooms/{id}` und der PATCH-Antwort ungefiltert geliefert (`tenantapi/pg_repository.go` `ListRooms`/`GetRoom` Zeile 623–666, `handler.go` `GetRoom` Zeile 541–553 auf `e5c2d86`). `UpdateRoom` ersetzt das Layout vollständig; `checkLayoutCIs` (Zeile 750–783) verlangt nur ein für den Aufrufer sichtbares CI der Organisation, nicht Raum oder Löschung. Wechselt ein CI zu einem anderen Client, sieht ein Client-1-Nutzer weiter dessen ID und Position; der Raumplan sendet das Server-Layout zurück (`RoomPlanPage.tsx` `flush`, Zeile 149) und scheitert mit 422 auf den fremden Schlüssel; ein direkter PATCH ohne ihn löscht die fremde Position. Der Org-Admin kann CIs beliebiger Clients in jeden Raum eintragen (F-427, UI-18, TEN-05, TEN-09).
+
+**Akzeptanzkriterien:**
+
+- [ ] Regel (spec-first, `api/openapi.yaml` an `Room.layout`, `UpdateRoomRequest.layout`, `PATCH /rooms/{id}` mit 422): Ein Layout-Schlüssel ist ein CI der Organisation, das der Aufrufer sieht, das nicht gelöscht ist und im Raum steht (`ci.room_id`, abgeleitet aus `location_id`: der Raum oder ein Ort darunter). `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `GET /rooms`, `GET /rooms/{id}` und die PATCH-Antwort zeigen nur Einträge nach dieser Regel (`showLayouts`, eine Abfrage je Liste); Einträge veralteter CIs (gelöscht, aus dem Raum verschoben) und für den Aufrufer unsichtbarer CIs fehlen.
+- [ ] `PATCH /rooms/{id}` mit `layout`: jeder gesendete Schlüssel nach der Regel, sonst 422 `layout.<ci>` mit einem Text für alle Gründe („the key is not a configuration item located in this room“), sodass ein CI eines anderen Clients wie eine unbekannte ID beantwortet wird (kein Existenz-Orakel). Das Ergebnis ersetzt die für den Aufrufer sichtbaren Einträge; gespeicherte Einträge von CIs, die er nicht sieht, bleiben unverändert; gespeicherte Einträge sichtbarer, aber veralteter CIs fallen weg (`mergeLayout`). Die Zusammenführung liest das gespeicherte Layout unter der Zeilensperre (`FOR UPDATE`) nach der If-Match-Prüfung von F-342; 409/412 unverändert.
+- [ ] Eine Verschiebung eines CI (Ortswechsel, auch Clientwechsel) ändert den alten Raum nicht; GET und PATCH ignorieren den veralteten Eintrag (in OpenAPI beschrieben).
+- [ ] `RoomPlanPage`: Ein 422 auf einen Schlüssel (`layout.<ci>` ohne `.x|.y`) zeigt einen Hinweis (de/en, `roomplan.staleObject`) und lädt Raum und Objekte neu, statt bei jeder weiteren Verschiebung erneut zu scheitern. Vitest „reloads room and objects when a layout key is no object of the room any more (F-427)“: auf `e5c2d86` rot, mit der Korrektur grün.
+- [ ] Defekttest `TestRoomLayoutForeignClientEntriesAgainstPostgres` (`backend/internal/tenantapi/room_layout_integration_test.go`, Handler über PostgreSQL als Laufzeitrolle, client-beschränkter Principal über `scopetest.ClientCtx` wie im Paket üblich): nach der Verschiebung von `m` zu Client 2 enthält GET für Client 1 und org-weit kein `m`, Server-Layout plus verschobenes `d` → 200, der org-weite PATCH entfernt den veralteten Eintrag, ein CI in einem anderen Raum → 422; org-weiter PATCH eines Client-1-Raums mit einem Client-2-CI → 422; mit einem früher gespeicherten Client-2-Eintrag zeigen GET und Liste für Client 1 nur sein CI, der Client-1-PATCH löscht die Client-2-Position nicht, der Client-2-Schlüssel ist 422 wie eine unbekannte ID; ein gelöschtes CI fehlt in GET und fällt beim nächsten PATCH weg. Auf `e5c2d86` rot, mit der Korrektur grün, auch als Nicht-Root-Nutzer (verbindlicher Retest F-427).
+- [ ] `TestRoomLayoutValidationAgainstPostgres` legt seine CIs in die Räume (die neue Regel) und bleibt grün (Bereich, Schlüssel, Client-Isolation, If-Match 409/412, gleichzeitige Bearbeiter).
+- [ ] `docs/security/review-g1.md` beschreibt die Korrektur. Regression: `go test -p 1 ./internal/tenantapi/ ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; `tsc`, prettier, eslint, Vitest `RoomPlanPage.test.tsx` und `src/i18n` grün; Ratchet `--kinds go,vitest` 0 Fehler.
+
+**Dateien (16 Einträge):**
+
+- backend/internal/tenantapi/pg_repository.go
+- backend/internal/tenantapi/validate.go
+- backend/internal/tenantapi/model.go
+- backend/internal/tenantapi/handler.go
+- backend/internal/tenantapi/room_layout_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- frontend/src/pages/RoomPlanPage.tsx
+- frontend/src/pages/RoomPlanPage.test.tsx
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- docs/security/review-g1.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Sichtbarkeit der CIs folgt der Policy `ci_isolation` in der Transaktion des Aufrufers (`WithRequestTenant`); geprüft als Laufzeitrolle. Da jede Site einen Client hat und der Ort eines CI dessen Client trägt (`ci_derive_location`), sieht jeder, der den Raum sieht, alle gültigen CIs darin; unsichtbare Einträge sind daher immer veraltet und bleiben nur, bis ein Aufrufer, der das CI sieht (org-weit), den Raum speichert.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestRoomLayout' ./internal/tenantapi/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/tenantapi/ ./internal/server/`.
+- `cd frontend && npx vitest run src/pages/RoomPlanPage.test.tsx src/i18n`.
+- Real-Stack `frontend/e2e-real/locations-racks.spec.ts` L06b unverändert (sein CI steht im Raum); nur in CI.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-18;[B];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+TEN-05;[B];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+TEN-09;[Q];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+UI-18;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-698
+```
+
+**Entscheidungsbedarf:** keiner. Gewählt: GET/PATCH ignorieren veraltete Einträge, statt sie beim Ortswechsel eines CI aus dem alten Raum zu entfernen (kein Schreibzugriff des CI-Pfads auf Räume, keine Migration); die Schlüsselregel „CI steht im Raum“ verschärft den Vertrag von WP-526 (bisher jedes sichtbare CI der Organisation).
+
+**Nicht Bestandteil:** Bereinigung bestehender veralteter Einträge per Migration (sie sind unsichtbar und werden beim nächsten org-weiten Speichern entfernt); Einträge von CIs, die endgültig gelöscht und für niemanden mehr sichtbar sind, bleiben gespeichert, ohne je gezeigt zu werden. Die `MemoryRepository` (ohne Scopes) bleibt unverändert. Raumpläne/Heatmaps (UI-13 [P4]).
+
+### WP-690 – Bulk-Operation: dieselbe UUID in anderer Schreibweise zählt einmal, Bericht je kanonischer ID
+
+**Schlüssel:** `k7n-bulk-uuid-dedupe` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-181 (`c-bulk`), WP-368 (`t3-bulk-manual`), WP-517 (`t7-bulk-validation`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-419](../../../audit/g1-reaudit/FINDINGS.md#f-419) | P3 | Bulk-Operation entfernt doppelte IDs nur bei identischer Schreibweise: dieselbe UUID in anderer Groß-/Kleinschreibung wird zweimal geschrieben und zweimal gemeldet | schließt | Verifier r3-b4 (Wiederholungsprüfung von WP-181 auf `bf51da7`) |
+
+**Problem:** `POST /api/v1/cis/bulk {"ids":[id, UPPER(id)]}` antwortet 200 mit `total` 2, `succeeded` 2 und zwei Einträgen „ok“ für dasselbe CI; `ci.version` steigt von 1 auf 3, es entsteht eine `ci_change`-Zeile (die zweite Schreiboperation erhöht die Version ohne Änderung). `validateBulk` (`backend/internal/ci/bulk.go:136–140` auf `e5c2d86`) prüft Duplikate auf der rohen Zeichenkette, PostgreSQL vergleicht `::uuid` unabhängig von der Schreibweise.
+
+**Akzeptanzkriterien:**
+
+- [ ] `validateBulk` bringt jede gültige UUID vor der Duplikatprüfung in die kanonische Kleinschreibung: dasselbe CI in mehreren Schreibweisen wird einmal angewendet (Version +1, eine Historienzeile) und einmal gemeldet, unter der kleingeschriebenen ID; eine nur großgeschrieben gesendete ID wird angewendet und kleingeschrieben gemeldet. Ungültige IDs bleiben unverändert und werden weiter je ID mit 400 „invalid CI id“ gemeldet (F-327). Das gilt synchron und für Bulk-Jobs ab 100 IDs (die Job-Parameter tragen die kanonische Form); `total` zählt die verschiedenen IDs, das Limit von 500 ebenso.
+- [ ] `TestBulkDeduplicatesUUIDCase` (`internal/ci/bulk_test.go`): synchron `[id0, UPPER(id0), Mixed(id0), UPPER(id1)]` → `total` 2, beide Einträge kleingeschrieben, jedes CI genau einmal geschrieben (Version 2, manuelle Änderung des Aufrufers); als Job 100 IDs in beiden Schreibweisen → 100 Einträge, jedes CI einmal geschrieben. Auf `e5c2d86` rot (`total` 4 bzw. 200, CI dreimal bzw. zweimal geschrieben), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestBulkAgainstPostgres` (`internal/ci/bulk_integration_test.go`) prüft gegen PostgreSQL als Client-1-Principal `[own1, UPPER(own1)]` → ein Eintrag `own1`, Version und `ci_change` je +1. Auf `e5c2d86` rot (zwei Einträge, Version +2), mit der Korrektur grün.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an `POST /api/v1/cis/bulk`, dass eine mehrfach vorkommende ID, auch dieselbe UUID in anderer Schreibweise, einmal zählt und kanonisch kleingeschrieben gemeldet wird; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/ci/ ./internal/server/` grün (ohne `TestCIQueryBudget`, bekannte lokale Abweichung); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/ci/bulk.go
+- backend/internal/ci/bulk_test.go
+- backend/internal/ci/bulk_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung; die Normalisierung liegt in der Validierung vor jedem Datenbankzugriff.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -v -run '^TestBulkDeduplicatesUUIDCase$' ./internal/ci/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestBulkAgainstPostgres$' ./internal/ci/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-08;[B];C;backend/internal/ci/bulk_test.go;WP-690
+BLK-01;[B];C;backend/internal/ci/bulk_test.go;WP-690
+API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-690
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Andere Schreibweisen einer UUID (geschweifte Klammern, `urn:uuid:`, ohne Bindestriche) bleiben ungültige IDs wie in den Einzelwegen (400 je ID, F-327). Die Normalisierung von IDs in anderen Listenparametern (z. B. `ci_ids` von `/impact`) ist nicht Teil dieses Pakets.
+
+### WP-691 – Redundanz-Postfilter: Versorger außerhalb des Client- oder Site-Scopes zählen, ohne genannt zu werden
+
+**Schlüssel:** `k7n-redundancy-hidden-supply` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** C · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-179 (`c-imp-redundancy`), WP-513 (`t7-impact-redundancy`), WP-611 (`k3n-impact-lean`), WP-345 (`t1-edge-scope`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-420](../../../audit/g1-reaudit/FINDINGS.md#f-420) | P3 | Redundanz-Postfilter für Principals mit Client-Scope: ein Versorger eines anderen Clients zählt nicht, das CI gilt als betroffen | schließt | Verifier r3-b4 (Wiederholungsprüfung von WP-179 auf `bf51da7`) |
+
+**Problem:** server (Client 1) `powered_by` pdu-a (Client 1) und pdu-b (Client 2): `GET /api/v1/impact/{pdu-a}?depth=1` und `/impact?ci_ids={pdu-a}` liefern org-weit `impacted=[]`, mit Client-1-Scope `impacted=[server]`. Die Analyse läuft vollständig unter der RLS des Aufrufers: der Graph (`graphFrom`) verwirft die Kante zum unsichtbaren CI, `readFeeds` (`backend/internal/topology/redundancy.go:68` auf `e5c2d86`) liest Versorger nur für Abhängige an der Tiefe und über `EdgesOf` ebenfalls unter der RLS des Aufrufers (`backend/internal/relationship/pg_repository.go:1111`). IMP-04 verlangt „betroffen nur, wenn alle Quellen ausgefallen sind“, IMP-07 Ergebnisse gemäß DB-Zustand innerhalb der Scope-Grenzen.
+
+**Akzeptanzkriterien:**
+
+- [ ] Neue optionale Schnittstelle `relationship.HiddenEdgeReader` mit `HiddenEdgesOf(ctx, orgID, ciIDs, relTypes)`: die gespeicherten Kanten der Typen mit einem Ende unter `ciIDs` zwischen zwei nicht gelöschten CIs der Organisation, die `EdgesOf` dem Aufrufer nicht liefert; ohne Kanten-Id und Quelle, die Id jedes Endes, das der Aufrufer nicht sieht, leer. Für Aufrufer ohne Client- und Site-Einschränkung keine Abfrage und kein Ergebnis; ohne Scope `ErrNoTenantScope`, fremde Organisation `ErrTenantMismatch`.
+- [ ] `PGRepository.HiddenEdgesOf` liest die Kanten in einer eigenen, nur lesenden Transaktion mit dem org-weiten Scope der Organisation des Aufrufers (`database.OrgWideScope`, vorhandenes Muster wie `webhook.objectScopes`; `app.org_id` bleibt, keine Zeile einer anderen Organisation) und bestimmt in einer Abfrage unter dem Scope des Aufrufers die sichtbaren Kanten und Enden. Keine Migration, keine Policy-Änderung.
+- [ ] `readFeeds` (Topologie) fügt diese Kanten für jeden Abhängigen über einen redundanten Typ in jeder Tiefe als Feed an, der unsichtbare Versorger ist `outside` und hält den Abhängigen wie ein Versorger jenseits der Tiefe (F-160). Der Weg der Analyse läuft nie über ihn; keine Antwort (`impacted`, `via`, `relay`, `path`, Blast Radius) nennt Id oder Namen eines unsichtbaren CI. Gilt für `/impact/{id}`, `/impact?ci_ids=`, `/topology/cis/{id}/impact` und `/cis/{id}/blast-radius`. Ein gelöschter Versorger zählt nicht.
+- [ ] `TestRedundancyHiddenSupplyForScopedPrincipal` (`internal/topology/redundancy_depth_integration_test.go`): server (pdu-a C1, pdu-b C2), server2 (pdu-a, pdu-c C1), server3 (pdu-a, gelöschte pdu-d C2), vm `hosted_on` server; org-weit und als Client-1-Principal gleich: `/impact/{pdu-a}` (`depth` 1, 2, 20), `/impact?ci_ids={pdu-a}` (`depth` 1, 2) und der Topologiepfad → nur server3; `/impact?ci_ids={pdu-a},{pdu-c}&depth=2` → server2, server3; Blast Radius: betroffen server3, geschützt server und server2; keine Antwort an Client 1 enthält pdu-b oder pdu-d. Auf `e5c2d86` rot (Client 1: `[server server3]` bzw. mit vm), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `TestEdgesOfStaysInsideScope` (`internal/relationship/pg_repository_integration_test.go`) prüft `HiddenEdgesOf`: Client 1 erhält nur die Kante zum CI von Client 2, ohne Id und Ziel (die Kante zum gelöschten CI nicht), Client 2 die Kante zu seinem CI ohne Id und Quelle, org-weit nichts, Fehler ohne Scope und für eine fremde Organisation.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an `/impact`, `/impact/{ci_id}`, dem Topologiepfad und `/cis/{id}/blast-radius`, dass Versorger außerhalb des Scopes des Aufrufers zählen und nie genannt werden; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/topology/ ./internal/relationship/ ./internal/server/` grün (u. a. `TestRedundancyAcrossDepthLimitAgainstPostgres`, `TestBlastRadiusAgainstPostgres`, `TestTopologyQueryBudget` mit org-weitem Principal ohne zusätzliche Abfrage); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (11 Einträge):**
+
+- backend/internal/relationship/relationship.go
+- backend/internal/relationship/pg_repository.go
+- backend/internal/relationship/pg_repository_integration_test.go
+- backend/internal/topology/redundancy.go
+- backend/internal/topology/redundancy_depth_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die org-weite Lesetransaktion ist das vorhandene Muster `database.WithTenant(database.WithoutTx(ctx), pool, &database.OrgWideScope(orgID, userID), …)`; sie liest nur `ci_relationship` und `ci` der Organisation des Aufrufers, schreibt nichts, und das Repository gibt nur den Typ und die Ids sichtbarer Enden heraus. Für org-weite Aufrufer entfällt sie.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestRedundancyHiddenSupplyForScopedPrincipal$' ./internal/topology/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestEdgesOfStaysInsideScope$' ./internal/relationship/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/topology/ ./internal/relationship/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+IMP-04;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-691
+IMP-07;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-691
+IMP-07;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-691
+```
+
+**Entscheidungsbedarf:** keiner. Dass ein eingeschränkter Principal aus „nicht betroffen“ bzw. „geschützt durch Redundanz“ auf die Existenz eines Versorgers außerhalb seines Scopes schließen kann, folgt aus IMP-04 selbst und entspricht der Ansicht eines org-weiten Nutzers; Id, Name, Client und Kante des Versorgers bleiben verborgen (IMP-07, E-62).
+
+**Nicht Bestandteil:** Ein unsichtbarer Versorger zählt immer als funktionsfähig, wie einer jenseits der Analysetiefe (F-160): fällt er seinerseits nur über unsichtbare CIs aus, sieht der eingeschränkte Principal den Abhängigen weiterhin als nicht betroffen, während die org-weite Analyse ihn als betroffen zeigt. Eine Analyse über den org-weiten Graphen mit anschließender Filterung (Wege durch unsichtbare CIs) widerspräche IMP-07 und ist nicht vorgesehen. Das Speicher-Repository (Entwicklungsmodus) implementiert `HiddenEdgeReader` nicht.
+
+### WP-692 – Eindeutige Attribute: die Prüfung umfasst die CIs außerhalb des Client- oder Site-Scopes des Schreibenden, ohne sie zu nennen
+
+**Schlüssel:** `k7n-unique-org-scope-client-writer` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-142 (`b-met-ddl`), WP-674 (`k7n-max-cis-org-count`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-421](../../../audit/g1-reaudit/FINDINGS.md#f-421) | P3 | Eindeutigkeit mit Scope `org` gilt für Writer mit Client-Scope nur, solange ein gültiger Unique-Index existiert | schließt | Verifier r3-b4 (Wiederholungsprüfung von WP-142 auf `bf51da7`) |
+
+**Problem:** Attribut `serial` `unique`, `unique_scope` `org`, Index noch nicht gebaut (Fenster zwischen Flag und Job): ein org-weiter Writer legt ein CI von Client 2 mit `SN-1` an, ein Client-1-Principal ein CI von Client 1 mit `SN-1` → `err=nil`, zwei aktive CIs mit `SN-1`; der Index-Job scheitert danach mit „Duplicate keys exist“. `PGRepository.UniqueConflicts` (`backend/internal/ci/pg_repository.go:2265` auf `e5c2d86`) läuft unter `database.WithRequestTenant`, also unter dem Client- und Site-Scope des Aufrufers, und sieht die CIs anderer Clients nicht. MET-15/WP-142 AK2 verlangt die serverseitige Eindeutigkeit unabhängig davon.
+
+**Akzeptanzkriterien:**
+
+- [ ] `UniqueConflicts` prüft für einen Aufrufer mit eingeschränktem Client- oder Site-Scope in einer eigenen Transaktion, die nur liest, mit dem org-weiten Scope der Organisation des Aufrufers (`database.OrgWideScope`, vorhandener Mechanismus wie in `webhook`, `notify`, `discovery`; `app.org_id` bleibt, keine Zeile einer anderen Organisation). Trägt `ctx` die Transaktion des Aufrufers, prüft es zusätzlich darin (ein früher in derselben Transaktion geschriebenes CI zählt); die Schlüssel beider Prüfungen werden vereinigt. Org-weite Aufrufer: unverändert eine Abfrage in ihrer Transaktion. Fremde Organisation: `ErrTenantMismatch`.
+- [ ] Zurück kommen nur die Schlüssel der Attribute. `POST /cis` und `PATCH /cis/{id}` (und jeder andere Weg über `ci.Service.Create`/`Update`) antworten bei einem Wert eines CI außerhalb des Scopes 409 `urn:reticora:problem:conflict` mit `violations` des Attributs und dem festen Text „another CI holds the value of the unique attribute(s): …“, ohne Id, Namen oder Client des anderen CI. Nichts wird gespeichert.
+- [ ] Scope `client` bleibt je Client: der Wert eines CI eines anderen Clients ist frei; ein CI desselben Clients an einem anderen, für einen Site-gebundenen Writer unsichtbaren Standort zählt.
+- [ ] `TestUniqueAttributeOrgScopeForClientWriter` (`internal/ci/unique_attr_integration_test.go`): Flags ohne Index; CIs von Client 2 mit `SN-1` und `SN-4`; der Client-1-Principal: Anlage mit `SN-1` und Änderung auf `SN-4` → `UniqueError` mit dem Feld `serial`, Fehlertext ohne die CIs von Client 2; je Wert ein aktives CI; `slot` (`client`) von Client 2 in Client 1 frei; zwei CIs mit `SN-3` in einer Transaktion → Konflikt; danach baut der Index-Job den Index. Auf `e5c2d86` rot (`err=nil` bei Anlage und Änderung, zwei CIs je Wert, Job scheitert mit „Duplicate keys exist“), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an der 409 von `POST /cis` und `PATCH /cis/{id}` und an `AttributeDefinition.unique`, dass die Prüfung auch CIs außerhalb des Scopes des Schreibenden umfasst und das andere CI nie nennt; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/citype/` grün (ohne `TestCIQueryBudget`, bekannte lokale Abweichung; `TestUniqueAttributes` unverändert); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (7 Einträge):**
+
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/unique_attr_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration (000189 bleibt frei), keine Policy-Änderung. Statt einer Funktion mit erweitertem Scope wie `ci_active_count()` (WP-674, Migration 000186) nutzt die Prüfung das vorhandene Muster einer eigenen Transaktion mit `database.OrgWideScope`: sie muss nicht unter einer Sperre der Schreibtransaktion laufen (die Prüfung lief schon bisher vor dem Schreiben in eigener Transaktion; parallele Schreibvorgänge hält der Unique-Index ab), und die Transaktion des Aufrufers wird zusätzlich geprüft.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUniqueAttributeOrgScopeForClientWriter$|^TestUniqueAttributes$' ./internal/ci/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/citype/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-692
+```
+
+**Entscheidungsbedarf:** keiner. Dass ein eingeschränkter Principal aus der 409 auf die Existenz des Werts außerhalb seines Scopes schließen kann, folgt aus `unique_scope` `org` (MET-15) selbst; welches CI ihn trägt, bleibt verborgen.
+
+**Nicht Bestandteil:** Wege, die CIs am Service vorbei über das Repository schreiben (Discovery-Ingest, Review-Auflösung `new`, `adoptUnlicensed`) und das Wiederherstellen (`Restore`) prüfen die Eindeutigkeit weiterhin nur über den Unique-Index, auch für org-weite Aufrufer; im Fenster ohne Index können dort Duplikate entstehen (unverändert seit WP-142). Eine Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben.
+
+### WP-697 – Review-Liste: unbekannte `status`- und `kind`-Werte sind 400 mit Feld, auch am veralteten Alias
+
+**Schlüssel:** `k7n-review-list-filter-validation` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-088 (Review-Modell und Ressource `review-items`), WP-673 (`k7n-relationship-list-filters`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-426](../../../audit/g1-reaudit/FINDINGS.md#f-426) | P3 | Review-Liste ignoriert unbekannte `status`- und `kind`-Werte: 200 mit leerer Liste statt 400 | schließt | Kandidatenprüfung K7 auf `7cd63e0` |
+
+**Problem:** `GET /api/v1/review-items?status=bogus`, `?kind=bogus` und `GET /api/v1/discovery/review-items?status=bogus` antworten 200 mit leerer Liste. `Handler.List` (`backend/internal/reviews/handler.go`) gibt `status` und `kind` ungeprüft als Gleichheitsfilter an das Repository, obwohl `api/openapi.yaml` beide als Enums definiert und an `listReviewItems` 400 dokumentiert. Ein Tippfehler (`status=OPEN`) liest sich als leere Queue; `/relationships?rel_type` (WP-673) und `escalated` lehnen ungültige Werte dagegen mit 400 ab.
+
+**Akzeptanzkriterien:**
+
+- [ ] `Handler.List` lehnt einen nicht leeren `status` außerhalb von `open|resolved|dismissed` und einen nicht leeren `kind` außerhalb von `reviews.Kinds` mit 400 `application/problem+json` (`urn:reticora:problem:invalid-field`) und `field` `status` bzw. `kind` ab, bevor das Repository gelesen wird; das gilt für `/api/v1/review-items` und den veralteten Alias `/api/v1/discovery/review-items`. Groß-/Kleinschreibung und NUL-Bytes werden nicht toleriert. Ein leerer Wert und kein Filter listen wie bisher; jeder dokumentierte Wert listet unverändert.
+- [ ] `TestListReviewItemsRejectsUnknownStatusAndKind` (`internal/reviews/handler_test.go`): sieben ungültige Kombinationen je Pfad → 400 mit dem Feld; alle drei Status, alle elf Typen, `status=`, `kind=` und `escalated=false` → 200; `status=open&kind=duplicate_ip` listet den offenen Eintrag. Auf `e5c2d86` rot (14-mal 200 mit leerer Liste), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] `api/openapi.yaml` (spec-first) beschreibt an `status` und `kind` beider Operationen die Ablehnung mit 400 und dem Feld; `listDiscoveryReviewItems` deklariert die Antwort 400; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] Regression: `go test -p 1 ./internal/reviews/ ./internal/server/ ./internal/middleware/ ./internal/graphqlbff/ ./internal/entitlement/ ./internal/discovery/` grün; die UI sendet nur dokumentierte Werte (Review-Inbox, Dashboard, Onboarding; leerer Wert für „alle“); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/reviews/handler.go
+- backend/internal/reviews/model.go
+- backend/internal/reviews/handler_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung; die Prüfung liegt im Handler vor jedem Datenbankzugriff, der Tenant-Scope (RLS) bleibt unverändert.
+
+**Tests:**
+
+- `cd backend && go test -count=1 -v -run '^TestListReviewItemsRejectsUnknownStatusAndKind$' ./internal/reviews/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/reviews/ ./internal/server/ ./internal/middleware/ ./internal/graphqlbff/ ./internal/entitlement/ ./internal/discovery/` mit `TEST_DATABASE_URL` und `TEST_APP_DATABASE_URL`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-01;[B];D;backend/internal/reviews/handler_test.go;WP-697
+API-02;[B];D;backend/internal/reviews/handler_test.go;WP-697
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Das GraphQL-Feld `reviewInbox(status, kind)` hat freie `String`-Argumente ohne dokumentierte Enums und filtert unbekannte Werte weiter zu einer leeren Liste; eine Angleichung wäre eine Änderung des GraphQL-Schemas und ist nicht Teil dieses Pakets. `GET /cis?status=` (ebenfalls 200 mit leerer Liste in der Probe) ist nicht Teil dieses Pakets.
+
+### WP-696 – Enrollment-Code in der Oberfläche: Pflichtauswahl des Kunden für Nutzer mehrerer Clients, Grund der Ablehnung statt allgemeiner Fehlermeldung
+
+**Schlüssel:** `k7n-enrollment-client-choice` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-677 (`k7n-enrollment-client-binding`), WP-199 (Onboarding, UI-17), WP-524 (Scope-Umschalter, Client-Liste)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-425](../../../audit/g1-reaudit/FINDINGS.md#f-425) | P2 | Enrollment-Dialog und Onboarding bieten keine Client-Auswahl: ein auf mehrere Clients beschränkter Nutzer erhält seit WP-677 422 und sieht nur „Ein Fehler ist aufgetreten“ | schließt | Kandidatenprüfung K7 auf `7cd63e0` |
+
+**Problem:** Seit WP-677 bindet `POST /api/v1/collectors/enrollment-codes` den Code an den Client, in dem der Erzeuger `collector:manage` hält, und lehnt einen auf mehrere Clients beschränkten Erzeuger ohne `client_id` mit 422 (`field` `client_id`) ab. Der Dialog „Collector verbinden“ (`DiscoveryPage.tsx`, `EnrollWizard`) sendet nur `{label}` und zeigt bei jedem Fehler „Ein Fehler ist aufgetreten“; der Onboarding-Schritt (`OnboardingPage.tsx`, `CollectorStep`) sendet `{label:"onboarding"}`. Keiner bietet eine Client-Auswahl; ein solcher Nutzer kann über die Oberfläche keinen Collector verbinden. `GET /clients` ist ihm ohne `location:read` verwehrt; seinen Scope nennt `GET /api/v1/me` (`cls`, je Recht `pscp`).
+
+**Akzeptanzkriterien:**
+
+- [ ] Ein gemeinsamer Baustein (`frontend/src/components/EnrollmentClientSelect.tsx`) liest `GET /api/v1/me` (nur bei geöffnetem Dialog bzw. im Collector-Schritt) und bestimmt die Clients von `collector:manage`: `pscp["collector:manage"].cls`, sonst `cls`. Bei mehr als einem Client zeigen Dialog und Onboarding ein Pflichtfeld „Kunde“ mit genau diesen Clients (Namen aus `GET /clients` über den Cache des Scope-Banners, ohne lesbaren Namen die ID), einem Hinweis und gesperrtem „Code erzeugen“ bzw. „Enrollment-Code erzeugen“ bis zur Wahl; der Body trägt `client_id`. Org-weite Nutzer, Nutzer mit einem Client und Nutzer, deren `collector:manage` nur einen Client umfasst, sehen keine Auswahl und senden nur `label` (unverändert). Solange `/me` lädt oder unlesbar ist, entscheidet der Server.
+- [ ] Ablehnungen zeigen den Grund des Servers: ein Problem mit `field` `client_id` bei angezeigter Auswahl am Feld („outside your scope“), sonst „Der Enrollment-Code wurde nicht erzeugt: <detail>“ als `role="alert"`; nie „Ein Fehler ist aufgetreten“.
+- [ ] i18n: `discovery.enroll.client`, `clientChoose`, `clientHint`, `failed` in de-DE und en-US; keine Rohwerte.
+- [ ] `api/openapi.yaml` (spec-first) dokumentiert `pscp` in `SessionClaims` und an `createCollectorEnrollmentCode` die Auswahl der Oberfläche; `frontend/src/api/generated/schema.d.ts` neu erzeugt. `docs/betrieb/collector-ca.md` nennt die Auswahl.
+- [ ] Vitest `DiscoveryPage.test.tsx` „offers the client choice to a user restricted to several clients (WP-677)“ (Optionen genau A und B aus `pscp`, nicht C der Sitzung; Sperre ohne Wahl; Body mit `client_id`), „shows the reason of the server instead of a generic error (WP-677)“ und „creates the code without a choice …“ (org-weit, ein Client, `pscp` mit einem Client); `OnboardingPage.test.tsx` „offers the client choice …“. Auf `e5c2d86` rot, mit der Korrektur grün; die übrigen Fälle beider Dateien unverändert grün.
+- [ ] Real-Stack `frontend/e2e-real/enrollment-client-choice.spec.ts` (nur CI): Nutzer mit Viewer in Client C und eigener Rolle `collector:manage` in A und B; E1 API ohne `client_id` 422, Dialog bietet genau A und B, mit B 201 und `client_id` B; E2 Onboarding mit A 201 und `client_id` A; E3 org-weiter Administrator ohne Auswahl, 201 ohne `client_id`. Grün in allen sechs Projekten von install-smoke.yml.
+- [ ] Regression: `npx tsc --noEmit -p .`, prettier und eslint der berührten Dateien, Vitest `src/i18n`, `src/components`, `src/api` und beide Seiten grün; Mock-Playwright `a11y.spec.ts`, `mobile-actions.spec.ts`, `review.spec.ts` in Chromium grün; die eingefrorenen ABN-01-Artefakte (u. a. `e2e/onboarding.spec.ts`) bleiben unverändert (`sha256sum -c` OK); `go test ./internal/server ./internal/middleware ./internal/identity ./internal/api` grün; Ratchet `--kinds go,vitest` 0 Fehler.
+
+**Dateien (16 Einträge):**
+
+- frontend/src/components/EnrollmentClientSelect.tsx (neu)
+- frontend/src/pages/DiscoveryPage.tsx
+- frontend/src/pages/OnboardingPage.tsx
+- frontend/src/api/client.ts
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/src/pages/DiscoveryPage.test.tsx
+- frontend/src/pages/OnboardingPage.test.tsx
+- frontend/e2e-real/enrollment-client-choice.spec.ts (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/betrieb/collector-ca.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung, keine Änderung am Server; die Bindung und ihre Prüfung bleiben im Server (WP-677). Die Oberfläche liest nur die Sitzungsdaten des Nutzers selbst (`GET /api/v1/me`, ohne Recht).
+
+**Tests:**
+
+- `cd frontend && npx vitest run src/pages/DiscoveryPage.test.tsx src/pages/OnboardingPage.test.tsx src/i18n src/components src/api`.
+- `cd frontend && CI=1 BASE_URL=http://localhost:<port> PW_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium npx playwright test e2e/a11y.spec.ts e2e/mobile-actions.spec.ts e2e/review.spec.ts --project=chromium` gegen `npx vite --port <port>`.
+- Real-Stack (nur CI, install-smoke.yml): `npx playwright test -c e2e-real/playwright.real.config.ts e2e-real/enrollment-client-choice.spec.ts`.
+- `cd backend && go test -count=1 -p 1 ./internal/server/ ./internal/middleware/ ./internal/identity/ ./internal/api/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+COL-04;[B];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-696
+TEN-09;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-696
+UI-17;[B];D;frontend/src/pages/OnboardingPage.test.tsx;WP-696
+COL-04;[B];D;frontend/e2e-real/enrollment-client-choice.spec.ts;WP-696
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Eine Site-Auswahl: ein Nutzer, dessen `collector:manage` auf mehrere Sites beschränkt ist, erhält weiter 422 `site_id`, sieht jetzt aber den Grund des Servers; eine Pflichtauswahl der Site (abhängig vom gewählten Client) ist ein eigenes Paket. Eine optionale Client-Auswahl für org-weite Nutzer (der Code bleibt ungebunden, wie WP-677 es vorsieht). API-Keys (kein `GET /me`) sind nicht betroffen.
+
+### WP-699 – Sicherheitsreview und GATE-01 erfassen die Befunde der Korrektur: SR-27 bis SR-49, Begründung ohne Sicherheitswirkung, maschinelle Prüfung über die Befundliste
+
+**Schlüssel:** `k7n-sr-coverage-reaudit-findings` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** SR · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-452 (`t5-review-g1`), WP-451 (`t5-gate-consistency`); die Korrektur-WPs der aufgenommenen Befunde (WP-633, WP-634, WP-636 bis WP-639, WP-642, WP-643, WP-656, WP-660, WP-663, WP-664, WP-667, WP-669, WP-677, WP-678, WP-680, WP-682, WP-685, WP-687, WP-689, WP-692, WP-698)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-428](../../../audit/g1-reaudit/FINDINGS.md#f-428) | P3 | Sicherheitsreview und GATE-01-Prüfung erfassen die sicherheitsrelevanten Befunde ab F-355 nicht als SR-Befunde mit Severity; ein offener Scope- oder Auth-Befund aus K5 bis K7 blockiert weder GATE-01 noch `--final` | schließt | K7-Wiederholungsprüfung r3-b6 (WP-209/WP-213, Kandidat K-r3b6-1, Verifier auf `7cd63e0`) |
+
+**Problem:** Das Review (`docs/security/review-g1.md`) endet mit SR-26 (WP-452: P0-Befunde F-001 bis F-015 des Phase-1-Audits). Die Befunde der Korrektur ab F-355 (`audit/g1-reaudit/FINDINGS.md`) mit Sicherheitswirkung, darunter F-364 (P0), F-366, F-396 (P1) und die Scope-Befunde aus K5 bis K7, stehen dort nicht als SR-Befund mit Severity (SEC-11, WP-209 AK2). Die GATE-01-Tabelle in `docs/acceptance/g1-gate.md` nennt nur „SR-01 bis SR-11“ und „F-001 bis F-016“, und `tests/rep01-structure.test.sh` zählt die P0-Befunde mit `seq 1 15`, ohne die Befundliste der Korrektur zu lesen: Ein offener Befund dieser Art blockiert weder GATE-01 noch `--final` (WP-213 AK3, WP-600 AK2/AK6).
+
+**Akzeptanzkriterien:**
+
+- [ ] `docs/security/review-g1.md`, neuer Abschnitt „Befunde der Korrektur G1 (ab F-355)“ im Format von SR-14 bis SR-26 (| ID | Severity | Status | Befund | Korrektur-WP | Nachweis |): SR-27 bis SR-49 für jeden Befund mit Sicherheitswirkung (Scope- und Mandantenisolation, Auth und Rechte, Secrets/Krypto, Audit-Integrität, Offenlegung) und jeden Befund, der nach dem Bewertungsschema ohne Sicherheitswirkung Critical ist (stiller Datenverlust: F-411, F-416). Severity nach `docs/audit/README.md` mit Begründung je Zeile (13 Critical, 3 High, 2 Medium, 4 Low, 1 Info), Status, Korrektur-WP mit Schlüssel und Commit, kodierender Test. F-397 bleibt Teil von SR-18.
+- [ ] Status „behoben“ nur mit gemergtem Korrektur-WP und grünem regulärem Test: die 28 Go-Tests der Zeilen (18 Pakete) auf `6a499ac` mit `go test -count=1 -p 1` grün, keiner übersprungen; `tests/audit/master-key-rotation-deploy.test.sh` 5/5 grün. Real-Stack- und Vitest-Nachweise der Zeilen laufen im CI.
+- [ ] Neuer Abschnitt „Befunde der Korrektur ohne Sicherheitswirkung“ (| Befund | Prio | Begründung |) mit allen übrigen Befunden der Liste (alle Prioritäten, dazu F-422 bis F-426 in Korrektur und F-428), je mit einer Begründung von mindestens fünf Wörtern. Einleitung, „Ergebnis“ und „Freigabe des Sicherheitsreviews“ nennen SR-27 bis SR-49.
+- [ ] `docs/acceptance/g1-gate.md`: Die GATE-01-Quellen nennen „Befunde des Sicherheitsreviews (SR-01 bis SR-49)“ und als eigene Zeile die Befundliste der Korrektur (`audit/g1-reaudit/FINDINGS.md`); die Regeln der Checkliste beschreiben die neue Prüfung. Keine Statuspflege anderer Zeilen (WP-595); die Zeile „P0-Befunde des Phase-1-Abnahmeaudits“ und die Statuswerte „offen“ bleiben.
+- [ ] `tests/rep01-structure.test.sh`, Regel `reaudit_coverage` (Normal- und `--final`-Modus): Jeder Befund P0 bis P2 der Tabelle „## Übersicht“ von `audit/g1-reaudit/FINDINGS.md` ist ein SR-Befund des Reviews (eine SR-Zeile mit Severity nennt seine ID) oder steht im Abschnitt „Befunde der Korrektur ohne Sicherheitswirkung“ mit mindestens fünf Wörtern Begründung; eine Übersicht ohne Befundzeile ist ein Verstoß, eine fehlende Datei der Repository-Prüfung „GATE-01 audit/g1-reaudit/FINDINGS.md lists the findings …“. Später hinzukommende Befunde (F-429 ff.) erfasst die Regel ohne Änderung. Regel `final_review_high`: mit `--final` kein offener SR-Befund mit Critical oder High.
+- [ ] Fixture-Selbsttests im Stil der übrigen (`tests/fixtures/rep01/final`, Änderung je Fall): `rep01_reaudit_finding_missing` (meldet `reaudit_coverage`), `rep01_reaudit_finding_listed` (besteht), `rep01_reaudit_finding_short_reason`, `rep01_reaudit_finding_sr`, `rep01_reaudit_finding_p3_only`, `rep01_reaudit_overview_empty`, `rep01_reaudit_sr_high_open` (normal grün, `--final` `final_review_high`), `rep01_reaudit_sr_critical_open`.
+- [ ] Konvention 16: Die neue Regel ist rot auf den alten Dokumenten (`e5c2d86`: 20 Befunde und `rep01_control`; `6a499ac` vor der Korrektur: 33 Befunde und `rep01_control`) und grün danach. Normalmodus 231 passed, 0 failed (vorher 213/0); `--final` 31 Fehlschläge vorher und nachher, dieselben. shellcheck ohne Befund; Ratchet `--kinds sh` 0 Fehler; `TestTraceabilityFile` grün.
+
+**Dateien (8 Einträge):**
+
+- docs/security/review-g1.md
+- docs/acceptance/g1-gate.md
+- tests/rep01-structure.test.sh
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine.
+
+**Tests:**
+
+- `KUSTOMIZE=~/go/bin/kustomize bash tests/rep01-structure.test.sh` und `… --final` (Zahl und Art der Fehlschläge unverändert).
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -p 1 -run '<die 28 Tests der SR-Zeilen>' ./internal/…` (Liste im Review) und `bash tests/audit/master-key-rotation-deploy.test.sh`.
+- `cd backend && TRACEABILITY_WPS=WP-699 go test -count=1 ./internal/traceability/`; Ratchet `./tests/audit/run-auditdefect.sh --kinds sh` und `bash tests/audit/run-auditdefect.test.sh`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+GATE-01;[Q];SR;tests/rep01-structure.test.sh;WP-699
+SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-699
+GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-699
+```
+
+**Entscheidungsbedarf:** keiner. Festgelegt (zur Bestätigung durch den Lead): Befunde ohne Sicherheitswirkung, die nach dem Bewertungsschema Critical sind (stiller Datenverlust, F-411 und F-416), stehen als SR-Befund im Review, weil GATE-01 die Critical-Befunde aus dem Review liest; F-404 und F-422 gelten nicht als stiller Verlust (jede Wirkung von einem Nutzer angefordert bzw. nur an gelöschten CIs). Die Prüfung verlangt die Aufnahme für P0 bis P2; P3-Befunde sind vollständig aufgeführt, aber nicht maschinell verlangt.
+
+**Nicht Bestandteil:** die Statuspflege von GATE-01 bis GATE-03 und der übrigen Zeilen auf dem RC-Commit (WP-595); die RC-Scanläufe des Reviews (F-122, WP-595); die Klassifikation künftiger Befunde ab F-429 (die Regel macht sie zur Pflicht beim Eintrag in die Befundliste).
+
+### WP-700 – Eindeutige Attribute auf allen Schreibwegen: Wiederherstellen, Unmerge und Review-Auflösung prüfen wie POST /cis (409 mit violations)
+
+**Schlüssel:** `k7n-unique-check-all-write-paths` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-142 (`b-met-ddl`), WP-692 (`k7n-unique-org-scope-client-writer`), WP-670 (`k7n-max-cis-all-paths`), WP-676 (`k7n-review-resolve-errors`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-429](../../../audit/g1-reaudit/FINDINGS.md#f-429) | P3 | Eindeutige Attribute: Wiederherstellen, Unmerge und die Review-Auflösungen, die ein CI anlegen oder reaktivieren, prüfen die Eindeutigkeit nicht (Duplikate ohne Index, 500 mit Index) | schließt | Korrektur WP-692 (K7) auf `7cd63e0` |
+
+**Problem:** Die serverseitige Prüfung der eindeutigen Attribute (`UniqueConflicts`, MET-15) läuft nur in `ci.Service.Create`/`Update`. `POST /cis/{id}/restore` und die Auflösung `merge` von `resurrected_device` (`PGRepository.restore`), `POST /cis/{id}/unmerge` (`PGRepository.Unmerge`), `new` von `unclassified_device`/`ambiguous_identity`/`resurrected_device` (`createReviewedDevice`) und `new` von `unlicensed_ci` sowie die Übernahme nach Anheben von `max_cis` (`adoptHeld`, `AdoptUnlicensed`) schreiben am Service vorbei und verlassen sich auf den Unique-Index. Solange er fehlt (Fenster zwischen Flag und Index-Job oder nach einem gescheiterten Job), antworten sie 200 und legen ein zweites aktives CI mit demselben Wert an; der Index-Job scheitert danach mit „Duplicate keys exist“. Mit Index meldet der Index den Konflikt als `*ci.UniqueError`, den die Handler von Restore, Unmerge und Review-Auflösung nicht abbilden: 500 statt der dokumentierten 409. `AdoptUnlicensed` bricht bei so einem Gerät ab und übernimmt die übrigen nicht.
+
+**Akzeptanzkriterien:**
+
+- [ ] Die Prüfung von `ci.Service` ist als `ci.CheckUnique(ctx, repo, orgID, ciTypeID, clientID, ciID, attrs)` exportiert (`UniqueConflicts` über `UniqueChecker`, unverändert inkl. WP-692 für eingeschränkte Writer); `ci.Service.Create`/`Update` nutzen sie, keine zweite Implementierung.
+- [ ] `PGRepository.restore` (beide Wege: `RestoreDeleted` für `POST /cis/{id}/restore`, `Restore` für `resurrected_device`) und `PGRepository.Unmerge` (Opfer und Überlebendes) prüfen nach dem Zurückschreiben in der schreibenden Transaktion; ein vergebener Wert ist `*ci.UniqueError`, die Transaktion rollt zurück, das CI bleibt gelöscht bzw. gemergt. `createReviewedDevice` und `adoptHeld` prüfen vor dem `Create`.
+- [ ] `*ci.UniqueError` implementiert `api.ViolationsConflict`; `api.WriteFieldError` antwortet damit 409 `urn:reticora:problem:conflict` mit `violations` (Feld je Attribut, fester Text, ohne das andere CI), so wie `POST /cis` (der CI-Handler nutzt dieselbe Ausgabe). Restore, Unmerge und `POST /review-items/{id}/resolve` antworten so, mit und ohne Index; der Review-Eintrag bleibt offen.
+- [ ] `AdoptUnlicensed` lässt einen Eintrag mit vergebenem Wert offen (Warnung im Log mit den Attributschlüsseln) und übernimmt die folgenden.
+- [ ] `api/openapi.yaml` (spec-first): 409 von `POST /cis/{id}/restore` und `POST /cis/{id}/unmerge`, die Beschreibung von `resolveReviewItem` und `AttributeDefinition.unique` beschreiben die Regel; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestUniqueAttributeEveryWritePath` (`internal/server`), `TestAdoptUnlicensedChecksUniqueAttributes` (`internal/discovery`) und `TestUniqueAttributeRestoreForClientWriter` (`internal/ci`): auf `e5c2d86` rot (200 und zwei aktive CIs je Weg, Index-Job „Duplicate keys exist“, mit Index 500; `AdoptUnlicensed` übernimmt beide Geräte; Client-1-Writer stellt sein CI mit dem Wert eines CI von Client 2 wieder her), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1 ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/` grün (ohne `TestCIQueryBudget`, bekannte lokale Abweichung; `TestUniqueAttributes`, `TestUniqueAttributeOrgScopeForClientWriter` unverändert; `TestHandlersDoNotEchoRepositoryErrors` mit dem Eintrag für `api.WriteFieldError`); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (16 Einträge):**
+
+- backend/internal/api/fielderrors.go
+- backend/internal/ci/service.go
+- backend/internal/ci/handler.go
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/merge.go
+- backend/internal/ci/unique_attr_integration_test.go
+- backend/internal/discovery/review.go
+- backend/internal/discovery/unlicensed.go
+- backend/internal/discovery/unlicensed_unique_integration_test.go (neu)
+- backend/internal/server/unique_attr_write_paths_integration_test.go (neu)
+- backend/internal/server/handler_errors_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration (000189 bleibt frei), keine Policy-Änderung. Die Prüfung beim Wiederherstellen und Unmerge läuft in der schreibenden Transaktion (`database.ContextWithTx`); für eingeschränkte Writer zusätzlich in der eigenen, nur lesenden org-weiten Transaktion von WP-692.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUniqueAttributeEveryWritePath$' ./internal/server/`, `… -run '^TestAdoptUnlicensedChecksUniqueAttributes$' ./internal/discovery/`, `… -run '^TestUniqueAttribute' ./internal/ci/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MET-15;B/G1;B;backend/internal/server/unique_attr_write_paths_integration_test.go;WP-700
+MET-15;B/G1;B;backend/internal/discovery/unlicensed_unique_integration_test.go;WP-700
+MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-700
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Der Discovery-Ingest (`createDiscoveredCI` aus `processRecord`, Batch über `ci.BatchCreator`, Updates bekannter Geräte mit `attributes`) prüft weiterhin nur über den Index; wie ein gemeldeter, bereits vergebener Wert eines eindeutigen Attributs zu behandeln ist (Datensatz abweisen, Wert verwerfen wie vergebene Identitätswerte, Review-Eintrag), ist eine eigene Entscheidung. Ebenso der Typwechsel (`POST /cis/{id}/type`, CI-11), bei dem ein vorhandener Wert unter ein eindeutiges Attribut des Zieltyps fällt (nicht reproduziert). Eine Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben. Dass `new` die dynamischen Attribute des Geräte-Datensatzes nicht übernimmt (`devicePayload` speichert sie nicht), bleibt unverändert.
+
+### WP-693 – Override-Wege auf soft-gelöschten CIs: `override_conflict` accept, Override setzen/entfernen und Feldliste antworten 404 und schreiben nichts
+
+**Schlüssel:** `k7n-override-deleted-ci` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-025 (`denorm-ci`), WP-057 (`manual-ovr`), WP-089 (`conflict`), WP-676 (`k7n-review-resolve-errors`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-422](../../../audit/g1-reaudit/FINDINGS.md#f-422) | P3 | `override_conflict` accept auf einem inzwischen soft-gelöschten CI entfernt den Override und schreibt das gelöschte CI; Override-Routen und Feldliste antworten für gelöschte CIs 200 | schließt | Kandidatenprüfung K7 auf `7cd63e0` (Probe `k7/out/cand/evidence/k-reaudit-cand/1/probe-override-conflict-deleted-ci.log`) |
+
+**Problem:** `POST /api/v1/review-items/{id}/resolve {"action":"accept"}` eines `override_conflict`-Eintrags, dessen CI inzwischen gelöscht wurde (`DELETE /cis/{id}` → 204, `GET` → 404), antwortet 200, löst den Eintrag auf, entfernt den Override und gibt dem gelöschten CI den beobachteten Wert mit neuer Version, `ci_change`-Zeile und Audit. `PUT`/`DELETE /api/v1/cis/{gelöscht}/fields/{f}/override` antworten 200 und schreiben, `GET /api/v1/cis/{gelöscht}/fields` 200 mit den Werten. Ursache: `lockCI` (`backend/internal/override/pg_repository.go:91–98` auf `7cd63e0`) und `visibleCI` (Zeile 67) prüfen `EXISTS (SELECT 1 FROM ci WHERE id = $1)` ohne `deleted_at`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `lockCI` meldet neben der Sichtbarkeit, ob das CI nicht gelöscht ist; `SetOverride` (über `requireLiveCI`) und `ClearOverride` verlangen ein nicht gelöschtes CI (sonst „not found“ bzw. `override.ErrNotFound`); das `UPDATE` von `ClearOverride` und `ListForCI` filtern mit `liveCI` (`deleted_at IS NULL`). Der Discovery-Weg (`RecordDiscovered`, `RecordDiscoveredMany`, `RecordDiscoveredBatch`, `Get`) und `Conflicts` bleiben unverändert.
+- [ ] accept eines `override_conflict`-Eintrags auf einem soft-gelöschten CI → 404 problem+json; der Eintrag bleibt offen, Override, Feldwert, CI (`model`, `version`), `ci_change` und Audit bleiben unverändert. Das accept auf einem lebenden CI bleibt 200.
+- [ ] `PUT` und `DELETE /api/v1/cis/{gelöscht}/fields/{name}/override` → 404 problem+json, nichts geschrieben (auch kein neuer Feldwert); `GET /api/v1/cis/{id}/fields` → 404 für ein unbekanntes, nicht sichtbares oder gelöschtes CI wie `GET /cis/{id}`; lebende CIs unverändert 200.
+- [ ] `api/openapi.yaml` (spec-first): `listCisIdFields` dokumentiert 404, `putCisIdFieldsNameOverride`/`deleteCisIdFieldsNameOverride` und `resolveReviewItem` nennen das soft-gelöschte CI; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestOverrideConflictAcceptOnDeletedCIIsNotFound` (`internal/server/scope_suggested_errors_integration_test.go`) deckt den Retest von F-422 ab; `TestOverrideRepositoryClientScope` erwartet für das CI eines anderen Clients `ErrNotFound`. Auf `e5c2d86` rot, mit der Korrektur grün, auch als Nutzer `nobody`.
+- [ ] Regression: `go test -p 1 ./internal/override/ ./internal/server/ ./internal/ci/ ./internal/reviews/` grün (ohne `TestCIQueryBudget`); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/override/pg_repository.go
+- backend/internal/override/handler.go
+- backend/internal/override/override_scope_integration_test.go
+- backend/internal/server/scope_suggested_errors_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Prüfung läuft wie bisher als `reticora_app` unter `database.WithRequestTenant` mit den Tenant-GUCs der Anfrage; `deleted_at IS NULL` verengt nur die bestehende Sichtbarkeit.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestOverrideConflictAcceptOnDeletedCIIsNotFound$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestOverrideRepositoryClientScope$' ./internal/override/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/override/ ./internal/server/ ./internal/ci/ ./internal/reviews/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+REC-12;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+OVR-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+CI-05;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+OVR-01;[B];D;backend/internal/override/override_scope_integration_test.go;WP-693
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** `GET /api/v1/reconciliation/conflicts` listet Konflikte soft-gelöschter CIs weiter (`Conflicts` filtert mit `visibleCI`); als Beobachtung gemeldet, nicht geändert. Der Discovery-Weg (`RecordDiscovered*`) schreibt weiter auf jedes sichtbare CI, da der Abgleich nur lebende CIs trifft. Das Aufräumen offener `override_conflict`-Einträge beim Löschen eines CIs.
+
+### WP-694 – Collector anlegen und ändern: Feldfehler aus Validierung und Repository sind 422 mit Feld statt 500
+
+**Schlüssel:** `k7n-collector-field-errors` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-143 (`d-col-status`), WP-144 (`d-col-token`), WP-677 (`k7n-enrollment-client-binding`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-423](../../../audit/g1-reaudit/FINDINGS.md#f-423) | P3 | `POST /collectors` und `PATCH /collectors/{id}`: Feldfehler aus Validierung und Repository enden als 500 statt 422 mit Feld | schließt | Kandidatenprüfung K7 auf `7cd63e0` (Probe `k7/out/cand/evidence/k-reaudit-cand/2/probe-collector-field-errors.log`; in WP-677 als Beobachtung vermerkt) |
+
+**Problem:** `POST /api/v1/collectors` mit unbekannter `site_id` oder mit `client_id` Client 1 und einer Site von Client 2 (org-weit wie als Client-1-Principal) und `PATCH /api/v1/collectors/{id}` mit `name` "", `status` "bogus"/"paused", unbekannter `site_id` oder einer Site eines anderen Clients antworten 500. `UpdateCollector` (`backend/internal/discovery/collector_status.go:103–111` auf `7cd63e0`) und `RegisterCollector` (`discovery.go:852–854`) geben die `*api.FieldError` der Validierung bzw. von `collectorError` (`pg_repository.go:184`) an `api.WriteRepoError` (`internal/api/dberrors.go:116`), das sie nicht kennt. Die Spezifikation von `registerCollector` nennt keine 422, `RegisterCollectorRequest` kein `site_id`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `api.WriteRepoError` schreibt ein `*api.FieldError` oder `*api.ConflictError`, auch verpackt, über `api.WriteFieldError` (Status des Fehlers, ohne Status 400; Konflikt 409; mit `field`), nach `ErrNotFound` und vor den PostgreSQL-Fehlern; der Text eines umhüllenden Fehlers wird nicht ausgegeben. Alle anderen Fälle (404, sanitisierte PostgreSQL-Fehler, 503, 500) bleiben.
+- [ ] `CollectorPatch.validate` setzt für `name` "" und einen `status` außer `disabled`/`active` 422.
+- [ ] `POST /collectors` mit unbekannter Site oder Site eines anderen Clients als `client_id` → 422 problem+json auf `site_id`, kein Collector angelegt; `PATCH` mit leerem Namen, unzulässigem Status, unbekannter Site oder Site eines anderen Clients → 422 auf `name`, `status` bzw. `site_id`, Collector unverändert; org-weit und als Principal mit `collector:manage` nur in Client 1; dieser erhält für die Site von Client 2 dieselbe Antwort wie für eine unbekannte Site. Gültige Anlage und Änderung bleiben 201/200.
+- [ ] `api/openapi.yaml` (spec-first): `registerCollector` mit 422 und Beschreibung der Site-Bindung, `RegisterCollectorRequest.site_id`, `updateCollector` nennt die 422 für Name, Status und Site; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestCollectorWritesKeepFieldErrorContract` (`internal/server/collector_field_errors_integration_test.go`) und `TestWriteRepoErrorWritesFieldErrors` (`internal/api/dberrors_test.go`) decken den Retest von F-423 ab; auf `e5c2d86` rot, mit der Korrektur grün, auch als Nutzer `nobody`.
+- [ ] Regression: `go test -p 1` über alle Backend-Pakete (ohne `./internal/database`, ohne `TestCIQueryBudget`) grün, da `WriteRepoError` von allen Handlern genutzt wird; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (9 Einträge):**
+
+- backend/internal/api/dberrors.go
+- backend/internal/api/dberrors_test.go
+- backend/internal/discovery/collector_status.go
+- backend/internal/server/collector_field_errors_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Site-Bindung prüft weiter der Trigger `trg_collector_site_binding` (000127) unter der RLS des Aufrufers; ein Client-1-Principal sieht die Site von Client 2 nicht und erhält „site not found“ wie für eine unbekannte Site.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestCollectorWritesKeepFieldErrorContract$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -v -run '^TestWriteRepoError' ./internal/api/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget $(go list ./... | grep -v '/internal/database$')`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+API-03;[B];D;backend/internal/server/collector_field_errors_integration_test.go;WP-694
+COL-01;[B];D;backend/internal/server/collector_field_errors_integration_test.go;WP-694
+API-03;[B];D;backend/internal/api/dberrors_test.go;WP-694
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** `POST /collectors` mit leerem Namen bleibt 400 „name is required“ (Pflichtfeld des Schemas). Ein Name von 10 000 Zeichen wird weiter angenommen (keine Längengrenze im Schema). Die Prüfung der übrigen Handler, die Feldfehler bisher selbst über `api.WriteFieldError` schreiben, bleibt unverändert; sie profitieren nur, wo ein Feldfehler bisher über `WriteRepoError` als 500 endete.
+
+### WP-695 – `unknown_relationship` accept folgt den Regeln von `POST /relationships`: Typliste von `connected_to` 422, soft-gelöschtes CI 404; keine neue Kante zu gelöschten CIs
+
+**Schlüssel:** `k7n-unknown-relationship-accept-rules` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** D · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-127 (`b-rel-types`), WP-158 (`d-lldp`), WP-592 (`t6-p3-sammel`, Typlisten E-95), WP-676 (`k7n-review-resolve-errors`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-424](../../../audit/g1-reaudit/FINDINGS.md#f-424) | P3 | `unknown_relationship` accept legt die Kante trotz Typliste von `connected_to` und zu soft-gelöschten CIs an; `POST /relationships` auf ein gelöschtes CI antwortet 201 | schließt | Kandidatenprüfung K7 auf `7cd63e0` (Probe `k7/out/cand/evidence/k-reaudit-cand/3/probe-unknown-relationship-accept.log`) |
+
+**Problem:** Das accept eines `unknown_relationship`-Eintrags antwortet 200 und legt die Kante `connected_to` an, obwohl die Typliste von `connected_to` (eigener Typ der Organisation, E-95) die CI-Typen verbietet oder Quelle bzw. Ziel soft-gelöscht ist; `POST /api/v1/relationships` auf ein gelöschtes Ziel antwortet 201. `resolveUnknownRelationship` und `upsertRelationshipErr` (`backend/internal/discovery/topology.go:731–751`, `632–643` auf `7cd63e0`) bauen die Kante ohne `checkTypeLists` (unexportiert, nur `relationship.go:1002` setzt es), `relationship.PGRepository.Create` (`pg_repository.go:265–266`) prüft die Endpunkte ohne `deleted_at`.
+
+**Akzeptanzkriterien:**
+
+- [ ] `relationship.Relationship.CheckTypeLists()` schaltet die Typlistenprüfung von `Create` ein; `upsertRelationshipErr` erhält den Schalter, `resolveUnknownRelationship` setzt ihn, der automatische Discovery-Weg (`upsertRelationship`, beobachtete Kanten) nicht.
+- [ ] `relationship.PGRepository.Create` verlangt für Quelle und Ziel `deleted_at IS NULL`; ein gelöschtes Ende ist `ErrSourceCINotFound`/`ErrTargetCINotFound` (für den manuellen und den Discovery-Weg). `POST /relationships` antwortet dafür 422 mit der Verletzung auf `source_ci_id`/`target_ci_id` wie für ein unbekanntes CI; nichts wird gespeichert.
+- [ ] accept eines `unknown_relationship`-Eintrags: Typliste verletzt → 422 problem+json; Quelle oder Ziel soft-gelöscht (auch wenn die Kante schon existiert; sie wird nicht erneut bestätigt) → 404 problem+json; der Eintrag bleibt offen, keine Kante. Lebende CIs mit erlaubten Typen bleiben 200 mit Kante.
+- [ ] `api/openapi.yaml` (spec-first): `createRelationship` (422) und `resolveReviewItem` nennen das soft-gelöschte CI und die Typlisten; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs` (`internal/server/scope_suggested_errors_integration_test.go`) und `TestCreateRefusesDeletedEndpoints` (`internal/relationship/deleted_endpoint_integration_test.go`) decken den Retest von F-424 ab; auf `e5c2d86` rot, mit der Korrektur grün, auch als Nutzer `nobody`.
+- [ ] Regression: `go test -p 1 ./internal/relationship/ ./internal/discovery/ ./internal/topology/ ./internal/server/` grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (10 Einträge):**
+
+- backend/internal/discovery/topology.go
+- backend/internal/relationship/relationship.go
+- backend/internal/relationship/pg_repository.go
+- backend/internal/relationship/deleted_endpoint_integration_test.go
+- backend/internal/server/scope_suggested_errors_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. `Create` prüft weiter in derselben Anweisung wie das Einfügen unter der RLS des Aufrufers (`database.WithRequestTenant`, `reticora_app`); `deleted_at IS NULL` verengt nur die Sichtbarkeit. Das accept liest die CIs über `ci.Repository.GetByID` unter dem Scope des Prüfers.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestCreateRefusesDeletedEndpoints$' ./internal/relationship/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/relationship/ ./internal/discovery/ ./internal/topology/ ./internal/server/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
+REL-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
+REL-01;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
+CI-05;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
+```
+
+**Entscheidungsbedarf:** keiner. Begründung der Abgrenzung: beobachtete Discovery-Kanten bleiben ohne Typlistenprüfung (WP-592, E-95: die Typlisten gelten für Kanten, über die ein Mensch entscheidet); eine Kante zu einem soft-gelöschten CI ist dagegen auf keinem Weg sinnvoll (CI-05), der Abgleich trifft nur lebende CIs, sodass nur ein Wettlauf zwischen Löschen und Ingest betroffen ist.
+
+**Nicht Bestandteil:** Selbstschleifen (`source = target`) und die Umkehrung einer bestehenden ungerichteten Kante beim accept (Probe (c)) bleiben wie bei `POST /relationships` erlaubt. Bestehende Kanten gelöschter CIs bleiben erhalten (CI-05: „Beziehungen bleiben“). Ein Typwechsel eines CIs nach dem Anlegen einer Kante.
+
+### WP-702 – Eindeutige Attribute beim Typwechsel: POST /cis/{id}/type prüft die eindeutigen Attribute des Zieltyps (409 mit violations)
+
+**Schlüssel:** `k7n-unique-check-type-change` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-142 (`b-met-ddl`), WP-172 (Typwechsel CI-11), WP-700 (`k7n-unique-check-all-write-paths`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-431](../../../audit/g1-reaudit/FINDINGS.md#f-431) | P3 | Eindeutige Attribute: Der Typwechsel `POST /cis/{id}/type` prüft die eindeutigen Attribute des Zieltyps nicht (Duplikat ohne Index, mit Index 409 ohne den Attributschlüssel) | schließt | Korrektur WP-700 (K7) auf `6a499ac` |
+
+**Problem:** Der Typwechsel (CI-11) bringt die vorhandenen Attributwerte eines CI unter die Attribute des Zieltyps. `PGRepository.changeTypeRow` ändert `ci_type_id` ohne die Prüfung von MET-15 (`ci.CheckUnique`) und verlässt sich auf den Unique-Index. Solange er fehlt (Fenster zwischen Flag und Index-Job oder nach einem gescheiterten Job), antwortet `POST /cis/{id}/type` 200 und es entstehen zwei aktive CIs des Zieltyps mit demselben Wert; der Index-Job scheitert danach mit „Duplicate keys exist“. Mit Index antwortet der Weg 409, aber `violations` nennt `attributes` statt des Attributs (`ChangeType` bildet den Indexnamen nicht über `uniqueField` ab), und die Spezifikation von `changeCIType` kennt keine 409. Eine 500 tritt nicht auf.
+
+**Akzeptanzkriterien:**
+
+- [ ] `changeTypeRow` ruft vor dem `UPDATE` in der schreibenden Transaktion `ci.CheckUnique(…, typeID, before.ClientID, ciID, before.Attributes)` auf (die Prüfung von `ci.Service`, keine zweite Implementierung, inkl. WP-692 für eingeschränkte Writer); ein vergebener Wert ist `*ci.UniqueError`, das CI behält seinen Typ. `ChangeType` bildet einen Index-Konflikt (gleichzeitiger Write) über `uniqueField` auf den Attributschlüssel ab.
+- [ ] `POST /cis/{id}/type` antwortet damit 409 `urn:reticora:problem:conflict` mit `violations` des Attributs (fester Text, ohne das andere CI), mit und ohne Index; ein CI mit freien Werten wechselt den Typ (200).
+- [ ] `api/openapi.yaml` (spec-first): 409 von `changeCIType` (`ViolationProblem`) und die Beschreibung von `AttributeDefinition.unique` nennen den Typwechsel; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestUniqueAttributeTypeChange` (`internal/server`): auf `e5c2d86` rot (200 und zwei aktive CIs des Zieltyps, Index-Job „Duplicate keys exist“, mit Index 409 mit dem Feld `attributes`), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1 ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/` grün (ohne `TestCIQueryBudget`, bekannte lokale Abweichung; `TestUniqueAttributeEveryWritePath` und die Typwechsel-Tests unverändert); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (8 Einträge):**
+
+- backend/internal/ci/pg_repository.go
+- backend/internal/server/unique_attr_type_change_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Prüfung läuft in der schreibenden Transaktion des Typwechsels (`database.ContextWithTx`); für eingeschränkte Writer zusätzlich in der eigenen, nur lesenden org-weiten Transaktion von WP-692.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestUniqueAttributeTypeChange$' ./internal/server/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MET-15;B/G1;B;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
+CI-11;[B];B;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
+```
+
+**Entscheidungsbedarf:** keiner.
+
+**Nicht Bestandteil:** Die Umklassifizierung durch die Discovery (`UpdateRecord`, Modus `discovery`) nutzt dieselbe Prüfung in `changeTypeRow`; wie das Ingest einen solchen Konflikt behandelt (Typ bleibt `generic_device`), regelt WP-703 (F-432). Eine Oberfläche für den Typwechsel gibt es nicht; die Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben.
+
+### WP-703 – Eindeutige Attribute im Discovery-Ingest: vergebener Wert wird nicht gespeichert (invalid_values), der Datensatz und der Batch laufen weiter
+
+**Schlüssel:** `k7n-unique-check-ingest` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-142 (`b-met-ddl`), WP-501 (verworfene Werte im Ingest, `invalid_values`), WP-333 (Batch-Ingest, `ci.BatchCreator`), WP-481 (Fehler je Datensatz), WP-700 (`k7n-unique-check-all-write-paths`), WP-702 (`k7n-unique-check-type-change`)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-432](../../../audit/g1-reaudit/FINDINGS.md#f-432) | P3 | Eindeutige Attribute im Discovery-Ingest: neue Geräte, Updates bekannter Geräte und die Umklassifizierung prüfen nicht (Duplikate ohne Index, mit Index scheitert der Datensatz als „retryable“ 500 und das Gerät fehlt) | schließt | Korrektur WP-700 (K7) auf `6a499ac` |
+
+**Problem:** Der Ingest schreibt die gemeldeten Attribute am `ci.Service` vorbei: neue Geräte über `ci.BatchCreator.CreateMany` (Batch, WP-333) oder `createDiscoveredCI` (Datensatz für sich, z. B. `generic_device` ohne Profil oder nach einer Ablehnung im Batch), bekannte Geräte über `ci.UpdateRecord`, die Umklassifizierung von `generic_device` über `changeTypeRow`. Keiner dieser Wege ruft `ci.CheckUnique` auf. Ohne Unique-Index entstehen Duplikate (auch zwei neue Geräte desselben Batches mit demselben Wert), der Index-Job scheitert danach. Mit Index lehnt `CreateMany` das Gerät ab, der Einzellauf scheitert am Index mit `*ci.UniqueError`, den die Klassifizierung der Datensatzfehler als vorübergehend einstuft: Antwort `rejected` mit Status 500 „send it again“, `retryable: true`; ein Request mit nur diesem Datensatz antwortet 500; das Gerät wird nie inventarisiert (auch Sichtung, `last_seen_at` und die übrigen Felder eines bekannten Geräts gehen verloren), der Collector bzw. die Queue liefert ihn erneut, und folgende Datensätze desselben Geräts im Batch werden zurückgehalten (WP-481). Die Anforderungen (MET-15, CI-03, REC-01 ff., DIS-02) legen nicht fest, wie ein gemeldeter, bereits vergebener Wert zu behandeln ist; eine 409 an eine Person ist im Ingest nicht möglich.
+
+**Akzeptanzkriterien:**
+
+- [ ] Ein gemeldeter Wert eines eindeutigen Attributs, den ein anderes aktives CI im Scope des Attributs hält, wird nicht gespeichert, wie ein Wert, den die Felddefinition ablehnt (CI-03, WP-501) und wie ein vergebener Identitätswert (`withoutTakenIdentity`): gezählt in `invalid_values`, Warnung `ingest.unique.dropped` mit dem Attributschlüssel (ohne den Wert und ohne das andere CI); der Rest des Datensatzes wird gespeichert, kein Datensatz und kein Batch scheitert. Die Prüfung ist `ci.CheckUnique` (keine zweite Implementierung), in der Transaktion des Datensatzes bzw. des Batches, auch ohne Index.
+- [ ] Neue Geräte: `reconcileRecord` prüft vor `createDiscoveredCI`. Der Batch (`createInWindow`) überlässt ein neues Gerät mit einem Wert eines eindeutigen Attributs seinem eigenen Datensatz-Lauf, der auch gegen die vorher angelegten Geräte desselben Batches prüft. Bekannte Geräte: nur die geänderten Werte werden geprüft, ein vergebener Wert wird weder geschrieben noch als Provenienz erfasst, das CI behält seinen Wert.
+- [ ] Umklassifizierung (CI-11): hält ein anderes CI einen Wert des CI unter einem eindeutigen Attribut des Zieltyps, bleibt das CI `generic_device` (wie eine nicht erlaubte Umklassifizierung, `ci.keepsType`, Warnung `ingest.reclassification.unique`), der Datensatz läuft weiter, der Eintrag `unclassified_device` bleibt offen; der manuelle Typwechsel antwortet 409 (WP-702).
+- [ ] Statement-Budget (NFR-03) unverändert: die Schlüssel der eindeutigen Attribute je Typ liest der Frame mit der Typauflösung in derselben Anweisung (`LookupCITypeIDsWithUnique`); ohne eindeutige Attribute im Datensatz läuft keine zusätzliche Anweisung (`TestIngestStatementBudget`, `TestRediscoverStatementBudget` mit unveränderten Grenzen grün).
+- [ ] `api/openapi.yaml` (spec-first): `BulkIngestResponse.invalid_values`, `AttributeDefinition.unique` und `changeCIType` beschreiben die Regel; `frontend/src/api/generated/schema.d.ts` neu erzeugt.
+- [ ] `TestIngestUniqueAttributes` (`internal/discovery`, `POST /api/v1/ingest/bulk`): auf `e5c2d86` rot (Duplikate im Batch, im Einzellauf, beim Update und bei der Umklassifizierung, mit Index `rejected` 500 bzw. Antwort 500, Index-Job „Duplicate keys exist“), mit der Korrektur grün, auch als Nicht-Root-Nutzer.
+- [ ] Regression: `go test -p 1 ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/` grün (ohne `TestCIQueryBudget`); golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go` 0 Fehler.
+
+**Dateien (13 Einträge):**
+
+- backend/internal/discovery/ingest_unique.go (neu)
+- backend/internal/discovery/discovery.go
+- backend/internal/discovery/pg_repository.go
+- backend/internal/ci/typechange.go
+- backend/internal/ci/pg_repository.go
+- backend/internal/discovery/ingest_unique_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** keine Migration, keine Policy-Änderung. Die Typauflösung des Frames liest `attribute_definition` im Tenant-Kontext des Senders (RLS wie bisher); die Prüfung läuft in der Transaktion des Datensatzes bzw. Batches, für einen auf einen Client beschränkten Sender zusätzlich in der nur lesenden org-weiten Transaktion von WP-692.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^TestIngestUniqueAttributes$' ./internal/discovery/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -v -run 'Budget' ./internal/discovery/` (Grenzen unverändert).
+- `cd backend && go test -count=1 -p 1 -skip TestCIQueryBudget ./internal/api/ ./internal/ci/ ./internal/server/ ./internal/reviews/ ./internal/discovery/ ./internal/citype/ ./internal/entitlement/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MET-15;B/G1;B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
+CI-03;[B];B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
+CI-11;[B];B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
+```
+
+**Entscheidungsbedarf:** ja, durch die Leitung. Die Anforderungen legen das Verhalten nicht fest. Umgesetzt ist das kleinste sichere Verhalten über einen vorhandenen Mechanismus: der vergebene Wert wird verworfen und in `invalid_values` gezählt (wie WP-501 und `withoutTakenIdentity`), das Gerät wird ohne ihn angelegt bzw. aktualisiert, der Batch läuft weiter; bei der Umklassifizierung bleibt `generic_device` mit offenem `unclassified_device`. Alternativen: (a) eigener Zähler (z. B. `taken_unique_values`) statt `invalid_values`; (b) zusätzlich ein Review-Eintrag (z. B. `conflicting_values` oder `probable_duplicate` mit dem anderen CI als Kandidat), damit ein Mensch den Konflikt sieht, statt nur Log und Zähler; (c) Datensatz als dauerhaft fehlgeschlagen (`permanent`, 409) abweisen – verliert das Gerät, wie heute mit Index. Ebenso zu entscheiden: ob P3 reicht, da mit Index ein Gerät mit kollidierendem Wert heute nie inventarisiert wird.
+
+**Nicht Bestandteil:** `discovery/review.go`, `topology.go`, Collector und Beziehungsanlage (parallele WPs 693–695) bleiben unverändert. Die Übernahme gehaltener Geräte (`adoptHeld`) prüft seit WP-700 mit 409 und bleibt so. Die doppelte Zählung von `invalid_values` für einen Datensatz, den der Batch nach `CreateMany` ablehnt und einzeln wiederholt (WP-207, vorbestehend), bleibt. Bereinigung bestehender Duplikate und ein erneuter Lauf des Index-Jobs sind Betriebsaufgaben.
+
+### WP-701 – Enrollment-Codes halten ihre Site: Löschen einer Site mit gültigem Collector-Enrollment-Code ist 409, abgelaufene und verbrauchte Codes gehen mit (000189 RESTRICT)
+
+**Schlüssel:** `k7n-enrollment-code-site-restrict` · **Meilenstein:** K7-Nachträge · **Epic (Traceability):** B · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-411 (`t3-loc-delete-409`, E-71 Option 1, Migration 000157), WP-677 (`k7n-enrollment-client-binding`, Migration 000187)
+
+**Befunde:**
+
+| Befund | Prio | Titel | Beitrag | Gefunden in |
+|---|---|---|---|---|
+| [F-430](../../../audit/g1-reaudit/FINDINGS.md#f-430) | P3 | Löschen einer Site entfernt die an sie gebundenen Collector-Enrollment-Codes still (Fremdschlüssel von 000187 ON DELETE CASCADE) | schließt | Integration der K7-Nachträge (Regressionstest) auf `7cd63e0` |
+
+**Problem:** Migration 000187 (WP-677) bindet `collector_enrollment_code` mit `collector_enrollment_code_site_fkey … REFERENCES site(id, organization_id) ON DELETE CASCADE` an die Site. `DELETE /sites/{id}` und `DELETE /locations/{id}` einer Site mit gebundenem Code antworten 204 und löschen jeden Code still mit, auch einen gültigen und einen, den der Aufrufer nicht sieht. Die Spec (`deleteLocation`: 409 für die an eine Site gebundenen Objekte, „no delete cascades“) und E-71 (Option 1, RESTRICT, abgelaufene bzw. widerrufene Tokens werden in der Lösch-Transaktion entfernt) verlangen dasselbe Verhalten wie für `agent_enrollment_token`. `TestLocationDeleteReferencesMapToSpecKinds` ist seit 000187 rot.
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration 000189: `collector_enrollment_code_site_fkey` ist `ON DELETE RESTRICT`; Down stellt `ON DELETE CASCADE` wieder her. `collector_enrollment_code_client_fkey` bleibt CASCADE (`DELETE /clients/{id}` hat keine Abhängigkeitsregel und entfernt Sites und Agent-Enrollment-Tokens schon heute mit). Roundtrip und Schema-Baseline (`Stand: Migration 000189_enrollment_code_site_restrict`) grün.
+- [ ] `locations.siteObjects` enthält `collector_enrollment_code` (`DependencyEnrollmentCode`) mit der Bedingung `expires_at <= now() OR used_at IS NOT NULL` (der Code kann keinen Collector mehr einschreiben, wie in `EnrollCollector`): ein gültiger Code blockiert das Löschen mit 409 `[collector_enrollment_code]` auf `/sites` und `/locations`, abgelaufene und verbrauchte Codes werden in der Lösch-Transaktion entfernt und in `location.deleted` unter `removed` gezählt; ein abgelehntes Löschen behält sie. `removeLapsed` klammert die Bedingung (kein Löschen von Codes anderer Sites). Ein für den Aufrufer unsichtbarer Code lehnt über den Fremdschlüssel ab (`DeleteError` → `collector_enrollment_code`).
+- [ ] `api/openapi.yaml` (spec-first): `DependencyProblem.dependencies` enthält `collector_enrollment_code`, die Beschreibungen von `deleteLocation` und `createCollectorEnrollmentCode` nennen die Regel; `frontend/src/api/generated/schema.d.ts` neu erzeugt; die Bezeichnung der Art steht in `de-DE.json` und `en-US.json` (`locations.dependencies.collector_enrollment_code`), `LocationTreePage.test.tsx` prüft sie über den `Record` der Arten.
+- [ ] `TestLocationDeleteReferencesMapToSpecKinds` (Liste der Arten und RESTRICT-Liste mit Kommentar zu 000189) und `TestSiteDeleteKeepsCollectorEnrollmentCodes` (neu): rot auf `5dbe22a` (204, Code still entfernt; Fremdschlüssel `c`), grün nach der Korrektur, auch als `nobody`. `TestAuditT3SiteDeleteKeepsNetworkObjects` unverändert grün.
+- [ ] `docs/betrieb/upgrade-hinweise.md` (Release-Hinweis F-430) und E-71 in `docs/plan/g1-korrektur/entscheidungen.md` (Folgen, betroffene WPs) beschreiben die Regel.
+- [ ] Regression: `go test -p 1 ./internal/locations/ ./internal/discovery/ ./internal/server/ ./internal/tenantapi/` grün, `./internal/database/` allein grün; Vitest der Standortseite und i18n grün; golangci-lint ohne neue Befunde, Lint-Schuld ≤ Baseline; Ratchet `--kinds go,vitest` 0 Fehler.
+
+**Dateien (17 Einträge):**
+
+- backend/migrations/000189_enrollment_code_site_restrict.up.sql (neu)
+- backend/migrations/000189_enrollment_code_site_restrict.down.sql (neu)
+- backend/internal/locations/dependencies.go
+- backend/internal/locations/move_integration_test.go
+- backend/internal/locations/enrollment_code_delete_integration_test.go (neu)
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/src/pages/LocationTreePage.test.tsx
+- docs/schema-baseline.md
+- docs/betrieb/upgrade-hinweise.md
+- docs/plan/g1-korrektur/entscheidungen.md
+- docs/traceability.csv
+- audit/g1-reaudit/FINDINGS.md, docs/plan/g1-korrektur/implementierungsplan.md, docs/plan/g1-korrektur/abdeckung-befunde.csv (Lead)
+
+**Migration/RLS:** Migration 000189 ändert nur die Löschregel von `collector_enrollment_code_site_fkey` (DROP/ADD CONSTRAINT in einer Transaktion, kurze Sperre auf `collector_enrollment_code` und `site`). Keine Policy-Änderung: Die Abhängigkeitsprüfung und das Entfernen der abgelaufenen bzw. verbrauchten Codes laufen als `reticora_app` mit den Tenant-GUCs der Anfrage (`collector_enrollment_code_scope_select|delete`, 000187); Codes außerhalb des Scopes bleiben und lehnen über den Fremdschlüssel ab. Das Löschen von Organisation und Client entfernt die Codes weiter über deren CASCADE-Fremdschlüssel.
+
+**Tests:**
+
+- `cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -v -run '^(TestSiteDeleteKeepsCollectorEnrollmentCodes|TestLocationDeleteReferencesMapToSpecKinds|TestAuditT3SiteDeleteKeepsNetworkObjects)$' ./internal/locations/`, außerdem als Nutzer `nobody`.
+- `cd backend && go test -count=1 -p 1 ./internal/locations/ ./internal/discovery/ ./internal/server/ ./internal/tenantapi/`; `go test -count=1 -p 1 ./internal/database/` allein.
+- `cd frontend && npx vitest run src/pages/LocationTreePage.test.tsx src/i18n/`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+LOC-11;B/G1;B;backend/internal/locations/enrollment_code_delete_integration_test.go;WP-701
+COL-04;[B];B;backend/internal/locations/enrollment_code_delete_integration_test.go;WP-701
+LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-701
+```
+
+**Entscheidungsbedarf:** keiner (E-71 entschieden: Option 1; die Regel für Agent-Enrollment-Tokens wird auf Collector-Enrollment-Codes übertragen).
+
+**Nicht Bestandteil:** Ein Weg, einen ausgegebenen Collector-Enrollment-Code zu widerrufen (API oder Oberfläche), damit eine Site vor dessen Ablauf (höchstens 24 h) gelöscht werden kann; heute bleibt nur Abwarten oder SQL (`upgrade-hinweise.md`). Beobachtung ohne Änderung: Für `agent_enrollment_token` zählt nur `expires_at <= now()`; ein verbrauchtes, unabgelaufenes Token blockiert bis zu seinem Ablauf (in E-71 unter „Folgen“ dokumentiert), während ein verbrauchter Collector-Code nach dieser Korrektur nicht blockiert, weil `used_at` ihn endgültig entwertet. Eine Angleichung der Agent-Tokens wäre eine eigene Änderung.
 
 ## Zurückgestellte Befunde
 

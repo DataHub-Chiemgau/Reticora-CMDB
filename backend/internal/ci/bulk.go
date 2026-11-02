@@ -123,7 +123,9 @@ func (s *Service) WithBulkQueue(q BulkQueue) *Service {
 // validateBulk normalizes and checks a bulk request: known action, 1–500
 // distinct ids, a valid status for set_status. It checks every id as a
 // UUID: a malformed id does not fail the request, it is reported on its own
-// with 400 while the other ids are applied (API-08, F-327).
+// with 400 while the other ids are applied (API-08, F-327). A UUID is
+// distinct in its canonical lower-case form: the same CI in another letter
+// case is applied and reported once, under that form (F-419).
 func validateBulk(req *BulkRequest) error {
 	if req.Action == "" {
 		req.Action = BulkSetStatus
@@ -134,7 +136,10 @@ func validateBulk(req *BulkRequest) error {
 	seen := map[string]bool{}
 	ids := make([]string, 0, len(req.IDs))
 	for _, id := range req.IDs {
-		if id = strings.TrimSpace(id); id != "" && !seen[id] {
+		if id = strings.TrimSpace(id); api.IsUUID(id) {
+			id = strings.ToLower(id)
+		}
+		if id != "" && !seen[id] {
 			seen[id] = true
 			ids = append(ids, id)
 		}

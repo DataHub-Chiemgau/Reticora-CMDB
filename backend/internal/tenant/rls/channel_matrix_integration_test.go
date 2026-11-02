@@ -196,7 +196,8 @@ const unknownID = "00000000-0000-4000-8000-000000000409"
 // channel of rls.Channels (REST lists and details, GraphQL with every query
 // field of the schema, search, export, topology, impact, metrics,
 // relationships, sites, buildings, rooms, racks, mounts, review items with
-// and without candidates, webhooks, notifications, jobs with data, the
+// and without candidates, webhooks, notifications, notification channels
+// and deliveries, jobs with data, the
 // mirrored export job, ingest and references across organizations) is read
 // and, where it writes, written by a principal of every scope kind of
 // rls.ScopeKinds (organization, client, site, team, several clients with one
@@ -319,6 +320,8 @@ type channelMatrix struct {
 	reviews, reviewsNoCandidates        []object
 	hooks                               []matrixHook
 	noteOwn, noteOther, noteB           object
+	ntfAdmins                           seen
+	ntfChannels, ntfDeliveries          []object
 	jobC1, jobS2, jobTeam, jobMulti     object
 	jobSystem, jobB, exportJob          object
 	exportID                            string
@@ -469,6 +472,21 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 	m.noteOwn = object{m.note(t, f.OrgA, m.userA), seenBy("org", "client", "site", "team", "multi")}
 	m.noteOther = object{m.note(t, f.OrgA, m.otherA), seenBy("other-user")}
 	m.noteB = object{m.note(t, f.OrgB, m.userB), m.onlyB}
+
+	// Notification channels with a delivery per organization (F-418): they
+	// belong to the organization, not to a client, so only principals with
+	// an org-wide scope administer them and read the deliveries.
+	m.ntfAdmins = seenBy("org", "other-user", "other-org")
+	for _, side := range []struct {
+		p    *channelPrincipal
+		seen seen
+	}{{m.org, seenBy("org", "other-user")}, {m.orgB, m.onlyB}} {
+		ch := m.create(t, side.p, "/api/v1/notification-channels", map[string]any{"name": m.name("chm-ntf"), "provider": "inapp"})
+		m.ntfChannels = append(m.ntfChannels, object{ch, side.seen})
+		m.ntfDeliveries = append(m.ntfDeliveries, object{m.scalar(t, `INSERT INTO notification_delivery (organization_id, channel_id,
+			recipient_user_id, recipient_key, category, subject, status) VALUES ($1, $2, $3::uuid, 'user:'||$3::text, 'review', 'chm', 'sent')
+			RETURNING id::text`, side.p.org, ch, side.p.user), side.seen})
+	}
 
 	// Jobs with the scope snapshot of their creator (WP-404, F-163): a job
 	// is visible where its snapshot lies in the caller's scope; a dimension
@@ -1048,6 +1066,66 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 						check(t)
 					}
 				}})
+		},
+	}
+
+	// Notification channels and deliveries (F-418): a principal restricted
+	// to clients, sites or teams gets 403 on every route, also for an
+	// unknown id, and changes nothing; an org-wide principal sees and
+	// writes the channels of its organization, another organization's
+	// channel is 404 like an unknown one.
+	ntfStatus := func(p *channelPrincipal, o object, ok int) int {
+		if !m.ntfAdmins[p.kind] {
+			return http.StatusForbidden
+		}
+		return o.seen.status(p, ok)
+	}
+	ntfUnknown := object{unknownID, seen{}}
+	rows["notification-channels"] = matrixRow{
+		read: func(p *channelPrincipal) []matrixProbe {
+			var out []matrixProbe
+			for _, path := range []string{"/api/v1/notification-channels", "/api/v1/notification-deliveries?limit=200"} {
+				objs := m.ntfChannels
+				if strings.Contains(path, "deliveries") {
+					objs = m.ntfDeliveries
+				}
+				if !m.ntfAdmins[p.kind] {
+					var hide []string
+					for _, o := range objs {
+						hide = append(hide, o.id)
+					}
+					out = append(out, matrixProbe{method: http.MethodGet, path: path, want: http.StatusForbidden, hide: hide})
+					continue
+				}
+				out = append(out, list(p, path, objs...))
+			}
+			for _, o := range append(append([]object{}, m.ntfChannels...), ntfUnknown) {
+				out = append(out, get("/api/v1/notification-channels/"+o.id, ntfStatus(p, o, http.StatusOK)))
+			}
+			return out
+		},
+		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
+			name := m.name("chm-ntf-new")
+			out := []matrixProbe{{method: http.MethodPost, path: "/api/v1/notification-channels",
+				body:  map[string]any{"name": name, "provider": "webhook", "config": map[string]any{"url": "https://hooks.example.org/" + name}},
+				want:  ntfStatus(p, object{"", m.ntfAdmins}, http.StatusCreated),
+				after: m.count(m.ntfAdmins[p.kind], `SELECT count(*) FROM notification_channel WHERE organization_id = $1 AND name = $2`, p.org, name)}}
+			for _, side := range []struct {
+				p    *channelPrincipal
+				seen seen
+			}{{m.org, seenBy("org", "other-user")}, {m.orgB, m.onlyB}} {
+				o := object{m.create(t, side.p, "/api/v1/notification-channels", map[string]any{"name": m.name("chm-ntf"), "provider": "inapp"}), side.seen}
+				written := ntfStatus(p, o, http.StatusOK) == http.StatusOK
+				out = append(out,
+					matrixProbe{method: http.MethodPatch, path: "/api/v1/notification-channels/" + o.id, body: map[string]any{"enabled": false},
+						want: ntfStatus(p, o, http.StatusOK), after: m.count(!written, `SELECT count(*) FROM notification_channel WHERE id = $1 AND enabled`, o.id)},
+					matrixProbe{method: http.MethodDelete, path: "/api/v1/notification-channels/" + o.id,
+						want: ntfStatus(p, o, http.StatusNoContent), after: m.count(!written, `SELECT count(*) FROM notification_channel WHERE id = $1`, o.id)})
+			}
+			return append(out,
+				matrixProbe{method: http.MethodPatch, path: "/api/v1/notification-channels/" + unknownID, body: map[string]any{"enabled": false},
+					want: ntfStatus(p, ntfUnknown, http.StatusOK)},
+				matrixProbe{method: http.MethodDelete, path: "/api/v1/notification-channels/" + unknownID, want: ntfStatus(p, ntfUnknown, http.StatusNoContent)})
 		},
 	}
 

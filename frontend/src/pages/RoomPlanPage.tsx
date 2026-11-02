@@ -131,7 +131,9 @@ export function RoomPlanPage() {
 
   /**
    * flush sends the pending positions on top of the last layout the server
-   * confirmed, with If-Match of its ETag. One PATCH at a time: moves made
+   * confirmed, with If-Match of its ETag. That layout holds only the objects
+   * the user sees; the server keeps the positions of the others (F-427).
+   * One PATCH at a time: moves made
    * meanwhile go out with the next one, based on the new ETag. A 409 (the
    * room was changed elsewhere) drops the moves, reloads and shows a hint.
    */
@@ -165,6 +167,19 @@ export function RoomPlanPage() {
           setConflict(true);
           setSaveError(undefined);
           void queryClient.invalidateQueries({ queryKey: roomKey });
+          return;
+        }
+        // A key the server refuses is no object of this room any more (moved
+        // or deleted meanwhile, F-427): reload the room and its objects so
+        // the next move is based on the current ones.
+        if (
+          err instanceof ApiError &&
+          err.status === 422 &&
+          /^layout\.[^.]+$/.test(err.field ?? '')
+        ) {
+          setSaveError(t('roomplan.staleObject'));
+          void queryClient.invalidateQueries({ queryKey: roomKey });
+          void queryClient.invalidateQueries({ queryKey: ['room-cis', roomId] });
           return;
         }
         setSaveError(

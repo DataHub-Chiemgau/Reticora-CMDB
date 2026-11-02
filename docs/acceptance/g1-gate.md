@@ -63,6 +63,12 @@ Konsistenzprüfung (WP-451, Normalmodus):
 - Ein offenes Critical verbietet PASS von GATE-01 und das Ergebnis
   „bestanden“. Ein offenes High oder Critical im Pentest verbietet PASS von
   GATE-03.
+- Jeder Befund P0 bis P2 der Übersicht von `audit/g1-reaudit/FINDINGS.md`
+  ist ein SR-Befund des Reviews (eine SR-Zeile mit Severity nennt ihn) oder
+  steht im Abschnitt „Befunde der Korrektur ohne Sicherheitswirkung“ des
+  Reviews mit einer Begründung von mindestens fünf Wörtern (F-428).
+  `--final` verlangt zusätzlich, dass kein SR-Befund mit Critical oder High
+  offen ist.
 - Ein offener SR- oder PT-Befund verbietet PASS jeder Katalog-ID, die seine
   Zeile nennt. Ausgenommen ist ein Befund unter High, für den der Abschnitt
   „Abgleich offener Befunde“ begründet, warum er die Anforderung nicht
@@ -270,7 +276,8 @@ Auftraggeber entschieden):
 | Quelle | Critical offen | Nachweis |
 |---|---:|---|
 | Audit-Befunde (225 Critical/High) | 0 | `docs/security/review-g1.md`, Abschnitt „Audit-Befunde Critical/High“: 41 geschlossen, 8 mit G1-Anteil geschlossen |
-| Neue Befunde des Sicherheitsreviews (SR-01 bis SR-11) | 0 | `docs/security/review-g1.md`: kein Critical. Es fehlen die Befunde SR-12 (Site-Scope-Bypass im Rack-Kanal, F-002) und SR-13 (Review-Items, F-003) und die übrigen P0-Befunde des Phase-1-Audits (WP-452). |
+| Befunde des Sicherheitsreviews (SR-01 bis SR-49) | 0 | `docs/security/review-g1.md`: Neue Befunde SR-01 bis SR-13 (SR-12 Site-Scope-Bypass im Rack-Kanal, F-002; SR-13 Review-Items, F-003), P0-Befunde des Phase-1-Audits SR-14 bis SR-26 (WP-452) und Befunde der Korrektur SR-27 bis SR-49 (WP-699). Kein Critical offen. |
+| Befunde der Korrektur G1 (`audit/g1-reaudit/FINDINGS.md`, ab F-355) | 0 | Jeder Befund mit Sicherheitswirkung oder Critical nach dem Bewertungsschema steht als SR-Befund mit Severity im Review (SR-27 bis SR-49, F-397 in SR-18), die übrigen mit Begründung im Abschnitt „Befunde der Korrektur ohne Sicherheitswirkung“. `tests/rep01-structure.test.sh` verlangt das für jeden Befund P0 bis P2 der Übersicht, auch für später hinzukommende (F-428). |
 | P0-Befunde des Phase-1-Abnahmeaudits (F-001 bis F-016) | offen bis zum Nachweis | Die Korrektur-WPs aller 16 P0-Befunde (Tabelle „Schwere Befunde (P0/P1) und ihre Korrektur“ in `docs/plan/g1-korrektur/implementierungsplan.md`) sind gemergt. Geschlossen sind die Befunde erst mit ihrer Aufnahme ins Review (WP-452) und den Läufen auf dem Release-Kandidaten (WP-595). |
 | Abhängigkeits- und Image-Scans | 0 | govulncheck, npm audit, Trivy blockierend in CI |
 | Externer Pentest | unbekannt | `docs/security/pentest-g1.md` enthält keine Befundliste (A-07, WP-453). Die Erklärung des Auftraggebers vom 2026-10-15 ist kein Nachweis (E-76). |
@@ -280,8 +287,9 @@ Phase-1-Audits offen ist (`docs/plan/g1-korrektur/implementierungsplan.md`)
 und die Befundliste des Pentests fehlt. `tests/rep01-structure.test.sh`
 verbietet PASS von GATE-01 und das Ergebnis „bestanden“, solange eine
 Critical-Zeile in Review oder Pentest offen ist, in jeder Schreibweise und
-auch im Anhang des Reviews; `--final` verlangt, dass keine offen ist. Das
-gilt auch für die nachgereichte Befundliste.
+auch im Anhang des Reviews; `--final` verlangt, dass keine offen ist und
+kein SR-Befund mit Critical oder High. Das gilt auch für die nachgereichte
+Befundliste.
 
 ## GATE-02 – Alle Anforderungen der Phase sind PASS
 

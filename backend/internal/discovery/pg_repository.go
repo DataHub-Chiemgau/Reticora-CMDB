@@ -669,6 +669,48 @@ func (r *PGRepository) LookupCITypeIDs(ctx context.Context, orgID string, namesO
 	return types, nil
 }
 
+// LookupCITypeIDsWithUnique implements CITypeUniqueLookup: the types of
+// LookupCITypeIDs and, in the same statement, per type id the keys of its
+// unique attributes and of the global ones (MET-15, F-432), as
+// ci.PGRepository.UniqueConflicts selects them.
+func (r *PGRepository) LookupCITypeIDsWithUnique(ctx context.Context, orgID string, namesOrKeys []string) (
+	types map[string]string, unique map[string][]string, err error) {
+	types, unique = map[string]string{}, map[string][]string{}
+	if len(namesOrKeys) == 0 {
+		return types, unique, nil
+	}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, qerr := tx.Query(ctx, `
+			SELECT DISTINCT ON (k.name) k.name, t.id::text,
+				ARRAY(SELECT d.key FROM attribute_definition d
+					WHERE d.is_unique AND (d.ci_type_id = t.id OR d.ci_type_id IS NULL)
+					  AND (d.organization_id = $2::uuid OR d.organization_id IS NULL)
+					ORDER BY d.key)
+			FROM unnest($1::text[]) AS k(name)
+			JOIN ci_type t ON (t.key = k.name OR t.name = k.name)
+			  AND (t.organization_id IS NULL OR t.organization_id = $2)
+			ORDER BY k.name, t.organization_id NULLS LAST, t.id
+		`, namesOrKeys, orgID)
+		if qerr != nil {
+			return qerr
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, id string
+			var keys []string
+			if serr := rows.Scan(&name, &id, &keys); serr != nil {
+				return serr
+			}
+			types[name], unique[id] = id, keys
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("lookup ci types: %w", err)
+	}
+	return types, unique, nil
+}
+
 // RunInTx implements TxRunner: fn runs in one transaction of the context's
 // tenant scope, which every repository call with fn's context joins.
 func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
@@ -759,9 +801,10 @@ var ciCountLockSQL = boundedLocksSQL("$1", `SELECT CASE WHEN $3 THEN pg_advisory
 
 // LockCICount implements CICountLocker: it takes the organization's max_cis
 // lock, exclusive or shared, until the end of the context transaction and
-// then counts the CIs the transaction sees, as ci.List counts them. The
-// count is a statement of its own, so it sees what every holder before
-// committed.
+// then counts the active CIs of the organization, also those outside the
+// scope of the transaction (ci_active_count, migration 000186, F-403), as
+// ci.CountActive counts them. The count is a statement of its own, so it
+// sees what every holder before committed.
 func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive bool) (int64, error) {
 	key := ingestLockKey(ciCountLockNamespace + strings.ToLower(orgID))
 	var count int64
@@ -769,7 +812,7 @@ func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive 
 		if _, err := tx.Exec(ctx, ciCountLockSQL, r.lockTimeoutSetting(), key, exclusive); err != nil {
 			return fmt.Errorf("lock max_cis: %w", err)
 		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID).Scan(&count); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT ci_active_count()`).Scan(&count); err != nil {
 			return fmt.Errorf("count cis: %w", err)
 		}
 		return nil
@@ -777,16 +820,40 @@ func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive 
 	return count, err
 }
 
-// CreateEnrollmentCode stores the hash of a new enrollment code.
+// CreateEnrollmentCode stores the hash of a new enrollment code with its
+// client and site binding (F-406, migration 000187): the site decides the
+// client, and collector_enrollment_code_scope_insert admits only a binding
+// within the scope of the transaction, as collector_isolation does for
+// POST /collectors.
 func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error {
-	return database.WithRequestTenant(ctx, r.pool, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-			INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at)
-			VALUES ($1, $2, $3, $4)
-			RETURNING id::text, created_at
-		`, code.OrganizationID, enrollmentCodeHash(code.RawCode()), code.Label, code.ExpiresAt).
-			Scan(&code.ID, &code.CreatedAt)
+			INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at, created_by,
+				binding_recorded, client_id, site_id)
+			VALUES ($1, $2, $3, $4, $5, true, $6, $7)
+			RETURNING id::text, created_at, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
+		`, code.OrganizationID, enrollmentCodeHash(code.RawCode()), code.Label, code.ExpiresAt, nilIfEmpty(code.CreatedBy),
+			nilIfEmpty(code.ClientID), nilIfEmpty(code.SiteID)).
+			Scan(&code.ID, &code.CreatedAt, &code.ClientID, &code.SiteID)
 	})
+	return enrollmentCodeError(err)
+}
+
+// enrollmentCodeError names the request field of a refused binding.
+func enrollmentCodeError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.ConstraintName {
+	case "collector_enrollment_code_client_fkey":
+		return &api.FieldError{Field: "client_id", Message: "client not found", Status: http.StatusUnprocessableEntity}
+	case "collector_enrollment_code_site_fkey":
+		return &api.FieldError{Field: "site_id", Message: "site not found", Status: http.StatusUnprocessableEntity}
+	case "collector_enrollment_code_site_client":
+		return &api.FieldError{Field: "site_id", Message: "the site belongs to another client", Status: http.StatusUnprocessableEntity}
+	}
+	return err
 }
 
 // EnrollCollector consumes a code and registers the collector in one
@@ -805,12 +872,15 @@ func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *C
 // consumed, so a refusal rolls back and leaves the code unused.
 func (r *PGRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error) {
 	hash := enrollmentCodeHash(rawCode)
-	var orgID string
+	var orgID, boundClient, boundSite string
 	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		// A code without a recorded binding (minted before migration 000187)
+		// is not redeemed: its creator's scope is not known (F-406).
 		lookupErr := tx.QueryRow(ctx, `
-			SELECT organization_id::text FROM collector_enrollment_code
-			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-		`, hash).Scan(&orgID)
+			SELECT organization_id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
+			FROM collector_enrollment_code
+			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now() AND binding_recorded
+		`, hash).Scan(&orgID, &boundClient, &boundSite)
 		if lookupErr == pgx.ErrNoRows {
 			return errEnrollmentCodeInvalid
 		}
@@ -824,6 +894,11 @@ func (r *PGRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode str
 	}
 
 	c.OrganizationID = orgID
+	// The collector lands in the client and site of the code; a client or
+	// site of the request outside them registers nothing (F-406).
+	if berr := applyEnrollmentBinding(boundClient, boundSite, c); berr != nil {
+		return nil, berr
+	}
 	scope := database.OrgWideScope(orgID, "")
 	var cert *IssuedCert
 	err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
@@ -841,7 +916,7 @@ func (r *PGRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode str
 		var codeID string
 		consumeErr := tx.QueryRow(ctx, `
 			UPDATE collector_enrollment_code SET used_at = now()
-			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now() AND binding_recorded
 			RETURNING id::text
 		`, hash).Scan(&codeID)
 		if consumeErr == pgx.ErrNoRows {
@@ -860,6 +935,10 @@ func (r *PGRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode str
 			orgID, nilIfEmpty(c.ClientID), nilIfEmpty(c.SiteID), c.Name, nilIfEmpty(c.Version), c.Config))
 		if insErr != nil {
 			return collectorError(fmt.Errorf("register collector: %w", insErr))
+		}
+		if (boundClient != "" && !strings.EqualFold(created.ClientID, boundClient)) ||
+			(boundSite != "" && !strings.EqualFold(created.SiteID, boundSite)) {
+			return fmt.Errorf("register collector: client %q site %q outside the binding of the enrollment code", created.ClientID, created.SiteID)
 		}
 		*c = *created
 		if _, uerr := tx.Exec(ctx, `UPDATE collector_enrollment_code SET used_by_collector_id = $2 WHERE id = $1`,

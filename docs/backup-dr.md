@@ -244,7 +244,7 @@ repository of pgBackRest:
 5. Run `make migrate-up` (or `migrate ... up`) to apply any migrations newer
    than the backup.
 6. Rebuild the search index per tenant: `POST /api/v1/search/reindex`.
-7. Verify the audit hash chains: `go run ./cmd/audit-verify -all` (in `backend/`) checks the chain of every organization and names the first violation of each (sequence gap, broken link, hash mismatch; AUD-04); `-org <id>` checks one.
+7. Verify the audit hash chains: `go run ./cmd/audit-verify -all` (in `backend/`) checks the chain of every organization and names the first violation of each (sequence gap, broken link, hash mismatch; AUD-04); `-org <id>` checks one. Entries whose personal values the `pii.backfill` run sealed are checked against the digest of their original; with `RETICORA_MASTER_KEY` set the command also rebuilds them from the vault, otherwise it reports them as not confirmed against the vault (exit 0; [docs/ops/workers.md](ops/workers.md#sealed-audit-entries-aud-04-sec-05)).
 
 ## Restore proof: RPO and RTO (WP-101, WP-445, NFR-05)
 
@@ -442,11 +442,13 @@ down section on a schema with the composite keys and without the table;
 rows come back as before.
 
 **Upgrade on installations migrated before this change.** Migration 000089
-is the first one that writes to `migration_quarantine`. Earlier builds of it
+was the first one that writes to `migration_quarantine`. Earlier builds of it
 stopped on such an installation with `relation "migration_quarantine" does
 not exist` and left version 89 dirty (schema still at 88). Since WP-649
 (F-378, E-100 Option 1 as transitional rule) 000089 creates the table when
 it is missing, exactly as 000056 defines it, and the upgrade runs through.
+Since WP-560 migration 000066 writes to the table first (report of the
+cleared document storage keys, F-187) and creates it in the same way.
 A failed attempt continues with `migrate … force 88` and `migrate … up`
 using the files of a current release; checks and details in
 `docs/betrieb/upgrade-hinweise.md`. Covered by `TestUpgradeFromPreQuarantine56`

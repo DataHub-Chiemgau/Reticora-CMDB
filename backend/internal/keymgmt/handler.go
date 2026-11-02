@@ -198,5 +198,5 @@ func (h *Handler) ListAssignments(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+	api.WriteJSON(w, http.StatusOK, map[string]any{"data": api.NonNilSlice(items)})
 }

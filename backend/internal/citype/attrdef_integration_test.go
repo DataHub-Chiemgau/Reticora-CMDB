@@ -170,6 +170,10 @@ func TestAttributeDefinitionsAgainstPostgres(t *testing.T) {
 			t.Errorf("%s: %d %s, want %d", name, rec.Code, rec.Body.String(), tc.status)
 		}
 	}
+	// A reserved namespace as key names the field key (F-408).
+	if rec := call(orgA, http.MethodPost, "/api/v1/attribute-definitions", `{"ci_type_id":"`+typ.ID+`","key":"_overrides","data_type":"text"}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"key"`) {
+		t.Errorf("reserved key: %d %s, want 400 with field key", rec.Code, rec.Body.String())
+	}
 	var systemType string
 	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE organization_id IS NULL AND key = 'switch'`).Scan(&systemType); err != nil {
 		t.Fatal(err)

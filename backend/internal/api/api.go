@@ -131,6 +131,16 @@ const ProblemContentType = "application/problem+json"
 // it is the trace_id of a problem.
 const RequestIDHeader = "X-Request-ID"
 
+// NonNilSlice returns items, or an empty slice for nil: a member the
+// contract declares as an array encodes as [], never as null, also in a
+// response that is no ListResponse (API-02, F-214, F-401).
+func NonNilSlice[T any](items []T) []T {
+	if items == nil {
+		return []T{}
+	}
+	return items
+}
+
 // CompleteList is the ListResponse of a list that is always returned in
 // full (a small catalog, a sub-collection, a tree): one page, no
 // next_cursor.

@@ -18,7 +18,9 @@ Laufs“.
 Bewertung der drei Archive eines Nachweises nach E-58 (Median über drei
 Läufe; `tests/load/README.md`, Abschnitt „Bewertung über drei Läufe“):
 `tests/load/evaluate-runs.sh <Lauf-ID-1> <Lauf-ID-2> <Lauf-ID-3>` mit den
-Pfaden der drei Verzeichnisse hier.
+Pfaden der drei Verzeichnisse hier. Bewertbar sind nur drei Läufe
+desselben Server-Commits mit je allen fünf Jobs (`scenarios=all`, F-417);
+`--partial` bewertet eine Teilmenge der Jobs und ist kein Nachweis.
 
 Die Läufe und ihre Werte stehen in `docs/acceptance/lasttest-g1.md`
 (Abschnitt „Läufe“). Noch ist kein Lauf archiviert.

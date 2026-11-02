@@ -465,7 +465,7 @@ export interface paths {
     put?: never;
     /**
      * Restore a deleted CI within the retention (CI-05, API-05)
-     * @description Clears the deletion of a CI deleted within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days); the status and the asset link of the deletion come back, the change history and the audit trail record the restore (ci.restored). Requires ci:delete. A CI of another organization, outside the caller's scope or unknown is 404.
+     * @description Clears the deletion of a CI deleted within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days); the status and the asset link of the deletion come back, the change history and the audit trail record the restore (ci.restored). Requires ci:delete. A CI of another organization, outside the caller's scope or unknown is 404. The restored CI counts against max_cis like a new one: with max_cis reached the restore is 403 entitlement-limit and the CI stays deleted (ENT-03).
      */
     post: operations['restoreCI'];
     delete?: never;
@@ -488,7 +488,7 @@ export interface paths {
     put?: never;
     /**
      * Change the type of a CI (CI-11)
-     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_changed, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type.
+     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_changed, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type. The values the CI carries must be free under the unique attributes of the target type (MET-15); discovery keeps generic_device when another active CI holds one of them.
      */
     post: operations['changeCIType'];
     delete?: never;
@@ -534,7 +534,7 @@ export interface paths {
     put?: never;
     /**
      * Revert the merge of this (merged) CI within 30 days (CI-12)
-     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values, the asset link and the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone (410). A survivor changed after the merge (its version is above the version the merge recorded) is not overwritten silently: the unmerge answers 409 with the fields of the later history entries and changes nothing; force=true restores the snapshot over those changes, and the audit entry ci.unmerged names force and the overwritten fields (E-80). The revert of the merge job behaves like an unmerge without force. Requires ci:delete.
+     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values, the asset link and the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone (410). A survivor changed after the merge (its version is above the version the merge recorded) is not overwritten silently: the unmerge answers 409 with the fields of the later history entries and changes nothing; force=true restores the snapshot over those changes, and the audit entry ci.unmerged names force and the overwritten fields (E-80). A survivor that is part of a later merge still open (merged into another CI, or another CI merged into it later) blocks the unmerge, also with force=true: 409 unmerge-later-merge names that merge, which is unmerged first; an unmerge never touches another open merge (F-416). The revert of the merge job behaves like an unmerge without force. The merged CI becomes active again and counts against max_cis like a new one: with max_cis reached the unmerge is 403 entitlement-limit and the merge stays (ENT-03). Requires ci:delete.
      */
     post: operations['unmergeCI'];
     delete?: never;
@@ -554,7 +554,7 @@ export interface paths {
     put?: never;
     /**
      * Bulk status change of up to 500 CIs (API-08, BLK-01)
-     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write. Every change is a manual change like a PATCH of status (CI-04, OVR-01): the status is set also over an existing override and gets a protected override with the requesting user (for a job its creator) as author; the CI version rises (API-07), so a later PATCH of status with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the requested status afterwards, otherwise it is an error.
+     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. Every change is a manual change like a PATCH of status (CI-04, OVR-01): the status is set also over an existing override and gets a protected override with the requesting user (for a job its creator) as author; the CI version rises (API-07), so a later PATCH of status with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the requested status afterwards, otherwise it is an error.
      */
     post: operations['bulkCIs'];
     delete?: never;
@@ -632,7 +632,7 @@ export interface paths {
     /**
      * List audit log entries
      * @deprecated
-     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05). A principal restricted to clients, sites or teams lists only the entries about objects it may read, for domain and route entries alike (`resource_type` `ci` or `racks`); entries of an unknown type and about deleted objects are hidden from it, `total` counts only the visible entries (TEN-06, TEN-09, F-389).
      */
     get: operations['listAuditEntriesLegacy'];
     put?: never;
@@ -660,7 +660,7 @@ export interface paths {
     };
     /**
      * List audit log entries
-     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05). A principal restricted to clients, sites or teams lists only the entries about objects it may read, for domain and route entries alike (`resource_type` `ci` or `racks`); entries of an unknown type and about deleted objects are hidden from it, `total` counts only the visible entries (TEN-06, TEN-09, F-389).
      */
     get: operations['listAuditEntries'];
     put?: never;
@@ -763,7 +763,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List relationships */
+    /**
+     * List relationships
+     * @description The stored and the projected relationships of the caller's tenant scope. The filters combine (all must hold); a filter without value does not filter. A CI that is unknown or outside the scope lists nothing (API-01, F-402).
+     */
     get: operations['listRelationships'];
     put?: never;
     /**
@@ -1198,7 +1201,7 @@ export interface paths {
     put?: never;
     /**
      * Revert a succeeded job where the revert is defined (E-25)
-     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02. A successful revert is recorded on the job (reverted_at, reverted_by); a second revert is 409 "the job is already reverted" (F-329).
+     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02. A successful revert is recorded on the job (reverted_at, reverted_by); a second revert is 409 "the job is already reverted" (F-329). The revert of ci.merge makes the merged CI active again: with max_cis reached it is 403 entitlement-limit like POST /cis/{id}/unmerge and the merge stays (ENT-03).
      */
     post: operations['revertJob'];
     delete?: never;
@@ -2530,7 +2533,14 @@ export interface paths {
      *     organization (otherwise 404), and what the key would grant through
      *     it, the requested permissions within the account's grants, must lie
      *     within the caller's own scope; otherwise 403. A deactivated account's
-     *     permissions are then required organization-wide.
+     *     permissions are then required organization-wide. The key records the
+     *     scope (clients, sites, teams) in which the caller holds each of its
+     *     permissions; at use it grants the account's then current rights
+     *     within that scope only, so roles the account receives later never
+     *     widen it beyond its creator (F-397, like E-98 for webhooks). It keeps
+     *     that scope when the creator is deactivated (E-64) and on rotation.
+     *     Keys bound before this rule (migration 000185) act at most with their
+     *     creator's current rights.
      *
      *     A new key counts against max_api_keys (ENT-03): at the limit of the
      *     active keys (neither revoked nor expired) the request gets 403
@@ -2634,7 +2644,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a user
-     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04). The caller cannot delete their own account: the request answers 400 ("you cannot delete your own account") and nothing is changed (F-377).
+     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04). The caller cannot delete their own account: the request answers 400 ("you cannot delete your own account") and nothing is changed (F-377). The deletion ends every access of the user at once, like a deactivation and in the transaction of the deletion (TLC-04, AUT-02, F-393): the user's sessions and refresh cookies are revoked, every active API key the user created for themself is revoked, and the audit entry user.deleted records it. Keys the user created for service accounts stay valid (decision E-64, option 2): the audit entry lists them (id, prefix, name, service account; never the secret), and the org_admins receive a notification to rotate them. An unknown user or a user of another organization answers 404, a refused deletion (400, 409) ends nothing. If the sessions cannot be revoked, nothing is deleted and the answer is 503.
      */
     delete: operations['deleteUser'];
     options?: never;
@@ -2659,7 +2669,10 @@ export interface paths {
      */
     get: operations['queryMetrics'];
     put?: never;
-    /** Ingest one or more metrics */
+    /**
+     * Ingest one or more metrics
+     * @description Stores the samples for the caller's organization (MON-02). A sample with `ci_id` is stored for that CI; a sample without `ci_id` is assigned by its `target` label among the CIs the caller sees, or counted as unassigned and not stored. The body is accepted whole or not at all: when one sample names a CI that the caller does not see (unknown, of another organization or outside the caller's client/site scope, TEN-06), the request answers 404 with `field` `ci_id` and the offending ci_id in `detail`, like GET /api/v1/cis/{id}/metrics, and no sample of the body is stored (F-394). A malformed `ci_id` answers 400. The collectors' edge subject `.metrics` answers the same statuses.
+     */
     post: operations['ingestMetrics'];
     delete?: never;
     options?: never;
@@ -2738,7 +2751,7 @@ export interface paths {
     };
     /**
      * List review items
-     * @description The review queue of reconciliation (REC-08). Items open longer than 14 days carry escalated = true; escalated=true lists only those (the dashboard's escalation).
+     * @description The review queue of reconciliation (REC-08). Items open longer than 14 days carry escalated = true; escalated=true lists only those (the dashboard's escalation). The queue is cmdb_core like GraphQL reviewInbox and the deprecated /discovery/review-items: it is read without the discovery feature (CI merges open items as well); only resolving a scope_suggested item needs discovery (F-400).
      */
     get: operations['listReviewItems'];
     put?: never;
@@ -2783,7 +2796,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage, 403 otherwise, the item stays open); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -2802,6 +2815,7 @@ export interface paths {
     /**
      * List reconciliation review items (deprecated, use /api/v1/review-items)
      * @deprecated
+     * @description Alias of its successor with the same rule: the review queue is cmdb_core, not gated by the discovery feature (F-400).
      */
     get: operations['listDiscoveryReviewItems'];
     put?: never;
@@ -2827,7 +2841,7 @@ export interface paths {
     /**
      * Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
      * @deprecated
-     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited. resolved_by and the audit actor are the caller; a body with resolved_by is 400.
+     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited. resolved_by and the audit actor are the caller; a body with resolved_by is 400. Like its successor the path is cmdb_core; a scope_suggested item needs the discovery feature (403 feature-not-entitled, F-400).
      */
     post: operations['resolveDiscoveryReviewItem'];
     delete?: never;
@@ -2893,7 +2907,7 @@ export interface paths {
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
      * @deprecated
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Over a redundant type (powered_by, member_of_cluster) a CI is impacted only when all its providers failed (IMP-04), also those outside the client or site scope of the caller, which the answer never names (IMP-07). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
      */
     get: operations['getCIImpactLegacy'];
     put?: never;
@@ -2913,7 +2927,7 @@ export interface paths {
     };
     /**
      * Joint impact of several CIs failing at once (IMP-05)
-     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
+     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). A provider outside the client or site scope of the caller counts as well, so the impact equals that of an org-wide caller, restricted to the visible CIs; the answer never names such a provider (IMP-07). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
      */
     get: operations['getMultiImpact'];
     put?: never;
@@ -2945,7 +2959,7 @@ export interface paths {
     };
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Over a redundant type (powered_by, member_of_cluster) a CI is impacted only when all its providers failed (IMP-04), also those outside the client or site scope of the caller, which the answer never names (IMP-07). Powers the Ausfallsimulation in the topology view.
      */
     get: operations['getCIImpact'];
     put?: never;
@@ -3141,7 +3155,7 @@ export interface paths {
     head?: never;
     /**
      * Update a room
-     * @description Changes name, floor, room type or the floor-plan layout. Every layout key must be a CI of the organization the caller sees and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
+     * @description Changes name, floor, room type or the floor-plan layout. The layout replaces the positions the caller sees (see Room.layout): every key must be a CI of the organization that the caller sees, that is not deleted and that is located in this room (its location is the room or lies below it), and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`; a CI the caller does not see is answered like an unknown id. Stored entries of CIs the caller does not see are kept unchanged; stored entries of CIs the caller sees that are deleted or no longer located in the room are dropped. The merge runs under the room's row lock after the If-Match check. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
      */
     patch: operations['updateRoom'];
     trace?: never;
@@ -3554,13 +3568,13 @@ export interface paths {
     };
     /**
      * Notification channels of the organization
-     * @description Requires notification:manage (RBA-02: org_admin only). Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
+     * @description Requires notification:manage for the whole organization (RBA-02: org_admin only; RBA-03, F-418): channels belong to the organization, not to a client, and receive the notifications of every client. A holder bound to a client, a site or a team gets 403. Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
      */
     get: operations['listNotificationChannels'];
     put?: never;
     /**
      * Create a notification channel
-     * @description Requires notification:manage. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is created. A webhook channel is a target of the whole organization: it receives the notifications of every client with name and e-mail of their recipients, so only an org-wide administrator creates one. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
      */
     post: operations['createNotificationChannel'];
     delete?: never;
@@ -3580,21 +3594,21 @@ export interface paths {
     };
     /**
      * Get a notification channel
-     * @description Requires notification:manage; redacted like the list.
+     * @description Requires notification:manage for the whole organization (F-418; 403 for a holder bound to a client, a site or a team, also for an unknown id); redacted like the list.
      */
     get: operations['getNotificationChannel'];
     put?: never;
     post?: never;
     /**
      * Delete a notification channel
-     * @description Requires notification:manage.
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is deleted.
      */
     delete: operations['deleteNotificationChannel'];
     options?: never;
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description Requires notification:manage. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is changed. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -3608,7 +3622,7 @@ export interface paths {
     };
     /**
      * Latest notification deliveries with their status
-     * @description Requires notification:manage (RBA-02: org_admin only). A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
+     * @description Requires notification:manage for the whole organization (RBA-02: org_admin only; RBA-03, F-418): the deliveries name recipients of every client, so a holder bound to a client, a site or a team gets 403. A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
      */
     get: operations['listNotificationDeliveries'];
     put?: never;
@@ -3990,7 +4004,7 @@ export interface paths {
     put?: never;
     /**
      * Register a discovery collector
-     * @description The new collector counts against max_collectors (ENT-03): at the limit of the organization's collectors that are not disabled, counted organization-wide, the request gets 403 entitlement-limit and no collector is registered.
+     * @description The new collector counts against max_collectors (ENT-03): at the limit of the organization's collectors that are not disabled, counted organization-wide, the request gets 403 entitlement-limit and no collector is registered. site_id binds the collector to a site, which decides its client: an unknown or not visible site and a site of another client than client_id are 422 with field site_id, nothing is registered (COL-01, F-423).
      */
     post: operations['registerCollector'];
     delete?: never;
@@ -4010,7 +4024,7 @@ export interface paths {
     put?: never;
     /**
      * Mint a single-use collector enrollment code
-     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll.
+     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client. The web UI offers the client choice when the caller's collector:manage scope of GET /api/v1/me (pscp, otherwise cls) holds several clients (F-425). While a code bound to a site is neither used nor expired, the site is not deleted (409 collector_enrollment_code, E-71, F-430).
      */
     post: operations['createCollectorEnrollmentCode'];
     delete?: never;
@@ -4030,7 +4044,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a collector with an enrollment code
-     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04). The enrollment counts against max_collectors of the code's organization (ENT-03): at the limit it answers 403 entitlement-limit, registers nothing and leaves the code unused and valid.
+     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04). The enrollment counts against max_collectors of the code's organization (ENT-03): at the limit it answers 403 entitlement-limit, registers nothing and leaves the code unused and valid. The collector is registered in the client and site the code is bound to (see createCollectorEnrollmentCode); `client_id` may then be left out or must name that client, otherwise the answer is 422, nothing is registered and the code stays unused. Only a code without a client binding takes the `client_id` of the request (a client of the code's organization; without it the collector is organization-wide). Codes minted before the binding was recorded are not accepted (401).
      */
     post: operations['enrollCollector'];
     delete?: never;
@@ -4100,7 +4114,7 @@ export interface paths {
     head?: never;
     /**
      * Rename, bind to a site, disable or enable a collector
-     * @description Requires collector:manage. The site decides the client (422 for a site of another client). status disabled refuses the collector's heartbeats; active enables a disabled collector again (offline until its next heartbeat).
+     * @description Requires collector:manage. The site decides the client (422 for a site of another client). status disabled refuses the collector's heartbeats; active enables a disabled collector again (offline until its next heartbeat). An empty name, another status and an unknown or not visible site are 422 with field name, status or site_id; the collector stays unchanged (F-423).
      */
     patch: operations['updateCollector'];
     trace?: never;
@@ -4195,7 +4209,7 @@ export interface paths {
     put?: never;
     /**
      * Create an encrypted credential
-     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password).
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
      */
     post: operations['createCredential'];
     delete?: never;
@@ -4216,12 +4230,15 @@ export interface paths {
     };
     /**
      * Get credential metadata
-     * @description Returns credential metadata (never the secret material) for the authenticated tenant.
+     * @description Returns credential metadata (never the secret material) for the authenticated tenant. An id that is no UUID is answered like an unknown one (404, API-03).
      */
     get: operations['getCredential'];
     put?: never;
     post?: never;
-    /** Delete a credential */
+    /**
+     * Delete a credential
+     * @description An id that is no UUID is answered like an unknown one (404, API-03).
+     */
     delete: operations['deleteCredential'];
     options?: never;
     head?: never;
@@ -4649,13 +4666,16 @@ export interface paths {
     get: operations['getRole'];
     put?: never;
     post?: never;
-    /** Delete a custom role */
+    /**
+     * Delete a custom role
+     * @description Deletes the role with all its assignments. The caller must be able to revoke each assignment (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the role and its assignments stay.
+     */
     delete: operations['deleteRole'];
     options?: never;
     head?: never;
     /**
      * Update a custom role
-     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the role stays unchanged.
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the role stays unchanged. Permissions the request removes are taken from every assignment of the role, so the caller must be able to revoke each of them (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the role stays unchanged.
      */
     patch: operations['updateRole'];
     trace?: never;
@@ -4762,12 +4782,12 @@ export interface paths {
     };
     /**
      * List permissions granted to a role
-     * @description Paged with `limit` and the signed `cursor` (API-02); a client that needs every grant follows `next_cursor` to the end.
+     * @description The permissions the standard role grants, as every authorization path resolves them (RBA-02, F-398): its grants (role_permission) and its seed permissions of the RBA-02 matrix, within the catalogue. A seed permission without a grant row carries the creation time of the role and no granted_by. Paged with `limit` and the signed `cursor` (API-02); a client that needs every grant follows `next_cursor` to the end.
      */
     get: operations['listRolePermissions'];
     /**
      * Replace permissions granted to a role
-     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds to the role must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the permissions of the role stay unchanged.
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds to the role must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the permissions of the role stay unchanged. Permissions the request removes are taken from every assignment of the role (users and service accounts), so the caller must be able to revoke each of them (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the permissions stay unchanged. The seed permissions of a standard role (its RBA-02 matrix row) cannot be removed: a request without one of them is 409 with the problem type https://reticora.io/problems/standard-role-permissions naming them, and nothing changes (F-398); a narrower role is a custom role (RBA-03). The response lists every permission the role grants afterwards, the seed permissions included, as GET /api/v1/roles/{id}/permissions does.
      */
     put: operations['replaceRolePermissions'];
     post?: never;
@@ -6073,7 +6093,7 @@ export interface paths {
     };
     /**
      * Compute the blast radius of a CI failure
-     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed. single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed, also those outside the client or site scope of the caller, which the answer never names (IMP-07). single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
      */
     get: operations['listCisIdBlastRadius'];
     put?: never;
@@ -6150,7 +6170,7 @@ export interface paths {
     };
     /**
      * List field provenance (discovered/override/effective) of a CI
-     * @description Per field the observed value with source and time, the manual override with author, reason and time, and the effective value: the override when there is one, otherwise the observed value (OVR-01). GET /cis/{id} and the CI list return the same effective values.
+     * @description Per field the observed value with source and time, the manual override with author, reason and time, and the effective value: the override when there is one, otherwise the observed value (OVR-01). GET /cis/{id} and the CI list return the same effective values. A CI that is unknown, not visible or soft-deleted is 404 like GET /cis/{id} (F-422).
      */
     get: operations['listCisIdFields'];
     put?: never;
@@ -6175,13 +6195,13 @@ export interface paths {
     get?: never;
     /**
      * Set a manual field override
-     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden; a reserved namespace (_overrides, _observed, _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409.
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden; a reserved namespace (_overrides, _observed, _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409. An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422).
      */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
     /**
      * Clear a manual field override
-     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version. A reserved namespace as name is 400 (GLO-13).
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version. A reserved namespace as name is 400 (GLO-13). An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422).
      */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
@@ -6309,7 +6329,7 @@ export interface paths {
     };
     /**
      * List the unified change history of an entity
-     * @description Needs ci:read and the read permission of the entity type: ci:read for ci, relationship:read for relationship, location:read for location, asset:read for asset, reservation and composition (CI-06, E-78). The history is read in the caller's client and site scope. The audit entries of a CI are part of its history only when the caller holds audit:read; audit_included says whether they are.
+     * @description Needs ci:read and the read permission of the entity type: ci:read for ci, relationship:read for relationship, location:read for location, asset:read for asset, reservation and composition (CI-06, E-78). The history is read in the caller's client and site scope. The audit entries of a CI are part of its history only when the caller holds audit:read; audit_included says whether they are. They are the entries about the CI under both forms of its type: those of the domain audit (resource_type ci) and those of the route audit (resource_type cis: the writes on its sub-resources such as interfaces, contacts, lifecycle transitions and unmerge), and the route entries of its contact links (ci-contacts) and network interfaces (network-interfaces), the delete of one included. A caller restricted to some clients, sites or teams reads only the entries GET /audit-log shows it (an entry about a deleted link or interface is not among them).
      */
     get: operations['getHistoryEntitytypeId'];
     put?: never;
@@ -6422,13 +6442,13 @@ export interface paths {
     };
     /**
      * List nodes of the location tree
-     * @description Nodes of the canonical location tree (LOC-10) visible in the caller's scope, parents first.
+     * @description Nodes of the canonical location tree (LOC-10) visible in the caller's scope, parents first. Reading the tree is cmdb_core: rack nodes with their names are listed without the rack_view feature, which gates the rack resource (/racks, /mounts, /rack-mounts) and the writes of rack nodes here (ENT-05, F-400).
      */
     get: operations['listLocations'];
     put?: never;
     /**
      * Create a node of the location tree
-     * @description The parent must be of the kind the parent matrix allows (site > building > room > rack, site > warehouse > zone > shelf > bin). A site is a root and needs client_id; every other node inherits client and site from its parent.
+     * @description The parent must be of the kind the parent matrix allows (site > building > room > rack, site > warehouse > zone > shelf > bin). A site is a root and needs client_id; every other node inherits client and site from its parent. A node of kind rack needs the rack_view feature like POST /racks (403 feature-not-entitled otherwise, F-400).
      */
     post: operations['createLocation'];
     delete?: never;
@@ -6472,14 +6492,14 @@ export interface paths {
     post?: never;
     /**
      * Delete a leaf node
-     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens or merge tombstones within tombstone_until are bound to it (E-71). Expired tokens and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree.
+     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens, collector enrollment codes that are neither used nor expired, or merge tombstones within tombstone_until are bound to it (E-71, F-430). Expired tokens, expired or used enrollment codes and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree. Deleting a rack node needs the rack_view feature like DELETE /racks/{id} (403 feature-not-entitled otherwise, F-400).
      */
     delete: operations['deleteLocation'];
     options?: never;
     head?: never;
     /**
      * Rename and/or move a node
-     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved.
+     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved. Renaming or moving a rack node needs the rack_view feature like PATCH /racks/{id} (403 feature-not-entitled otherwise, the rack stays unchanged, F-400).
      */
     patch: operations['updateLocation'];
     trace?: never;
@@ -6765,7 +6785,7 @@ export interface components {
       multi_value: boolean;
       /** @description Indexed for search: a job builds the index concurrently (DB-04). A non-unique definition of an organization without a CI type uses the index of its key, shared by all organizations (`attribute.index.key` job, `idx_attr_key_<key>`, or `idx_attr_keyh_<hash>` for other keys; E-73); other definitions get `idx_attr_<id>` (`attribute.index` job). */
       searchable: boolean;
-      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. */
+      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. The server check covers the CIs outside the client or site scope of the writer as well, also before the index exists, and every write that sets or brings back the values of a CI: POST and PATCH /cis, the restore (POST /cis/{id}/restore), the unmerge (POST /cis/{id}/unmerge), the type change (POST /cis/{id}/type) and the resolutions of review items that create or reactivate a CI (409 with `violations`). The discovery ingest does not store a discovered value another active CI holds (counted in invalid_values) and does not reclassify a CI whose value the target type's unique attribute holds elsewhere. */
       unique: boolean;
       /**
        * @description Unique per organization or per client (CIs without a client count as one client).
@@ -6814,6 +6834,7 @@ export interface components {
     AttributeDefinitionCreate: {
       /** @description Omitted for a global definition. */
       ci_type_id?: string;
+      /** @description The reserved namespaces _overrides, _observed, _provenance and _instance are no keys (GLO-13): 400 with field key; the other definition checks name their own field (data_type, reference_target, validation, conditional, default; F-408). */
       key: string;
       display_name?: components['schemas']['LocalizedText'] | string;
       description?: string;
@@ -7286,6 +7307,7 @@ export interface components {
         [key: string]: number[];
       };
     };
+    /** @description An omitted height_u or face takes its default; an explicit value outside minimum or enum (height_u 0 or below, face "") is 400 with field height_u or face, nothing is stored and an existing mount stays unchanged (F-415). */
     PutRackMountRequest: {
       position_u: number;
       /** @default 1 */
@@ -7720,6 +7742,21 @@ export interface components {
       cls?: string[] | null;
       sts?: string[] | null;
       tms?: string[] | null;
+      /**
+       * @description Permission scopes: for each permission whose scope differs from the
+       *     session scope (cls, sts, tms), the scope in which the caller holds
+       *     it, in the same form; a permission not listed holds the session
+       *     scope. The UI reads it for collector:manage to offer the client
+       *     choice of an enrollment code (createCollectorEnrollmentCode,
+       *     F-425).
+       */
+      pscp?: {
+        [key: string]: {
+          cls?: string[] | null;
+          sts?: string[] | null;
+          tms?: string[] | null;
+        };
+      };
       name?: string;
       email?: string;
       /**
@@ -7987,7 +8024,7 @@ export interface components {
       broken_id?: string;
       /** @description Chain position (seq) where the first violation was found. */
       broken_at?: number;
-      /** @description `sequence gap`, `previous_hash mismatch` or `hash mismatch`. */
+      /** @description `sequence gap`, `previous_hash mismatch` or `hash mismatch`; for an entry whose personal values were sealed after it was chained (migration 000189) `sealed entry changed after its seal` or `sealed value differs from the original` (the values in the vault no longer give back the original). */
       broken_reason?: string;
     };
     /** @enum {string} */
@@ -8066,7 +8103,7 @@ export interface components {
       attributes: {
         [key: string]: unknown;
       };
-      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). */
+      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). An edge that is verified or re-confirmed is kept, also while a cleanup run is under way: a verification answered with 200 is never undone by the cleanup (F-411). */
       source: string;
       confidence?: number;
       /** @description Port of the source CI the edge starts at (REL-02). */
@@ -8381,7 +8418,7 @@ export interface components {
       rejected_future?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
-      /** @description Sum over the processed records of the discovered values dropped because a manual write would refuse them: the data type of a typed CI column (MET-11; a multi-line hostname, a hardware_uuid that is no UUID, a malformed MAC or IP) or the field definitions of the CI type (CI-03). The rest of each record is stored; no value fails a record or the batch (WP-501). Absent when no value was dropped; with the queue the records are processed asynchronously and it stays absent. */
+      /** @description Sum over the processed records of the discovered values dropped because a manual write would refuse them: the data type of a typed CI column (MET-11; a multi-line hostname, a hardware_uuid that is no UUID, a malformed MAC or IP), the field definitions of the CI type (CI-03) or a unique attribute whose value another active CI holds (MET-15, also before the unique index exists; the CI keeps its own value). The rest of each record is stored; no value fails a record or the batch (WP-501). Absent when no value was dropped; with the queue the records are processed asynchronously and it stays absent. */
       invalid_values?: number;
       job_id?: string;
       /** @description Records processed, deduplicated or queued (REC-01). A record that fails does not take the others of the request down (WP-481). */
@@ -9616,6 +9653,15 @@ export interface components {
       /** Format: int64 */
       current_version: number;
     };
+    /** @description The unmerge is blocked by a later open merge of the survivor (F-416): the merge later_merge_id of later_merge_victim_id into later_merge_survivor_id is unmerged first. A later merge into a CI outside the caller's scope is named only by its victim (the survivor of this merge); later_merge_id and later_merge_survivor_id are absent. */
+    UnmergeLaterMergeProblem: components['schemas']['ProblemDetail'] & {
+      /** Format: uuid */
+      later_merge_id?: string;
+      /** Format: uuid */
+      later_merge_victim_id: string;
+      /** Format: uuid */
+      later_merge_survivor_id?: string;
+    };
     ViolationProblem: components['schemas']['ProblemDetail'] & {
       violations: {
         field: string;
@@ -9627,7 +9673,7 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -9641,6 +9687,7 @@ export interface components {
         | 'collector'
         | 'discovery_scope'
         | 'agent_enrollment_token'
+        | 'collector_enrollment_code'
         | 'ci_merge'
       )[];
     };
@@ -9910,7 +9957,7 @@ export interface components {
       environment: 'live' | 'test';
       permissions: string[];
       owner_id: string;
-      /** @description The key acts with this service account's rights (RBA-08). */
+      /** @description The key acts with this service account's rights (RBA-08), within the scope its creator held at binding (F-397). */
       service_account_id?: string;
       rotated_from?: string;
       /** Format: date-time */
@@ -9948,7 +9995,7 @@ export interface components {
        * @enum {string}
        */
       environment: 'live' | 'test';
-      /** @description The key acts with this service account's rights (RBA-08). */
+      /** @description The key acts with this service account's rights (RBA-08), within the scope its creator held at binding (F-397). */
       service_account_id?: string;
     };
     RotateAPIKeyRequest: {
@@ -10036,7 +10083,9 @@ export interface components {
       operator_id: string;
       /** @enum {string} */
       operator_kind: 'oidc' | 'break_glass';
+      /** @description "login", a named change (e.g. entitlement.grant, org.create) or the method and the percent-encoded path below /api/v1/admin of the request (e.g. "GET /orgs"); a NUL byte or invalid UTF-8 in the path appears encoded (%00, %FF), never as a failed entry. */
       action: string;
+      /** @description The organization of /admin/orgs/{id}/... when {id} is a UUID. */
       target_org?: string;
       status: number;
       details: {
@@ -10544,7 +10593,7 @@ export interface components {
       name: string;
       floor?: number;
       room_type?: string;
-      /** @description Floor-plan object positions, object_id → {x, y} normalized 0..1. */
+      /** @description Floor-plan object positions, CI id → {x, y} normalized 0..1. Only entries of CIs the caller sees, that are not deleted and that are located in this room are returned; an entry of a CI that was deleted or moved out of the room (e.g. to another client) is ignored, it neither shows nor blocks a PATCH. */
       layout?: {
         [key: string]: {
           x?: number;
@@ -10566,7 +10615,7 @@ export interface components {
       name?: string;
       floor?: number;
       room_type?: string;
-      /** @description Replaces the room's floor-plan object positions. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. Each key must be a CI of the organization the caller sees (422 otherwise). */
+      /** @description Replaces the room's floor-plan object positions the caller sees. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears them. Each key must be a CI of the organization the caller sees, not deleted and located in this room (422 otherwise). Positions of CIs the caller does not see stay as stored. */
       layout?: {
         [key: string]: {
           x?: number;
@@ -10635,6 +10684,7 @@ export interface components {
       ci_name: string;
       ci_type: string;
     };
+    /** @description An omitted height_u or face takes its default (1, front); an explicit value outside minimum or enum (height_u 0 or below, face "") is 400 with field height_u or face and nothing is stored (F-415). */
     CreateRackMountRequest: {
       ci_id: string;
       position_u: number;
@@ -11032,6 +11082,8 @@ export interface components {
     RegisterCollectorRequest: {
       name: string;
       client_id?: string;
+      /** @description Site of the collector; it decides the client (422 with field site_id for an unknown site or one of another client than client_id). */
+      site_id?: string;
       version?: string;
       status?: string;
       config?: {
@@ -11445,7 +11497,16 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description Forbidden: a missing permission, or the organization's plan does not include the feature of this operation (rack_view for racks and mounts, api_access for API keys; type https://reticora.io/problems/feature-not-entitled, ENT-05). */
+    /** @description Forbidden: the principal does not hold notification:manage, or holds it only for some clients, sites or teams. Notification channels and their deliveries belong to the whole organization (a channel receives the notifications of every client, a delivery names recipients of every client), so only a holder of notification:manage for the whole organization administers them (RBA-03, TEN-06, F-418); nothing is created, changed or deleted. */
+    NotificationAdminForbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Forbidden: a missing permission, or the organization's plan does not include the feature of this operation (rack_view for racks, mounts and rack nodes of the location tree, api_access for API keys, discovery for discovery scopes; type https://reticora.io/problems/feature-not-entitled, ENT-05). */
     FeatureNotEntitled: {
       headers: {
         [name: string]: unknown;
@@ -11454,7 +11515,7 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description Forbidden: a missing permission, the organization's plan does not include the feature (type https://reticora.io/problems/feature-not-entitled, ENT-05), or the quota of the operation is reached (type https://reticora.io/problems/entitlement-limit, ENT-03): max_users for users, max_api_keys for API keys, max_collectors for collectors. Nothing is created; after a downgrade below the stock the existing objects stay usable and readable (ENT-08). */
+    /** @description Forbidden: a missing permission, the organization's plan does not include the feature (type https://reticora.io/problems/feature-not-entitled, ENT-05), or the quota of the operation is reached (type https://reticora.io/problems/entitlement-limit, ENT-03): max_users for users, max_api_keys for API keys, max_collectors for collectors, max_cis (the active CIs of the whole organization, also those of clients and sites outside the caller's scope) for every write that makes a CI active (POST /cis, the restore, the unmerge, and of a review item new and the merge of a resurrected_device item). Nothing is created, restored or unmerged; after a downgrade below the stock the existing objects stay usable and readable (ENT-08). Every quota counts the whole organization; the detail of entitlement-limit names count and limit ("N of L in use") only to a caller with org-wide client and site scope. A caller restricted to clients or sites, an invitation, a first login and an enrollment get "the limit of the plan is reached" without numbers (F-414). */
     EntitlementLimit: {
       headers: {
         [name: string]: unknown;
@@ -12135,7 +12196,7 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
-      /** @description The ID token is invalid, or it carries no valid organization attribute (type https://reticora.io/problems/login-no-organization, AUT-09, CH26). */
+      /** @description The ID token is invalid, or it carries no valid organization attribute: none, not a UUID, or one that names no organization of the instance (type https://reticora.io/problems/login-no-organization, AUT-09, CH26, F-395). No user is created and no session is issued. */
       401: {
         headers: {
           [name: string]: unknown;
@@ -12367,7 +12428,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. */
+      403: components['responses']['EntitlementLimit'];
+      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. The check covers every CI of the scope of the attribute, also those outside the client or site scope of the caller, and never names the other CI. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12491,7 +12553,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes) */
+      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes; also a CI outside the client or site scope of the caller, which is never named) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12545,9 +12607,9 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). */
+      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12602,6 +12664,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description Another active CI holds a value the CI carries of a unique attribute of the target type (MET-15): urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists. The CI keeps its type. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
       /** @description The target type is not allowed, `violations` names ci_type_id: no UUID ("not the ID (UUID) of a CI type"), no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or deactivated ("the CI type is deactivated"). */
       422: {
         headers: {
@@ -12691,9 +12762,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), or one of the CIs is locked by another write. */
+      /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), the survivor is part of a later open merge (UnmergeLaterMergeProblem, type urn:reticora:problem:unmerge-later-merge: unmerge that merge first; force does not override it), one of the CIs is locked by another write, or another active CI holds a value of a unique attribute of the merged CI or of the survivor in the snapshot meanwhile (MET-15: urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; force does not override it, the merge stays). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12701,6 +12772,7 @@ export interface operations {
         content: {
           'application/problem+json':
             | components['schemas']['VersionConflictProblem']
+            | components['schemas']['UnmergeLaterMergeProblem']
             | components['schemas']['ProblemDetail'];
         };
       };
@@ -13053,11 +13125,14 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
-        /** @description Return relationships where the CI is either the source or target. */
+        /** @description Return relationships where the CI is either the source or target. Not a UUID → 400. */
         ci_id?: string;
+        /** @description Return relationships whose source is the CI. Not a UUID → 400. */
         source_ci_id?: string;
+        /** @description Return relationships whose target is the CI (projected mounted_in and located_in have none). Not a UUID → 400. */
         target_ci_id?: string;
-        rel_type?: components['schemas']['RelationshipType'];
+        /** @description Return relationships of this type: a key of the relationship type catalogue the organization sees (GET /api/v1/relationship-types), the projected types contains, mounted_in and located_in included. A key the catalogue does not know → 400. */
+        rel_type?: string;
       };
       header?: never;
       path?: never;
@@ -13074,6 +13149,7 @@ export interface operations {
           'application/json': components['schemas']['RelationshipListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -13112,7 +13188,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, or an unknown ID. `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, nothing is stored (REL-01, E-95, F-313). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, an unknown ID or a soft-deleted CI (CI-05, F-424). `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, nothing is stored (REL-01, E-95, F-313). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -13978,9 +14054,9 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the merge kind has no unmerge, or the merge no longer exists. */
+      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the survivor is part of a later open merge (the detail names that merge; its job is reverted first, F-416), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -17389,6 +17465,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   updateUser: {
@@ -17493,6 +17570,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description A sample names a CI the caller does not see (`field` ci_id, the ci_id in `detail`); nothing of the body is stored. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -17682,7 +17768,9 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Return items of this status. Another value → 400 with field status (F-426). */
         status?: 'open' | 'resolved' | 'dismissed';
+        /** @description Return items of this review type. Another value → 400 with field kind (F-426). */
         kind?:
           | 'unclassified_device'
           | 'ambiguous_identity'
@@ -17769,10 +17857,10 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      /** @description The action does not resolve items of this type, new cannot tell the client of the device, or new has no CI type (field ci_type_id) */
+      /** @description The action does not resolve items of this type, new cannot tell the client of the device, new has no CI type (field ci_type_id), or the effect refuses a value of the item (the field it names, e.g. collector_id or target of a suggested scope) */
       422: {
         headers: {
           [name: string]: unknown;
@@ -17802,7 +17890,9 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Return items of this status. Another value → 400 with field status (F-426). */
         status?: 'open' | 'resolved' | 'dismissed';
+        /** @description Return items of this review type. Another value → 400 with field kind (F-426). */
         kind?:
           | 'unclassified_device'
           | 'ambiguous_identity'
@@ -17831,6 +17921,7 @@ export interface operations {
           'application/json': components['schemas']['ReviewItemListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -17862,7 +17953,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
@@ -18763,7 +18854,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller (field `layout.<ci>`). */
+      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller, not deleted and located in this room (field `layout.<ci>`; the same answer for an unknown id and a CI the caller does not see). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -19965,7 +20056,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
     };
   };
   createNotificationChannel: {
@@ -19992,7 +20083,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
@@ -20018,7 +20109,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -20041,7 +20132,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -20071,7 +20162,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -20111,7 +20202,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['NotificationAdminForbidden'];
     };
   };
   listVRFs: {
@@ -21228,6 +21319,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21244,6 +21336,16 @@ export interface operations {
           label?: string;
           /** @description Validity in minutes; defaults to and is capped at 1440 (24 h, COL-04). */
           ttl_minutes?: number;
+          /**
+           * Format: uuid
+           * @description Client the collector is enrolled in; must lie in the caller's scope.
+           */
+          client_id?: string;
+          /**
+           * Format: uuid
+           * @description Site the collector is bound to; must lie in the caller's scope and decides the client.
+           */
+          site_id?: string;
         };
       };
     };
@@ -21260,11 +21362,23 @@ export interface operations {
             label?: string;
             /** Format: date-time */
             expires_at?: string;
+            /**
+             * Format: uuid
+             * @description Client the code binds the collector to; absent when unbound.
+             */
+            client_id?: string;
+            /**
+             * Format: uuid
+             * @description Site the code binds the collector to; absent when unbound.
+             */
+            site_id?: string;
           };
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   enrollCollector: {
@@ -21280,6 +21394,7 @@ export interface operations {
           code: string;
           name: string;
           version?: string;
+          /** @description Client of the collector; must be the code's client when the code is bound to one. */
           client_id?: string;
           /** @description PEM certificate signing request */
           csr?: string;
@@ -21432,7 +21547,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
     };
   };
   createDiscoveryScope: {
@@ -21459,7 +21574,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
@@ -21486,7 +21601,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -21510,7 +21625,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -21541,7 +21656,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -21673,6 +21788,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
@@ -22829,6 +22945,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -23100,6 +23217,15 @@ export interface operations {
       403: components['responses']['Forbidden'];
       /** @description The role is no standard role of the organization. */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The request leaves out a seed permission of the standard role (type https://reticora.io/problems/standard-role-permissions; the detail names the role and the permissions). Nothing changes. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -27300,6 +27426,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   putCisIdFieldsNameOverride: {
@@ -27371,7 +27498,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Unknown or invisible CI, or the CI has no value of the field */
+      /** @description Unknown, invisible or soft-deleted CI, or the CI has no value of the field */
       404: {
         headers: {
           [name: string]: unknown;
@@ -28100,6 +28227,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];
     };
@@ -28168,6 +28296,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['LocationInUse'];
     };
@@ -28198,6 +28327,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];

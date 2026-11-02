@@ -139,6 +139,7 @@ function stubRoomServer(
   let stored: Record<string, { x: number; y: number }> = { 'ci-1': { x: 0.5, y: 0.5 } };
   const patches: PatchCall[] = [];
   let roomGets = 0;
+  let ciGets = 0;
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
     new Response(JSON.stringify(body), {
       status,
@@ -171,6 +172,7 @@ function stubRoomServer(
       return json({ data: [roomBody()], total: 1, limit: 100, offset: 0 });
     }
     if (url.includes('/cis')) {
+      ciGets += 1;
       return json({
         data: [{ id: 'ci-1', name: 'Switch 1', status: 'active' }],
         total: 1,
@@ -182,7 +184,7 @@ function stubRoomServer(
   });
   vi.stubGlobal('fetch', fetchMock);
   renderWithProviders(<RoomPlanPage />);
-  return { patches, roomGets: () => roomGets };
+  return { patches, roomGets: () => roomGets, ciGets: () => ciGets };
 }
 
 function problem(status: number, field: string, detail: string) {
@@ -236,6 +238,30 @@ describe('RoomPlanPage saving (F-342)', () => {
     await waitFor(() => expect(server.roomGets()).toBe(2));
     // The refused move is dropped: the marker shows the reloaded position.
     await waitFor(() => expect(marker).toHaveAccessibleName(/50 %.*50 %/));
+  });
+
+  it('reloads room and objects when a layout key is no object of the room any more (F-427)', async () => {
+    // The server refuses a key whose CI was moved out of the room or deleted
+    // meanwhile; the page shows a hint and reloads instead of failing on
+    // every further move.
+    const server = stubRoomServer({
+      respond: () =>
+        problem(
+          422,
+          'layout.ci-1',
+          'layout.ci-1: the key is not a configuration item located in this room',
+        ),
+    });
+    const marker = await openRoom();
+    expect(server.roomGets()).toBe(1);
+    expect(server.ciGets()).toBe(1);
+    marker.focus();
+    fireEvent.keyDown(marker, { key: 'ArrowRight', shiftKey: true });
+    expect(
+      await screen.findByText(/nicht mehr zugeordnet|no longer assigned/, {}, { timeout: 3000 }),
+    ).toHaveAttribute('role', 'alert');
+    await waitFor(() => expect(server.roomGets()).toBe(2));
+    await waitFor(() => expect(server.ciGets()).toBe(2));
   });
 
   it('shows the 422 of an out-of-range coordinate entered in the form', async () => {

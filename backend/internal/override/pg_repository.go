@@ -66,15 +66,34 @@ func (r *PGRepository) withEffectiveTx(ctx context.Context, tx pgx.Tx, fv *Field
 // ci_field_value carries no client column yet (WP-025).
 const visibleCI = "EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_field_value.ci_id)"
 
+// liveCI is visibleCI without soft-deleted CIs: the field values of a
+// deleted CI are gone for the manual paths (GET /cis/{id}/fields, override
+// set and clear, the accept of an override_conflict item) as the CI is for
+// GET /cis/{id} (F-422).
+const liveCI = "EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_field_value.ci_id AND ci.deleted_at IS NULL)"
+
 // requireVisibleCI rejects writes to a CI the tenant scope does not show; the
 // foreign key alone would accept a CI of another client. It locks the CI row
 // (lockCI).
 func requireVisibleCI(ctx context.Context, tx pgx.Tx, ciID string) error {
-	visible, err := lockCI(ctx, tx, ciID)
+	visible, _, err := lockCI(ctx, tx, ciID)
 	if err != nil {
 		return err
 	}
 	if !visible {
+		return fmt.Errorf("not found")
+	}
+	return nil
+}
+
+// requireLiveCI is requireVisibleCI for a manual write: a soft-deleted CI
+// is not found either (F-422).
+func requireLiveCI(ctx context.Context, tx pgx.Tx, ciID string) error {
+	_, live, err := lockCI(ctx, tx, ciID)
+	if err != nil {
+		return err
+	}
+	if !live {
 		return fmt.Errorf("not found")
 	}
 	return nil
@@ -87,23 +106,33 @@ func requireVisibleCI(ctx context.Context, tx pgx.Tx, ciID string) error {
 // the CI row first (discovery LockCI, SELECT … FOR UPDATE): taking it first
 // here too keeps one lock order, so the two wait for each other instead of
 // deadlocking (40P01). Only a row the scope may update is locked; the others
-// are not written either.
-func lockCI(ctx context.Context, tx pgx.Tx, ciID string) (visible bool, err error) {
+// are not written either. live reports a visible CI that is not
+// soft-deleted.
+func lockCI(ctx context.Context, tx pgx.Tx, ciID string) (visible, live bool, err error) {
 	var locked bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1),
-		EXISTS (SELECT 1 FROM ci WHERE id = $1 FOR UPDATE)`, ciID).Scan(&visible, &locked); err != nil {
-		return false, fmt.Errorf("check ci visibility: %w", err)
+		EXISTS (SELECT 1 FROM ci WHERE id = $1 AND deleted_at IS NULL),
+		EXISTS (SELECT 1 FROM ci WHERE id = $1 FOR UPDATE)`, ciID).Scan(&visible, &live, &locked); err != nil {
+		return false, false, fmt.Errorf("check ci visibility: %w", err)
 	}
-	return visible, nil
+	return visible, live, nil
 }
 
 // ListForCI returns all tracked field values of a CI with resolved effective
-// values and divergence flags.
+// values and divergence flags. A CI that is unknown, not visible or
+// soft-deleted is ErrNotFound (F-422).
 func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]FieldValue, error) {
 	var out []FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var live bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1 AND deleted_at IS NULL)`, ciID).Scan(&live); err != nil {
+			return fmt.Errorf("check ci visibility: %w", err)
+		}
+		if !live {
+			return ErrNotFound
+		}
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_field_value WHERE ci_id = $1 AND "+visibleCI+" ORDER BY field_name ASC",
+			"SELECT %s FROM ci_field_value WHERE ci_id = $1 AND "+liveCI+" ORDER BY field_name ASC",
 			selectColumns), ciID)
 		if err != nil {
 			return fmt.Errorf("list field values: %w", err)
@@ -338,7 +367,7 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 	}
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
+		if err := requireLiveCI(ctx, tx, ciID); err != nil {
 			return err
 		}
 		before, err := ciFieldValue(ctx, tx, ciID, fieldName)
@@ -432,9 +461,9 @@ func userID(author string) any {
 // ClearOverride removes the manual override of a field. In the same
 // transaction the CI returns to the observed value, when there is one, its
 // version rises and its history records the change (raiseVersion, API-07),
-// and the change is audited (OVR-01). An unknown or invisible CI and a field
-// without a value are ErrNotFound, a reserved namespace ErrReservedName; a
-// field without an override keeps the version.
+// and the change is audited (OVR-01). An unknown, invisible or soft-deleted
+// CI (F-422) and a field without a value are ErrNotFound, a reserved
+// namespace ErrReservedName; a field without an override keeps the version.
 func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
 	if IsReservedName(fieldName) {
 		return nil, ErrReservedName
@@ -442,11 +471,11 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		// The CI row first (lockCI).
-		visible, err := lockCI(ctx, tx, ciID)
+		_, live, err := lockCI(ctx, tx, ciID)
 		if err != nil {
 			return err
 		}
-		if !visible {
+		if !live {
 			return ErrNotFound
 		}
 		var overridden bool
@@ -466,7 +495,7 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 				override_value = NULL, override_author = NULL,
 				override_reason = NULL, override_at = NULL, protected = false
 			WHERE ci_id = $1 AND field_name = $2 AND %s
-			RETURNING %s`, visibleCI, selectColumns), ciID, fieldName)
+			RETURNING %s`, liveCI, selectColumns), ciID, fieldName)
 		fv, err := scan(row)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {

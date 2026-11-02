@@ -67,6 +67,20 @@ nebeneinander arbeiten.
   Organisation für alle Consumer).
 - **Collector-Edge:** Records über den mTLS-NATS-Kanal (COL-08) laufen über
   dieselbe Queue und dieselben Subjects.
+- **Client des Collectors (F-407, DIS-05):** Die Records eines an einen
+  Client (oder eine Site) gebundenen Collectors laufen im Client-Scope des
+  Collectors; die Nachricht trägt ihn zum Consumer. Ein Record ohne
+  `client_id` erhält den Client des Collectors (bei Site-Bindung auch dessen
+  Site); ein Record mit einem anderen Client, einer anderen Site, einer Site
+  eines anderen Clients oder einer `scope_id`, die der Client nicht sieht,
+  wird einzeln mit 403 abgewiesen und nicht veröffentlicht, die übrigen
+  Records des Batches laufen weiter (WP-481); sind alle abgewiesen,
+  antwortet die Edge 403. Die Identitätsauflösung sieht nur CIs dieses
+  Clients (und org-weite, die sie nicht übernimmt): Ein Record mit der
+  Seriennummer eines CIs eines anderen Clients ändert dieses nicht und wird
+  mit 409 abgewiesen. Der Site-Scope bleibt beim Ingest org-weit, weil ein
+  entdecktes CI seine Site aus einer Location erhält, nicht aus dem Record.
+  Records eines org-weiten Collectors behalten den Client ihres Scopes.
 
 ## Garantien (E-56)
 

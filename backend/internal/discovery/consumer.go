@@ -354,6 +354,10 @@ func classifyRecordError(err error) recordErrorClass {
 	case errors.Is(err, api.ErrNotFound):
 		return recordErrorClass{status: http.StatusNotFound, detail: "the requested resource was not found", permanent: true}
 	}
+	var outside *collectorScopeError
+	if errors.As(err, &outside) {
+		return recordErrorClass{status: http.StatusForbidden, detail: outside.Error(), permanent: true}
+	}
 	if status, _, detail, ok := api.ClassifyDBError(err); ok {
 		return recordErrorClass{status: status, detail: detail,
 			permanent: status >= 400 && status < 500 && retryReason(err) == ""}

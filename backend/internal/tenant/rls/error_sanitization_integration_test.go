@@ -14,7 +14,8 @@ package rls_test
 // (WP-407) come from the former defect test
 // TestAuditT1RepositoryErrorsAreSanitized, WP-013 is the NUL case of the
 // discovery scopes (SQLSTATE 22021 -> 400), WP-208 the team member written by
-// a team principal outside its team scope (TestVerifyB27TeamScope). An object
+// a team principal outside its team scope (TestVerifyB27TeamScope); the
+// credential cases come from WP-661 (k7n-credential-invalid-id, F-390). An object
 // of another organization, client or team answers exactly like an unknown
 // one (TEN-04).
 //
@@ -117,6 +118,20 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 			"name": "T1", "applies_to": "no-such-kind", "states": []any{map[string]any{"key": "a", "label": "A", "is_initial": true}}}, []int{422}, `"field":"applies_to"`},
 		{"WP-011", "lifecycle definition with a NUL byte", w.orgA, http.MethodPost, "/api/v1/lifecycle-definitions", map[string]any{"key": "t1_nul",
 			"name": nul, "states": []any{map[string]any{"key": "a", "label": "A", "is_initial": true}}}, []int{400}, "invalid format or is out of range"},
+		// WP-661 (F-390): the credential handler answers an id that is no
+		// UUID like an unknown one, not 500.
+		{"WP-011", "credential of an invalid id", w.orgA, http.MethodGet, "/api/v1/credentials/not-a-uuid", nil, []int{404}, "credential not found"},
+		{"WP-011", "credential deletion of an invalid id", w.orgA, http.MethodDelete, "/api/v1/credentials/not-a-uuid", nil, []int{404},
+			"credential not found"},
+		{"WP-011", "credential of an unknown id", w.orgA, http.MethodGet, "/api/v1/credentials/" + unknown, nil, []int{404}, "credential not found"},
+		{"WP-011", "credential with a NUL byte", w.orgA, http.MethodPost, "/api/v1/credentials/", map[string]any{"name": nul, "kind": "snmp_v2c",
+			"secret": map[string]any{"community": "x"}}, []int{400}, "invalid format or is out of range"},
+		{"WP-011", "credential of an unknown client", w.orgA, http.MethodPost, "/api/v1/credentials/", map[string]any{"name": "t1-err-cred",
+			"kind": "snmp_v2c", "client_id": unknown, "secret": map[string]any{"community": "x"}}, []int{422}, "does not exist or is still in use"},
+		{"WP-011", "credential with an invalid client_id", w.orgA, http.MethodPost, "/api/v1/credentials/", map[string]any{"name": "t1-err-cred",
+			"kind": "snmp_v2c", "client_id": "not-a-uuid", "secret": map[string]any{"community": "x"}}, []int{400}, "invalid format or is out of range"},
+		{"WP-011", "credential for client 2 by client 1", client1, http.MethodPost, "/api/v1/credentials/", map[string]any{"name": "t1-err-cred",
+			"kind": "snmp_v2c", "client_id": f.Client2, "secret": map[string]any{"community": "x"}}, []int{403}, "the operation is not permitted"},
 		{"WP-011", "lifecycle transition of an invalid CI id", w.orgA, http.MethodPost, "/api/v1/cis/not-a-uuid/lifecycle-transitions",
 			map[string]any{"to_state": "a"}, []int{404}, "entity not found"},
 		{"WP-011", "source policy with a NUL byte", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-policy", map[string]any{"name": nul,

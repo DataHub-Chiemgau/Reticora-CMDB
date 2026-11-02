@@ -103,6 +103,29 @@ func TestBulkAgainstPostgres(t *testing.T) {
 	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE id = ANY($1::uuid[]) AND status = 'inactive'`, ids).Scan(&inactive); err != nil || inactive != 100 {
 		t.Errorf("inactive %d, %v", inactive, err)
 	}
+
+	// WP-690 (F-419): the id of own1 in another letter case names the same
+	// CI; it is written once and reported once, under the lower-case id.
+	state := func() (version, changes int) {
+		t.Helper()
+		if serr := f.Admin.QueryRow(bg, `SELECT version, (SELECT count(*) FROM ci_change WHERE ci_id = $1) FROM ci WHERE id = $1`,
+			own1).Scan(&version, &changes); serr != nil {
+			t.Fatal(serr)
+		}
+		return version, changes
+	}
+	version, changes := state()
+	w = post(ci.BulkRequest{Action: ci.BulkSetStatus, IDs: []string{own1, strings.ToUpper(own1)}, Status: ci.StatusActive})
+	res = ci.BulkResult{}
+	if err = json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("bulk in two letter cases: %d %s", w.Code, w.Body.String())
+	}
+	if res.Total != 1 || res.Succeeded != 1 || len(res.Items) != 1 || res.Items[0].ID != own1 {
+		t.Errorf("bulk in two letter cases: %s, want one item for %s", w.Body.String(), own1)
+	}
+	if v, c := state(); v != version+1 || c != changes+1 {
+		t.Errorf("bulk in two letter cases: version %d -> %d, changes %d -> %d, want one write", version, v, changes, c)
+	}
 }
 
 // TestBulkStatusIsManualWriteUnderRequiredIfMatch covers WP-368 (CI-04,

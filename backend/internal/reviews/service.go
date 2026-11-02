@@ -213,11 +213,16 @@ func (s *Service) Get(ctx context.Context, orgID, id string) (*Item, error) {
 var legacyActions = map[string]string{"create": ActionNew}
 
 // Resolve resolves an open item with one of the actions its type allows
-// (REC-08) and the effect registered for the type.
+// (REC-08) and the effect registered for the type. An item is resolved
+// exactly once (F-404): with a Locker repository the item is locked, its
+// status checked again, the effect carried out and the resolution written
+// in one transaction, so a concurrent resolution of the item waits for it
+// and then gets ErrAlreadyResolved (409) without running its effect, and a
+// failed effect leaves neither its writes nor a resolution behind.
 func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution) (*Item, error) {
-	item, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return nil, err
+	item, getErr := s.Get(ctx, orgID, id)
+	if getErr != nil {
+		return nil, getErr
 	}
 	if item.Status != StatusOpen {
 		return nil, ErrAlreadyResolved
@@ -237,53 +242,103 @@ func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution
 	if !ok && res.Action != ActionDismiss {
 		return nil, &Error{Status: http.StatusUnprocessableEntity, Message: "no " + res.Action + " is available for " + item.Kind + " items yet"}
 	}
-	resolved := false
-	if ok {
-		if resolved, err = s.runEffect(ctx, effect, item, res); err != nil {
-			return nil, err
+	var out *Item
+	resolved, tracked := false, false
+	err := s.inTx(ctx, orgID, func(ctx context.Context) error {
+		locked, err := s.lock(ctx, orgID, id)
+		if err != nil {
+			return err
 		}
+		if locked.Status != StatusOpen {
+			return ErrAlreadyResolved
+		}
+		item = locked
+		if s.jobs != nil && res.Action == ActionMerge {
+			err = s.trackMerge(ctx, item, res)
+			if err != nil {
+				return err
+			}
+			tracked = true
+		}
+		if ok {
+			if resolved, err = effect(ctx, item, res); err != nil {
+				return err
+			}
+		}
+		if res.Note == "" {
+			res.Note = res.Action
+		}
+		if resolved {
+			out, err = s.repo.GetReviewItem(ctx, orgID, id)
+			return err
+		}
+		out, err = s.repo.ResolveReviewItem(ctx, orgID, id, res)
+		return err
+	})
+	if tracked {
+		s.finishMerge(ctx, item, err)
 	}
-	if res.Note == "" {
-		res.Note = res.Action
-	}
-	if resolved {
-		return s.Get(ctx, orgID, id)
-	}
-	out, err := s.repo.ResolveReviewItem(ctx, orgID, id, res)
 	if err != nil {
 		return nil, err
 	}
-	slog.InfoContext(ctx, "review item resolved", "event", "review.resolved", "organization_id", orgID,
-		"review_item_id", id, "kind", item.Kind, "action", res.Action)
+	if !resolved {
+		slog.InfoContext(ctx, "review item resolved", "event", "review.resolved", "organization_id", orgID,
+			"review_item_id", id, "kind", item.Kind, "action", res.Action)
+	}
 	return out, nil
 }
 
-// runEffect runs the effect of a resolution; a merge runs as a job whose
-// status follows the effect (JOB-04). The merge runs in the request and the
-// review.merge job mirrors it (E-89, transitional rule: option 1); the
-// merge of a probable_duplicate item is the ci.merge job of the CI-12
-// merge, whose status the review.merge job takes. There is one job per item:
-// a retry after a failed merge runs that job again, failed → running with
-// one more attempt and without the old error, and it ends succeeded or
-// failed with the retry (F-330).
-func (s *Service) runEffect(ctx context.Context, effect Effect, item *Item, res *Resolution) (bool, error) {
-	if s.jobs == nil || res.Action != ActionMerge {
-		return effect(ctx, item, res)
+// inTx runs fn in one transaction of a Locker repository, else as it is.
+func (s *Service) inTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	if locker, ok := s.repo.(Locker); ok {
+		return locker.RunInTx(ctx, orgID, fn)
 	}
-	actor := res.ResolvedBy
-	if err := s.jobs.Track(ctx, item.OrganizationID, MergeJobKind, "review_item", item.ID, actor); err != nil {
-		return false, err
+	return fn(ctx)
+}
+
+// lock returns the item locked until the end of the context transaction
+// (Locker), else as it stands.
+func (s *Service) lock(ctx context.Context, orgID, id string) (*Item, error) {
+	locker, ok := s.repo.(Locker)
+	if !ok {
+		return s.Get(ctx, orgID, id)
 	}
-	_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusRunning, "")
-	resolved, err := effect(ctx, item, res)
+	return locker.LockReviewItem(ctx, orgID, id)
+}
+
+// A merge resolution runs as a job whose status follows it (JOB-04). The
+// merge runs in the request and the review.merge job mirrors it (E-89,
+// transitional rule: option 1); the merge of a probable_duplicate item is
+// the ci.merge job of the CI-12 merge, whose status the review.merge job
+// takes. There is one job per item: a retry after a failed merge runs that
+// job again, failed → running with one more attempt and without the old
+// error, and it ends succeeded or failed with the retry (F-330). The job is
+// written outside the transaction of the resolution, so that a failed
+// merge, whose writes roll back, leaves its failed job. It starts once the
+// item is locked, while the transaction holds nothing else (the loser of a
+// concurrent resolution never touches it, F-404), and ends once the
+// transaction has ended.
+
+// trackMerge starts the review.merge job of item.
+func (s *Service) trackMerge(ctx context.Context, item *Item, res *Resolution) error {
+	jobCtx := database.WithoutTx(ctx)
+	if err := s.jobs.Track(jobCtx, item.OrganizationID, MergeJobKind, "review_item", item.ID, res.ResolvedBy); err != nil {
+		return err
+	}
+	_ = s.jobs.Mirror(jobCtx, item.OrganizationID, "review_item", item.ID, jobs.StatusRunning, "")
+	return nil
+}
+
+// finishMerge ends the review.merge job of item with the outcome err of the
+// resolution: the job shows a refusal as it is, any other error sanitized;
+// the raw error goes to the log (F-372).
+func (s *Service) finishMerge(ctx context.Context, item *Item, err error) {
+	jobCtx := database.WithoutTx(ctx)
 	if err != nil {
-		// The job shows a refusal as it is, any other error sanitized; the
-		// raw error goes to the log (F-372).
-		_ = jobs.MirrorFailed(ctx, s.jobs, item.OrganizationID, "review_item", item.ID, err)
-		return false, err
+		_ = jobs.MirrorFailed(jobCtx, s.jobs, item.OrganizationID, "review_item", item.ID, err)
+		return
 	}
-	_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusSucceeded, "")
-	return resolved, nil
+	_ = s.jobs.Mirror(jobCtx, item.OrganizationID, "review_item", item.ID, jobs.StatusSucceeded, "")
 }
 
 func joinActions(actions []string) string {

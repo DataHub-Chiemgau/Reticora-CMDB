@@ -87,6 +87,57 @@ func TestCompileSQLRelationshipPredicates(t *testing.T) {
 	}
 }
 
+// TestCompileSQLRelationshipPredicatesReadTheProjection pins the SQL of
+// has_relationship and lacks_relationship for the structural types (F-244,
+// WP-573): contains, mounted_in and located_in are never stored in
+// ci_relationship but projected by ci_structure_edge, so the predicate is
+// the union of both, the projection read once per end of the edge with
+// the other CI end checked for visibility; the type is one parameter.
+// Other types read ci_relationship only.
+func TestCompileSQLRelationshipPredicatesReadTheProjection(t *testing.T) {
+	for _, relType := range []string{"contains", "mounted_in", "located_in"} {
+		for _, lacks := range []bool{false, true} {
+			spec := FilterSpec{EntityKind: "ci", HasRelationship: relType}
+			if lacks {
+				spec = FilterSpec{EntityKind: "ci", LacksRelationship: relType}
+			}
+			where, args, err := spec.CompileSQL("ci", []any{"org"}, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix := "("
+			if lacks {
+				prefix = "NOT ("
+			}
+			for _, want := range []string{
+				`EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = $2 AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))`,
+				`OR EXISTS (SELECT 1 FROM ci_structure_edge e WHERE e.rel_type = $2 AND e.source_ci_id = ci.id`,
+				`AND (e.target_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci t WHERE t.id = e.target_ci_id))`,
+				`OR EXISTS (SELECT 1 FROM ci_structure_edge e WHERE e.rel_type = $2 AND e.target_ci_id = ci.id`,
+				`AND EXISTS (SELECT 1 FROM ci s WHERE s.id = e.source_ci_id)`,
+			} {
+				if !strings.Contains(where, want) {
+					t.Errorf("%s (lacks %v): %q missing in %s", relType, lacks, want, where)
+				}
+			}
+			if !strings.HasPrefix(where, prefix) || strings.Count(where, "ci_structure_edge") != 2 {
+				t.Errorf("%s (lacks %v): want %q and two projection arms, got %s", relType, lacks, prefix, where)
+			}
+			if len(args) != 2 || args[1] != relType {
+				t.Errorf("%s (lacks %v): args %v, want [org %s]", relType, lacks, args, relType)
+			}
+		}
+	}
+	where, args, err := FilterSpec{EntityKind: "ci", HasRelationship: "depends_on"}.CompileSQL("ci", []any{"org"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(where, "ci_structure_edge") || len(args) != 2 ||
+		where != `EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = $2 AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))` {
+		t.Errorf("depends_on reads the stored relationships only: %s %v", where, args)
+	}
+}
+
 func TestCompileSQLAssetLifecycleAndOwner(t *testing.T) {
 	falseVal := false
 	spec := FilterSpec{EntityKind: "asset", Lifecycle: "deployed", HasOwner: &falseVal, WarrantyWithinDays: 90}

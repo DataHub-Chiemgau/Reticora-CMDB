@@ -36,6 +36,10 @@
 // growing, the run stops waiting and counts what is missing (dead letters,
 // records held as unlicensed_ci, dropped messages).
 //
+// No request may fail (F-388): http_req_failed is 0 in the run and in every
+// scenario of it (ingest, spool and the probe with its polls and /readyz);
+// every failed request is logged with its status (lib.js failed).
+//
 // Every scenario records the peak backlog of /readyz (details.ingest.total,
 // WP-334; the server samples it every 30 s) while it waits, and counts the
 // records accepted with 202 (ingest_records_accepted; load.yml divides the
@@ -48,7 +52,7 @@ import http from 'k6/http';
 import exec from 'k6/execution';
 import { check, fail, sleep } from 'k6';
 import { Counter, Gauge, Trend } from 'k6/metrics';
-import { BASE_URL, get, params, post, seedDevice, total, uuid } from './lib.js';
+import { BASE_URL, failed, get, params, post, seedDevice, total, uuid } from './lib.js';
 
 const SCENARIO = __ENV.SCENARIO || 'load';
 const RATE = Number(__ENV.RATE || 200);
@@ -142,7 +146,13 @@ if (SCENARIO === 'rediscover' && OFFERED + PROBES > OBJECTS - 4) {
 
 export const options = {
   scenarios: scenarios[SCENARIO],
-  thresholds: thresholds[SCENARIO],
+  thresholds: {
+    ...thresholds[SCENARIO],
+    // F-388: no failed request in the run (setup included) and in every
+    // scenario.
+    http_req_failed: ['rate==0'],
+    ...Object.fromEntries(Object.keys(scenarios[SCENARIO]).map((s) => [`http_req_failed{scenario:${s}}`, ['rate==0']])),
+  },
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'max', 'count'],
 };
 
@@ -247,7 +257,8 @@ export function rediscover() {
 
 // visibleCount returns how many CIs have a serial number with prefix.
 function visibleCount(prefix) {
-  const res = http.get(`${BASE_URL}/api/v1/cis?limit=1&filter[serial_number][like]=${prefix}*`, params('visible-poll'));
+  const res = failed(http.get(`${BASE_URL}/api/v1/cis?limit=1&filter[serial_number][like]=${prefix}*`, params('visible-poll')),
+    'visible-poll');
   return res.status === 200 ? Number(res.json('total')) : -1;
 }
 
@@ -256,7 +267,7 @@ function visibleCount(prefix) {
 // (sampled_at; now for a server that reads it per request); total -1
 // without the detail.
 function backlog() {
-  const res = http.get(`${BASE_URL}/readyz`, { tags: { name: 'readyz' }, timeout: '10s' });
+  const res = failed(http.get(`${BASE_URL}/readyz`, { tags: { name: 'readyz' }, timeout: '10s' }), 'readyz');
   try {
     const total = res.json('details.ingest.total');
     if (typeof total === 'number') {
@@ -400,8 +411,8 @@ export function spool(data) {
       const ip = `172.${16 + (Math.floor(n / 65536) % 16)}.${Math.floor(n / 256) % 256}.${n % 256}`;
       records.push(record(`${prefix}${n}`, ip, new Date(observed + n)));
     }
-    const res = http.post(`${BASE_URL}/api/v1/discovery/ingest`, JSON.stringify({ records }),
-      Object.assign(params('spool'), { compression: 'gzip' }));
+    const res = failed(http.post(`${BASE_URL}/api/v1/discovery/ingest`, JSON.stringify({ records }),
+      Object.assign(params('spool'), { compression: 'gzip' })), 'spool');
     if (!check(res, { 'spool 202': (r) => r.status === 202 })) {
       fail(`spooled upload at record ${i}: ${res.status} ${res.body}`);
     }

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 func testService(t *testing.T, plan Plan) *Service {
@@ -152,6 +154,44 @@ func TestAllowCreateEnforcesLimit(t *testing.T) {
 	}
 }
 
+// TestLimitExceededDetailFollowsCallerScope covers F-414 (ENT-03): the
+// refusal names count and limit only to a principal with org-wide client
+// and site scope; a client- or site-scoped principal and a context without
+// a user (invitation, first login, enrollment, ingest) get the text without
+// numbers. The fields keep both for the callers in code.
+func TestLimitExceededDetailFollowsCallerScope(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
+	if _, err := svc.Grant(context.Background(), Entitlement{OrganizationID: "org-1", FeatureKey: FeatureCMDBCore,
+		Plan: PlanEssential, Enabled: true, Limits: map[string]int64{LimitMaxCIs: 7}}); err != nil {
+		t.Fatal(err)
+	}
+	orgWide := database.OrgWideScope("org-1", "user-1")
+	clientScoped, siteScoped := orgWide, orgWide
+	clientScoped.Clients = database.ScopeIDs("c0dea1a0-0000-4000-8000-0000000000c1")
+	siteScoped.Sites = database.ScopeIDs("c0dea1a0-0000-4000-8000-0000000000a1")
+	system := database.OrgWideScope("org-1", "")
+	const hidden = `entitlement limit for "max_cis" exceeded: the limit of the plan is reached`
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want string
+	}{
+		"org-wide principal": {database.ContextWithTenantScope(context.Background(), &orgWide), `entitlement limit for "max_cis" exceeded: 9 of 7 in use`},
+		"client-scoped":      {database.ContextWithTenantScope(context.Background(), &clientScoped), hidden},
+		"site-scoped":        {database.ContextWithTenantScope(context.Background(), &siteScoped), hidden},
+		"system scope":       {database.ContextWithTenantScope(context.Background(), &system), hidden},
+		"no scope":           {context.Background(), hidden},
+	} {
+		err := svc.AllowCreate(tc.ctx, "org-1", LimitMaxCIs, 9)
+		var limitErr *LimitExceededError
+		if !asLimitError(err, &limitErr) {
+			t.Fatalf("%s: %v, want LimitExceededError", name, err)
+		}
+		if err.Error() != tc.want || limitErr.Limit != 7 || limitErr.Current != 9 {
+			t.Errorf("%s: %q (limit %d, current %d), want %q with limit 7 and current 9", name, err.Error(), limitErr.Limit, limitErr.Current, tc.want)
+		}
+	}
+}
+
 func TestEnforcementDisabledAllowsEverything(t *testing.T) {
 	svc := NewService(NewMemoryRepository(), Options{Enforce: false})
 	ctx := context.Background()
@@ -182,6 +222,9 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		// WP-168 (API-05): catalog paths are gated like their predecessors.
 		"/api/v1/impact/c1":  FeatureTopology,
 		"/api/v1/exports/j1": FeatureExportCSV,
+		// WP-671 (F-400): the discovery scopes are discovery.
+		"/api/v1/discovery-scopes":    FeatureDiscovery,
+		"/api/v1/discovery-scopes/s1": FeatureDiscovery,
 	}
 	for path, want := range cases {
 		got, gated := RequiredFeature(path)
@@ -191,7 +234,12 @@ func TestRequiredFeatureMapping(t *testing.T) {
 	}
 
 	for _, path := range []string{"/api/v1/cis", "/api/v1/cis/c1", "/api/v1/auth/me", "/api/v1/entitlements", "/healthz",
-		"/api/v1/collectors/enroll", "/api/v1/users/u1/data-export"} {
+		"/api/v1/collectors/enroll", "/api/v1/users/u1/data-export",
+		// WP-671 (F-400): the review queue, its deprecated alias and the
+		// location tree are cmdb_core (rack nodes and scope_suggested items
+		// check their feature in the handler).
+		"/api/v1/review-items", "/api/v1/review-items/r1/resolve", "/api/v1/discovery/review-items",
+		"/api/v1/discovery/review-items/r1/resolve", "/api/v1/locations", "/api/v1/locations/tree", "/api/v1/locations/l1"} {
 		if _, gated := RequiredFeature(path); gated {
 			t.Errorf("expected %q to stay ungated", path)
 		}

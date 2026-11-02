@@ -195,5 +195,5 @@ func (h *Handler) ListNotifications(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": notifications})
+	api.WriteJSON(w, http.StatusOK, map[string]any{"data": api.NonNilSlice(notifications)})
 }

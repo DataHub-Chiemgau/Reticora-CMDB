@@ -188,12 +188,48 @@ func (r *PGRepository) GetReviewItem(ctx context.Context, orgID, id string) (*It
 	return item, nil
 }
 
-// ResolveReviewItem implements Repository. Resolving an unlicensed_ci item
-// is audited (ENT-03); resolved_by and the audit actor are both
-// resolution.ResolvedBy, the principal of the request (the system when
-// empty). Every resolution writes review.resolved in its transaction
-// (EVT-02).
+// RunInTx implements Locker: fn runs in one transaction of the context's
+// tenant scope, which every repository call with fn's context joins.
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
+// LockReviewItem implements Locker: the row of the item stays locked until
+// the context transaction ends, so a concurrent resolution of the item
+// waits and then finds it resolved (F-404). Under the tenant scope like
+// GetReviewItem (the restrictive update policies of migration 000140 apply
+// as well).
+func (r *PGRepository) LockReviewItem(ctx context.Context, orgID, id string) (*Item, error) {
+	if !audit.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var item *Item
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		item, err = scan(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM review_item WHERE id = $2 AND organization_id = $3 AND %s FOR UPDATE OF review_item",
+			selectColumns, visible), escalationSeconds, id, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// ResolveReviewItem implements Repository. Only an open item is resolved:
+// the status check and the change are one statement, so of two concurrent
+// resolutions one changes the item and the other gets ErrAlreadyResolved
+// (F-404). Resolving an unlicensed_ci item is audited (ENT-03); resolved_by
+// and the audit actor are both resolution.ResolvedBy, the principal of the
+// request (the system when empty). Every resolution writes review.resolved
+// in its transaction (EVT-02).
 func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, resolution *Resolution) (*Item, error) {
+	if !audit.IsUUID(id) {
+		return nil, ErrNotFound
+	}
 	var item *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -201,9 +237,20 @@ func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, 
 			UPDATE review_item
 			SET status = $4, action = NULLIF($5, ''), resolution = $6, resolved_by = NULLIF($7, '')::uuid,
 			    resolved_at = now(), updated_at = now()
-			WHERE id = $2 AND organization_id = $3 AND %s
+			WHERE id = $2 AND organization_id = $3 AND status = 'open' AND %s
 			RETURNING %s`, visible, selectColumns),
 			escalationSeconds, id, orgID, resolution.Status, resolution.Action, resolution.Note, resolution.ResolvedBy))
+		if errors.Is(err, pgx.ErrNoRows) {
+			var exists bool
+			if qerr := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM review_item WHERE id = $1 AND organization_id = $2 AND "+visible+")",
+				id, orgID).Scan(&exists); qerr != nil {
+				return fmt.Errorf("read review item: %w", qerr)
+			}
+			if exists {
+				return ErrAlreadyResolved
+			}
+			return ErrNotFound
+		}
 		if err != nil {
 			return err
 		}

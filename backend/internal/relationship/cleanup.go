@@ -81,7 +81,9 @@ const CleanupKind = "relationship.cleanup"
 // event relationship.removed; so is a discovery edge a suppression covers.
 // The scope interval comes from scopeinterval (shared with the offline
 // detector): a cron scope counts with the gap between its runs, a weekly
-// one with 35 days (F-111).
+// one with 35 days (F-111). The DELETE checks verification and deadline
+// again on the current row: an edge verified or re-confirmed while a run is
+// under way stays, without an event (F-411).
 type Cleanup struct {
 	pool *pgxpool.Pool
 	now  func() time.Time
@@ -231,9 +233,31 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 			default:
 				continue
 			}
-			if _, err = tx.Exec(ctx, `DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND source = 'discovery'`, e.id, orgID); err != nil {
+			// The candidates were read without a lock: the DELETE checks
+			// again on the current row (F-411). An edge a user verified or
+			// discovery re-confirmed since then stays, without an event;
+			// a concurrent writer of the row is waited for, and its
+			// committed version decides (READ COMMITTED re-evaluates the
+			// condition). A stale edge must still be past its deadline.
+			var deadline *time.Time
+			if reason == "stale" {
+				d := now.Add(-age)
+				deadline = &d
+			}
+			var confirmed time.Time
+			err = tx.QueryRow(ctx, `DELETE FROM ci_relationship
+				WHERE id = $1 AND organization_id = $2 AND source = 'discovery' AND verification_state <> 'verified'
+				  AND ($3::timestamptz IS NULL OR COALESCE(last_confirmed_at, last_seen_at, created_at) < $3)
+				RETURNING COALESCE(last_confirmed_at, last_seen_at, created_at)`, e.id, orgID, deadline).Scan(&confirmed)
+			if errors.Is(err, pgx.ErrNoRows) {
+				slog.Info("discovery edge kept: verified or confirmed during the cleanup", "job", CleanupKind,
+					"organization_id", orgID, "relationship_id", e.id)
+				continue
+			}
+			if err != nil {
 				return fmt.Errorf("remove edge %s: %w", e.id, err)
 			}
+			e.confirmed = confirmed
 			if _, err = outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.RelationshipRemoved, EntityID: e.id,
 				Data: map[string]any{"id": e.id, "source_ci_id": e.source, "target_ci_id": e.target, "rel_type": e.relType,
 					"source": "discovery", "reason": reason, "last_confirmed_at": e.confirmed.UTC().Format(time.RFC3339),

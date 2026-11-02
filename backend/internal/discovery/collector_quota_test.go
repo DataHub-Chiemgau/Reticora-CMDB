@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -168,7 +169,11 @@ func runCollectorQuota(t *testing.T, e *quotaEnv, clientID string) {
 // TestCollectorQuota covers the handler with the in-memory repository.
 func TestCollectorQuota(t *testing.T) {
 	svc := entitlement.NewService(entitlement.NewMemoryRepository(), entitlement.Options{Enforce: true})
-	runCollectorQuota(t, newQuotaEnv(t, svc, discovery.NewMemoryRepository(), quotaOrg, context.Background(), context.Background()), "")
+	// An authenticated request carries its tenant scope (TenantMiddleware);
+	// the enrollment code takes its binding from it (F-406).
+	scope := database.OrgWideScope(quotaOrg, "")
+	ctx := database.ContextWithTenantScope(context.Background(), &scope)
+	runCollectorQuota(t, newQuotaEnv(t, svc, discovery.NewMemoryRepository(), quotaOrg, ctx, context.Background()), "")
 }
 
 // TestCollectorQuotaPostgres covers the PostgreSQL repository with a

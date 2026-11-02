@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"slices"
 	"strings"
 )
@@ -36,6 +37,17 @@ func GrantCeiling(p *Principal, target []Grant) []Permission {
 		}
 	}
 	return missing
+}
+
+// HoldsOrgWide reports whether the principal of ctx holds perm for the whole
+// organization, not only for some clients, sites or teams (RBA-03): the
+// check of routes whose objects belong to the organization as a whole, such
+// as PATCH /org (F-359) and the notification channels with their deliveries
+// (F-418), while the route authorization accepts any scope of perm. Without
+// a principal it is false (fail-closed).
+func HoldsOrgWide(ctx context.Context, perm Permission) bool {
+	p, ok := PrincipalFromContext(ctx)
+	return ok && len(GrantCeiling(&p, []Grant{OrgWideGrant([]Permission{perm})})) == 0
 }
 
 // siteWithoutClient reports whether a target grant of perm names sites but not

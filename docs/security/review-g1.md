@@ -43,6 +43,13 @@ Aktualisierung behoben (`vitest` 4.1.12 ohne `tinypool`, `vite` 6.4.5 und
 Patch-Stände der transitiven Pakete). npm audit meldet über alle
 Abhängigkeiten kein High und kein Critical (Abschnitt „Scanergebnisse“).
 
+Fortschreibung vom 2026-11-01 (WP-699, `k7n-sr-coverage-reaudit-findings`,
+F-428) auf dem Stand `6a499ac`: Die Befunde der Korrektur G1 ab F-355
+(`audit/g1-reaudit/FINDINGS.md`) mit Sicherheitswirkung oder Critical nach
+dem Bewertungsschema stehen als SR-27 bis SR-49 im Review, alle behoben; die
+übrigen mit Begründung im Abschnitt „Befunde der Korrektur ohne
+Sicherheitswirkung“ (Abschnitt „Befunde der Korrektur G1 (ab F-355)“).
+
 ## Ergebnis
 
 - **Audit-Befunde:** Von 225 Critical/High-Befunden sind alle G1-Anteile
@@ -77,6 +84,12 @@ Abhängigkeiten kein High und kein Critical (Abschnitt „Scanergebnisse“).
   Sicherheitswirkung (F-001, F-004 bis F-015) stehen als SR-14 bis SR-26 mit
   Severity Critical im Review. Ihre Korrektur-WPs sind gemergt, jeder Befund
   ist mit einem regulären Test belegt behoben (lokal grün auf `425a655`).
+- **Befunde der Korrektur G1 (ab F-355):** 23 Befunde stehen als SR-27 bis
+  SR-49 im Review: 13 Critical (davon F-411 und F-416 als stiller
+  Datenverlust ohne Sicherheitswirkung), 3 High, 2 Medium, 4 Low, 1 Info;
+  F-397 ist Teil von SR-18. Alle sind behoben und mit einem regulären Test
+  belegt (lokal grün auf `6a499ac`). Die übrigen Befunde haben keine
+  Sicherheitswirkung; F-386 und F-422 bis F-426 sind offen bzw. in Korrektur.
 - **G1-Nachbesserung:** Die sicherheitsrelevanten Änderungen von WP-332 bis
   WP-335 sind mit Tests belegt (Abschnitt „G1-Nachbesserung“ unten). Die
   Schwächen, die die Reviews der WPs und das Gesamtreview des integrierten
@@ -108,7 +121,8 @@ war am 2026-10-15 kein High und kein Critical als offen geführt; SR-02 ist
 mit WP-332 bis WP-334 behoben. SR-11 stand dabei entgegen dem
 Bewertungsschema auf Low (F-119), und SR-12 und SR-13 fehlten (F-040); beides
 korrigiert die Fortschreibung vom 2026-10-25. Seitdem ist unter SR-01 bis
-SR-26 kein High und kein Critical offen; die Critical-Advisories der
+SR-26 kein High und kein Critical offen, ebenso unter SR-27 bis SR-49 (Befunde
+der Korrektur, Fortschreibung vom 2026-11-01); die Critical-Advisories der
 Entwicklungsabhängigkeiten sind mit WP-654 behoben (Abschnitt
 „Scanergebnisse“). Das
 Ausstiegskriterium „keine offenen High/Critical“ verlangt zusätzlich den
@@ -284,7 +298,7 @@ auf dem Release-Kandidaten“) und `docs/acceptance/g1-installation.md`.
 | V1 Architektur | Threat-Model, Mandantentrennung in der DB (RLS FORCE), ein DB-Einstieg `WithTenant` | `docs/security/threat-model.md`, `backend/internal/tenant/rls/` |
 | V2 Authentisierung | OIDC mit PKCE über Keycloak, MFA für Operatoren, API-Schlüssel mit Hash und Ablauf | T1, T2, T15 |
 | V3 Sessions | RS256-JWT mit 15 min, Refresh-Rotation, Widerruf über Redis | T1 |
-| V4 Zugriffskontrolle | Routen-Rechte-Tabelle (fail closed), Scopes je Client/Site/Team; Kanalmatrix mit 29 Kanälen für jede der 6 Scope-Arten seit WP-409, Lücken davor und außerhalb der Matrix im Abschnitt „Kanalmatrix: Kanal × Scope-Art“ | T6, T7, `backend/internal/server/authz_test.go`, `backend/internal/tenant/rls/channel_matrix_integration_test.go` |
+| V4 Zugriffskontrolle | Routen-Rechte-Tabelle (fail closed), Scopes je Client/Site/Team; Kanalmatrix mit 29 Kanälen für jede der 6 Scope-Arten seit WP-409 (30 mit den Benachrichtigungskanälen seit WP-689), Lücken davor und außerhalb der Matrix im Abschnitt „Kanalmatrix: Kanal × Scope-Art“ | T6, T7, `backend/internal/server/authz_test.go`, `backend/internal/tenant/rls/channel_matrix_integration_test.go` |
 | V5 Validierung | OpenAPI-Validierung der Anfragen, typisierte Fehler (RFC 7807) | `backend/internal/middleware/` (Validation) |
 | V7 Logging | Audit-Kette, Redaktion personenbezogener Daten | T16, T17 |
 | V8 Datenschutz | PII-Vault, Envelope-Encryption der Credentials | T17 |
@@ -303,15 +317,16 @@ läuft seit WP-409 (`t1-channel-matrix`, `52ac11d`) tabellengetrieben über
 - Scope-Arten: Org, Client, Site, Team, Mehrfach (zwei Clients, eine Site)
   und die andere Organisation, dazu ein zweiter org-weiter Nutzer der
   Organisation.
-- Lesend (27 Kanäle): CIs, Suche, Export, Topologie, Impact, Metriken,
+- Lesend (27 Kanäle, 28 seit WP-689): CIs, Suche, Export, Topologie, Impact, Metriken,
   Beziehungen, Sites, Gebäude, Räume, Racks mit Layout, Mounts, Review-Items
-  mit und ohne Kandidaten, Webhooks, Benachrichtigungen, Jobs, Export-Jobs und
+  mit und ohne Kandidaten, Webhooks, Benachrichtigungen,
+  Benachrichtigungskanäle mit Zustellungen (seit WP-689), Jobs, Export-Jobs und
   je GraphQL-Query-Feld ein Kanal (`cis`, `ci`, `relationships`,
   `currentUser`, `topology`, `rackLayout`, `searchEverything`, `reviewInbox`,
   `jobs`).
-- Schreibend (15 Kanäle): CIs, Beziehungen, Sites, Gebäude, Räume, Racks,
+- Schreibend (15 Kanäle, 16 seit WP-689): CIs, Beziehungen, Sites, Gebäude, Räume, Racks,
   Mounts, Review-Items mit und ohne Kandidaten, Webhooks, Benachrichtigungen,
-  Jobs, Export-Jobs, Ingest und Verweise auf Objekte der anderen Organisation
+  Benachrichtigungskanäle (seit WP-689), Jobs, Export-Jobs, Ingest und Verweise auf Objekte der anderen Organisation
   (`reference`: Kontakte, Subnetze über Client und VRF, Kontaktlinks,
   Discovery-Scopes, Rollenzuweisungen über Benutzer und Rolle).
 - Jede der 294 Kombinationen aus Kanal, Nutzer und Lesen bzw. Schreiben prüft
@@ -342,6 +357,65 @@ Fehlende Kombinationen:
   (SR-14), Dokumente und Wartungsfenster (SR-15) und die Scope-Kette des
   Site-Grants (SR-25). Einen HTTP-Lauf je Scope-Art hat die Matrix für diese
   Ressourcen nicht.
+- Audit-Log (F-389, WP-660): Die Audit-Liste filterte für eingeschränkte
+  Principals nur die Domänentypen `ci`, `asset`, `contact`, `credential`,
+  `document` und `ticket`; die Einträge des Routen-Audits (`racks`,
+  `relationships`, `assets` …) zeigte sie mit Namen und alten und neuen
+  Werten auch für Objekte fremder Clients und Sites. Seit WP-660 hat jeder
+  Typ, den ein Auditor schreibt, eine Scope-Regel (`audit/scope.go`): sichtbar
+  ist ein Eintrag nur, wenn der Principal die genannte Zeile lesen darf;
+  unbekannte Typen sind verborgen. HTTP-Lauf für Client- und Site-Scope mit
+  org-weiter Kontrolle: `TestAuditLogHidesForeignClientRouteEntries`
+  (`backend/internal/server/audit_log_scope_integration_test.go`);
+  Architekturtests `TestEveryAuditedRouteHasAScopeRule` und
+  `TestEveryRecordedResourceTypeHasAScopeRule`. Der Audit-Anteil der
+  CI-Historie (`GET /history/ci/{id}`, F-410, WP-681) liest seither auch die
+  Routeneinträge `cis`, `ci-contacts` und `network-interfaces` des CI und
+  wendet dieselbe Regel an (`audit.VisibleEntries`): Ein eingeschränkter
+  Principal sieht dort nur Einträge, die ihm die Audit-Liste zeigt
+  (`TestCIHistoryIncludesRouteAuditOfCISubresources`,
+  `backend/internal/server/history_route_audit_integration_test.go`).
+- Rollendefinitionen (F-396, WP-667): Die Grant-Obergrenze von WP-394/WP-395
+  galt für das Zuweisen und Entziehen, über die Rollendefinition aber nur für
+  hinzugefügte Rechte. Ein client-gebundener Inhaber von `role:manage`
+  durfte eine org-weite Zuweisung nicht entziehen (403), leerte aber dieselbe
+  Custom-Rolle (`PATCH /roles/{id}`), löschte sie samt Zuweisungen
+  (`DELETE /roles/{id}`) oder nahm einer Standardrolle hinzugefügte Rechte
+  (`PUT /roles/{id}/permissions`). Seit WP-667 verlangt jedes Entfernen von
+  Rechten und jedes Löschen einer Rolle die Entzugs-Obergrenze für jede
+  Zuweisung der Rolle (Benutzer und Service-Accounts;
+  `permission.CheckRoleNarrowing`), sonst 403 ohne Änderung. HTTP-Lauf über
+  den Produktionsrouter: `TestRoleDefinitionChangeNeverReachesBeyondCallerScope`
+  (`backend/internal/user/role_definition_ceiling_integration_test.go`).
+- Benachrichtigungskanäle (F-418, WP-689): Kanäle und Zustellungen gehören
+  der Organisation, nicht einem Client: Ein Kanal erhält die
+  Benachrichtigungen aller Clients, eine Zustellung nennt Empfänger aller
+  Clients. Die Routen prüften nur `notification:manage` in irgendeinem Scope.
+  Ein client-gebundener Inhaber las alle Kanäle und Zustellungen (mit Name
+  und E-Mail fremder Empfänger), legte einen Webhook-Kanal an, der die
+  Benachrichtigungen anderer Clients mit deren Empfängern erhielt, und
+  änderte oder löschte die Kanäle der Organisation. Seit WP-689 verwalten
+  nur org-weite Inhaber von `notification:manage` die Kanäle und lesen die
+  Zustellungen (`identity.HoldsOrgWide`, dasselbe Muster wie `PATCH /org`
+  für F-359); ein an Client, Site oder Team gebundener Inhaber erhält auf
+  allen sechs Routen 403 ohne Wirkung. Webhook-Kanäle bleiben damit
+  dokumentierte org-weite Ziele. HTTP-Lauf mit Principals, die wie beim
+  Login aus der Datenbank aufgelöst werden:
+  `TestNotificationAdministrationRequiresOrgWideScope`
+  (`backend/internal/server/notification_channel_scope_integration_test.go`);
+  Matrixzeile `notification-channels` für jede Scope-Art.
+- Raumlayout (F-427, WP-698): Das Layout eines Raums (`room.layout`, CI-Id →
+  Position) wurde ungefiltert ausgeliefert. Wechselte ein CI zu einem
+  anderen Client, lasen client-gebundene Nutzer des alten Raums dessen Id und
+  Position; ihr nächster PATCH scheiterte mit 422 oder löschte fremde
+  Einträge. Seit WP-698 liefern `GET /rooms`, `GET /rooms/{id}` und die
+  PATCH-Antwort nur Einträge von CIs, die der Aufrufer sieht, die nicht
+  gelöscht sind und im Raum stehen; ein PATCH ersetzt nur diese Einträge und
+  behält die für den Aufrufer unsichtbaren unter der Zeilensperre des Raums.
+  Ein Schlüssel muss ein solches CI sein; ein CI eines anderen Clients wird
+  wie eine unbekannte Id abgelehnt (422 mit demselben Text, kein
+  Existenz-Orakel). Test: `TestRoomLayoutForeignClientEntriesAgainstPostgres`
+  (`backend/internal/tenantapi/room_layout_integration_test.go`).
 - Die endgültige Formulierung nach WP-409 auf dem Release-Kandidaten
   übernimmt WP-595 (`t5-rc-evidence`).
 
@@ -391,7 +465,7 @@ Sicherheitswirkung. Die übrigen 13 stehen hier:
 | SR-15 | Critical | **behoben** | F-004: Ein teilgescopter Principal änderte und löschte geteilte Dokumente und Wartungsfenster; die FK-Kaskade entfernte die Links anderer Clients. | WP-341 (`t1-doc-window-writes`, `b7aff9a`): Schreiben nur bei vollständig sichtbaren Links (Migration 000139). | `TestDocumentWritesOutsideScope`, `TestMaintenanceWindowWritesOutsideScope` (`backend/internal/tenant/rls/module_object_writes_integration_test.go`) |
 | SR-16 | Critical | **behoben** | F-005: Keine MFA-Pflicht für org_admins aus Signup, Einladung, Operator-Pfad, Rollenzuweisung, IdP-Gruppe, Default-Rolle und Realm-Gruppe reticora-admin; die Konten waren nur durch ein Passwort geschützt. | WP-367 (`t2-mfa-login-path`, `6562ad5`); Teile WP-357 (`t2-mfa-accounts`, `07fb145`) und WP-358 (`t2-mfa-role-sync`, `00b2e4e`). | `TestAuditT2FirstOrgAdminAccountRequiresMFA`, `TestAuditT2RealmAdminGroupRequiresMFA` (`backend/internal/signup/mfa_test.go`); `TestRoleAssignmentOrgAdminRequiresMFA`, `TestInvitationAcceptanceOrgAdminRequiresMFA`, `TestFirstLoginWithOrgAdminInvitationRequiresMFA` (`backend/internal/user/role_assignment_mfa_test.go`); `TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA` (`backend/internal/identity/handler_test.go`); Real-Stack `frontend/e2e-real/mfa-admin.spec.ts` (nur CI) |
 | SR-17 | Critical | **behoben** | F-006: Jeder Halter von `apikey:manage` rotierte oder widerrief jeden API-Key der Organisation und erhielt beim Rotieren eines org-weiten Admin-Keys den Klartext eines Nachfolgers mit dessen Rechten. | WP-354 (`t2-apikey-authz`, `ae575c1`): nur Owner oder ein Aufrufer, der die Rechte des Keys im Scope des Inhabers hält. | `TestAuditT2APIKeyRotateRevokeOnlyByEntitledCaller` (`backend/internal/identity/apikey_authz_integration_test.go`) |
-| SR-18 | Critical | **behoben** | F-007: Die Bindung eines API-Keys an einen Service-Account prüfte den Scope nicht; ein client-gebundener Ersteller erhielt über einen org-weiten Service-Account einen org-weiten Key. | WP-354 (`t2-apikey-authz`, `ae575c1`): Bindung nur im Scope des Erstellers, sonst 403. | `TestAuditT2KeyBindingNeverBroadensCreatorScope` (`backend/internal/identity/apikey_authz_integration_test.go`) |
+| SR-18 | Critical | **behoben** | F-007: Die Bindung eines API-Keys an einen Service-Account prüfte den Scope nicht; ein client-gebundener Ersteller erhielt über einen org-weiten Service-Account einen org-weiten Key. | WP-354 (`t2-apikey-authz`, `ae575c1`): Bindung nur im Scope des Erstellers, sonst 403. Die Prüfung galt nur beim Binden: Spätere org-weite Rollen des Accounts machten einen schon gebundenen Key eines client-beschränkten Erstellers org-weit (F-397). WP-668 (`k7n-bound-key-creator-scope`, Migration 000185): Der Key speichert den Scope des Erstellers je Recht und handelt bei jeder Anfrage nur im Schnitt mit den aktuellen Rechten des Accounts; Keys von vor 000185 höchstens mit den aktuellen Rechten ihres Erstellers (`docs/betrieb/upgrade-hinweise.md`). | `TestAuditT2KeyBindingNeverBroadensCreatorScope`, `TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening` (`backend/internal/identity/apikey_authz_integration_test.go`), `TestBoundKeyCreatorCeiling` (`backend/internal/identity/ceiling_test.go`) |
 | SR-19 | Critical | **behoben** | F-008: Rollen eines Service-Accounts ließen sich ohne Rechte- und Scope-Prüfung zuweisen, die Route verlangte nur `user:manage`; ein Halter von `user:manage` erzeugte Admin-Service-Accounts. | WP-355 (`t2-sa-role-ceiling`, `3e58a7f`): `role:manage` und Grant-Obergrenze. | `TestAuditT2ServiceAccountRolesWithinCallerRights` (`backend/internal/identity/apikey_authz_integration_test.go`), `TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage` (`backend/internal/server/t2_auth_chain_test.go`), `TestServiceAccountRoleCeiling` (`backend/internal/user/service_account_integration_test.go`) |
 | SR-20 | Critical | **behoben** | F-009: Der Webhook-Filter stellte `ci.merged` und `relationship.removed` über CIs anderer Clients an client-gebundene Service-Accounts zu; ein Payload ohne Scope galt als org-weit. | WP-356 (`t2-webhook-bound-scope`, `4cae303`): Scope serverseitig aufgelöst, fail-closed bei unbekanntem Scope. | `TestAuditT2BoundSubscriptionGetsOnlyReadableClientEvents` (`backend/internal/webhook/bound_filter_integration_test.go`) |
 | SR-21 | Critical | **behoben** | F-010: Das WMI-Plugin sendete Zugangsdaten per HTTP Basic im Klartext (Port 5985) und im HTTPS-Modus ohne Zertifikatsprüfung; über einen Protokoll-Alias erhielt es das SSH-Konto. | WP-378 (`t4-cred-scope`, `bf8d16a`); Teil WP-377 (`t4-wmi-tls`, `70626ed`): WinRM nur über geprüftes TLS, Credentials je Art. | `TestAuditWMICredentialTransport` (`collector/plugins/wmi/wmi_test.go`), `TestAuditT2CredentialsArePerProtocol` (`collector/plugins/plugin_test.go`) |
@@ -400,6 +474,127 @@ Sicherheitswirkung. Die übrigen 13 stehen hier:
 | SR-24 | Critical | **behoben** | F-013: Der Collector ignorierte `credential_ids` je Scope; das erste Credential je Protokoll galt für alle Scopes, auch über Client-Grenzen. | WP-378 (`t4-cred-scope`, `bf8d16a`): Credentials je Scope und je Art. | `TestAuditPerScopeCredentials` (`collector/collectorcmd/discovery_credentials_test.go`) |
 | SR-25 | Critical | **behoben** | F-014: Ein Site-Grant setzte den Client-Scope auf „alle“; Site-Nutzer lasen Kontakte, Credential-Metadaten, Assets und unplatzierte CIs fremder Clients. | WP-392 (`t6-asset-site-scope`, `6c92576`); Teil WP-390 (`t6-site-grant-scope`, `85e117d`): Site-Grant auf den Client des Standorts begrenzt, Site-Scope für Assets. | `TestSiteGrantConfinedToClient`, `TestSiteGrantConfinedToClientAndSite` (`backend/internal/locations/sitescope_integration_test.go`); Real-Stack `frontend/e2e-real/tenant-isolation.spec.ts` T18 (nur CI) |
 | SR-26 | Critical | **behoben** | F-015: Keine Grant-Obergrenze; ein client-gescopter Inhaber von `user:manage` erzeugte org-weite org_admin-Einladungen und -Rollenzuweisungen. | WP-394 (`t6-invite-ceiling`, `ae60e06`): Zielrechte und Zielscope nur innerhalb der eigenen. | `TestAuditDefectInvitationGrantCeiling`, `TestAuditDefectRoleAssignmentGrantCeiling` (`backend/internal/user/invitation_integration_test.go`) |
+
+## Befunde der Korrektur G1 (ab F-355)
+
+Die Korrektur G1 führt ihre neuen Befunde in `audit/g1-reaudit/FINDINGS.md`
+(ab F-355, Konvention 16 des Korrekturplans): Befunde aus der Umsetzung von
+K4 bis K6 und aus der Wiederholungsprüfung K7. Die Fortschreibung vom
+2026-11-01 (WP-699, `k7n-sr-coverage-reaudit-findings`, F-428) nimmt sie auf
+dem Stand `6a499ac` ins Review auf:
+
+- Als SR-Befund (Tabelle unten) steht jeder Befund mit Sicherheitswirkung:
+  Mandanten- oder Scope-Isolation (Lesen, Schreiben oder Integrität von Daten
+  außerhalb des Scopes), Authentifizierung und Rechte, Secrets und Krypto,
+  Integrität des Audits und Offenlegung von Interna. Dazu kommen die Befunde,
+  die nach dem Bewertungsschema ohne Sicherheitswirkung Critical sind
+  (stiller Datenverlust: SR-44, SR-46), weil GATE-01 die Critical-Befunde aus
+  dem Review liest. F-397 ist Teil von SR-18 (oben).
+- Severity nach dem Bewertungsschema (`docs/audit/README.md`), unabhängig von
+  der Priorität des Befunds: Critical für Scope-Isolation, stillen
+  Datenverlust, Secrets/Krypto und Auth-Bypass; Medium und Low, wo die
+  Isolation der Objekte nicht berührt ist (nur Zähler, Interna, Konsistenz),
+  Info, wo der Befund im G1-Release nicht erreichbar ist. Die Begründung
+  steht je Zeile.
+- Status: behoben, wenn das Korrektur-WP gemergt ist und der kodierende Test
+  regulär (ohne Build-Tag `auditdefect`) grün läuft. Lauf am 2026-11-01 auf
+  `6a499ac` (PostgreSQL mit TimescaleDB 2.31.0 und Migration 000188,
+  `go test -count=1 -p 1`): die 28 genannten Go-Tests (18 Pakete) sind grün,
+  keiner ist übersprungen; `tests/audit/master-key-rotation-deploy.test.sh`
+  5 von 5 grün. Die Real-Stack- und Vitest-Nachweise laufen im CI.
+- Alle übrigen Befunde der Liste stehen mit Begründung im Abschnitt
+  „Befunde der Korrektur ohne Sicherheitswirkung“. `tests/rep01-structure.test.sh`
+  verlangt für jeden Befund P0 bis P2 der Übersicht von
+  `audit/g1-reaudit/FINDINGS.md` eine SR-Zeile, die ihn nennt, oder eine
+  Zeile dort, auch für später hinzukommende Befunde; mit `--final` darf kein
+  SR-Befund mit Critical oder High offen sein.
+
+| ID | Severity | Status | Befund | Korrektur-WP | Nachweis |
+|---|---|---|---|---|---|
+| SR-27 | Critical | **behoben** | F-359 (P2): Ein client-gebundener Inhaber von `user:manage` änderte Name, Zeitzone, Währung, Sprache und Einstellungen der Organisation, die für alle Clients gelten. Critical: Schreiben außerhalb des Scopes (Scope-Isolation, RBA-03). | WP-633 (`k4n-org-fields-scope`, `1e5ef11`): `PATCH /org` nur für org-weite Inhaber von `user:manage`, sonst 403. | `TestOrganizationFieldsRequireOrgWideUserManage` (`backend/internal/tenantapi/tenantapi_scope_integration_test.go`) |
+| SR-28 | Medium | **behoben** | F-360 (P2): Die Höhenprüfung des Racks las die Mounts unter dem Scope des Aufrufers; ein gescopter Nutzer verkleinerte ein Rack unter die Mounts eines anderen Clients. Medium: Integrität der Belegung eines anderen Clients; keine fremde Zeile gelesen oder geschrieben, nichts offengelegt. | WP-634 (`k4n-rack-height-scope`, `4b456ad`): Prüfung gegen alle Mounts, 409 ohne Angaben zum fremden Mount. | `TestAuditK4RackHeightCoversInvisibleMounts` (`backend/internal/rack/height_integration_test.go`) |
+| SR-29 | Critical | **behoben** | F-363 (P2): Nicht zugeordnete Discovery-Ergebnisse folgten der Client-Bindung ihres Collectors nicht; Scan-Rohdaten (Adressen, Gerätedaten) eines Collectors von Client 2 blieben für andere Clients lesbar. Critical: Cross-Client-Exposition (TEN-09). | WP-636 (`k5n-collector-result-scope`, `b7448cc`): Die Ergebnisse folgen Client und Site des Collectors (Trigger wie 000141, Backfill). | `TestAuditCollectorBindingMovesUnmatchedResults` (`backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go`) |
+| SR-30 | Critical | **behoben** | F-364 (P0): Der Login eines Nutzers ohne Rollenzuweisung vergab die Standardrolle org-weit neu; eine entzogene Client-Zuweisung wurde zu org-weitem Lesezugriff. Critical: Rechteausweitung über die Client-Grenze (Auth, TEN-09). | WP-637 (`k5n-login-default-role`, `b2d0cf6`): Standardrolle nur bei der Erstanlage, Login ohne Zuweisung ohne Session. | `TestAuditCallbackWithoutAssignmentIssuesNoSession` (`backend/internal/identity/callback_scope_integration_test.go`) |
+| SR-31 | Critical | **behoben** | F-365 (P2): Ein client-gescopter Principal änderte, schloss und löschte eine org-weite Inventur samt den Scans anderer Clients (E-09). Critical: Schreiben und Löschen außerhalb des Scopes; Modul Stocktake [P2], in G1 abgeschaltet (E-03). | WP-638 (`k5n-stocktake-org-writes`, `9a944b9`): Ändern, Abschließen und Löschen nur durch org-weite Principals. | `TestAuditStocktakeOrgWideWritesNeedOrgWideScope` (`backend/internal/stocktake/stocktake_scope_integration_test.go`) |
+| SR-32 | Critical | **behoben** | F-366 (P1): Arbeitsplatzbuchung, Schlüsselausgabe und Schulungszuweisung nahmen Nutzer und Kurse anderer Organisationen an (Existenzorakel, Kaskade aus der fremden Organisation). Critical: Mandantenisolation (TEN-09); Module [P4], in G1 abgeschaltet (E-03). | WP-639 (`k5n-module-org-refs`, `0232492`): nur Referenzen der eigenen Organisation, sonst wie eine unbekannte ID. | `TestAuditDeskBookingStaysInOrganization` (`backend/internal/desk/desk_scope_integration_test.go`), `TestAuditKeyIssueStaysInOrganization` (`backend/internal/keymgmt/keymgmt_scope_integration_test.go`), `TestAuditTrainingAssignmentStaysInOrganization` (`backend/internal/training/training_scope_integration_test.go`) |
+| SR-33 | High | **behoben** | F-370 (P1): Compose und Kubernetes reichten `RETICORA_MASTER_KEY_PREVIOUS` nicht an den Server; die dokumentierte Rotation des Master-Keys war nicht durchführbar. High: Krypto-Betrieb, ein Schlüssel ließ sich nicht rotieren (SEC-06); kein Secret offengelegt. | WP-642 (`k5n-master-key-previous`, `3802900`): Variable in Compose und in den Kubernetes-Manifesten (optionales Secret). | `tests/audit/master-key-rotation-deploy.test.sh` (`compose_master_key_previous`, `k8s_master_key_previous`); Real-Stack `frontend/e2e-real/key-rotation.spec.ts` K01 (nur CI) |
+| SR-34 | Medium | **behoben** | F-372 (P2): Das Fehlerfeld gespiegelter Jobs enthielt den rohen Datenbankfehler (SQLSTATE, Spaltentypen), lesbar mit `job:read`. Medium: Offenlegung von Interna, keine Daten fremder Scopes. | WP-643 (`k5n-review-merge-errors`, `5e65ac6`): bereinigter Jobfehler. | `TestAuditReviewMergeJobErrorIsSanitized` (`backend/internal/server/review_merge_job_integration_test.go`) |
+| SR-35 | Info | **behoben** | F-385 (P3): Unterschriften von Zuweisungen speicherten den Namen des Unterzeichners im Klartext statt als PII-Surrogat (SEC-05). Info: Das Modul Inventar ist im G1-Release abgeschaltet (E-03), der Klartext entsteht nur mit `RETICORA_MODULES=inventory`. | WP-656 (`k7n-assignment-signature-surrogate`, `ddcc530`): Surrogat, Bestandsnamen über den Backfill in den Vault. | `TestAssignmentSignatureKeepsSurrogate` (`backend/internal/assignment/pii_integration_test.go`) |
+| SR-36 | Critical | **behoben** | F-389 (P2): Die Audit-Liste zeigte client- und site-beschränkten Principals die Einträge des Routen-Audits über Objekte fremder Clients und Sites (Namen, alte und neue Werte). Critical: Cross-Client-Exposition (TEN-06, TEN-09). | WP-660 (`k7n-audit-log-scope`, `a3915c1`): Scope-Regel für jeden Typ der Auditoren, unbekannte Typen fail-closed. | `TestAuditLogHidesForeignClientRouteEntries` (`backend/internal/server/audit_log_scope_integration_test.go`) |
+| SR-37 | Low | **behoben** | F-392 (P3): Ein NUL-Byte im Schlüssel des JSON-Körpers ergab 503 „audit trail unavailable“, eines im /admin-Pfad 500; die abgewiesene anonyme Anfrage fehlte in `operator_audit`, und eine großgeschriebene Organisations-ID setzte die Prüfung der Operator-Audit-Kette auf „ungültig“. Low: Lücke und Fehlalarm im Operator-Audit (AUD-07, SEC-07), keine Daten verändert. | WP-663 (`k7n-route-audit-body-keys`, `fb8adfe`): 400 vor der Audit-Absicht, /admin-Pfade kodiert protokolliert. | `TestRouteAuditInvalidBodyKeyIsClientError` (`backend/internal/server/route_audit_integration_test.go`), `TestOperatorAuditRecordsAnyRequestPath` (`backend/internal/operator/audit_integration_test.go`) |
+| SR-38 | High | **behoben** | F-393 (P2): Ein gelöschter Benutzer behielt bis zum Ablauf seines Tokens (≤ 15 min) Lese- und Schreibzugriff; seine API-Keys blieben unwiderrufen, kein Audit-Eintrag `user.deleted`. High: Zugang nach dem Entfernen (TLC-04, AUT-02), zeitlich begrenzt; die Deaktivierung sperrte sofort. | WP-664 (`k7n-user-delete-ends-access`, `3eca249`): Löschung beendet jeden Zugang wie die Deaktivierung, in derselben Transaktion; Audit `user.deleted`. | `TestUserDeletionEndsAccess` (`backend/internal/identity/user_deletion_integration_test.go`), `TestUserDeletionRevocationFailureRollsBack` (`backend/internal/user/user_deletion_revocation_integration_test.go`) |
+| SR-39 | Critical | **behoben** | F-396 (P1): Ein client-gebundener Inhaber von `role:manage` nahm org-weiten Zuweisungen über die Rollendefinition die Rechte (PATCH, DELETE und PUT `/roles/{id}`…). Critical: Wirkung auf Rechte außerhalb des eigenen Scopes (Scope-Isolation). | WP-667 (`k7n-role-definition-ceiling`, `6deb530`): Rechte entfernen und Rollen löschen nur mit der Entzugs-Obergrenze jeder Zuweisung. | `TestRoleDefinitionChangeNeverReachesBeyondCallerScope` (`backend/internal/user/role_definition_ceiling_integration_test.go`) |
+| SR-40 | Low | **behoben** | F-398 (P3): `PUT /roles/{id}/permissions` auf einer Standardrolle antwortete 200, die Seed-Rechte blieben wirksam; Antwort, Rechteliste und Audit wichen von den wirksamen Rechten ab. Low: unwirksamer Rechteentzug mit irreführendem Audit, keine Rechteausweitung. | WP-669 (`k7n-standard-role-permissions`, `96bb4d0`): Seed-Rechte nicht entfernbar (409), Anzeige der wirksamen Rechte. | `TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused` (`backend/internal/permission/standard_role_permissions_integration_test.go`) |
+| SR-41 | Critical | **behoben** | F-406 (P2): Ein Enrollment-Code trug keine Client-Bindung; ein auf Client 1 beschränkter Engineer schrieb einen aktiven Collector in Client 2 oder org-weit ein und konnte so die Zugangsdaten fremder Scopes erhalten. Critical: Scope-Isolation, Zugangsdaten. | WP-677 (`k7n-enrollment-client-binding`, `08b45ef`): Code bindet den Collector an Client und Site seines Erzeugers. | `TestEnrollmentCodeBindsCreatorClients` (`backend/internal/server/enrollment_client_binding_integration_test.go`) |
+| SR-42 | Critical | **behoben** | F-407 (P2): Der Edge-Ingest band die Records eines client-gebundenen Collectors nicht an dessen Client; CIs fremder Clients wurden angelegt und überschrieben. Critical: Schreiben außerhalb des Scopes (TEN-09). | WP-678 (`k7n-edge-ingest-collector-client`, `408f133`): Records erhalten Client und Site des Collectors. | `TestEdgeIngestBindsRecordsToCollectorClient` (`backend/internal/discovery/edge_record_client_integration_test.go`) |
+| SR-43 | High | **behoben** | F-409 (P2): Die Laufzeitrolle konnte Audit-Einträge umschreiben und die Kette neu verketten (`app.audit_pii_migration`, `audit_rechain`); `audit-verify` meldete die Kette intakt. High: Manipulationsnachweis (AUD-04) gegen die Laufzeitrolle wirkungslos; setzt deren Übernahme voraus. | WP-680 (`k7n-audit-append-only-runtime`, `95d7ee8`, Migration 000188): Siegel nur über `audit_seal_pii`, keine Neuverkettung, Prüfung gegen das Original. | `TestRuntimeRoleCannotRewriteAuditChain` (`backend/internal/audit/append_only_integration_test.go`) |
+| SR-44 | Critical | **behoben** | F-411 (P3): Das Kanten-Cleanup löschte Discovery-Kanten, die während des Laufs verifiziert oder bestätigt wurden; 70–99 % der mit 200 beantworteten Verifikationen gingen verloren. Ohne Sicherheitswirkung; Critical nach dem Bewertungsschema, weil eine bestätigte Schreibanfrage still verloren ging (stiller Datenverlust). | WP-682 (`k7n-relationship-cleanup-race`, `0a5dccb`): Verifikation und Frist beim Löschen geprüft. | `TestCleanupKeepsEdgeVerifiedDuringRun` (`backend/internal/relationship/cleanup_race_integration_test.go`) |
+| SR-45 | Low | **behoben** | F-414 (P3): Die Ablehnung eines Kontingents nannte eingeschränkten Principals den Bestand der ganzen Organisation („N of L in use“). Low: Cross-Client-Information beschränkt auf Zähler, keine Objekte und Kennungen. | WP-685 (`k7n-entitlement-limit-detail`, `244733a`): Bestand nur für org-weite Aufrufer. | `TestEntitlementLimitDetailHidesOrgCountFromScopedCallers` (`backend/internal/server/t2_entitlement_gates_test.go`) |
+| SR-46 | Critical | **behoben** | F-416 (P2): Das Unmerge in einer Merge-Kette belebte einen Survivor, der Opfer eines offenen Merges war, und verschob danach Beziehungen, Schnittstellen, Kontakte und Historie auf das falsche CI. Ohne Sicherheitswirkung; Critical nach dem Bewertungsschema: stille Verfälschung des Bestands, nur in der Datenbank sichtbar. | WP-687 (`k7n-unmerge-chain`, `ac91f7b`): 409 mit dem späteren Merge, auch mit force und beim Job-Revert. | `TestUnmergeRefusesWhileSurvivorIsMergedVictim` (`backend/internal/ci/unmerge_integration_test.go`), `TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim` (`backend/internal/server/merge_chain_revert_integration_test.go`) |
+| SR-47 | Critical | **behoben** | F-418 (P2): Ein client-gebundener Inhaber von `notification:manage` verwaltete die Benachrichtigungskanäle der Organisation und las alle Zustellungen; ein von ihm angelegter Webhook-Kanal erhielt die Benachrichtigungen anderer Clients mit Name und E-Mail fremder Empfänger. Critical: Cross-Client-Exposition personenbezogener Daten (TEN-09). | WP-689 (`k7n-notification-admin-org-wide`, `3f6e818`): Kanäle und Zustellungen nur für org-weite Inhaber. | `TestNotificationAdministrationRequiresOrgWideScope` (`backend/internal/server/notification_channel_scope_integration_test.go`), `TestChannelAdministrationNeedsOrgWideScope` (`backend/internal/notify/handler_test.go`); Matrixzeile `notification-channels` von `TestChannelMatrix` |
+| SR-48 | Low | **behoben** | F-421 (P3): Die Eindeutigkeit mit Scope `org` galt für Schreibende mit Client-Scope nur, solange ein gültiger Unique-Index bestand; sie vergaben Werte, die ein CI eines anderen Clients trägt. Low: Integrität über die Client-Grenze, kein fremder Wert gelesen oder geändert. | WP-692 (`k7n-unique-org-scope-client-writer`, `6a499ac`): Prüfung über die CIs außerhalb des Scopes, ohne sie zu nennen. | `TestUniqueAttributeOrgScopeForClientWriter` (`backend/internal/ci/unique_attr_integration_test.go`) |
+| SR-49 | Critical | **behoben** | F-427 (P2): Das Raumlayout behielt und akzeptierte Schlüssel von CIs eines anderen Clients; client-beschränkte Nutzer lasen deren ID und Position, und ein PATCH löschte die fremde Position. Critical: Cross-Client-Exposition und Schreiben außerhalb des Scopes (TEN-09). | WP-698 (`k7n-room-layout-client-scope`, `a2a1152`): nur sichtbare CIs des Raums, unsichtbare Einträge bleiben. | `TestRoomLayoutForeignClientEntriesAgainstPostgres` (`backend/internal/tenantapi/room_layout_integration_test.go`); `frontend/src/pages/RoomPlanPage.test.tsx` (F-427) |
+
+## Befunde der Korrektur ohne Sicherheitswirkung
+
+Die übrigen Befunde von `audit/g1-reaudit/FINDINGS.md`, alle Prioritäten,
+mit dem Grund, warum sie keine Sicherheitswirkung haben und nach dem
+Bewertungsschema nicht Critical sind. F-422 bis F-426 sind auf `6a499ac` in
+Korrektur (WP-693 bis WP-697); F-386 wartet auf E-101. Die Begründung muss
+mindestens fünf Wörter haben (`tests/rep01-structure.test.sh`).
+
+| Befund | Prio | Begründung |
+|---|---|---|
+| F-355 | P2 | Barrierefreiheit (WCAG-Kontrast im dunklen Thema), keine Daten und keine Rechte berührt. |
+| F-356 | P2 | Barrierefreiheit (verschachtelte Bedienelemente der Karte), keine Daten und keine Rechte berührt. |
+| F-357 | P2 | Barrierefreiheit (seitlich scrollende Tabellen ohne Fokus), keine Daten und keine Rechte berührt. |
+| F-358 | P2 | Funktionsmangel: Ad-hoc-Jobs liefen nicht; kein Zugriff außerhalb des Scopes, nichts offengelegt. |
+| F-361 | P2 | Barrierefreiheit (Kontrast der Löschaktionen), keine Daten und keine Rechte berührt. |
+| F-362 | P2 | Listenbegrenzung in Dashboard und Karte; Anzeige unvollständig, kein Zugriff auf fremde Daten. |
+| F-367 | P3 | Fehlervertrag 200 statt 404 mit leerer Antwort; keine Daten fremder Clients, keine Wirkung. |
+| F-368 | P2 | Die TLS-Prüfung greift (das Zertifikat wird abgelehnt), nur die Fehlermeldung fehlte. |
+| F-369 | P2 | Fehlermeldung bei nicht erreichbarem Ziel fehlte; Betriebsdiagnose, keine Daten und keine Rechte. |
+| F-371 | P3 | Fehlervertrag 500 statt 404 beim Merge in ein gelöschtes CI, feste Fehlertexte. |
+| F-373 | P2 | Rechte zu eng: die Standardrolle sah ihre eigenen Clients nicht; keine Ausweitung, die Korrektur listet nur Clients des Scopes. |
+| F-374 | P2 | Topologie des ersten Zyklus unvollständig (Reihenfolge der Lanes); kein Leck, kein Verlust. |
+| F-375 | P3 | Testumgebung: WebKit verwirft das Secure-Cookie über Plain-HTTP korrekt; im unterstützten HTTPS-Betrieb keine Wirkung. |
+| F-376 | P1 | Erreichbarkeit des Exports: die signierte URL nannte den internen Objektspeicher; der Browser lud nichts über ungesicherte Wege, keine fremden Daten. |
+| F-377 | P2 | Selbstaussperrung durch eigene Aktion des Administrators; keine Rechteausweitung, kein Zugriff Dritter. |
+| F-378 | P3 | Upgrade-Pfad früher Testinstallationen (Migration 000089); keine Daten und keine Rechte berührt. |
+| F-379 | P3 | Konsistenz Mount und Standort; laut Befund keine Offenlegung fremder Daten und kein Datenverlust. |
+| F-380 | P3 | Konsistenz `asset.location_id` und `ci.location_id`; das fremde CI blieb unsichtbar und unverändert. |
+| F-381 | P3 | Darstellung beidseitiger Einbauten auf der Rackseite; API und Daten korrekt, keine Offenlegung. |
+| F-382 | P3 | Doppeltes Review nach accept; die angenommene Kante bleibt, keine Daten und keine Rechte berührt. |
+| F-383 | P3 | Benachrichtigungssprache je Empfänger nicht einstellbar; keine Daten und keine Rechte berührt. |
+| F-384 | P3 | Zeitweise roter Regressionstest; die Begrenzung der Parallelität im Collector greift. |
+| F-386 | P3 | Zwei statt einer Transaktion je Batch; die Ledger-Semantik bleibt korrekt, kein Verlust (offen, E-101). |
+| F-387 | P2 | Schutzfunktion zu streng (429 bei gültigen Anmeldedaten); die Brute-Force-Sperre bleibt belegt (`TestPreAuthBruteForceStillTripsUnderConcurrency`). |
+| F-388 | P3 | Schwellen der Lastskripte (Nachweisqualität des Lasttests); keine Produktwirkung, keine Daten berührt. |
+| F-390 | P3 | Fehlervertrag 500 statt 404/422 bei Credentials mit festen Texten; keine Offenlegung, keine Datenabweichung. |
+| F-391 | P3 | 503 und ERROR-Log bei NUL-Byte in der Pfad-ID; der Audit-Trail bleibt lückenlos, keine Daten verändert. |
+| F-394 | P3 | Fehlervertrag 500 statt 404 beim Metrik-Ingest; laut Befund keine Daten fremder Mandanten offengelegt oder geschrieben. |
+| F-395 | P3 | Fehlervertrag 502 statt 401 bei unbekannter Organisation im Login; keine fremde Organisation erreicht. |
+| F-399 | P2 | Lizenzgrenze `max_cis` über Nebenwege umgangen (ENT-06, Abrechnung); keine Mandanten- oder Rechtewirkung. |
+| F-400 | P3 | Paketgrenzen discovery und rack_view auf Nebenwegen umgangen (ENT-06); keine Mandanten- oder Rechtewirkung. |
+| F-401 | P3 | API-Vertrag `null` statt `[]` bei leeren Listen; keine Daten und keine Rechte berührt. |
+| F-402 | P3 | Dokumentierte Filter der Beziehungsliste ohne Wirkung; laut Befund kein Leck, nur sichtbare Beziehungen. |
+| F-403 | P2 | Lizenzgrenze `max_cis` nur im Scope gezählt (Abrechnung); keine Daten anderer Clients gelesen oder geschrieben. |
+| F-404 | P2 | Doppelte Wirkung gleichzeitiger Auflösungen; jede Wirkung hat ein Nutzer angefordert, daher kein stiller Verlust. |
+| F-405 | P3 | Fehlervertrag 500 statt 409/422/404 der Review-Auflösung; keine Daten und keine Rechte berührt. |
+| F-408 | P3 | Falsches Feld in der 400-Antwort; die Definition wird korrekt abgelehnt, keine Datenwirkung. |
+| F-410 | P3 | CI-Historie unvollständig; laut Befund kein Leck, der Audit-Trail selbst ist vollständig. |
+| F-412 | P3 | Scheinausfälle (`unknown`) bei parallelem Ingest; Statusanzeige, keine Daten und keine Rechte. |
+| F-413 | P3 | Automatische Statuswechsel fehlten in Historie und Audit-Log; keine Benutzeraktion blieb ohne Audit. |
+| F-415 | P3 | Eingabevalidierung: ungültiger Wert des Aufrufers als Vorgabe gespeichert, keine Änderung ohne Anfrage. |
+| F-417 | P3 | Bewertungsskript des Lastnachweises zu nachsichtig; keine Produktwirkung, keine Daten berührt. |
+| F-419 | P3 | Dubletten derselben UUID in anderer Schreibweise; nur sichtbare CIs, keine Rechte berührt. |
+| F-420 | P3 | Zu viele Betroffene für gescopte Principals; kein Leck, die Korrektur zählt verborgene Versorger, ohne sie zu nennen. |
+| F-422 | P3 | Override-Verlust nur an soft-gelöschten CIs, nicht am aktiven Bestand (Befund: daher P3); die Sichtbarkeit unter dem Scope wird geprüft (in Korrektur, WP-693). |
+| F-423 | P3 | Fehlervertrag 500 statt 422 beim Anlegen und Ändern von Collectors; keine Datenwirkung (in Korrektur, WP-694). |
+| F-424 | P3 | Typlisten und gelöschte CIs beim Anlegen von Kanten nicht geprüft; laut Befund keine Mandantenwirkung (in Korrektur, WP-695). |
+| F-425 | P2 | Enrollment-Dialog ohne Client-Auswahl seit WP-677; Bedienbarkeit, laut Befund kein Leck (in Korrektur, WP-696). |
+| F-426 | P3 | Unbekannte Filterwerte der Review-Liste ohne 400; kein Leck, kein Schreibzugriff (in Korrektur, WP-697). |
+| F-428 | P3 | Dokumentationslücke dieses Reviews (fehlende SR-Zeilen); behoben mit dieser Fortschreibung (WP-699). |
 
 ## G1-Nachbesserung (WP-332 bis WP-335)
 

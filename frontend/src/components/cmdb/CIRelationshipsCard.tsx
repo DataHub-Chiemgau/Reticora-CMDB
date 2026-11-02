@@ -46,7 +46,12 @@ import { Modal } from '../ui/Modal';
 import { Select } from '../ui/Select';
 import { SkeletonList } from '../ui/Skeleton';
 
-/** Relationship types offered when creating an edge by hand. */
+/**
+ * Relationship types offered when creating an edge by hand. The structural
+ * types (contains, mounted_in, located_in and their inverses) are not
+ * offered: they are projected from the CI's parent, rack mount and location
+ * (DB-05) and POST /relationships refuses them with 422 (F-242).
+ */
 const relTypeOptions = [
   'connected_to',
   'hosted_on',
@@ -55,10 +60,8 @@ const relTypeOptions = [
   'powers',
   'powered_by',
   'runs_on',
-  'mounted_in',
   'uplink_to',
   'managed_by',
-  'located_in',
   'uses',
 ];
 

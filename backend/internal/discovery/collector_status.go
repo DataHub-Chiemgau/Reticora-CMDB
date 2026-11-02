@@ -54,12 +54,15 @@ type CollectorPatch struct {
 	Status *string `json:"status,omitempty"`
 }
 
+// validate refuses an empty name and a status other than disabled and
+// active with 422 on the field, like the site binding of the repository
+// (collectorError, F-423).
 func (p *CollectorPatch) validate() error {
 	if p.Name != nil && *p.Name == "" {
-		return &api.FieldError{Field: "name", Message: "name must not be empty"}
+		return &api.FieldError{Field: "name", Message: "name must not be empty", Status: http.StatusUnprocessableEntity}
 	}
 	if p.Status != nil && *p.Status != CollectorDisabled && *p.Status != CollectorActive {
-		return &api.FieldError{Field: "status", Message: "status can be set to disabled or active"}
+		return &api.FieldError{Field: "status", Message: "status can be set to disabled or active", Status: http.StatusUnprocessableEntity}
 	}
 	return nil
 }
