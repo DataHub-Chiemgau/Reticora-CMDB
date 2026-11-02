@@ -761,7 +761,9 @@ func applyNodeOverride(n *Node, field string, value any) {
 	}
 }
 
-// Create inserts a new CI.
+// Create inserts a new CI. A deactivated type writes nothing and is
+// ErrTypeInactive (MET-05): the insert reads the flag itself, so items
+// without ChosenType (discovery, agent) cost no statement more.
 func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 	err := database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Attributes == nil {
@@ -795,13 +797,14 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				is_manual,
 				asset_id,
 				parent_ci_id
-			) VALUES (
+			)
+			SELECT
 				$1, $2, $3, $4, $5,
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
 				$21, $22, $23, $24, $25
-			)
+			WHERE NOT EXISTS (SELECT 1 FROM ci_type WHERE id = $4 AND NOT is_active)
 			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''),
 				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at
 		`
@@ -842,6 +845,10 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			nilIfEmpty(item.AssetID),
 			nilIfEmpty(item.ParentCIID),
 		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &item.SchemaVersion, &createdAt, &updatedAt); err != nil {
+			// No row: the type is deactivated (MET-05).
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrTypeInactive
+			}
 			return locationError(fmt.Errorf("create ci: %w", err))
 		}
 
@@ -869,7 +876,10 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 // its own; under row level security an error could not name it. The rows are
 // inserted in the order of serial number, hardware UUID and primary MAC, so
 // concurrent batches with the same identities wait for each other instead of
-// deadlocking on the unique indexes.
+// deadlocking on the unique indexes. A CI of a deactivated type is never
+// inserted: the statement flags it, CreateMany returns ErrTypeInactive and
+// the transaction rolls back (MET-05); it is never reported as refused,
+// which the discovery reads as a unique index refusal.
 func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*Item) (CreateManyResult, error) {
 	var res CreateManyResult
 	if len(items) == 0 {
@@ -888,6 +898,9 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 			return err
 		}
 		created, refused, err := insertCIs(ctx, tx, orgID, items)
+		if errors.Is(err, ErrTypeInactive) {
+			return err
+		}
 		if err != nil {
 			return locationError(fmt.Errorf("create cis: %w", err))
 		}
@@ -910,7 +923,8 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 }
 
 // insertCIs inserts the CI rows of items with one statement and returns the
-// created items and the positions of the refused ones.
+// created items and the positions of the refused ones; an item of a
+// deactivated type is ErrTypeInactive (MET-05).
 func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (created []*Item, refused []int, err error) {
 	n := len(items)
 	text := func(value string) *string {
@@ -950,7 +964,8 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 	args = append(args, firstSeen, lastSeen, manual)
 	rows, err := tx.Query(ctx, `
 		WITH input AS MATERIALIZED (
-			SELECT gen_random_uuid() AS id, r.*
+			SELECT gen_random_uuid() AS id, r.*,
+				EXISTS (SELECT 1 FROM ci_type t WHERE t.id = r.ci_type_id::uuid AND NOT t.is_active) AS type_inactive
 			FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
 			            $10::text[], $11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[],
 			            $17::text[], $18::text[], $19::text[], $20::text[], $21::text[], $22::text[],
@@ -969,6 +984,7 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 				os_name, os_version, firmware_version, sys_object_id, attributes::jsonb, discovery_source,
 				first_seen_at, last_seen_at, is_manual, asset_id::uuid, parent_ci_id::uuid
 			FROM input
+			WHERE NOT type_inactive
 			ORDER BY serial_number, hardware_uuid, primary_mac, ord
 			ON CONFLICT DO NOTHING
 			RETURNING id, COALESCE(site_id::text, '') AS site_id, COALESCE(room_id::text, '') AS room_id,
@@ -976,23 +992,29 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 		)
 		SELECT input.ord, COALESCE(ins.id::text, ''), COALESCE(ins.site_id, ''), COALESCE(ins.room_id, ''),
 			COALESCE(ins.location_id, ''), COALESCE(ins.health, ''), COALESCE(ins.version, 0),
-			COALESCE(ins.schema_version, 0), ins.created_at, ins.updated_at
+			COALESCE(ins.schema_version, 0), ins.created_at, ins.updated_at, input.type_inactive
 		FROM input LEFT JOIN ins ON ins.id = input.id
 		ORDER BY input.ord`, args...)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rows.Close()
+	inactive := false
 	for rows.Next() {
 		var ord int64
 		var id, siteID, roomID, locationID, health string
 		var version, schemaVersion int64
 		var createdAt, updatedAt *time.Time
+		var typeInactive bool
 		if err := rows.Scan(&ord, &id, &siteID, &roomID, &locationID, &health, &version, &schemaVersion,
-			&createdAt, &updatedAt); err != nil {
+			&createdAt, &updatedAt, &typeInactive); err != nil {
 			return nil, nil, err
 		}
 		i := int(ord) - 1
+		if typeInactive {
+			inactive = true
+			continue
+		}
 		if id == "" {
 			refused = append(refused, i)
 			continue
@@ -1004,7 +1026,13 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 		created = append(created, item)
 	}
-	return created, refused, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	if inactive {
+		return nil, nil, ErrTypeInactive
+	}
+	return created, refused, nil
 }
 
 // recordCreates writes the history entry of each new CI, as Create does,
@@ -2601,9 +2629,13 @@ func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID
 		tc.result.CI = before
 		return tc, nil
 	}
-	// A person cannot choose a deactivated type (CI-01); discovery
-	// raises generic_device to the type it resolved, as it creates CIs.
-	if mode == TypeChangeManual && !active {
+	// A person cannot choose a deactivated type (CI-01); discovery does
+	// not raise generic_device to it either, the CI keeps its type
+	// (keepsType, MET-05).
+	if !active {
+		if mode == TypeChangeDiscovery {
+			return nil, ErrTypeInactive
+		}
 		return nil, ciTypeViolation(ciTypeDeactivated)
 	}
 	// The values the CI carries fall under the unique attributes of the

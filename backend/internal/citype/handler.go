@@ -393,7 +393,7 @@ func (h *Handler) Deactivate(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.SetActive(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), false)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+		writeSetActiveError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.deactivated", item)
@@ -408,7 +408,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.SetActive(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), true)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+		writeSetActiveError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.updated", item)
@@ -610,6 +610,22 @@ func writeTypeError(w http.ResponseWriter, err error) {
 		return
 	}
 	api.WriteRepoError(w, err)
+}
+
+// writeSetActiveError reports a refused deactivation or activation (MET-05):
+// an unknown type 404, a system type 403 (ErrTypeReadOnly), active subtypes
+// or a deactivated parent 409; everything else goes through
+// api.WriteRepoError (F-047). Nothing is dispatched.
+func writeSetActiveError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, api.ErrNotFound) || err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+	case errors.Is(err, ErrTypeReadOnly):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrTypeReadOnly.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		api.WriteRepoError(w, err)
+	}
 }
 
 // writeTypeUpdateError reports a failed update of a CI type: an unknown

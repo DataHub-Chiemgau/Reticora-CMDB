@@ -154,6 +154,9 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 		if typ.Key == "" {
 			typ.Key = slugify(typ.Name)
 		}
+		if err := checkParentActiveTx(ctx, tx, typ.OrganizationID, typ.ParentTypeID, errParentInactive); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, `
 			INSERT INTO ci_type (
 				organization_id, key, name, display_name, icon, description, category,
@@ -343,6 +346,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 			if *req.ParentTypeID != "" && !api.IsUUID(*req.ParentTypeID) {
 				return errParentUnknown()
 			}
+			if perr := checkParentActiveTx(ctx, tx, orgID, *req.ParentTypeID, errParentInactive); perr != nil {
+				return perr
+			}
 			add("parent_type_id", nilIfEmpty(*req.ParentTypeID))
 			if reindex, err = inheritedIndexedTx(ctx, tx, orgID, id); err != nil {
 				return err
@@ -408,7 +414,13 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 }
 
 // Clone copies a type row plus its field definitions under a new key/name.
+// The clone keeps the parent of the source (MET-05, MET-06); a deactivated
+// parent is a conflict (409), since an active type has no deactivated
+// parent.
 func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneRequest) (*Type, error) {
+	if !api.IsUUID(id) {
+		return nil, fmt.Errorf("not found")
+	}
 	var out *Type
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		src, err := scanType(tx.QueryRow(ctx,
@@ -418,6 +430,9 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 				return fmt.Errorf("not found")
 			}
 			return err
+		}
+		if perr := checkParentActiveTx(ctx, tx, orgID, src.ParentTypeID, errParentInactiveConflict); perr != nil {
+			return perr
 		}
 		name := req.Name
 		if name == "" {
@@ -434,17 +449,17 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 				is_builtin, is_system, is_active, is_logical, version, cloned_from_id,
 				template_key, lifecycle_definition_id, capabilities,
 				allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings,
-				is_observable
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16,$17)
+				is_observable, parent_type_id
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16,$17,$18)
 			RETURNING id::text`,
 			orgID, key, name, LocalizedText{}.WithFallback(name), nilIfEmpty(src.Icon), nilIfEmpty(src.Description),
 			nilIfEmpty(src.Category), src.IsLogical, src.Version+1, src.ID,
 			nilIfEmpty(src.LifecycleDefinitionID), src.Capabilities,
 			src.AllowedRelationshipTypes, src.UISchema, src.ComplianceRules,
-			src.DiscoveryMappings, src.IsObservable,
+			src.DiscoveryMappings, src.IsObservable, nilIfEmpty(src.ParentTypeID),
 		).Scan(&cloneID)
 		if err != nil {
-			return fmt.Errorf("clone ci type: %w", err)
+			return fmt.Errorf("clone ci type: %w", typeDBError(err))
 		}
 		// Copy the field definitions of the source type.
 		if _, err := tx.Exec(ctx, `
@@ -460,6 +475,11 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 			WHERE ci_type_id = $2`, cloneID, id); err != nil {
 			return fmt.Errorf("clone ci type fields: %w", err)
 		}
+		if src.ParentTypeID != "" {
+			if cerr := checkSubtreeCompositionTx(ctx, tx, cloneID); cerr != nil {
+				return cerr
+			}
+		}
 		out = &Type{ID: cloneID, OrganizationID: orgID, Key: key, Name: name}
 		return recordMetamodelAudit(ctx, tx, orgID, "ci_type.cloned", "ci_type", cloneID, nil,
 			map[string]any{"cloned_from_id": src.ID, "key": key, "name": name, "version": src.Version + 1})
@@ -470,10 +490,43 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 	return r.GetByID(ctx, orgID, out.ID)
 }
 
-// SetActive toggles the active flag of a tenant-owned type.
+// SetActive toggles the active flag of a tenant-owned type (MET-05). A
+// system type is ErrTypeReadOnly (E-10), an unknown one "not found". The
+// invariant "an active type has no deactivated parent" holds under the lock
+// of the organization's type tree, which trg_ci_type_parent_guard takes for
+// new children and re-parentings as well: deactivating a type with an
+// active subtype and activating a type under a deactivated parent are
+// conflicts. A refused change writes no audit entry.
 func (r *PGRepository) SetActive(ctx context.Context, orgID, id string, active bool) (*Type, error) {
+	if !api.IsUUID(id) {
+		return nil, fmt.Errorf("not found")
+	}
 	var out *Type
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := lockTypeTreeTx(ctx, tx, orgID); err != nil {
+			return err
+		}
+		// Read after the lock, with a fresh snapshot.
+		var system, parentInactive, activeChild bool
+		err := tx.QueryRow(ctx, `
+			SELECT t.organization_id IS NULL,
+				COALESCE(NOT p.is_active, false),
+				EXISTS (SELECT 1 FROM ci_type c WHERE c.parent_type_id = t.id AND c.is_active)
+			FROM ci_type t
+			LEFT JOIN ci_type p ON p.id = t.parent_type_id
+			WHERE t.id = $1`, id).Scan(&system, &parentInactive, &activeChild)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("not found")
+		case err != nil:
+			return fmt.Errorf("read ci type: %w", err)
+		case system:
+			return ErrTypeReadOnly
+		case active && parentInactive:
+			return errParentInactiveConflict()
+		case !active && activeChild:
+			return errActiveSubtypes()
+		}
 		t, err := scanType(tx.QueryRow(ctx, fmt.Sprintf(
 			"UPDATE ci_type SET is_active = $2 WHERE id = $1 AND organization_id IS NOT NULL RETURNING %s",
 			typeSelectColumns), id, active))
@@ -491,6 +544,41 @@ func (r *PGRepository) SetActive(ctx context.Context, orgID, id string, active b
 		return recordMetamodelAudit(ctx, tx, orgID, action, "ci_type", id, nil, map[string]any{"is_active": active})
 	})
 	return out, err
+}
+
+// lockTypeTreeTx takes the lock of the organization's type tree that
+// trg_ci_type_parent_guard takes (migration 000197): parent changes, new
+// children and activations of one organization run one after the other.
+func lockTypeTreeTx(ctx context.Context, tx pgx.Tx, orgID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('ci_type_tree:' || $1::uuid::text, 0))`,
+		orgID); err != nil {
+		return fmt.Errorf("lock ci type tree: %w", err)
+	}
+	return nil
+}
+
+// checkParentActiveTx refuses a deactivated parent (MET-05: an active type
+// has no deactivated parent) with refuse: on create and update 422, on
+// clone 409. It reads the parent after the lock of the type tree; an
+// unknown parent is left to trg_ci_type_parent_guard.
+func checkParentActiveTx(ctx context.Context, tx pgx.Tx, orgID, parentID string, refuse func() error) error {
+	if parentID == "" || !api.IsUUID(parentID) {
+		return nil
+	}
+	if err := lockTypeTreeTx(ctx, tx, orgID); err != nil {
+		return err
+	}
+	var active bool
+	err := tx.QueryRow(ctx, `SELECT is_active FROM ci_type WHERE id = $1`, parentID).Scan(&active)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil
+	case err != nil:
+		return fmt.Errorf("read parent ci type: %w", err)
+	case !active:
+		return refuse()
+	}
+	return nil
 }
 
 // Versions returns the lineage of a type: the root plus every clone.

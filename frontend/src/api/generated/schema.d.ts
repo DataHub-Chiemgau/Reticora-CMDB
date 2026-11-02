@@ -5920,13 +5920,13 @@ export interface paths {
     };
     /**
      * List CI types
-     * @description The organization's types and the system types (MET-01 – MET-03).
+     * @description The organization's types and the system types (MET-01 – MET-03). Deactivated types are left out unless `include_inactive=true` (MET-05).
      */
     get: operations['listCiTypes'];
     put?: never;
     /**
      * Create a CI type
-     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01). `parent_type_id` makes the type a subtype of a type of the organization or a system type (MET-06): an unknown parent and one of another organization are both 422 on `parent_type_id`, as is a chain of more than 6 types; a taken key or name is 409.
+     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01). `parent_type_id` makes the type a subtype of a type of the organization or a system type (MET-06): an unknown parent and one of another organization are both 422 on `parent_type_id`, as is a chain of more than 6 types and a deactivated parent (MET-05: an active type has no deactivated parent); a taken key or name is 409.
      */
     post: operations['createCiTypes'];
     delete?: never;
@@ -5991,7 +5991,7 @@ export interface paths {
     head?: never;
     /**
      * Update a CI type
-     * @description `parent_type_id` moves the type below another type of the organization or a system type (MET-06); an empty string makes it a root. An unknown parent and one of another organization are both 422 on `parent_type_id`, a cycle is 409, a chain of more than 6 types (including the moved subtree) is 422, and a moved subtree whose attribute definitions cannot be composed is 422 naming the attribute key. An unknown CI type, or a system type, is 404.
+     * @description `parent_type_id` moves the type below another type of the organization or a system type (MET-06); an empty string makes it a root. An unknown parent and one of another organization are both 422 on `parent_type_id`, a cycle is 409, a chain of more than 6 types (including the moved subtree) is 422, a deactivated parent is 422 on `parent_type_id` (MET-05), and a moved subtree whose attribute definitions cannot be composed is 422 naming the attribute key. An unknown CI type, or a system type, is 404.
      */
     patch: operations['updateCiTypesId'];
     trace?: never;
@@ -6005,7 +6005,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Reactivate a CI type */
+    /**
+     * Reactivate a CI type
+     * @description Makes a deactivated type of the organization selectable for new CIs again (MET-05). System types are read-only (403); a type whose parent is deactivated is 409 on `parent_type_id`. A refused activation writes no audit entry and sends no webhook.
+     */
     post: operations['createCiTypesIdActivate'];
     delete?: never;
     options?: never;
@@ -6022,7 +6025,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Clone a CI type into a new version lineage */
+    /**
+     * Clone a CI type into a new version lineage
+     * @description Copies the type into the organization under a new key (`key`, else derived from `name`, else the name with `_copy`) with `cloned_from_id`: its attribute definitions, `compliance_rules`, `ui_schema`, `lifecycle_definition_id` and `parent_type_id` (MET-05). An organization replaces a system type this way. A taken key or name is 409, as is a source whose parent is deactivated.
+     */
     post: operations['createCiTypesIdClone'];
     delete?: never;
     options?: never;
@@ -6039,7 +6045,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Deactivate a CI type */
+    /**
+     * Deactivate a CI type
+     * @description A deactivated type gets no new CIs (MET-05): POST /api/v1/cis and the type change answer 422, discovery creates a generic_device with an unclassified_device review item (reason `type_inactive`). Its CIs stay readable and editable. System types are read-only (403); a type with active subtypes is 409. A refused deactivation writes no audit entry and sends no webhook.
+     */
     post: operations['createCiTypesIdDeactivate'];
     delete?: never;
     options?: never;
@@ -28339,7 +28348,10 @@ export interface operations {
   };
   listCiTypes: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Also list deactivated types (MET-05). */
+        include_inactive?: boolean;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -28527,12 +28539,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Reactivate a CI type */
+      /** @description The reactivated CI type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -28541,6 +28555,9 @@ export interface operations {
         };
         content?: never;
       };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   createCiTypesIdClone: {
@@ -28552,12 +28569,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Clone a CI type into a new version lineage */
-      200: {
+      /** @description The clone */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -28580,12 +28599,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Deactivate a CI type */
+      /** @description The deactivated CI type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -28594,6 +28615,9 @@ export interface operations {
         };
         content?: never;
       };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listCiTypesIdFields: {

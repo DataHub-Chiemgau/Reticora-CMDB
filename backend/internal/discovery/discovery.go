@@ -776,31 +776,29 @@ func isUUID(value string) bool {
 	return true
 }
 
-// resolveCITypeIDs maps each item's ci_type_name to the canonical ci_type UUID
-// with the types of the batch (lookupTypes). Entries that are already UUIDs
-// pass through. Items whose type cannot be resolved get an empty string so
-// the caller can queue them for review.
-func resolveCITypeIDs(items []IngestItem, types map[string]string) []string {
-	ids := make([]string, len(items))
+// resolveCITypeIDs maps each item's ci_type_name, a name, key or UUID, to
+// the canonical ci_type UUID and its active flag with the types of the
+// batch (lookupTypes); a UUID is resolved like a name (MET-05). Items whose
+// type cannot be resolved get an empty id so the caller can queue them for
+// review.
+func resolveCITypeIDs(items []IngestItem, types map[string]ResolvedType) []ResolvedType {
+	out := make([]ResolvedType, len(items))
 	for i := range items {
-		name := strings.TrimSpace(items[i].CITypeName)
-		if isUUID(name) {
-			ids[i] = name
-		} else if name != "" {
-			ids[i] = types[name]
+		if name := strings.TrimSpace(items[i].CITypeName); name != "" {
+			out[i] = types[name]
 		}
 	}
-	return ids
+	return out
 }
 
-// frameTypeNames are the type names a batch looks up at once: the names of
-// its items that are no UUID, generic_device and the virtual types of the
+// frameTypeNames are the type entries a batch looks up at once: the names,
+// keys and UUIDs of its items, generic_device and the virtual types of the
 // identity context.
 func frameTypeNames(items []IngestItem) []string {
 	seen := map[string]bool{}
 	var names []string
 	add := func(name string) {
-		if name != "" && !isUUID(name) && !seen[name] {
+		if name != "" && !seen[name] {
 			seen[name] = true
 			names = append(names, name)
 		}
@@ -1341,6 +1339,11 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 type batchFrame struct {
 	items   []IngestItem
 	typeIDs []string
+	// inactiveType holds the reported type of the records whose type is
+	// deactivated (MET-05), "" for the others: they match as usual, a new
+	// device becomes a generic_device with an unclassified_device item
+	// (reason type_inactive).
+	inactiveType []string
 	// noProfile marks records no collector profile classified (DIS-02);
 	// known before CITypeName becomes the type id.
 	noProfile  []bool
@@ -1378,6 +1381,15 @@ type recordOutcome struct {
 	created bool
 }
 
+// inactive returns the reported type of record i when it is deactivated,
+// else "" (MET-05).
+func (f *batchFrame) inactive(i int) string {
+	if i < len(f.inactiveType) {
+		return f.inactiveType[i]
+	}
+	return ""
+}
+
 // openFrame runs the frame of a batch: it drops the records processed within
 // the dedupe window (REC-01), resolves the CI types of the records and of the
 // identity context with one lookup, queues records of an unknown type for
@@ -1411,11 +1423,20 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 		return nil, err
 	}
 	frame.uniqueKeys = unique
-	frame.typeIDs = resolveCITypeIDs(items, types)
+	resolved := resolveCITypeIDs(items, types)
+	frame.typeIDs = make([]string, len(items))
+	frame.inactiveType = make([]string, len(items))
 	frame.noProfile = make([]bool, len(items))
+	// A deactivated type gets no new CIs (MET-05): a new device becomes a
+	// generic_device, so the type is usable only while generic_device is.
+	generic := types[ci.GenericDeviceType]
 	for i := range items {
 		item := &items[i]
-		if frame.typeIDs[i] != "" {
+		if r := resolved[i]; r.ID != "" && (r.Active || generic.Active) {
+			frame.typeIDs[i] = r.ID
+			if !r.Active {
+				frame.inactiveType[i] = strings.TrimSpace(item.CITypeName)
+			}
 			frame.noProfile[i] = unclassifiedDevice(item)
 			continue
 		}
@@ -1516,6 +1537,11 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 	out *recordOutcome) error {
 	item := *rec
 	typeID, identity := frame.typeIDs[i], frame.identity
+	// A new device of a deactivated type becomes a generic_device (MET-05).
+	createType := typeID
+	if frame.inactive(i) != "" {
+		createType = identity.GenericDeviceTypeID
+	}
 	resp := &out.resp
 
 	// No collector profile matched (DIS-02): the device becomes a
@@ -1556,7 +1582,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 	// per-field provenance recorded below keeps the reporting source and
 	// timestamp available for reconciliation.
 	// Discovered values pass the same field rules as manual writes.
-	validateType, validateCI := typeID, ""
+	validateType, validateCI := createType, ""
 	if result.Action == ReconcileMatched {
 		if m := findCI(candidates, result.MatchedCIID); m != nil {
 			validateType, validateCI = m.CITypeID, m.ID
@@ -1573,7 +1599,8 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 	switch result.Action {
 	case ReconcileCreated:
 		// Over max_cis the device is held as unlicensed_ci instead of
-		// becoming a CI (ENT-03, CH21); existing CIs keep updating.
+		// becoming a CI (ENT-03, CH21); existing CIs keep updating. The item
+		// holds the reported type: the adoption checks it again.
 		if h.limits != nil {
 			total, countErr := h.admissionCount(ctx, orgID, frame, frame.total)
 			if countErr != nil {
@@ -1591,7 +1618,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		withoutTakenIdentity(&item, candidates)
 		// Likewise a value of a unique attribute another active CI holds
 		// (MET-15, F-432).
-		takenDropped, takenErr := h.withoutTakenUnique(ctx, frame, orgID, typeID, &item)
+		takenDropped, takenErr := h.withoutTakenUnique(ctx, frame, orgID, createType, &item)
 		if takenErr != nil {
 			return takenErr
 		}
@@ -1599,7 +1626,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		if h.beforeCreate != nil {
 			h.beforeCreate(ctx)
 		}
-		newItem, err := h.createDiscoveredCI(ctx, orgID, &item, typeID, source)
+		newItem, err := h.createDiscoveredCI(ctx, orgID, &item, createType, source)
 		if err != nil {
 			return err
 		}
@@ -1620,6 +1647,17 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		}
 		if err := openUnclassified(&newItem); err != nil {
 			return err
+		}
+		// The reported type is deactivated: a reviewer classifies the
+		// generic_device (MET-05).
+		if frame.inactive(i) != "" {
+			opened, reviewErr := h.reviewTypeInactive(ctx, orgID, &item, &newItem, frame.inactive(i))
+			if reviewErr != nil {
+				return reviewErr
+			}
+			if opened {
+				resp.ReviewItems++
+			}
 		}
 	case ReconcileMatched:
 		matched := findCI(candidates, result.MatchedCIID)
@@ -1991,8 +2029,9 @@ func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFra
 		w.candidates[k], w.prefetched[k] = candidates[k], true
 		i := start + k
 		results[k] = ResolveIdentity(candidates[k], &frame.items[i], frame.identity)
-		// A device no collector profile matched opens its review on its own.
-		if results[k].Action == ReconcileCreated && !frame.noProfile[i] {
+		// A device no collector profile matched opens its review on its own,
+		// as does a new device of a deactivated type (MET-05).
+		if results[k].Action == ReconcileCreated && !frame.noProfile[i] && frame.inactive(i) == "" {
 			fresh = append(fresh, k)
 			deletedOf[k] = resurrectionGuard(&qs[k])
 		}

@@ -24,16 +24,17 @@ import (
 // CITypeUniqueLookup resolves the type names of a batch like
 // CITypeBatchLookup and, in the same statement, the keys of the unique
 // attributes of each type, global ones included (NFR-03: no statement per
-// record for an organization without unique attributes). The discovery PG
-// repository implements it.
+// record for an organization without unique attributes). It resolves and
+// orders the types as CITypeBatchLookup does, with the active flag (MET-05).
+// The discovery PG repository implements it.
 type CITypeUniqueLookup interface {
-	LookupCITypeIDsWithUnique(ctx context.Context, orgID string, namesOrKeys []string) (types map[string]string, unique map[string][]string, err error)
+	LookupCITypeIDsWithUnique(ctx context.Context, orgID string, namesOrKeys []string) (types map[string]ResolvedType, unique map[string][]string, err error)
 }
 
 // lookupFrameTypes resolves the type names of a frame with the keys of the
 // unique attributes per type id where the repository can (CITypeUniqueLookup),
 // else as lookupTypes with unique nil.
-func (h *Handler) lookupFrameTypes(ctx context.Context, orgID string, names []string) (types map[string]string, unique map[string][]string, err error) {
+func (h *Handler) lookupFrameTypes(ctx context.Context, orgID string, names []string) (types map[string]ResolvedType, unique map[string][]string, err error) {
 	if lookup, ok := h.repo.(CITypeUniqueLookup); ok {
 		if types, unique, err = lookup.LookupCITypeIDsWithUnique(ctx, orgID, names); err != nil {
 			return nil, nil, fmt.Errorf("lookup ci types: %w", err)

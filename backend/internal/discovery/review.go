@@ -155,6 +155,11 @@ func (n afterCommitNotifier) ReviewOpened(ctx context.Context, item *reviews.Ite
 // no collector profile matched (DIS-02); its generic_device CI exists.
 const ReasonNoProfileMatch = "no_profile_match"
 
+// ReasonTypeInactive marks an unclassified_device item of a new device
+// whose reported type is deactivated (MET-05); its generic_device CI
+// exists.
+const ReasonTypeInactive = "type_inactive"
+
 // ReasonReclassified is the resolution of an unclassified_device item whose
 // CI discovery classified later (DIS-02).
 const ReasonReclassified = "reclassified"
@@ -175,6 +180,12 @@ func unclassifiedReview(orgID string, item *IngestItem, device *ci.Item, ic *Ide
 	if ic == nil || ic.GenericDeviceTypeID == "" || device.CITypeID != ic.GenericDeviceTypeID {
 		return nil
 	}
+	return deviceReview(orgID, item, device, ReasonNoProfileMatch, ci.GenericDeviceType)
+}
+
+// deviceReview is the unclassified_device item about the generic_device CI
+// device of record item, with reason and the reported type typeName.
+func deviceReview(orgID string, item *IngestItem, device *ci.Item, reason, typeName string) *ReviewItem {
 	return &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindUnclassifiedDevice,
@@ -182,9 +193,9 @@ func unclassifiedReview(orgID string, item *IngestItem, device *ci.Item, ic *Ide
 		ClientID:       device.ClientID,
 		SiteID:         device.SiteID,
 		Payload: map[string]any{
-			"reason":        ReasonNoProfileMatch,
+			"reason":        reason,
 			"ci_id":         device.ID,
-			"ci_type_name":  ci.GenericDeviceType,
+			"ci_type_name":  typeName,
 			"name":          item.Name,
 			"manufacturer":  item.Manufacturer,
 			"model":         item.Model,
@@ -208,6 +219,14 @@ func (h *Handler) reviewUnclassified(ctx context.Context, orgID string, item *In
 		return false, nil
 	}
 	return h.ReviewService().OpenUnlessDismissed(ctx, review, "reason")
+}
+
+// reviewTypeInactive opens the unclassified_device item of a new device
+// whose reported type typeName is deactivated (MET-05): the device became
+// the generic_device CI device, a reviewer classifies it. It reports
+// whether an item was opened.
+func (h *Handler) reviewTypeInactive(ctx context.Context, orgID string, item *IngestItem, device *ci.Item, typeName string) (bool, error) {
+	return h.openReview(ctx, deviceReview(orgID, item, device, ReasonTypeInactive, typeName))
 }
 
 // resolveReclassified closes the open unclassified_device item of a CI that
@@ -326,7 +345,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			res.Note = "merged into " + res.CIID
 		}
 	case reviews.ActionNew:
-		if payloadString(item.Payload, "reason") == ReasonNoProfileMatch {
+		if reason := payloadString(item.Payload, "reason"); reason == ReasonNoProfileMatch || reason == ReasonTypeInactive {
 			// The device already exists as generic_device CI.
 			return false, refused(http.StatusConflict, "the device is already recorded as generic_device; set its type on the CI and dismiss the item")
 		}
@@ -457,19 +476,25 @@ func (h *Handler) reviewedDeviceType(ctx context.Context, orgID, typeName, chose
 	if name == "" {
 		return "", errChooseType
 	}
-	var types map[string]string
-	if !isUUID(name) {
-		var err error
-		if types, err = h.lookupTypes(ctx, orgID, []string{name}); err != nil {
-			return "", err
-		}
+	types, err := h.lookupTypes(ctx, orgID, []string{name})
+	if err != nil {
+		return "", err
 	}
-	typeID := resolveCITypeIDs([]IngestItem{{CITypeName: name}}, types)[0]
-	if typeID == "" {
+	typ := resolveCITypeIDs([]IngestItem{{CITypeName: name}}, types)[0]
+	switch {
+	case typ.ID == "":
 		return "", errChooseType
+	case !typ.Active:
+		// A deactivated type gets no new CIs (MET-05).
+		return "", errTypeInactive
 	}
-	return typeID, nil
+	return typ.ID, nil
 }
+
+// errTypeInactive refuses new for a device whose recorded type is
+// deactivated by now (MET-05): the principal chooses another type.
+var errTypeInactive = &reviews.Error{Status: http.StatusUnprocessableEntity, Field: "ci_type_id",
+	Message: "the CI type is deactivated; choose a CI type"}
 
 // reviewedDeviceScope returns the client and site of the CI new creates. The
 // columns of the item decide (WP-342): the database derives them from the
