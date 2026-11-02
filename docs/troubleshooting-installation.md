@@ -265,8 +265,8 @@ after `.env` had been edited.
   (`docker compose --env-file .env logs keycloak`) and re-run the installer.
 
 No password or secret is printed: the rotation lines (`Keycloak rotation: …`)
-name the setting; only redirect URIs and web origins are shown with their
-values.
+name the setting; only redirect URIs, web origins and post-logout redirect
+URIs are shown with their values.
 
 ---
 
@@ -607,7 +607,7 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | Session key | Reused; a Docker-created directory or zero-byte file is removed and regenerated. |
 | Database passwords | `RETICORA_DB_PASSWORD` (CMDB), `RETICORA_DB_APP_PASSWORD` (runtime login) and `KEYCLOAK_DB_PASSWORD` (Keycloak) are probed over TCP — the images trust the local socket and 127.0.0.1 regardless of the password — and on mismatch the stored role password is resynced automatically. |
 | Keycloak admin password | A changed `KEYCLOAK_ADMIN_PASSWORD` is set through the admin CLI: login with the password of `.env.previous`, then with the new one; afterwards the old password no longer works. |
-| OIDC client `reticora-app` | Secret (`RETICORA_OIDC_CLIENT_SECRET`), redirect URIs and web origins (from `RETICORA_OIDC_REDIRECT_URL` and `RETICORA_OIDC_ISSUER_URL`) of the rendered realm file are compared with the running realm; each differing value is applied with one `kcadm update clients/<id>`. |
+| OIDC client `reticora-app` | Secret (`RETICORA_OIDC_CLIENT_SECRET`), redirect URIs and web origins (from `RETICORA_OIDC_REDIRECT_URL` and `RETICORA_OIDC_ISSUER_URL`) and the post-logout redirect URIs (`post.logout.redirect.uris`, `+`: the valid redirect URIs, needed for the sign-out's return to `/login`, see [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Sign-out") of the rendered realm file are compared with the running realm; each differing value is applied with one `kcadm update clients/<id>` (the attribute update names only this attribute; Keycloak keeps the others). |
 | Server admin client `reticora-server-admin` | `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID`/`_SECRET` are generated once (`.env`, never asked for). `ensure_admin_client` creates the confidential client with its service account (realm-management `manage-users`, `view-users`, `query-users`) before the server starts, repairs drifted settings and missing roles, and sets a secret that differs from `.env` (logged by name only); an unchanged client is not written. |
 | SMTP server | `RETICORA_SMTP_*` from the environment, `.env` or the prompt; checked over TCP before the start. With a host, `apply_realm_smtp` sets the same server as `smtpServer` of the realm `reticora` (password only on stdin). |
 | Collector endpoint names | `RETICORA_NATS_EDGE_HOSTS` is derived on every run (TLS domain, host of `RETICORA_PUBLIC_BASE_URL`, host IP of an IP or localhost installation) and merged with the names already in `.env`; the server reissues the nats-edge certificate when the names change. |
@@ -626,11 +626,13 @@ their value; a run without a change writes nothing to Keycloak.
 
 **Limits of the rotation:**
 
-- Of the realm file only the client's secret, redirect URIs and web origins
-  reach an existing realm; these three follow the realm file, so a change made
-  to them in the Keycloak console is reset by the next run. Other realm
-  content — roles, groups, flows, password and MFA policies, mappers, the user
-  profile — is not updated by a re-run; change it in the Keycloak console.
+- Of the realm file only the client's secret, redirect URIs, web origins and
+  post-logout redirect URIs (`post.logout.redirect.uris` of `reticora-app`)
+  reach an existing realm; these four follow the realm file, so a change made
+  to them in the Keycloak console (e.g. post-logout redirect URIs `-`) is
+  reset by the next run. Other realm content — roles, groups, flows, password
+  and MFA policies, mappers, the user profile — is not updated by a re-run;
+  change it in the Keycloak console.
 - The name of the Keycloak administrator (`KEYCLOAK_ADMIN`) is not renamed;
   only its password is rotated.
 - `RETICORA_MASTER_KEY` and the session signing key are not rotated by the

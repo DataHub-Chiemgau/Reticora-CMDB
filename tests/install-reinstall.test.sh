@@ -26,8 +26,8 @@
 # and run_migrations (WP-604).
 # The realm ships reticora-app without a service account; for the
 # client_credentials check the test enables it after the first run. The
-# installer leaves that setting alone (only secret, redirect URIs and web
-# origins are applied).
+# installer leaves that setting alone (only secret, redirect URIs, web
+# origins and post-logout redirect URIs are applied).
 #
 # Usage: ./tests/install-reinstall.test.sh
 #   RETICORA_REINSTALL_KC_PORT  host port of the test Keycloak (default 18180)
