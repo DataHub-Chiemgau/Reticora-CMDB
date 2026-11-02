@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { ApiError, ciApi, collectorApi, fetchAPI, scopeSuggestionApi } from '../api/client';
 import { useAuthStore } from '../auth/authStore';
-import { InsecureContextError, fetchAuthConfig, getStoredAuthConfig } from '../auth/oidc';
+import { InsecureContextError } from '../auth/oidc';
 import { logout } from '../auth/session';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -188,25 +188,6 @@ function describeVerifyError(error: unknown, t: TFunction): VerifyRefusal {
   }
 }
 
-/**
- * signOutOfIdP ends the session of this tab and the single sign-on session
- * of the IdP, like the logout of the app shell: otherwise the sign-in with
- * the new account would silently sign the previous user (e.g. the
- * superadmin) in again. Without the IdP's logout endpoint only the local
- * session ends.
- */
-async function signOutOfIdP() {
-  await logout();
-  try {
-    const config = getStoredAuthConfig() ?? (await fetchAuthConfig());
-    if (config.end_session_endpoint) {
-      window.location.assign(config.end_session_endpoint);
-    }
-  } catch {
-    // The OIDC configuration is unreachable: the local session has ended.
-  }
-}
-
 function Progress({ current }: { current: OnboardingStep | 'done' }) {
   const { t } = useTranslation();
   const index = current === 'done' ? ONBOARDING_STEPS.length : ONBOARDING_STEPS.indexOf(current);
@@ -348,10 +329,17 @@ function VerifyStep({ token, signedInAs }: { token: string; signedInAs?: string 
   const refusal = verify.error ? describeVerifyError(verify.error, t) : null;
   const passwordError = policyError ?? refusal?.password;
 
+  // signOut ends the Reticora session of this tab only. Unlike the logout
+  // of the app shell it does not leave for the IdP's end-session endpoint:
+  // that bare redirect ends on the IdP's "logged out" page, with no way back
+  // to the onboarding and its sign-in with the new account. The IdP's single
+  // sign-on session of the previous user (e.g. the superadmin) does not sign
+  // that user in again: the sign-in link that then replaces the button
+  // carries forceLogin (prompt=login, ONBOARDING_LOGIN_STATE).
   const signOut = async () => {
     setSigningOut(true);
     try {
-      await signOutOfIdP();
+      await logout();
     } finally {
       setSigningOut(false);
     }
@@ -376,8 +364,9 @@ function VerifyStep({ token, signedInAs }: { token: string; signedInAs?: string 
             </Button>
           </SignedInHint>
         ) : (
-          // Also a tab without a Reticora session (a new tab, or one after a
-          // local-only logout) can share the IdP session of another account.
+          // Also a tab without a Reticora session (a new tab, or this one
+          // after its logout, which ends the local session only) can share
+          // the IdP session of another account.
           <Link
             to="/login"
             state={ONBOARDING_LOGIN_STATE}

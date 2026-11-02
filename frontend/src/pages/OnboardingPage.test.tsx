@@ -294,7 +294,7 @@ describe('OnboardingPage', () => {
     expect(screen.queryByText(/must not be equal/)).toBeNull();
   });
 
-  it('verifies in a signed-in tab and offers the logout before the sign-in (F-351)', async () => {
+  it('verifies in a signed-in tab, ends only its session and then offers the sign-in (F-351)', async () => {
     signIn({ sub: 'admin-1', email: 'admin@reticora.example' });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -306,13 +306,14 @@ describe('OnboardingPage', () => {
       if (url.endsWith('/auth/logout') && init?.method === 'POST')
         return new Response(null, { status: 204 });
       if (url.endsWith('/auth/config'))
-        // No end_session_endpoint: only the local session ends.
+        // The IdP has an end-session endpoint, as every real deployment does.
         return json({
           issuer: 'https://id.example/realms/reticora',
           client_id: 'reticora-app',
           redirect_uri: 'https://cmdb.example/auth/callback',
           scopes: ['openid'],
           authorization_endpoint: 'https://id.example/realms/reticora/protocol/openid-connect/auth',
+          end_session_endpoint: 'https://id.example/realms/reticora/protocol/openid-connect/logout',
           pkce_required: true,
         });
       if (url.includes('/review-items')) return json(page([]));
@@ -321,6 +322,8 @@ describe('OnboardingPage', () => {
       return json({ detail: 'unexpected' }, 404);
     });
     vi.stubGlobal('fetch', fetchMock);
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
     renderOnboarding('/onboarding?token=tok-1');
 
     // The token wins over the session: the verification, not the collector.
@@ -353,6 +356,9 @@ describe('OnboardingPage', () => {
     ).toBe(true);
     expect(useAuthStore.getState().isAuthenticated()).toBe(false);
     expect(screen.queryByRole('button', { name: 'Abmelden' })).toBeNull();
+    // The page stays: no redirect to the IdP's end-session endpoint, whose
+    // "logged out" page has no way back to the sign-in with the new account.
+    expect(assign).not.toHaveBeenCalled();
     // Only the local session ended: the IdP session of the superadmin is
     // still there, so the sign-in must ask for a fresh login.
     expect(

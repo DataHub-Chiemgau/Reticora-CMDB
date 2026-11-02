@@ -26545,12 +26545,43 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Manage global CI field definitions */
+      /** @description Every global field in one answer (legacy field view of attribute_definition); the list is not paged, so next_cursor is always absent. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
+            data: {
+              id?: string;
+              /** @description Empty for global fields. */
+              ci_type_id?: string;
+              /** @enum {string} */
+              scope: 'global' | 'type';
+              name: string;
+              label?: string;
+              description?: string;
+              data_type: string;
+              required: boolean;
+              default_value?: string;
+              enum_values?: string[];
+              ui_group?: string;
+              sort_order: number;
+              validation?: components['schemas']['AttributeValidationLegacy'];
+              conditional?: {
+                [key: string]: unknown;
+              };
+              reference_target?: string;
+              is_system?: boolean;
+            }[];
+            total?: number;
+            limit?: number;
+            offset?: number;
+            has_more?: boolean;
+          };
+        };
       };
       /** @description Unauthorized */
       401: {

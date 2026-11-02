@@ -11602,7 +11602,48 @@ paths:
         organization, and the read-only system fields (`is_system`).
       responses:
         '200':
-          description: Manage global CI field definitions
+          description: >-
+            Every global field in one answer (legacy field view of
+            attribute_definition); the list is not paged, so next_cursor is
+            always absent.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent on the last page.
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, scope, data_type, required, sort_order]
+                      properties:
+                        id: { type: string }
+                        ci_type_id: { type: string, description: Empty for global fields. }
+                        scope: { type: string, enum: [global, type] }
+                        name: { type: string }
+                        label: { type: string }
+                        description: { type: string }
+                        data_type: { type: string }
+                        required: { type: boolean }
+                        default_value: { type: string }
+                        enum_values:
+                          type: array
+                          items: { type: string }
+                        ui_group: { type: string }
+                        sort_order: { type: integer }
+                        validation:
+                          $ref: '#/components/schemas/AttributeValidationLegacy'
+                        conditional: { type: object, additionalProperties: true }
+                        reference_target: { type: string }
+                        is_system: { type: boolean }
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+                  has_more: { type: boolean }
         '401':
           description: Unauthorized
     put:

@@ -208,6 +208,11 @@ const DEFAULTS: Handler[] = [
       return type ? { body: type } : { status: 404, body: problem(404, 'ci type not found') };
     },
   },
+  // The organization-wide fields (MET-13) that the create and edit dialog
+  // of a CI shows in front of the type's fields: none in the mocked tenant.
+  // A spec that needs one answers the route with a handler of its own,
+  // which is matched before DEFAULTS.
+  { path: '/ci-fields/global', reply: () => ({ body: list([]) }) },
 ];
 
 /** problem is an RFC 7807 body as the server sends it (API-03). */
