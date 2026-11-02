@@ -3,14 +3,13 @@ import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../components/ui/Button';
 import { startAuthorizationCodeFlow, InsecureContextError } from '../../auth/oidc';
+import { OtherAccountHint } from '../../auth/SignOutButton';
 
 type LoginLocationState = {
   from?: string;
   expired?: boolean;
   /** invitationAccepted is the address of an account the invitation page just created (TLC-03). */
   invitationAccepted?: string;
-  /** forceLogin asks the IdP for a fresh login instead of its SSO session (F-351). */
-  forceLogin?: boolean;
 };
 
 export function LoginPage() {
@@ -26,7 +25,7 @@ export function LoginPage() {
     setLoading(true);
 
     try {
-      await startAuthorizationCodeFlow(from, { forceLogin: state?.forceLogin === true });
+      await startAuthorizationCodeFlow(from);
     } catch (err) {
       if (err instanceof InsecureContextError) {
         setError(t('auth.secureContextRequired'));
@@ -56,12 +55,19 @@ export function LoginPage() {
           </p>
         ) : null}
         {state?.invitationAccepted ? (
-          <p
-            role="status"
-            className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-200"
-          >
-            {t('auth.invitationAccepted', { email: state.invitationAccepted })}
-          </p>
+          <>
+            <p
+              role="status"
+              className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950/40 dark:text-green-200"
+            >
+              {t('auth.invitationAccepted', { email: state.invitationAccepted })}
+            </p>
+            {/* The new account must not meet the IdP session of another
+                account in this browser (F-351). */}
+            <div className="mt-3">
+              <OtherAccountHint />
+            </div>
+          </>
         ) : null}
         {error ? (
           <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">

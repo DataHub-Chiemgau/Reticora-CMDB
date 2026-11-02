@@ -141,21 +141,7 @@ function assertUsableAuthConfig(config: AuthConfig) {
   }
 }
 
-/** AuthorizationCodeFlowOptions tunes the authorization request. */
-export type AuthorizationCodeFlowOptions = {
-  /**
-   * forceLogin asks the IdP for a fresh login (prompt=login) instead of
-   * reusing its single sign-on session, e.g. right after a self-signup or an
-   * accepted invitation, when the browser may still hold the IdP session of
-   * another account (F-351).
-   */
-  forceLogin?: boolean;
-};
-
-export async function startAuthorizationCodeFlow(
-  returnTo: string,
-  options: AuthorizationCodeFlowOptions = {},
-) {
+export async function startAuthorizationCodeFlow(returnTo: string) {
   // The PKCE code challenge is derived from the Web Crypto API, which browsers
   // only expose in secure contexts (HTTPS or localhost). Fail early with a
   // readable message instead of a "Cannot read properties of undefined" error.
@@ -179,9 +165,6 @@ export async function startAuthorizationCodeFlow(
   authorizationUrl.searchParams.set('state', state);
   authorizationUrl.searchParams.set('code_challenge_method', 'S256');
   authorizationUrl.searchParams.set('code_challenge', codeChallenge);
-  if (options.forceLogin) {
-    authorizationUrl.searchParams.set('prompt', 'login');
-  }
 
   window.location.assign(authorizationUrl.toString());
   return authorizationUrl.toString();

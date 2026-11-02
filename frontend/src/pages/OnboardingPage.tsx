@@ -14,7 +14,7 @@ import type { TFunction } from 'i18next';
 import { ApiError, ciApi, collectorApi, fetchAPI, scopeSuggestionApi } from '../api/client';
 import { useAuthStore } from '../auth/authStore';
 import { InsecureContextError } from '../auth/oidc';
-import { logout } from '../auth/session';
+import { OtherAccountHint, SignOutButton } from '../auth/SignOutButton';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
@@ -48,14 +48,8 @@ export function currentStep(
   return 'done';
 }
 
-/**
- * ONBOARDING_LOGIN_STATE is the router state of the sign-in after the
- * verification: back to the onboarding, and forceLogin, which asks the
- * sign-in page for a fresh IdP login (prompt=login) instead of the IdP's
- * single sign-on session. A tab without a Reticora session still shares that
- * session with the other tabs, e.g. the superadmin's (F-351).
- */
-const ONBOARDING_LOGIN_STATE = { from: '/onboarding', forceLogin: true } as const;
+/** ONBOARDING_LOGIN_STATE leads the sign-in after the verification back to the onboarding. */
+const ONBOARDING_LOGIN_STATE = { from: '/onboarding' } as const;
 
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.detail || err.message;
@@ -303,8 +297,8 @@ function SignupStep() {
 
 /**
  * SignedInHint warns a tab that is still signed in with another account:
- * the verification works there, but the sign-in afterwards must not reuse
- * that session (F-351).
+ * the verification works there, but the sign-in afterwards must not meet
+ * that account's IdP session, which would sign it in again (F-351).
  */
 function SignedInHint({ children }: { children: ReactNode }) {
   return (
@@ -318,7 +312,6 @@ function VerifyStep({ token, signedInAs }: { token: string; signedInAs?: string 
   const { t, i18n } = useTranslation();
   const [password, setPassword] = useState('');
   const [policyError, setPolicyError] = useState<string | null>(null);
-  const [signingOut, setSigningOut] = useState(false);
   const verify = useMutation({
     mutationFn: () =>
       fetchAPI<{ organization_slug: string; trial_ends_at: string }>('/signup/verify', {
@@ -328,22 +321,6 @@ function VerifyStep({ token, signedInAs }: { token: string; signedInAs?: string 
   });
   const refusal = verify.error ? describeVerifyError(verify.error, t) : null;
   const passwordError = policyError ?? refusal?.password;
-
-  // signOut ends the Reticora session of this tab only. Unlike the logout
-  // of the app shell it does not leave for the IdP's end-session endpoint:
-  // that bare redirect ends on the IdP's "logged out" page, with no way back
-  // to the onboarding and its sign-in with the new account. The IdP's single
-  // sign-on session of the previous user (e.g. the superadmin) does not sign
-  // that user in again: the sign-in link that then replaces the button
-  // carries forceLogin (prompt=login, ONBOARDING_LOGIN_STATE).
-  const signOut = async () => {
-    setSigningOut(true);
-    try {
-      await logout();
-    } finally {
-      setSigningOut(false);
-    }
-  };
 
   if (verify.isSuccess) {
     return (
@@ -355,25 +332,26 @@ function VerifyStep({ token, signedInAs }: { token: string; signedInAs?: string 
           })}
         </p>
         {signedInAs ? (
-          // Signing in now would reuse the session of the other account:
-          // first the logout, then the sign-in with the new account.
+          // Signing in now would reuse the IdP session of the other account:
+          // the logout ends it as well and returns to the sign-in page, where
+          // the new account signs in with its credentials.
           <SignedInHint>
             <p>{t('onboarding.verify.signOutFirst', { user: signedInAs })}</p>
-            <Button size="sm" variant="secondary" loading={signingOut} onClick={signOut}>
-              {t('onboarding.verify.signOut')}
-            </Button>
+            <SignOutButton size="sm">{t('onboarding.verify.signOutAndSignIn')}</SignOutButton>
           </SignedInHint>
         ) : (
-          // Also a tab without a Reticora session (a new tab, or this one
-          // after its logout, which ends the local session only) can share
-          // the IdP session of another account.
-          <Link
-            to="/login"
-            state={ONBOARDING_LOGIN_STATE}
-            className="inline-block font-medium text-primary underline"
-          >
-            {t('onboarding.verify.login')}
-          </Link>
+          // A tab without a Reticora session (a new tab) can still share the
+          // IdP session of an account signed in in another tab.
+          <>
+            <Link
+              to="/login"
+              state={ONBOARDING_LOGIN_STATE}
+              className="inline-block font-medium text-primary underline"
+            >
+              {t('onboarding.verify.login')}
+            </Link>
+            <OtherAccountHint />
+          </>
         )}
       </div>
     );

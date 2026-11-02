@@ -1387,13 +1387,15 @@ fake_kcadm() {
 
 # kc_applied — the fake Keycloak holds the current admin password and the
 # client of the realm rendered from the current values (in another order:
-# Keycloak stores the lists as sets), and the realm as a fresh import of the
-# rendered realm (kc_imported_realm).
+# Keycloak stores the lists as sets; its attributes with one Keycloak adds on
+# its own), and the realm as a fresh import of the rendered realm
+# (kc_imported_realm).
 kc_applied() {
     configure_realm >/dev/null
     printf '%s\n' "$KEYCLOAK_ADMIN_PASSWORD" > "$KC_STATE/admin-password"
     jq '.clients[] | select(.clientId == "reticora-app")
-        | {id: "client-uuid", clientId, secret, redirectUris: (.redirectUris | reverse), webOrigins: (.webOrigins | reverse), serviceAccountsEnabled}' \
+        | {id: "client-uuid", clientId, secret, redirectUris: (.redirectUris | reverse), webOrigins: (.webOrigins | reverse), serviceAccountsEnabled,
+           attributes: ((.attributes // {}) + {"backchannel.logout.session.required": "true"})}' \
         "$COMPOSE_DIR/.generated/realm-reticora.json" > "$KC_STATE/client.json"
     kc_imported_realm "$COMPOSE_DIR/.generated/realm-reticora.json" > "$KC_STATE/realm.json"
 }
@@ -1434,6 +1436,12 @@ kc_legacy_realm() {
         | .components = ($cur[0].components | .["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"]
             |= map(fromjson | .attributes |= map(select(.name != "organization_id")) | tojson))' > "$KC_STATE/realm.new"
     mv "$KC_STATE/realm.new" "$current"
+}
+
+# kc_client_edit <jq program> [jq args…] — changes the client reticora-app of
+# the fake Keycloak before a run.
+kc_client_edit() {
+    jq "$@" "$KC_STATE/client.json" > "$KC_STATE/client.new" && mv "$KC_STATE/client.new" "$KC_STATE/client.json"
 }
 
 # kc_realm_edit <jq program> [jq args…] — changes the fake realm (operator
@@ -1572,7 +1580,7 @@ test_rotation_unchanged_writes_nothing() {
     [ "$(tr '\n' ' ' < "$KC_STATE/logins")" = "ok " ] &&
         [ -z "$(kc_log_writes)" ] &&
         ! grep -q -e 'Keycloak rotation:' -e 'Changed since the last run' "$out" &&
-        grep -q 'client secret, redirect URIs and web origins match the configuration' "$out"
+        grep -q 'client secret, redirect URIs, web origins and post-logout redirect URIs match the configuration' "$out"
 }
 
 # Only one value rotated: exactly its update. A new callback path on the same
@@ -1653,6 +1661,42 @@ test_rotation_documented() {
         grep -q '\.env\.previous' "$REPO_ROOT/docs/troubleshooting-installation.md"
 }
 
+# An installation whose realm an earlier release imported: the client lacks
+# the post-logout redirect URIs of the bundled realm ("+", the valid redirect
+# URIs), so the sign-out of the SPA could not return from Keycloak (F-351).
+# One update that names only this attribute (Keycloak keeps the others),
+# logged like a rotation; the next run writes nothing. A different value
+# (here "-", no redirect) is replaced the same way, like the redirect URIs.
+test_rotation_post_logout_uris_applied() {
+    local out="$TMP_ROOT/post-logout-out" value
+    for value in absent "-"; do
+        kc_rerun "$OLD_ADMIN_PW" "$OLD_CLIENT_SECRET" "http://192.0.2.10:3000/auth/callback"
+        if [ "$value" = absent ]; then
+            kc_client_edit 'del(.attributes["post.logout.redirect.uris"])'
+        else
+            kc_client_edit --arg v "$value" '.attributes["post.logout.redirect.uris"] = $v'
+        fi
+        create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+        [ "$(cat "$KCADM_WRITES")" = "clients attributes" ] || { cat "$KCADM_WRITES"; return 1; }
+        jq -e '. == {attributes: {"post.logout.redirect.uris": "+"}}' "$KC_STATE/body" >/dev/null || { cat "$KC_STATE/body"; return 1; }
+        jq -e '.attributes == {"post.logout.redirect.uris": "+", "backchannel.logout.session.required": "true"}' \
+            "$KC_STATE/client.json" >/dev/null || { cat "$KC_STATE/client.json"; return 1; }
+        [ "$(grep -c 'Keycloak rotation:' "$out")" -eq 1 ] &&
+            grep -q -F "Keycloak rotation: client reticora-app post.logout.redirect.uris set to +" "$out" &&
+            no_secret_in "$out" || { cat "$out"; return 1; }
+        : > "$KCADM_WRITES"
+        create_initial_admin > "$out" 2>&1 || { cat "$out"; return 1; }
+        [ ! -s "$KCADM_WRITES" ] || { cat "$KCADM_WRITES"; return 1; }
+        grep -q 'web origins and post-logout redirect URIs match the configuration' "$out" || return 1
+    done
+}
+
+# Both realm files give the client the post-logout redirect URIs "+": the
+# valid redirect URIs, which include the origin of the redirect URL (F-351).
+test_realm_post_logout_uris() {
+    realm_py "all(c['attributes']['post.logout.redirect.uris'] == '+' and 'RETICORA_OIDC_REDIRECT_ORIGIN_PLACEHOLDER/*' in c['redirectUris'] for x in (r, d) for c in x['clients'] if c['clientId'] == 'reticora-app')"
+}
+
 run_test    "rotation: rotated admin password, secret and redirect URL, one update each" test_rotation_applies_each_value_once
 run_test    "rotation: unchanged values cause no write"                                  test_rotation_unchanged_writes_nothing
 run_test    "rotation: a single rotated value causes exactly its update"                 test_rotation_single_values
@@ -1661,6 +1705,8 @@ run_test    "rotation: a refused admin login aborts with a hint"                
 run_test    "rotation: a failing client update aborts with a hint"                       test_rotation_update_failure_aborts
 run_test    "rotation: .env is kept as .env.previous (0600) until applied"               test_rotation_env_previous_backup
 run_test    "rotation: the troubleshooting guide covers the rotation"                    test_rotation_documented
+run_test    "rotation: missing post-logout redirect URIs of the client are added once"   test_rotation_post_logout_uris_applied
+run_test    "realm: reticora-app reuses its redirect URIs after the logout"              test_realm_post_logout_uris
 
 # ─── realm settings on every run (WP-428, AUT-09, SEC-07, F-061) ─────────────
 # `start --import-realm` skips the existing realm on an upgrade; the installer

@@ -11,8 +11,8 @@ import { Button } from './components/ui/Button';
 import { Skeleton } from './components/ui/Skeleton';
 import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
-import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
-import { logout, refreshSession } from './auth/session';
+import { refreshSession } from './auth/session';
+import { signOut } from './auth/signOut';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { useEntitlements, useModules, navFeatureFor } from './hooks/useEntitlements';
@@ -217,20 +217,13 @@ function App() {
     setIsCreateOpen(true);
   }
 
+  // handleLogout ends the Reticora and the IdP session; the IdP returns to
+  // the sign-in page. Without an end-session endpoint the sign-in is shown
+  // right away.
   async function handleLogout() {
-    await logout();
-
-    try {
-      const config = getStoredAuthConfig() ?? (await fetchAuthConfig());
-      if (config.end_session_endpoint) {
-        window.location.assign(config.end_session_endpoint);
-        return;
-      }
-    } catch {
-      // Fall back to local logout below when OIDC configuration is unreachable.
+    if ((await signOut()) === 'local') {
+      navigate('/login', { replace: true });
     }
-
-    navigate('/login', { replace: true });
   }
 
   return (

@@ -791,7 +791,11 @@
     "invitationAccepted": "Ihr Konto für {{email}} ist angelegt. Melden Sie sich jetzt an.",
     "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut.",
     "signupPrompt": "Noch kein Konto?",
-    "signupLink": "Konto anlegen"
+    "signupLink": "Konto anlegen",
+    "otherAccount": {
+      "hint": "Ist in diesem Browser noch ein anderes Konto angemeldet, etwa in einem anderen Tab, meldet die Anmeldung Sie mit diesem Konto an statt mit dem neuen. Melden Sie es dann zuerst ab oder verwenden Sie ein privates Fenster.",
+      "signOut": "Anderes Konto abmelden"
+    }
   },
   "topology": {
     "subtitle": "Beziehungen zwischen Configuration Items als Graph.",
@@ -1848,8 +1852,8 @@
       "unavailable": "Die Bestätigung ist auf diesem Server gerade nicht möglich. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Betreiber.",
       "failed": "Die Bestätigung ist fehlgeschlagen: {{detail}}",
       "signedIn": "Dieser Tab ist noch als {{user}} angemeldet. Das neue Konto wird trotzdem angelegt; melden Sie sich danach hier ab, bevor Sie sich mit dem neuen Konto anmelden.",
-      "signOutFirst": "Sie sind noch als {{user}} angemeldet. Melden Sie sich zuerst ab, sonst meldet die Anmeldung Sie wieder mit diesem Konto an statt mit dem neuen. Danach melden Sie sich mit dem neuen Konto an.",
-      "signOut": "Abmelden"
+      "signOutFirst": "Sie sind noch als {{user}} angemeldet. Melden Sie sich zuerst ab, sonst meldet die Anmeldung Sie wieder mit diesem Konto an statt mit dem neuen. Nach der Abmeldung (der Anmeldedienst fragt eventuell noch einmal nach) melden Sie sich auf der Anmeldeseite mit dem neuen Konto an.",
+      "signOutAndSignIn": "Abmelden und mit dem neuen Konto anmelden"
     },
     "collector": {
       "hint": "Installieren Sie den Collector in Ihrem Netz und geben Sie dort einen Enrollment-Code ein.",

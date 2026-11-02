@@ -2785,22 +2785,34 @@ kc_admin_login() {
         || die "Could not log in to the Keycloak admin API as $KEYCLOAK_ADMIN with KEYCLOAK_ADMIN_PASSWORD${previous:+ or the previous password of $ENV_FILE.previous} ($KC_ROTATION_TROUBLESHOOTING)."
 }
 
+# Client attributes of the rendered realm that sync_realm_client keeps like
+# the redirect URIs: post.logout.redirect.uris ("+", the valid redirect URIs)
+# lets the sign-out of the SPA return from Keycloak's end-session endpoint to
+# its sign-in page (RP-initiated logout, F-351). A realm imported by an
+# earlier release lacks it (Keycloak 24 then falls back to the redirect URIs);
+# a value set in the console, such as "-" (none), is reset like them.
+KC_CLIENT_ATTRIBUTES='["post.logout.redirect.uris"]'
+
 # kc_client_drift <realm file> <clientId> — reads the client of the running
-# realm (JSON) on stdin and prints each of secret, redirectUris and webOrigins
-# whose value differs from the rendered realm; lists compare as sets, the way
-# Keycloak stores them.
+# realm (JSON) on stdin and prints each of secret, redirectUris, webOrigins
+# and the attributes of KC_CLIENT_ATTRIBUTES the rendered realm sets whose
+# value differs from the rendered realm; lists compare as sets, the way
+# Keycloak stores them. Other attributes are not compared.
 kc_client_drift() {
-    jq -r --arg id "$2" --slurpfile realm "$1" '
+    jq -r --arg id "$2" --slurpfile realm "$1" --argjson attrs "$KC_CLIENT_ATTRIBUTES" '
         def norm: if type == "array" then unique else . end;
         . as $have
         | ($realm[0].clients[] | select(.clientId == $id)) as $want
-        | ("secret", "redirectUris", "webOrigins")
-        | select(($want[.] | norm) != ($have[.] | norm))'
+        | (("secret", "redirectUris", "webOrigins") | select(($want[.] | norm) != ($have[.] | norm))),
+          ($attrs[] | select(($want.attributes // {})[.] != null
+            and ($want.attributes // {})[.] != ($have.attributes // {})[.]))'
 }
 
-# sync_realm_client — applies secret, redirectUris and webOrigins of each
-# client of the rendered realm that has a secret to the running realm: one
-# update per differing field; nothing else of the realm is changed.
+# sync_realm_client — applies secret, redirectUris, webOrigins and the
+# attributes of KC_CLIENT_ATTRIBUTES of each client of the rendered realm that
+# has a secret to the running realm: one update per differing field (an
+# attribute update names only that attribute, Keycloak keeps the others);
+# nothing else of the realm is changed.
 sync_realm_client() {
     local realm_file="$COMPOSE_DIR/.generated/realm-reticora.json" client_id uuid current drift field changed=0
     [ -f "$realm_file" ] || die "The rendered realm file $realm_file is missing."
@@ -2812,19 +2824,21 @@ sync_realm_client() {
             die "Could not read the Keycloak client $client_id ($KC_ROTATION_TROUBLESHOOTING)."
         fi
         for field in $drift; do
-            jq -c --arg id "$client_id" --arg f "$field" '.clients[] | select(.clientId == $id) | {($f): .[$f]}' "$realm_file" \
+            jq -c --arg id "$client_id" --arg f "$field" --argjson attrs "$KC_CLIENT_ATTRIBUTES" '.clients[] | select(.clientId == $id)
+                | if ($attrs | index([$f])) then {attributes: {($f): .attributes[$f]}} else {($f): .[$f]} end' "$realm_file" \
                 | kcadm update "clients/$uuid" -r reticora -f - >/dev/null \
                 || die "Could not apply $field of the rendered realm to the Keycloak client $client_id ($KC_ROTATION_TROUBLESHOOTING)."
             if [ "$field" = secret ]; then
                 success "Keycloak rotation: client $client_id secret set to RETICORA_OIDC_CLIENT_SECRET"
             else
                 success "Keycloak rotation: client $client_id $field set to $(jq -r --arg id "$client_id" --arg f "$field" \
-                    '.clients[] | select(.clientId == $id) | .[$f] | join(", ")' "$realm_file")"
+                    '.clients[] | select(.clientId == $id) | .[$f] // .attributes[$f] | if type == "array" then join(", ") else . end' \
+                    "$realm_file")"
             fi
             changed=1
         done
     done
-    [ "$changed" -eq 1 ] || success "Keycloak client secret, redirect URIs and web origins match the configuration"
+    [ "$changed" -eq 1 ] || success "Keycloak client secret, redirect URIs, web origins and post-logout redirect URIs match the configuration"
 }
 
 # apply_keycloak_rotation — logs the admin CLI in (rotating the admin

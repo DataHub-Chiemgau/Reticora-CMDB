@@ -126,7 +126,8 @@ Every change is logged (`Keycloak realm: …`), every stricter value that is
 kept as well (`Keycloak realm: kept …`); a run without anything to change
 reports `Keycloak realm settings match the bundled realm`. Users, the client
 `reticora-app` (apart from the rotated secret, redirect URIs and web origins,
-see `docs/troubleshooting-installation.md`) and all other realm settings are
+see `docs/troubleshooting-installation.md`, and its post-logout redirect URIs,
+see Sign-out) and all other realm settings are
 left alone; the server's admin client and the realm's SMTP server are the
 installer's (see Server admin client and realm SMTP). A failing call aborts the installer with this section as the hint;
 check the Keycloak log and re-run the installer.
@@ -249,6 +250,38 @@ of the realm group `operators` whose login used a second factor. The shared
   `frontend/e2e-real/support/stack.ts` (`operatorAuthorization`) builds this
   URL; `frontend/e2e-real/operator-login.spec.ts` runs the login against the
   installed stack.
+
+## Sign-out (RP-initiated logout, F-351)
+
+The sign-out of the SPA (`Abmelden` in the header, and the sign-out the
+onboarding and the login page offer after a self-signup or an accepted
+invitation, `frontend/src/auth/signOut.ts`) ends the Reticora session
+(`POST /api/v1/auth/logout`) and then Keycloak's single sign-on session: the
+browser goes to the `end_session_endpoint` of `GET /api/v1/auth/config` with
+`client_id=reticora-app` and
+`post_logout_redirect_uri=<origin of RETICORA_OIDC_REDIRECT_URL>/login`, and
+Keycloak sends it back to the sign-in page. Without that session the next
+sign-in asks for credentials, so an account created in a browser where
+another account (e.g. the installer's administrator) is still signed in signs
+in as itself. A fresh login with `prompt=login` instead does not work with
+Keycloak: while the session of another user is alive it ends on the error
+page "You are already authenticated as different user".
+
+- `reticora-app` accepts its redirect URIs as post-logout redirect URIs
+  (`"attributes": {"post.logout.redirect.uris": "+"}`); they include
+  `<origin>/*`. Keycloak imports the attribute only with a new realm, so every
+  run of `install-cloud.sh` sets it on the running client like the redirect
+  URIs (`sync_realm_client`, logged as
+  `Keycloak rotation: client reticora-app post.logout.redirect.uris set to +`).
+  A value set in the console, e.g. `-` (none), is reset; with a list that
+  lacks the origin Keycloak answers the sign-out with "Invalid redirect uri".
+- The SPA keeps no ID token (the server issues its own session), so the
+  request carries no `id_token_hint`: while its session is alive, Keycloak
+  asks once to confirm the logout and then returns to the sign-in page;
+  without a session it returns at once.
+- Without an `end_session_endpoint` only the Reticora session ends. Another
+  OpenID provider must accept `<origin>/login` as post-logout redirect URI
+  of the client.
 
 ## Notes on the bundled realm
 

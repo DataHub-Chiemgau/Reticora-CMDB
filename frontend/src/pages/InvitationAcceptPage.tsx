@@ -114,7 +114,7 @@ export function InvitationAcceptPage() {
         onSuccess: (accepted) =>
           navigate('/login', {
             replace: true,
-            state: { invitationAccepted: accepted.email, forceLogin: true },
+            state: { invitationAccepted: accepted.email },
           }),
         onError: (error) => setRefusal(describeRefusal(error, t)),
       },

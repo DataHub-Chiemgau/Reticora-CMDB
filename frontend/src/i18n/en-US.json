@@ -791,7 +791,11 @@
     "invitationAccepted": "Your account for {{email}} has been created. Sign in now.",
     "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again.",
     "signupPrompt": "No account yet?",
-    "signupLink": "Create account"
+    "signupLink": "Create account",
+    "otherAccount": {
+      "hint": "If another account is still signed in in this browser, for example in another tab, signing in would use that account instead of the new one. Sign that account out first, or use a private window.",
+      "signOut": "Sign out the other account"
+    }
   },
   "topology": {
     "subtitle": "Relationships between configuration items as a graph.",
@@ -1848,8 +1852,8 @@
       "unavailable": "Confirming is not possible on this server right now. Please try again later or contact the operator.",
       "failed": "Confirming failed: {{detail}}",
       "signedIn": "This tab is still signed in as {{user}}. The new account is created anyway; afterwards, sign out here before you sign in with the new account.",
-      "signOutFirst": "You are still signed in as {{user}}. Sign out first, otherwise signing in would use this account again instead of the new one. Then sign in with the new account.",
-      "signOut": "Sign out"
+      "signOutFirst": "You are still signed in as {{user}}. Sign out first, otherwise signing in would use this account again instead of the new one. After signing out (the sign-in service may ask you to confirm), sign in with the new account on the sign-in page.",
+      "signOutAndSignIn": "Sign out and sign in with the new account"
     },
     "collector": {
       "hint": "Install the collector in your network and enter an enrollment code there.",

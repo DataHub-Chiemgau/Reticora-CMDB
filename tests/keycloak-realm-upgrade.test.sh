@@ -19,8 +19,9 @@
 #   3. upgrade with the installer (configure_realm, keycloak up,
 #      validate_keycloak_bootstrap, create_initial_admin with
 #      apply_realm_settings): password policy, lockout, browser flow
-#      browser-mfa, roles, groups with their realm roles, the default scope acr
-#      and the declared organization_id are set; the initial administrator has
+#      browser-mfa, roles, groups with their realm roles, the default scope acr,
+#      the declared organization_id and the post-logout redirect URIs of
+#      reticora-app ("+", sync_realm_client) are set; the initial administrator has
 #      a temporary password (UPDATE_PASSWORD, CONFIGURE_TOTP), org_admin,
 #      reticora-admin and its organization; admin@reticora.local is removed,
 #      there is no admin@demo.local;
@@ -167,6 +168,8 @@ SETTINGS='
             | {name, composites: ((.composites.realm // []) | sort)}] | sort_by(.name),
         groups: [.groups[] | {name, realmRoles: ((.realmRoles // []) | sort)}] | sort_by(.name),
         default_scopes: [.clients[] | select(.clientId == "reticora-app") | .defaultClientScopes | sort] | first,
+        post_logout_redirect_uris: [.clients[] | select(.clientId == "reticora-app")
+            | .attributes["post.logout.redirect.uris"]] | first,
         flow: tree($r; "browser-mfa"),
         organization_id: ([.components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0]
             | strings | fromjson | .attributes[] | select(.name == "organization_id")] | first)
@@ -256,6 +259,13 @@ check "upgrade: password policy and brute-force detection of the realm export, b
 check "upgrade: browser-mfa runs the executions of the realm export (OTP for mfa_required, acr levels)" same_flow_as_bundled
 check "upgrade: groups reticora-admin (mfa_required) and operators (operator); org_admin and operator contain mfa_required" group_roles
 check "upgrade: reticora-app has the default client scope acr" acr_scope
+# The sign-out of the SPA returns from the end-session endpoint to its
+# sign-in page: the client reuses its redirect URIs after the logout (F-351).
+post_logout_uris() {
+    jq -e '.clients[] | select(.clientId == "reticora-app") | .attributes["post.logout.redirect.uris"] == "+"' \
+        "$TMP_ROOT/upgraded.json" >/dev/null
+}
+check "upgrade: reticora-app accepts its redirect URIs as post-logout redirect URIs (+)" post_logout_uris
 check "upgrade: every change is logged, no secret in the log" changes_logged
 
 # The initial administrator.

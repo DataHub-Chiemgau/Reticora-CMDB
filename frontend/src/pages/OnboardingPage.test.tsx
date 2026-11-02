@@ -234,9 +234,11 @@ describe('OnboardingPage', () => {
       token: 'tok-1',
       password: GOOD_PASSWORD,
     });
-    // A tab without a session can still share the IdP session of another
-    // account: the sign-in asks the IdP for a fresh login.
-    expect(followLogin(login)).toEqual({ from: '/onboarding', forceLogin: true });
+    // A tab without a session can still share the IdP session of an account
+    // signed in in another tab: the page offers that account's sign-out.
+    expect(screen.getByText(/noch ein anderes Konto angemeldet/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Anderes Konto abmelden' })).toBeVisible();
+    expect(followLogin(login)).toEqual({ from: '/onboarding' });
   });
 
   it('explains an expired verification link', async () => {
@@ -294,10 +296,12 @@ describe('OnboardingPage', () => {
     expect(screen.queryByText(/must not be equal/)).toBeNull();
   });
 
-  it('verifies in a signed-in tab, ends only its session and then offers the sign-in (F-351)', async () => {
-    signIn({ sub: 'admin-1', email: 'admin@reticora.example' });
+  /** stubSignedInServer answers the verification, the logout and GET /auth/config. */
+  function stubSignedInServer(endSession: string | undefined) {
+    const calls: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
       if (url.endsWith('/signup/verify'))
         return json(
           { organization_slug: 'muster-gmbh', trial_ends_at: '2026-11-13T00:00:00Z' },
@@ -306,14 +310,13 @@ describe('OnboardingPage', () => {
       if (url.endsWith('/auth/logout') && init?.method === 'POST')
         return new Response(null, { status: 204 });
       if (url.endsWith('/auth/config'))
-        // The IdP has an end-session endpoint, as every real deployment does.
         return json({
           issuer: 'https://id.example/realms/reticora',
           client_id: 'reticora-app',
           redirect_uri: 'https://cmdb.example/auth/callback',
           scopes: ['openid'],
           authorization_endpoint: 'https://id.example/realms/reticora/protocol/openid-connect/auth',
-          end_session_endpoint: 'https://id.example/realms/reticora/protocol/openid-connect/logout',
+          ...(endSession ? { end_session_endpoint: endSession } : {}),
           pkce_required: true,
         });
       if (url.includes('/review-items')) return json(page([]));
@@ -324,6 +327,12 @@ describe('OnboardingPage', () => {
     vi.stubGlobal('fetch', fetchMock);
     const assign = vi.fn();
     vi.stubGlobal('location', { ...window.location, assign });
+    return { calls, assign };
+  }
+
+  /** verifySignedIn verifies the link in a tab signed in as the superadmin. */
+  async function verifySignedIn() {
+    signIn({ sub: 'admin-1', email: 'admin@reticora.example' });
     renderOnboarding('/onboarding?token=tok-1');
 
     // The token wins over the session: the verification, not the collector.
@@ -342,28 +351,45 @@ describe('OnboardingPage', () => {
         /Sie sind noch als admin@reticora.example angemeldet. Melden Sie sich zuerst ab/,
       ),
     ).toBeVisible();
-    // Signing in now would reuse the superadmin's session: no sign-in yet.
+    // Signing in now would reuse the superadmin's IdP session: no sign-in yet.
     expect(screen.queryByRole('link', { name: 'Jetzt anmelden und fortfahren' })).toBeNull();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Abmelden und mit dem neuen Konto anmelden' }),
+    );
+  }
 
-    fireEvent.click(screen.getByRole('button', { name: 'Abmelden' }));
-    expect(
-      await screen.findByRole('link', { name: 'Jetzt anmelden und fortfahren' }),
-    ).toHaveAttribute('href', '/login');
-    expect(
-      fetchMock.mock.calls.some(
-        (call) => String(call[0]) === '/api/v1/auth/logout' && call[1]?.method === 'POST',
-      ),
-    ).toBe(true);
+  it('verifies in a signed-in tab, then ends the Reticora and the IdP session (F-351)', async () => {
+    const endSession = 'https://id.example/realms/reticora/protocol/openid-connect/logout';
+    const { calls, assign } = stubSignedInServer(endSession);
+    await verifySignedIn();
+
+    // RP-initiated logout: the IdP ends the superadmin's session and returns
+    // to the sign-in page, where the new account signs in with its
+    // credentials.
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
     expect(useAuthStore.getState().isAuthenticated()).toBe(false);
-    expect(screen.queryByRole('button', { name: 'Abmelden' })).toBeNull();
-    // The page stays: no redirect to the IdP's end-session endpoint, whose
-    // "logged out" page has no way back to the sign-in with the new account.
+    expect(calls.filter((c) => c.includes('/auth/'))).toEqual([
+      'POST /api/v1/auth/logout',
+      'GET /api/v1/auth/config',
+    ]);
+    const url = new URL(String(assign.mock.calls[0]?.[0]));
+    expect(`${url.origin}${url.pathname}`).toBe(endSession);
+    expect(url.searchParams.get('client_id')).toBe('reticora-app');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://cmdb.example/login');
+  });
+
+  it('ends only the Reticora session without an end-session endpoint', async () => {
+    const { calls, assign } = stubSignedInServer(undefined);
+    await verifySignedIn();
+
+    const login = await screen.findByRole('link', { name: 'Jetzt anmelden und fortfahren' });
+    expect(calls).toContain('POST /api/v1/auth/logout');
+    expect(useAuthStore.getState().isAuthenticated()).toBe(false);
     expect(assign).not.toHaveBeenCalled();
-    // Only the local session ended: the IdP session of the superadmin is
-    // still there, so the sign-in must ask for a fresh login.
     expect(
-      followLogin(screen.getByRole('link', { name: 'Jetzt anmelden und fortfahren' })),
-    ).toEqual({ from: '/onboarding', forceLogin: true });
+      screen.queryByRole('button', { name: 'Abmelden und mit dem neuen Konto anmelden' }),
+    ).toBeNull();
+    expect(followLogin(login)).toEqual({ from: '/onboarding' });
   });
 
   it('says that the server has no self-signup set up (503 on the challenge)', async () => {
