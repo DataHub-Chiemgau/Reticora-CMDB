@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,11 +17,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -727,6 +731,138 @@ func TestInvitationMailStraightToTheInviteeAgainstPostgres(t *testing.T) {
 	}
 	if len(accounts.created) != 1 || accounts.created[0] != email {
 		t.Errorf("IdP accounts = %v, want %s", accounts.created, email)
+	}
+}
+
+// outboxLockClass is the class of the advisory lock that the insert trigger
+// of event_outbox takes per organization (migration 000120).
+const outboxLockClass int32 = 1165389428
+
+// probeOrgLocks takes the advisory locks of orgID's audit chain
+// (audit.AcquireAdvisoryLock) and event outbox in a transaction of its own
+// on pool, with lock_timeout 500 ms, and releases them again. An error means
+// that another transaction holds one of them.
+func probeOrgLocks(pool *pgxpool.Pool, orgID string) error {
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
+		return err
+	}
+	if err := audit.AcquireAdvisoryLock(ctx, tx, orgID); err != nil {
+		return fmt.Errorf("audit chain lock: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, audit_org_lock_key($2::uuid))`, outboxLockClass, orgID); err != nil {
+		return fmt.Errorf("event outbox lock: %w", err)
+	}
+	return nil
+}
+
+// lockProbeMailer stands in for the central SMTP sender: while the issue or
+// renewal sends, it takes the organization's advisory locks from another
+// connection (probeOrgLocks) and records each failure.
+type lockProbeMailer struct {
+	pool  *pgxpool.Pool
+	orgID string
+	sent  int
+	held  []error
+}
+
+func (m *lockProbeMailer) SendInvitation(context.Context, *notify.InvitationMail) error {
+	m.sent++
+	if err := probeOrgLocks(m.pool, m.orgID); err != nil {
+		m.held = append(m.held, err)
+	}
+	return nil
+}
+
+// TestInvitationMailHoldsNoOrganizationLockAgainstPostgres covers TLC-03 and
+// NTF-05 with the IdP admin client: issue and renewal send the invitation
+// mail before the audit entry and invitation.created take the
+// organization's audit-chain and event-outbox advisory locks
+// (sendInvitation), so a slow or unreachable SMTP server does not stall the
+// audited or event-writing writes of the organization for the duration of
+// the send. While the mailer runs, another connection must get both locks
+// within 500 ms; the probe itself must fail against a transaction holding
+// either lock. Audit entry and event are still written after the send.
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestInvitationMailHoldsNoOrganizationLockAgainstPostgres' ./internal/user/
+func TestInvitationMailHoldsNoOrganizationLockAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "d2")
+	bg := context.Background()
+	count := func(sql string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, sql, args...).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return n
+	}
+
+	// The probe detects a held lock of either kind.
+	for name, lock := range map[string]func(pgx.Tx) error{
+		"audit chain": func(tx pgx.Tx) error { return audit.AcquireAdvisoryLock(bg, tx, f.OrgA) },
+		"event outbox": func(tx pgx.Tx) error {
+			_, err := tx.Exec(bg, `SELECT pg_advisory_xact_lock($1, audit_org_lock_key($2::uuid))`, outboxLockClass, f.OrgA)
+			return err
+		},
+	} {
+		holder, err := f.Admin.Begin(bg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := lock(holder); err != nil {
+			t.Fatalf("%s lock: %v", name, err)
+		}
+		if err := probeOrgLocks(f.Admin, f.OrgA); err == nil {
+			t.Errorf("the probe got the %s lock that another transaction holds", name)
+		}
+		_ = holder.Rollback(bg)
+	}
+	if err := probeOrgLocks(f.Admin, f.OrgA); err != nil {
+		t.Fatalf("probe without a holder: %v", err)
+	}
+
+	mailer := &lockProbeMailer{pool: f.Admin, orgID: f.OrgA}
+	mux := chi.NewRouter()
+	NewInvitationHandler(NewPGInvitations(f.App)).WithAcceptURL(testAcceptURL).
+		WithAccounts(&stubInvitationAccounts{}, mailer).RegisterRoutes(mux)
+	admin := f.AppUser(t, f.OrgA, "lock-d2-orgadmin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`,
+		f.OrgA, admin, auditRoleID(t, f, "org_admin")); err != nil {
+		t.Fatal(err)
+	}
+	adminCtx := auditPrincipalCtx(t, f, admin)
+
+	w := auditPost(mux, adminCtx, "/api/v1/invitations",
+		`{"email":"lock-d2-invitee@invite.example","role_id":"`+auditRoleID(t, f, "viewer")+`"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("issue = %d %s", w.Code, w.Body.String())
+	}
+	var inv Invitation
+	if err := json.Unmarshal(w.Body.Bytes(), &inv); err != nil {
+		t.Fatal(err)
+	}
+	if w = auditPost(mux, adminCtx, "/api/v1/invitations/"+inv.ID+"/renew", ``); w.Code != http.StatusOK {
+		t.Fatalf("renew = %d %s", w.Code, w.Body.String())
+	}
+	if mailer.sent != 2 {
+		t.Errorf("%d sends, want one for the issue and one for the renewal", mailer.sent)
+	}
+	for _, err := range mailer.held {
+		t.Errorf("an advisory lock of the organization was held during the send: %v", err)
+	}
+	if n := count(`SELECT count(*) FROM audit_log WHERE organization_id = $1 AND resource_type = 'user_invitation' AND resource_id = $2`,
+		f.OrgA, inv.ID); n != 2 {
+		t.Errorf("%d audit entries of the invitation, want issued and renewed", n)
+	}
+	if n := count(`SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = 'invitation.created' AND entity_id = $2`,
+		f.OrgA, inv.ID); n != 2 {
+		t.Errorf("%d invitation.created events, want one per send", n)
 	}
 }
 

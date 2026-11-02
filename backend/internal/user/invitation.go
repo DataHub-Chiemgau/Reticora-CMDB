@@ -60,9 +60,10 @@ var (
 )
 
 // invitationMailTimeout bounds the send of an invitation mail. It runs
-// inside the transaction of the issue or renewal and stays below the
-// server's write timeout (15 s, cmd/server), so a slow SMTP server ends in
-// ErrInvitationMail rather than in a lost response.
+// inside the transaction of the issue or renewal (holding row locks only,
+// see sendInvitation) and stays below the server's write timeout (15 s,
+// cmd/server), so a slow SMTP server ends in ErrInvitationMail rather than
+// in a lost response.
 const invitationMailTimeout = 10 * time.Second
 
 // Invitation statuses, derived from accepted_at and expires_at.
@@ -124,8 +125,10 @@ type InvitationDelivery struct {
 	// Link is the acceptance link of the token.
 	Link string
 	// Mailer, when set, sends the invitation mail straight to the invited
-	// address, as the last step of the transaction: when the SMTP server
-	// does not take it, the issue or renewal rolls back (ErrInvitationMail).
+	// address inside the transaction, before the audit entry and the event
+	// take the organization's advisory locks (sendInvitation): when the SMTP
+	// server does not take it, the issue or renewal rolls back
+	// (ErrInvitationMail).
 	// The event invitation.created then carries no link, so no channel of
 	// the organization (e.g. its own SMTP server) and no other consumer of
 	// the event gets the token. Without Mailer the event carries the link,
@@ -268,27 +271,40 @@ func recordInvitationAudit(ctx context.Context, tx pgx.Tx, orgID, actor, id, act
 	return nil
 }
 
-// deliverInvitation appends invitation.created for inv in tx, the
-// transaction of the issue or renewal, and delivers link and expiry to the
-// invitee (NTF-05, InvitationDelivery). Without a mailer the event carries
-// the link and its notification mails it over the organization's e-mail
-// channels. With one the event leaves the link out, and the mailer sends it
-// straight to the invited address as the last step: a refused send rolls
-// the issue or renewal back. Should the commit fail after the send, the
-// mailed link names no stored token, and the acceptance answers 404. The
-// address travels as a vault surrogate (SEC-05); webhook deliveries leave
-// out the link (webhook.go).
-func deliverInvitation(ctx context.Context, tx pgx.Tx, inv *Invitation, delivery InvitationDelivery) error {
+// sendInvitation is the first of the two steps in which an issue or renewal
+// delivers inv in its transaction tx (NTF-05, InvitationDelivery). It runs
+// right after the INSERT or UPDATE of the invitation, reads the
+// organization as the mail and the event name it and, when delivery has a
+// mailer, sends the mail straight to the invited address; a refused send
+// rolls the issue or renewal back. Only then follow the audit entry and
+// appendInvitationCreated: both take advisory locks of the organization
+// (the audit chain, audit.AcquireAdvisoryLock and migration 000117; the
+// event outbox, migration 000120) that last until commit, and holding them
+// through the SMTP conversation would stall every audited or event-writing
+// write of the organization for as long as the send takes. During the send
+// tx holds row locks only: the invitation row and, on an issue, the
+// foreign-key share locks on its organization and role rows. Should the
+// audit entry, the event or the commit fail after the send, the mailed link
+// names no stored token, and the acceptance answers 404.
+func sendInvitation(ctx context.Context, tx pgx.Tx, inv *Invitation, delivery InvitationDelivery) (invitationOrganization, error) {
 	var org invitationOrganization
 	if err := tx.QueryRow(ctx, `SELECT name, locale, COALESCE(settings->'branding'->>'sender_name', '')
 		FROM organization WHERE id = $1`, inv.OrganizationID).Scan(&org.Name, &org.Locale, &org.SenderName); err != nil {
-		return fmt.Errorf("read organization: %w", err)
+		return org, fmt.Errorf("read organization: %w", err)
 	}
-	if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: inv.OrganizationID, Type: events.InvitationCreated,
-		EntityID: inv.ID, Data: delivery.eventData(inv, org.Name)}); err != nil {
-		return err
-	}
-	return delivery.send(ctx, inv, org)
+	return org, delivery.send(ctx, inv, org)
+}
+
+// appendInvitationCreated appends invitation.created for inv in tx, the
+// second step of the delivery after sendInvitation and the audit entry.
+// Without a mailer the event carries the link, and its notification mails
+// it over the organization's e-mail channels; with one it leaves the link
+// out. The address travels as a vault surrogate (SEC-05); webhook
+// deliveries leave out the link (webhook.go).
+func appendInvitationCreated(ctx context.Context, tx pgx.Tx, inv *Invitation, delivery InvitationDelivery, orgName string) error {
+	_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: inv.OrganizationID, Type: events.InvitationCreated,
+		EntityID: inv.ID, Data: delivery.eventData(inv, orgName)})
+	return err
 }
 
 // invitationOrganization is the organization of an invitation as its mail
@@ -354,11 +370,17 @@ func (r *PGInvitations) IssueInvitation(ctx context.Context, caller *identity.Pr
 			return fmt.Errorf("insert invitation: %w", err)
 		}
 		*inv = *created
+		// The mail goes out before the audit entry and the event take the
+		// organization's advisory locks (sendInvitation).
+		org, err := sendInvitation(ctx, tx, inv, delivery)
+		if err != nil {
+			return err
+		}
 		if err := recordInvitationAudit(ctx, tx, inv.OrganizationID, inv.InvitedBy, inv.ID, "invitation.issued",
 			map[string]any{"role_id": inv.RoleID, "scope_type": inv.ScopeType, "scope_id": inv.ScopeID}); err != nil {
 			return err
 		}
-		return deliverInvitation(ctx, tx, inv, delivery)
+		return appendInvitationCreated(ctx, tx, inv, delivery, org.Name)
 	})
 }
 
@@ -417,7 +439,7 @@ func (r *PGInvitations) ListInvitations(ctx context.Context, orgID string, page 
 
 // RenewInvitation implements InvitationRepository: a pending or expired
 // invitation gets a new token and a new validity; the old token stops
-// working, the invitee gets a mail with the new link (deliverInvitation; a
+// working, the invitee gets a mail with the new link (sendInvitation; a
 // refused direct send keeps the old token and expiry). The renewing
 // principal must hold user:manage and the role's permissions in a scope
 // covering the invitation's scope (grant ceiling).
@@ -454,11 +476,17 @@ func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, c
 		if err != nil {
 			return fmt.Errorf("renew invitation: %w", err)
 		}
+		// The mail goes out before the audit entry and the event take the
+		// organization's advisory locks (sendInvitation).
+		org, err := sendInvitation(ctx, tx, inv, delivery)
+		if err != nil {
+			return err
+		}
 		if aerr := recordInvitationAudit(ctx, tx, orgID, tenant.FromContext(ctx).UserID, id, "invitation.renewed",
 			map[string]any{"expires_at": expiresAt.UTC().Format(time.RFC3339)}); aerr != nil {
 			return aerr
 		}
-		return deliverInvitation(ctx, tx, inv, delivery)
+		return appendInvitationCreated(ctx, tx, inv, delivery, org.Name)
 	})
 	if err != nil {
 		return nil, err

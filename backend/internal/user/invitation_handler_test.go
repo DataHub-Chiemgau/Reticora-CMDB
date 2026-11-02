@@ -22,9 +22,10 @@ import (
 )
 
 // fakeInvitations is an InvitationRepository without database. Issue and
-// renewal deliver like PGInvitations (deliverInvitation): they record the
-// data of invitation.created and send the direct mail last; a refused send
-// changes nothing, like the rolled-back transaction.
+// renewal deliver like PGInvitations (sendInvitation, then
+// appendInvitationCreated): they send the direct mail first and then record
+// the data of invitation.created; a refused send changes nothing, like the
+// rolled-back transaction.
 type fakeInvitations struct {
 	org    invitationOrganization
 	stored map[string]Invitation
