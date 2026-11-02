@@ -22,11 +22,18 @@ spec:
           env:
             - name: RETICORA_PORT
               value: "8080"
+            # Runtime login only (TEN-03): the DSN names a dedicated login
+            # with LOGIN NOSUPERUSER NOBYPASSRLS that is a member of
+            # reticora_app and of no other role (deploy/README.md). The
+            # migration login (owner/superuser) lives in the separate secret
+            # reticora-db-migrate and never reaches this pod, so a RESET ROLE
+            # on a pooled connection gains nothing (F-057).
             - name: RETICORA_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: reticora-secrets
+                  name: reticora-db-runtime
                   key: database-url
+                  optional: false
             - name: RETICORA_NATS_URL
               value: "nats://nats:4222"
             - name: RETICORA_REDIS_URL
@@ -54,6 +61,55 @@ spec:
                   name: reticora-secrets
                   key: master-key
                   optional: false
+            # Master key rotation (SEC-06, docs/ops/workers.md "Key
+            # rotation"): the old key(s), comma-separated, while
+            # rotation.master_key rewraps the data keys. Optional, so the pod
+            # starts once the key master-key-previous is removed again.
+            - name: RETICORA_MASTER_KEY_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: master-key-previous
+                  optional: true
+            # OIDC login. The issuer is mandatory outside development (start
+            # check, requiredOutsideDevelopment, F-036); issuer, client ID and
+            # redirect URL come from the operator's ConfigMap reticora-config,
+            # the client secret from reticora-secrets. Like the master key,
+            # every reference is mandatory: a missing ConfigMap, secret or
+            # key keeps the pod in CreateContainerConfigError.
+            - name: RETICORA_OIDC_ISSUER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-issuer-url
+                  optional: false
+            - name: RETICORA_OIDC_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-client-id
+                  optional: false
+            - name: RETICORA_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: oidc-client-secret
+                  optional: false
+            - name: RETICORA_OIDC_REDIRECT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-redirect-url
+                  optional: false
+            # Accept page of the invitation mail, an absolute URL
+            # https://<host>/invitations/accept. Without it issuing and
+            # renewing invitations answers 503 (WP-421, F-041).
+            - name: RETICORA_INVITATION_ACCEPT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: invitation-accept-url
+                  optional: false
             # Operator switches of the background workers (OPS-02,
             # docs/ops/workers.md). A dedicated worker deployment keeps them
             # on and the API deployment switches them off, or vice versa.
@@ -64,6 +120,8 @@ spec:
             - name: RETICORA_WORKER_INGEST_ENABLED
               value: "true"
             - name: RETICORA_WORKER_MONITORING_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_HEALTH_ENABLED
               value: "true"
             - name: RETICORA_WORKER_SCHEDULER_ENABLED
               value: "true"
@@ -81,15 +139,20 @@ spec:
               value: "true"
             - name: RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED
               value: "true"
+            # CI offline detector (REC-09, LCY-05), a system job of the
+            # scheduler.
+            - name: RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session
               readOnly: true
           # Liveness only asks whether the process serves HTTP; readiness
-          # (/readyz) also checks database, Redis, object storage and NATS, so
-          # a dependency outage removes the pod from the Service without
-          # restarting it (OPS-01). /readyz answers within 2 s (its check
-          # timeout); the probe waits longer, so the answer decides.
+          # (/readyz) also checks database, Redis, object storage, NATS and,
+          # with RETICORA_SMTP_HOST, the SMTP server, so a dependency outage
+          # removes the pod from the Service without restarting it (OPS-01).
+          # /readyz answers within 2 s (its check timeout); the probe waits
+          # longer, so the answer decides.
           livenessProbe:
             httpGet:
               path: /healthz

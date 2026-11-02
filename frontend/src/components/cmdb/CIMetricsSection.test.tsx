@@ -78,4 +78,21 @@ describe('CIMetricsSection', () => {
 
     await waitFor(() => expect(screen.getByText(/nicht freigeschaltet|not enabled/i)).toBeTruthy());
   });
+
+  it('shows the error instead of a line for a CI the API does not find (F-167)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async () =>
+        json({ title: 'Not Found', status: 404, detail: 'ci not found' }, 404),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<CIMetricsSection ciId={CI_ID} />);
+    fireEvent.click(screen.getByRole('button', { name: /metriken laden|load metrics/i }));
+
+    expect(await screen.findByText('ci not found')).toBeTruthy();
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.queryByText(/keine messwerte|no samples/i)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

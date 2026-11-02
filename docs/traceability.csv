@@ -457,11 +457,6 @@ GLO-11;[Q];G1;backend/internal/traceability/traceability_test.go;WP-213
 WHK-01;[B];G1;backend/internal/webhook/whk01_test.go;WP-213
 WHK-01;[B];G1;backend/internal/webhook/whk01_integration_test.go;WP-213
 AUD-02;[B];G1;backend/internal/contact/handler_test.go;WP-213
-AUT-05;[B];G1;docs/acceptance/g1-gate.md;WP-213
-AUT-06;[B];G1;docs/acceptance/g1-gate.md;WP-213
-NET-04;[B];G1;docs/acceptance/g1-gate.md;WP-213
-NFR-08;[B];G1;docs/acceptance/g1-gate.md;WP-213
-GATE-04;[Q], Bezug GA;G1;docs/acceptance/g1-gate.md;WP-213
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-332
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/ci/create_many_integration_test.go;WP-333
 NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/consumer_integration_test.go;WP-334
@@ -470,3 +465,719 @@ NFR-10;[Q];G1;tests/load/ingest.js;WP-334
 NFR-02;[B];G1;backend/internal/topology/querybudget_integration_test.go;WP-335
 NFR-02;[B];G1;tests/load/api.js;WP-335
 ABN-02;[Q];G1;backend/internal/topology/querybudget_integration_test.go;WP-335
+GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-336
+DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-336
+TST-04;[Q];A;tests/audit/run-auditdefect.test.sh;WP-337
+TST-02;[B];A;tests/audit/run-auditdefect.test.sh;WP-337
+TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
+TST-04;[Q];C;frontend/e2e-real/stack-smoke.spec.ts;WP-338
+TEN-06;[B];B;backend/internal/tenant/rls/compliance_channel_integration_test.go;WP-339
+TEN-06;[B];B;backend/internal/rack/rack_scope_integration_test.go;WP-340
+TEN-09;[Q];B;backend/internal/tenant/rls/rack_channel_scope_integration_test.go;WP-340
+MGT-01;[P2];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-341
+MGT-04;[P3];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-341
+TEN-06;[B];B;backend/internal/tenant/rls/module_object_writes_integration_test.go;WP-341
+TEN-06;[B];B;backend/internal/discovery/discovery_scope_integration_test.go;WP-342
+TEN-02;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-05;[B];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-09;[Q];B;backend/internal/tenant/rls/review_item_scope_integration_test.go;WP-342
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-343
+MON-01;[B];B;backend/internal/monitoring/audit_t1_metric_scope_integration_test.go;WP-344
+TEN-06;[B];B;backend/internal/tenant/rls/ci_metrics_channel_integration_test.go;WP-344
+TEN-02;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-345
+TEN-05;[B];B;backend/internal/tenant/rls/ci_children_integration_test.go;WP-345
+IMP-07;[B];B;backend/internal/tenant/rls/edge_scope_integration_test.go;WP-345
+TEC-12;[P5];B;backend/internal/search/opensearch_placement_integration_test.go;WP-346
+EXP-01;[B], DATEV [P2];B;backend/internal/export/scope_integration_test.go;WP-347
+TEN-06;[B];B;backend/internal/jobs/pg_repository_integration_test.go;WP-347
+TEN-09;[Q];B;backend/internal/tenant/rls/export_job_channel_integration_test.go;WP-347
+TEN-03;[B];B;tests/install-cloud-helpers.test.sh;WP-348
+TEN-03;[B];B;backend/internal/database/scopetest/scopetest_integration_test.go;WP-349
+TEC-06;[B], [Q] Spike;B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-350
+MON-01;[B];B;backend/internal/monitoring/timescale_rls_spike_integration_test.go;WP-350
+TEN-02;[B];B;backend/internal/monitoring/audit_t1_metric_scope_integration_test.go;WP-350
+TEN-03;[B];B;backend/internal/database/tenantguard_test.go;WP-351
+TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-352
+DB-04;nicht geliefert;B;backend/internal/database/role_check_integration_test.go;WP-352
+MGT-02;[P2];B;backend/internal/tenant/rls/module_object_integration_test.go;WP-353
+TEN-09;[Q];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-353
+TST-02;[B];B;backend/internal/tenant/rls/matrix_integration_test.go;WP-353
+AUT-04;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-354
+API-05;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-354
+RBA-08;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-354
+RBA-08;[B];B;backend/internal/user/service_account_integration_test.go;WP-355
+API-05;[B];B;backend/internal/user/service_account_integration_test.go;WP-355
+RBA-08;[B];B;backend/internal/webhook/dispatcher_integration_test.go;WP-356
+AUT-09;[B];B;backend/internal/signup/mfa_test.go;WP-357
+AUT-09;[B];B;frontend/e2e-real/mfa-admin.spec.ts;WP-358
+TLC-04;[B];B;backend/internal/user/deactivation_tenant_integration_test.go;WP-359
+AUT-02;[B];B;backend/internal/identity/deactivation_integration_test.go;WP-359
+AI-02;[A];B;backend/internal/server/t2_ai_optin_test.go;WP-360
+SEC-07;[B];B;frontend/e2e-real/operator-login.spec.ts;WP-361
+SEC-07;[B];B;tests/audit/t2-break-glass-alert.test.sh;WP-362
+RBA-01;[B];B;backend/internal/server/authz_catalog_test.go;WP-363
+AUT-02;[B];B;backend/internal/server/t2_auth_chain_test.go;WP-364
+API-04;[B];B;backend/cmd/server/main_test.go;WP-364
+AGT-03;[P4];B;backend/cmd/agent/t2_transport_test.go;WP-365
+AUT-02;[B];B;frontend/src/auth/bootRefresh.test.tsx;WP-366
+AUT-10;[B];B;frontend/src/auth/session.test.ts;WP-366
+AUT-09;[B];B;backend/internal/identity/handler_test.go;WP-367
+CI-04;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
+OVR-01;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
+API-07;[B];D;backend/internal/ci/bulk_integration_test.go;WP-368
+CI-13;[B];D;backend/internal/discovery/resurrect_test.go;WP-369
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/ci_scope_integration_test.go;WP-370
+AST-05;[P2];B;backend/internal/ci/ci_scope_integration_test.go;WP-370
+NET-08;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+NET-01;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+NET-02;[B];B;backend/internal/ipam/vlan_integration_test.go;WP-371
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/server/vlan_routes_integration_test.go;WP-371
+TEN-10;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
+NET-02;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
+NET-03;[B];B;backend/internal/ipam/vrf_integration_test.go;WP-372
+REC-08;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373
+API-05;[B];D;backend/internal/server/audit_t3_review_routes_integration_test.go;WP-373
+COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-374
+PRI-07;Grundsatz (ohne Tag);D;backend/internal/discovery/natsedge_integration_test.go;WP-374
+COL-04;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-375
+COL-02;[B];D;backend/internal/discovery/renew_edge_integration_test.go;WP-375
+COL-02;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-376
+DIS-09;[B];D;backend/internal/discovery/scope_integration_test.go;WP-376
+INS-06;[B];D;backend/internal/discovery/bundle_selection_integration_test.go;WP-376
+DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-377
+DIS-04;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
+DIS-09;[B];D;collector/collectorcmd/discovery_credentials_test.go;WP-378
+COL-02;[B];D;collector/collectorcmd/bundle_test.go;WP-378
+DIS-04;[B];D;collector/plugins/nas/nas_test.go;WP-379
+DIS-09;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-380
+COL-01;[B];D;backend/internal/discovery/edge_status_integration_test.go;WP-380
+COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-381
+DIS-09;[B];D;backend/internal/discovery/zone_isolation_integration_test.go;WP-383
+API-05;[B];D;backend/internal/discovery/zone_isolation_integration_test.go;WP-383
+REC-09;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-383
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-383
+TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-383
+COL-01;[B];D;backend/internal/discovery/collector_status_integration_test.go;WP-383
+DIS-09;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+API-05;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+INS-06;[B];D;backend/internal/server/scope_suggested_authz_integration_test.go;WP-382
+COL-02;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+DIS-09;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+INS-06;[B];D;frontend/e2e-real/onboarding-bundle.spec.ts;WP-384
+INS-02;[B];A;tests/install-cloud-issuer-order.test.sh;WP-385
+INS-05;[B];A;tests/install-reinstall.test.sh;WP-386
+TEC-15;[B];A;tests/install-signature.test.sh;WP-387
+COL-06;[B], Air-Gapped [O];A;tests/install-signature.test.sh;WP-387
+TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-390
+RBA-03;[B];B;backend/internal/identity/principal_scope_test.go;WP-390
+TEN-09;[Q];B;backend/internal/locations/sitescope_integration_test.go;WP-390
+RBA-03;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
+TEN-04;[B];B;backend/internal/permission/scope_integration_test.go;WP-391
+TEN-01;[B], Reseller [P4];B;backend/internal/locations/sitescope_integration_test.go;WP-392
+TEN-02;[B];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-392
+TEN-02;[B];B;backend/internal/tenant/rls/located_site_scope_integration_test.go;WP-393
+TEN-05;[B];B;backend/internal/tenant/rls/located_site_scope_integration_test.go;WP-393
+TEN-09;[Q];B;backend/internal/tenant/rls/catalog_integration_test.go;WP-393
+TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-394
+API-05;[B];B;backend/internal/user/grant_ceiling_test.go;WP-394
+AUT-02;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-395
+API-05;[B];B;backend/internal/user/role_assignment_integration_test.go;WP-395
+CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/server/ci_type_ref_integration_test.go;WP-396
+TEN-09;[Q];B;backend/internal/server/ci_type_ref_integration_test.go;WP-396
+CI-03;[B];B;frontend/src/pages/CIFormModal.test.tsx;WP-397
+MET-04;B/G1;B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-397
+CI-01;[B], Teilfelder [P2]/[P3];B;frontend/src/pages/CIFormModal.test.tsx;WP-397
+TST-03;[B], Teilumfang [P2];B;frontend/e2e-real/ci-lifecycle.spec.ts;WP-397
+NTF-01;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+NTF-04;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+API-05;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+RBA-02;[B];B;backend/internal/server/notification_authz_integration_test.go;WP-398
+NTF-01;[B];B;backend/internal/notify/channel_secret_test.go;WP-399
+TEC-13;[B];B;backend/internal/notify/channel_secret_test.go;WP-399
+REP-01;[B];B;backend/internal/notify/channel_test.go;WP-399
+SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-399
+EVT-02;[B];B;backend/internal/server/domain_events_integration_test.go;WP-400
+EVT-01;[B];B;backend/internal/server/domain_events_integration_test.go;WP-400
+REL-02;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
+REL-04;[B];B;backend/internal/relationship/relationship_scope_integration_test.go;WP-401
+SEC-11;[Q];A;tests/ci-config.test.sh;WP-389
+TST-04;[Q];A;tests/ci-config.test.sh;WP-389
+TEC-15;[B];A;tests/install-signature.test.sh;WP-388
+MON-02;[B];C;backend/internal/monitoring/ci_metrics_integration_test.go;WP-402
+SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_integration_test.go;WP-405
+IMP-06;[B];C;backend/internal/topology/limit_integration_test.go;WP-403
+IMP-05;[B];C;backend/internal/topology/multi_integration_test.go;WP-403
+UI-06;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-403
+API-09;[B];C;backend/internal/jobs/scope_integration_test.go;WP-404
+JOB-03;[B];C;backend/internal/jobs/scope_integration_test.go;WP-404
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-406
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+WFL-01;[P3];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-407
+TEN-09;[Q];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
+TST-02;[B];SR;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-409
+TEN-06;[B];B;backend/internal/server/handler_errors_test.go;WP-408
+WFL-01;[P3];B;backend/internal/workflow/submit_form_integration_test.go;WP-603
+IGA-01;[A];B;backend/internal/iga/access_request_workflow_integration_test.go;WP-603
+INS-05;[B];A;tests/timescaledb-update.test.sh;WP-604
+OPS-01;[B];A;tests/timescaledb-update.test.sh;WP-604
+TEN-09;[Q];B;backend/internal/webhook/subscription_scope_integration_test.go;WP-601
+WHK-01;[B];B;backend/internal/webhook/subscription_scope_integration_test.go;WP-601
+NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
+ABN-02;[Q];LT;backend/internal/ci/list_budget_integration_test.go;WP-605
+IMP-06;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
+NFR-02;[B];C;backend/internal/topology/querybudget_integration_test.go;WP-602
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-606
+API-04;[B];C;backend/internal/middleware/ratelimit_test.go;WP-410
+OVR-01;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-412
+CI-10;[B];D;backend/internal/ci/effective_view_integration_test.go;WP-412
+API-07;[B];D;backend/internal/ci/concurrency_integration_test.go;WP-412
+INS-03;[B];A;tests/install-cloud-acme.test.sh;WP-419
+TEC-09;[B];A;tests/install-cloud-acme.test.sh;WP-419
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/user/invitation_integration_test.go;WP-421
+TLC-03;[B];B;backend/internal/user/invitation_integration_test.go;WP-421
+LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-411
+CI-10;[B];D;frontend/src/api/cmdbHooks.test.tsx;WP-413
+API-07;[B];D;frontend/e2e-real/discovery-override.spec.ts;WP-413
+DIS-04;[B];D;collector/plugins/wmi/wmi_test.go;WP-415
+DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-415
+OPS-03;[B], [P5];A;backend/internal/config/k8s_required_env_test.go;WP-422
+OPS-01;[B];A;backend/internal/config/k8s_required_env_test.go;WP-422
+INS-02;[B];A;tests/install-acme-pebble.test.sh;WP-420
+TEC-09;[B];A;tests/install-acme-pebble.test.sh;WP-420
+TOP-01;[B];D;collector/plugins/snmp/neighbors_test.go;WP-416
+CI-13;[B];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-418
+GATE-02;[Q];D;backend/internal/tenant/rls/ci_decorator_chain_integration_test.go;WP-418
+DIS-02;[B], Profilliste (V);D;backend/internal/discovery/ingest_review_integration_test.go;WP-417
+COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-414
+DIS-08;[Q];D;collector/collectorcmd/natsconn_test.go;WP-414
+AUD-04;[B];B;backend/internal/audit/pg_roundtrip_integration_test.go;WP-423
+CI-03;[B];B;backend/internal/ci/special_chars_integration_test.go;WP-423
+MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/special_chars_integration_test.go;WP-423
+REL-02;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-424
+REL-05;[B];B;backend/internal/server/manual_edge_integration_test.go;WP-424
+NET-01;[B];B;backend/internal/ipam/interface_integration_test.go;WP-424
+JOB-02;[B], Zusätze [P2], [P3];B;backend/cmd/server/main_test.go;WP-425
+OPS-03;[B], [P5];B;backend/cmd/server/main_test.go;WP-425
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/jobs/notices_integration_test.go;WP-425
+EVT-02;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
+ENT-07;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
+COL-04;[B];B;backend/internal/jobs/notices_integration_test.go;WP-425
+MON-02;[B];C;backend/internal/discovery/edge_metrics_integration_test.go;WP-426
+GLO-11;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
+DOD-01;[Q];A;backend/internal/traceability/traceability_test.go;WP-450
+OPS-05;[B];A;tests/monitoring-config.test.sh;WP-446
+SIM-01;[B], Teilumfang [P2];LT;backend/cmd/seed/seed_integration_test.go;WP-433
+NFR-10;[Q];LT;backend/cmd/seed/seed_integration_test.go;WP-433
+OPS-01;[B];A;backend/cmd/server/startup_readiness_integration_test.go;WP-442
+COL-08;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-429
+GATE-01;[Q];G1;tests/rep01-structure.test.sh;WP-451
+GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-451
+GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-451
+NFR-05;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
+OPS-04;[B], [P5];A;tests/backup-config.test.sh;WP-443
+NFR-09;[B];A;deploy/terraform/tests/backup.tftest.hcl;WP-443
+NFR-01;[B], Teilumfang [P5];LT;backend/internal/discovery/scale_integration_test.go;WP-434
+OPS-05;[B];A;backend/cmd/server/workers_metrics_test.go;WP-447
+OPS-02;[B], [P3], [A];A;backend/internal/config/config_test.go;WP-447
+COL-04;[B];D;backend/internal/discovery/natsedge_integration_test.go;WP-430
+GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-452
+SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-452
+ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-456
+OPS-05;[B];A;backend/internal/operator/alerts_integration_test.go;WP-448
+ABN-02;[Q];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-435
+NFR-10;[Q];LT;tests/load/api.js;WP-437
+ABN-02;[Q];LT;tests/load/api.js;WP-437
+NFR-02;[B];LT;tests/load/api.js;WP-437
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-437
+ABN-03;[Q], jeweilige Phase;LT;backend/internal/ci/integrity_check_integration_test.go;WP-437
+OPS-03;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-441
+COL-08;[B];D;tests/audit/compose-port-policy.test.sh;WP-431
+PRI-07;Grundsatz (ohne Tag);D;tests/audit/compose-port-policy.test.sh;WP-431
+ABN-02;[Q];LT;backend/internal/ci/querybudget_integration_test.go;WP-436
+OPS-06;[Q];A;tests/outage/run.sh;WP-449
+NFR-02;[B];LT;backend/internal/ci/list_budget_integration_test.go;WP-438
+INS-06;[B];D;tests/audit/collector-install-cli.test.sh;WP-432
+COL-06;[B], Air-Gapped [O];D;tests/install-vm-cosign.test.sh;WP-432
+AUT-09;[B];B;tests/keycloak-realm-upgrade.test.sh;WP-428
+INS-03;[B];A;tests/install-acme-pebble.test.sh;WP-440
+INS-01;[Q];A;tests/install-smoke-health.test.sh;WP-440
+NFR-05;[B];A;tests/restore-pitr-config.test.sh;WP-445
+OPS-04;[B], [P5];A;tests/restore-pitr.sh;WP-445
+NFR-06;[B];B;tests/audit/log-retention.test.sh;WP-458
+OPS-04;[B], [P5];A;tests/k8s/kind-smoke.sh;WP-444
+NFR-05;[B];A;tests/k8s/kind-smoke.sh;WP-444
+SEC-06;[B];B;backend/internal/platform/crypto/crypto_test.go;WP-459
+NFR-10;[Q];LT;tests/load/api.js;WP-439
+NFR-01;[B], Teilumfang [P5];LT;backend/cmd/seed/seed_integration_test.go;WP-439
+NFR-02;[B];LT;tests/load/api.js;WP-439
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-439
+ABN-02;[Q];LT;tests/load/api.js;WP-439
+TEN-03;[B];B;backend/internal/database/migrations_roundtrip_integration_test.go;WP-427
+NFR-02;[B];LT;backend/internal/identity/apikey_lastused_integration_test.go;WP-610
+NFR-02;[B];LT;backend/internal/relationship/list_plan_integration_test.go;WP-609
+ABN-02;[Q];LT;backend/internal/relationship/list_plan_integration_test.go;WP-609
+NFR-02;[B];LT;backend/internal/ci/attr_filter_plan_integration_test.go;WP-607
+NFR-01;[B], Teilumfang [P5];LT;backend/internal/ci/indexes_integration_test.go;WP-607
+NFR-10;[Q];LT;tests/load/evaluate-runs.sh;WP-612
+NFR-02;[B];LT;backend/internal/topology/impact_bench_integration_test.go;WP-611
+NFR-03;[B], Teilumfang [P5];LT;backend/internal/discovery/ingest_budget_integration_test.go;WP-608
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-470
+CI-06;[B];C;backend/internal/history/history_integration_test.go;WP-473
+LOC-10;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
+LOC-11;B/G1;C;backend/internal/history/history_integration_test.go;WP-473
+SRC-03;[P2], Textsyntax [O];B;backend/internal/savedview/scope_integration_test.go;WP-460
+CI-04;[B];D;backend/internal/ci/manual_override_integration_test.go;WP-476
+REC-01;[B];D;backend/internal/discovery/consumer_integration_test.go;WP-481
+NFR-03;[B], Teilumfang [P5];D;backend/internal/discovery/consumer_test.go;WP-481
+LOC-07;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
+LOC-11;B/G1;B;frontend/src/pages/LocationTreePage.test.tsx;WP-474
+ENT-05;[B];B;backend/internal/entitlement/enforce_integration_test.go;WP-471
+API-04;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-471
+CI-04;[B];D;frontend/src/pages/CIFormModal.test.tsx;WP-477
+API-07;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-477
+API-03;[B];D;frontend/src/pages/CIDetailPage.instance-fields.test.tsx;WP-477
+COL-05;[B];D;edgecore/buffer/buffer_test.go;WP-482
+OPS-06;[Q];D;edgecore/buffer/buffer_test.go;WP-482
+NFR-04;[B], Teilumfang [P5];D;edgecore/buffer/buffer_test.go;WP-482
+CI-06;[B];C;backend/internal/history/history_scope_integration_test.go;WP-475
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-466
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/asset_canonical_integration_test.go;WP-486
+AST-04;[P2];B;backend/internal/server/ci_asset_routes_integration_test.go;WP-486
+COL-05;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-483
+OPS-06;[Q];D;collector/collectorcmd/collectorcmd_test.go;WP-483
+NFR-04;[B], Teilumfang [P5];D;collector/collectorcmd/collectorcmd_test.go;WP-483
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-467
+GLO-13;[B];D;backend/internal/server/override_routes_integration_test.go;WP-478
+CI-10;[B];D;backend/internal/ci/namespace_integration_test.go;WP-478
+REC-03;[B];D;backend/internal/override/decide_test.go;WP-478
+OVR-02;[B];D;backend/internal/agent/agent_merge_integration_test.go;WP-484
+AGT-05;[P4];D;backend/internal/agent/agent_merge_integration_test.go;WP-484
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-472
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-472
+TEN-06;[B];B;backend/internal/iga/approve_task_integration_test.go;WP-461
+API-05;[B];C;frontend/src/api/deprecatedPaths.test.ts;WP-468
+CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-485
+AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-462
+API-04;[B];B;backend/cmd/server/main_test.go;WP-462
+AUD-03;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
+CI-11;[B];C;backend/internal/ci/change_record_integration_test.go;WP-487
+AI-02;[A];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-463
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/health_integration_test.go;WP-480
+CI-12;[B];C;backend/internal/discovery/review_resolution_integration_test.go;WP-479
+SEC-08;[B];B;frontend/src/pages/WebhooksPage.test.tsx;WP-465
+IMP-01;[B];C;backend/internal/topology/impact_test.go;WP-490
+IMP-03;[B];C;backend/internal/topology/impact_integration_test.go;WP-490
+IMP-07;[B];C;backend/internal/topology/impact_integration_test.go;WP-490
+IMP-02;[B];C;backend/internal/topology/topology_test.go;WP-490
+AUD-03;[B];C;backend/internal/history/history_integration_test.go;WP-488
+AUD-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
+API-05;[B];C;frontend/src/pages/AuditPage.test.tsx;WP-469
+ENT-07;[B];B;frontend/src/components/EntitlementExpiryBanner.test.tsx;WP-464
+IMP-03;[B];C;frontend/src/components/cmdb/CIDetailSections.impact.test.tsx;WP-491
+IMP-01;[B];C;frontend/src/pages/TopologyPage.test.tsx;WP-491
+DIS-09;[B];D;collector/collectorcmd/discovery_scope_test.go;WP-494
+INS-06;[B];D;collector/collectorcmd/collectorcmd_test.go;WP-494
+COL-04;[B];D;collector/collectorcmd/lifecycle_test.go;WP-493
+DIS-04;[B];D;collector/plugins/snmp/v3_agent_test.go;WP-492
+DIS-08;[Q];D;backend/internal/discovery/errors_test.go;WP-492
+AUD-03;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
+CI-11;[B];C;backend/internal/discovery/ingest_change_integration_test.go;WP-489
+LOC-03;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+API-05;[B];B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-04;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-05;B/G1;B;backend/internal/locations/unique_conflict_integration_test.go;WP-500
+LOC-06;B/G1;B;backend/internal/rack/height_integration_test.go;WP-500
+RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-500
+DIS-10;[B];D;collector/collectorcmd/schedule_test.go;WP-495
+IMP-09;[B];D;backend/internal/discovery/power_chain_integration_test.go;WP-498
+REL-03;[B];D;backend/internal/discovery/power_test.go;WP-498
+AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-504
+EVT-01;[B];B;backend/internal/webhook/consume_integration_test.go;WP-506
+MET-11;B/G1, Teil P2/G2;B;backend/internal/discovery/typedvalues_integration_test.go;WP-501
+CI-03;[B];B;backend/internal/discovery/typedvalues_integration_test.go;WP-501
+TLC-03;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-510
+API-05;[B];B;frontend/src/pages/UserManagementPage.test.tsx;WP-510
+DIS-09;[B];D;frontend/e2e-real/discovery-scopes.spec.ts;WP-496
+DIS-08;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-496
+MON-02;[B];C;collector/collectorcmd/power_metrics_test.go;WP-512
+NTF-03;[B];B;backend/internal/notify/recipients_integration_test.go;WP-507
+TOP-02;[B];D;backend/internal/relationship/cleanup_integration_test.go;WP-497
+JOB-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;WP-502
+REP-01;[B];B;backend/internal/server/discovery_job_tracking_integration_test.go;WP-502
+MET-15;B/G1;B;frontend/src/pages/CITypeAdminPage.flags.test.tsx;WP-511
+DB-04;nicht geliefert;B;backend/internal/citype/attrdef_integration_test.go;WP-511
+VIE-01;[B];C;backend/internal/savedview/savedview_integration_test.go;WP-518
+TEC-14;[B];B;backend/internal/jobs/queue_integration_test.go;WP-503
+JOB-01;[B];B;backend/internal/server/jobkinds_test.go;WP-503
+UI-01;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-02;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-03;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-04;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-05;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-07;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-08;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-09;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+UI-10;[B];C;frontend/e2e/keyboard.spec.ts;WP-519
+AUD-05;[B];B;backend/internal/server/route_audit_integration_test.go;WP-505
+AUD-07;[B];B;backend/internal/audit/route_snapshot_test.go;WP-505
+IMP-04;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-513
+IMP-05;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-513
+NTF-04;[B];B;backend/internal/notify/digest_integration_test.go;WP-508
+UI-16;[B];C;frontend/src/pages/ReviewInboxPage.test.tsx;WP-528
+NTF-01;[B];B;backend/internal/notify/defaults_integration_test.go;WP-509
+NTF-04;[B];B;backend/internal/notify/defaults_integration_test.go;WP-509
+UI-16;[B];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-509
+JOB-03;[B];C;backend/internal/ci/bulk_jobs_integration_test.go;WP-514
+API-08;[B];C;backend/internal/ci/bulk_jobs_integration_test.go;WP-514
+UI-16;[B];C;backend/internal/jobs/handler_test.go;WP-514
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-522
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-522
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-499
+JOB-03;[B];C;backend/internal/export/cancel_integration_test.go;WP-515
+JOB-04;[B];C;backend/internal/history/snapshot_integration_test.go;WP-516
+API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
+BLK-01;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
+GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-525
+UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-525
+GLO-10;[B];C;frontend/src/pages/CIDetailPage.test.tsx;WP-523
+UI-18;[B];C;frontend/e2e-real/i18n.spec.ts;WP-523
+UI-17;[B];C;frontend/e2e/onboarding.spec.ts;WP-529
+ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-529
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/onboarding.spec.ts;WP-529
+INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-529
+API-08;[B];C;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-520
+BLK-01;[B];C;frontend/src/pages/CIListPage.test.tsx;WP-520
+UI-18;[B];C;frontend/e2e-real/locations-racks.spec.ts;WP-526
+NFR-07;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-526
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-530
+GLO-10;[B];C;frontend/src/i18n/rawEnum.test.ts;WP-527
+UI-18;[B];C;frontend/src/i18n/catalog.test.ts;WP-527
+UI-01;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-02;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-03;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-04;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-05;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-07;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-08;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-09;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-10;[B];C;frontend/e2e-real/scope-switcher.spec.ts;WP-524
+UI-16;[B];C;frontend/e2e-real/job-center.spec.ts;WP-521
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-531
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-531
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/ci.spec.ts;WP-531
+RBA-03;[B];B;backend/internal/tenantapi/tenantapi_scope_integration_test.go;WP-633
+RCK-01;[B];B;backend/internal/rack/height_integration_test.go;WP-634
+TEN-06;[B];B;backend/internal/rack/height_integration_test.go;WP-634
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-630
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-630
+UI-18;[B];C;frontend/e2e/a11y.spec.ts;WP-631
+NFR-07;[B];C;frontend/e2e/a11y.spec.ts;WP-631
+JOB-01;[B];B;backend/internal/discovery/job_execution_integration_test.go;WP-632
+API-02;[B];C;frontend/src/api/listLimit.test.ts;WP-635
+API-02;[B];C;frontend/src/api/client.test.ts;WP-635
+TEC-15;[B];A;edgecore/update/cosign_real_test.go;WP-545
+COL-06;[B], Air-Gapped [O];A;edgecore/update/cosign_real_test.go;WP-545
+NFR-04;[B], Teilumfang [P5];D;backend/internal/maintenance/status_test.go;WP-540
+MGT-04;[P3];D;backend/internal/maintenance/status_test.go;WP-540
+NTF-05;[B], Zusätze [P2], [P3];D;frontend/src/pages/MaintenancePage.test.tsx;WP-540
+NFR-06;[B];B;backend/internal/jobs/retention_integration_test.go;WP-548
+EVT-01;[B];B;backend/internal/config/config_test.go;WP-548
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/events_integration_test.go;WP-549
+EVT-01;[B];B;backend/internal/notify/events_integration_test.go;WP-549
+COL-06;[B], Air-Gapped [O];D;tests/collector-selfupdate.test.sh;WP-546
+NFR-04;[B], Teilumfang [P5];D;frontend/e2e-real/maintenance.spec.ts;WP-541
+MGT-04;[P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
+NTF-05;[B], Zusätze [P2], [P3];D;frontend/e2e-real/maintenance.spec.ts;WP-541
+EVT-01;[B];B;backend/internal/events/emit_tx_integration_test.go;WP-550
+TEC-12;[P5];B;backend/internal/search/opensearch_real_integration_test.go;WP-534
+TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/stack-smoke.spec.ts;WP-532
+TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-533
+TEN-04;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-06;[B];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+EXP-01;[B], DATEV [P2];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-09;[Q];B;frontend/e2e-real/client-scope.spec.ts;WP-535
+TEN-06;[B];B;backend/internal/movement/movement_scope_integration_test.go;WP-537
+AST-01;[P2];B;backend/internal/assignment/assignment_scope_integration_test.go;WP-537
+EVT-02;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+EVT-01;[B];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/server/evt02_producers_integration_test.go;WP-551
+COL-02;[B];B;collector/collectorcmd/redfish_tls_integration_test.go;WP-539
+TEN-04;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-536
+TEN-06;[B];B;backend/internal/tenant/rls/core_channels_integration_test.go;WP-536
+AUT-04;[B];B;backend/internal/identity/apikey_scope_integration_test.go;WP-536
+REL-03;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
+REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-543
+TEN-06;[B];B;backend/internal/ai/ai_scope_integration_test.go;WP-538
+MGT-03;[P4];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-538
+MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-538
+OPS-04;[B], [P5];A;backend/cmd/server/objectstorage_integration_test.go;WP-544
+NFR-05;[B];A;backend/cmd/server/objectstorage_integration_test.go;WP-544
+DIS-08;[Q];D;frontend/e2e-real/discovery-errors.spec.ts;WP-542
+API-09;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
+JOB-03;[B];C;backend/internal/jobs/revert_metrics_integration_test.go;WP-553
+UI-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+IMP-05;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+IMP-06;[B];C;frontend/e2e-real/topology.spec.ts;WP-552
+JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-554
+SEC-06;[B];B;backend/internal/jobs/rotation_integration_test.go;WP-547
+VIE-01;[B];C;frontend/e2e-real/saved-views.spec.ts;WP-555
+UI-01;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-02;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-03;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-04;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-05;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-07;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-08;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-09;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-10;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-556
+UI-16;[B];C;frontend/e2e-real/review-inbox.spec.ts;WP-557
+INS-04;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
+ABN-01;[Q];C;frontend/e2e/onboarding.spec.ts;WP-558
+UI-18;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532
+NFR-07;[B];C;frontend/e2e/mobile-actions.spec.ts;WP-532
+SEC-06;[B];A;frontend/e2e-real/key-rotation.spec.ts;WP-642
+DIS-08;[Q];D;collector/collectorcmd/discovery_errors_test.go;WP-641
+COL-02;[B];D;collector/collectorcmd/redfish_tls_integration_test.go;WP-641
+TEN-02;[B];B;backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go;WP-636
+TEN-04;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-637
+RBA-03;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-637
+MGT-04;[P3];B;backend/internal/maintenance/maintenance_scope_integration_test.go;WP-640
+TEN-06;[B];B;backend/internal/training/training_scope_integration_test.go;WP-639
+MGT-03;[P4];B;backend/internal/keymgmt/keymgmt_scope_integration_test.go;WP-639
+RBA-02;[B];C;backend/internal/server/clients_read_integration_test.go;WP-644
+UI-01;[B];C;frontend/src/components/ScopeSwitcher.test.tsx;WP-644
+TEN-05;[B];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-638
+API-03;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-643
+JOB-04;[B];C;backend/internal/server/review_merge_job_integration_test.go;WP-643
+AUT-02;[B];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
+TST-03;[B], Teilumfang [P2];C;frontend/e2e-real/roles-authz.spec.ts;WP-646
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-645
+EXP-01;[B], DATEV [P2];B;backend/internal/platform/blob/public_url_test.go;WP-647
+EXP-01;[B], DATEV [P2];B;frontend/e2e-real/bulk-jobs-export.spec.ts;WP-647
+SEC-08;[B];B;backend/internal/platform/egress/egress_test.go;WP-563
+AUT-01;[B];B;backend/internal/identity/first_login_integration_test.go;WP-570
+AUT-09;[B];B;frontend/e2e-real/roles-authz.spec.ts;WP-570
+REL-08;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583
+REL-04;[B];D;backend/internal/relationship/provenance_integration_test.go;WP-583
+TEN-06;[B];B;backend/internal/webhook/webhook_scope_integration_test.go;WP-562
+OPS-05;[B];B;backend/internal/webhook/delivery_claim_integration_test.go;WP-562
+TEN-06;[B];B;backend/internal/database/tenantguard_test.go;WP-561
+API-02;[B];C;backend/internal/identity/apikey_integration_test.go;WP-565
+TLC-04;[B];B;frontend/e2e-real/user-lifecycle.spec.ts;WP-571
+RBA-02;[B];B;frontend/src/pages/UserManagementPage.lifecycle.test.tsx;WP-571
+TLC-04;[B];B;backend/internal/user/self_lockout_integration_test.go;WP-648
+API-02;[B];C;backend/internal/ci/listquery_integration_test.go;WP-566
+SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-564
+ENT-04;[B];B;backend/internal/operator/entitlements_test.go;WP-564
+ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-564
+CI-05;[B];C;backend/internal/ci/restore_integration_test.go;WP-567
+API-05;[B];C;backend/internal/server/t2_ci_include_integration_test.go;WP-567
+REL-03;[B];D;backend/internal/relationship/suppression_integration_test.go;WP-584
+REL-04;[B];D;frontend/e2e-real/relationships-suppression.spec.ts;WP-584
+API-01;[B];C;backend/internal/middleware/openapi_test.go;WP-568
+API-03;[B];C;backend/internal/server/openapi_contract_test.go;WP-568
+SEC-01;[B];B;backend/internal/platform/httpx/redact_test.go;WP-569
+API-04;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569
+API-03;[B];B;backend/internal/middleware/idempotency_integration_test.go;WP-569
+SIM-02;[B];D;collector/collectorcmd/simulate_test.go;WP-586
+ABN-03;[Q], jeweilige Phase;D;backend/internal/config/config_test.go;WP-586
+CI-12;[B];C;backend/internal/ci/merge_integration_test.go;WP-572
+TST-02;[B];SR;backend/internal/server/e2e_scenarios_integration_test.go;WP-559
+AST-05;[P2];B;backend/internal/relationship/projection_integration_test.go;WP-574
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/relationship/projection_integration_test.go;WP-574
+CI-06;[B];B;frontend/src/pages/CIDetailPage.test.tsx;WP-577
+DB-05;nicht geliefert, CH12/PRI-10;B;frontend/src/pages/CIDetailPage.test.tsx;WP-577
+AST-04;[P2];B;frontend/src/pages/CIFormModal.test.tsx;WP-577
+REC-08;[B];D;frontend/src/pages/DashboardPage.test.tsx;WP-575
+DB-02;nicht geliefert;B;backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go;WP-649
+GLO-12;[B];D;backend/internal/discovery/observed_seen_integration_test.go;WP-580
+REC-02;[B];D;backend/internal/discovery/observed_seen_integration_test.go;WP-580
+REC-07;[B];D;backend/internal/ipam/interface_integration_test.go;WP-580
+REC-12;[B];D;backend/internal/reviews/conflict_integration_test.go;WP-576
+WFL-02;[P3];D;backend/internal/workflow/set_ci_field_integration_test.go;WP-576
+AGT-05;[P4];D;backend/internal/agent/audit_t3_agent_rank_integration_test.go;WP-576
+RCK-03;[B];B;backend/internal/rack/mount_location_integration_test.go;WP-578
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/rack/mount_location_integration_test.go;WP-578
+TLC-01;[B];B;backend/internal/signup/signup_integration_test.go;WP-591
+SEC-10;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
+GQL-01;[B];C;backend/internal/graphqlbff/graphqlbff_test.go;WP-593
+EXP-01;[B], DATEV [P2];C;backend/internal/export/export_test.go;WP-593
+RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-579
+REC-09;[B];D;backend/internal/discovery/ci_online_integration_test.go;WP-585
+LCY-05;[B];D;backend/cmd/server/main_test.go;WP-585
+RCK-03;[B];B;backend/internal/rack/placement_scope_integration_test.go;WP-650
+NET-01;[B];B;backend/internal/ipam/net01_migration_integration_test.go;WP-592
+REL-01;[B];B;backend/internal/relationship/pg_repository_integration_test.go;WP-592
+TEC-14;[B];B;backend/internal/export/stale_reclaim_integration_test.go;WP-592
+DIS-02;[B], Profilliste (V);D;backend/internal/discovery/system_template_test.go;WP-581
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-582
+NTF-03;[B];B;backend/internal/notify/templates_test.go;WP-588
+SRC-01;[B];C;frontend/e2e-real/search-palette.spec.ts;WP-594
+RCK-01;[B];B;frontend/src/pages/RackPage.test.tsx;WP-651
+TOP-01;[B];D;backend/internal/discovery/topology_integration_test.go;WP-652
+MET-16;B/G1, Teil P2/G2;B;backend/internal/ci/schema_version_integration_test.go;WP-590
+MET-10;B/G1, Teil P2/G2;B;backend/internal/citype/attrdef_integration_test.go;WP-589
+DB-03;nicht geliefert;B;backend/internal/citype/resolver_layers_test.go;WP-589
+API-05;[B];B;backend/internal/citype/attrdef_integration_test.go;WP-589
+MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/citype/attrdef_integration_test.go;WP-589
+OPS-06;[Q];A;tests/outage/collector.sh;WP-587
+NTF-03;[B];B;backend/internal/notify/locale_integration_test.go;WP-653
+GATE-03;[Q];G1;tests/rep01-structure.test.sh;WP-595
+INS-01;[Q];G1;tests/rep01-structure.test.sh;WP-595
+SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-654
+DIS-01;[B];D;collector/plugins/sweep/sweep_test.go;WP-655
+REL-01;[B];B;frontend/src/components/cmdb/CIRelationshipsCard.test.tsx;WP-573
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/savedview/savedview_integration_test.go;WP-573
+SEC-05;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
+AUD-04;[B];B;backend/internal/assignment/pii_integration_test.go;WP-656
+MGT-01;[P2];B;frontend/src/pages/DocumentListPage.test.tsx;WP-560
+TEN-06;[B];B;backend/internal/document/document_scope_integration_test.go;WP-560
+AGT-06;[P4];B;frontend/src/api/client.test.ts;WP-560
+AUT-10;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
+API-04;[B];B;backend/internal/middleware/ratelimit_test.go;WP-658
+NFR-03;[B], Teilumfang [P5];G1;backend/internal/discovery/ingest_budget_integration_test.go;WP-657
+TEN-06;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+TEN-09;[Q];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+AUD-05;[B];B;backend/internal/server/audit_log_scope_integration_test.go;WP-660
+AUD-05;[B];B;backend/internal/audit/scope_test.go;WP-660
+API-03;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-661
+TEN-06;[B];B;backend/internal/tenant/rls/error_sanitization_integration_test.go;WP-661
+API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-662
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-662
+AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-662
+NFR-10;[Q];LT;tests/load/thresholds.test.sh;WP-659
+NFR-02;[B];LT;tests/load/api.js;WP-659
+NFR-03;[B], Teilumfang [P5];LT;tests/load/ingest.js;WP-659
+AUT-10;[B];B;backend/internal/cache/window_test.go;WP-658
+AUT-10;[B];B;backend/internal/operator/operator_test.go;WP-658
+API-03;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
+AUD-07;[B];B;backend/internal/server/route_audit_integration_test.go;WP-663
+AUD-07;[B];B;backend/internal/middleware/middleware_test.go;WP-663
+SEC-07;[B];B;backend/internal/operator/audit_integration_test.go;WP-663
+TLC-04;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+AUT-02;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+AUT-04;[B];B;backend/internal/identity/user_deletion_integration_test.go;WP-664
+TLC-04;[B];B;backend/internal/user/user_deletion_revocation_integration_test.go;WP-664
+MON-02;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+API-03;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+TEN-06;[B];C;backend/internal/tenant/rls/metric_ingest_errors_integration_test.go;WP-665
+AUT-01;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+AUT-09;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+API-03;[B];B;backend/internal/identity/callback_scope_integration_test.go;WP-666
+AUT-01;[B];B;frontend/src/pages/auth/CallbackPage.test.tsx;WP-666
+RBA-08;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+AUT-04;[B];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+AUT-04;[B];B;backend/internal/identity/ceiling_test.go;WP-668
+TEN-09;[Q];B;backend/internal/identity/apikey_authz_integration_test.go;WP-668
+RBA-03;[B];B;backend/internal/user/role_definition_ceiling_integration_test.go;WP-667
+TEN-09;[Q];B;backend/internal/user/role_definition_ceiling_integration_test.go;WP-667
+RBA-02;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+RBA-03;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+AUD-07;[B];B;backend/internal/permission/standard_role_permissions_integration_test.go;WP-669
+API-02;[B];C;backend/internal/server/pagination_test.go;WP-672
+API-02;[B];C;backend/internal/server/empty_arrays_integration_test.go;WP-672
+API-02;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
+SRC-01;[B];C;backend/internal/search/empty_page_integration_test.go;WP-672
+API-01;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
+API-02;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-673
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-670
+ENT-05;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-02;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-671
+ENT-05;[B];B;backend/internal/entitlement/entitlement_test.go;WP-671
+ENT-05;[B];B;backend/internal/discovery/scope_channel_license_nats_test.go;WP-671
+ENT-07;[B];B;backend/internal/discovery/scope_channel_license_nats_test.go;WP-671
+ENT-05;[B];B;backend/cmd/server/scope_channel_license_test.go;WP-671
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-674
+ENT-08;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-674
+ENT-03;[B];B;backend/internal/ci/active_count_integration_test.go;WP-674
+REC-08;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+API-05;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+REC-12;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+CI-13;[B];D;backend/internal/server/review_resolve_concurrency_integration_test.go;WP-675
+REC-08;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+API-03;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+API-05;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+DIS-09;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-676
+COL-04;[B];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677
+TEN-09;[Q];D;backend/internal/server/enrollment_client_binding_integration_test.go;WP-677
+DIS-05;[B];D;backend/internal/discovery/edge_record_client_integration_test.go;WP-678
+TEN-09;[Q];D;backend/internal/discovery/edge_record_client_integration_test.go;WP-678
+AUD-04;[B];B;backend/internal/audit/append_only_integration_test.go;WP-680
+AUD-04;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
+SEC-05;[B];B;backend/internal/audit/seal_integration_test.go;WP-680
+TEN-03;[B];B;backend/internal/database/role_check_integration_test.go;WP-680
+CI-06;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
+AUD-05;[B];C;backend/internal/server/history_route_audit_integration_test.go;WP-681
+REC-09;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
+LCY-05;[B];D;backend/internal/lifecycle/offline_race_integration_test.go;WP-683
+REC-07;[B];D;backend/internal/ci/sighting_test.go;WP-683
+AUD-03;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+AUD-07;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+LCY-05;[B];D;backend/internal/lifecycle/offline_integration_test.go;WP-684
+CI-12;[B];C;backend/internal/ci/unmerge_integration_test.go;WP-687
+CI-12;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
+JOB-03;[B];C;backend/internal/server/merge_chain_revert_integration_test.go;WP-687
+NFR-10;[Q];LT;tests/load/evaluate-runs.test.sh;WP-688
+GLO-13;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
+API-03;[B];D;backend/internal/citype/attribute_definition_test.go;WP-679
+MET-10;B/G1, Teil P2/G2;D;backend/internal/citype/attrdef_integration_test.go;WP-679
+TOP-02;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-682
+REL-08;[B];D;backend/internal/relationship/cleanup_race_integration_test.go;WP-682
+ENT-03;[B];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
+TEN-09;[Q];B;backend/internal/server/t2_entitlement_gates_test.go;WP-685
+ENT-03;[B];B;backend/internal/entitlement/entitlement_test.go;WP-685
+RCK-01;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+RCK-02;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+API-03;[B];C;backend/internal/rack/layout_integration_test.go;WP-686
+NTF-03;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+NTF-04;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+TEN-06;[B];B;backend/internal/server/notification_channel_scope_integration_test.go;WP-689
+NTF-04;[B];B;backend/internal/notify/handler_test.go;WP-689
+TEN-09;[Q];B;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-689
+UI-18;[B];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+TEN-05;[B];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+TEN-09;[Q];C;backend/internal/tenantapi/room_layout_integration_test.go;WP-698
+UI-18;[B];C;frontend/src/pages/RoomPlanPage.test.tsx;WP-698
+API-08;[B];C;backend/internal/ci/bulk_test.go;WP-690
+BLK-01;[B];C;backend/internal/ci/bulk_test.go;WP-690
+API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-690
+IMP-04;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-691
+IMP-07;[B];C;backend/internal/topology/redundancy_depth_integration_test.go;WP-691
+IMP-07;[B];C;backend/internal/relationship/pg_repository_integration_test.go;WP-691
+MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-692
+API-01;[B];D;backend/internal/reviews/handler_test.go;WP-697
+API-02;[B];D;backend/internal/reviews/handler_test.go;WP-697
+COL-04;[B];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-696
+TEN-09;[Q];D;frontend/src/pages/DiscoveryPage.test.tsx;WP-696
+UI-17;[B];D;frontend/src/pages/OnboardingPage.test.tsx;WP-696
+COL-04;[B];D;frontend/e2e-real/enrollment-client-choice.spec.ts;WP-696
+GATE-01;[Q];SR;tests/rep01-structure.test.sh;WP-699
+SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-699
+GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-699
+MET-15;B/G1;B;backend/internal/server/unique_attr_write_paths_integration_test.go;WP-700
+MET-15;B/G1;B;backend/internal/discovery/unlicensed_unique_integration_test.go;WP-700
+MET-15;B/G1;B;backend/internal/ci/unique_attr_integration_test.go;WP-700
+REC-12;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+OVR-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+CI-05;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-693
+OVR-01;[B];D;backend/internal/override/override_scope_integration_test.go;WP-693
+API-03;[B];D;backend/internal/server/collector_field_errors_integration_test.go;WP-694
+COL-01;[B];D;backend/internal/server/collector_field_errors_integration_test.go;WP-694
+API-03;[B];D;backend/internal/api/dberrors_test.go;WP-694
+TOP-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
+REL-01;[B];D;backend/internal/server/scope_suggested_errors_integration_test.go;WP-695
+REL-01;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
+CI-05;[B];D;backend/internal/relationship/deleted_endpoint_integration_test.go;WP-695
+MET-15;B/G1;B;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
+CI-11;[B];B;backend/internal/server/unique_attr_type_change_integration_test.go;WP-702
+MET-15;B/G1;B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
+CI-03;[B];B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
+CI-11;[B];B;backend/internal/discovery/ingest_unique_integration_test.go;WP-703
+LOC-11;B/G1;B;backend/internal/locations/enrollment_code_delete_integration_test.go;WP-701
+COL-04;[B];B;backend/internal/locations/enrollment_code_delete_integration_test.go;WP-701
+LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-701

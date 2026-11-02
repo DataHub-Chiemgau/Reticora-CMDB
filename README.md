@@ -309,12 +309,12 @@ Visualisierungen:
 
 Feature-Keys mit Limits pro Mandant auf einer Codebasis, serverseitig in REST und GraphQL durchgesetzt:
 
-| Paket | Umfang (Auszug) | max_cis / Collectors / Nutzer |
+| Paket | Umfang (Auszug) | max_cis / Collectors / Nutzer / Beta-Preis / Final-Preis |
 |---|---|---|
-| **Essential** | CMDB-Kern, Discovery, Topologie, Rack, Export, Webhooks, API; ab P2 Assets, Dokumente, Import, Ticketing Essential | 500 / 2 / 5 |
-| **Standard** | + Ticketing Standard, Signatur, Lager, Inventur, Barcode, DATEV | 2.500 / 5 / 25 |
-| **Pro** | + SMS/Pager, Workflows, Compliance-Findings, Ticketing Pro, Disposition, erweitertes Audit | 10.000 / 20 / 100 |
-| **Enterprise** | + Monitoring, Reseller, RFID, GIS, Endpoint-Agent, Schlüssel, Schulung, Dedicated Instance | 50.000 / ∞ / ∞ |
+| **Essential** | CMDB-Kern, Discovery, Topologie, Rack, Export, Webhooks, API; ab P2 Assets, Dokumente, Import, Ticketing Essential | 500 / 2 / 5 / 29€-290€ / 49€-490€ |
+| **Standard** | + Ticketing Standard, Signatur, Lager, Inventur, Barcode, DATEV | 2.500 / 5 / 25 / 69€-690€ / 149€-1490€ |
+| **Pro** | + SMS/Pager, Workflows, Compliance-Findings, Ticketing Pro, Disposition, erweitertes Audit | 10.000 / 20 / 100 / 149€-1490€ / 299€-2990€ |
+| **Enterprise** | + Monitoring, Reseller, RFID, GIS, Endpoint-Agent, Schlüssel, Schulung, Dedicated Instance | 50.000 / ∞ / ∞ / NONE / ab 990€ |
 | **Add-ons** | IGA, KI – zu jedem Paket zubuchbar | – |
 
 Paketmatrix und Limits sind noch zu bestätigen.
@@ -329,6 +329,9 @@ Regeln:
 ## 15. Betrieb, Deployment & Skalierung
 
 - **Installation:** idempotentes `install.sh` mit Keycloak-Bootstrap-Validierung, TLS-Modul (selbstsigniert/ACME) und Passwort-Rotation.
+  - **Standard: signierte Release-Artefakte** (TEC-15, E-69 Option 1). `install.sh`, `install-cloud.sh` und `install-vm.sh` installieren das neueste Release oder das mit `--ref v<version>` bzw. `--release v<version>` genannte: Quelle nur von einem Release-Tag (gegen das signierte `SOURCE_COMMIT` bzw. den Quell-Tarball geprüft), Images per `cosign verify` und Digest-Pin, Collector per `cosign verify-blob`; jede Prüfung fail-closed.
+  - **Schalter `--build-from-source`** (`RETICORA_BUILD_FROM_SOURCE=1`) baut lokal aus den Quellen und meldet „not signature-verified“; nur damit ist ein Ref ohne Release-Tag (z. B. `main`) zulässig, ohne den Schalter bricht er mit Hinweis ab. Entwicklung und CI nutzen den Schalter, der Job `release-mode` prüft den Standardpfad auf Tags `v*`.
+  - **Fehlerbilder** (Signatur, Prüfsumme, Quellstand, kein cosign, kein erreichbares Release) und Prüfbefehle: [`docs/troubleshooting-installation.md`, Abschnitt 9](docs/troubleshooting-installation.md#9-signature-verification); Ablauf der Installer: [`deploy/README.md`](deploy/README.md).
 - **Mindest-Sizing** bis 10.000 Objekte: 4 vCPU, 8 GB RAM, 100 GB SSD.
 - **Kubernetes** mit Kustomize-Overlays und HPA. Ab P5: Terraform, GitOps, Postgres-HA, PITR, Read-Replicas, Partitionierung.
 - **Observability:** Health-/Readiness-Endpunkte für alle Abhängigkeiten, mandantenbewusst mit SLOs.
@@ -349,7 +352,7 @@ Zielwerte:
 
 ## 16. Qualitätssicherung
 
-- **Traceability:** Jede Anforderung ist über [`docs/traceability.csv`](docs/traceability.csv) (`id;tag;epic;testdatei;wp`) auf Epic, Testdatei und Arbeitspaket rückführbar. Der CI-Job `traceability` (`backend/internal/traceability`) prüft Format, bekannte IDs, vorhandene Testdateien und die im Implementierungsplan vorgesehenen Zeilen der WPs eines PRs; die Vollständigkeit aller [B]/[Pn]/[A]-IDs wird berichtet und ist ab G1 blockierend (E-30).
+- **Traceability:** [`docs/traceability.csv`](docs/traceability.csv) (`id;tag;epic;testdatei;wp`) führt Anforderungen auf Epic, Testdatei und Arbeitspaket zurück. Der CI-Job `traceability` (`backend/internal/traceability`) prüft Format, bekannte IDs, die Testdatei (vorhanden und nach ihrer Form ein Test: `*_test.go`, `*.test.ts(x)`, `*.spec.ts`, `*.tftest.hcl`, `tests/**/*.sh|js|ts`; andere Nachweise nur für die 21 im Plan vorgeschriebenen Zeilen der Allow-List, die Gate-Checkliste nie) und die in den Plänen vorgesehenen Zeilen der WPs eines PRs aus Titel und Zeile „Arbeitspakete:“, Bereiche wie „WP-332 – WP-335“ eingeschlossen. Seit G1 blockiert jede [B]/[Q]-ID ohne Zeile, die nicht in [`docs/acceptance/g1-ausnahmen.csv`](docs/acceptance/g1-ausnahmen.csv) steht; Ausnahmen zählen nicht als abgenommen und werden getrennt berichtet (E-30, E-76). [Pn]/[A]-IDs späterer Phasen werden nur berichtet, mit der Anzahl der IDs ohne Zeile.
 - **Definition of Done pro PR:** OpenAPI, RLS, Audit/Events, i18n, Tests, Lint, Doku, Traceability. Arbeitspakete umfassen 0,5–2 Tage; die Checkliste steht in der [PR-Vorlage](.github/pull_request_template.md).
 - **Tests:**
   - Unit, u. a. ≥ 20 Reconciliation-Fälle

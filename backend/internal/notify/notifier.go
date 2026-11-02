@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
@@ -19,8 +22,20 @@ type Request struct {
 	Category string
 	// Critical notifications ignore quiet hours and muted categories.
 	Critical bool
-	Subject  string
-	Body     string
+	// Personal notifications go to the recipients' own addresses and
+	// inboxes only: webhook channels, which post to a URL of the
+	// organization, do not get them (Subscription.Personal).
+	Personal bool
+	// Subject and Body are the text in the organization's language: that
+	// of the webhook channels and of the recipients without a text in
+	// Texts.
+	Subject string
+	Body    string
+	// Texts holds the text per template locale (NTF-03): a recipient gets
+	// the one of TemplateLocale(Recipient.Locale, Branding.Locale).
+	Texts map[string]Text
+	// Branding brands the e-mails (subject prefix, footer); nil: none.
+	Branding *Branding
 	Data     map[string]any
 	// DedupKey identifies the fact: the same key reaches a recipient over
 	// a channel once.
@@ -60,14 +75,41 @@ type QueuedDelivery struct {
 	LastError      string         `json:"last_error,omitempty"`
 	ProviderID     string         `json:"provider_id,omitempty"`
 	SentAt         *time.Time     `json:"sent_at,omitempty"`
+	// SenderName is the organization's sender name of an e-mail (NTF-03),
+	// read when the delivery is claimed.
+	SenderName string `json:"-"`
 }
 
-// Preference is a user's quiet hours and muted categories.
+// Preference is a user's quiet hours, muted categories and digest.
 type Preference struct {
 	QuietStart      string   `json:"quiet_start,omitempty"` // HH:MM
 	QuietEnd        string   `json:"quiet_end,omitempty"`
 	TimeZone        string   `json:"time_zone"`
 	MutedCategories []string `json:"muted_categories"`
+	// Digest maps a non-critical category to the window its e-mails are
+	// bundled in (hourly or daily, NTF-04); missing: DefaultDigest, empty:
+	// every e-mail on its own.
+	Digest map[string]string `json:"digest"`
+	// Subscriptions are the category subscriptions (NTF-03, E-91 option
+	// 2): every category, subscribed or muted, the view of
+	// MutedCategories. Categories named here when storing win over
+	// MutedCategories.
+	Subscriptions map[string]string `json:"subscriptions,omitempty"`
+	// Locale is the language of the user's notifications (NTF-03, F-383):
+	// de-DE or en-US, empty for the organization's locale. It is stored in
+	// app_user.locale, not with the preference row; nil when storing keeps
+	// the stored language.
+	Locale *string `json:"locale,omitempty"`
+}
+
+// validateLocale checks a notification language of the preferences: de-DE,
+// en-US or empty (the organization's locale).
+func validateLocale(locale string) error {
+	switch locale {
+	case "", LocaleDE, LocaleEN:
+		return nil
+	}
+	return fmt.Errorf("%w: unknown notification language %q (de-DE, en-US or empty for the organization's)", ErrValidation, locale)
 }
 
 // Validate checks the preference.
@@ -92,7 +134,19 @@ func (p *Preference) Validate() error {
 	if p.MutedCategories == nil {
 		p.MutedCategories = []string{}
 	}
-	return nil
+	if p.Locale != nil {
+		if err := validateLocale(*p.Locale); err != nil {
+			return err
+		}
+	}
+	if err := p.applySubscriptions(); err != nil {
+		return err
+	}
+	p.FillSubscriptions()
+	if p.Digest == nil {
+		p.Digest = DefaultDigest()
+	}
+	return validateDigest(p.Digest)
 }
 
 // QuietUntil returns the end of the quiet hours that contain t, or the
@@ -141,18 +195,46 @@ type DeliveryStore interface {
 	List(ctx context.Context, orgID string, limit, offset int) ([]QueuedDelivery, error)
 }
 
-// PreferenceStore reads and writes user preferences.
+// PreferenceStore reads and writes user preferences. SetPreference also
+// stores a Locale that is not nil; Locale returns the user's notification
+// language as UserLocaleChoice names it.
 type PreferenceStore interface {
 	Preference(ctx context.Context, orgID, userID string) (*Preference, error)
 	SetPreference(ctx context.Context, orgID, userID string, p *Preference) error
+	Locale(ctx context.Context, orgID, userID string) (string, error)
 }
+
+// storedLocale returns the new app_user.locale when the user chooses a
+// notification language over the stored one: the language, or empty for
+// the organization's locale. Choosing the organization's locale without a
+// language chosen before keeps the column default (legacyUserLocale), so
+// a later login still takes the IdP's locale claim; after a language it
+// is stored as empty, which no login replaces.
+func storedLocale(stored, chosen string) string {
+	if chosen == "" && strings.EqualFold(strings.TrimSpace(stored), legacyUserLocale) {
+		return stored
+	}
+	return chosen
+}
+
+// FeatureChecker reports whether an organization holds a feature; an error
+// is a failed lookup, not a missing feature (entitlement.Service).
+type FeatureChecker interface {
+	Check(ctx context.Context, orgID, featureKey string) (entitlement.Entitlement, bool, error)
+}
+
+// ReasonFeatureNotEntitled is the reason of an e-mail delivery skipped
+// because the organization lacks notifications_email (ENT-05, F-070).
+const ReasonFeatureNotEntitled = "feature-not-entitled"
 
 // Notifier turns requests into deliveries and works them off (NTF-04).
 type Notifier struct {
 	channels    Repository
 	store       DeliveryStore
 	prefs       PreferenceStore
+	digest      DigestStore
 	sender      *Sender
+	features    FeatureChecker
 	MaxAttempts int
 	// Backoff is the delay after the n-th failed attempt.
 	Backoff func(n int) time.Duration
@@ -168,6 +250,14 @@ func NewNotifier(channels Repository, store DeliveryStore, prefs PreferenceStore
 		Batch:   50, Lease: 10 * time.Minute, now: func() time.Time { return time.Now().UTC() }}
 }
 
+// WithEntitlements makes e-mail channels (smtp, central_smtp) send only for
+// organizations holding notifications_email (ENT-05); other channels are
+// not affected. Without a checker every e-mail is sent.
+func (n *Notifier) WithEntitlements(features FeatureChecker) *Notifier {
+	n.features = features
+	return n
+}
+
 // WithClock replaces the clock (tests).
 func (n *Notifier) WithClock(now func() time.Time) *Notifier {
 	n.now = now
@@ -175,8 +265,10 @@ func (n *Notifier) WithClock(now func() time.Time) *Notifier {
 }
 
 // Notify queues the request on the organization's channels: per recipient
-// for e-mail (with address) and in-app (users), once for a webhook. It
-// returns how many deliveries it queued (dedup skips the known ones).
+// for e-mail (with address) and in-app (users), once for a webhook. An
+// e-mail of a non-critical category the recipient bundles becomes a digest
+// item instead (WithDigest). It returns how many deliveries and digest
+// items it queued (dedup skips the known ones).
 func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int, error) {
 	if strings.TrimSpace(req.Category) == "" || strings.TrimSpace(req.Subject) == "" {
 		return 0, fmt.Errorf("%w: a notification needs a category and a subject", ErrValidation)
@@ -187,6 +279,8 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 	}
 	now := n.now()
 	var rows []QueuedDelivery
+	var items []DigestItem
+	prefs := map[string]*Preference{}
 	for i := range channels {
 		ch := &channels[i]
 		if !ch.Enabled || (len(req.ChannelIDs) > 0 && !slices.Contains(req.ChannelIDs, ch.ID)) {
@@ -197,6 +291,13 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 			MaxAttempts: n.MaxAttempts, NextAttemptAt: now}
 		switch ch.Kind {
 		case KindWebhook:
+			// A webhook channel is a target of the whole organization: it
+			// receives the notifications of every client with their
+			// recipients, so only an org-wide holder of
+			// notification:manage creates or changes it (F-418).
+			if req.Personal {
+				continue
+			}
 			row := base
 			row.RecipientKey, row.Recipients = "*", req.Recipients
 			rows = append(rows, row)
@@ -212,16 +313,48 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 				if key == "" {
 					continue
 				}
+				window, timeZone, perr := n.bundled(ctx, orgID, req, ch.Kind, r, prefs)
+				if perr != nil {
+					return 0, perr
+				}
+				locale, text := req.textOf(&r)
+				if window != "" {
+					// The digest brands its e-mail (buildDigest).
+					items = append(items, DigestItem{OrganizationID: orgID, ChannelID: ch.ID, Recipient: r, RecipientKey: key,
+						Category: req.Category, Window: window, WindowEnd: windowEnd(window, timeZone, now), Subject: text.Subject,
+						Body: text.Body, Data: req.Data, DedupKey: req.DedupKey, CreatedAt: now})
+					continue
+				}
+				if ch.Kind == KindEmail {
+					text = req.Branding.Mail(locale, text)
+				}
 				row := base
-				row.Recipient, row.RecipientKey = r, key
+				row.Recipient, row.RecipientKey, row.Subject, row.Body = r, key, text.Subject, text.Body
 				rows = append(rows, row)
 			}
 		}
 	}
-	if len(rows) == 0 {
-		return 0, nil
+	created := 0
+	if len(items) > 0 {
+		if created, err = n.digest.AddItems(ctx, orgID, items); err != nil {
+			return 0, err
+		}
 	}
-	return n.store.Enqueue(ctx, orgID, rows)
+	if len(rows) == 0 {
+		return created, nil
+	}
+	queued, err := n.store.Enqueue(ctx, orgID, rows)
+	return created + queued, err
+}
+
+// textOf returns the template locale of r and the text of the request in
+// it: the one in Texts, else Subject and Body.
+func (req *Request) textOf(r *Recipient) (string, Text) {
+	locale := TemplateLocale(r.Locale, req.Branding.locale())
+	if t, ok := req.Texts[locale]; ok {
+		return locale, t
+	}
+	return locale, Text{Subject: req.Subject, Body: req.Body}
 }
 
 // ProcessDue works off the due deliveries and returns how many it sent.
@@ -254,6 +387,22 @@ func (n *Notifier) attempt(ctx context.Context, d *QueuedDelivery) (bool, error)
 	if err != nil {
 		return false, n.retry(ctx, d, err)
 	}
+	if ch.Kind == KindEmail && n.features != nil {
+		// Checked at sending, so a delivery queued before the feature was
+		// withdrawn is not sent either. The worker has no request scope:
+		// the lookup runs in the delivery's organization.
+		scope := database.OrgWideScope(d.OrganizationID, "")
+		_, entitled, ferr := n.features.Check(database.ContextWithTenantScope(ctx, &scope), d.OrganizationID, entitlement.FeatureNotificationsEmail)
+		if ferr != nil {
+			return false, n.retry(ctx, d, ferr)
+		}
+		if !entitled {
+			d.Status, d.LastError = StatusSuppressed, ReasonFeatureNotEntitled
+			slog.Info("notification delivery skipped: notifications_email not entitled",
+				"delivery", d.ID, "organization_id", d.OrganizationID, "channel", d.ChannelID, "reason", ReasonFeatureNotEntitled)
+			return false, n.store.Finish(ctx, d)
+		}
+	}
 	if d.Recipient.UserID != "" && !d.Critical && n.prefs != nil {
 		pref, perr := n.prefs.Preference(ctx, d.OrganizationID, d.Recipient.UserID)
 		if perr != nil {
@@ -277,7 +426,8 @@ func (n *Notifier) attempt(ctx context.Context, d *QueuedDelivery) (bool, error)
 	if d.RecipientKey == "*" {
 		to = d.Recipients
 	}
-	delivery, err := n.sender.Send(ctx, ch, &Message{Category: d.Category, Subject: d.Subject, Body: d.Body, To: to, Data: d.Data})
+	delivery, err := n.sender.Send(ctx, ch, &Message{Category: d.Category, Subject: d.Subject, Body: d.Body, To: to, Data: d.Data,
+		SenderName: d.SenderName})
 	if err != nil {
 		return false, n.retry(ctx, d, err)
 	}
@@ -327,11 +477,16 @@ type MemoryStore struct {
 	mu    sync.Mutex
 	rows  []*QueuedDelivery
 	prefs map[string]Preference
-	seq   int
+	// locales are the stored app_user.locale by organization/user; a
+	// missing one is the column default.
+	locales map[string]string
+	seq     int
 }
 
 // NewMemoryStore creates an empty store.
-func NewMemoryStore() *MemoryStore { return &MemoryStore{prefs: map[string]Preference{}} }
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{prefs: map[string]Preference{}, locales: map[string]string{}}
+}
 
 // Enqueue implements DeliveryStore.
 func (s *MemoryStore) Enqueue(_ context.Context, orgID string, rows []QueuedDelivery) (int, error) {
@@ -425,6 +580,26 @@ func (s *MemoryStore) SetPreference(_ context.Context, orgID, userID string, p *
 	cp := *p
 	cp.MutedCategories = append([]string(nil), p.MutedCategories...)
 	sort.Strings(cp.MutedCategories)
+	cp.Digest = maps.Clone(p.Digest)
+	cp.Subscriptions, cp.Locale = nil, nil
 	s.prefs[orgID+"/"+userID] = cp
+	if p.Locale != nil {
+		stored, ok := s.locales[orgID+"/"+userID]
+		if !ok {
+			stored = legacyUserLocale
+		}
+		s.locales[orgID+"/"+userID] = storedLocale(stored, *p.Locale)
+	}
 	return nil
+}
+
+// Locale implements PreferenceStore.
+func (s *MemoryStore) Locale(_ context.Context, orgID, userID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored, ok := s.locales[orgID+"/"+userID]
+	if !ok {
+		return "", nil
+	}
+	return UserLocaleChoice(stored), nil
 }

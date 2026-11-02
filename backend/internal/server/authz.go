@@ -57,7 +57,10 @@ var readPermissionFor = map[string]identity.Permission{
 	// user:manage (TLC-03).
 	"invitations": identity.PermUserManage,
 	"teams":       identity.PermUserRead,
-	"clients":     identity.PermUserRead,
+	// Every standard role with a client reference holds location:read
+	// (RBA-02); RLS limits the list to the clients of the scope, and the
+	// scope switcher offers them (UI-01, F-373). Writes stay user:manage.
+	"clients": identity.PermLocationRead,
 	// The organization is the root of the location hierarchy (LOC-01).
 	"org":          identity.PermLocationRead,
 	"roles":        identity.PermRoleRead,
@@ -75,10 +78,14 @@ var readPermissionFor = map[string]identity.Permission{
 	"jobs":             identity.PermJobRead,
 	"role-assignments": identity.PermRoleRead,
 	"webhooks":         identity.PermWebhookRead,
-	// Notification channels and their deliveries are administered like
-	// webhooks (NTF-01, NTF-04).
-	"notification-channels":   identity.PermWebhookRead,
-	"notification-deliveries": identity.PermWebhookRead,
+	// Notification channels hold provider credentials and their deliveries
+	// name recipients: reading needs notification:manage like writing
+	// (RBA-01, RBA-02: org_admin only; NTF-01). Channels and deliveries
+	// belong to the whole organization: the handler refuses a holder bound
+	// to a client, site or team with 403 (RBA-03, F-418). The own inbox
+	// below /notifications is self-service.
+	"notification-channels":   identity.PermNotificationManage,
+	"notification-deliveries": identity.PermNotificationManage,
 	"credentials":             identity.PermCredentialRead,
 	"export":                  identity.PermCIRead,
 	"ip-addresses":            identity.PermIPAMRead,
@@ -123,11 +130,16 @@ var readPermissionFor = map[string]identity.Permission{
 	"override":              identity.PermCIRead,
 	"reconciliation":        identity.PermDiscoveryRead,
 	"source-policy":         identity.PermDiscoveryRead,
-	"history":               identity.PermAuditRead,
+	"history":               identity.PermCIRead, // minimum; the handler checks the entity type and audit:read (CI-06, E-78)
 	"saved-views":           identity.PermSavedViewRead,
 	"dependencies":          identity.PermTopologyRead,
 	"blast-radius":          identity.PermTopologyRead,
 	"state":                 identity.PermCIRead,
+
+	// Suppressions of removed discovery edges (F-273): listing reads
+	// relationships; lifting one derives relationship:write, the right of
+	// the forced DELETE /relationships/{id} that creates it.
+	"relationship-suppressions": identity.PermRelationshipRead,
 }
 
 // writePermissionOverrides covers resources whose write permission does not
@@ -135,9 +147,9 @@ var readPermissionFor = map[string]identity.Permission{
 var writePermissionOverrides = map[string]identity.Permission{
 	// VRFs are managed with their own key (TEN-10, RBA-01).
 	"vrfs": identity.PermVRFManage,
-	// Channels hold provider credentials; deliveries are only read.
-	"notification-channels":   identity.PermWebhookManage,
-	"notification-deliveries": identity.PermWebhookManage,
+	// Notification channels have their own key, not webhook:manage (RBA-01).
+	"notification-channels":   identity.PermNotificationManage,
+	"notification-deliveries": identity.PermNotificationManage,
 	// Review items are only written by resolving them (REC-08).
 	"review-items": identity.PermReviewResolve,
 
@@ -161,7 +173,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"clients":        identity.PermUserManage,
 	"org":            identity.PermUserManage,
 	"roles":          identity.PermRoleManage,
-	"permissions":    identity.PermPermissionManage,
+	"permissions":    identity.PermRoleManage,        // no write route: role grants are replaced below /roles
 	"entitlements":   identity.PermEntitlementManage, // no tenant write route: the operator writes (ENT-04)
 	"modules":        identity.PermEntitlementManage, // no write route: RETICORA_MODULES sets them (WP-214)
 	"webhooks":       identity.PermWebhookManage,
@@ -182,7 +194,8 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"iga":      identity.PermIGAWrite,
 	"scim":     identity.PermIGAWrite,
 	"me":       identity.PermPermissionRead,
-	"ci-types": identity.PermCITypeManageNew,
+	// CI types are managed with the RBA-01 key.
+	"ci-types": identity.PermCITypeManage,
 	"api-keys": identity.PermAPIKeyManage,
 	"ingest":   identity.PermDiscoveryIngest,
 	// Enterprise CMDB + asset/inventory extension write side (spec §21).
@@ -203,7 +216,8 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"source-policy":         identity.PermReconciliationManage,
 	"saved-views":           identity.PermSavedViewWrite,
 	// Read-only surfaces: writes (if any) stay on the read permission so no
-	// non-existent derived write permission is required.
+	// non-existent derived write permission is required. The state snapshot
+	// job (POST /history/snapshots) stays on audit:read.
 	"history":      identity.PermAuditRead,
 	"dependencies": identity.PermTopologyRead,
 	"blast-radius": identity.PermTopologyRead,
@@ -257,9 +271,9 @@ var routeRules = []routeRule{
 	// Reconciliation settings (RBA-06); reading them stays discovery:read.
 	{http.MethodPut, "reconciliation/source-policy", identity.PermReconciliationManage},
 	// Collectors report with the ingest credential; managing them is
-	// collector:manage (RBA-01).
+	// collector:manage (RBA-01). Certificates are renewed over the
+	// collector's NATS channel, not the API (F-012).
 	{http.MethodPost, "collectors/*/heartbeat", identity.PermDiscoveryIngest},
-	{http.MethodPost, "collectors/*/certificate", identity.PermDiscoveryIngest},
 	{http.MethodPost, "discovery/ingest", identity.PermDiscoveryIngest},
 	// Resolving a review item is its own right (RBA-01, RBA-02).
 	{http.MethodPost, "discovery/review-items/*/resolve", identity.PermReviewResolve},
@@ -269,6 +283,13 @@ var routeRules = []routeRule{
 	{http.MethodGet, "export/jobs/*", identity.PermJobRead},
 	{http.MethodGet, "exports", identity.PermJobRead},
 	{http.MethodGet, "exports/*", identity.PermJobRead},
+	// Assigning roles to a service account is managing roles, as for users
+	// (RBA-08, RBA-01); the account itself stays user:manage.
+	{http.MethodPut, "service-accounts/*/roles", identity.PermRoleManage},
+	// The structured search reads (F-055, SRC-03); the handler also
+	// requires the read right of the queried entity kind. Rebuilding the
+	// index (search/reindex) stays search:write.
+	{http.MethodPost, "search/query", identity.PermSearchRead},
 }
 
 // matchRouteRule returns the permission of the first rule matching the
@@ -388,8 +409,13 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		return identity.PermAgentManage, routeProtected
 	case "me":
 		// /me is the signed-in principal itself and needs no permission;
-		// /me/permissions is read-only self-service.
-		if len(segments) == 1 {
+		// /me/permissions is read-only self-service as well (OpenAPI
+		// getMyPermissions: the caller's own effective permissions, no
+		// 403): every user reads its own user_id and rights, also without
+		// permission:read (custom roles, client_technician), which the UI
+		// needs for the cancel rule of the job center and the saved views.
+		if len(segments) == 1 || (len(segments) == 2 && segments[1] == "permissions" &&
+			(method == http.MethodGet || method == http.MethodHead)) {
 			return "", routeProtected
 		}
 		return identity.PermPermissionRead, routeProtected
@@ -506,6 +532,10 @@ var auditExemptions = map[string]string{
 	"POST /api/v1/admin/auth/callback":          "operator path, operator_audit",
 	"POST /api/v1/admin/orgs":                   "operator path, operator_audit",
 	"POST /api/v1/admin/orgs/{id}/entitlements": "operator path, operator_audit",
+	// The Alertmanager bridge (OPS-05, E-75) records a queued alert itself,
+	// in the tenant transaction of the operator organization; refusals go to
+	// operator_audit.
+	"POST /api/v1/admin/alerts/alertmanager": "operator path, audited by the bridge in the operator organization",
 	// Measurements and heartbeats are not history (AUD-03); the CI changes
 	// of an ingest are audited by the CI repository with source collector.
 	"POST /api/v1/agents/telemetry":          "measurements; CI changes audited by the CI repository",
@@ -521,8 +551,70 @@ var auditExemptions = map[string]string{
 var collectorRoutes = map[string]bool{
 	"POST /api/v1/agents/telemetry": true, "POST /api/v1/agents/{id}/heartbeat": true,
 	"POST /api/v1/collectors/{id}/heartbeat": true, "POST /api/v1/discovery/ingest": true,
-	"POST /api/v1/collectors/{id}/certificate": true,
-	"POST /api/v1/ingest/bulk":                 true,
+	"POST /api/v1/ingest/bulk": true,
+}
+
+// domainRecordedRoutes are the audited write routes whose domain recorder
+// writes the audit entry of every successful request in the transaction of
+// the change, with old and new values (AUD-07), with the recorder. They get
+// no audit intent and so no transaction of the route audit (NFR-10, E-17,
+// WP-504); every other audited write route stores an intent before the
+// handler runs. TestEveryWriteRouteAuditedOnPostgreSQL
+// (audit_coverage_test.go) keeps this list and the recorders in step.
+var domainRecordedRoutes = map[string]string{
+	// CI writes (AUD-03 history with old and new values).
+	"POST /api/v1/cis":                               "ci.PGRepository.Create",
+	"PATCH /api/v1/cis/{id}":                         "ci.PGRepository.Update",
+	"DELETE /api/v1/cis/{id}":                        "ci.PGRepository.Delete",
+	"POST /api/v1/cis/bulk":                          "ci.PGRepository.Update per CI",
+	"POST /api/v1/cis/{id}/merge":                    "ci.PGRepository (merge)",
+	"POST /api/v1/cis/{id}/restore":                  "ci.PGRepository.RestoreDeleted",
+	"POST /api/v1/cis/{id}/type":                     "ci.PGRepository.ChangeType",
+	"PUT /api/v1/cis/{id}/fields/{name}/override":    "override.PGRepository",
+	"DELETE /api/v1/cis/{id}/fields/{name}/override": "override.PGRepository",
+	// Metamodel (MET-15).
+	"POST /api/v1/ci-types":                            "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/activate":              "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/clone":                 "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/deactivate":            "citype.PGRepository",
+	"PUT /api/v1/ci-types/{id}/fields":                 "citype.PGRepository",
+	"DELETE /api/v1/ci-types/{id}/fields/{name}":       "citype.PGRepository",
+	"PUT /api/v1/ci-fields/global":                     "citype.PGRepository",
+	"DELETE /api/v1/ci-fields/global/{name}":           "citype.PGRepository",
+	"PUT /api/v1/cis/{id}/field-definitions":           "citype.PGRepository",
+	"DELETE /api/v1/cis/{id}/field-definitions/{name}": "citype.PGRepository",
+	"POST /api/v1/attribute-definitions":               "citype.PGRepository",
+	"PATCH /api/v1/attribute-definitions/{id}":         "citype.PGRepository",
+	"DELETE /api/v1/attribute-definitions/{id}":        "citype.PGRepository",
+	// Locations and rack placement (DOD-01).
+	"POST /api/v1/locations":                   "locations.PGRepository",
+	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",
+	"POST /api/v1/mounts":                      "rack placement",
+	"PATCH /api/v1/mounts/{id}":                "rack placement",
+	"DELETE /api/v1/mounts/{id}":               "rack placement",
+	"POST /api/v1/racks/{id}/mounts":           "rack placement",
+	"PUT /api/v1/racks/{id}/mounts/{ci_id}":    "rack placement",
+	"DELETE /api/v1/racks/{id}/mounts/{ci_id}": "rack placement",
+	// Access: API keys, service accounts, users (RBA-05, AUT-08).
+	"POST /api/v1/api-keys":                   "identity.PGAPIKeyStore",
+	"POST /api/v1/api-keys/{id}/rotate":       "identity.PGAPIKeyStore",
+	"DELETE /api/v1/api-keys/{id}":            "identity.PGAPIKeyStore",
+	"POST /api/v1/service-accounts":           "user service accounts",
+	"PATCH /api/v1/service-accounts/{id}":     "user service accounts",
+	"PUT /api/v1/service-accounts/{id}/roles": "user service accounts",
+	"DELETE /api/v1/service-accounts/{id}":    "user service accounts",
+	"DELETE /api/v1/role-assignments/{id}":    "user.PGRepository (revocation)",
+	"POST /api/v1/users/{id}/anonymize":       "user.PGRepository",
+	"DELETE /api/v1/users/{id}":               "user.PGRepository (user.deleted, F-393)",
+	"DELETE /scim/v2/Users/{id}":              "user.PGRepository (deactivation)",
+
+	// Lifting a suppression (F-273): relationship.suppression_lifted with
+	// the values of the suppression. The forced DELETE
+	// /relationships/{id} of a discovery edge writes
+	// relationship.suppression_created in its transaction in the same way,
+	// which takes the place of its route entry; every other deletion keeps
+	// the route entry, so that route stays a route-audited one.
+	"DELETE /api/v1/relationship-suppressions/{id}": "relationship.PGRepository.LiftSuppression",
 }
 
 // auditedRoutes records, per write route registered through an
@@ -559,7 +651,14 @@ func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
 		if collectorRoutes[key] {
 			source = audit.SourceCollector
 		}
-		chain = append(chain, middleware.AuditRoute(method, full, a.auditor, !exempt, source))
+		mode := middleware.AuditIntent
+		switch {
+		case exempt:
+			mode = middleware.AuditNone
+		case domainRecordedRoutes[key] != "":
+			mode = middleware.AuditDomain
+		}
+		chain = append(chain, middleware.AuditRoute(method, full, a.auditor, mode, source))
 		auditedRoutes.Store(key, !exempt)
 	}
 	a.Router.With(chain...).Method(method, pattern, h)

@@ -49,15 +49,18 @@ func scanRack(s scanner) (*Rack, error) {
 	return rk, nil
 }
 
-// Racks, mounts and cables carry no client or site scope column yet (WP-025,
-// WP-027). They are visible only when the objects they hang off are visible
-// under the transaction's tenant scope, whose site and ci policies filter the
-// subqueries: a rack through room, building and site, a mount through its
-// rack and CI, a cable through the CIs of both interfaces.
+// Racks carry the client and site of their location row and mounts those of
+// their CI, both with client and site policies (migrations 000152, 000061);
+// cables carry no scope column. The predicates below stay as defense in
+// depth (WP-393): racks, mounts and cables are visible only when the objects
+// they hang off are visible under the transaction's tenant scope, whose
+// location and ci policies filter the subqueries: a rack through its 1:1
+// location row (organization, client and site predicate, migration 000062
+// section 6), a mount through its rack and CI, a cable through the CIs of
+// both interfaces. A LEFT JOIN over room and building would admit the rack of
+// an invisible building (WP-340, F-002).
 const (
-	rackVisible = `EXISTS (SELECT 1 FROM room LEFT JOIN building ON building.id = room.building_id
-		WHERE room.id = rack.room_id
-		AND (building.site_id IS NULL OR EXISTS (SELECT 1 FROM site WHERE site.id = building.site_id)))`
+	rackVisible  = `EXISTS (SELECT 1 FROM location WHERE location.id = rack.id)`
 	mountVisible = "EXISTS (SELECT 1 FROM rack WHERE rack.id = rack_mount.rack_id AND " + rackVisible + ")" +
 		" AND EXISTS (SELECT 1 FROM ci WHERE ci.id = rack_mount.ci_id)"
 	cableVisible = `(cable.source_interface_id IS NULL OR EXISTS (
@@ -140,9 +143,54 @@ func (r *PGRepository) CreateRack(ctx context.Context, rk *Rack) error {
 	})
 }
 
+// lockRackHeight locks the rack row (FOR UPDATE) and returns its height.
+// Writers that compare mounts with the height (UpdateRack, CreateMount,
+// UpdateMount) take this lock first, so a mount and a reduction of the
+// height cannot pass their checks against each other's old state (RCK-01).
+func lockRackHeight(ctx context.Context, tx pgx.Tx, orgID, id string) (int, error) {
+	var height int
+	err := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible+" FOR UPDATE",
+		orgID, id).Scan(&height)
+	return height, err
+}
+
+// checkHeightCoversMounts refuses a height below the highest unit occupied
+// by a mount of the rack (RCK-01: position_u + height_u − 1 ≤ height_units)
+// with 409 on height_units; the message names that unit. The caller holds
+// the lock of lockRackHeight.
+//
+// The unit counts every mount of the rack, also those of CIs outside the
+// caller's client or site scope (F-360): rack_highest_mounted_unit
+// (migration 000172) reads it with the scope widened to the organization and
+// returns only the number, NULL for a rack the caller cannot see.
+func checkHeightCoversMounts(ctx context.Context, tx pgx.Tx, id string, height int) error {
+	var top *int
+	if err := tx.QueryRow(ctx, "SELECT rack_highest_mounted_unit($1)", id).Scan(&top); err != nil {
+		return fmt.Errorf("highest mounted unit: %w", err)
+	}
+	if top == nil {
+		return ErrNotFound
+	}
+	if height < *top {
+		return heightBelowMountsError(*top)
+	}
+	return nil
+}
+
 func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req UpdateRackRequest) (*Rack, error) {
 	var rk *Rack
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := lockRackHeight(ctx, tx, orgID, id); err != nil {
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
+			return err
+		}
+		if req.HeightUnits != nil {
+			if err := checkHeightCoversMounts(ctx, tx, id, *req.HeightUnits); err != nil {
+				return err
+			}
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -202,7 +250,7 @@ func (r *PGRepository) DeleteRack(ctx context.Context, orgID, id string) error {
 			return ErrNotFound
 		}
 		// Mounted CIs keep the rack (LOC-11): no cascade to rack_mount.
-		if err := locations.CheckDeletable(ctx, tx, id, true); err != nil {
+		if err := locations.CheckDeletable(ctx, tx, id); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, "DELETE FROM rack WHERE organization_id = $1 AND id = $2", orgID, id); err != nil {
@@ -213,6 +261,12 @@ func (r *PGRepository) DeleteRack(ctx context.Context, orgID, id string) error {
 }
 
 const mountCols = `id::text, organization_id::text, rack_id::text, ci_id::text, position_u, height_u, face, created_at, updated_at`
+
+// listedMountCols are the mountCols of ListMounts, qualified because of the
+// joins, followed by the names of the CI (mci) and its type (mct).
+const listedMountCols = `rack_mount.id::text, rack_mount.organization_id::text, rack_mount.rack_id::text, rack_mount.ci_id::text,
+	rack_mount.position_u, rack_mount.height_u, rack_mount.face, rack_mount.created_at, rack_mount.updated_at,
+	mci.name, COALESCE(mct.name, '')`
 
 func scanMount(s scanner) (*RackMount, error) {
 	m := &RackMount{}
@@ -248,8 +302,9 @@ func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, pag
 	var out []RackMount
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// A rack outside the scope answers 404, not an empty list (F-180).
 		var exists bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM rack WHERE organization_id = $1 AND id = $2)", orgID, rackID).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible+")", orgID, rackID).Scan(&exists); err != nil {
 			return err
 		}
 		if !exists {
@@ -258,32 +313,62 @@ func (r *PGRepository) ListMounts(ctx context.Context, orgID, rackID string, pag
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM rack_mount WHERE organization_id = $1 AND rack_id = $2 AND "+mountVisible, orgID, rackID).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+mountCols+" FROM rack_mount WHERE organization_id = $1 AND rack_id = $2 AND "+mountVisible+" ORDER BY position_u LIMIT $3 OFFSET $4", orgID, rackID, page.Limit, page.Offset)
+		// The names of the CI and its type come with the mount (F-252); the
+		// joins run under the same policies as mountVisible, so they name
+		// only CIs the scope sees.
+		rows, err := tx.Query(ctx, "SELECT "+listedMountCols+` FROM rack_mount
+			JOIN ci mci ON mci.id = rack_mount.ci_id
+			LEFT JOIN ci_type mct ON mct.id = mci.ci_type_id
+			WHERE rack_mount.organization_id = $1 AND rack_mount.rack_id = $2 AND `+mountVisible+`
+			ORDER BY rack_mount.position_u LIMIT $3 OFFSET $4`, orgID, rackID, page.Limit, page.Offset)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			m, err := scanMount(rows)
-			if err != nil {
+			m := RackMount{}
+			if err := rows.Scan(&m.ID, &m.OrganizationID, &m.RackID, &m.CIID, &m.PositionU, &m.HeightU, &m.Face,
+				&m.CreatedAt, &m.UpdatedAt, &m.CIName, &m.CIType); err != nil {
 				return err
 			}
-			out = append(out, *m)
+			m.CreatedAt = m.CreatedAt.UTC()
+			m.UpdatedAt = m.UpdatedAt.UTC()
+			out = append(out, m)
 		}
 		return rows.Err()
 	})
 	return out, total, err
 }
 
+// CreateMount implements Repository. Rack and CI ids are checked before any
+// SQL; the CI must be visible under the caller's scope, so an unknown CI,
+// one of another organization and one of a client or site outside the scope
+// all fail with ErrCINotFound, before the foreign key (checked without RLS)
+// or the policy of rack_mount could tell them apart (TEN-04, API-03).
 func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
+	if !api.IsUUID(m.RackID) {
+		return ErrRackNotFound
+	}
+	if err := api.RequireUUID("ci_id", m.CIID); err != nil {
+		return err
+	}
 	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		var height int
-		err := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, m.OrganizationID, m.RackID).Scan(&height)
+		// The rack row stays locked until commit: a concurrent reduction of
+		// its height waits for the mount and then sees it (RCK-01).
+		height, err := lockRackHeight(ctx, tx, m.OrganizationID, m.RackID)
 		if err == pgx.ErrNoRows {
 			return ErrRackNotFound
 		}
 		if err != nil {
 			return err
+		}
+		var ciVisible bool
+		if err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE organization_id = $1 AND id = $2)",
+			m.OrganizationID, m.CIID).Scan(&ciVisible); err != nil {
+			return fmt.Errorf("check ci of mount: %w", err)
+		}
+		if !ciVisible {
+			return ErrCINotFound
 		}
 		existing, err := mountsForRackTx(ctx, tx, m.OrganizationID, m.RackID)
 		if err != nil {
@@ -323,6 +408,9 @@ func (r *PGRepository) GetMount(ctx context.Context, orgID, id string) (*RackMou
 
 // MountByCI implements Repository.
 func (r *PGRepository) MountByCI(ctx context.Context, orgID, ciID string) (*RackMount, error) {
+	if !api.IsUUID(ciID) {
+		return nil, ErrNotFound
+	}
 	var m *RackMount
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -358,11 +446,11 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 		if req.Face != nil {
 			face = *req.Face
 			if !ValidFaces[face] {
-				return fmt.Errorf("%w: invalid face", ErrValidation)
+				return ruleError(ErrValidation, "invalid face")
 			}
 		}
-		var rackHeight int
-		heightErr := tx.QueryRow(ctx, "SELECT height_units FROM rack WHERE organization_id = $1 AND id = $2 AND "+rackVisible, orgID, rackID).Scan(&rackHeight)
+		// Lock the target rack as CreateMount does (RCK-01).
+		rackHeight, heightErr := lockRackHeight(ctx, tx, orgID, rackID)
 		if heightErr == pgx.ErrNoRows {
 			return ErrRackNotFound
 		}
@@ -554,14 +642,20 @@ func nilIfEmptyPtr(v *string) any {
 
 // mountWriteError maps a failed mount write: a collision the exclusion
 // constraint caught (concurrent writers), a CI that is mounted already and
-// a child CI of a composition are conflicts (409); the rest is invalid.
+// a child CI of a composition are conflicts (409) with a fixed domain
+// message; the rest stays a database error for api.WriteRepoError, whose
+// constraint, policy or trigger text never reaches the client (F-047).
 func mountWriteError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		switch {
-		case pgErr.Code == "23P01", pgErr.Code == "23505", pgErr.ConstraintName == "rack_mount_composition_child":
-			return fmt.Errorf("%w: %s", ErrConflict, pgErr.Message)
+		case pgErr.Code == "23P01":
+			return ruleError(ErrConflict, "overlaps another mount")
+		case pgErr.Code == "23505":
+			return ruleError(ErrConflict, "ci already mounted")
+		case pgErr.ConstraintName == "rack_mount_composition_child":
+			return ruleError(ErrConflict, "the CI is part of a composition; its parent is mounted")
 		}
 	}
-	return fmt.Errorf("%w: %v", ErrValidation, err)
+	return fmt.Errorf("write rack mount: %w", err)
 }

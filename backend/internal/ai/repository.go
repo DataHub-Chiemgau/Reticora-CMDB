@@ -45,7 +45,14 @@ func (r *MemoryRepository) ListConversations(_ context.Context, orgID, userID st
 			out = append(out, c)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	// Newest first, then id, like PGRepository: the offset pages of
+	// GET /ai/conversations need a stable order (API-02).
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].ID > out[j].ID
+	})
 	return out, nil
 }
 func (r *MemoryRepository) AddMessage(_ context.Context, orgID, conversationID, role, content string, promptTokens, completionTokens int, citations []Citation) error {

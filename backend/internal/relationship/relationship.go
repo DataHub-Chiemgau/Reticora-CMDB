@@ -2,6 +2,7 @@
 package relationship
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,8 +13,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -53,7 +56,20 @@ type Relationship struct {
 	// TargetLocationID is the target of mounted_in (the rack) and located_in
 	// (the location); TargetCIID is empty for them.
 	TargetLocationID string `json:"target_location_id,omitempty"`
+	// checkTypeLists makes the PostgreSQL repository check the CI types of
+	// the ends against allowed_source_types and allowed_target_types of the
+	// relationship type (ErrSourceCITypeNotAllowed, ErrTargetCITypeNotAllowed).
+	// POST /relationships sets it (E-95), as does the accept of an
+	// unknown_relationship item (CheckTypeLists); the discovery ingest does
+	// not.
+	checkTypeLists bool
 }
+
+// CheckTypeLists makes Create check the CI types of the ends against the
+// type lists of the relationship type, as POST /relationships does (E-95):
+// for an edge a person decides on outside this package, the accept of an
+// unknown_relationship item (TOP-01, F-424).
+func (r *Relationship) CheckTypeLists() { r.checkTypeLists = true }
 
 // StructuralRelTypes are projected, never stored (REL-01, CH27).
 var StructuralRelTypes = map[string]bool{
@@ -138,26 +154,182 @@ var ValidSources = map[string]bool{
 	"api": true, "integration": true, "workflow": true, "rule": true,
 }
 
+// SystemSources are the sources reserved to their system paths (REL-08,
+// F-271): discovery edges come from the discovery ingest, agent edges from
+// the agent path. POST /relationships refuses them with 422 on source; a
+// user edge stored as discovery would need force to be deleted and would be
+// removed by the cleanup of unconfirmed discovery edges.
+var SystemSources = map[string]bool{"discovery": true, "agent": true}
+
+// ErrSystemSource refuses a system source on POST /relationships (F-271).
+var ErrSystemSource = errors.New("discovery and agent are reserved to the discovery and agent paths")
+
+// ProvenanceAttribute is the attribute that records actor, actor type,
+// source and time of an edge (REL-08). Create sets it; PATCH refuses it
+// (ErrProvenanceReserved, F-270) and the repositories keep the stored one.
+const ProvenanceAttribute = "provenance"
+
+// ErrProvenanceReserved refuses attributes.provenance on PATCH (F-270).
+var ErrProvenanceReserved = errors.New("provenance is recorded by the system and cannot be changed")
+
 // ErrForceRequired refuses deleting a discovery edge without force=true
 // (REL-04): discovery would find it again, so the deletion also records a
 // suppression.
 var ErrForceRequired = errors.New("a discovery edge is deleted only with force=true; discovery then no longer recreates it")
 
+// ErrSuppressionType refuses the forced deletion of a discovery edge whose
+// type has no relationship_type row (REL-03, F-272): without the row no
+// suppression can be stored and discovery would recreate the edge, so it
+// stays. Delete answers 422 on rel_type.
+var ErrSuppressionType = errors.New("the relationship type has no catalogue entry, so the deletion cannot be recorded as suppression")
+
+// ErrSourceCINotFound and ErrTargetCINotFound refuse an edge whose source or
+// target CI the caller cannot see: a CI of another organization, of a client
+// or site outside the scope, an unknown id (F-145) or a soft-deleted CI
+// (F-424). Create answers 422 on
+// source_ci_id or target_ci_id, the same for each of them, so the answer does
+// not tell a foreign CI from an unknown one. A repository joins both when
+// neither endpoint is visible.
+var (
+	ErrSourceCINotFound = errors.New("source CI not found")
+	ErrTargetCINotFound = errors.New("target CI not found")
+)
+
+// ErrSourceCITypeNotAllowed and ErrTargetCITypeNotAllowed refuse an edge
+// whose visible source or target CI has a type outside allowed_source_types
+// or allowed_target_types of the relationship type; an empty list allows
+// every type (REL-01, E-95, F-313). Create answers 422 on source_ci_id or
+// target_ci_id, a repository joins both.
+var (
+	ErrSourceCITypeNotAllowed = errors.New("the type of the source CI is not in allowed_source_types of the relationship type")
+	ErrTargetCITypeNotAllowed = errors.New("the type of the target CI is not in allowed_target_types of the relationship type")
+)
+
 // PolicyDeleter deletes an edge by the source policy (REL-03, REL-04): a
 // discovery edge only with force, then suppressed for its CIs and type.
 type PolicyDeleter interface {
-	DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error
+	DeleteWithPolicy(ctx context.Context, orgID, id string, opts DeleteOptions) error
 }
 
-// DeleteWithPolicy implements PolicyDeleter (without suppression storage).
-func (r *MemoryRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error {
+// DeleteOptions are the options of DeleteWithPolicy: Force deletes a
+// discovery edge; its suppression records the actor and the reason
+// (F-273).
+type DeleteOptions struct {
+	Force bool
+	// Reason is the reason given in the confirmation; empty stores none.
+	Reason string
+	// Actor names who deletes the edge (created_by of the suppression and
+	// actor of its audit entry).
+	Actor Actor
+}
+
+// Actor is who changes a suppression: the user id (empty for a principal
+// without user) and the actor type of the audit entry (user, api_key).
+type Actor struct {
+	ID   string
+	Type string
+}
+
+// MaxSuppressionReason is the longest reason a suppression stores, in
+// characters (migration 000178).
+const MaxSuppressionReason = 1000
+
+// Audit actions of the suppression lifecycle (F-273): the forced deletion of
+// a discovery edge creates a suppression, DELETE
+// /relationship-suppressions/{id} lifts it.
+const (
+	ActionSuppressionCreated = "relationship.suppression_created"
+	ActionSuppressionLifted  = "relationship.suppression_lifted"
+)
+
+// Suppression is a removed discovery edge that discovery does not create
+// again (REL-03): its CIs and type, who removed it, why and when (F-273).
+type Suppression struct {
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	SourceCIID     string `json:"source_ci_id"`
+	TargetCIID     string `json:"target_ci_id"`
+	RelType        string `json:"rel_type"`
+	Reason         string `json:"reason,omitempty"`
+	CreatedBy      string `json:"created_by,omitempty"`
+	CreatedAt      string `json:"created_at"`
+}
+
+// SuppressionStore lists and lifts suppressions (F-273). Both see only the
+// suppressions whose source and target CI the caller sees.
+type SuppressionStore interface {
+	// ListSuppressions returns the suppressions of the organization, with
+	// ciID set those whose source or target is that CI, newest first.
+	ListSuppressions(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Suppression, int, error)
+	// LiftSuppression deletes a suppression, so the next discovery cycle
+	// creates its edge again; api.ErrNotFound when the caller does not
+	// find it.
+	LiftSuppression(ctx context.Context, orgID, id string, actor Actor) error
+}
+
+// DeleteWithPolicy implements PolicyDeleter; a forced deletion of a
+// discovery edge stores its suppression in memory.
+func (r *MemoryRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, opts DeleteOptions) error {
 	r.mu.RLock()
 	rel, ok := r.items[id]
+	var edge Relationship
+	if ok {
+		edge = *rel
+	}
 	r.mu.RUnlock()
-	if ok && rel.OrganizationID == orgID && rel.Source == "discovery" && !force {
+	if ok && edge.OrganizationID == orgID && edge.Source == "discovery" && !opts.Force {
 		return ErrForceRequired
 	}
-	return r.Delete(ctx, orgID, id)
+	if err := r.Delete(ctx, orgID, id); err != nil {
+		return err
+	}
+	if edge.Source != "discovery" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.suppressions {
+		if s.OrganizationID == orgID && s.SourceCIID == edge.SourceCIID && s.TargetCIID == edge.TargetCIID && s.RelType == edge.RelType {
+			return nil
+		}
+	}
+	r.seq++
+	s := &Suppression{ID: fmt.Sprintf("%08d-0000-4000-8000-%012d", r.seq, r.seq), OrganizationID: orgID,
+		SourceCIID: edge.SourceCIID, TargetCIID: edge.TargetCIID, RelType: edge.RelType, Reason: opts.Reason,
+		CreatedBy: opts.Actor.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	r.suppressions[s.ID] = s
+	return nil
+}
+
+// ListSuppressions implements SuppressionStore.
+func (r *MemoryRepository) ListSuppressions(_ context.Context, orgID, ciID string, page api.PaginationParams) ([]Suppression, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]Suppression, 0)
+	for _, s := range r.suppressions {
+		if s.OrganizationID == orgID && (ciID == "" || s.SourceCIID == ciID || s.TargetCIID == ciID) {
+			items = append(items, *s)
+		}
+	}
+	slices.SortFunc(items, func(a, b Suppression) int {
+		return cmp.Or(strings.Compare(b.CreatedAt, a.CreatedAt), strings.Compare(a.ID, b.ID))
+	})
+	total := len(items)
+	start := min(page.Offset, total)
+	end := min(start+page.Limit, total)
+	return items[start:end], total, nil
+}
+
+// LiftSuppression implements SuppressionStore.
+func (r *MemoryRepository) LiftSuppression(_ context.Context, orgID, id string, _ Actor) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.suppressions[id]
+	if !ok || s.OrganizationID != orgID {
+		return api.ErrNotFound
+	}
+	delete(r.suppressions, id)
+	return nil
 }
 
 // Confirmer re-confirms a discovery edge seen again (TOP-02).
@@ -182,9 +354,129 @@ func (r *MemoryRepository) Confirm(_ context.Context, orgID, id string, confiden
 	return nil
 }
 
+// BatchConfirmer re-confirms several discovery edges seen again with one
+// statement, each as Confirm does (TOP-02; WP-608, NFR-03).
+type BatchConfirmer interface {
+	ConfirmMany(ctx context.Context, orgID string, confirmations []Confirmation) error
+}
+
+// Confirmation is the re-confirmation of one discovery edge: its id and
+// the reported confidence (nil keeps the stored one).
+type Confirmation struct {
+	ID         string
+	Confidence *float64
+	// Attributes are merged into the stored attributes of the edge, so
+	// that what discovery reports again (an outlet switched off) does not
+	// stay at its first value (WP-498); a nil value removes the attribute.
+	// Nil leaves the attributes unchanged.
+	Attributes map[string]any
+}
+
+// mergeAttributes merges patch into attrs as a confirmation does: a nil
+// value removes the attribute.
+func mergeAttributes(attrs, patch map[string]any) map[string]any {
+	if patch == nil {
+		return attrs
+	}
+	out := make(map[string]any, len(attrs)+len(patch))
+	for k, v := range attrs {
+		out[k] = v
+	}
+	for k, v := range patch {
+		if v == nil {
+			delete(out, k)
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// ConfirmMany implements BatchConfirmer.
+func (r *MemoryRepository) ConfirmMany(ctx context.Context, orgID string, confirmations []Confirmation) error {
+	for _, c := range confirmations {
+		r.mu.Lock()
+		rel, ok := r.items[c.ID]
+		if ok && rel.OrganizationID == orgID && rel.Source == "discovery" {
+			rel.Attributes = mergeAttributes(rel.Attributes, c.Attributes)
+		}
+		r.mu.Unlock()
+		if ok {
+			// Gone edges and edges of other sources stay unchanged, as in
+			// the PostgreSQL repository.
+			_ = r.Confirm(ctx, orgID, c.ID, c.Confidence)
+		}
+	}
+	return nil
+}
+
+// RedundancyMarker recomputes attributes.redundant of the discovery edges
+// of a type (powered_by, IMP-09) per source CI from every stored discovery
+// edge of that type, not only from those a batch reported (WP-498, F-112):
+// a source fed by more than one target has redundant feeds. An edge whose
+// attributes.outlet_state is "off" stays an edge but feeds nothing (E-85
+// option A). Edges of other sources are neither counted nor changed
+// (REL-08).
+type RedundancyMarker interface {
+	MarkRedundant(ctx context.Context, orgID, relType string, sourceCIIDs []string) error
+}
+
+// liveFeed reports whether a stored edge counts as a feed (E-85 option A).
+func liveFeed(attrs map[string]any) bool {
+	state, _ := attrs["outlet_state"].(string)
+	return state != "off"
+}
+
+// MarkRedundant implements RedundancyMarker.
+func (r *MemoryRepository) MarkRedundant(_ context.Context, orgID, relType string, sourceCIIDs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sources := map[string]bool{}
+	for _, id := range sourceCIIDs {
+		sources[id] = true
+	}
+	feeds := map[string]map[string]bool{}
+	var edges []*Relationship
+	for _, rel := range r.items {
+		if rel.OrganizationID != orgID || rel.RelType != relType || rel.Source != "discovery" || !sources[rel.SourceCIID] {
+			continue
+		}
+		edges = append(edges, rel)
+		if feeds[rel.SourceCIID] == nil {
+			feeds[rel.SourceCIID] = map[string]bool{}
+		}
+		if liveFeed(rel.Attributes) {
+			feeds[rel.SourceCIID][rel.TargetCIID] = true
+		}
+	}
+	for _, rel := range edges {
+		redundant := len(feeds[rel.SourceCIID]) > 1
+		if rel.Attributes["redundant"] == redundant {
+			continue
+		}
+		rel.Attributes = mergeAttributes(rel.Attributes, map[string]any{"redundant": redundant})
+		rel.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	return nil
+}
+
+// ListFilter holds the documented filters of GET /api/v1/relationships
+// (API-01, F-402): CIID keeps the edges with the CI at either end,
+// SourceCIID and TargetCIID those with the CI at that end, RelType those
+// of the type. The filters combine; an empty field does not filter.
+type ListFilter struct {
+	CIID       string
+	SourceCIID string
+	TargetCIID string
+	RelType    string
+}
+
 // Repository defines persistence operations for relationships.
 type Repository interface {
+	// List returns the relationships of the organization, of one CI when
+	// ciID is set: ListFiltered with ListFilter{CIID: ciID}.
 	List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error)
+	ListFiltered(ctx context.Context, orgID string, filter ListFilter, page api.PaginationParams) ([]Relationship, int, error)
 	Create(ctx context.Context, rel *Relationship) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Relationship, error)
 	Delete(ctx context.Context, orgID, id string) error
@@ -197,11 +489,87 @@ type Traverser interface {
 	TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error)
 }
 
+// Walker walks like Traverser and returns the walk with its CIs as numbers
+// (NFR-02, WP-611): topology and impact work on the numbers instead of
+// the id strings. The PostgreSQL repository implements it; the memory
+// repository does not.
+type Walker interface {
+	WalkFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) (*Walk, error)
+}
+
+// Walk is the result of a walk: the edges TraverseFrom returns with the
+// numbers of their CIs.
+type Walk struct {
+	// CIs holds the id of each CI the walk keeps by number: the root
+	// first, then the CIs in the order the walk reaches them. A walk from a
+	// root the caller does not see holds the root and no edge.
+	CIs []string
+	// Edges are the kept edges, ordered by id.
+	Edges []WalkEdge
+	// Truncated is set when the node limit cut the walk: a kept CI may
+	// then lack edges to CIs within the depth (IMP-04 reads them again).
+	Truncated bool
+}
+
+// WalkEdge is an edge of a Walk; SourceCI and TargetCI are numbers of
+// Walk.CIs, Source is the origin of the edge (Relationship.Source).
+type WalkEdge struct {
+	ID                 string
+	SourceCI, TargetCI int32
+	RelType            string
+	Source             string
+}
+
+// EdgeReader reads the edges among a set of CIs at once, with a number of
+// statements that does not grow with the set, so the topology without a
+// root reads its edges without one query per node (NFR-02, ABN-02). The
+// memory repository does not implement it; the topology then lists the
+// edges of each CI.
+type EdgeReader interface {
+	// EdgesAmong returns the edges the topology shows (the stored
+	// relationships and the projected containment) whose source and target
+	// are both among ids and are visible, not deleted CIs under the
+	// caller's scope, ordered by id.
+	EdgesAmong(ctx context.Context, orgID string, ids []string) ([]Relationship, error)
+}
+
+// IncidentEdgeReader reads the stored edges of some types that touch a set
+// of CIs, whatever the depth of a walk (IMP-04, F-160): the impact reads
+// every provider of a redundant type of the dependents it reached, also
+// those beyond its depth, in one statement. Both the PostgreSQL and the
+// memory repository implement it.
+type IncidentEdgeReader interface {
+	// EdgesOf returns the stored relationships of one of relTypes whose
+	// source or target is among ciIDs and whose source and target are
+	// both visible, not deleted CIs under the caller's scope, ordered by
+	// id.
+	EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error)
+}
+
+// HiddenEdgeReader reads the stored edges of some types that touch a set of
+// CIs and that the caller's client or site scope hides (IMP-04, IMP-07,
+// F-420): the impact counts a provider of a redundant type in another
+// client or site as a working supply of its dependent, as it does for an
+// org-wide caller, without learning which CI it is. The PostgreSQL
+// repository implements it; without it the impact sees only what the
+// caller sees.
+type HiddenEdgeReader interface {
+	// HiddenEdgesOf returns the stored relationships of one of relTypes
+	// whose source or target is among ciIDs, whose source and target are
+	// not deleted CIs of the organization, and which EdgesOf does not
+	// return to the caller. They carry neither an id nor a source; an end
+	// the caller does not see is empty. Nothing is returned to a caller
+	// without a client and site restriction.
+	HiddenEdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error)
+}
+
 // MemoryRepository is an in-memory relationship store.
 type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string]*Relationship
-	seq   int
+	// suppressions are the suppressions of forced deletions (REL-03).
+	suppressions map[string]*Suppression
+	seq          int
 	// visible decides which CIs a traversal may pass through (IMP-07).
 	visible NodeVisibility
 }
@@ -222,10 +590,14 @@ func (r *MemoryRepository) WithNodeVisibility(visible NodeVisibility) *MemoryRep
 
 // NewMemoryRepository creates a new in-memory relationship repository.
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{items: make(map[string]*Relationship)}
+	return &MemoryRepository{items: make(map[string]*Relationship), suppressions: make(map[string]*Suppression)}
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
+func (r *MemoryRepository) List(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
+	return r.ListFiltered(ctx, orgID, ListFilter{CIID: ciID}, page)
+}
+
+func (r *MemoryRepository) ListFiltered(_ context.Context, orgID string, filter ListFilter, page api.PaginationParams) ([]Relationship, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -234,7 +606,12 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, ciID string, pa
 		if rel.OrganizationID != orgID {
 			continue
 		}
-		if ciID != "" && rel.SourceCIID != ciID && rel.TargetCIID != ciID {
+		if filter.CIID != "" && rel.SourceCIID != filter.CIID && rel.TargetCIID != filter.CIID {
+			continue
+		}
+		if (filter.SourceCIID != "" && rel.SourceCIID != filter.SourceCIID) ||
+			(filter.TargetCIID != "" && rel.TargetCIID != filter.TargetCIID) ||
+			(filter.RelType != "" && rel.RelType != filter.RelType) {
 			continue
 		}
 		result = append(result, *rel)
@@ -282,7 +659,10 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 			rel.Attributes = make(map[string]any)
 		}
 		for k, v := range req.Attributes {
-			rel.Attributes[k] = v
+			// The stored provenance stays (F-270).
+			if k != ProvenanceAttribute {
+				rel.Attributes[k] = v
+			}
 		}
 	}
 	if req.Confidence != nil {
@@ -312,7 +692,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 
 	rel, ok := r.items[id]
 	if !ok || rel.OrganizationID != orgID {
-		return fmt.Errorf("not found")
+		return api.ErrNotFound
 	}
 	delete(r.items, id)
 	return nil
@@ -351,6 +731,39 @@ func (r *MemoryRepository) TraverseFrom(ctx context.Context, orgID, rootCIID str
 		edges = visibleEdges(edges, relationshipEnds, visible)
 	}
 	return SelectTraversal(rootCIID, edges, maxDepth, maxNodes), nil
+}
+
+// EdgesOf implements IncidentEdgeReader on the in-memory edges; with a
+// NodeVisibility only edges between visible, not deleted CIs count, as in
+// TraverseFrom.
+func (r *MemoryRepository) EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error) {
+	edges := make([]Relationship, 0)
+	if len(ciIDs) == 0 || len(relTypes) == 0 {
+		return edges, nil
+	}
+	r.mu.RLock()
+	for _, rel := range r.items {
+		if rel.OrganizationID == orgID && slices.Contains(relTypes, rel.RelType) &&
+			(slices.Contains(ciIDs, rel.SourceCIID) || slices.Contains(ciIDs, rel.TargetCIID)) {
+			edges = append(edges, *rel)
+		}
+	}
+	visibility := r.visible
+	r.mu.RUnlock()
+
+	if visibility != nil && len(edges) > 0 {
+		var ids []string
+		for i := range edges {
+			ids = append(ids, edges[i].SourceCIID, edges[i].TargetCIID)
+		}
+		visible, err := visibility(ctx, orgID, ids)
+		if err != nil {
+			return nil, err
+		}
+		edges = visibleEdges(edges, relationshipEnds, visible)
+	}
+	slices.SortFunc(edges, func(a, b Relationship) int { return strings.Compare(a.ID, b.ID) })
+	return edges, nil
 }
 
 func relationshipEnds(rel *Relationship) (source, target string) {
@@ -490,9 +903,16 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/relationships", h.Create)
 	r.Patch("/api/v1/relationships/{id}", h.Update)
 	r.Delete("/api/v1/relationships/{id}", h.Delete)
+	r.Get("/api/v1/relationship-suppressions", h.ListSuppressions)
+	r.Delete("/api/v1/relationship-suppressions/{id}", h.LiftSuppression)
 }
 
-// List handles GET /api/v1/cis/{id}/relationships
+// List handles GET /api/v1/cis/{id}/relationships, the edges of the CI, and
+// GET /api/v1/relationships with its documented filters ci_id,
+// source_ci_id, target_ci_id and rel_type (API-01, F-402). A CI filter
+// that is no UUID and a rel_type the catalogue does not know are 400; an
+// unknown or invisible CI lists nothing. The edges stay those of the
+// caller's tenant scope.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -500,10 +920,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciID := chi.URLParam(r, "id")
+	filter := ListFilter{CIID: chi.URLParam(r, "id")}
+	if filter.CIID == "" {
+		var ok bool
+		if filter, ok = h.listFilter(w, r, t.OrganizationID); !ok {
+			return
+		}
+	}
 	page := api.ParsePagination(r)
 
-	rels, total, err := h.repo.List(r.Context(), t.OrganizationID, ciID, page)
+	rels, total, err := h.repo.ListFiltered(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -516,6 +942,28 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// listFilter reads the query filters of GET /api/v1/relationships; on an
+// invalid one it answers 400 and reports false.
+func (h *Handler) listFilter(w http.ResponseWriter, r *http.Request, orgID string) (ListFilter, bool) {
+	q := r.URL.Query()
+	filter := ListFilter{CIID: q.Get("ci_id"), SourceCIID: q.Get("source_ci_id"), TargetCIID: q.Get("target_ci_id"), RelType: q.Get("rel_type")}
+	for _, f := range []struct{ name, value string }{
+		{"ci_id", filter.CIID}, {"source_ci_id", filter.SourceCIID}, {"target_ci_id", filter.TargetCIID},
+	} {
+		if f.value != "" && !api.IsUUID(f.value) {
+			api.WriteFieldError(w, &api.FieldError{Field: f.name, Message: "must be a UUID"})
+			return ListFilter{}, false
+		}
+	}
+	// The catalogue holds the projected types (contains, mounted_in,
+	// located_in) as well, so every listed type can be filtered.
+	if filter.RelType != "" && (api.RejectNUL("rel_type", filter.RelType) != nil || !h.validRelType(r, orgID, filter.RelType)) {
+		api.WriteFieldError(w, &api.FieldError{Field: "rel_type", Message: "must be a relationship type of the catalogue"})
+		return ListFilter{}, false
+	}
+	return filter, true
 }
 
 // Create handles POST /api/v1/relationships
@@ -552,6 +1000,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid source")
 		return
 	}
+	if SystemSources[source] {
+		// Discovery and agent edges come only from their paths (F-271).
+		writeViolations(w, violation{Field: "source", Detail: ErrSystemSource.Error()})
+		return
+	}
 	req.Source = source
 	if req.Confidence != nil && (*req.Confidence < 0 || *req.Confidence > 1) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "confidence must be between 0 and 1")
@@ -571,6 +1024,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 		SourceInterfaceID: req.SourceInterfaceID,
 		TargetInterfaceID: req.TargetInterfaceID,
+
+		checkTypeLists: true,
 	}
 	if rel.Attributes == nil {
 		rel.Attributes = make(map[string]any)
@@ -605,11 +1060,61 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.Create(r.Context(), rel); err != nil {
+		if writeEndpointError(w, err) {
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, rel)
+}
+
+// violation is one rejected field of a 422 (ViolationProblem).
+type violation struct {
+	Field  string `json:"field"`
+	Detail string `json:"detail"`
+}
+
+// writeEndpointError answers an edge with an endpoint the caller cannot see
+// (ErrSourceCINotFound, ErrTargetCINotFound, F-145) or of a type the
+// relationship type does not allow (ErrSourceCITypeNotAllowed,
+// ErrTargetCITypeNotAllowed, F-313) with 422 and a violation per such
+// endpoint. It reports whether err was one.
+func writeEndpointError(w http.ResponseWriter, err error) bool {
+	var violations []violation
+	for _, end := range []struct {
+		field string
+		err   error
+	}{
+		{"source_ci_id", ErrSourceCINotFound}, {"source_ci_id", ErrSourceCITypeNotAllowed},
+		{"target_ci_id", ErrTargetCINotFound}, {"target_ci_id", ErrTargetCITypeNotAllowed},
+	} {
+		if errors.Is(err, end.err) {
+			violations = append(violations, violation{Field: end.field, Detail: end.err.Error()})
+		}
+	}
+	if len(violations) == 0 {
+		return false
+	}
+	writeViolations(w, violations...)
+	return true
+}
+
+// writeViolations answers 422 with the rejected fields (ViolationProblem).
+func writeViolations(w http.ResponseWriter, violations ...violation) {
+	details := make([]string, 0, len(violations))
+	for _, v := range violations {
+		details = append(details, v.Field+": "+v.Detail)
+	}
+	api.WriteProblemBody(w, http.StatusUnprocessableEntity, struct {
+		api.ProblemDetail
+		Violations []violation `json:"violations"`
+	}{
+		ProblemDetail: api.ProblemDetail{Type: "https://reticora.io/problems/422", Title: "Unprocessable Entity",
+			Status: http.StatusUnprocessableEntity, Detail: strings.Join(details, "; ")},
+		Violations: violations,
+	})
 }
 
 // validRelType resolves the rel_type against the metadata catalogue when
@@ -646,6 +1151,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
 		return
 	}
+	if _, reserved := req.Attributes[ProvenanceAttribute]; reserved {
+		// Actor and time of the edge are recorded by the system (F-270).
+		writeViolations(w, violation{Field: "attributes." + ProvenanceAttribute, Detail: ErrProvenanceReserved.Error()})
+		return
+	}
 
 	req.ActorID = t.UserID
 	rel, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
@@ -672,23 +1182,117 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	// A malformed id names no edge (404) and never reaches SQL.
+	id, ok := api.ParseUUIDParam(w, r, "id", "relationship not found")
+	if !ok {
+		return
+	}
+	// The reason of a suppression (F-273): optional for the API, the UI
+	// asks for it in its confirmation.
+	reason := strings.TrimSpace(r.URL.Query().Get("reason"))
+	if utf8.RuneCountInString(reason) > MaxSuppressionReason || strings.ContainsRune(reason, 0) {
+		writeViolations(w, violation{Field: "reason", Detail: errReason.Error()})
+		return
+	}
 	var err error
 	if deleter, ok := h.repo.(PolicyDeleter); ok {
 		// A discovery edge goes only with force and is then suppressed
 		// (REL-03, REL-04); manual edges are deleted as asked.
-		err = deleter.DeleteWithPolicy(r.Context(), t.OrganizationID, id, r.URL.Query().Get("force") == "true")
+		err = deleter.DeleteWithPolicy(r.Context(), t.OrganizationID, id, DeleteOptions{
+			Force: r.URL.Query().Get("force") == "true", Reason: reason, Actor: requestActor(r)})
 	} else {
 		err = h.repo.Delete(r.Context(), t.OrganizationID, id)
 	}
-	if errors.Is(err, ErrForceRequired) {
+	// Only an unknown or invisible edge is 404; a refused suppression names
+	// the type, other failures go through WriteRepoError (F-272).
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, ErrForceRequired):
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
-		return
-	}
-	if err != nil {
+	case errors.Is(err, ErrSuppressionType):
+		writeViolations(w, violation{Field: "rel_type", Detail: ErrSuppressionType.Error()})
+	case errors.Is(err, api.ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// errReason refuses a suppression reason that is too long or holds a NUL
+// character (422 on reason).
+var errReason = fmt.Errorf("the reason has at most %d characters and no NUL character", MaxSuppressionReason)
+
+// requestActor names the principal of the request as the actor of a
+// suppression change: its user id (none when the subject is no UUID) and
+// whether it is a user session or an API key.
+func requestActor(r *http.Request) Actor {
+	actor := Actor{ID: tenant.FromContext(r.Context()).UserID, Type: "user"}
+	if p, ok := identity.PrincipalFromContext(r.Context()); ok && p.Type == identity.PrincipalTypeAPIKey {
+		actor.Type = "api_key"
+	}
+	if !api.IsUUID(actor.ID) {
+		actor.ID = ""
+	}
+	return actor
+}
+
+// ListSuppressions handles GET /api/v1/relationship-suppressions: the
+// suppressions the caller sees (both CIs visible), with ci_id those of one
+// CI, newest first (F-273).
+func (h *Handler) ListSuppressions(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	ciID := r.URL.Query().Get("ci_id")
+	if ciID != "" && !api.IsUUID(ciID) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_id must be a UUID")
+		return
+	}
+	items, total := []Suppression{}, 0
+	if store, ok := h.repo.(SuppressionStore); ok {
+		var err error
+		if items, total, err = store.ListSuppressions(r.Context(), t.OrganizationID, ciID, page); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Suppression]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total,
+	})
+}
 
-	w.WriteHeader(http.StatusNoContent)
+// LiftSuppression handles DELETE /api/v1/relationship-suppressions/{id}: the
+// suppression is deleted and audited (relationship.suppression_lifted), so
+// the next discovery cycle creates the edge again (F-273). 404 for a
+// suppression the caller does not find (unknown, another organization, a CI
+// outside the scope, malformed id).
+func (h *Handler) LiftSuppression(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", "suppression not found")
+	if !ok {
+		return
+	}
+	err := api.ErrNotFound
+	if store, ok := h.repo.(SuppressionStore); ok {
+		err = store.LiftSuppression(r.Context(), t.OrganizationID, id, requestActor(r))
+	}
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, api.ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "suppression not found")
+	default:
+		api.WriteRepoError(w, err)
+	}
 }

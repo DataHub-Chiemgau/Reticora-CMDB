@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000138_contact_roles
+Stand: Migration 000189_enrollment_code_site_restrict
 
 ## Prüfung
 
@@ -70,6 +70,18 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_parent ON ci (organization_id
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_attributes_path ON ci USING gin (attributes jsonb_path_ops);
 ```
 
+Ebenso der Index der Standardsortierung der CI-Liste (WP-605, NFR-02):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_sort ON ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE deleted_at IS NULL;
+```
+
+Ebenso der Index der Adressen einer Schnittstelle (WP-608, NFR-03):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ip_address_interface ON ip_address (interface_id) WHERE interface_id IS NOT NULL;
+```
+
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein
 abgebrochener Lauf hinterlässt einen ungültigen Index, der mit `DROP INDEX
 CONCURRENTLY` entfernt und neu gebaut wird. Die Migration entfernt danach nur
@@ -84,7 +96,8 @@ Start bei jeder Abweichung:
 
 | Rolle | Eigenschaften | Rechte |
 |---|---|---|
-| Login-Rolle (z. B. `reticora`) | führt die Migrationen aus | Mitglied von `reticora_app`; der Pool wechselt per `SET ROLE` |
+| Migrations-/Admin-Login (z. B. `reticora`) | führt die Migrationen aus | darf SUPERUSER sein; nie Login des Servers (`database.NewPool` weist ihn ab), nur Werkzeuge über `database.NewAdminPool` |
+| Laufzeit-Login (z. B. `reticora_runtime`) | LOGIN, NOSUPERUSER, NOBYPASSRLS | nur Mitglied von `reticora_app`; der Pool wechselt per `SET ROLE`; erreicht keine SUPERUSER-/BYPASSRLS-Rolle |
 | `reticora_app` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | DML/Sequenzen/EXECUTE; `SET ROLE reticora_owner` erlaubt, aber ohne Vererbung (`INHERIT FALSE`); kein eigenes `CREATE` auf `public` |
 | `reticora_owner` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | Eigentümer aller Tabellen in `public` außer `schema_migrations` und TimescaleDB-Hypertables; `USAGE, CREATE` auf `public` |
 
@@ -99,6 +112,21 @@ Start bei jeder Abweichung:
   Grants oder neue Tabellen bleiben den Migrationen vorbehalten.
 - Der Event-Trigger `reticora_assign_owner` übergibt Tabellen, die spätere
   Migrationen in `public` anlegen, an `reticora_owner`.
+- Login (WP-352, F-057): Weder `session_user` noch `current_user` ist
+  SUPERUSER oder BYPASSRLS, und keine von ihnen erreichbare Rolle (geerbt oder
+  per `SET ROLE`) ist es; sonst gäbe `RESET ROLE` jeder Pool-Verbindung die
+  Rechte zurück. `VerifyRLSEnforced` und `VerifyRoleContract` melden das als
+  `RoleContractError` mit dem Session-User.
+- TRUNCATE-Guard (Migration 000144, F-192): `TRUNCATE` umgeht RLS, und der
+  Eigentümer `reticora_owner` darf es implizit. Jede Mandantentabelle (auch
+  `metric_sample` und die Materialisierungs-Hypertable von
+  `metric_sample_1h`) trägt den Statement-Level-Trigger
+  `reticora_truncate_guard` (`BEFORE TRUNCATE`), der für `reticora_app` und
+  `reticora_owner` mit 42501 abbricht. Entfernen oder Abschalten des Guards ist
+  DDL und für beide Rollen durch `reticora_restrict_app_ddl` gesperrt.
+  `VerifyRoleContract` meldet jede Mandantentabelle ohne aktiven Guard und
+  einen Login mit eigenem `TRUNCATE`-Recht; eine neue Mandantentabelle braucht
+  den Trigger daher in ihrer Migration.
 
 Nachweis: `backend/internal/database/role_check_integration_test.go`.
 
@@ -124,29 +152,131 @@ Policies für `PUBLIC` oder `reticora_app`:
 | `team-scope` | Tabellen mit `team_id` verwenden `app.team_scope` in `USING` und `WITH CHECK` (CH25) |
 | `org-column` | jede Tabelle außer `organization`, `schema_migrations` und den globalen Katalogen hat `organization_id` |
 | `read-only-catalog` | globale Kataloge ohne `organization_id` (`rls.GlobalCatalogTables`) gewähren `reticora_app` kein INSERT/UPDATE/DELETE |
+| `system-only` | Systemtabellen ohne `organization_id` (`rls.SystemTables`) haben ENABLE + FORCE RLS und den TRUNCATE-Schutz, jede Policy verlangt `app.system` (USING und WITH CHECK), keine erlaubt DELETE, `reticora_app` hat kein DELETE/TRUNCATE |
+| `located-scope` | Tabellen mit Standort- oder CI-Bezug (Spalte `location_id`, `room_id`, `rack_id` oder `ci_id`, auch mit Präfix wie `from_location_id` oder `child_ci_id`, oder Knoten des Standortbaums) tragen Client- und Site-Dimension (`client_id` und `site_id`, auch mit Präfix `source_`/`target_`) oder stehen in `rls.DerivedScopeTables` (TEN-02) |
 
 Das Verhalten der Policies prüft `TestRLSMatrix`
 (`backend/internal/tenant/rls/matrix_integration_test.go`, WP-065) für jede
 Mandantentabelle mit echten Anweisungen der App-Rolle: Prinzipale mit Org-,
 Client-, Site-, Team- und kombiniertem Scope sowie eine fremde Organisation ×
 SELECT/INSERT/UPDATE/DELETE × Zeilen in und außerhalb des Scopes, org-weite
-Zeilen (Scope-Spalte NULL) und globale Katalogzeilen. Org-weite und globale
-Zeilen dürfen sichtbar sein, gescopte Prinzipale dürfen sie aber weder
-anlegen noch ändern, löschen oder durch Setzen ihres Scopes übernehmen
-(TEN-05). Dafür ergänzt Migration 000079 je Tabelle, deren `ALL`-Policy mehr
-zeigt als sie schreiben lässt, restriktive Policies `<tabelle>_scoped_update`
-und `<tabelle>_scoped_delete` mit dem WITH-CHECK-Ausdruck als USING. Die
-Testzeilen werden mit `session_replication_role = replica` synthetisiert
-(ohne Fremdschlüssel und Trigger, RLS bleibt aktiv); Tabellen, deren Policy
-den Scope über eine Unterabfrage erbt, prüft die Matrix nur auf
-Organisationsebene, ihren Scope decken `module_object_integration_test.go`
-und `team_scope_integration_test.go` ab.
+Zeilen (Scope-Spalte NULL) und globale Katalogzeilen. Die Lesesemantik ist
+strikt gepinnt (TEN-05): Org-weite Zeilen sind für gescopte Prinzipale
+sichtbar, globale Zeilen für alle (Ausnahme `job`: Systemjobs nur mit
+`app.system`, `matrixHiddenGlobalRows`). Gescopte Prinzipale dürfen org-weite
+Zeilen aber weder anlegen noch ändern, löschen oder durch Setzen ihres Scopes
+übernehmen (TEN-05). Dafür ergänzt Migration 000079 je Tabelle, deren
+`ALL`-Policy mehr zeigt als sie schreiben lässt, restriktive Policies
+`<tabelle>_scoped_update` und `<tabelle>_scoped_delete` mit dem
+WITH-CHECK-Ausdruck als USING. Tabellen ohne Client- und Site-Spalte, deren
+Zeilen die ganze Organisation betreffen, schreiben nur Prinzipale ohne
+Client- und Site-Einschränkung (E-09, `matrixOrgWideWrites`); gescopte
+Prinzipale lesen sie. Heute ist das `vrf` (Migration 000148, WP-372, F-089):
+die restriktiven Policies `vrf_scoped_insert`, `vrf_scoped_update` und
+`vrf_scoped_delete` verlangen leeres `app.client_scope` und `app.site_scope`.
+`job` trägt statt Client-, Site- und Team-Spalten den Scope-Snapshot seines
+Erzeugers (`scope_recorded`, `scope_clients`, `scope_sites`, `scope_teams`,
+Migration 000154, WP-404, F-163): `job_isolation` verlangt in `USING` und
+`WITH CHECK` je Dimension leere Scope-GUC oder einen Snapshot, der vollständig
+im Scope liegt; die restriktive `job_scope_select` wendet das auch auf die
+Lesezugriffe an, die `job_system_select` sonst org-weit öffnen würde. Jobs ohne
+Snapshot (Systemjobs, Altbestand) lesen und schreiben nur Prinzipale ohne
+jede Scope-Einschränkung (`matrixSnapshotScoped`); die Snapshot-Regeln prüft
+`TestJobScopeAgainstPostgres` (`backend/internal/jobs/scope_integration_test.go`).
+`webhook_subscription` trägt denselben Snapshot (Migration 000155, WP-601,
+E-98): `webhook_sub_isolation` prüft Organisation und Snapshot in `USING` und
+`WITH CHECK`, die restriktive `webhook_sub_scope_select` jeden Lesezugriff
+(außer mit `app.system`); Abos ohne Snapshot (Altbestand) lesen und verwalten
+nur Prinzipale ohne jede Scope-Einschränkung, die Regeln prüft
+`TestSubscriptionScopeAgainstPostgres`
+(`backend/internal/webhook/subscription_scope_integration_test.go`).
+Die Testzeilen werden mit
+`session_replication_role = replica` synthetisiert (ohne Fremdschlüssel und
+Trigger, RLS bleibt aktiv). Tabellen, deren Policy den Scope über eine
+Unterabfrage erbt (`document`, `maintenance_window`, `review_item`,
+`training_assignment`), prüft die Matrix ebenfalls mit allen Prinzipalen
+(WP-353, F-354): Ihre Zeilen entstehen über echte Elternzeilen (CIs mit
+Client und Standort, Benutzer mit Teammitgliedschaften) bei aktiven Triggern,
+einschließlich geteilter, einseitig verlinkter, unverlinkter und nur mit
+org-weiten CIs verlinkter Zeilen; eine neue Tabelle dieser Art lässt die
+Matrix scheitern, bis sie in `inheritedModels` modelliert ist.
+
+### Abgeleiteter Scope der Modultabellen (WP-028, WP-353)
+
+`ticket`, `ticket_comment`, `document_link`, `maintenance_window_ci`
+(Migration 000064) und `disposal_record` (Migration 000145) leiten
+`client_id` und `site_id` per Trigger aus dem referenzierten Objekt ab
+(Entsorgung: Client des Assets und Standort seiner Location, ohne Asset aus
+dem CI) und folgen dessen Verschiebung; `disposal_record` bleibt
+revisionssicher, der Append-only-Trigger lässt nur diese Neuableitung durch
+die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
+
+- `key_assignment` hat nur `client_id`: `key_item` trägt keinen Standort
+  (Freitext `location` aus Migration 000050), ein `site_id` ist nicht
+  ableitbar.
+- `document` und `maintenance_window` haben keine eigene `client_id`: Sie
+  sind Mehrobjektzeilen, ihr Scope ergibt sich aus den Links
+  (`document_link`, `maintenance_window_ci`). Gescopte Prinzipale ändern oder
+  löschen sie nur, wenn jeder Link in ihrem Schreib-Scope liegt (Migrationen
+  000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
+  und legen keine unverlinkten an (WP-341).
+
+### Standort von Assets und Mengenartikeln (WP-392)
+
+`asset` und `quantity_item` tragen `site_id`, den Standort ihrer Location
+(Migration 000151, F-141). Der Trigger `derive_location_site` setzt ihn bei
+jedem INSERT und jeder Änderung von `location_id` oder `site_id` und
+überschreibt geschriebene Werte; er liest die Location mit erweitertem
+Client- und Site-Scope (`app_scope_widen`), eine Location einer anderen
+Organisation gilt als nicht gefunden (23503). Ändert eine Location ihren
+Standort (Verschieben, Umhängen), leitet `location_refresh_asset_site` die
+Zeilen an ihr neu ab. Die Policies prüfen `app.site_scope` wie bei `ci`
+(Migration 000063): Zeilen ohne Standort bleiben lesbar, schreiben dürfen
+sie nur org-weite Prinzipale (E-09).
+
+Ein neuer `location_id` eines Assets geht über `asset_propagate_location`
+unter der RLS des Schreibenden an seine CIs. Behält danach ein CI des Assets
+– geprüft mit erweitertem Client- und Site-Scope – einen anderen Standort,
+weil der Schreibende es nicht sieht oder nicht ändern darf, lehnt der
+Trigger die Änderung mit 42501 (`asset_location_ci_scope`) ab (Migration
+000181, F-380); Asset und CIs weichen nicht still voneinander ab.
+
+### Standort von Räumen und Racks (WP-393)
+
+`room` und `rack` tragen `client_id` und `site_id` ihrer 1:1-Location-Zeile
+(Migration 000152, F-053), beide `NOT NULL`: Jeder Raum und jedes Rack hat
+eine Location mit Client und Standort, org-weite Zeilen gibt es nicht. Der
+Trigger `derive_location_row_scope` setzt die Werte bei jedem INSERT und
+UPDATE und überschreibt geschriebene Werte; er liest die Location mit
+erweitertem Client- und Site-Scope. Ändert die Location-Zeile eines Raums
+oder Racks Client oder Standort (Verschieben im Baum, Client-Wechsel der
+Site), leitet `location_refresh_room_rack_scope` die Zeile neu ab. Die
+Policies `room_isolation` und `rack_isolation` verwenden das Prädikat von
+`location` (Migration 000062) in USING und WITH CHECK. Die Suchzeilen
+(`search_document`) von Assets und ihren Reservierungen übernehmen den
+Standort des Assets, Reservierungen von Mengenartikeln Client und Standort
+des Artikels, und folgen deren Änderung.
+
+Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
+Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
+(`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
+`asset_movement`, `assignment`, `composition`, `form_submission` und
+`stock_scan` (Sichtbarkeit über das referenzierte Asset, CI, Formular bzw.
+Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
+über die Site) und `metric_sample` (über die Views `metric_sample_v` und
+`metric_sample_1h_v`). `TestRLSCatalog` scheitert für einen Eintrag ohne
+vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
 
 Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
 keine Lücke: Sie werden nur durch Migrationen gepflegt und sind für die
 App-Rolle schreibgeschützt. Heute ist das nur `permission` (WP-024). Globale
 Katalogzeilen in Tabellen mit Org-Spalte (`organization_id IS NULL`, z. B.
-System-CI-Typen) sind über getrennte Policies je Kommando nur lesbar.
+System-CI-Typen) sind über getrennte Policies je Kommando nur lesbar. Ein CI
+hat einen System-Typ oder einen Typ seiner Organisation: Der einspaltige
+Fremdschlüssel `ci_ci_type_id_fkey` umgeht RLS, deshalb prüft der
+Constraint-Trigger `trg_ci_type_organization` (Migration 000153, WP-396,
+F-144) jedes INSERT und jede Änderung von `ci_type_id` (23514
+`ci_type_organization`).
 
 Die organisationsübergreifende Tabelle `operator_audit` (SEC-07, WP-070) ist
 die zweite dokumentierte Ausnahme ohne Org-Spalte: ENABLE + FORCE RLS mit einer
@@ -157,6 +287,17 @@ kein UPDATE/DELETE, zusätzlich verhindern Trigger Änderungen
 `signup_request` (WP-111) geschützt: Ein Signup-Antrag existiert vor seiner
 Organisation und ist nur im Operator-Kontext (`database.WithOperator`,
 `database.WithOrganizationSetup`) erreichbar.
+
+`platform_secret` (Migration 000163, SEC-06, WP-459) ist eine Systemtabelle der
+Installation ohne Org-Spalte, eine weitere dokumentierte Ausnahme
+(`rls.SystemTables`): Sie hält die Ableitungswurzel der abgeleiteten Secrets,
+mit dem Master-Key versiegelt. Jede Policy verlangt das System-Flag
+(`app.system`); der Server liest mit `database.WithSystem` und legt die Wurzel
+nur über `database.WithSystemWrite` an bzw. versiegelt sie neu (Aufrufer in
+`systemWriteCallers`, `TestSystemWriteCallersAreListed`). Mandanten- und
+Operator-Transaktionen lesen und schreiben nichts. Keine Policy erlaubt DELETE,
+`reticora_app` hat kein DELETE, der TRUNCATE-Schutz gilt wie bei den
+Mandantentabellen (`TestRLSCatalog` prüft die Regel `system-only`).
 
 Ein Prädikat gilt als erzwungen, wenn alle permissiven Policies des Kommandos
 oder eine restriktive Policy das GUC verwenden. Die folgende Liste der heute
@@ -173,6 +314,89 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 |---|---|---|
 
 <!-- rls-known-gaps:end -->
+
+## CI-Änderungen `ci_change` (AUD-03, WP-487)
+
+Nach Entscheidung E-82 (Option 2) bleibt `ci_change` feldgranular: eine Zeile
+je geändertem Feld, darauf beruhen die feldgranulare 409-Prüfung (API-07,
+`ci_version`) und der Merge. Migration 000167 ergänzt die Spalten von AUD-03:
+
+| Spalte | Inhalt |
+|---|---|
+| `change_kind` | `NOT NULL`, CHECK `chk_ci_change_kind`: `created`, `updated`, `deleted`, `restored`, `merged`, `type_changed`, `relationship_added`, `relationship_removed`, `status_changed`; gilt für die ganze Änderungsgruppe (ein Statuswechsel zusammen mit weiteren Feldern ist `updated`) |
+| `change_set_id` | gruppiert die Feldzeilen eines Schreibvorgangs eines CI; Bestandszeilen vor 000167 haben `NULL` |
+| `actor_user_id` | Benutzer-ID des Akteurs (Surrogat, keine Personendaten); `NULL` bei API-Schlüsseln, deren ID in `actor_id` steht |
+| `collector_id`, `observed_at` | Collector und Beobachtungszeitpunkt einer Discovery-Änderung |
+| `source` | Quelle wie in `audit_log` (CHECK `chk_ci_change_source`: `ui`, `api`, `collector`, `import`, `system`) |
+| `request_id`, `correlation_id` | Request- und Correlation-ID der Anfrage (AUD-07) |
+
+Die Schreibpfade des CI-Repositorys (`recordCIChange`, `recordCreates` in
+`backend/internal/ci`) setzen `change_kind`, `change_set_id`,
+`actor_user_id`, `source`, `request_id` und `correlation_id`;
+`collector_id` und `observed_at` setzt der Ingest-Pfad (WP-489).
+
+Der Typwechsel heißt `type_changed` (CI-11, `chk_ci_change_type`); die
+Migration benennt bestehende `type_change`-Zeilen um und leitet
+`change_kind` der Bestandszeilen aus `change_type`, Feld und Werten ab
+(Funktion `ci_change_kind`; Zeilen desselben CI mit gleichem `created_at`
+gelten als ein Schreibvorgang). Der Trigger `ci_change_kind` (`BEFORE INSERT
+OR UPDATE`) setzt `change_kind` für Schreiber, die es nicht setzen (ipam,
+rack, override), und speichert `type_change` als `type_changed`, auch wenn
+der Unmerge Zeilen aus einem älteren Merge-Snapshot zurückschreibt. Die
+Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
+
+## Schemaversion und Laufzeitschicht der Attribute (MET-16, WP-590)
+
+`ci_type.attribute_schema` ist das materialisierte Schema eines Typs:
+`generate_attribute_schema` komponiert die System-Basis
+(`attribute_definition` mit `organization_id` und `ci_type_id` `NULL`) mit
+den Definitionen des Typs; jede Änderung ergibt eine neue
+`ci_type.schema_version` (000105, 000107). `ci.schema_version` nennt die
+Version, gegen die ein CI zuletzt geschrieben wurde. Der Trigger
+`ci_schema_version` (`BEFORE INSERT OR UPDATE`, Fassung 000183) setzt sie
+bei jedem `INSERT` und bei jedem `UPDATE`, das `ci_type_id`, `attributes`
+oder eine typisierte Spalte nach CI-01 ändert (`name`, `manufacturer`,
+`model`, `serial_number`, `hardware_uuid`, `management_ip`, `primary_mac`,
+`hostname`, `fqdn`, `os_name`, `os_version`, `firmware_version`,
+`sys_object_id`), auf die aktuelle Version des Typs. Ein `UPDATE`, das nur
+andere Felder ändert (Systemfelder wie `last_seen_at`, `first_seen_at`,
+`health`, `version`, `updated_at`, `deleted_at`; Zuordnung und Status),
+lässt sie unverändert; ein direktes Schreiben von `schema_version` wird
+ignoriert.
+
+Org-globale Attributdefinitionen (`organization_id` gesetzt, `ci_type_id`
+`NULL`, MET-13) sind nach Entscheidung E-93 (entschieden: Option 2) eine
+validierte, nicht materialisierte **Laufzeitschicht**: Der CI-Service
+komponiert sie bei jedem Schreibvorgang der Organisation zwischen System-Basis
+und Typ (`citype.ResolveFields`) und erzwingt sie (Pflichtdefinition ohne Wert
+→ 422). `generate_attribute_schema` nimmt sie nicht auf, ihre Änderung erzeugt
+keine neue Typversion, und `ci.schema_version` referenziert nur System-Basis
+und Typ. Systemtypen sind organisationsübergreifend materialisiert und tragen
+deshalb keine Schicht einer einzelnen Organisation. Eine Org-Schemarevision je
+(Organisation, Typ) (Option 1) wäre ein eigenes WP mit Migration.
+
+## Attributdefinitionen (DB-03, MET-10, MET-16, WP-589)
+
+Nach Entscheidung E-92 (`docs/plan/g1-korrektur/entscheidungen.md`,
+entschieden: Option 2) ist `attribute_definition` die einzige Quelle der
+System-, Organisations- und Typdefinitionen (DB-03); `ci_type.attribute_schema`
+wird daraus erzeugt. Die Definitionen der Instanzattribute bleiben in
+`ci_instance_field_definition` (MET-14 [P2], WP-256), der letzten Schicht der
+Komposition System → Organisation → Typ → Instanz (MET-16, `ResolveFields` in
+`backend/internal/citype/resolver.go`). Weitere Tabellen mit
+Attributdefinitionen gibt es nicht (`TestResolverLayerOrder`). Entscheidet
+der Auftraggeber Option 1, übernimmt ein Folge-WP zusammen mit WP-256 die
+Instanzdefinitionen.
+
+`attribute_definition.validation` speichert seit WP-589 die Regel als AST nach
+MET-45 (`api/rules.schema.json`); `backend/internal/rules` wertet sie bei jedem
+CI-Schreibvorgang verbindlich aus. Die frühere Struktur (`min`, `max`,
+`min_length`, `max_length`, `pattern`, `patterns`, `options`) bleibt in
+Bestandszeilen stehen (keine Datenmigration) und wird beim Lesen in den AST
+übersetzt. Für die Komposition des materialisierten Schemas übersetzt die
+Funktion `reticora_validation_legacy` (Migration 000184) einen AST in diese
+Struktur, wie `fieldmeta.ValidationFromRule`; die Down-Migration schreibt
+AST-Zeilen in die frühere Struktur zurück.
 
 ## Tabellen, RLS und Policies
 
@@ -196,12 +420,14 @@ SECURITY`), Policies mit ihrem Kommando.
 | `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
+| `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
 | `building` | ja | ja | building_isolation (ALL) |
 | `cable` | ja | ja | org_isolation (ALL) |
 | `ci` | ja | ja | ci_isolation (ALL), ci_scoped_delete (DELETE), ci_scoped_update (UPDATE) |
 | `ci_change` | ja | ja | ci_change_scoped_delete (DELETE), ci_change_scoped_update (UPDATE), org_isolation (ALL) |
 | `ci_contact` | ja | ja | ci_contact_scoped_delete (DELETE), ci_contact_scoped_update (UPDATE), org_isolation (ALL) |
 | `ci_field_value` | ja | ja | ci_field_value_isolation (ALL), ci_field_value_scoped_delete (DELETE), ci_field_value_scoped_update (UPDATE) |
+| `ci_identity_mac` | ja | ja | ci_identity_mac_isolation (ALL), ci_identity_mac_scoped_delete (DELETE), ci_identity_mac_scoped_update (UPDATE) |
 | `ci_instance_field_definition` | ja | ja | ci_instance_field_definition_isolation (ALL), ci_instance_field_definition_scoped_delete (DELETE), ci_instance_field_definition_scoped_update (UPDATE) |
 | `ci_merge` | ja | ja | ci_merge_isolation (ALL), ci_merge_scoped_delete (DELETE), ci_merge_scoped_update (UPDATE) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL), ci_relationship_scoped_delete (DELETE), ci_relationship_scoped_update (UPDATE) |
@@ -210,7 +436,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `collector` | ja | ja | collector_isolation (ALL), collector_scoped_delete (DELETE), collector_scoped_update (UPDATE) |
 | `collector_ca` | ja | ja | collector_ca_operator (ALL) |
 | `collector_certificate` | ja | ja | collector_certificate_isolation (ALL), collector_certificate_system_select (SELECT) |
-| `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_system_select (SELECT) |
+| `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_scope_delete (DELETE), collector_enrollment_code_scope_insert (INSERT), collector_enrollment_code_scope_select (SELECT), collector_enrollment_code_scope_update (UPDATE), collector_enrollment_code_system_select (SELECT) |
 | `compliance_result` | ja | ja | compliance_result_scoped_delete (DELETE), compliance_result_scoped_update (UPDATE), compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
 | `composition` | ja | ja | composition_isolation (ALL) |
@@ -223,8 +449,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `discovery_job` | ja | ja | discovery_job_isolation (ALL) |
 | `discovery_result` | ja | ja | discovery_result_isolation (ALL), discovery_result_scoped_delete (DELETE), discovery_result_scoped_update (UPDATE) |
 | `discovery_scope` | ja | ja | discovery_scope_isolation (ALL), discovery_scope_scoped_delete (DELETE), discovery_scope_scoped_update (UPDATE) |
-| `disposal_record` | ja | ja | disposal_record_isolation (ALL) |
-| `document` | ja | ja | document_scoped_delete (DELETE), document_scoped_update (UPDATE), document_tenant_isolation (ALL) |
+| `disposal_record` | ja | ja | disposal_record_isolation (ALL), disposal_record_scoped_delete (DELETE), disposal_record_scoped_update (UPDATE) |
+| `document` | ja | ja | document_scoped_delete (DELETE), document_scoped_insert (INSERT), document_scoped_update (UPDATE), document_tenant_isolation (ALL) |
 | `document_link` | ja | ja | document_link_scoped_delete (DELETE), document_link_scoped_update (UPDATE), document_link_tenant_isolation (ALL) |
 | `endpoint_agent` | ja | ja | endpoint_agent_isolation (ALL), endpoint_agent_scoped_delete (DELETE), endpoint_agent_scoped_update (UPDATE) |
 | `entitlement` | ja | ja | entitlement_isolation (ALL) |
@@ -244,7 +470,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL) |
 | `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
-| `job` | ja | ja | job_isolation (ALL), job_system_select (SELECT) |
+| `job` | ja | ja | job_isolation (ALL), job_scope_select (SELECT), job_system_select (SELECT) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL), key_assignment_scoped_delete (DELETE), key_assignment_scoped_update (UPDATE) |
 | `key_item` | ja | ja | key_item_isolation (ALL), key_item_scoped_delete (DELETE), key_item_scoped_update (UPDATE) |
 | `lifecycle_definition` | ja | ja | lifecycle_definition_isolation_delete (DELETE), lifecycle_definition_isolation_insert (INSERT), lifecycle_definition_isolation_select (SELECT), lifecycle_definition_isolation_update (UPDATE) |
@@ -255,13 +481,15 @@ SECURITY`), Policies mit ihrem Kommando.
 | `location_node_retired` | ja | ja | location_node_retired_isolation (ALL), location_node_retired_scoped_delete (DELETE), location_node_retired_scoped_update (UPDATE) |
 | `location_ref_migration` | ja | ja | location_ref_migration_isolation (ALL) |
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL), maintenance_notification_scoped_delete (DELETE), maintenance_notification_scoped_update (UPDATE) |
-| `maintenance_window` | ja | ja | maintenance_window_isolation (ALL), maintenance_window_scoped_delete (DELETE), maintenance_window_scoped_update (UPDATE) |
+| `maintenance_window` | ja | ja | maintenance_window_isolation (ALL), maintenance_window_scoped_delete (DELETE), maintenance_window_scoped_insert (INSERT), maintenance_window_scoped_update (UPDATE) |
 | `maintenance_window_ci` | ja | ja | maintenance_window_ci_isolation (ALL), maintenance_window_ci_scoped_delete (DELETE), maintenance_window_ci_scoped_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |
+| `notice_sent` | ja | ja | notice_sent_isolation (ALL) |
 | `notification_channel` | ja | ja | notification_channel_isolation (ALL) |
 | `notification_delivery` | ja | ja | notification_delivery_isolation (ALL), notification_delivery_system_select (SELECT) |
+| `notification_digest_item` | ja | ja | notification_digest_item_isolation (ALL), notification_digest_item_system_select (SELECT) |
 | `notification_inbox` | ja | ja | notification_inbox_isolation (ALL) |
 | `notification_preference` | ja | ja | notification_preference_isolation (ALL) |
 | `operator_audit` | ja | ja | operator_audit_operator (ALL) |
@@ -269,6 +497,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
 | `permission` | nein | nein | – |
 | `pii_subject` | ja | ja | pii_subject_isolation (ALL) |
+| `platform_secret` | ja | ja | platform_secret_system_insert (INSERT), platform_secret_system_select (SELECT), platform_secret_system_update (UPDATE) |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `quantity_item` | ja | ja | quantity_item_isolation (ALL), quantity_item_scoped_delete (DELETE), quantity_item_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
@@ -276,7 +505,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `relationship_suppression` | ja | ja | relationship_suppression_scoped_delete (DELETE), relationship_suppression_scoped_update (UPDATE), suppression_isolation (ALL) |
 | `relationship_type` | ja | ja | relationship_type_isolation_delete (DELETE), relationship_type_isolation_insert (INSERT), relationship_type_isolation_select (SELECT), relationship_type_isolation_update (UPDATE) |
 | `reservation` | ja | ja | reservation_isolation (ALL) |
-| `review_item` | ja | ja | review_item_isolation (ALL) |
+| `review_item` | ja | ja | review_item_isolation (ALL), review_item_scoped_delete (DELETE), review_item_scoped_select (SELECT), review_item_scoped_update (UPDATE) |
 | `role` | ja | ja | role_isolation (ALL) |
 | `role_assignment` | ja | ja | role_assignment_isolation (ALL) |
 | `role_permission` | ja | ja | role_permission_tenant_isolation (ALL) |
@@ -305,10 +534,10 @@ SECURITY`), Policies mit ihrem Kommando.
 | `user_custom_role` | ja | ja | user_custom_role_isolation (ALL) |
 | `user_invitation` | ja | ja | org_isolation (ALL) |
 | `vlan` | ja | ja | vlan_isolation (ALL), vlan_scoped_delete (DELETE), vlan_scoped_update (UPDATE) |
-| `vrf` | ja | ja | vrf_isolation (ALL) |
+| `vrf` | ja | ja | vrf_isolation (ALL), vrf_scoped_delete (DELETE), vrf_scoped_insert (INSERT), vrf_scoped_update (UPDATE) |
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
-| `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL) |
+| `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL), webhook_sub_scope_select (SELECT) |
 | `workflow_def` | ja | ja | workflow_def_tenant_isolation (ALL) |
 | `workflow_run` | ja | ja | workflow_run_tenant_isolation (ALL) |
 | `workflow_step` | ja | ja | workflow_step_tenant_isolation (ALL) |

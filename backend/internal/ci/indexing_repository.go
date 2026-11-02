@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // indexingRepository decorates a Repository with best-effort search-index
@@ -17,7 +18,10 @@ import (
 //
 // The decorator lives at the repository boundary so that every write path
 // (REST handler, collector bulk ingest, workflow executor) keeps the index
-// in sync, not only the CI service.
+// in sync, not only the CI service. It offers every exported method of the
+// PostgreSQL repository (except WithEvents): callers find the optional
+// interfaces by type assertion, and a method the decorator hides is lost
+// in production, where the repository is always decorated (SR-11, F-037).
 type indexingRepository struct {
 	Repository
 	indexer Indexer
@@ -102,6 +106,44 @@ func (r *indexingRepository) RestoreDeleted(ctx context.Context, orgID, id strin
 	return item, nil
 }
 
+// reactivator reactivates a CI seen again after its deletion (CI-13); the
+// discovery review handler asserts it.
+type reactivator interface {
+	Restore(ctx context.Context, orgID, id string) (*Item, error)
+}
+
+// Restore forwards the reactivation of a deleted CI (CI-13, merge of a
+// resurrected_device review) and indexes the CI again.
+func (r *indexingRepository) Restore(ctx context.Context, orgID, id string) (*Item, error) {
+	restorer, ok := r.Repository.(reactivator)
+	if !ok {
+		return nil, errors.New("reactivation is not supported by this repository")
+	}
+	item, err := restorer.Restore(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	r.index(ctx, item)
+	return item, nil
+}
+
+// UniqueConflicts forwards the check of the unique attributes (MET-15), so
+// the service refuses a taken value before the write; without it no
+// attribute is reported and only the unique index guards.
+func (r *indexingRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) ([]string, error) {
+	checker, ok := r.Repository.(UniqueChecker)
+	if !ok {
+		return nil, nil
+	}
+	return checker.UniqueConflicts(ctx, orgID, ciTypeID, clientID, ciID, attrs)
+}
+
+// CountActive forwards the count of max_cis over the whole organization
+// (ActiveCounter, F-403); without it the count is the total of List.
+func (r *indexingRepository) CountActive(ctx context.Context, orgID string) (int64, error) {
+	return CountActive(ctx, r.Repository, orgID)
+}
+
 // GetByIDs forwards the batch read (NFR-02); without it every CI is read
 // on its own.
 func (r *indexingRepository) GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error) {
@@ -150,6 +192,36 @@ func (r *indexingRepository) ChangeType(ctx context.Context, orgID, ciID, typeID
 	return result, nil
 }
 
+// UpdateRecord forwards the record update of the ingest (RecordUpdater,
+// AUD-03) with its transaction and indexes the changed CI after the commit,
+// together with the other CIs the transaction changed this way; a rollback
+// indexes nothing. A sighting changes no field of the document and is not
+// indexed. The decorator always offers it, so the outermost of several
+// decorators keeps it.
+func (r *indexingRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
+	result, err := UpdateRecord(ctx, r.Repository, orgID, id, rec)
+	if err != nil || !result.Changed {
+		return result, err
+	}
+	// The CIs of the transaction (a window of the ingest) are indexed
+	// together, each in its last state.
+	database.AfterCommitBatch(ctx, r, snapshot(result.CI), func(ctx context.Context, batch []any) {
+		latest := map[string]int{}
+		items := make([]*Item, 0, len(batch))
+		for _, v := range batch {
+			item := v.(*Item)
+			if k, seen := latest[item.ID]; seen {
+				items[k] = item
+				continue
+			}
+			latest[item.ID] = len(items)
+			items = append(items, item)
+		}
+		r.indexMany(ctx, items)
+	})
+	return result, nil
+}
+
 // Merge forwards the merge (CI-12): the survivor is indexed again, the
 // victim leaves the index.
 func (r *indexingRepository) Merge(ctx context.Context, orgID, survivorID, victimID, mergeID string) (*MergeResult, error) {
@@ -168,13 +240,14 @@ func (r *indexingRepository) Merge(ctx context.Context, orgID, survivorID, victi
 	return result, nil
 }
 
-// Unmerge forwards the unmerge (CI-12) and indexes both CIs again.
-func (r *indexingRepository) Unmerge(ctx context.Context, orgID, victimID string) (*UnmergeResult, error) {
+// Unmerge forwards the unmerge (CI-12) with its force (E-80) and indexes
+// both CIs again.
+func (r *indexingRepository) Unmerge(ctx context.Context, orgID, victimID string, force bool) (*UnmergeResult, error) {
 	unmerger, ok := r.Repository.(Unmerger)
 	if !ok {
 		return nil, ErrMergeUnsupported
 	}
-	result, err := unmerger.Unmerge(ctx, orgID, victimID)
+	result, err := unmerger.Unmerge(ctx, orgID, victimID, force)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,60 @@
+
+running (01m56.0s), 31/32 VUs, 10168 complete and 0 interrupted iterations
+
+running (01m57.0s), 31/32 VUs, 10252 complete and 0 interrupted iterations
+
+running (01m58.0s), 31/32 VUs, 10342 complete and 0 interrupted iterations
+
+running (01m59.0s), 31/32 VUs, 10443 complete and 0 interrupted iterations
+
+running (02m00.0s), 31/32 VUs, 10529 complete and 0 interrupted iterations
+
+running (02m01.0s), 02/32 VUs, 10600 complete and 0 interrupted iterations
+
+     ✓ detail 200
+     ✓ filter 200
+     ✓ rack 200
+     ✓ search 200
+     ✓ list 200
+     ✓ bulk 200/202
+     ✓ topology 200
+     ✓ impact 200
+     ✓ impact covers the organization
+     ✓ impact <= 250 B per impacted CI
+     ✓ impact_full 200
+     ✓ full impact covers the organization
+     ✓ bulk job succeeded
+
+     █ setup
+
+       ✓ setup 200
+
+   ✓ bulk_500_duration..............: avg=11.39s   min=9.91s    med=11.43s   p(90)=12.54s   p(95)=12.68s   max=12.82s   count=3    
+   ✓ checks.........................: 100.00% 11045 out of 11045
+     data_received..................: 1.6 GB  13 MB/s
+     data_sent......................: 2.6 MB  21 kB/s
+     http_req_blocked...............: avg=13.98µs  min=1.47µs   med=5.68µs   p(90)=7.92µs   p(95)=10.56µs  max=4.97ms   count=10817
+     http_req_connecting............: avg=6.04µs   min=0s       med=0s       p(90)=0s       p(95)=0s       max=4.93ms   count=10817
+     http_req_duration..............: avg=114.22ms min=4.41ms   med=64.5ms   p(90)=264.3ms  p(95)=372.66ms max=1.48s    count=10817
+       { expected_response:true }...: avg=114.22ms min=4.41ms   med=64.5ms   p(90)=264.3ms  p(95)=372.66ms max=1.48s    count=10817
+     ✓ { name:detail }..............: avg=42.24ms  min=4.41ms   med=28.53ms  p(90)=91.94ms  p(95)=129.72ms max=267.02ms count=2469 
+     ✓ { name:filter }..............: avg=67.64ms  min=8.94ms   med=52.83ms  p(90)=133.59ms p(95)=173.49ms max=341.26ms count=2235 
+     ✓ { name:impact_full }.........: avg=687.43ms min=313.49ms med=627.77ms p(90)=1.08s    p(95)=1.25s    max=1.48s    count=142  
+     ✓ { name:impact }..............: avg=646ms    min=308.25ms med=617.3ms  p(90)=940.04ms p(95)=1.13s    max=1.48s    count=146  
+     ✓ { name:list }................: avg=215.06ms min=58.61ms  med=185.65ms p(90)=366.33ms p(95)=450.49ms max=827.37ms count=1444 
+     ✓ { name:rack }................: avg=54.39ms  min=5.6ms    med=39.56ms  p(90)=113.24ms p(95)=153.36ms max=343.07ms count=2350 
+     ✓ { name:search }..............: avg=165.77ms min=36.23ms  med=146.77ms p(90)=292.6ms  p(95)=348.12ms max=669.57ms count=1637 
+     ✓ { name:topology }............: avg=368.05ms min=116.17ms med=334.54ms p(90)=564.06ms p(95)=681.55ms max=994.17ms count=176  
+     http_req_failed................: 0.00%   0 out of 10817
+     http_req_receiving.............: avg=385.42µs min=14.68µs  med=87.34µs  p(90)=337.14µs p(95)=1.07ms   max=145.08ms count=10817
+     http_req_sending...............: avg=29.09µs  min=4.61µs   med=16.13µs  p(90)=42.18µs  p(95)=63.48µs  max=7.52ms   count=10817
+     http_req_tls_handshaking.......: avg=0s       min=0s       med=0s       p(90)=0s       p(95)=0s       max=0s       count=10817
+     http_req_waiting...............: avg=113.81ms min=4.32ms   med=64.34ms  p(90)=264ms    p(95)=371.07ms max=1.48s    count=10817
+     http_reqs......................: 10817   89.304176/s
+     iteration_duration.............: avg=354.65ms min=204.64ms med=266.28ms p(90)=476.75ms p(95)=689.25ms max=12.82s   count=10602
+     iterations.....................: 10602   87.529155/s
+     vus............................: 2       min=2              max=32
+     vus_max........................: 32      min=32             max=32
+
+
+running (02m01.1s), 00/32 VUs, 10602 complete and 0 interrupted iterations

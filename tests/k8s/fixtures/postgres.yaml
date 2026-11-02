@@ -1,0 +1,75 @@
+# Test database of the kind smoke. kind-smoke.sh setup migrates it with the
+# bootstrap superuser (the migration login of deploy/README.md) through a
+# port-forward and then creates the runtime login of reticora-db-runtime.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kind-smoke-postgres
+type: Opaque
+stringData:
+  password: kind-smoke-admin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+    spec:
+      containers:
+        - name: postgres
+          # The TimescaleDB image of the repository, pinned by version and
+          # digest (E-96, tests/ci-config.test.sh).
+          image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+          env:
+            - name: POSTGRES_USER
+              value: reticora
+            - name: POSTGRES_DB
+              value: reticora
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kind-smoke-postgres
+                  key: password
+            - name: NO_TS_TUNE
+              value: "true"
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+              name: postgres
+          # Over TCP: during the initialization the entrypoint's temporary
+          # server listens on the socket only, so the pod becomes Ready with
+          # the final server.
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "reticora", "-d", "reticora"]
+            periodSeconds: 3
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

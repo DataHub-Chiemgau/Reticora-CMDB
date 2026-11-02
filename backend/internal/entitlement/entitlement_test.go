@@ -3,8 +3,11 @@ package entitlement
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 func testService(t *testing.T, plan Plan) *Service {
@@ -18,7 +21,8 @@ func testService(t *testing.T, plan Plan) *Service {
 
 // TestProvisionedPlanGrantsOnlyPlanFeatures covers WP-072 (ENT-05): an
 // organization is entitled exactly to its rows; an organization without rows
-// has only cmdb_core (no default-plan fallback); provisioning runs once.
+// has only cmdb_core (no default-plan fallback); provisioning again adds
+// only missing plan features (WP-470) and changes no existing row.
 func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	svc := testService(t, PlanEssential)
 	ctx := context.Background()
@@ -35,11 +39,21 @@ func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	if list, _ := svc.List(ctx, "org-2"); len(list) != 1 || list[0].FeatureKey != FeatureCMDBCore || !list[0].Enabled {
 		t.Errorf("entitlements of an organization without rows: %+v", list)
 	}
-	if done, err := svc.Provision(ctx, "org-1", PlanEnterprise); done || err != nil {
-		t.Errorf("second provisioning: %v, %v; want no change", done, err)
+	if added, err := svc.Provision(ctx, "org-1", PlanEssential); len(added) != 0 || err != nil {
+		t.Errorf("second provisioning: %v, %v; want no change", added, err)
 	}
 	if svc.IsEnabled(ctx, "org-1", FeatureTicketing) {
 		t.Error("second provisioning changed the plan")
+	}
+	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureExportCSV, Plan: PlanEssential}); err != nil {
+		t.Fatal(err)
+	}
+	added, err := svc.Provision(ctx, "org-1", PlanStandard)
+	if err != nil || !slices.Equal(added, []string{FeatureDocuments, FeatureStocktake, FeatureTicketing}) {
+		t.Errorf("provisioning a larger plan: %v, %v; want only the missing features", added, err)
+	}
+	if svc.IsEnabled(ctx, "org-1", FeatureExportCSV) {
+		t.Error("provisioning overwrote the disabled export_csv row")
 	}
 }
 
@@ -140,6 +154,44 @@ func TestAllowCreateEnforcesLimit(t *testing.T) {
 	}
 }
 
+// TestLimitExceededDetailFollowsCallerScope covers F-414 (ENT-03): the
+// refusal names count and limit only to a principal with org-wide client
+// and site scope; a client- or site-scoped principal and a context without
+// a user (invitation, first login, enrollment, ingest) get the text without
+// numbers. The fields keep both for the callers in code.
+func TestLimitExceededDetailFollowsCallerScope(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
+	if _, err := svc.Grant(context.Background(), Entitlement{OrganizationID: "org-1", FeatureKey: FeatureCMDBCore,
+		Plan: PlanEssential, Enabled: true, Limits: map[string]int64{LimitMaxCIs: 7}}); err != nil {
+		t.Fatal(err)
+	}
+	orgWide := database.OrgWideScope("org-1", "user-1")
+	clientScoped, siteScoped := orgWide, orgWide
+	clientScoped.Clients = database.ScopeIDs("c0dea1a0-0000-4000-8000-0000000000c1")
+	siteScoped.Sites = database.ScopeIDs("c0dea1a0-0000-4000-8000-0000000000a1")
+	system := database.OrgWideScope("org-1", "")
+	const hidden = `entitlement limit for "max_cis" exceeded: the limit of the plan is reached`
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		want string
+	}{
+		"org-wide principal": {database.ContextWithTenantScope(context.Background(), &orgWide), `entitlement limit for "max_cis" exceeded: 9 of 7 in use`},
+		"client-scoped":      {database.ContextWithTenantScope(context.Background(), &clientScoped), hidden},
+		"site-scoped":        {database.ContextWithTenantScope(context.Background(), &siteScoped), hidden},
+		"system scope":       {database.ContextWithTenantScope(context.Background(), &system), hidden},
+		"no scope":           {context.Background(), hidden},
+	} {
+		err := svc.AllowCreate(tc.ctx, "org-1", LimitMaxCIs, 9)
+		var limitErr *LimitExceededError
+		if !asLimitError(err, &limitErr) {
+			t.Fatalf("%s: %v, want LimitExceededError", name, err)
+		}
+		if err.Error() != tc.want || limitErr.Limit != 7 || limitErr.Current != 9 {
+			t.Errorf("%s: %q (limit %d, current %d), want %q with limit 7 and current 9", name, err.Error(), limitErr.Limit, limitErr.Current, tc.want)
+		}
+	}
+}
+
 func TestEnforcementDisabledAllowsEverything(t *testing.T) {
 	svc := NewService(NewMemoryRepository(), Options{Enforce: false})
 	ctx := context.Background()
@@ -170,6 +222,9 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		// WP-168 (API-05): catalog paths are gated like their predecessors.
 		"/api/v1/impact/c1":  FeatureTopology,
 		"/api/v1/exports/j1": FeatureExportCSV,
+		// WP-671 (F-400): the discovery scopes are discovery.
+		"/api/v1/discovery-scopes":    FeatureDiscovery,
+		"/api/v1/discovery-scopes/s1": FeatureDiscovery,
 	}
 	for path, want := range cases {
 		got, gated := RequiredFeature(path)
@@ -179,7 +234,12 @@ func TestRequiredFeatureMapping(t *testing.T) {
 	}
 
 	for _, path := range []string{"/api/v1/cis", "/api/v1/cis/c1", "/api/v1/auth/me", "/api/v1/entitlements", "/healthz",
-		"/api/v1/collectors/enroll", "/api/v1/users/u1/data-export"} {
+		"/api/v1/collectors/enroll", "/api/v1/users/u1/data-export",
+		// WP-671 (F-400): the review queue, its deprecated alias and the
+		// location tree are cmdb_core (rack nodes and scope_suggested items
+		// check their feature in the handler).
+		"/api/v1/review-items", "/api/v1/review-items/r1/resolve", "/api/v1/discovery/review-items",
+		"/api/v1/discovery/review-items/r1/resolve", "/api/v1/locations", "/api/v1/locations/tree", "/api/v1/locations/l1"} {
 		if _, gated := RequiredFeature(path); gated {
 			t.Errorf("expected %q to stay ungated", path)
 		}
@@ -239,7 +299,7 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 		"disabled core": {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: false},
 		"expiring core": {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: true, ValidUntil: &expired},
 		"bad source":    {OrganizationID: "org-1", FeatureKey: FeatureWebhooks, Enabled: true, Source: "gift"},
-		"negative":      {OrganizationID: "org-1", FeatureKey: FeatureWebhooks, Enabled: true, Limits: map[string]int64{"limit": -1}},
+		"negative":      {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: true, Limits: map[string]int64{LimitMaxCIs: -1}},
 	} {
 		var validation *ValidationError
 		if _, err := svc.Grant(ctx, ent); !errors.As(err, &validation) {
@@ -248,6 +308,70 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 	}
 	if !svc.IsEnabled(ctx, "org-1", FeatureCMDBCore) {
 		t.Error("cmdb_core not active")
+	}
+}
+
+// TestGrantAcceptsOnlyENT02Keys covers WP-564 (ENT-02, F-209): Grant stores
+// only the feature keys of ENT-02, the module keys and the add-ons, and only
+// the quotas max_cis, max_collectors, max_users and max_api_keys; any other
+// key is a ValidationError naming the field, and nothing is stored.
+func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
+
+	keys := FeatureKeys()
+	for _, f := range slices.Concat(Phase1Features, Addons, []string{"inventory", "documents", "stocktake", "ticketing",
+		"monitoring", "endpoint_agent", "workflow_forms", "compliance"}) {
+		if !slices.Contains(keys, f) {
+			t.Errorf("FeatureKeys lacks %s", f)
+		}
+	}
+	if len(keys) != 18 {
+		t.Errorf("FeatureKeys %v, want the 8 keys of ENT-02, 8 module keys and 2 add-ons", keys)
+	}
+	for _, plan := range []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise} {
+		for _, f := range PlanFeatures(plan) {
+			if !slices.Contains(keys, f) {
+				t.Errorf("plan %s includes %s, which is no known feature key", plan, f)
+			}
+		}
+	}
+
+	for name, tc := range map[string]struct {
+		ent   Entitlement
+		field string
+	}{
+		"feature key with a hyphen": {Entitlement{FeatureKey: "rack-view", Enabled: true}, "feature_key"},
+		"feature key of phase 2":    {Entitlement{FeatureKey: "export_datev", Enabled: true}, "feature_key"},
+		"feature key in upper case": {Entitlement{FeatureKey: "Discovery", Enabled: true}, "feature_key"},
+		"feature key with a space":  {Entitlement{FeatureKey: "discovery ", Enabled: true}, "feature_key"},
+		"empty feature key":         {Entitlement{FeatureKey: " ", Enabled: true}, "feature_key"},
+		"quota typo":                {Entitlement{FeatureKey: FeatureRackView, Enabled: true, Limits: map[string]int64{"max_cis_typo": 5}}, "limits"},
+		"quota in upper case":       {Entitlement{FeatureKey: FeatureCMDBCore, Enabled: true, Limits: map[string]int64{"MAX_CIS": 5}}, "limits"},
+		"negative quota":            {Entitlement{FeatureKey: FeatureCMDBCore, Enabled: true, Limits: map[string]int64{LimitMaxCIs: -1}}, "limits"},
+		"disabled cmdb_core":        {Entitlement{FeatureKey: FeatureCMDBCore}, "enabled"},
+		"bad source":                {Entitlement{FeatureKey: FeatureWebhooks, Enabled: true, Source: "gift"}, "source"},
+	} {
+		tc.ent.OrganizationID = "org-1"
+		var validation *ValidationError
+		if _, err := svc.Grant(ctx, tc.ent); !errors.As(err, &validation) || validation.Field != tc.field {
+			t.Errorf("%s: %v, want a validation error of %s", name, err, tc.field)
+		}
+	}
+	if list, err := svc.List(ctx, "org-1"); err != nil || len(list) != 1 || list[0].FeatureKey != FeatureCMDBCore {
+		t.Errorf("refused grants stored rows: %+v, %v", list, err)
+	}
+
+	for _, f := range keys {
+		if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: f, Enabled: true}); err != nil {
+			t.Errorf("grant %s: %v", f, err)
+		}
+	}
+	for _, quota := range Quotas {
+		if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: QuotaFeature[quota], Enabled: true,
+			Limits: map[string]int64{quota: 3}}); err != nil {
+			t.Errorf("quota %s: %v", quota, err)
+		}
 	}
 }
 

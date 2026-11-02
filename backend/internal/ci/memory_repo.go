@@ -118,7 +118,7 @@ func (r *MemoryRepository) GetByID(ctx context.Context, orgID, id string) (*Item
 
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	return item, nil
 }
@@ -172,7 +172,10 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
+	}
+	if err := reviveSighted(item, &req); err != nil {
+		return nil, err
 	}
 
 	if req.Name != nil {
@@ -214,7 +217,8 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	}
 	if req.LastSeenAt != nil {
 		t, err := time.Parse(time.RFC3339, *req.LastSeenAt)
-		if err == nil {
+		// A sighting keeps the later time, like the PostgreSQL repository.
+		if err == nil && (req.Manual != nil || item.LastSeenAt == nil || t.After(*item.LastSeenAt)) {
 			item.LastSeenAt = &t
 		}
 	}
@@ -231,7 +235,7 @@ func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
-		return fmt.Errorf("not found")
+		return ErrNotFound
 	}
 	// A deleted CI is kept for the retention like in PostgreSQL (CI-05):
 	// decommissioned, without its asset link.
@@ -248,8 +252,11 @@ func (r *MemoryRepository) RestoreDeleted(_ context.Context, orgID, id string, r
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	item, ok := r.items[id]
-	if !ok || item.OrganizationID != orgID || item.DeletedAt == nil {
-		return nil, fmt.Errorf("not found")
+	if !ok || item.OrganizationID != orgID {
+		return nil, ErrNotFound
+	}
+	if item.DeletedAt == nil {
+		return nil, ErrNotDeleted
 	}
 	if time.Since(*item.DeletedAt) > retention {
 		return nil, ErrRetentionExpired
@@ -334,7 +341,7 @@ func (r *MemoryRepository) ChangeType(_ context.Context, orgID, ciID, typeID, mo
 	defer r.mu.Unlock()
 	item, ok := r.items[ciID]
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	to, ok := r.types[typeID]
 	if !ok {

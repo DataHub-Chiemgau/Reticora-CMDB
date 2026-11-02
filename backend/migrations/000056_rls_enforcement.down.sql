@@ -11,14 +11,22 @@ ALTER TABLE ci DROP CONSTRAINT IF EXISTS ci_id_organization_key;
 
 -- Move the quarantined rows back unchanged; without the composite foreign keys
 -- they are accepted again, so the down migration loses no data.
-INSERT INTO ci_relationship
-SELECT (jsonb_populate_record(NULL::ci_relationship, q.row_data)).*
-FROM migration_quarantine q
-WHERE q.source_table = 'ci_relationship' AND q.migration = '000056';
-INSERT INTO composition
-SELECT (jsonb_populate_record(NULL::composition, q.row_data)).*
-FROM migration_quarantine q
-WHERE q.source_table = 'composition' AND q.migration = '000056';
+-- Installations that applied 000056 before E-26 have no migration_quarantine:
+-- their 000056 deleted the rows, there is nothing to move back (F-224, E-72).
+DO $$
+BEGIN
+    IF to_regclass('migration_quarantine') IS NOT NULL THEN
+        INSERT INTO ci_relationship
+        SELECT (jsonb_populate_record(NULL::ci_relationship, q.row_data)).*
+        FROM migration_quarantine q
+        WHERE q.source_table = 'ci_relationship' AND q.migration = '000056';
+        INSERT INTO composition
+        SELECT (jsonb_populate_record(NULL::composition, q.row_data)).*
+        FROM migration_quarantine q
+        WHERE q.source_table = 'composition' AND q.migration = '000056';
+    END IF;
+END
+$$;
 DROP TABLE IF EXISTS migration_quarantine;
 
 DROP TRIGGER IF EXISTS trg_audit_log_no_update ON audit_log;
@@ -53,7 +61,8 @@ ALTER TABLE lifecycle_state ALTER COLUMN organization_id SET NOT NULL;
 
 -- FORCE ROW LEVEL SECURITY is intentionally not reverted per table: dropping it
 -- would weaken isolation, and migration 000055 already sets it for the tables it
--- creates. Only the application role is removed.
+-- creates. Only the application role is removed: its privileges in this
+-- database always, the role itself only if no other database needs it.
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
     REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM reticora_app;
@@ -67,4 +76,23 @@ REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM reticora_app;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM reticora_app;
 REVOKE USAGE ON SCHEMA public FROM reticora_app;
 
-DROP ROLE IF EXISTS reticora_app;
+-- Roles belong to the whole cluster. While another database of the cluster
+-- (staging next to production) still holds grants to reticora_app, DROP ROLE
+-- fails with SQLSTATE 2BP01 and the rollback would stop half done with a dirty
+-- version. The role then stays with a NOTICE, and the up migration reuses it
+-- (F-193, E-72; same pattern as reticora_owner in 000078).
+DO $$
+DECLARE
+    detail text;
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'reticora_app') THEN
+        BEGIN
+            DROP ROLE reticora_app;
+        EXCEPTION
+            WHEN dependent_objects_still_exist THEN
+                GET STACKED DIAGNOSTICS detail = PG_EXCEPTION_DETAIL;
+                RAISE NOTICE 'role reticora_app is kept, other databases of the cluster still depend on it: %', detail;
+        END;
+    END IF;
+END
+$$;

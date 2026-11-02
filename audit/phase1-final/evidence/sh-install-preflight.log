@@ -1,0 +1,31 @@
+ok   platform ubuntu:22.04 is supported
+ok   platform ubuntu:24.04 is supported
+ok   platform debian:12 is supported
+ok   platform ubuntu:20.04 is refused
+ok   platform debian:11 is refused
+ok   platform centos:9 is refused
+ok   platform rhel:9 is refused
+ok   override continues with a warning
+ok   missing os-release is refused
+ok   install.sh refuses an unsupported platform
+ok   install.sh and install-preflight.sh list the same platforms
+ok   docker 23 is refused
+ok   docker 24 is accepted
+ok   docker 27 is accepted
+ok   unknown docker version is refused
+ok   compose plugin v2 is accepted
+ok   compose v-prefixed v2 is accepted
+ok   docker-compose v1 is refused
+ok   docker-compose v2 binary is accepted
+ok   cloud sizing met
+ok   cloud below minimum warns about vCPU
+ok   cloud below minimum warns about RAM
+ok   cloud below minimum warns about disk
+ok   collector sizing met
+ok   real host resources are read
+ok   docs/ops/sizing.md documents the sizing up to 50,000 objects
+ok   installers only use apt-get
+ok   install-cloud.sh runs the preflight
+ok   install-vm.sh runs the preflight
+
+29 passed, 0 failed

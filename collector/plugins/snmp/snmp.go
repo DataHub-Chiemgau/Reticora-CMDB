@@ -148,6 +148,9 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			defer func() { <-sem }()
 
 			if useV3 {
+				// An agent that refuses the credentials with a usmStats
+				// report is a hit too: its Collect fails with
+				// plugins.ErrAuthFailed and the target (DIS-08).
 				if result, ok := p.probeV3(ctx, t, v3); ok {
 					mu.Lock()
 					results = append(results, *result)
@@ -205,105 +208,49 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 	return results, ctx.Err()
 }
 
-// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+// Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03)
+// with the neighbours of its LLDP and bridge tables (DIS-05).
 func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
 	observedAt := time.Now()
-	res, err := p.collect(ctx, target, creds)
-	return plugins.CollectRecord(p.Name(), res, err, observedAt)
+	res, neighbors, err := p.collect(ctx, target, creds)
+	rec, err := plugins.CollectRecord(p.Name(), res, err, observedAt)
+	if err != nil {
+		return nil, err
+	}
+	rec.Neighbors = neighbors
+	return rec, nil
 }
 
-// collect retrieves inventory and telemetry from a single SNMP endpoint.
-func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
-	timeout := p.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-
+// collect retrieves inventory, telemetry and neighbours from a single SNMP
+// endpoint.
+func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, []plugins.DeviceNeighbor, error) {
 	community := creds["community"]
 	if community == "" {
 		community = "public"
 	}
 	if v3, useV3, err := v3FromCreds(creds); err != nil {
-		return nil, err
+		return nil, nil, err
 	} else if useV3 {
 		return p.collectV3(ctx, target, v3)
 	}
 
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
-	conn, err := net.DialTimeout("udp", addr, timeout)
-	if err != nil {
-		return nil, fmt.Errorf("snmp: dial %s: %w", target, err)
+	// The values come from the decoded varbinds of the response, never
+	// from the message header (which echoes the community).
+	g := p.v2cSession(ctx, target, community)
+	if err := g.Connect(); err != nil {
+		return nil, nil, fmt.Errorf("snmp: dial %s: %w", target, err)
 	}
-	defer conn.Close()
-
-	// Query system group OIDs
-	sysDescr := p.snmpGet(conn, community, oidSysDescr, timeout)
-	sysName := p.snmpGet(conn, community, oidSysName, timeout)
-	sysObjectID := p.snmpGet(conn, community, oidSysObjectID, timeout)
-	sysLocation := p.snmpGet(conn, community, oidSysLocation, timeout)
-	sysContact := p.snmpGet(conn, community, oidSysContact, timeout)
-
-	// Query Entity-MIB for hardware info
-	serial := p.snmpGet(conn, community, oidEntPhysSerialNum+".1", timeout)
-	manufacturer := p.snmpGet(conn, community, oidEntPhysMfgName+".1", timeout)
-	model := p.snmpGet(conn, community, oidEntPhysModelName+".1", timeout)
-	firmware := p.snmpGet(conn, community, oidEntPhysFirmwareRev+".1", timeout)
-
-	name := sysName
-	if name == "" {
-		name = target
+	defer g.Conn.Close()
+	if result, err := p.collectSession(g, target, "v2c"); err == nil {
+		return result, walkNeighbors(g, target, result.Interfaces), nil
 	}
-
-	result := &plugins.Result{
-		CIType:       "network.device",
-		Name:         name,
-		IP:           target,
-		Manufacturer: manufacturer,
-		Model:        model,
-		Serial:       serial,
-		Firmware:     firmware,
-		Attributes: map[string]any{
-			"protocol":    "snmp",
-			"sysDescr":    sysDescr,
-			"sysObjectID": sysObjectID,
-			"sysLocation": sysLocation,
-			"sysContact":  sysContact,
-			"snmpVersion": "v2c",
-		},
-	}
-
-	p.applyProfile(result, sysObjectID)
-
-	// The interface table (IF-MIB) of a device that answered.
-	if sysDescr != "" || sysObjectID != "" {
-		g := p.v2cSession(ctx, target, community)
-		if g.Connect() == nil {
-			result.Interfaces = walkInterfaces(g)
-			g.Conn.Close()
-		}
-	}
-	return result, nil
-}
-
-// snmpGet performs a single SNMP GET and returns the string value or empty string on failure.
-func (p *Plugin) snmpGet(conn net.Conn, community, oid string, timeout time.Duration) string {
-	pkt := buildSNMPv2cGet(community, oid)
-	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return ""
-	}
-	if _, err := conn.Write(pkt); err != nil {
-		return ""
-	}
-
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
-	if err != nil || n < 20 {
-		return ""
-	}
-
-	// Basic extraction of the value from SNMP response.
-	// In a production implementation this would use a proper ASN.1/BER decoder.
-	return extractSNMPValue(buf[:n])
+	// A device that leaves the GET unanswered keeps its address as name.
+	return &plugins.Result{
+		CIType:     "network.device",
+		Name:       target,
+		IP:         target,
+		Attributes: map[string]any{"protocol": "snmp", "snmpVersion": "v2c"},
+	}, nil, nil
 }
 
 // buildSNMPv2cGet constructs a minimal SNMPv2c GET-Request packet.
@@ -381,27 +328,6 @@ func encodeOIDComponent(value int) []byte {
 		value >>= 7
 	}
 	return result
-}
-
-// extractSNMPValue attempts to extract a printable string value from an SNMP response.
-func extractSNMPValue(data []byte) string {
-	// Walk through the BER-encoded response to find the value in the varbind.
-	// This is a simplified parser that looks for OctetString (0x04) or
-	// ObjectIdentifier (0x06) values in the response payload.
-	for i := 0; i < len(data)-2; i++ {
-		// Look for OctetString tag followed by a length
-		if data[i] == 0x04 && i+1 < len(data) {
-			length := int(data[i+1])
-			if length > 0 && i+2+length <= len(data) {
-				val := string(data[i+2 : i+2+length])
-				// Only return printable ASCII strings
-				if isPrintable(val) && len(val) > 0 {
-					return val
-				}
-			}
-		}
-	}
-	return ""
 }
 
 func isPrintable(s string) bool {

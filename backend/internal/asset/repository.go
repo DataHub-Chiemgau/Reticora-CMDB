@@ -2,6 +2,7 @@ package asset
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
+
+// ErrNotFound: the asset is unknown, of another organization or outside the
+// caller's scope; all answer 404 alike (TEN-04).
+var ErrNotFound = errors.New("asset not found")
 
 // Repository defines persistence operations for assets.
 type Repository interface {
@@ -114,7 +119,7 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Asset,
 
 	a, ok := r.assets[id]
 	if !ok || a.OrganizationID != orgID {
-		return nil, fmt.Errorf("asset not found")
+		return nil, ErrNotFound
 	}
 	return a, nil
 }
@@ -124,7 +129,8 @@ func (r *MemoryRepository) Create(_ context.Context, a *Asset) error {
 	defer r.mu.Unlock()
 
 	r.nextID++
-	a.ID = fmt.Sprintf("asset-%d", r.nextID)
+	// UUID form, as the handler accepts only UUID ids (API-03).
+	a.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID)
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
@@ -138,7 +144,7 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 
 	a, ok := r.assets[id]
 	if !ok || a.OrganizationID != orgID {
-		return nil, fmt.Errorf("asset not found")
+		return nil, ErrNotFound
 	}
 
 	if req.Name != nil {
@@ -193,7 +199,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 
 	a, ok := r.assets[id]
 	if !ok || a.OrganizationID != orgID {
-		return fmt.Errorf("asset not found")
+		return ErrNotFound
 	}
 	delete(r.assets, id)
 	return nil

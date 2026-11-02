@@ -15,6 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
 // TLS modes of an SMTP server.
@@ -78,9 +81,63 @@ func (c *SMTPConfig) Validate() error {
 		return fmt.Errorf("%w: smtp tls must be starttls, tls or none", ErrValidation)
 	case c.Password != "" && c.Username == "":
 		return fmt.Errorf("%w: smtp password without username", ErrValidation)
+	case c.TLS == SMTPNone && c.Username != "" && !smtpLocalhost(c.Host):
+		// smtp.PlainAuth refuses an unencrypted connection to any other
+		// host: every send would fail at AUTH.
+		return fmt.Errorf("%w: smtp authentication needs tls or starttls", ErrValidation)
 	}
 	if _, err := parseAddress(c.From); err != nil {
 		return fmt.Errorf("%w: smtp from: %v", ErrValidation, err)
+	}
+	return nil
+}
+
+// smtpLocalhost reports whether net/smtp's PlainAuth sends credentials to
+// host over an unencrypted connection: only to these literal names.
+func smtpLocalhost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// smtpPorts are the ports an organization's own server may use unless
+// private destinations are allowed: relay, implicit TLS and submission.
+var smtpPorts = map[int]bool{25: true, 465: true, 587: true}
+
+// allowPrivate is the setting the errors of CheckEgress name for internal
+// relays.
+const allowPrivate = "RETICORA_EGRESS_ALLOW_PRIVATE=true"
+
+// DestinationError rejects the server of an organization's own SMTP
+// channel or the url of a webhook channel under the egress policy
+// (SEC-08): the request field and the reason, which wraps
+// egress.ErrBlockedDestination.
+type DestinationError struct {
+	Field string
+	Err   error
+	// Status is the HTTP status; zero means 422.
+	Status int
+}
+
+func (e *DestinationError) Error() string { return e.Err.Error() }
+
+func (e *DestinationError) Unwrap() error { return e.Err }
+
+// CheckEgress checks an organization's own server (provider smtp) against
+// the egress policy when it is stored and before every send: no IP literal
+// or name of the internal network or a cloud metadata endpoint, and only
+// the ports 25, 465 and 587, unless private destinations are allowed. The
+// address the name resolves to is checked on every connection (DNS
+// rebinding). The configuration must be valid.
+func (c *SMTPConfig) CheckEgress(opts egress.Options) error {
+	if err := opts.ValidateHost(c.Host); err != nil {
+		// Metadata endpoints stay blocked with the setting as well.
+		if (egress.Options{AllowPrivate: true}).ValidateHost(c.Host) == nil {
+			err = fmt.Errorf("%w; an SMTP relay in the internal network needs %s", err, allowPrivate)
+		}
+		return &DestinationError{Field: "host", Err: err}
+	}
+	if !opts.AllowPrivate && !smtpPorts[c.Port] {
+		return &DestinationError{Field: "port", Err: fmt.Errorf("%w: port %d (25, 465 or 587; other ports need %s)",
+			egress.ErrBlockedDestination, c.Port, allowPrivate)}
 	}
 	return nil
 }
@@ -100,6 +157,10 @@ type SMTPSender struct {
 	// TLSConfig overrides the TLS settings (tests with their own CA).
 	TLSConfig *tls.Config
 	now       func() time.Time
+	// connect opens the connection to the server; nil uses a plain
+	// net.Dialer (the central server of the operator), organization
+	// servers get the egress dialer.
+	connect func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 // NewSMTPSender creates a sender; the configuration must be valid.
@@ -188,16 +249,28 @@ func (s *SMTPSender) tlsConfig() *tls.Config {
 // is required when configured.
 func (s *SMTPSender) dial(ctx context.Context) (*smtp.Client, error) {
 	addr := net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
-	dialer := &net.Dialer{}
-	var conn net.Conn
-	var err error
-	if s.cfg.TLS == SMTPTLS {
-		conn, err = (&tls.Dialer{NetDialer: dialer, Config: s.tlsConfig()}).DialContext(ctx, "tcp", addr)
-	} else {
-		conn, err = dialer.DialContext(ctx, "tcp", addr)
+	connect := s.connect
+	if connect == nil {
+		connect = (&net.Dialer{}).DialContext
 	}
+	conn, err := connect(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("smtp connect %s: %w", addr, err)
+	}
+	if s.cfg.TLS == SMTPTLS {
+		// TLS over the connection the dialer checked, verified for the
+		// configured host name.
+		cfg := s.tlsConfig()
+		if cfg.ServerName == "" {
+			cfg = cfg.Clone()
+			cfg.ServerName = s.cfg.Host
+		}
+		tlsConn := tls.Client(conn, cfg)
+		if err = tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("smtp connect %s: %w", addr, err)
+		}
+		conn = tlsConn
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
@@ -266,17 +339,30 @@ func (s *SMTPSender) compose(from *mail.Address, to []*mail.Address, m *Mail) (m
 // EmailProvider delivers e-mail channels: central_smtp over the
 // installation's server with the organization as sender name (the central
 // relay signs with DKIM for its domain, SPF covers it), smtp over the
-// organization's own server.
+// organization's own server under the egress policy (SEC-08).
 type EmailProvider struct {
 	central *SMTPSender
+	// egress is the destination policy of organization servers; the
+	// central server is the operator's configuration and exempt.
+	egress egress.Options
+	dialer *egress.Dialer
 	// TLSConfig overrides the TLS settings of organization servers (tests).
 	TLSConfig *tls.Config
 }
 
 // NewEmailProvider creates the provider; central may be nil (no central
-// SMTP configured: central_smtp channels fail).
+// SMTP configured: central_smtp channels fail). Organization servers are
+// held to the default egress policy, which blocks every internal
+// destination.
 func NewEmailProvider(central *SMTPSender) *EmailProvider {
-	return &EmailProvider{central: central}
+	return (&EmailProvider{central: central}).WithEgress(egress.Options{})
+}
+
+// WithEgress sets the destination policy of organization servers
+// (RETICORA_EGRESS_ALLOW_PRIVATE).
+func (p *EmailProvider) WithEgress(opts egress.Options) *EmailProvider {
+	p.egress, p.dialer = opts, egress.NewDialer(opts)
+	return p
 }
 
 // Send implements Provider.
@@ -289,7 +375,11 @@ func (p *EmailProvider) Send(ctx context.Context, ch *Channel, msg *Message) (*D
 			return nil, fmt.Errorf("no central SMTP server is configured")
 		}
 		sender = p.central
+		// The channel's sender name, else the organization's (NTF-03).
 		m.FromName, _ = ch.Config["sender_name"].(string)
+		if m.FromName == "" {
+			m.FromName = msg.SenderName
+		}
 		m.ReplyTo, _ = ch.Config["reply_to"].(string)
 	case ProviderSMTP:
 		cfg, err := SMTPConfigFrom(ch.Config)
@@ -299,7 +389,18 @@ func (p *EmailProvider) Send(ctx context.Context, ch *Channel, msg *Message) (*D
 		if sender, err = NewSMTPSender(&cfg); err != nil {
 			return nil, err
 		}
+		// Checked again on every send: the channel may have been stored
+		// under another policy.
+		if err := cfg.CheckEgress(p.egress); err != nil {
+			return nil, err
+		}
 		sender.TLSConfig = p.TLSConfig
+		sender.connect = p.dialer.DialContext
+		// A sender address without a display name gets the
+		// organization's sender name (NTF-03).
+		if from, _ := parseAddress(cfg.From); from != nil && from.Name == "" {
+			m.FromName = msg.SenderName
+		}
 	default:
 		return nil, fmt.Errorf("provider %s is no e-mail provider", ch.Provider)
 	}
@@ -337,5 +438,44 @@ func (s SignupMailer) SendSignupVerification(ctx context.Context, to, organizati
 		Body: "Bitte bestätigen Sie die Registrierung von " + organizationName + ":\n" + link +
 			"\n\nPlease confirm the registration of " + organizationName + ":\n" + link + "\n",
 	})
+	return err
+}
+
+// InvitationMail is the invitation mail of an issue or renewal (TLC-03,
+// NTF-05): the acceptance link for the invited address and its expiry, with
+// the organization's name, locale (LOC-01) and settings.branding.sender_name
+// (NTF-03).
+type InvitationMail struct {
+	To               string
+	Link             string
+	ExpiresAt        time.Time
+	OrganizationName string
+	Locale           string
+	SenderName       string
+}
+
+// InvitationMailer sends the invitation mail straight to the invited
+// address over the central SMTP server of the installation, like the
+// verification e-mail of the self-signup (user.InvitationMailer). Its link
+// holds the acceptance token, and with the IdP admin client the acceptance
+// creates a verified IdP account of the address: the mail therefore never
+// goes over a channel of the organization, whose own SMTP server (provider
+// smtp) the organization's administrators choose and could read. It is no
+// notification: channels, preferences, digests and notifications_email do
+// not apply. The text is the template of invitation.created in the
+// organization's language (the invitee has no account, so no language of
+// their own), branded like the organization's e-mails: sender name, subject
+// prefix and footer.
+type InvitationMailer struct {
+	Sender *SMTPSender
+}
+
+// SendInvitation implements user.InvitationMailer.
+func (m InvitationMailer) SendInvitation(ctx context.Context, inv *InvitationMail) error {
+	brand := newBranding(inv.OrganizationName, inv.Locale, inv.SenderName)
+	locale := TemplateLocale("", brand.Locale)
+	text := brand.Mail(locale, Render(events.InvitationCreated, locale, map[string]any{
+		"organization_name": inv.OrganizationName, "expires_at": inv.ExpiresAt.UTC().Format(time.RFC3339), "link": inv.Link}))
+	_, err := m.Sender.Send(ctx, &Mail{FromName: brand.SenderName, To: []string{inv.To}, Subject: text.Subject, Body: text.Body})
 	return err
 }

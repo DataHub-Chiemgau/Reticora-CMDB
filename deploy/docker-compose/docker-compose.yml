@@ -21,19 +21,35 @@
 #   cd deploy/docker-compose
 #   docker compose --env-file .env up -d
 # To run with prebuilt registry images instead, set RETICORA_SERVER_IMAGE /
-# RETICORA_FRONTEND_IMAGE in .env and rename docker-compose.override.yml to
-# docker-compose.override.yml.disabled (install-cloud.sh does this for you).
+# RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE in .env and rename
+# docker-compose.override.yml to docker-compose.override.yml.disabled.
+# install-cloud.sh does this in its release mode, the default (E-69): it
+# verifies the signed release images with cosign and pins them by digest
+# (TEC-15); --build-from-source builds them with the override instead.
+
+# Container logs are kept 30 days (NFR-06, E-77): every service logs to the
+# journal of the host, and install-cloud.sh limits the journal with the
+# drop-in /etc/systemd/journald.conf.d/reticora.conf (MaxRetentionSec=30day;
+# it applies to the whole journal of the host). A host without
+# systemd-journald cannot start a container with this driver; there
+# install-cloud.sh selects docker-compose.logging-json.yml (json-file with
+# rotation) through COMPOSE_FILE in .env. docker logs and docker compose logs
+# read both. See docs/ops/workers.md, "Container logs".
+x-logging: &logging
+  driver: journald
 
 services:
   postgres:
     # TimescaleDB with pgBackRest (deploy/docker-compose/postgres, WP-100):
     # every WAL segment is archived to the pgbackrest volume (and the
     # offsite S3 repository when configured), at the latest every 5 minutes
-    # (archive_timeout) — RPO <= 15 min (NFR-05).
+    # (archive_timeout) — RPO <= 15 min (NFR-05). The release mode runs the
+    # signed reticora-postgres image (RETICORA_POSTGRES_IMAGE, pinned by
+    # digest); build: lives in docker-compose.override.yml like for server and
+    # frontend.
     image: ${RETICORA_POSTGRES_IMAGE:-reticora-postgres:latest}
-    build:
-      context: ./postgres
     restart: unless-stopped
+    logging: *logging
     entrypoint: ["reticora-pgbackrest-env.sh", "docker-entrypoint.sh"]
     command:
       - postgres
@@ -76,6 +92,7 @@ services:
   backup:
     image: ${RETICORA_POSTGRES_IMAGE:-reticora-postgres:latest}
     restart: unless-stopped
+    logging: *logging
     user: postgres
     entrypoint: ["reticora-pgbackrest-env.sh", "reticora-backup.sh"]
     command: ["run"]
@@ -110,6 +127,7 @@ services:
   nats:
     image: nats:2.10-alpine
     restart: unless-stopped
+    logging: *logging
     command: ["-c", "/etc/nats/nats.conf"]
     ports:
       - "127.0.0.1:${RETICORA_NATS_LOCAL_PORT:-4223}:4222"
@@ -131,6 +149,7 @@ services:
   nats-edge:
     image: nats:2.10-alpine
     restart: unless-stopped
+    logging: *logging
     working_dir: /etc/nats
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -161,6 +180,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -177,6 +197,7 @@ services:
     # included, AGPLv3), pinned by release tag and digest.
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     restart: unless-stopped
+    logging: *logging
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${RETICORA_S3_ACCESS_KEY:?RETICORA_S3_ACCESS_KEY must be set}
@@ -195,6 +216,7 @@ services:
   keycloak-db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
@@ -210,10 +232,13 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
     restart: unless-stopped
+    logging: *logging
     # `start` with an imported realm: users created via the admin console are
     # persisted in keycloak-db (the previous `start-dev` used an in-memory
-    # database, losing everything on restart). The realm is re-imported only
-    # when the container is recreated.
+    # database, losing everything on restart). The realm file is imported
+    # only while the realm does not exist ("Import skipped" otherwise);
+    # install-cloud.sh applies the settings of a newer realm file on every
+    # run (apply_realm_settings, deploy/keycloak/README.md "Upgrade").
     command: start --import-realm --hostname-strict=false
     environment:
       KC_DB: postgres
@@ -229,8 +254,14 @@ services:
       # never become healthy even though startup succeeded.
       KC_HEALTH_ENABLED: "true"
       KC_PROXY: edge
+    # Plain HTTP with the admin console: 127.0.0.1 only (COL-08,
+    # docs/betrieb/firewall-matrix.md); browsers sign in through the
+    # frontend (/realms/, /resources/). An installation without a TLS domain
+    # addresses its OIDC issuer on this port of the host IP: install-cloud.sh
+    # then opts in (RETICORA_PUBLISH_DIRECT_PORTS=true) and sets
+    # RETICORA_DIRECT_PORTS_BIND=0.0.0.0.
     ports:
-      - "${RETICORA_KEYCLOAK_PORT:-8180}:8080"
+      - "${RETICORA_DIRECT_PORTS_BIND:-127.0.0.1}:${RETICORA_KEYCLOAK_PORT:-8180}:8080"
     volumes:
       # .generated/realm-reticora.json is written by install-cloud.sh with the
       # configured OIDC client secret substituted.
@@ -252,6 +283,7 @@ services:
   opensearch:
     image: opensearchproject/opensearch:2.13.0
     restart: unless-stopped
+    logging: *logging
     profiles: ["opensearch"]
     environment:
       discovery.type: single-node
@@ -282,13 +314,25 @@ services:
     # build: lives in docker-compose.override.yml so this file also works
     # standalone with prebuilt registry images.
     restart: unless-stopped
+    logging: *logging
     environment:
       RETICORA_PORT: "8080"
-      RETICORA_DATABASE_URL: "postgres://reticora:${RETICORA_DB_PASSWORD}@postgres:5432/reticora?sslmode=disable"
+      # Runtime login reticora_runtime (TEN-03): LOGIN NOSUPERUSER NOBYPASSRLS,
+      # member of reticora_app only; install-cloud.sh creates it after the
+      # migrations. The bootstrap superuser reticora (RETICORA_DB_PASSWORD)
+      # serves only the migrations and the backups, so a RESET ROLE on a
+      # pooled connection gains nothing (F-057). application_name marks the
+      # server's sessions in pg_stat_activity (tests/install-smoke-health.sh).
+      RETICORA_DATABASE_URL: "postgres://reticora_runtime:${RETICORA_DB_APP_PASSWORD:?RETICORA_DB_APP_PASSWORD must be set (see install-cloud.sh)}@postgres:5432/reticora?sslmode=disable&application_name=reticora-server"
       RETICORA_NATS_URL: "nats://nats:4222"
       RETICORA_REDIS_URL: "redis://redis:6379"
       RETICORA_S3_ENDPOINT: "minio:9000"
       RETICORA_S3_BUCKET: "reticora"
+      # Signed download URLs (exports, documents) name the public origin; the
+      # frontend nginx forwards /objects/<bucket>/… read-only to minio:9000
+      # (frontend/objects-proxy.conf). Without it the URLs named minio:9000,
+      # which a browser cannot resolve (F-376).
+      RETICORA_S3_PUBLIC_URL: "${RETICORA_S3_PUBLIC_URL:-${RETICORA_PUBLIC_BASE_URL:-http://localhost:3000}/objects}"
       RETICORA_S3_ACCESS_KEY: "${RETICORA_S3_ACCESS_KEY}"
       RETICORA_S3_SECRET_KEY: "${RETICORA_S3_SECRET_KEY}"
       RETICORA_OIDC_ISSUER_URL: "${RETICORA_OIDC_ISSUER_URL:-http://localhost:8180/realms/reticora}"
@@ -301,6 +345,41 @@ services:
       # while only the self-signed bootstrap certificate is installed. Empty
       # (the default) means "system trust store only".
       RETICORA_OIDC_CA_CERT_FILE: "${RETICORA_OIDC_CA_CERT_FILE:-}"
+      # The Keycloak admin client (signup, invitations, MFA binding) talks to
+      # Keycloak inside the compose network: the frontend proxies only
+      # /realms/ and /resources/, so the admin REST API under the public
+      # issuer host answers 405 (WP-646). Keycloak still builds the public
+      # URLs from the forwarded host the server sends along.
+      RETICORA_KEYCLOAK_INTERNAL_URL: "${RETICORA_KEYCLOAK_INTERNAL_URL:-http://keycloak:8080}"
+      # Page the link of the invitation mail opens (TLC-03, NTF-05), on the
+      # public base URL install-cloud.sh writes into .env (same default).
+      RETICORA_INVITATION_ACCEPT_URL: "${RETICORA_PUBLIC_BASE_URL:-http://localhost:3000}/invitations/accept"
+      # Self-signup (TLC-01) and the central SMTP server (TEC-13), from the
+      # .env that install-cloud.sh writes; the server treats an empty value
+      # as unset. Signups need the Keycloak admin client, the SMTP server
+      # (the e-mail verification is mandatory) and the page the verification
+      # link opens (<public base URL>/onboarding unless set in .env); without
+      # one of them GET /api/v1/signup/challenge and POST /api/v1/signup
+      # answer 503 ("self-signup is not available"). Without
+      # RETICORA_SMTP_HOST no e-mail is sent at all; with it /readyz also
+      # checks the SMTP server. The admin client (service account,
+      # install-cloud.sh ensure_admin_client) also creates the accounts of
+      # accepted invitations and binds org_admins to MFA.
+      RETICORA_SIGNUP_VERIFY_URL: "${RETICORA_SIGNUP_VERIFY_URL:-${RETICORA_PUBLIC_BASE_URL:-http://localhost:3000}/onboarding}"
+      RETICORA_SIGNUP_CAPTCHA_KEY: "${RETICORA_SIGNUP_CAPTCHA_KEY:-}"
+      RETICORA_SIGNUP_BLOCKED_DOMAINS: "${RETICORA_SIGNUP_BLOCKED_DOMAINS:-}"
+      RETICORA_SIGNUP_ALLOWED_DOMAINS: "${RETICORA_SIGNUP_ALLOWED_DOMAINS:-}"
+      RETICORA_TRIAL_PLAN: "${RETICORA_TRIAL_PLAN:-}"
+      RETICORA_TRIAL_DAYS: "${RETICORA_TRIAL_DAYS:-}"
+      RETICORA_TRIAL_MAX_CIS: "${RETICORA_TRIAL_MAX_CIS:-}"
+      RETICORA_KEYCLOAK_ADMIN_CLIENT_ID: "${RETICORA_KEYCLOAK_ADMIN_CLIENT_ID:-}"
+      RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET: "${RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET:-}"
+      RETICORA_SMTP_HOST: "${RETICORA_SMTP_HOST:-}"
+      RETICORA_SMTP_PORT: "${RETICORA_SMTP_PORT:-587}"
+      RETICORA_SMTP_TLS: "${RETICORA_SMTP_TLS:-starttls}"
+      RETICORA_SMTP_USERNAME: "${RETICORA_SMTP_USERNAME:-}"
+      RETICORA_SMTP_PASSWORD: "${RETICORA_SMTP_PASSWORD:-}"
+      RETICORA_SMTP_FROM: "${RETICORA_SMTP_FROM:-}"
       RETICORA_ENVIRONMENT: "production"
       # Optional: switch the search backend from PostgreSQL FTS (default) to
       # OpenSearch. Only takes effect when the `opensearch` compose profile is
@@ -315,32 +394,52 @@ services:
       # (generated by install-cloud.sh).
       RETICORA_SESSION_KEY_PATH: "/etc/reticora/session/private.pem"
       RETICORA_MASTER_KEY: ${RETICORA_MASTER_KEY:?RETICORA_MASTER_KEY must be set}
+      # Master key rotation (SEC-06, docs/ops/workers.md "Key rotation"): the
+      # old key(s), comma-separated, while rotation.master_key rewraps the
+      # data keys. Optional: empty once the old key is retired.
+      RETICORA_MASTER_KEY_PREVIOUS: "${RETICORA_MASTER_KEY_PREVIOUS:-}"
       # Operator switches of the background workers (OPS-02,
       # docs/ops/workers.md): false keeps a worker off in this container.
       RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED: "${RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED:-true}"
       RETICORA_WORKER_EXPORT_ENABLED: "${RETICORA_WORKER_EXPORT_ENABLED:-true}"
       RETICORA_WORKER_INGEST_ENABLED: "${RETICORA_WORKER_INGEST_ENABLED:-true}"
       RETICORA_WORKER_MONITORING_ENABLED: "${RETICORA_WORKER_MONITORING_ENABLED:-true}"
+      RETICORA_WORKER_HEALTH_ENABLED: "${RETICORA_WORKER_HEALTH_ENABLED:-true}"
       RETICORA_WORKER_SCHEDULER_ENABLED: "${RETICORA_WORKER_SCHEDULER_ENABLED:-true}"
       RETICORA_WORKER_JOBS_ENABLED: "${RETICORA_WORKER_JOBS_ENABLED:-true}"
       RETICORA_WORKER_EVENTS_ENABLED: "${RETICORA_WORKER_EVENTS_ENABLED:-true}"
       RETICORA_WORKER_NOTIFIER_ENABLED: "${RETICORA_WORKER_NOTIFIER_ENABLED:-true}"
       # Collector NATS endpoint (COL-08): its PKI and the authorization
-      # callout (worker nats_edge); host names of its server certificate.
+      # callout (worker nats_edge).
       RETICORA_WORKER_NATS_EDGE_ENABLED: "${RETICORA_WORKER_NATS_EDGE_ENABLED:-true}"
       RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED: "${RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED:-true}"
       RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED: "${RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED:-true}"
+      # CI offline detector (REC-09, LCY-05), a system job of the scheduler.
+      RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED: "${RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED:-true}"
       RETICORA_PKI_DIR: "/pki"
       RETICORA_NATS_EDGE_URL: "tls://nats-edge:4222"
-      RETICORA_NATS_EDGE_HOSTS: "${RETICORA_TLS_DOMAIN:-localhost},nats-edge,localhost"
+      # Names on the server certificate of nats-edge. A collector connects to
+      # tls://<host of its server URL>:4222, so the list must name that host
+      # (domain, IP or host name of the enrollment URL): install-cloud.sh
+      # derives RETICORA_NATS_EDGE_HOSTS on every run and writes it into
+      # .env. Without it (an .env from before, a start without the installer)
+      # the TLS domain applies. nats-edge is the name the server itself
+      # connects to; the server adds the fixed name reticora-collector-nats
+      # and reissues the certificate when the names change. Duplicates are
+      # ignored.
+      RETICORA_NATS_EDGE_HOSTS: "${RETICORA_NATS_EDGE_HOSTS:-${RETICORA_TLS_DOMAIN:-localhost}},nats-edge,localhost"
     volumes:
       - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
       - collector-pki:/pki
       # Read-only view of the TLS material so RETICORA_OIDC_CA_CERT_FILE can
       # reference the certificate that this host serves for the issuer domain.
       - ./letsencrypt:/etc/letsencrypt:ro
+    # Plain-HTTP API: 127.0.0.1 only like Keycloak (COL-08); from outside
+    # the API is reached through the frontend (/api/, /bff/). All interfaces
+    # only with RETICORA_DIRECT_PORTS_BIND=0.0.0.0 (opt-in of an installation
+    # without a TLS domain, see keycloak).
     ports:
-      - "${RETICORA_SERVER_PORT:-8080}:8080"
+      - "${RETICORA_DIRECT_PORTS_BIND:-127.0.0.1}:${RETICORA_SERVER_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -351,7 +450,8 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      # /readyz also checks database, Redis, object storage and NATS (OPS-01).
+      # /readyz also checks database, Redis, object storage, NATS and, with
+      # RETICORA_SMTP_HOST, the SMTP server (OPS-01).
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/readyz || exit 1"]
       interval: 10s
       timeout: 3s
@@ -363,6 +463,7 @@ services:
     # build: lives in docker-compose.override.yml so this file also works
     # standalone with prebuilt registry images.
     restart: unless-stopped
+    logging: *logging
     # The unprivileged nginx worker must be able to write its pid file and
     # temp directories. frontend/nginx.conf places all of them under /tmp
     # (a tmpfs is root-owned and therefore not writable for the nginx user),
@@ -375,9 +476,13 @@ services:
     # When it is set, the nginx image entrypoint renders the TLS template
     # (nginx-tls.conf.template, mounted below) to
     # /etc/nginx/conf.d/reticora-tls.conf, which the nginx.conf baked into the
-    # image includes inside its http block.
+    # image includes inside its http block. With a domain, the image's
+    # 30-reticora-cert-reload.sh checks live/<domain>/fullchain.pem every
+    # RETICORA_TLS_RELOAD_INTERVAL seconds and, when the certbot service has
+    # renewed it, runs nginx -t and then nginx -s reload (WP-440, F-139).
     environment:
       RETICORA_TLS_DOMAIN: "${RETICORA_TLS_DOMAIN:-}"
+      RETICORA_TLS_RELOAD_INTERVAL: "${RETICORA_TLS_RELOAD_INTERVAL:-21600}"
     volumes:
       - ./letsencrypt:/etc/letsencrypt:ro
       - certbot-webroot:/var/www/certbot
@@ -415,15 +520,32 @@ services:
   certbot:
     # Pinned version for reproducible deployments.
     image: certbot/certbot:v2.11.0
+    logging: *logging
     # Idles between renewal checks: certbot renew is a no-op until the
     # certificate is close to expiry; the real issuance runs once from
     # install-cloud.sh. Uses the host's /bin/sh loop instead of the image
     # entrypoint (which requires a certbot subcommand as its first argument).
+    # The deploy hook makes a renewed key and chain readable for nginx
+    # (uid/gid 101) in the frontend, as after the issuance (WP-419, F-034).
+    # Renewals go to the ACME server of the issuance (WP-420). The frontend
+    # reloads nginx itself when the renewed chain appears (WP-440).
     entrypoint: /bin/sh
-    command: -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    command: -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook "sh /usr/local/bin/reticora-certbot-deploy-hook.sh" --server "$$RETICORA_ACME_SERVER"; sleep 12h & wait $${!}; done'
+    environment:
+      # ACME directory (RETICORA_ACME_SERVER in .env, install-cloud.sh passes
+      # it to the issuance as well); empty = Let's Encrypt production.
+      RETICORA_ACME_SERVER: "${RETICORA_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
+      # Trust anchor for the ACME server's HTTPS endpoint, e.g. a test CA
+      # (RETICORA_ACME_CA_BUNDLE, mounted below); it replaces the public CAs
+      # of the image. Empty without a bundle: certbot keeps those.
+      REQUESTS_CA_BUNDLE: "${RETICORA_ACME_CA_BUNDLE:+/etc/reticora/acme-ca.pem}"
     volumes:
       - ./letsencrypt:/etc/letsencrypt
       - certbot-webroot:/var/www/certbot
+      - ./certbot-deploy-hook.sh:/usr/local/bin/reticora-certbot-deploy-hook.sh:ro
+      # RETICORA_ACME_CA_BUNDLE: absolute path of a PEM file, checked by
+      # install-cloud.sh; without one the empty /dev/null.
+      - ${RETICORA_ACME_CA_BUNDLE:-/dev/null}:/etc/reticora/acme-ca.pem:ro
 
 volumes:
   pgdata:

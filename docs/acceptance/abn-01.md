@@ -8,11 +8,11 @@ automatisierte Protokolle gegen eingefrorene Daten. Die Daten liegen in
 
 | Teil | Szenario | Tag | Status G1 | Nachweis |
 |---|---|---|---|---|
-| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Originaltext nachzureichen (E-02, A-02) |
-| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | PASS (Erklärung des Auftraggebers) | Abnahme durch Erklärung des Auftraggebers vom 2026-10-15 (B4); Originaltext nachzureichen (E-02, A-02) |
+| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | offen | Erklärung des Auftraggebers vom 2026-10-15 (B4), Nachweis ausstehend: Originaltext nachzureichen (E-02, A-02; WP-457) |
+| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | offen | Erklärung des Auftraggebers vom 2026-10-15 (B4), Nachweis ausstehend: Originaltext nachzureichen (E-02, A-02; WP-457) |
 | (c) | Metamodell-Szenario | [P2] | nicht G1 | Phase 2 |
-| (d) | Onboarding-Szenario | [B] | **PASS** | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`) |
-| (e) | Konflikt-Szenario | [B] | **PASS** | `frontend/e2e/conflict.spec.ts` mit `artefakte/abn-01-e-konflikt.json` |
+| (d) | Onboarding-Szenario | [B] | **PASS** | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`); Schritt 7 seit WP-456 verschärft, bestanden in install-smoke Run 40258372749 (2026-10-26) |
+| (e) | Konflikt-Szenario | [B] | **PASS** | `frontend/e2e-real/abn-01-konflikt.spec.ts` (Real-Stack, install-smoke Run 40258372749, bestanden) und `frontend/e2e/conflict.spec.ts` (gemockt), beide mit `artefakte/abn-01-e-konflikt.json` |
 
 ## (a) und (b): v2-Texte nach E-02
 
@@ -29,6 +29,14 @@ erklärt. Die Texte liegen im Repository weiterhin nicht vor; (a) und (b) sind
 durch diese Erklärung abgenommen, nicht durch einen Test. Nachzureichen sind
 die Texte in `docs/spec/`; danach kommen sie wie oben beschrieben unverändert
 in dieses Verzeichnis, und jeder Schritt wird zugeordnet.
+
+Nachtrag 2026-10-25 (WP-451, E-76): Die Erklärung des Auftraggebers ersetzt
+den Nachweis nicht. (a) und (b) stehen auf „offen“ mit der Begründung
+„Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend“; ABN-01
+steht in `docs/acceptance/g1-gate.md` auf „offen“ und in
+`docs/acceptance/g1-ausnahmen.csv`, bis die Szenariotexte eingefroren und
+Schritt für Schritt protokolliert sind (WP-457). (d) und (e) bleiben durch
+Tests belegt.
 
 ## (d) Onboarding-Szenario
 
@@ -51,38 +59,237 @@ Die Werte stehen in `frontend/e2e/onboarding.spec.ts` und
 `frontend/e2e/fixtures/setup-onboarding.sh`. Die Prüfsummen des eingefrorenen
 Stands stehen in `artefakte/SHA256SUMS`.
 
+Änderung nach dem Einfrieren: WP-357 (`t2-mfa-accounts`, AUT-09, F-005).
+Der erste org_admin eines Signups erhält die Realm-Rolle `mfa_required` und
+richtet beim ersten Login OTP ein. `keycloakLogin` in
+`frontend/e2e/onboarding.spec.ts` durchläuft dazu den OTP-Schritt
+(`frontend/e2e/support/totp.ts`: Einrichtung beim ersten Login, Code bei
+jedem weiteren). Eingaben und Schritte des Szenarios bleiben unverändert;
+die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist neu.
+
+Änderung nach dem Einfrieren, 2026-10-25: WP-456 (`t5-abn01-de`, F-299).
+Schritt 7 bestand auch mit leerer Impact-Liste, weil die simulierte Flotte
+keine Beziehung garantiert. `frontend/e2e/onboarding.spec.ts` legt vor dem
+Impact die Beziehung `sim-srv-01` → `sim-nas-01` (`depends_on`) an und
+verlangt: Der Impact von `sim-nas-01` nennt mindestens ein CI, darunter
+`sim-srv-01` über die Beziehung (nicht heuristisch), und die
+Ausfallsimulation zeigt es. Negativfall: Ein CI ohne Beziehung hat einen
+leeren Impact, und die Ausfallsimulation zeigt den Hinweis „Dieses CI hat
+keine abhängigen CIs“. Die übrigen Eingaben und Schritte bleiben unverändert;
+die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist neu. Lauf #122 (unten)
+belegt Schritt 7 in der früheren Fassung; die verschärfte Fassung bestand am
+2026-10-26 in install-smoke Run 40258372749 (Job `install-cloud-smoke (ubuntu-24.04)`,
+Commit `68fa184`, PR #94; 6 passed).
+
+Änderung nach dem Einfrieren, 2026-10-26: Korrektur zu WP-456 (`t5-abn01-de`,
+F-299). Der Negativfall las die Beziehungen des CI ohne Beziehung über
+`GET /api/v1/relationships?ci_id=<id>`. Diese Liste kennt keinen Filter
+`ci_id` und zählte alle Beziehungen der Organisation (install-smoke auf
+PR #94: „Expected: 0, Received: 58“). Die Spec fragt jetzt
+`GET /api/v1/cis/<id>/relationships` ab. Erwartung und übrige Schritte
+bleiben unverändert; die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist
+neu.
+
+Nachtrag 2026-11-01: WP-673 (`k7n-relationship-list-filters`, F-402).
+`GET /api/v1/relationships` wendet die dokumentierten Filter `ci_id`,
+`source_ci_id`, `target_ci_id` und `rel_type` jetzt an; das oben beschriebene
+Symptom (alle Beziehungen der Organisation trotz `ci_id`) ist behoben. Die
+eingefrorenen Artefakte bleiben unverändert: Der Negativfall fragt weiter
+`GET /api/v1/cis/<id>/relationships` ab, die Prüfsummen in
+`artefakte/SHA256SUMS` gelten unverändert.
+
+Änderung nach dem Einfrieren, 2026-10-26: WP-468 (`t2-ci-export`, API-05,
+F-077). Der Export-Schritt lud die Datei über den veralteten Pfad
+`GET /api/v1/export/cis` (deprecated, Sunset 2027-10-15), nicht über den
+Exportauftrag. `frontend/e2e/onboarding.spec.ts` lädt die Datei jetzt über die
+signierte `download_url` des abgeschlossenen Auftrags (`GET /api/v1/exports/<id>`)
+ohne Bearer-Token; die Prüfung (mehr Zeilen als simulierte Geräte) bleibt
+gleich. Die URL nennt den Objektspeicher `minio:9000`; der Workflow
+`install-smoke.yml` trägt `minio` vor dem Onboarding-Lauf in `/etc/hosts` ein
+(`setup-onboarding.sh` bleibt unverändert). Eingaben und übrige Schritte
+bleiben unverändert; die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist
+neu.
+
+Änderung nach dem Einfrieren, 2026-10-28: WP-647 (`k5n-export-public-url`,
+EXP-01, F-376). Die signierte `download_url` nennt jetzt den öffentlichen
+Origin der Installation (`<Basis-URL>/objects/<Bucket>/<Schlüssel>?X-Amz-…`,
+`RETICORA_S3_PUBLIC_URL`); das Frontend-nginx leitet diesen Pfad nur lesend
+an den Objektspeicher weiter. Der Eintrag `127.0.0.1 minio` in `/etc/hosts`,
+den `install-smoke.yml` vor dem Onboarding-Lauf setzte, entfällt.
+`frontend/e2e/onboarding.spec.ts` und `setup-onboarding.sh` bleiben
+unverändert (gleiche Prüfsummen): Die Seite lädt die Datei jetzt vom eigenen
+Origin, die Prüfung mit manipulierter Signatur (403) bleibt.
+
+Änderung nach dem Einfrieren, 2026-10-27: WP-529 (`t7-onboarding-suite`,
+UI-17, F-177, F-351, F-353). Grund: Schritt 4 „Scope bestätigen“ wurde nur
+geklickt, wenn ein Vorschlag sichtbar war, und nicht geprüft; ein defekter
+Resolve hätte die Suite bestehen lassen. Schritt 8 prüfte die Datei nur über
+die Zeilenzahl ohne Negativfall, und es gab keinen In-App-Einstieg zu Signup
+und Onboarding. Änderungen in `frontend/e2e/onboarding.spec.ts`:
+
+- Schritt 1: Die Registrierung beginnt über den Link „Konto anlegen“ der
+  Anmeldeseite. Schritt 2: Das Dashboard der neuen Organisation zeigt
+  „Einrichtung fortsetzen“ (Link nach `/onboarding`); Schritt 3 erreicht das
+  Onboarding über diesen Link.
+- Schritt 4 ist Pflicht: Die Spec wartet auf einen offenen Vorschlag
+  (`GET /api/v1/review-items?kind=scope_suggested&status=open`), klickt
+  „Bestätigen“ ohne Bedingung und verlangt: das Item ist `resolved` mit
+  `action` `accept`, `GET /api/v1/discovery-scopes?collector_id=<id>` enthält
+  den bestätigten Bereich, der Fortschritt geht 3 → 4 → 5 (`aria-valuenow`).
+  Damit Stufe 4 sichtbar ist, liefert der Browser die CI-Zahl des Onboardings
+  (`GET /api/v1/cis?limit=1`) bis zur Bestätigung als 0 (`page.route`); Stufe 5
+  folgt aus der echten Zahl. Negativfall: Ein per `page.route` gebrochener
+  Resolve-Endpunkt (500) hält den Fortschritt bei 3, die Seite zeigt die
+  Meldung, das Item bleibt offen.
+- Schritt 8: Der Browser lädt die Datei über die signierte `download_url` des
+  Auftrags und zählt mindestens 30 Datenzeilen. Negativfall: Eine per
+  `page.route` manipulierte Signatur beantwortet der Objektspeicher mit 403,
+  und der Schritt schlägt fehl.
+
+Die Eingriffe per `page.route` betreffen nur die Sicht des Browsers bzw. die
+Negativfälle; Daten und Prüfungen der Positivfälle kommen vom installierten
+Stack. Eingaben bleiben unverändert; die Prüfsumme der Datei in
+`artefakte/SHA256SUMS` ist neu. `install-smoke.yml` lädt den Bericht der Suite
+jetzt nach jedem Lauf hoch (Artefakt `onboarding-e2e`, `retries: 0`). Grüner
+install-smoke-Lauf mit dieser Fassung: [Install Smoke Test #219](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40537085229)
+(Commit `0d0f176`, PR #101), Job `install-cloud-smoke (ubuntu-24.04)`, Schritt
+„Run the onboarding E2E suite“, success, 2026-10-27: 6 von 6 Tests bestanden,
+darunter „self-signup, verification, trial, login and dashboard“ (Schritte 1
+und 2) und „collector, scopes, 30 simulated devices, review, impact and
+export“ (Schritte 3 bis 8).
+
+Änderung nach dem Einfrieren, 2026-10-27: WP-558 (`t7-onboarding-tls-origin`,
+INS-04, F-352). Grund: Das INS-04-Fehlerbild „Localhost-Redirect“ wurde nicht
+erkannt. Die Suite lief nur über `http://localhost:<port>`, verglich den
+Origin der `redirect_uri` mit diesem localhost-Origin und übersprang die
+Issuer-Prüfung ohne `E2E_ISSUER_URL`. Änderungen:
+
+- `frontend/e2e/onboarding.spec.ts`: Die Prüfung der Authorize-Weiterleitung
+  verlangt `E2E_ISSUER_URL` und schlägt ohne die Variable fehl, statt zu
+  überspringen. Ist `BASE_URL` kein Loopback-Origin, nennen Authorize-URL,
+  `redirect_uri` und Issuer weder localhost noch eine Loopback-Adresse und
+  haben den Origin von `BASE_URL`. Neu ist ein Selbsttest: `page.route`
+  schreibt die `redirect_uri` der Authorize-Weiterleitung auf
+  `http://localhost:1/auth/callback` um, und die Prüfung muss fehlschlagen.
+  Die INS-04-Tests tragen das Tag `@ins-04`. Der Test zum unsicheren Origin
+  trägt zusätzlich `@plain-http`, weil eine TLS-Installation HTTP auf HTTPS
+  umleitet.
+- `frontend/e2e/fixtures/setup-onboarding.sh`: Bei `RETICORA_TLS_DOMAIN` in
+  der Env-Datei ist `BASE_URL` `https://<Domain>`. Das Skript prüft das
+  Frontend dort und vertraut dabei der Wurzel aus `E2E_CA_CERT`. Es setzt
+  `E2E_ISSUER_URL` auf den Issuer der Installation und bricht ab, wenn
+  dieser fehlt. Ohne TLS-Domain bleibt `BASE_URL`
+  `http://localhost:<RETICORA_FRONTEND_PORT>`.
+
+Eingaben und die Schritte 1 bis 8 bleiben unverändert. Die Prüfsummen beider
+Dateien in `artefakte/SHA256SUMS` sind neu. Der Job `tls-domain-pebble` in
+`install-smoke.yml` behält die Installation von
+`tests/install-acme-pebble.test.sh` mit dem Pebble-Zertifikat. Danach laufen
+dort die INS-04-Tests (`--grep @ins-04 --grep-invert @plain-http`) über
+`https://<Domain>`. Die Suite vertraut der Pebble-Wurzel über
+`playwright.install.config.ts` (NSS-Datenbank, `NODE_EXTRA_CA_CERTS`) statt
+über `ignoreHTTPSErrors`. Lauf-ID des Jobs `tls-domain-pebble`:
+[Install Smoke Test 40613604691](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40613604691)
+(Job 122571465336, Stand `372d442`, PR #102), grün; Nachtrag vom 2026-10-28.
+Damit ist der Retest von F-352 bestanden.
+
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|
-| 1 | Self-Signup | Bestätigungs-Mail, Organisation mit Trial | bestanden |
-| 2 | Login, Dashboard | Dashboard der neuen Organisation | bestanden |
+| 1 | Self-Signup | über den Link „Konto anlegen“ der Anmeldeseite; Bestätigungs-Mail, Organisation mit Trial | bestanden (Lauf #219, Fassung WP-529; frühere Fassung in Lauf #122) |
+| 2 | Login, Dashboard | Dashboard der neuen Organisation mit „Einrichtung fortsetzen“ | bestanden (Lauf #219, Fassung WP-529; frühere Fassung in Lauf #122) |
 | 3 | Collector-Enrollment | Einmal-Code, Zertifikat, Collector online | bestanden |
-| 4 | Scope bestätigen | Scope aktiv | bestanden |
+| 4 | Scope bestätigen | Pflichtschritt: Vorschlag bestätigt, Item `resolved`/`accept`, Scope des Collectors angelegt, Fortschritt 3 → 4 → 5; gebrochener Resolve hält den Fortschritt bei 3 mit Meldung | bestanden (Lauf #219, Fassung WP-529 mit Negativfall; frühere bedingte Fassung in Lauf #122) |
 | 5 | 30 simulierte Geräte | 30 CIs sichtbar | bestanden |
 | 6 | Review auflösen | Review geschlossen, Ergebnis am CI | bestanden |
-| 7 | Impact abfragen | betroffene CIs zum gewählten CI | bestanden |
-| 8 | Export laden | Exportdatei mit den CIs | bestanden |
+| 7 | Impact abfragen | betroffene CIs zum gewählten CI: nach der Beziehung `sim-srv-01` → `sim-nas-01` nennt der Impact von `sim-nas-01` `sim-srv-01` (API und Ausfallsimulation); ein CI ohne Beziehung hat keinen Impact, mit Hinweis in der UI | bestanden (install-smoke Run 40258372749; frühere Fassung in Lauf #122 bestanden) |
+| 8 | Export laden | Exportdatei mit mindestens 30 Datenzeilen, im Browser geladen über die signierte `download_url` des Exportauftrags; manipulierte Signatur → 403, Schritt schlägt fehl | bestanden (Lauf #219, Fassungen WP-468 und WP-529 mit Negativfall; frühere Fassung über `/api/v1/export/cis` in Lauf #122) |
 
-Lauf: [Install Smoke Test #122](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38512314064),
-Job `install-cloud-smoke (ubuntu-24.04)`, Schritt „Run the onboarding E2E
-suite“, success, 2026-10-14.
+Läufe: [Install Smoke Test #219](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40537085229) (aktuelle Fassung, 2026-10-27) und
+[Install Smoke Test #122](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/38512314064)
+(Fassung vom 2026-10-14), jeweils Job `install-cloud-smoke (ubuntu-24.04)`,
+Schritt „Run the onboarding E2E suite“, success.
 
 ## (e) Konflikt-Szenario
 
 **Ablauf:** Override setzen, abweichende Discovery, override_conflict sichtbar,
 accept und dismiss.
 
-**Umgebung:** Playwright gegen die SPA mit gemocktem Backend. Der Test läuft in
-allen Browser-Projekten des CI-Jobs `frontend`: Chromium, Edge, Firefox,
-WebKit, Mobile Chrome und Mobile Safari.
+**Umgebung:** Real-Stack. `frontend/e2e-real/abn-01-konflikt.spec.ts` läuft
+gegen die frisch installierte Instanz im Workflow `install-smoke.yml`, Job
+`install-cloud-smoke (ubuntu-24.04)`, Schritt „Run the real-stack E2E suite
+against the expected-failure list“ (WP-338). Es gibt keine Mocks: Die
+Discovery-Datensätze laufen durch den Ingest des Stacks
+(`POST /api/v1/ingest/bulk`, Abgleich), und jeder Schritt wird in der UI,
+über die API und in der Datenbank (psql, nur lesend) geprüft.
 
-**Eingefrorene Daten:** `artefakte/abn-01-e-konflikt.json`. Der Test liest die
-Datei direkt, sodass Protokoll und Test dieselben Daten verwenden. Die Datei
-legt fest:
+**Eingefrorene Daten:** `artefakte/abn-01-e-konflikt.json`. Die Real-Stack-Spec
+und der gemockte Lauf lesen die Datei direkt, sodass Protokoll und Tests
+dieselben Daten verwenden. Die Datei legt fest:
 
 - CI `srv-abn-01`, entdecktes Modell `R-1U` (SNMP)
 - Override `R-2U-manual`, Begründung „Abnahme ABN-01“
 - zwei `override_conflict`-Reviews: `srv-abn-01`/model mit beobachtetem Wert
-  `R-3U` (accept) und `srv-abn-02`/os_name (dismiss)
+  `R-3U` (accept) und `srv-abn-02`/os_name mit Override `Linux (manual)` und
+  beobachtetem Wert `Linux 6.1` (dismiss)
+
+Nach einem grünen Lauf schreibt die Spec die Datei aus dem Lauf neu (IDs,
+Zeitpunkte, Run-ID); die Szenariowerte muss der Lauf unverändert
+reproduzieren. Die Übernahme beschreibt `artefakte/README.md`.
+
+| # | Schritt | Erwartung (UI, API, Datenbank) | Ergebnis |
+|---|---|---|---|
+| 0 | Erste Discovery | `srv-abn-01` mit Modell `R-1U` aus `snmp`, `srv-abn-02` ohne Betriebssystem (API, `ci_field_value`) | bestanden |
+| 1 | CI-Detail, „Herkunft & Overrides“, Override setzen | Dialog: `PUT /cis/{id}/fields/model/override` 200; Feld „geschützt“, Override und Effektiv `R-2U-manual`, Discovery `R-1U`; Herkunft mit Autor und Begründung; `ci.model` und `override_value` in der Datenbank. Override `Linux (manual)` auf `srv-abn-02`/os_name über denselben Endpunkt | bestanden |
+| 2 | Abweichende Discovery | Ingest meldet `R-3U` und `Linux 6.1`; beide Overrides bleiben, die Herkunft zeigt den gemeldeten Wert „abweichend“; je Feld genau ein offenes `override_conflict` mit dem gemeldeten Wert | bestanden |
+| 3 | override_conflict sichtbar | Review-Inbox, Typ „Konflikt mit Override“: zwei Einträge; der Diff nennt `srv-abn-01`, beobachtet `R-3U`, im CI `R-2U-manual`, „abweichend“ | bestanden |
+| 4 | accept | „Übernehmen“: Review `resolved` mit `accept` und Bearbeiter; Override entfernt, `srv-abn-01` hat das Modell `R-3U` | bestanden |
+| 5 | dismiss | „Verwerfen“: Review `dismissed` mit `dismiss`; Override `Linux (manual)` bleibt; „Keine Review-Items“; beide Ergebnisse nach einem Reload | bestanden |
+
+Lauf: install-smoke Run 40258372749 vom 2026-10-26 (Job `install-cloud-smoke (ubuntu-24.04)`,
+Commit `68fa184`, PR #94), bestanden in 12,1 s. Die Spec verglich dabei die
+Szenariowerte des Laufs mit `artefakte/abn-01-e-konflikt.json` (sie
+stimmten überein) und schrieb die Datei des Laufs ins Testergebnis
+(Artefakt `e2e-real`, 14 Tage aufbewahrt). Übernahme nach `artefakte/` und neue
+Prüfsumme in `artefakte/SHA256SUMS`: ausstehend, weil das Artefakt aus der
+Arbeitsumgebung nicht abrufbar war; bis dahin gilt die eingefrorene
+Fassung.
+
+Änderung nach dem Einfrieren, 2026-10-25: WP-456 (`t5-abn01-de`, F-298).
+Das Protokoll stützte sich nur auf den gemockten Lauf unten. Neu ist die
+Real-Stack-Spec `frontend/e2e-real/abn-01-konflikt.spec.ts` mit den
+eingefrorenen Daten; sie steht mit eigener Prüfsumme in
+`artefakte/SHA256SUMS`. `artefakte/abn-01-e-konflikt.json` und
+`frontend/e2e/conflict.spec.ts` bleiben bis zum ersten grünen Real-Lauf
+unverändert. Die allgemeine Real-Stack-Prüfung von Override und Konflikt mit
+der simulierten Flotte bleibt `frontend/e2e-real/discovery-override.spec.ts`
+(D03–D05); sie ist nicht eingefroren, weil mehrere Korrektur-WPs sie ändern.
+
+Änderung nach dem Einfrieren, 2026-10-27: WP-530 (`t7-e2e-strict-mocks`,
+TST-03, F-178). Der gemockte Lauf nutzt jetzt das strikte Mock-Backend:
+Unbeantwortete Aufrufe schlagen fehl, und jeder Request und jede
+Mock-Antwort wird gegen `api/openapi.yaml` geprüft.
+`frontend/e2e/conflict.spec.ts` importiert dafür `test` aus
+`e2e/support/backend.ts`, und die Mock-Antworten tragen die Pflichtfelder des
+Vertrags: `is_manual` am CI, `organization_id` und `updated_at` an den
+Reviews, die `FieldProvenance` als Antwort des Overrides. Die nicht
+betrachteten Panels der CI-Detailseite stehen in der Allowlist der Spec.
+`artefakte/abn-01-e-konflikt.json`, die Schritte und die Erwartungen bleiben
+unverändert; die Prüfsumme der Spec in `artefakte/SHA256SUMS` ist neu.
+
+Änderung nach dem Einfrieren, 2026-10-27 (Integration K4): Die Prüfung
+„geschützt“ nach dem Speichern des Overrides sucht den Text jetzt exakt
+(`getByText('geschützt', { exact: true })`). Ohne `exact` traf der Locator
+auch den Hinweis des Abschnitts („Geschützte manuelle Overrides …“), der vor
+dem Speichern sichtbar ist. Der Schritt galt dann als erledigt, bevor der
+PUT ankam, oder schlug nach dem Speichern mit zwei Treffern fehl
+(Strict Mode). Unter Last wurde das sichtbar. Daten, Schritte und
+Erwartungen bleiben unverändert; die Prüfsumme der Spec in
+`artefakte/SHA256SUMS` ist neu.
+
+**Gemockter Lauf (Regression, Freigabe vom 2026-10-14):**
+`frontend/e2e/conflict.spec.ts` spielt dieselben Daten mit gemocktem Backend
+ab. Der Test läuft in allen Browser-Projekten des CI-Jobs `frontend`:
+Chromium, Edge, Firefox, WebKit, Mobile Chrome und Mobile Safari.
 
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -22,24 +24,67 @@ const minInvitedPasswordLength = 12
 type InvitationHandler struct {
 	repo     InvitationRepository
 	accounts InvitationAccounts
-	now      func() time.Time
+	// mailer sends the invitation mail straight to the invited address;
+	// set exactly when accounts is (WithAccounts).
+	mailer InvitationMailer
+	// quota checks max_users before an acceptance creates the user.
+	quota QuotaGuard
+	// acceptURL is the page the link of the invitation mail opens
+	// (RETICORA_INVITATION_ACCEPT_URL); nil: issue and renew answer 503.
+	acceptURL *url.URL
+	now       func() time.Time
 }
 
 // NewInvitationHandler creates the handler; a nil repository answers 503.
+// Issue and renew need WithAcceptURL as well.
 func NewInvitationHandler(repo InvitationRepository) *InvitationHandler {
 	return &InvitationHandler{repo: repo, now: time.Now}
 }
 
+// WithAcceptURL sets the page the link of the invitation mail opens; the
+// link adds the token as query parameter. An empty value or one that is not
+// an absolute http(s) URL (config.Validate) leaves invitations
+// unconfigured: issue and renew answer 503, like the signup without
+// verification page.
+func (h *InvitationHandler) WithAcceptURL(raw string) *InvitationHandler {
+	h.acceptURL = nil
+	if u, err := url.Parse(raw); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != "" && u.User == nil {
+		h.acceptURL = u
+	}
+	return h
+}
+
 // WithAccounts lets the acceptance create the IdP account with the given
-// password (Keycloak admin client).
-func (h *InvitationHandler) WithAccounts(a InvitationAccounts) *InvitationHandler {
-	h.accounts = a
+// password (Keycloak admin client). That account is created with a verified
+// address, so the token is a proof of the mailbox: issue and renewal leave
+// it out of their response and of the event invitation.created, and mailer
+// sends the invitation mail straight to the invited address over the
+// central SMTP server. It never goes over a channel of the organization,
+// whose own SMTP server the organization's administrators choose and could
+// read, and it reaches organizations without any e-mail channel as well.
+// Both are needed: without a mailer the invitee would get neither link nor
+// mail, so the accounts client is not wired either, and the acceptance
+// links an existing IdP account at the first login.
+func (h *InvitationHandler) WithAccounts(a InvitationAccounts, mailer InvitationMailer) *InvitationHandler {
+	h.accounts, h.mailer = nil, nil
+	if a != nil && mailer != nil {
+		h.accounts, h.mailer = a, mailer
+	}
+	return h
+}
+
+// WithQuota enforces max_users on the acceptance (ENT-03): at the limit it
+// answers 403 entitlement-limit, creates neither user nor IdP account and
+// leaves the invitation open.
+func (h *InvitationHandler) WithQuota(q QuotaGuard) *InvitationHandler {
+	h.quota = q
 	return h
 }
 
 // RegisterRoutes registers the invitation routes. Issue, list, renew and
-// revoke need user:manage; accept is public, the token is the credential,
-// and it runs through the pre-auth limit.
+// revoke need user:manage, issue and renew within the caller's rights (grant
+// ceiling); accept is public, the token is the credential, and it runs
+// through the pre-auth limit.
 func (h *InvitationHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/invitations", h.List)
 	r.Post("/api/v1/invitations", h.Issue)
@@ -56,8 +101,25 @@ func (h *InvitationHandler) unavailable(w http.ResponseWriter) bool {
 	return false
 }
 
+// unconfigured refuses issue and renewal without accept URL: the invitee
+// would get no usable link (NTF-05).
+func (h *InvitationHandler) unconfigured(w http.ResponseWriter) bool {
+	if h.unavailable(w) {
+		return true
+	}
+	if h.acceptURL == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "invitations not configured")
+		return true
+	}
+	return false
+}
+
 func writeInvitationError(w http.ResponseWriter, r *http.Request, err error) {
+	var ceiling *GrantCeilingError
 	switch {
+	case errors.As(err, &ceiling):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ceiling.Error())
+	case api.WriteEntitlementError(w, err):
 	case errors.Is(err, ErrInvitationNotFound), errors.Is(err, ErrInvitationInvalid):
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 	case errors.Is(err, ErrInvitationExpired):
@@ -66,6 +128,16 @@ func writeInvitationError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
 	case errors.Is(err, ErrInvitationUserExists):
 		api.WriteFieldError(w, &api.ConflictError{Field: "email", Message: err.Error()})
+	case errors.Is(err, ErrMFAUnavailable):
+		// An org_admin account without MFA was deleted again (WP-358); the
+		// cause names the admin API and goes to the log only.
+		slog.ErrorContext(r.Context(), "invitation: org_admin account without enforceable MFA", "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrMFAUnavailable.Error())
+	case errors.Is(err, ErrInvitationMail):
+		// The issue or renewal was rolled back; the cause names the SMTP
+		// server and goes to the log only.
+		slog.ErrorContext(r.Context(), "invitation: the central SMTP server did not take the invitation mail", "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrInvitationMail.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		slog.ErrorContext(r.Context(), "invitation failed", "error", err)
@@ -73,28 +145,62 @@ func writeInvitationError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-// List returns the organization's invitations with their status.
+// List returns a page of the organization's invitations with their status,
+// newest first on (created_at, id): limit (default 50, at most 200) and the
+// signed cursor of API-02 (F-215).
 func (h *InvitationHandler) List(w http.ResponseWriter, r *http.Request) {
 	if h.unavailable(w) {
 		return
 	}
-	items, err := h.repo.ListInvitations(r.Context(), tenant.FromContext(r.Context()).OrganizationID)
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListInvitations(r.Context(), tenant.FromContext(r.Context()).OrganizationID, page)
 	if err != nil {
 		writeInvitationError(w, r, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Invitation]{Data: items, Total: len(items), Limit: len(items)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(items, total, page, invitationPosition))
 }
 
-// Issue creates an invitation valid for seven days. The response carries
-// the token once; only its hash is stored.
+// invitationPosition is the (created_at, id) position of an invitation in
+// its list.
+func invitationPosition(inv *Invitation) (createdAt time.Time, id string) {
+	return inv.CreatedAt, inv.ID
+}
+
+// invitingPrincipal is the principal whose rights bound an issued or renewed
+// invitation (grant ceiling); without one the request is refused.
+func invitingPrincipal(w http.ResponseWriter, r *http.Request) (*identity.Principal, bool) {
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "invitations are issued by an authenticated principal")
+		return nil, false
+	}
+	return &p, true
+}
+
+// Issue creates an invitation valid for seven days; only the hash of its
+// token is stored. The invitee gets the link with the token by mail, in the
+// issue's transaction (delivery): with an accounts client straight over the
+// central SMTP server, where a refused send stores nothing and answers 503
+// (ErrInvitationMail), otherwise by invitation.created over the
+// organization's e-mail channels. The response carries the token once, and
+// only without an accounts client (tokenInResponse). The issuer must hold
+// user:manage and the permissions of the role in a scope covering the
+// invitation's scope (403 otherwise).
 func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
+	if h.unconfigured(w) {
 		return
 	}
 	t := tenant.FromContext(r.Context())
 	if t.UserID == "" {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "invitations are issued by a user")
+		return
+	}
+	caller, ok := invitingPrincipal(w, r)
+	if !ok {
 		return
 	}
 	var req struct {
@@ -114,18 +220,25 @@ func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
 	}
 	inv := &Invitation{OrganizationID: t.OrganizationID, Email: req.Email, RoleID: req.RoleID,
 		ScopeType: req.ScopeType, ScopeID: req.ScopeID, InvitedBy: t.UserID, ExpiresAt: h.now().Add(InvitationTTL)}
-	if err := h.repo.IssueInvitation(r.Context(), inv, hash); err != nil {
+	if err := h.repo.IssueInvitation(r.Context(), caller, inv, hash, h.delivery(token)); err != nil {
 		writeInvitationError(w, r, err)
 		return
 	}
-	inv.Token = token
+	h.tokenInResponse(inv, token)
 	api.WriteJSON(w, http.StatusCreated, inv)
 }
 
 // Renew gives a pending or expired invitation a new token and seven more
-// days.
+// days; the invitee gets a mail with the new link like on the issue (a
+// refused direct send keeps the old token and answers 503), the response
+// carries the token like the issue's (tokenInResponse). The grant ceiling
+// applies to the renewing principal, not to the original issuer.
 func (h *InvitationHandler) Renew(w http.ResponseWriter, r *http.Request) {
-	if h.unavailable(w) {
+	if h.unconfigured(w) {
+		return
+	}
+	caller, ok := invitingPrincipal(w, r)
+	if !ok {
 		return
 	}
 	orgID := tenant.FromContext(r.Context()).OrganizationID
@@ -134,13 +247,40 @@ func (h *InvitationHandler) Renew(w http.ResponseWriter, r *http.Request) {
 		writeInvitationError(w, r, err)
 		return
 	}
-	inv, err := h.repo.RenewInvitation(r.Context(), orgID, chi.URLParam(r, "id"), hash, h.now().Add(InvitationTTL))
+	inv, err := h.repo.RenewInvitation(r.Context(), orgID, chi.URLParam(r, "id"), caller, hash, h.delivery(token), h.now().Add(InvitationTTL))
 	if err != nil {
 		writeInvitationError(w, r, err)
 		return
 	}
-	inv.Token = token
+	h.tokenInResponse(inv, token)
 	api.WriteJSON(w, http.StatusOK, inv)
+}
+
+// delivery is how an issue or renewal delivers the link of token: with an
+// accounts client straight by mail to the invited address (mailer),
+// otherwise by the event invitation.created over the organization's e-mail
+// channels.
+func (h *InvitationHandler) delivery(token string) InvitationDelivery {
+	return InvitationDelivery{Link: InvitationLink(h.acceptURL, token), Mailer: h.mailer}
+}
+
+// tokenInResponse puts the token of an issue or renewal into its response
+// only when the acceptance cannot create an IdP account. With an accounts
+// client the acceptance creates a verified, password-bearing account of the
+// invited address, so whoever holds the token owns that address at the IdP:
+// the token must reach the invitee's mailbox only, not the inviter, or any
+// org_admin could invite an address it does not control and accept the
+// invitation itself. That is why the mail then goes over the central SMTP
+// server only, never over an SMTP server the organization configured
+// (delivery). Without an accounts client the acceptance creates no
+// IdP account: the user signs in with an existing IdP account of the
+// address, which the first login links, so the link in the inviter's hands
+// (without central SMTP often the only way to pass it on) creates no
+// account for an address nobody proved.
+func (h *InvitationHandler) tokenInResponse(inv *Invitation, token string) {
+	if h.accounts == nil {
+		inv.Token = token
+	}
 }
 
 // Revoke deletes a pending or expired invitation.
@@ -157,7 +297,9 @@ func (h *InvitationHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 // Accept consumes an invitation once and creates the user with the invited
 // role and scope. With the IdP admin client the password creates the IdP
-// account in the same step; it is never stored by Reticora.
+// account in the same step; it is never stored by Reticora. An org_admin
+// account is bound to MFA; when that fails, the acceptance answers 503 and
+// the invitation stays open.
 func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 	if h.unavailable(w) {
 		return
@@ -181,7 +323,7 @@ func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var (
-		createAccount func(ctx context.Context, inv *Invitation) error
+		createAccount func(ctx context.Context, inv *Invitation, role string) error
 		accountID     string
 	)
 	if h.accounts != nil {
@@ -190,12 +332,12 @@ func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 				Message: fmt.Sprintf("password must have at least %d characters", minInvitedPasswordLength)})
 			return
 		}
-		createAccount = func(ctx context.Context, inv *Invitation) error {
+		createAccount = func(ctx context.Context, inv *Invitation, role string) error {
 			display := req.DisplayName
 			if display == "" {
 				display = inv.Email
 			}
-			id, err := h.accounts.CreateInvitedAccount(ctx, inv.Email, display, req.Password, orgID)
+			id, err := h.accounts.CreateInvitedAccount(ctx, inv.Email, display, req.Password, orgID, role)
 			if err != nil {
 				return err
 			}
@@ -203,7 +345,7 @@ func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 	}
-	accepted, err := h.repo.AcceptInvitation(r.Context(), orgID, HashInvitationToken(req.Token), req.DisplayName, createAccount)
+	accepted, err := h.repo.AcceptInvitation(r.Context(), orgID, HashInvitationToken(req.Token), req.DisplayName, h.quota, createAccount)
 	if err != nil {
 		if accountID != "" {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)

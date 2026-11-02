@@ -4,8 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
 // fakeDelivery records what the queue did with a message.
@@ -202,4 +208,101 @@ func TestQueueSweepAnnouncesOverdueJobs(t *testing.T) {
 	if due, _ := s.repo.QueuedDue(context.Background(), c.now().Add(-q.SweepInterval), 10); len(due) != 1 || due[0].ID != job.ID {
 		t.Errorf("overdue jobs: %+v", due)
 	}
+}
+
+// fakeJetStream stands in for JetStream in Run: the stream answers unless
+// down is set, consumers are created and consume nothing, announcements are
+// accepted.
+type fakeJetStream struct {
+	jetstream.JetStream
+	down atomic.Bool
+}
+
+func (f *fakeJetStream) Stream(context.Context, string) (jetstream.Stream, error) {
+	if f.down.Load() {
+		return nil, errors.New("nats: no responders available for request")
+	}
+	return nil, nil
+}
+
+func (f *fakeJetStream) CreateOrUpdateConsumer(context.Context, string, jetstream.ConsumerConfig) (jetstream.Consumer, error) {
+	return fakeConsumer{}, nil
+}
+
+func (f *fakeJetStream) Publish(context.Context, string, []byte, ...jetstream.PublishOpt) (*jetstream.PubAck, error) {
+	return &jetstream.PubAck{}, nil
+}
+
+type fakeConsumer struct{ jetstream.Consumer }
+
+func (fakeConsumer) Consume(jetstream.MessageHandler, ...jetstream.PullConsumeOpt) (jetstream.ConsumeContext, error) {
+	return fakeConsumeContext{}, nil
+}
+
+type fakeConsumeContext struct{ jetstream.ConsumeContext }
+
+func (fakeConsumeContext) Stop() {}
+
+// TestQueueSweepIsACycleOfTheJobsWorker covers WP-447 (OPS-05, F-133): each
+// sweep of Run is a cycle of the worker jobs (reticora_worker_runs_total
+// {worker="jobs"}). A sweep without due jobs succeeds while the stream
+// answers; a failed attempt of a job since the previous sweep and a stream
+// that does not answer are failures of the cycle, so an idle queue does not
+// report success while NATS is down.
+func TestQueueSweepIsACycleOfTheJobsWorker(t *testing.T) {
+	runs := func() float64 { return testutil.ToFloat64(observability.WorkerRuns.WithLabelValues("jobs")) }
+	errs := func() float64 { return testutil.ToFloat64(observability.WorkerErrors.WithLabelValues("jobs")) }
+	last := func() float64 { return testutil.ToFloat64(observability.WorkerLastSuccess.WithLabelValues("jobs")) }
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s: runs %v, errors %v", what, runs(), errs())
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	s, _ := newService()
+	js := &fakeJetStream{}
+	q := NewQueue(s, js)
+	q.SweepInterval = 10 * time.Millisecond
+	q.Handle(Kind{Name: "sync", MaxAttempts: 1, Timeout: time.Minute},
+		func(context.Context, *Job) (any, error) { return nil, errors.New("upstream down") })
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	beforeRuns, beforeErrs := runs(), errs()
+	observability.WorkerLastSuccess.WithLabelValues("jobs").Set(0)
+	go func() {
+		q.Run(ctx)
+		close(stopped)
+	}()
+	defer func() {
+		cancel()
+		<-stopped
+	}()
+
+	waitFor("an idle sweep", func() bool { return runs() >= beforeRuns+2 })
+	if errs() != beforeErrs || last() == 0 {
+		t.Errorf("idle sweeps: errors %v -> %v, last success %v; want cycles without error", beforeErrs, errs(), last())
+	}
+
+	// A failed attempt counts in the next sweep.
+	job, _, err := s.Enqueue(ctx, "org-1", "sync", nil, EnqueueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := q.Process(ctx, deliveryOf(t, job)); !out.Ran {
+		t.Fatalf("attempt: %+v", out)
+	}
+	waitFor("the failed attempt in a cycle", func() bool { return errs() >= beforeErrs+1 })
+
+	// NATS does not answer: the idle sweep fails.
+	failedBefore := errs()
+	js.down.Store(true)
+	waitFor("a sweep while the stream does not answer", func() bool { return errs() >= failedBefore+2 })
+	js.down.Store(false)
+	answered := runs()
+	waitFor("a sweep after the stream answers again", func() bool { return runs() >= answered+2 })
 }

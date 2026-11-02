@@ -29,6 +29,26 @@ func TestClassifyCause(t *testing.T) {
 	if ClassifyCause("x509: certificate has expired") != CauseTLS {
 		t.Error("certificate errors are TLS errors")
 	}
+
+	// SNMPv3 (WP-492, F-105): the errors of the collector's SNMP plugin for
+	// refused credentials (usmStats reports) are auth_failed, from the cause
+	// the collector sends and from the message alone; the scope health shows
+	// auth_failed with protocol snmp and the target.
+	for _, report := range []string{"usmStatsWrongDigests", "usmStatsUnknownUserNames", "usmStatsDecryptionErrors"} {
+		msg := "snmp v3: auth_failed: 10.0.0.5: authentication failed, the agent reports " + report
+		if got := ClassifyCause(msg); got != CauseAuthFailed {
+			t.Errorf("ClassifyCause(%q) = %s, want %s", msg, got, CauseAuthFailed)
+		}
+		for _, cause := range []string{CauseAuthFailed, ""} {
+			run := NormalizeRunResult(map[string]any{"records": 1, "errors": []any{
+				map[string]any{"protocol": "snmp", "target": "10.0.0.5", "cause": cause, "message": msg}}})
+			h := ScopeHealthOf(&Scope{LastRunAt: "2026-10-26T12:00:00Z", LastResult: run})
+			if h.State != ScopeStatePartial || len(h.Errors) != 1 || h.Errors[0].Cause != CauseAuthFailed ||
+				h.Errors[0].Protocol != "snmp" || h.Errors[0].Target != "10.0.0.5" {
+				t.Errorf("scope health after %s (cause %q) = %+v, want auth_failed with protocol snmp and target", report, cause, h)
+			}
+		}
+	}
 }
 
 func TestRunResultStatesAndMetrics(t *testing.T) {

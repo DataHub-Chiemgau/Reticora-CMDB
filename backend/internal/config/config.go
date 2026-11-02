@@ -7,11 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Environments accepted in RETICORA_ENVIRONMENT. Only development keeps the
@@ -50,6 +54,11 @@ type Config struct {
 	S3AccessKey string
 	S3SecretKey string
 	S3UseSSL    bool
+	// S3PublicURL is the base URL under which browsers reach the object
+	// store for signed downloads (exports, documents), e.g.
+	// https://cmdb.example.com/objects behind the frontend nginx. Empty
+	// keeps the internal endpoint in the URLs (F-376).
+	S3PublicURL string
 	// BlobDir backs export storage in --no-db development mode.
 	BlobDir string
 
@@ -60,7 +69,8 @@ type Config struct {
 	OIDCRedirectURL  string
 	// OIDCCACertFile optionally points at a PEM bundle that is trusted in
 	// addition to the system roots when the server talks to the OIDC issuer
-	// (discovery, JWKS and token exchange). Deployments that terminate TLS
+	// (discovery, JWKS and token exchange, and the Keycloak admin client of
+	// signup, invitations and MFA binding). Deployments that terminate TLS
 	// with a private or not-yet-issued certificate would otherwise fail the
 	// token exchange with an x509 verification error.
 	OIDCCACertFile string
@@ -78,6 +88,15 @@ type Config struct {
 	OperatorGroup        string
 	OperatorMFAACR       string
 	AllowInsecureDevAuth bool // opt-in: accept session tokens without signature verification
+	// Alertmanager bridge of the operator path (OPS-05, E-75):
+	// RETICORA_OPS_ALERT_TOKEN is the bearer token Alertmanager sends (at
+	// least 32 characters, not the break-glass token; surrounding white
+	// space is dropped as Alertmanager drops it from its credentials file);
+	// RETICORA_OPS_ALERT_ORG_ID is the operator organization whose
+	// notification channels deliver the alerts. Without the organization the
+	// bridge answers 404 and Alertmanager delivers by e-mail only.
+	OpsAlertToken string
+	OpsAlertOrgID string
 
 	// Entitlements
 	DefaultPlan string // plan provisioned for the --no-db demo organization
@@ -97,7 +116,8 @@ type Config struct {
 	// collectors reach on 4222 with mutual TLS. PKIDir receives its CA
 	// bundle, server certificate (for the host names in NATSEdgeHosts) and
 	// generated configuration; the authorization callout connects to
-	// NATSEdgeURL. Its keys are derived from the master key.
+	// NATSEdgeURL. Its keys are derived from the derivation root of the
+	// installation (crypto.LoadDerivationRoot), not from the master key.
 	PKIDir        string
 	NATSEdgeHosts string
 	NATSEdgeURL   string
@@ -108,19 +128,34 @@ type Config struct {
 	// metrics. It multiplies the series count by the number of tenants, so it
 	// is opt-in for bounded-tenant deployments.
 	MetricsTenantLabel bool
+	// PprofAddr is the loopback address of the profiling listener
+	// (RETICORA_PPROF_ADDR, e.g. 127.0.0.1:6060; NFR-02, WP-438): the CPU
+	// profile of a load run. Empty (the default) starts no listener; the
+	// start check allows it only in development, on a loopback IP and
+	// without RETICORA_EGRESS_ALLOW_PRIVATE.
+	PprofAddr string
 
-	// EgressAllowPrivate permits webhook and connector destinations in
-	// private networks (on-premises installations); cloud metadata endpoints
+	// EgressAllowPrivate permits webhook and connector destinations and own
+	// SMTP servers in private networks and on other SMTP ports (dedicated,
+	// on-premises and air-gapped installations); cloud metadata endpoints
 	// stay blocked (SEC-08). Default off.
 	EgressAllowPrivate bool
 
 	// Self-signup (TLC-01, E-33). SignupVerifyURL is the page the
-	// verification link opens; the Keycloak admin client creates the first
-	// org_admin's account. Without them, or without an e-mail channel
-	// (WP-137), signup answers 503.
+	// verification link opens (the SPA's /onboarding; the link adds
+	// ?token=<token>); the Keycloak admin client creates the first
+	// org_admin's account. Without them, or without the central SMTP server
+	// (WP-137), signup answers 503. Development defaults to
+	// DefaultSignupVerifyURL.
 	SignupVerifyURL           string
 	KeycloakAdminClientID     string
 	KeycloakAdminClientSecret string
+	// KeycloakInternalURL optionally is the base URL (http(s)://host[:port])
+	// under which the server reaches Keycloak directly, e.g.
+	// http://keycloak:8080 in the compose network. The Keycloak admin client
+	// then sends its requests there instead of to the public issuer host,
+	// whose reverse proxy does not expose /admin/ (WP-646).
+	KeycloakInternalURL string
 	// SignupCaptchaKey signs the ALTCHA challenges (at least 32 bytes, the
 	// same on every instance); SignupBlockedDomains/SignupAllowedDomains
 	// extend the disposable-domain lists (E-33).
@@ -130,6 +165,12 @@ type Config struct {
 	TrialPlan            string // ENT-07: standard
 	TrialDays            int    // ENT-07: 30
 	TrialMaxCIs          int    // ENT-07: 100
+
+	// InvitationAcceptURL is the page the link of an invitation mail opens
+	// (TLC-03, NTF-05); the link adds ?token=<token>. Without it, issuing and
+	// renewing invitations answers 503. Development defaults to
+	// DefaultInvitationAcceptURL.
+	InvitationAcceptURL string
 
 	// PreAuthRateLimitRPM is the budget of authentication attempts per
 	// client IP and minute (AUT-10, default 20).
@@ -161,6 +202,12 @@ type Config struct {
 	RetentionSoftDeleteDays int // soft-deleted CIs, 90 days
 	RetentionReviewItemDays int // resolved review items, 1 year
 
+	// Retention of the event stream RETICORA_EVENTS (EVT-01, NFR-06): the
+	// age and size its messages are kept; published outbox rows keep their
+	// data as long. An age below MinEventsMaxAge is a start error.
+	EventsMaxAge   time.Duration
+	EventsMaxBytes int64
+
 	// Search
 	SearchBackend      string
 	OpenSearchURL      string
@@ -175,9 +222,6 @@ type Config struct {
 	LLMEmbeddingModel string
 	// AirGapped disables every external AI call (AI-02, air-gapped profile).
 	AirGapped bool
-	// OfflineDetector switches the CI offline detector on (REC-09, LCY-05;
-	// RETICORA_OFFLINE_DETECTOR_ENABLED, default true).
-	OfflineDetector bool
 	// Modules lists the enabled late modules (RETICORA_MODULES, WP-214):
 	// empty switches every module with a phase tag from P2 or [A] off (the
 	// G1 default after E-03), "all" switches them all on.
@@ -188,9 +232,11 @@ type Config struct {
 	workers map[string]bool
 
 	// explicit records the RETICORA_* variables that were set; invalid
-	// lists variables whose value could not be parsed.
+	// lists variables whose value could not be parsed; warnings are the
+	// settings the server accepts but reports at start (Warnings).
 	explicit map[string]bool
 	invalid  []string
+	warnings []string
 }
 
 // Load reads configuration from environment variables with RETICORA_ prefix
@@ -211,6 +257,7 @@ func Load() *Config {
 		S3AccessKey: l.str("RETICORA_S3_ACCESS_KEY", "reticora"),
 		S3SecretKey: l.str("RETICORA_S3_SECRET_KEY", "reticora_dev"),
 		S3UseSSL:    l.str("RETICORA_S3_USE_SSL", "false") == "true",
+		S3PublicURL: l.str("RETICORA_S3_PUBLIC_URL", ""),
 		// BlobDir backs export storage in --no-db development mode; in
 		// database mode the S3 settings above are used instead.
 		BlobDir: l.str("RETICORA_BLOB_DIR", ""),
@@ -226,18 +273,22 @@ func Load() *Config {
 		OperatorGroup:           l.str("RETICORA_OPERATOR_GROUP", "operators"),
 		OperatorMFAACR:          l.str("RETICORA_OPERATOR_MFA_ACR", "2"),
 		AllowInsecureDevAuth:    l.str("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false") == "true",
+		OpsAlertToken:           strings.TrimSpace(l.str("RETICORA_OPS_ALERT_TOKEN", "")),
+		OpsAlertOrgID:           strings.TrimSpace(l.str("RETICORA_OPS_ALERT_ORG_ID", "")),
 
 		DefaultPlan: l.str("RETICORA_DEFAULT_PLAN", "essential"),
 
 		SignupVerifyURL:           l.str("RETICORA_SIGNUP_VERIFY_URL", ""),
 		KeycloakAdminClientID:     l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", ""),
 		KeycloakAdminClientSecret: l.str("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", ""),
+		KeycloakInternalURL:       l.str("RETICORA_KEYCLOAK_INTERNAL_URL", ""),
 		SignupCaptchaKey:          l.str("RETICORA_SIGNUP_CAPTCHA_KEY", ""),
 		SignupBlockedDomains:      l.str("RETICORA_SIGNUP_BLOCKED_DOMAINS", ""),
 		SignupAllowedDomains:      l.str("RETICORA_SIGNUP_ALLOWED_DOMAINS", ""),
 		TrialPlan:                 l.str("RETICORA_TRIAL_PLAN", "standard"),
 		TrialDays:                 l.integer("RETICORA_TRIAL_DAYS", 30),
 		TrialMaxCIs:               l.integer("RETICORA_TRIAL_MAX_CIS", 100),
+		InvitationAcceptURL:       l.str("RETICORA_INVITATION_ACCEPT_URL", ""),
 		DefaultProvisionRole:      l.str("RETICORA_DEFAULT_PROVISION_ROLE", "viewer"),
 		EntitlementEnforcement:    l.str("RETICORA_ENTITLEMENT_ENFORCEMENT", "true") != "false",
 
@@ -252,6 +303,7 @@ func Load() *Config {
 		// Opt-in: the organization_id label multiplies the HTTP metric series
 		// by the tenant count. Default off; enable for bounded-tenant setups.
 		MetricsTenantLabel: l.boolean("RETICORA_METRICS_TENANT_LABEL", false),
+		PprofAddr:          strings.TrimSpace(l.str("RETICORA_PPROF_ADDR", "")),
 		RateLimitRPM:       l.integer("RETICORA_RATE_LIMIT_RPM", 600),
 		RateLimitOrgRPM:    l.integer("RETICORA_RATE_LIMIT_ORG_RPM", 6000),
 
@@ -266,6 +318,8 @@ func Load() *Config {
 		RetentionHistoryDays:    l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
 		RetentionSoftDeleteDays: l.integer("RETICORA_RETENTION_SOFT_DELETE_DAYS", MinRetentionSoftDeleteDays),
 		RetentionReviewItemDays: l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
+		EventsMaxAge:            l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
+		EventsMaxBytes:          l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
 		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
 		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
 		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
@@ -281,7 +335,6 @@ func Load() *Config {
 		LLMChatModel:      l.str("RETICORA_LLM_CHAT_MODEL", ""),
 		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
 		AirGapped:         l.boolean("RETICORA_AIR_GAPPED", false),
-		OfflineDetector:   l.boolean("RETICORA_OFFLINE_DETECTOR_ENABLED", true),
 		Modules:           l.str("RETICORA_MODULES", ""),
 
 		LogLevel: slog.LevelInfo,
@@ -291,12 +344,37 @@ func Load() *Config {
 	for _, name := range WorkerNames {
 		cfg.workers[name] = l.boolean(WorkerEnvKey(name), true)
 	}
+	cfg.warnings = l.checkWorkerSwitches(cfg.workers)
+	if cfg.OpsAlertToken != "" && cfg.OpsAlertOrgID == "" {
+		cfg.warnings = append(cfg.warnings, "RETICORA_OPS_ALERT_TOKEN is set without RETICORA_OPS_ALERT_ORG_ID: "+
+			"the Alertmanager bridge answers 404 (E-75)")
+	}
+	// Outside production the server may run without the NATS ingest queue,
+	// but then it ingests in the request without identity locks (F-282);
+	// production refuses that in Validate.
+	if !l.set["RETICORA_NATS_URL"] && cfg.Environment != EnvProduction {
+		cfg.warnings = append(cfg.warnings, natsIngestWarning)
+	}
 
 	cfg.explicit = l.set
 	cfg.invalid = l.invalid
 
+	// Compose derives the accept and the verify URL from
+	// RETICORA_PUBLIC_BASE_URL, which may end with a slash:
+	// https://host//invitations/accept becomes
+	// https://host/invitations/accept, https://host//onboarding becomes
+	// https://host/onboarding.
+	cfg.InvitationAcceptURL = collapseLeadingSlashes(cfg.InvitationAcceptURL)
+	cfg.SignupVerifyURL = collapseLeadingSlashes(cfg.SignupVerifyURL)
+
 	if cfg.Environment == EnvDevelopment {
 		cfg.LogLevel = slog.LevelDebug
+		if cfg.InvitationAcceptURL == "" {
+			cfg.InvitationAcceptURL = DefaultInvitationAcceptURL
+		}
+		if cfg.SignupVerifyURL == "" {
+			cfg.SignupVerifyURL = DefaultSignupVerifyURL
+		}
 	} else if !cfg.anySet(s3Keys...) {
 		// Outside development the local MinIO defaults are never used
 		// silently: without explicit settings object storage is disabled.
@@ -306,12 +384,56 @@ func Load() *Config {
 	return cfg
 }
 
+// DefaultInvitationAcceptURL is the accept page of the development frontend
+// (Vite on port 5173).
+const DefaultInvitationAcceptURL = "http://localhost:5173/invitations/accept"
+
+// DefaultSignupVerifyURL is the onboarding page of the development frontend
+// (Vite on port 5173), which redeems the verification token of a signup.
+const DefaultSignupVerifyURL = "http://localhost:5173/onboarding"
+
+// collapseLeadingSlashes replaces a run of slashes at the start of the path
+// of raw with one; any other value stays as it is.
+func collapseLeadingSlashes(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.HasPrefix(u.Path, "//") {
+		return raw
+	}
+	u.Path, u.RawPath = "/"+strings.TrimLeft(u.Path, "/"), ""
+	return u.String()
+}
+
+// absoluteHTTPURL reports whether raw is an absolute http or https URL with
+// a host and without user info.
+func absoluteHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil || u.Hostname() == "" {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	return scheme == "http" || scheme == "https"
+}
+
+// smtpLocalhost reports whether Go's net/smtp sends a login to host over an
+// unencrypted connection: only to these literal names (smtp.PlainAuth).
+func smtpLocalhost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
 // Minimum retention periods of NFR-06 and AUD-09.
 const (
 	MinRetentionAuditYears     = 10
 	MinRetentionHistoryDays    = 3 * 365
 	MinRetentionSoftDeleteDays = 90
 	MinRetentionReviewItemDays = 365
+)
+
+// Retention of the event stream RETICORA_EVENTS (EVT-01): 30 days and
+// 10 GB by default; the events are kept at least 30 days (NFR-06).
+const (
+	DefaultEventsMaxAge   = 30 * 24 * time.Hour
+	MinEventsMaxAge       = 30 * 24 * time.Hour
+	DefaultEventsMaxBytes = int64(10) << 30
 )
 
 // Ingest lanes per organization (RETICORA_INGEST_LANES, WP-334): the
@@ -333,6 +455,10 @@ const (
 	WorkerExport            = "export"
 	WorkerIngest            = "ingest"
 	WorkerMonitoring        = "monitoring"
+	// WorkerHealth recomputes ci.health from the monitoring samples every
+	// minute (DB-05, MON-02); unlike the alert evaluator (monitoring, module
+	// alerting) it runs in the G1 default configuration (F-087).
+	WorkerHealth            = "health"
 	WorkerScheduler         = "scheduler"
 	WorkerJobs              = "jobs"
 	WorkerEvents            = "events"
@@ -340,6 +466,9 @@ const (
 	WorkerNATSEdge          = "nats_edge"
 	WorkerCredentialBundles = "credential_bundles"
 	WorkerDiscoveryScopes   = "discovery_scopes"
+	// WorkerOfflineDetector runs as the system job ci.offline_detector of
+	// the scheduler (REC-09, LCY-05, F-289).
+	WorkerOfflineDetector = "offline_detector"
 )
 
 // WorkerNames lists every registered worker.
@@ -348,6 +477,7 @@ var WorkerNames = []string{
 	WorkerExport,
 	WorkerIngest,
 	WorkerMonitoring,
+	WorkerHealth,
 	WorkerScheduler,
 	WorkerJobs,
 	WorkerEvents,
@@ -355,12 +485,22 @@ var WorkerNames = []string{
 	WorkerNATSEdge,
 	WorkerCredentialBundles,
 	WorkerDiscoveryScopes,
+	WorkerOfflineDetector,
 }
+
+// OfflineDetectorAlias is the former switch of the offline detector (WP-157).
+// It still applies while RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED is not set
+// and is reported as deprecated (F-289).
+const OfflineDetectorAlias = "RETICORA_OFFLINE_DETECTOR_ENABLED"
 
 // WorkerEnvKey returns the switch variable of a worker.
 func WorkerEnvKey(name string) string {
 	return "RETICORA_WORKER_" + strings.ToUpper(name) + "_ENABLED"
 }
+
+// Warnings lists the settings the server accepts but reports at start: a
+// deprecated switch, a worker switch without a registered worker (OPS-02).
+func (c *Config) Warnings() []string { return append([]string(nil), c.warnings...) }
 
 // IsWorker reports whether name is a registered worker.
 func IsWorker(name string) bool {
@@ -388,6 +528,13 @@ var requiredOutsideDevelopment = []string{
 }
 
 var s3Keys = []string{"RETICORA_S3_ENDPOINT", "RETICORA_S3_ACCESS_KEY", "RETICORA_S3_SECRET_KEY"}
+
+// natsIngestWarning is the start warning without RETICORA_NATS_URL outside
+// production: the identity locks of the ingest (E-56) exist only on the NATS
+// queue path, so several instances without NATS can duplicate devices with a
+// weak identity (F-282).
+const natsIngestWarning = "RETICORA_NATS_URL is not set: the discovery ingest runs in the request without identity locks; " +
+	"several instances can duplicate devices with a weak identity, so run one instance or configure NATS (docs/betrieb/ingest-spuren.md)"
 
 // IsDevelopment reports whether the local development defaults apply.
 func (c *Config) IsDevelopment() bool { return c.Environment == EnvDevelopment }
@@ -424,6 +571,8 @@ func (c *Config) Validate(noDB bool) error {
 	if c.OperatorToken != "" && len(c.OperatorToken) < 32 {
 		errs = append(errs, fmt.Errorf("RETICORA_OPERATOR_TOKEN must have at least 32 characters"))
 	}
+	errs = append(errs, c.opsAlertErrors()...)
+	errs = append(errs, c.pprofErrors()...)
 	switch c.TrialPlan {
 	case "essential", "standard", "pro", "enterprise":
 	default:
@@ -431,6 +580,17 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.SignupCaptchaKey != "" && len(c.SignupCaptchaKey) < 32 {
 		errs = append(errs, fmt.Errorf("RETICORA_SIGNUP_CAPTCHA_KEY must have at least 32 characters"))
+	}
+	// The invitation mail carries this link. http is allowed in every
+	// environment: the HTTP default path of the installer runs production
+	// on http://<host>.
+	if c.InvitationAcceptURL != "" && !absoluteHTTPURL(c.InvitationAcceptURL) {
+		errs = append(errs, fmt.Errorf("RETICORA_INVITATION_ACCEPT_URL must be an absolute http or https URL with a host and without user info"))
+	}
+	// The verification mail of the self-signup carries this link, with the
+	// same rules.
+	if c.SignupVerifyURL != "" && !absoluteHTTPURL(c.SignupVerifyURL) {
+		errs = append(errs, fmt.Errorf("RETICORA_SIGNUP_VERIFY_URL must be an absolute http or https URL with a host and without user info"))
 	}
 	if c.TrialDays <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_DAYS must be positive, got %d", c.TrialDays))
@@ -446,6 +606,10 @@ func (c *Config) Validate(noDB bool) error {
 			errs = append(errs, fmt.Errorf("RETICORA_SMTP_TLS=%q is not one of starttls, tls, none", c.SMTPTLS))
 		case c.SMTPPort < 1 || c.SMTPPort > 65535:
 			errs = append(errs, fmt.Errorf("RETICORA_SMTP_PORT=%d is out of range", c.SMTPPort))
+		case c.SMTPTLS == "none" && c.SMTPUsername != "" && !smtpLocalhost(c.SMTPHost):
+			// Go's net/smtp sends no login over an unencrypted connection
+			// to another host: every e-mail would fail (notify.SMTPConfig).
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls: no login is sent unencrypted to %s", c.SMTPHost))
 		}
 	}
 	for _, r := range []struct {
@@ -460,6 +624,12 @@ func (c *Config) Validate(noDB bool) error {
 		if r.value < r.min {
 			errs = append(errs, fmt.Errorf("%s must be at least %d (NFR-06), got %d", r.key, r.min, r.value))
 		}
+	}
+	if c.EventsMaxAge < MinEventsMaxAge {
+		errs = append(errs, fmt.Errorf("RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06), got %s", c.EventsMaxAge))
+	}
+	if c.EventsMaxBytes <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_EVENTS_MAX_BYTES must be positive, got %d", c.EventsMaxBytes))
 	}
 	if c.RateLimitOrgRPM < c.RateLimitRPM {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_ORG_RPM (%d) must not be below RETICORA_RATE_LIMIT_RPM (%d)", c.RateLimitOrgRPM, c.RateLimitRPM))
@@ -480,6 +650,15 @@ func (c *Config) Validate(noDB bool) error {
 		if noDB {
 			errs = append(errs, fmt.Errorf("--no-db is only allowed with RETICORA_ENVIRONMENT=%s", EnvDevelopment))
 		}
+		// A default role org_admin makes first logins org_admins whose
+		// account the server binds to MFA through the Keycloak admin client
+		// (AUT-09, E-65 option 1, WP-367); without it each of these logins
+		// would fail.
+		if c.DefaultProvisionRole == "org_admin" && (c.KeycloakAdminClientID == "" || c.KeycloakAdminClientSecret == "") {
+			errs = append(errs, fmt.Errorf("RETICORA_DEFAULT_PROVISION_ROLE=org_admin requires the Keycloak admin client "+
+				"(RETICORA_KEYCLOAK_ADMIN_CLIENT_ID, RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET) outside %s: "+
+				"the second factor of a new org_admin could not be enforced (AUT-09)", EnvDevelopment))
+		}
 		var missing []string
 		for _, key := range requiredOutsideDevelopment {
 			if !c.explicit[key] {
@@ -497,7 +676,67 @@ func (c *Config) Validate(noDB bool) error {
 			errs = append(errs, fmt.Errorf("RETICORA_ENVIRONMENT=%s requires %s", c.Environment, strings.Join(missing, ", ")))
 		}
 	}
+	// Production runs the ingest only over the NATS queue, the path with the
+	// identity locks (E-56); without it two instances could duplicate devices
+	// with a weak identity (F-282).
+	if c.Environment == EnvProduction && !c.explicit["RETICORA_NATS_URL"] {
+		errs = append(errs, fmt.Errorf("RETICORA_ENVIRONMENT=%s requires RETICORA_NATS_URL: without the NATS ingest queue "+
+			"the HTTP ingest takes no identity locks and several instances can duplicate devices (docs/betrieb/ingest-spuren.md)", EnvProduction))
+	}
 	return errors.Join(errs...)
+}
+
+// uuidValue matches a UUID in its canonical text form.
+var uuidValue = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// opsAlertErrors checks the Alertmanager bridge (OPS-05, E-75): the
+// operator organization is a UUID and needs the token; the token has at
+// least 32 characters and is not the break-glass token, whose every use is
+// an alarm and which must not sit in Alertmanager's secrets.
+func (c *Config) opsAlertErrors() []error {
+	var errs []error
+	if c.OpsAlertToken != "" && len(c.OpsAlertToken) < 32 {
+		errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_TOKEN must have at least 32 characters"))
+	}
+	if c.OpsAlertToken != "" && c.OpsAlertToken == c.OperatorToken {
+		errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_TOKEN must differ from RETICORA_OPERATOR_TOKEN"))
+	}
+	if c.OpsAlertOrgID != "" {
+		if !uuidValue.MatchString(c.OpsAlertOrgID) {
+			errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_ORG_ID must be the UUID of the operator organization"))
+		}
+		if c.OpsAlertToken == "" {
+			errs = append(errs, fmt.Errorf("RETICORA_OPS_ALERT_ORG_ID requires RETICORA_OPS_ALERT_TOKEN"))
+		}
+	}
+	return errs
+}
+
+// pprofErrors checks the profiling listener (RETICORA_PPROF_ADDR, WP-438).
+// The profiles show the server's code paths and run CPU profiles on
+// request, so nobody but the host may reach them: a loopback IP with a port,
+// only in development (the load runs of load.yml), and not together with
+// RETICORA_EGRESS_ALLOW_PRIVATE, which lets webhooks and connectors reach
+// loopback addresses.
+func (c *Config) pprofErrors() []error {
+	if c.PprofAddr == "" {
+		return nil
+	}
+	var errs []error
+	host, port, err := net.SplitHostPort(c.PprofAddr)
+	ip := net.ParseIP(host)
+	n, perr := strconv.Atoi(port)
+	if err != nil || ip == nil || !ip.IsLoopback() || perr != nil || n < 1 || n > 65535 {
+		errs = append(errs, fmt.Errorf("RETICORA_PPROF_ADDR=%q must be a loopback IP with a port, e.g. 127.0.0.1:6060", c.PprofAddr))
+	}
+	if !c.IsDevelopment() {
+		errs = append(errs, fmt.Errorf("RETICORA_PPROF_ADDR is only allowed with RETICORA_ENVIRONMENT=%s, not %s", EnvDevelopment, c.Environment))
+	}
+	if c.EgressAllowPrivate {
+		errs = append(errs, fmt.Errorf("RETICORA_PPROF_ADDR must not be combined with RETICORA_EGRESS_ALLOW_PRIVATE=true: "+
+			"webhooks and connectors could reach the profiles on the loopback address"))
+	}
+	return errs
 }
 
 // loader reads RETICORA_* variables and records which were set and which
@@ -528,6 +767,41 @@ func (l *loader) integer(key string, defaultValue int) int {
 	return i
 }
 
+func (l *loader) int64(key string, defaultValue int64) int64 {
+	v := l.str(key, "")
+	if v == "" {
+		return defaultValue
+	}
+	i, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		l.invalid = append(l.invalid, key)
+		return defaultValue
+	}
+	return i
+}
+
+// duration reads a Go duration ("720h") or a whole number of days ("30d").
+func (l *loader) duration(key string, defaultValue time.Duration) time.Duration {
+	v := l.str(key, "")
+	if v == "" {
+		return defaultValue
+	}
+	if days, ok := strings.CutSuffix(v, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 0 || int64(n) > math.MaxInt64/int64(24*time.Hour) {
+			l.invalid = append(l.invalid, key)
+			return defaultValue
+		}
+		return time.Duration(n) * 24 * time.Hour
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		l.invalid = append(l.invalid, key)
+		return defaultValue
+	}
+	return d
+}
+
 func (l *loader) boolean(key string, defaultValue bool) bool {
 	v := l.str(key, "")
 	if v == "" {
@@ -539,6 +813,39 @@ func (l *loader) boolean(key string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return b
+}
+
+// checkWorkerSwitches applies the alias of the offline detector to workers
+// and reports it, and reports every set RETICORA_WORKER_*_ENABLED that
+// switches no registered worker: it has no effect (F-289).
+func (l *loader) checkWorkerSwitches(workers map[string]bool) []string {
+	var warnings []string
+	if alias := l.boolean(OfflineDetectorAlias, true); l.set[OfflineDetectorAlias] {
+		key := WorkerEnvKey(WorkerOfflineDetector)
+		if l.set[key] {
+			warnings = append(warnings, fmt.Sprintf("%s is deprecated and ignored: %s is set", OfflineDetectorAlias, key))
+		} else {
+			workers[WorkerOfflineDetector] = alias
+			warnings = append(warnings, fmt.Sprintf("%s is deprecated: use %s", OfflineDetectorAlias, key))
+		}
+	}
+	var unknown []string
+	for _, kv := range os.Environ() {
+		key, value, _ := strings.Cut(kv, "=")
+		if value == "" || !strings.HasPrefix(key, "RETICORA_WORKER_") || !strings.HasSuffix(key, "_ENABLED") {
+			continue
+		}
+		if name := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(key, "RETICORA_WORKER_"), "_ENABLED")); !IsWorker(name) ||
+			WorkerEnvKey(name) != key {
+			unknown = append(unknown, key)
+		}
+	}
+	sort.Strings(unknown)
+	for _, key := range unknown {
+		warnings = append(warnings, fmt.Sprintf("%s switches no registered worker and is ignored (workers: %s)",
+			key, strings.Join(WorkerNames, ", ")))
+	}
+	return warnings
 }
 
 // dsnKeyValueSecret matches the password of a key=value connection string

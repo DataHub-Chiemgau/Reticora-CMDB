@@ -3,6 +3,7 @@ package order_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -56,5 +57,65 @@ func TestOrderRepositoryClientScope(t *testing.T) {
 	}
 	if _, _, err = repo.List(context.Background(), f.OrgA, order.FilterParams{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
+	}
+}
+
+// TestOrderForeignClientUpdateAndApprove covers the writes on an existing
+// order (TEN-06, WP-537): a principal restricted to client 1 can neither
+// update a client-2 order nor submit, approve or reject it (not found), and
+// the client-2 row stays unchanged; its own order it updates and approves.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestOrderForeignClientUpdateAndApprove(t *testing.T) {
+	f := scopetest.Seed(t, "31")
+	bg := context.Background()
+	approver := f.AppUser(t, f.OrgA, "approver")
+	repo := order.NewPGRepository(f.App)
+	own := &order.Order{OrganizationID: f.OrgA, ClientID: f.Client1, Title: "order-c1", Status: "submitted", Supplier: "acme"}
+	foreign := &order.Order{OrganizationID: f.OrgA, ClientID: f.Client2, Title: "order-c2", Status: "submitted", Supplier: "acme"}
+	for _, o := range []*order.Order{own, foreign} {
+		if err := repo.Create(f.OrgCtx(f.OrgA), o); err != nil {
+			t.Fatalf("org-wide order %s: %v", o.Title, err)
+		}
+	}
+	type row struct{ client, title, status, supplier, approvedBy string }
+	stored := func(id string) row {
+		var r row
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(client_id::text, ''), title, status, COALESCE(supplier, ''), COALESCE(approved_by::text, '') FROM internal_order WHERE id = $1`, id).
+			Scan(&r.client, &r.title, &r.status, &r.supplier, &r.approvedBy); err != nil {
+			t.Fatalf("stored order %s: %v", id, err)
+		}
+		return r
+	}
+	want := row{client: f.Client2, title: "order-c2", status: "submitted", supplier: "acme"}
+	title, supplier, client1 := "hijacked", "evil", f.Client1
+	req := order.UpdateOrderRequest{Title: &title, Supplier: &supplier}
+
+	ctx := f.ClientCtx(f.Client1)
+	if _, err := repo.Update(ctx, f.OrgA, foreign.ID, req); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("client-1 update of a client-2 order: err=%v, want not found", err)
+	}
+	if _, err := repo.Update(ctx, f.OrgA, foreign.ID, order.UpdateOrderRequest{ClientID: &client1}); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("client-1 takeover of a client-2 order: err=%v, want not found", err)
+	}
+	for _, status := range []string{"submitted", "approved", "rejected"} {
+		if _, err := repo.SetStatus(ctx, f.OrgA, foreign.ID, status, approver); err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Errorf("client-1 transition of a client-2 order to %s: err=%v, want not found", status, err)
+		}
+	}
+	if got := stored(foreign.ID); got != want {
+		t.Errorf("client-2 order after foreign writes: %+v, want %+v", got, want)
+	}
+
+	// Positive control: the client-1 principal updates and approves its own
+	// order.
+	if o, err := repo.Update(ctx, f.OrgA, own.ID, req); err != nil || o.Title != title {
+		t.Fatalf("client-1 update of own order: %+v err=%v", o, err)
+	}
+	if o, err := repo.SetStatus(ctx, f.OrgA, own.ID, "approved", approver); err != nil || o.Status != "approved" {
+		t.Fatalf("client-1 approval of own order: %+v err=%v", o, err)
+	}
+	if got := stored(own.ID); got != (row{client: f.Client1, title: title, status: "approved", supplier: supplier, approvedBy: approver}) {
+		t.Errorf("own order after update and approval: %+v", got)
 	}
 }

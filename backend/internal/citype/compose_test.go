@@ -23,7 +23,7 @@ func TestComposeRules(t *testing.T) {
 		{Name: "ports", DataType: fieldmeta.TypeInteger, Required: true,
 			Validation: &fieldmeta.ValidationRules{Min: f64(1), Max: f64(512)}},
 		{Name: "code", DataType: fieldmeta.TypeText,
-			Validation: &fieldmeta.ValidationRules{Pattern: "^[A-Z]", MaxLength: intp(10), Options: []string{"AX", "BX", "CY"}}},
+			Validation: &fieldmeta.ValidationRules{Pattern: "^[A-Z]", MaxLength: intp(10), Options: []any{"AX", "BX", "CY"}}},
 		{Name: "note", DataType: fieldmeta.TypeTextarea},
 	}
 	typed := []fieldmeta.FieldDefinition{
@@ -32,7 +32,7 @@ func TestComposeRules(t *testing.T) {
 		{Name: "ports", DataType: fieldmeta.TypeInteger, DefaultValue: "24",
 			Validation: &fieldmeta.ValidationRules{Min: f64(8), Max: f64(1024)}},
 		{Name: "code", DataType: fieldmeta.TypeText,
-			Validation: &fieldmeta.ValidationRules{Pattern: "X$", MinLength: intp(2), Options: []string{"BX", "CY", "DX"}}},
+			Validation: &fieldmeta.ValidationRules{Pattern: "X$", MinLength: intp(2), Options: []any{"BX", "CY", "DX"}}},
 		{Name: "note", DataType: fieldmeta.TypeMultiline, Label: "Note"},
 	}
 	got, err := Compose(base, typed)
@@ -60,7 +60,7 @@ func TestComposeRules(t *testing.T) {
 	code := byName["code"]
 	v := code.Validation
 	if v.Pattern != "^[A-Z]" || !reflect.DeepEqual(v.Patterns, []string{"X$"}) || *v.MinLength != 2 || *v.MaxLength != 10 ||
-		!reflect.DeepEqual(v.Options, []string{"BX", "CY"}) {
+		!reflect.DeepEqual(v.Options, []any{"BX", "CY"}) {
 		t.Errorf("code validation = %+v", v)
 	}
 	// Every rule of both layers applies to the composed definition.

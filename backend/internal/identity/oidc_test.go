@@ -266,3 +266,38 @@ func TestValidateIDTokenReadsOrganizationAttribute(t *testing.T) {
 		t.Errorf("email_verified=false: %+v, %v", claims, err)
 	}
 }
+
+// TestValidateIDTokenRealmRolesGrantNoStandardRole covers F-200 (RBA-02,
+// WP-428): the app roles of a session come from the role assignments and the
+// IdP groups only. Keycloak realm roles in the ID token (realm_access.roles)
+// are not read: a token with the realm role org_admin and without groups
+// carries no group and maps to no standard role. The same token with the
+// group reticora-viewer maps to viewer only.
+func TestValidateIDTokenRealmRolesGrantNoStandardRole(t *testing.T) {
+	fake := newFakeOIDCServer(t)
+	fake.mutateClaims = func(claims map[string]any) { delete(claims, "groups") }
+	provider := fake.provider("reticora-app")
+	realmRoles := map[string]any{"roles": []string{"org_admin"}}
+
+	claims, err := provider.ValidateIDToken(context.Background(), fake.idToken(map[string]any{"realm_access": realmRoles}))
+	if err != nil {
+		t.Fatalf("a token with realm roles must validate, got %v", err)
+	}
+	if len(claims.Groups) != 0 {
+		t.Fatalf("realm roles must not become groups, got %v", claims.Groups)
+	}
+	if roles := StandardRolesForGroups(claims.Groups); len(roles) != 0 {
+		t.Fatalf("realm_access.roles [org_admin] without groups must grant no standard role, got %v", roles)
+	}
+
+	claims, err = provider.ValidateIDToken(context.Background(), fake.idToken(map[string]any{
+		"realm_access": realmRoles,
+		"groups":       []string{"reticora-viewer"},
+	}))
+	if err != nil {
+		t.Fatalf("a token with realm roles and a group must validate, got %v", err)
+	}
+	if roles := StandardRolesForGroups(claims.Groups); len(roles) != 1 || roles[0] != "viewer" {
+		t.Fatalf("the group reticora-viewer must map to viewer only, despite the realm role org_admin; got %v", roles)
+	}
+}

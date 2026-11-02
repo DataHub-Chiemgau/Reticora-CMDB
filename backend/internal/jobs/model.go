@@ -8,7 +8,11 @@ package jobs
 import (
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // Status of a job.
@@ -69,6 +73,77 @@ type Job struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 	StartedAt      *time.Time `json:"started_at,omitempty"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	// RevertedAt and RevertedBy record the revert of a succeeded job
+	// (POST /jobs/{id}/revert, F-329); RevertedBy is a surrogate of the
+	// user like CreatedBy. Both are empty for a job that was not reverted.
+	RevertedAt *time.Time `json:"reverted_at,omitempty"`
+	RevertedBy string     `json:"reverted_by,omitempty"`
+	// Scope is the scope snapshot of the job; nil for a job without one.
+	Scope *Scope `json:"-"`
+	// Cancellable reports whether DELETE /jobs/{id} would cancel the job
+	// now (Service.Cancellable); the job API sets it, it is not stored.
+	Cancellable bool `json:"cancellable"`
+}
+
+// Scope is the scope snapshot of a job (TEN-09, F-163): the client, site
+// and team scope its creator had when queueing it, or for a tracked job the
+// snapshot of the row it mirrors (export: the export job). A nil dimension
+// is the whole organization, an empty one no id. A job without snapshot
+// (system jobs, jobs from before migration 000154) belongs to the whole
+// organization.
+type Scope struct {
+	Clients []string
+	Sites   []string
+	Teams   []string
+}
+
+// ScopeOf returns the snapshot of a tenant scope.
+func ScopeOf(s *database.TenantScope) *Scope {
+	set := func(d database.ScopeSet) []string {
+		if d.IsAll() {
+			return nil
+		}
+		if ids := d.IDs(); ids != nil {
+			return ids
+		}
+		return []string{}
+	}
+	return &Scope{Clients: set(s.Clients), Sites: set(s.Sites), Teams: set(s.Teams)}
+}
+
+// VisibleTo reports whether a principal with the tenant scope s sees the
+// job, the rule of job_isolation (migration 000154) and of the export
+// creator rule (ownExport): the job belongs to the organization of s, in
+// every dimension s is org-wide or the job's snapshot lies completely in
+// s, and an export job only to its creator. A job without snapshot is
+// visible to org-wide principals only (E-09).
+func (j *Job) VisibleTo(s *database.TenantScope) bool {
+	if s == nil || !strings.EqualFold(j.OrganizationID, s.OrgID) {
+		return false
+	}
+	if j.RefTable == "export_job" && (s.UserID == "" || !strings.EqualFold(j.CreatedBy, s.UserID)) {
+		return false
+	}
+	snapshot := j.Scope
+	if snapshot == nil {
+		snapshot = &Scope{}
+	}
+	within := func(ids []string, set database.ScopeSet) bool {
+		if set.IsAll() {
+			return true
+		}
+		if ids == nil {
+			return false
+		}
+		allowed := set.IDs()
+		for _, id := range ids {
+			if !slices.ContainsFunc(allowed, func(a string) bool { return strings.EqualFold(a, id) }) {
+				return false
+			}
+		}
+		return true
+	}
+	return within(snapshot.Clients, s.Clients) && within(snapshot.Sites, s.Sites) && within(snapshot.Teams, s.Teams)
 }
 
 // Kind configures the jobs of one kind: how often they are tried, how long
@@ -79,6 +154,11 @@ type Kind struct {
 	Timeout     time.Duration
 	// Backoff returns the delay before attempt n+1 after n failed attempts.
 	Backoff func(attempts int) time.Duration
+	// Cancellable: a running job of the kind can be cancelled, its worker
+	// stops at its next checkpoint (JOB-03, F-162). A running job of any
+	// other kind runs to its end and a cancel is refused
+	// (ErrNotCancellable); a queued job of every kind can be cancelled.
+	Cancellable bool
 }
 
 // ExponentialBackoff doubles base per failed attempt up to limit.
@@ -103,6 +183,11 @@ var (
 	ErrNotFound = errors.New("job not found")
 	// ErrTransition: the job is not in a status that allows the change.
 	ErrTransition = errors.New("job status does not allow this change")
+	// ErrNotCancellable: the job runs and its kind cannot be cancelled
+	// while running (Kind.Cancellable).
+	ErrNotCancellable = errors.New("the job kind cannot be cancelled while running")
 	// ErrUnknownKind: no kind of that name is registered.
 	ErrUnknownKind = errors.New("unknown job kind")
+	// ErrAlreadyReverted: the job's revert is recorded already (F-329).
+	ErrAlreadyReverted = errors.New("the job is already reverted")
 )

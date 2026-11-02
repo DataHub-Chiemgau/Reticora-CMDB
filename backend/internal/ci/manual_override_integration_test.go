@@ -156,3 +156,72 @@ func TestManualPatchCreatesOverridesDiscoveryKeeps(t *testing.T) {
 		t.Errorf("open override_conflict reviews: %v, want %v", fields, want)
 	}
 }
+
+// TestAuditT3MergePatchNullClearsTypedField covers WP-476 (CI-04, F-080;
+// retest of WP-057): PATCH /cis/{id} is an RFC 7396 merge patch on the
+// typed fields too. A null member clears the column and gives the field a
+// protected override with the value null (CH9), so a later ingest does not
+// bring the value back; an absent member stays; null on a required field
+// (name, status) is 422 with the field.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=... go test -count=1 -run 'TestAuditT3MergePatchNullClearsTypedField' ./internal/ci/
+func TestAuditT3MergePatchNullClearsTypedField(t *testing.T) {
+	r := newAuditT3CIRouter(t, "6c")
+	id := r.f.CI(t, r.f.OrgA, r.f.Client1, "audit-t3-null")
+	if _, err := r.f.Admin.Exec(context.Background(), `UPDATE ci SET hostname = 'host-a', model = 'model-a',
+		firmware_version = '1.2.3', serial_number = 'NULL-SN-1', manufacturer = 'maker-a' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"hostname", "model", "firmware_version"} {
+		t.Run(field, func(t *testing.T) {
+			w := r.call(http.MethodPatch, "/api/v1/cis/"+id, "", `{"`+field+`":null}`)
+			got := r.str(`SELECT coalesce(`+field+`, '<NULL>') FROM ci WHERE id = $1`, id)
+			if w.Code != http.StatusOK || got != "<NULL>" {
+				t.Errorf("PATCH {%q:null} = %d, stored %s = %q; want 200 and NULL (RFC 7396: null removes the member)", field, w.Code, field, got)
+			}
+			if o := r.str(`SELECT coalesce((SELECT concat_ws('|', coalesce(override_value::text, '<NULL>'), override_author, protected,
+				override_at IS NOT NULL) FROM ci_field_value WHERE ci_id = $1 AND field_name = $2), '<none>')`, id, field); o != "<NULL>|"+r.user+"|t|t" {
+				t.Errorf("override of %s after null: %s, want a protected override with value null by the editor (CH9)", field, o)
+			}
+		})
+	}
+	// Absent members stay.
+	if got := r.str(`SELECT concat_ws('|', name, serial_number, manufacturer) FROM ci WHERE id = $1`, id); got != "audit-t3-null|NULL-SN-1|maker-a" {
+		t.Errorf("absent members after the null patches: %s, want them unchanged", got)
+	}
+	// null on a required field is refused with the field, so is a malformed
+	// last_seen_at (not 404, F-229).
+	for field, body := range map[string]string{"name": `{"name":null}`, "status": `{"status":null}`,
+		"last_seen_at": `{"last_seen_at":"yesterday"}`} {
+		w := r.call(http.MethodPatch, "/api/v1/cis/"+id, "", body)
+		var problem struct {
+			Violations []ci.Violation `json:"violations"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil || w.Code != http.StatusUnprocessableEntity ||
+			len(problem.Violations) != 1 || problem.Violations[0].Field != field {
+			t.Errorf("PATCH %s = %d %s, want 422 naming %s", body, w.Code, w.Body.String(), field)
+		}
+	}
+	if got := r.str(`SELECT concat_ws('|', name, status) FROM ci WHERE id = $1`, id); got != "audit-t3-null|active" {
+		t.Errorf("required fields after the refused null: %s", got)
+	}
+
+	// The null override keeps the field empty against a later ingest.
+	mux := chi.NewRouter()
+	discovery.NewHandler(discovery.NewPGRepository(r.f.App), ci.NewPGRepository(r.f.App)).
+		WithProvenance(provenance{repo: override.NewPGRepository(r.f.App)}).RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ingest/bulk", strings.NewReader(`{"collector_id":"col-1","items":[{"ci_type_name":"server",
+		"name":"audit-t3-null","serial_number":"NULL-SN-1","model":"model-discovered","hostname":"host-discovered","manufacturer":"maker-b"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req.WithContext(r.ctx))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
+	}
+	if got := r.str(`SELECT concat_ws('|', coalesce(model, '<NULL>'), coalesce(hostname, '<NULL>'), manufacturer) FROM ci WHERE id = $1`, id); got != "<NULL>|<NULL>|maker-b" {
+		t.Errorf("after ingest: %s, want model and hostname still NULL and the discovered manufacturer", got)
+	}
+}

@@ -23,6 +23,10 @@ type Update struct {
 	FinishedAt *time.Time
 	// IncAttempts counts an attempt (when a job starts).
 	IncAttempts bool
+	// ReportFailed records job.failed (NTF-05) with a change to failed in
+	// the transaction of the change (WP-550); the memory repository has
+	// no outbox and records nothing.
+	ReportFailed bool
 }
 
 // Repository stores jobs; every method works within one organization.
@@ -44,6 +48,14 @@ type Repository interface {
 	ClaimID(ctx context.Context, orgID, id string, now time.Time) (*Job, error)
 	// QueuedDue lists due queued jobs of all organizations, oldest first.
 	QueuedDue(ctx context.Context, now time.Time, limit int) ([]Job, error)
+	// RunningOverdue lists the running jobs of all organizations whose
+	// attempt had exceeded its timeout at t, longest running first; jobs
+	// without a timeout (tracked jobs) are not listed.
+	RunningOverdue(ctx context.Context, t time.Time, limit int) ([]Job, error)
+	// MarkReverted records the revert of a succeeded job by user at t;
+	// ErrAlreadyReverted when its revert is recorded already, ErrTransition
+	// when it did not succeed.
+	MarkReverted(ctx context.Context, orgID, id, by string, at time.Time) (*Job, error)
 }
 
 // MemoryRepository keeps jobs in memory (tests and --no-db mode).
@@ -218,6 +230,43 @@ func (r *MemoryRepository) QueuedDue(_ context.Context, now time.Time, limit int
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+// RunningOverdue implements Repository.
+func (r *MemoryRepository) RunningOverdue(_ context.Context, t time.Time, limit int) ([]Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []Job
+	for _, j := range r.jobs {
+		if j.Status == StatusRunning && j.TimeoutSeconds > 0 && j.StartedAt != nil &&
+			j.StartedAt.Add(time.Duration(j.TimeoutSeconds)*time.Second).Before(t) {
+			out = append(out, *j)
+		}
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].StartedAt.Before(*out[b].StartedAt) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// MarkReverted implements Repository.
+func (r *MemoryRepository) MarkReverted(_ context.Context, orgID, id, by string, at time.Time) (*Job, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	j, err := r.get(orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case j.RevertedAt != nil:
+		return nil, ErrAlreadyReverted
+	case j.Status != StatusSucceeded:
+		return nil, fmt.Errorf("%w: %s is not reverted", ErrTransition, j.Status)
+	}
+	j.RevertedAt, j.RevertedBy, j.UpdatedAt = &at, by, time.Now().UTC()
+	cp := *j
+	return &cp, nil
 }
 
 func applyUpdate(j *Job, u *Update) {

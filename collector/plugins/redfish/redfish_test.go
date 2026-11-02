@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -355,7 +356,8 @@ func loopback(t *testing.T, cidr string) *net.IPNet {
 }
 
 // COL-02: an untrusted certificate is rejected by default and no credentials
-// are sent to the endpoint.
+// are sent to the endpoint. The probe returns no hit and reports the target
+// with the certificate error (DIS-08; WP-641, F-368).
 func TestCollectRejectsUntrustedCertificateByDefault(t *testing.T) {
 	sawAuth := false
 	_, port := tlsBMC(t, &sawAuth)
@@ -369,9 +371,18 @@ func TestCollectRejectsUntrustedCertificateByDefault(t *testing.T) {
 	if sawAuth {
 		t.Fatal("credentials must not be sent to an unverified endpoint")
 	}
-	results, _ := p.Probe(context.Background(), []string{"127.0.0.1"}, map[string]string{"username": "admin"})
+	results, err := p.Probe(context.Background(), []string{"127.0.0.1"}, map[string]string{"username": "admin", "password": "secret"})
 	if len(results) != 0 || sawAuth {
 		t.Fatalf("discovery must not accept an unverified endpoint: %v (auth sent: %v)", results, sawAuth)
+	}
+	var probeErrs *plugins.ProbeErrors
+	if !errors.As(err, &probeErrs) || len(probeErrs.Targets) != 1 {
+		t.Fatalf("Probe error = %v, want the refused target as plugins.ProbeErrors", err)
+	}
+	f := probeErrs.Targets[0]
+	if f.Target != "127.0.0.1" || !errors.Is(f.Err, plugins.ErrTLSUntrusted) || plugins.ErrorCause(f.Err) != "tls" ||
+		!strings.Contains(f.Err.Error(), "certificate") {
+		t.Errorf("probe error of the target = %+v, want 127.0.0.1 with the certificate error (tls_untrusted, cause tls)", f)
 	}
 }
 
@@ -405,6 +416,42 @@ func TestCollectAcceptsScopedCAAndPin(t *testing.T) {
 			}
 			if !tc.ok && err == nil {
 				t.Fatal("expected the certificate to be rejected")
+			}
+		})
+	}
+}
+
+// TestCollectFollowsNoRedirectToPlainHTTP (COL-02, WP-379): a verified BMC
+// that redirects to plain HTTP on the same host does not get the Basic
+// credentials repeated there (net/http copies Authorization to the same
+// host whatever the scheme); the shared TLS client follows no redirect and
+// the collection fails with the redirect status.
+func TestCollectFollowsNoRedirectToPlainHTTP(t *testing.T) {
+	for _, status := range []int{http.StatusFound, http.StatusTemporaryRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var plainRequests atomic.Int32
+			var plainAuth atomic.Bool
+			plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				plainRequests.Add(1)
+				_, _, ok := r.BasicAuth()
+				plainAuth.Store(ok)
+				writeJSON(w, serviceRoot{RedfishVersion: "1.13.0", UUID: "plain-bmc"})
+			}))
+			t.Cleanup(plain.Close)
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, plain.URL+r.URL.Path, status)
+			}))
+			t.Cleanup(srv.Close)
+			pin := sha256.Sum256(srv.Certificate().RawSubjectPublicKeyInfo)
+			p := New(WithTLSScopes(TLSScope{Network: loopback(t, "127.0.0.1/32"), PinsSHA256: [][]byte{pin[:]}}))
+			p.port = srv.Listener.Addr().(*net.TCPAddr).Port
+
+			_, err := p.collect(context.Background(), "127.0.0.1", map[string]string{"username": "admin", "password": "secret"})
+			if n := plainRequests.Load(); n > 0 {
+				t.Fatalf("COL-02 violated: the redirect was followed to plain HTTP (%d request(s), Basic credentials: %v)", n, plainAuth.Load())
+			}
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("HTTP %d", status)) {
+				t.Errorf("collect error = %v, want the redirect status %d", err, status)
 			}
 		})
 	}

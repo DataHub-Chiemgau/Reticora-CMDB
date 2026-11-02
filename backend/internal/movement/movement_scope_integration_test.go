@@ -62,3 +62,70 @@ func TestMovementRepositoryClientScope(t *testing.T) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
 	}
 }
+
+// TestQuantityItemForeignClientUpdate covers the writes on an existing
+// quantity item (TEN-06, WP-537): a principal restricted to client 1 can
+// neither update a client-2 quantity item nor move stock of it
+// (ErrItemNotFound, 404); the client-2 row keeps its fields and stock level
+// and gets no movement. Its own item it updates and moves.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestQuantityItemForeignClientUpdate(t *testing.T) {
+	f := scopetest.Seed(t, "2f")
+	bg := context.Background()
+	repo := movement.NewPGRepository(f.App)
+	orgCtx := f.OrgCtx(f.OrgA)
+	own := &movement.QuantityItem{OrganizationID: f.OrgA, ClientID: f.Client1, Name: "cable-c1", Category: "cable", Unit: "pcs", StockLevel: 10, Notes: "original", Attributes: map[string]any{}}
+	foreign := &movement.QuantityItem{OrganizationID: f.OrgA, ClientID: f.Client2, Name: "cable-c2", Category: "cable", Unit: "pcs", StockLevel: 10, Notes: "original", Attributes: map[string]any{}}
+	for _, it := range []*movement.QuantityItem{own, foreign} {
+		if err := repo.CreateItem(orgCtx, it); err != nil {
+			t.Fatalf("org-wide quantity item %s: %v", it.Name, err)
+		}
+	}
+	type row struct {
+		client, name, notes string
+		level               float64
+		movements           int
+	}
+	stored := func(id string) row {
+		var r row
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(client_id::text, ''), name, COALESCE(notes, ''), stock_level,
+			(SELECT count(*) FROM asset_movement WHERE quantity_item_id = quantity_item.id) FROM quantity_item WHERE id = $1`, id).
+			Scan(&r.client, &r.name, &r.notes, &r.level, &r.movements); err != nil {
+			t.Fatalf("stored quantity item %s: %v", id, err)
+		}
+		return r
+	}
+	want := row{client: f.Client2, name: "cable-c2", notes: "original", level: 10}
+	name, notes := "hijacked", "hijacked"
+	req := movement.UpdateItemRequest{Name: &name, Notes: &notes, Attributes: map[string]any{"owner": "client-1"}}
+	qty := 4.0
+	mv := func(itemID, kind string) *movement.Movement {
+		return &movement.Movement{OrganizationID: f.OrgA, ItemKind: "quantity_item", QuantityItemID: itemID, MovementType: kind, Quantity: &qty}
+	}
+
+	ctx := f.ClientCtx(f.Client1)
+	if _, err := repo.UpdateItem(ctx, f.OrgA, foreign.ID, req); !errors.Is(err, movement.ErrItemNotFound) {
+		t.Errorf("client-1 update of a client-2 quantity item: err=%v, want ErrItemNotFound", err)
+	}
+	for _, kind := range []string{"deployment", "receipt", "correction"} {
+		if err := repo.Record(ctx, mv(foreign.ID, kind)); !errors.Is(err, movement.ErrItemNotFound) {
+			t.Errorf("client-1 %s movement of a client-2 quantity item: err=%v, want ErrItemNotFound", kind, err)
+		}
+	}
+	if got := stored(foreign.ID); got != want {
+		t.Errorf("client-2 quantity item after foreign writes: %+v, want %+v", got, want)
+	}
+
+	// Positive control: the client-1 principal updates its own item and
+	// deploys stock from it.
+	if it, err := repo.UpdateItem(ctx, f.OrgA, own.ID, req); err != nil || it.Name != name {
+		t.Fatalf("client-1 update of own quantity item: %+v err=%v", it, err)
+	}
+	if err := repo.Record(ctx, mv(own.ID, "deployment")); err != nil {
+		t.Fatalf("client-1 deployment from own quantity item: %v", err)
+	}
+	if got := stored(own.ID); got != (row{client: f.Client1, name: name, notes: notes, level: 6, movements: 1}) {
+		t.Errorf("own quantity item after update and deployment: %+v", got)
+	}
+}

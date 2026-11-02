@@ -1,4 +1,4 @@
-FROM golang:1.26.9-alpine AS builder
+FROM golang:1.26.10-alpine AS builder
 
 # The backend module replace-directs to the sibling collector/edgecore
 # modules (see backend/go.mod), so the build context must be the repository
@@ -30,8 +30,12 @@ COPY --chmod=0644 api/openapi.yaml /etc/reticora/openapi.yaml
 ENV RETICORA_OPENAPI_SPEC_PATH=/etc/reticora/openapi.yaml
 # Mount point of the collector PKI volume (COL-08): a fresh named volume
 # takes over this ownership, so the unprivileged server can write it.
-RUN mkdir -p /pki && chown nobody:nobody /pki
+# COPY --chmod can also apply 0644 to a newly created destination directory.
+# nobody needs directory traversal permission to read the API contract.
+RUN chmod 0755 /etc/reticora && mkdir -p /pki && chown nobody:nobody /pki
 
 EXPOSE 8080
 USER nobody:nobody
+# Fail the image build if the runtime user cannot read the bundled contract.
+RUN test -s "$RETICORA_OPENAPI_SPEC_PATH" && cat "$RETICORA_OPENAPI_SPEC_PATH" > /dev/null
 ENTRYPOINT ["server"]

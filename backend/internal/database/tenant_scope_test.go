@@ -367,3 +367,50 @@ func TestAfterCommitQueuesOnOpenTransaction(t *testing.T) {
 	rolledBack := txInState(OrgWideScope(testOrg, ""), txRolledBack)
 	AfterCommit(ContextWithTx(context.Background(), rolledBack), func(context.Context) { t.Error("callback of a rolled back transaction ran") })
 }
+
+// TestAfterCommitBatch: the items of a key wait for the commit and reach fn
+// once, in order, with a detached context; keys are separate batches;
+// without a transaction and after the commit fn runs at once with the item;
+// a rollback drops the batch (WP-489).
+func TestAfterCommitBatch(t *testing.T) {
+	var got []string
+	collect := func(ctx context.Context, items []any) {
+		if InTx(ctx) {
+			t.Error("batch context still carries the transaction")
+		}
+		parts := make([]string, 0, len(items))
+		for _, item := range items {
+			parts = append(parts, item.(string))
+		}
+		got = append(got, strings.Join(parts, "+"))
+	}
+	AfterCommitBatch(context.Background(), "k", "alone", collect)
+	if strings.Join(got, ",") != "alone" {
+		t.Fatalf("without a transaction: %v", got)
+	}
+
+	got = nil
+	tx := txInState(OrgWideScope(testOrg, ""), txOpen)
+	ctx := ContextWithTx(context.Background(), tx)
+	AfterCommitBatch(ctx, "a", "a1", collect)
+	AfterCommitBatch(ctx, "b", "b1", collect)
+	AfterCommitBatch(ctx, "a", "a2", collect)
+	if len(got) != 0 {
+		t.Fatal("batches ran before the commit")
+	}
+	tx.state.Store(txCommitted)
+	tx.runAfterCommit(WithoutTx(ctx))
+	if strings.Join(got, ",") != "a1+a2,b1" {
+		t.Fatalf("batches after the commit: %v", got)
+	}
+	AfterCommitBatch(ctx, "a", "late", collect)
+	if got[len(got)-1] != "late" {
+		t.Error("an item after the commit did not run at once")
+	}
+
+	rolledBack := txInState(OrgWideScope(testOrg, ""), txOpen)
+	rbCtx := ContextWithTx(context.Background(), rolledBack)
+	AfterCommitBatch(rbCtx, "a", "dropped", func(context.Context, []any) { t.Error("batch of a rolled back transaction ran") })
+	rolledBack.state.Store(txRolledBack)
+	AfterCommitBatch(rbCtx, "a", "after the rollback", func(context.Context, []any) { t.Error("item after the rollback ran") })
+}

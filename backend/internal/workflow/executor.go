@@ -2,18 +2,36 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+// Rules of a trigger or approval (400 with the fixed message; the handler
+// shows no other error text, API-03, F-047).
+var (
+	// ErrTriggerMismatch: the trigger does not match the definition.
+	ErrTriggerMismatch = errors.New("workflow trigger does not match")
+	// ErrNotWaiting: the run waits for no approval.
+	ErrNotWaiting = errors.New("workflow run is not waiting for approval")
+	// ErrInvalidDecision: an approval decision is approved or rejected.
+	ErrInvalidDecision = errors.New("decision must be approved or rejected")
+	// ErrInvalidAction: an action of the definition has a type that is no
+	// string.
+	ErrInvalidAction = errors.New("workflow action type must be a string")
 )
 
 type Executor struct {
@@ -23,6 +41,13 @@ type Executor struct {
 	forms      form.Repository
 	dispatcher *webhook.Dispatcher
 	guard      *override.Guard
+	conflicts  ConflictReviews
+}
+
+// ConflictReviews opens the override_conflict review of a field
+// (reviews.Service, the call of discovery as well, REC-12).
+type ConflictReviews interface {
+	OpenOverrideConflict(ctx context.Context, c *reviews.OverrideConflict) (bool, error)
 }
 
 func NewExecutor(repo Repository, tickets ticket.Repository, cis ci.Repository, forms form.Repository, dispatcher *webhook.Dispatcher) *Executor {
@@ -36,18 +61,52 @@ func (e *Executor) WithFieldGuard(g *override.Guard) *Executor {
 	return e
 }
 
+// WithConflictReviews makes set_ci_field open an override_conflict review
+// when its value differs from a manual override (REC-12).
+func (e *Executor) WithConflictReviews(r ConflictReviews) *Executor {
+	e.conflicts = r
+	return e
+}
+
+// Trigger starts a run of def for trigger with payload as its context and
+// executes its actions (Start, then Execute).
 func (e *Executor) Trigger(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap) (*Run, error) {
+	run, err := e.Start(ctx, orgID, def, trigger, payload)
+	if err != nil {
+		return nil, err
+	}
+	return e.Execute(ctx, orgID, def, run)
+}
+
+// Start stores a pending run of def for trigger with payload as its context
+// and executes no action. A caller that stores the run together with its own
+// rows in one transaction (database.ContextWithTx) executes it with Execute
+// after the commit, so a failing action never rolls back the run that
+// records the failure (WFL-04).
+func (e *Executor) Start(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap) (*Run, error) {
 	if def == nil {
 		return nil, fmt.Errorf("workflow definition is required")
 	}
 	if !triggerMatches(def.Trigger, trigger) {
-		return nil, fmt.Errorf("workflow trigger does not match")
+		return nil, ErrTriggerMismatch
 	}
 	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, Status: StatusPending, Trigger: trigger, Context: payload, StartedAt: time.Now().UTC()}
 	if err := e.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
+	return run, nil
+}
+
+// Execute runs the actions of a run that Start stored.
+func (e *Executor) Execute(ctx context.Context, orgID string, def *Definition, run *Run) (*Run, error) {
 	return e.resume(ctx, orgID, def, run, "")
+}
+
+// TriggerMatches reports whether event starts runs of def under the rule of
+// Trigger: the event of the trigger, or "manual" for a manual or scheduled
+// definition.
+func TriggerMatches(def *Definition, event string) bool {
+	return def != nil && triggerMatches(def.Trigger, event)
 }
 
 func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment string) (*Run, error) {
@@ -60,7 +119,7 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 		return nil, err
 	}
 	if run.Status != StatusWaitingApproval {
-		return nil, fmt.Errorf("workflow run is not waiting for approval")
+		return nil, ErrNotWaiting
 	}
 	steps, err := e.repo.ListSteps(ctx, orgID, runID)
 	if err != nil {
@@ -74,7 +133,7 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 		}
 	}
 	if waiting == nil {
-		return nil, fmt.Errorf("approval step not found")
+		return nil, fmt.Errorf("approval step not found: %w", ErrNotWaiting)
 	}
 	out := JSONMap{"decision": decision, "comment": comment}
 	if decision == "rejected" {
@@ -85,7 +144,7 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 		return e.repo.UpdateRunStatus(ctx, orgID, runID, StatusCancelled, &now, run.Context)
 	}
 	if decision != "approved" {
-		return nil, fmt.Errorf("decision must be approved or rejected")
+		return nil, ErrInvalidDecision
 	}
 	if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
 		return nil, fmt.Errorf("complete approval step: %w", err)
@@ -126,7 +185,7 @@ func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, ru
 			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
 		}
 		if err != nil {
-			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, out, err.Error()); uerr != nil {
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, out, stepErrorText(step.ID, err)); uerr != nil {
 				slog.Error("workflow: failed to mark step failed", "step_id", step.ID, "error", uerr)
 			}
 			now := time.Now().UTC()
@@ -139,6 +198,22 @@ func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, ru
 	}
 	now := time.Now().UTC()
 	return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusSucceeded, &now, run.Context)
+}
+
+// stepErrorText is the error text a failed step stores, which the run API
+// shows: a database error becomes its sanitized classification without
+// table, constraint, policy or SQLSTATE text (API-03, F-047), the log keeps
+// it; the errors of the actions themselves keep their text.
+func stepErrorText(stepID string, err error) string {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err.Error()
+	}
+	slog.Warn("workflow: step failed", "step_id", stepID, "error", err)
+	if _, _, detail, ok := api.ClassifyDBError(err); ok {
+		return detail
+	}
+	return "the action could not be completed"
 }
 
 // failRun best-effort marks the run failed; the original error is returned to
@@ -158,7 +233,7 @@ func actionType(action JSONMap) (string, error) {
 	}
 	typ, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("workflow action type must be a string, got %T", raw)
+		return "", fmt.Errorf("%w, got %T", ErrInvalidAction, raw)
 	}
 	if typ == "" {
 		return "noop", nil
@@ -211,25 +286,58 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 		if e.forms == nil {
 			return nil, false, fmt.Errorf("form repository unavailable")
 		}
-		formID := str(action, "form_id", "")
-		var vals map[string]any
-		if raw, exists := action["values"]; exists && raw != nil {
-			v, ok := raw.(map[string]any)
-			if !ok {
-				return nil, false, fmt.Errorf("submit_form action values must be an object, got %T", raw)
-			}
-			vals = v
-		}
-		sub := &form.Submission{OrganizationID: orgID, FormID: formID, Values: form.JSONMap(vals), SubmittedBy: "workflow", Status: "submitted"}
-		if err := e.forms.CreateSubmission(ctx, sub); err != nil {
-			return nil, false, err
-		}
-		return JSONMap{"submission_id": sub.ID}, false, nil
+		return e.submitForm(ctx, orgID, action)
 	case "noop", "":
 		return JSONMap{}, false, nil
 	default:
 		return nil, false, fmt.Errorf("unsupported workflow action %q", typ)
 	}
+}
+
+// errFormInactive: submit_form names an inactive form definition, which
+// the form API refuses as well.
+var errFormInactive = errors.New("form definition is inactive")
+
+// submitForm submits the form of a submit_form action under the rules of
+// POST /forms/{id}/submissions (WFL-01, WFL-02): the definition must be
+// visible in the caller's scope and active, and the values must match its
+// schema. A refused submission fails the step with the fixed text of the
+// rule, the fields of a schema violation in the step output. submitted_by is
+// the user who triggered the run, empty (NULL) for a trigger without a user:
+// the column holds user ids, the origin "workflow" is the step that names
+// the submission.
+func (e *Executor) submitForm(ctx context.Context, orgID string, action JSONMap) (JSONMap, bool, error) {
+	values := form.JSONMap{}
+	if raw, exists := action["values"]; exists && raw != nil {
+		v, ok := raw.(map[string]any)
+		if !ok {
+			return nil, false, fmt.Errorf("submit_form action values must be an object, got %T", raw)
+		}
+		values = v
+	}
+	formID := str(action, "form_id", "")
+	if !api.IsUUID(formID) {
+		return nil, false, form.ErrNotFound
+	}
+	def, err := e.forms.GetDefinition(ctx, orgID, formID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !def.Active {
+		return nil, false, errFormInactive
+	}
+	if err := form.Validate(def.Schema, values); err != nil {
+		var ve form.ValidationError
+		if errors.As(err, &ve) {
+			return JSONMap{"fields": ve.Fields}, false, err
+		}
+		return nil, false, err
+	}
+	sub := &form.Submission{OrganizationID: orgID, FormID: def.ID, Values: values, SubmittedBy: tenant.FromContext(ctx).UserID, Status: "submitted"}
+	if err := e.forms.CreateSubmission(ctx, sub); err != nil {
+		return nil, false, err
+	}
+	return JSONMap{"submission_id": sub.ID}, false, nil
 }
 
 func triggerMatches(trigger JSONMap, event string) bool {
@@ -333,6 +441,17 @@ func (e *Executor) setCIField(ctx context.Context, orgID string, action JSONMap)
 	if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
 		if err = e.guard.Record(ctx, w); err != nil {
 			return nil, false, fmt.Errorf("record provenance: %w", err)
+		}
+	}
+	if d.Conflict && e.conflicts != nil {
+		// The override stays; the value goes to the review queue like a
+		// discovered one (REC-12). A failed review does not fail the step.
+		previous, hasPrevious := item.ObservedUnderOverride(field)
+		if _, err = e.conflicts.OpenOverrideConflict(ctx, &reviews.OverrideConflict{
+			OrganizationID: orgID, CIID: item.ID, Field: field, Value: value, Source: sourceWorkflow,
+			Rank: override.SourceRank(sourceWorkflow), Previous: previous, HasPrevious: hasPrevious,
+		}); err != nil {
+			slog.WarnContext(ctx, "override conflict review not created", "ci_id", item.ID, "field", field, "error", err)
 		}
 	}
 	return JSONMap{"ci_id": item.ID, "field": field, "written": d.Write, "reason": d.Reason}, false, nil

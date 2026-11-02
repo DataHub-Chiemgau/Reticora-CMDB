@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -28,8 +29,8 @@ type Handler struct {
 	// foreign keys (ticket reporter, assignment, ...) resolve without manual
 	// user setup. Nil disables provisioning (tests, --no-db without users).
 	provisioner UserProvisioner
-	// defaultRole is the standard role assigned on auto-provisioning
-	// (e.g. "viewer"); empty assigns no role.
+	// defaultRole is the standard role the first login of a user assigns
+	// (e.g. "viewer"); empty assigns no role. A later login assigns none.
 	defaultRole string
 	// access resolves the role grants of the user from the database at login
 	// and refresh (RBA-03). Nil keeps the IdP groups as the only grant
@@ -37,6 +38,19 @@ type Handler struct {
 	access AccessResolver
 	// refresh stores the rotating refresh tokens.
 	refresh *RefreshSessions
+	// mfa binds the IdP account of a login that grants org_admin through
+	// the IdP group org_admin or the default role to MFA (WP-367). Nil
+	// binds nothing (tests, development without Keycloak admin client).
+	mfa MFAEnforcer
+}
+
+// MFAEnforcer binds an IdP account to the second factor (realm role
+// mfa_required, AUT-09); user.MFAEnforcer (signup.KeycloakAccounts,
+// user.UnavailableMFA) implements it.
+type MFAEnforcer interface {
+	// RequireMFA makes the account of the OIDC subject hold mfa_required;
+	// it is idempotent.
+	RequireMFA(ctx context.Context, oidcSubject string) error
 }
 
 // AccessResolver loads the role grants of a user: every role assignment and
@@ -59,6 +73,39 @@ var ErrUserInactive = errors.New("identity: user is deactivated")
 // account created by an administrator or SCIM (AUT-01).
 var ErrFirstLoginNotPermitted = errors.New("identity: first login requires an invitation for this organization and e-mail")
 
+// ErrUnknownOrganization is returned when the organization attribute of the
+// ID token names no organization of the instance (AUT-01, CH26). The login
+// is refused like one without the attribute (401 login-no-organization); no
+// app_user and no session are created (F-395).
+var ErrUnknownOrganization = errors.New("identity: the organization attribute names no organization")
+
+// ErrMFAUnavailable is returned when a grant of org_admin cannot bind the
+// IdP account to the second factor (realm role mfa_required, AUT-09,
+// WP-358, WP-367): no Keycloak admin client, or the admin API refused or
+// failed. The grant does not happen; login, role assignment and invitation
+// acceptance answer 503.
+var ErrMFAUnavailable = errors.New("identity: the second factor of the account could not be enforced")
+
+// ErrNoRoleAssignment is returned when a login resolves no role of the user:
+// no role assignment, no custom role and no IdP role. The login issues no
+// session (TEN-04, RBA-03, F-364); an administrator assigns a role.
+var ErrNoRoleAssignment = errors.New("identity: no role is assigned to the user in this organization; ask an administrator for access")
+
+// Problem types of a refused login (F-197): the SPA shows a localized text
+// for each instead of the detail.
+const (
+	// ProblemLoginNotAdmitted: a first login without admission
+	// (ErrFirstLoginNotPermitted, 403).
+	ProblemLoginNotAdmitted = "https://reticora.io/problems/login-not-admitted"
+	// ProblemLoginUserInactive: the user is deactivated (ErrUserInactive, 403).
+	ProblemLoginUserInactive = "https://reticora.io/problems/login-user-inactive"
+	// ProblemLoginNoRole: the user holds no role (ErrNoRoleAssignment, 403).
+	ProblemLoginNoRole = "https://reticora.io/problems/login-no-role"
+	// ProblemLoginNoOrganization: the ID token carries no valid organization
+	// attribute (401).
+	ProblemLoginNoOrganization = "https://reticora.io/problems/login-no-organization"
+)
+
 // UserStatusChecker reports whether an app_user may hold a session. A
 // provisioner implementing it makes refresh check the user status; a user
 // that no longer exists is not active.
@@ -71,11 +118,47 @@ type UserProvisioner interface {
 	// EnsureUser resolves the app_user of the OIDC subject in the
 	// organization, or on first login by organization and verified e-mail
 	// (empty when unverified). It creates or links a user only with an
-	// admission and returns ErrFirstLoginNotPermitted otherwise, and
-	// ErrUserInactive for a deactivated user.
-	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName string) (string, error)
-	// EnsureRole assigns the named standard role when the user has none yet.
-	EnsureRole(ctx context.Context, orgID, userID, roleName string) error
+	// admission and returns ErrFirstLoginNotPermitted otherwise,
+	// ErrUserInactive for a deactivated user and ErrUnknownOrganization
+	// when orgID names no organization. Only the first login, which
+	// creates the user or links an account by e-mail, assigns the standard
+	// role defaultRole (empty: none) in the same transaction, when the user
+	// then holds no role; assigned reports that it did. A later login
+	// assigns nothing, so a revoked assignment stays revoked (RBA-03).
+	EnsureUser(ctx context.Context, orgID, oidcSubject, email, displayName, defaultRole string) (userID string, assigned bool, err error)
+}
+
+// LoginRefusalRecorder records a login refused because the user holds no
+// role (audit entry user.login_refused); user.PGRepository implements it.
+type LoginRefusalRecorder interface {
+	RecordLoginRefused(ctx context.Context, orgID, userID string) error
+}
+
+// LoginLocaleRecorder stores the language of a login's locale claim as the
+// user's notification language (app_user.locale, NTF-03, F-383) while the
+// user has chosen none; user.PGRepository implements it.
+type LoginLocaleRecorder interface {
+	RecordLoginLocale(ctx context.Context, orgID, userID, locale string) error
+}
+
+// Template locales of the notifications (notify.LocaleDE, notify.LocaleEN).
+const (
+	notificationLocaleDE = "de-DE"
+	notificationLocaleEN = "en-US"
+)
+
+// notificationLocale maps a locale claim (BCP 47 as Keycloak sends it, e.g.
+// de, en, en-GB, also with an underscore) to the template locale of its
+// language, de-DE or en-US; any other language gives empty.
+func notificationLocale(claim string) string {
+	lang, _, _ := strings.Cut(strings.ToLower(strings.ReplaceAll(strings.TrimSpace(claim), "_", "-")), "-")
+	switch lang {
+	case "de":
+		return notificationLocaleDE
+	case "en":
+		return notificationLocaleEN
+	}
+	return ""
 }
 
 // NewHandler constructs a new identity handler. Refresh tokens live in a
@@ -103,6 +186,14 @@ func (h *Handler) WithProvisioning(p UserProvisioner, defaultRole string) *Handl
 // the database instead of relying on token claims only.
 func (h *Handler) WithAccessResolver(resolver AccessResolver) *Handler {
 	h.access = resolver
+	return h
+}
+
+// WithMFA makes a login that grants org_admin through the IdP group
+// org_admin or the default role bind the IdP account to MFA before the
+// session is issued (WP-367).
+func (h *Handler) WithMFA(m MFAEnforcer) *Handler {
+	h.mfa = m
 	return h
 }
 
@@ -172,7 +263,8 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		writeIdentityError(w, err)
 		return
 	}
-	refreshToken, err := h.refresh.Issue(r.Context(), &RefreshGrant{Claims: withoutTokenTimes(&result.claims)})
+	// The session id of the login names the refresh family (sid, API-04).
+	refreshToken, err := h.refresh.Issue(r.Context(), &RefreshGrant{Family: result.claims.SessionID, Claims: withoutTokenTimes(&result.claims)})
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "store refresh token")
 		return
@@ -238,19 +330,24 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	refreshedClaims := cloneSessionClaims(&grant.Claims)
+	// The new access token stays in the session of the refresh family, so
+	// the per-session rate limit does not start over (sid, API-04).
+	refreshedClaims.SessionID = grant.Family
 	// Roles and scopes are re-read on every refresh so revoked or narrowed
 	// assignments take effect without a new login.
-	if err = h.applyAccess(r.Context(), &refreshedClaims); err != nil {
+	if _, err = h.applyAccess(r.Context(), &refreshedClaims); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "resolve role assignments")
 		return
 	}
 	if err = stampToken(&refreshedClaims); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		slog.ErrorContext(r.Context(), "refresh: stamp session token", "error", err)
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "stamp session token")
 		return
 	}
 	token, err := h.sessions.Issue(refreshedClaims)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
+		slog.ErrorContext(r.Context(), "refresh: issue session token", "error", err)
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "issue session token")
 		return
 	}
 	grant.Claims = withoutTokenTimes(&refreshedClaims)
@@ -360,9 +457,15 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Like the auth middleware: the cause, e.g. an unreadable revocation
+	// list, stays out of the response (API-03); a revoked session says so.
 	claims, err := h.sessions.Validate(token)
-	if err != nil {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
+	switch {
+	case errors.Is(err, ErrSessionRevoked):
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", ErrSessionRevoked.Error())
+		return
+	case err != nil:
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "invalid session token")
 		return
 	}
 	if !claims.ExpiresAt.IsZero() && time.Now().UTC().After(claims.ExpiresAt) {
@@ -416,22 +519,23 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 	// subject is the app_user id once provisioning ran, keeping token and
 	// database identity aligned.
 	subject := idToken.Subject
+	defaultOrgAdmin := false
 	if h.provisioner != nil {
 		email := ""
 		if idToken.EmailVerified {
 			email = idToken.Email
 		}
-		userID, provisionErr := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, email, idToken.Name)
-		if errors.Is(provisionErr, ErrUserInactive) || errors.Is(provisionErr, ErrFirstLoginNotPermitted) {
+		userID, assigned, provisionErr := h.provisioner.EnsureUser(ctx, orgID, idToken.Subject, email, idToken.Name, h.defaultRole)
+		if errors.Is(provisionErr, ErrUserInactive) || errors.Is(provisionErr, ErrFirstLoginNotPermitted) ||
+			errors.Is(provisionErr, ErrUnknownOrganization) {
 			return "", time.Time{}, authResult{}, provisionErr
 		}
 		if provisionErr != nil {
 			return "", time.Time{}, authResult{}, fmt.Errorf("identity: provision user: %w", provisionErr)
 		}
-		if h.defaultRole != "" {
-			// Best effort: role assignment must not block login.
-			_ = h.provisioner.EnsureRole(ctx, orgID, userID, h.defaultRole)
-		}
+		// The first login assigned the default role org_admin: it is bound
+		// to MFA below (WP-367).
+		defaultOrgAdmin = assigned && h.defaultRole == orgAdminRole
 		subject = userID
 	}
 
@@ -442,8 +546,50 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		Name:           idToken.Name,
 		Email:          idToken.Email,
 	}
-	if err = h.applyAccess(ctx, &claims); err != nil {
+	granted, err := h.applyAccess(ctx, &claims)
+	if err != nil {
 		return "", time.Time{}, authResult{}, fmt.Errorf("identity: resolve role assignments: %w", err)
+	}
+	// A user without any role gets no session (TEN-04, RBA-03, F-364),
+	// e.g. after an administrator revoked every assignment: a later login
+	// assigns no default role. The refusal is audited.
+	if h.access != nil && !granted {
+		if recorder, ok := h.provisioner.(LoginRefusalRecorder); ok {
+			if auditErr := recorder.RecordLoginRefused(ctx, orgID, subject); auditErr != nil {
+				slog.ErrorContext(ctx, "login: audit refused login", "error", auditErr)
+			}
+		}
+		return "", time.Time{}, authResult{}, ErrNoRoleAssignment
+	}
+	// A login that grants org_admin through the IdP group org_admin or the
+	// default role binds the account of the ID token's subject to MFA before
+	// the session is issued (AUT-09, WP-367); the realm asks for the second
+	// factor from the next Keycloak login on. The group reticora-admin
+	// carries mfa_required in the realm and needs no binding (E-65 option
+	// 1). Refresh has no ID token and binds nothing.
+	if h.mfa != nil && (defaultOrgAdmin || orgAdminWithoutRealmMFA(idToken.Groups)) {
+		if mfaErr := h.mfa.RequireMFA(ctx, idToken.Subject); mfaErr != nil {
+			if !errors.Is(mfaErr, ErrMFAUnavailable) {
+				mfaErr = fmt.Errorf("%w: %w", ErrMFAUnavailable, mfaErr)
+			}
+			return "", time.Time{}, authResult{}, mfaErr
+		}
+	}
+	// The language of the IdP account (locale claim) becomes the user's
+	// notification language unless the user chose one (NTF-03, F-383); the
+	// UI language stays the browser's (E-99). A failure does not fail the
+	// login: the next login tries again.
+	if recorder, ok := h.provisioner.(LoginLocaleRecorder); ok {
+		if locale := notificationLocale(idToken.Locale); locale != "" {
+			if localeErr := recorder.RecordLoginLocale(ctx, orgID, subject, locale); localeErr != nil {
+				slog.WarnContext(ctx, "login: store the language of the locale claim", "error", localeErr)
+			}
+		}
+	}
+	// The login starts the session: its id (sid) names the refresh family
+	// the callback opens and stays the same across refreshes (API-04).
+	if claims.SessionID, err = newSessionID(); err != nil {
+		return "", time.Time{}, authResult{}, err
 	}
 	if stampErr := stampToken(&claims); stampErr != nil {
 		return "", time.Time{}, authResult{}, stampErr
@@ -466,22 +612,22 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 // organization. IdP roles are org-wide grants; database assignments carry
 // their client and site scope. A failing lookup fails the login or refresh
 // instead of issuing an unscoped session. Without a resolver (tests) the
-// token's access stays unchanged.
-func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) error {
+// token's access stays unchanged. It reports whether any role granted access.
+func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) (bool, error) {
 	if h.access == nil {
-		return nil
+		return false, nil
 	}
 	grants := make([]Grant, 0, 4)
 	if roles := StandardRolesForGroups(claims.Groups); len(roles) > 0 {
 		mapped, err := h.access.RoleGrants(ctx, claims.OrganizationID, roles)
 		if err != nil {
-			return err
+			return false, err
 		}
 		grants = append(grants, mapped...)
 	}
 	stored, err := h.access.AccessGrants(ctx, claims.OrganizationID, claims.Subject)
 	if err != nil {
-		return err
+		return false, err
 	}
 	grants = append(grants, stored...)
 	access := ResolveAccess(grants)
@@ -490,9 +636,11 @@ func (h *Handler) applyAccess(ctx context.Context, claims *SessionClaims) error 
 	claims.Scope = &scope
 	claims.PermissionScopes = access.PermissionScopes
 	claims.ClientScope = scope.LegacyClientScope()
-	return nil
+	return len(grants) > 0, nil
 }
 
+// bearerTokenFromRequest reads the bearer token of the Authorization header.
+// validation: fixed texts.
 func bearerTokenFromRequest(r *http.Request) (string, error) {
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
 	if authz == "" {
@@ -549,15 +697,32 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		return
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeContextError(w, err)
-	case errors.Is(err, ErrUserInactive), errors.Is(err, ErrFirstLoginNotPermitted):
-		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+	case errors.Is(err, ErrFirstLoginNotPermitted):
+		api.WriteProblem(w, http.StatusForbidden, ProblemLoginNotAdmitted, "Forbidden", ErrFirstLoginNotPermitted.Error())
+	case errors.Is(err, ErrUserInactive):
+		api.WriteProblem(w, http.StatusForbidden, ProblemLoginUserInactive, "Forbidden", ErrUserInactive.Error())
+	case errors.Is(err, ErrNoRoleAssignment):
+		api.WriteProblem(w, http.StatusForbidden, ProblemLoginNoRole, "Forbidden", ErrNoRoleAssignment.Error())
+	case errors.Is(err, ErrUnknownOrganization):
+		// The attribute names no organization (CH26, F-395): like a token
+		// without one, not a failure of the provisioning.
+		api.WriteProblem(w, http.StatusUnauthorized, ProblemLoginNoOrganization, "Unauthorized", ErrUnknownOrganization.Error())
+	case api.WriteEntitlementError(w, err):
+		// A first login with an invitation while max_users is reached
+		// (ENT-03): 403 entitlement-limit, the invitation stays open.
+	case errors.Is(err, ErrMFAUnavailable):
+		// The cause names the admin API; it goes to the log only.
+		slog.Error("login: org_admin without enforceable MFA", "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrMFAUnavailable.Error())
 	case strings.Contains(err.Error(), "authorization code is required"),
 		strings.Contains(err.Error(), "PKCE code verifier is required"),
 		strings.Contains(err.Error(), "ID token is required"),
 		strings.Contains(err.Error(), "groups claim"):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-	case strings.Contains(err.Error(), "organization attribute"),
-		strings.Contains(err.Error(), "unexpected ID token issuer"),
+	case strings.Contains(err.Error(), "organization attribute"):
+		// The ID token names no organization, or no valid one (CH26).
+		api.WriteProblem(w, http.StatusUnauthorized, ProblemLoginNoOrganization, "Unauthorized", err.Error())
+	case strings.Contains(err.Error(), "unexpected ID token issuer"),
 		strings.Contains(err.Error(), "ID token is expired"),
 		strings.Contains(err.Error(), "ID token subject is required"),
 		strings.Contains(err.Error(), "verify ID token signature"),
@@ -572,7 +737,11 @@ func writeIdentityError(w http.ResponseWriter, err error) {
 		strings.Contains(err.Error(), "OIDC client ID is required"):
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", err.Error())
 	default:
-		api.WriteError(w, http.StatusBadGateway, "Bad Gateway", err.Error())
+		// The code exchange with the IdP, the provisioning of the user and
+		// the role lookup: their texts (IdP responses, database errors) go
+		// to the log only (API-03).
+		slog.Error("login failed", "error", err)
+		api.WriteError(w, http.StatusBadGateway, "Bad Gateway", "the login could not be completed")
 	}
 }
 

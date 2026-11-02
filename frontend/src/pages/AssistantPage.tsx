@@ -88,7 +88,7 @@ export function AssistantPage() {
               {t('assistant.ask')}
             </Button>
           </form>
-          {ask.isError ? <p className="mt-3 text-sm text-red-600">{ask.error.message}</p> : null}
+          {ask.isError ? <p className="mt-3 text-sm text-danger">{ask.error.message}</p> : null}
         </Card>
         {answer ? (
           <Card title={t('assistant.answer')}>
@@ -100,7 +100,7 @@ export function AssistantPage() {
                   <a className="text-primary underline" href={citation.url}>
                     {citation.title}
                   </a>{' '}
-                  <span className="text-gray-500">({citation.entity_type})</span>
+                  <span className="text-muted">({citation.entity_type})</span>
                 </li>
               ))}
             </ul>

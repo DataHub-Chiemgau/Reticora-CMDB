@@ -166,6 +166,11 @@ func TestMigration74MovesReferencesToLocation(t *testing.T) {
 		}
 	}
 	exec(down)
+	// Before 000074 asset and quantity item reference location_node; the
+	// derivation of their site from location (000151) is not part of that
+	// schema.
+	exec(`ALTER TABLE asset DISABLE TRIGGER trg_asset_derive_site`)
+	exec(`ALTER TABLE quantity_item DISABLE TRIGGER trg_quantity_item_derive_site`)
 
 	nSite, nRoom, nFloor, nDesk, nWh, nOrphan := f.ID(), f.ID(), f.ID(), f.ID(), f.ID(), f.ID()
 	for _, n := range []struct{ id, parent, kind, site, room string }{

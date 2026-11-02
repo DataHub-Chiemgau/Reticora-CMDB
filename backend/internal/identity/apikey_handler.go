@@ -21,21 +21,98 @@ const (
 // APIKeyManager is the persistence of the api-keys resource.
 type APIKeyManager interface {
 	Create(ctx context.Context, key *StoredAPIKey) (*StoredAPIKey, error)
+	// List returns every key of the organization (quota count).
 	List(ctx context.Context, orgID string) ([]StoredAPIKey, error)
+	// ListPage returns a page newest first on (created_at, id), at most
+	// one key more than the limit, and the number of keys (API-02).
+	ListPage(ctx context.Context, orgID string, page api.PaginationParams) ([]StoredAPIKey, int, error)
+	Get(ctx context.Context, orgID, id string) (*StoredAPIKey, error)
 	Revoke(ctx context.Context, orgID, id string) error
 	Rotate(ctx context.Context, orgID, id string, overlapUntil time.Time) (*RotatedAPIKey, error)
 }
 
+// QuotaGuard enforces a licensed quota before a resource is created
+// (ENT-03): current is the number of resources the organization holds; over
+// the limit it returns an error with LimitExceeded (403 entitlement-limit).
+// The entitlement service implements it.
+type QuotaGuard interface {
+	AllowCreate(ctx context.Context, orgID, quota string, current int64) error
+}
+
+// QuotaMaxAPIKeys is the quota of the active API keys of an organization
+// (entitlement.LimitMaxAPIKeys; the entitlement package imports this one).
+const QuotaMaxAPIKeys = "max_api_keys"
+
+// ServiceAccountKeyResolver resolves the service account a key is bound to
+// (RBA-08): its grants and whether it exists in the organization and is
+// active.
+type ServiceAccountKeyResolver interface {
+	ServiceAccountAccessResolver
+	ServiceAccountState(ctx context.Context, orgID, id string) (exists, active bool, err error)
+}
+
 // APIKeyHandler serves /api/v1/api-keys (AUT-04, API-05). Every route needs
 // apikey:manage (authz). The plaintext of a key is returned only by create
-// and rotate.
+// and rotate. Rotating and revoking a foreign key and binding a key to a
+// service account need the key's rights in its holder's scope
+// (GrantCeiling); without the resolvers only the owner rotates and revokes
+// and no key is bound (fail-closed).
 type APIKeyHandler struct {
-	keys APIKeyManager
+	keys            APIKeyManager
+	owners          OwnerAccessResolver
+	serviceAccounts ServiceAccountKeyResolver
+	quota           QuotaGuard
 }
 
 // NewAPIKeyHandler creates the handler.
 func NewAPIKeyHandler(keys APIKeyManager) *APIKeyHandler {
 	return &APIKeyHandler{keys: keys}
+}
+
+// WithOwnerAccess resolves the current rights of the users owning keys.
+func (h *APIKeyHandler) WithOwnerAccess(owners OwnerAccessResolver) *APIKeyHandler {
+	h.owners = owners
+	return h
+}
+
+// WithServiceAccountAccess resolves the service accounts keys are bound to.
+func (h *APIKeyHandler) WithServiceAccountAccess(r ServiceAccountKeyResolver) *APIKeyHandler {
+	h.serviceAccounts = r
+	return h
+}
+
+// WithQuota enforces max_api_keys on create (ENT-03); a rotation replaces
+// a key and is no new one.
+func (h *APIKeyHandler) WithQuota(q QuotaGuard) *APIKeyHandler {
+	h.quota = q
+	return h
+}
+
+// allowNewKey checks max_api_keys against the organization's active keys
+// (not revoked, not expired) and writes the refusal.
+func (h *APIKeyHandler) allowNewKey(w http.ResponseWriter, r *http.Request, orgID string) bool {
+	if h.quota == nil {
+		return true
+	}
+	keys, err := h.keys.List(r.Context(), orgID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return false
+	}
+	now := time.Now()
+	var active int64
+	for i := range keys {
+		if keys[i].RevokedAt == nil && (keys[i].ExpiresAt == nil || keys[i].ExpiresAt.After(now)) {
+			active++
+		}
+	}
+	if err = h.quota.AllowCreate(r.Context(), orgID, QuotaMaxAPIKeys, active); err != nil {
+		if !api.WriteEntitlementError(w, err) {
+			api.WriteRepoError(w, err)
+		}
+		return false
+	}
+	return true
 }
 
 // RegisterRoutes registers the api-keys routes.
@@ -98,7 +175,9 @@ func userPrincipal(w http.ResponseWriter, r *http.Request) (Principal, bool) {
 
 // Create issues a key for the calling user. The key's permissions must be a
 // subset of the caller's; at use the key holds the intersection with its
-// owner's then current rights (AUT-04).
+// owner's then current rights (AUT-04). A key bound to a service account
+// records the caller's scope of its permissions; at use it holds the
+// account's then current rights within that scope (F-397).
 func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	p, ok := userPrincipal(w, r)
 	if !ok {
@@ -145,16 +224,28 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.ServiceAccountID != nil && strings.TrimSpace(*req.ServiceAccountID) == "" {
 		req.ServiceAccountID = nil
 	}
+	if req.ServiceAccountID != nil && !h.authorizeBinding(w, r, &p, *req.ServiceAccountID, req.Permissions) {
+		return
+	}
+	if !h.allowNewKey(w, r, p.OrganizationID) {
+		return
+	}
 	generated, err := GenerateAPIKey(req.Environment)
 	if err != nil {
 		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 		return
 	}
-	created, err := h.keys.Create(r.Context(), &StoredAPIKey{
+	key := &StoredAPIKey{
 		OrganizationID: p.OrganizationID, Name: req.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 		Environment: generated.Environment, Permissions: req.Permissions, CreatedBy: p.Subject, ExpiresAt: req.ExpiresAt,
 		ServiceAccountID: req.ServiceAccountID,
-	})
+	}
+	if key.ServiceAccountID != nil {
+		// The account's later roles never take the key beyond the scope
+		// the caller holds now (F-397).
+		key.CreatorScope = creatorScopeOf(&p, req.Permissions)
+	}
+	created, err := h.keys.Create(r.Context(), key)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -162,14 +253,20 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusCreated, CreatedAPIKey{APIKeyView: viewOf(created), Key: generated.Plaintext})
 }
 
-// List returns the organization's keys without secrets.
+// List returns a page of the organization's keys without secrets, newest
+// first on (created_at, id): limit (default 50, at most 200) and the signed
+// cursor of API-02 (F-215).
 func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok || p.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "authentication required")
 		return
 	}
-	keys, err := h.keys.List(r.Context(), p.OrganizationID)
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	keys, total, err := h.keys.ListPage(r.Context(), p.OrganizationID, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -178,7 +275,9 @@ func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
 	for i := range keys {
 		views[i] = viewOf(&keys[i])
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[APIKeyView]{Data: views, Total: len(views), Limit: len(views)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(views, total, page, func(v *APIKeyView) (time.Time, string) {
+		return v.CreatedAt, v.ID
+	}))
 }
 
 // Revoke ends a key at once.
@@ -188,7 +287,11 @@ func (h *APIKeyHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "authentication required")
 		return
 	}
-	if err := h.keys.Revoke(r.Context(), p.OrganizationID, chi.URLParam(r, "id")); err != nil {
+	id := chi.URLParam(r, "id")
+	if !h.authorizeKeyChange(w, r, &p, id) {
+		return
+	}
+	if err := h.keys.Revoke(r.Context(), p.OrganizationID, id); err != nil {
 		writeAPIKeyError(w, err)
 		return
 	}
@@ -218,7 +321,11 @@ func (h *APIKeyHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rotated, err := h.keys.Rotate(r.Context(), p.OrganizationID, chi.URLParam(r, "id"), time.Now().UTC().Add(overlap))
+	id := chi.URLParam(r, "id")
+	if !h.authorizeKeyChange(w, r, &p, id) {
+		return
+	}
+	rotated, err := h.keys.Rotate(r.Context(), p.OrganizationID, id, time.Now().UTC().Add(overlap))
 	if err != nil {
 		writeAPIKeyError(w, err)
 		return
@@ -227,6 +334,138 @@ func (h *APIKeyHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		"key":      CreatedAPIKey{APIKeyView: viewOf(rotated.Created), Key: rotated.Plaintext},
 		"previous": viewOf(rotated.Previous),
 	})
+}
+
+// authorizeBinding allows binding a key with perms to a service account only
+// if the account exists in the organization (404 otherwise) and the caller
+// holds what the key would grant, the intersection of perms and the
+// account's grants, in the account's scope (RBA-08, F-007). The rights of an
+// inactive account are unknown until it is reactivated, so perms are then
+// required org-wide.
+func (h *APIKeyHandler) authorizeBinding(w http.ResponseWriter, r *http.Request, p *Principal, serviceAccountID string, perms []Permission) bool {
+	if h.serviceAccounts == nil {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "API keys cannot be bound to service accounts here")
+		return false
+	}
+	exists, active, err := h.serviceAccounts.ServiceAccountState(r.Context(), p.OrganizationID, serviceAccountID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return false
+	}
+	if !exists {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "service account not found")
+		return false
+	}
+	target := []Grant{OrgWideGrant(perms)}
+	if active {
+		grants, grantErr := h.serviceAccounts.ServiceAccountGrants(r.Context(), p.OrganizationID, serviceAccountID)
+		if grantErr != nil {
+			api.WriteRepoError(w, grantErr)
+			return false
+		}
+		target = restrictGrants(grants, perms)
+	}
+	if missing := GrantCeiling(p, target); len(missing) > 0 {
+		api.WriteError(w, http.StatusForbidden, "Forbidden",
+			"binding the key to the service account would grant "+joinPermissions(missing)+" beyond the caller's scope")
+		return false
+	}
+	return true
+}
+
+// authorizeKeyChange allows rotating or revoking the key id only to its
+// owner (the creating user of a key not bound to a service account) or to a
+// caller holding every key permission in at least the scope in which the
+// key's holder (owner or service account) holds it (AUT-04, F-006). A
+// rotation hands out the successor's plaintext, so anything less would let
+// the caller act with the holder's rights. A foreign or unknown key is 404.
+func (h *APIKeyHandler) authorizeKeyChange(w http.ResponseWriter, r *http.Request, p *Principal, id string) bool {
+	key, err := h.keys.Get(r.Context(), p.OrganizationID, id)
+	if err != nil {
+		writeAPIKeyError(w, err)
+		return false
+	}
+	if key.ServiceAccountID == nil && key.CreatedBy == p.Subject {
+		return true
+	}
+	grants, resolved, err := h.holderGrants(r.Context(), key)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return false
+	}
+	if !resolved {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "only the owner may rotate or revoke this API key")
+		return false
+	}
+	missing := GrantCeiling(p, restrictGrants(grants, key.Permissions))
+	for _, perm := range key.Permissions {
+		// A permission the holder lost may return with its roles; the
+		// caller must hold it as well.
+		if !p.Has(perm) && !containsPermission(missing, perm) {
+			missing = append(missing, perm)
+		}
+	}
+	if len(missing) > 0 {
+		api.WriteError(w, http.StatusForbidden, "Forbidden",
+			"rotating or revoking this API key requires "+joinPermissions(missing)+" in the scope of its holder")
+		return false
+	}
+	return true
+}
+
+// holderGrants returns the grants of the key's holder; resolved is false
+// when the handler has no resolver for it.
+func (h *APIKeyHandler) holderGrants(ctx context.Context, key *StoredAPIKey) (grants []Grant, resolved bool, err error) {
+	if key.ServiceAccountID == nil {
+		if h.owners == nil {
+			return nil, false, nil
+		}
+		grants, err = h.owners.AccessGrants(ctx, key.OrganizationID, key.CreatedBy)
+		return grants, err == nil, err
+	}
+	if h.serviceAccounts == nil {
+		return nil, false, nil
+	}
+	exists, active, err := h.serviceAccounts.ServiceAccountState(ctx, key.OrganizationID, *key.ServiceAccountID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !exists || !active {
+		// Unknown rights: the key's permissions are required org-wide.
+		return []Grant{OrgWideGrant(key.Permissions)}, true, nil
+	}
+	grants, err = h.serviceAccounts.ServiceAccountGrants(ctx, key.OrganizationID, *key.ServiceAccountID)
+	return grants, err == nil, err
+}
+
+// restrictGrants limits every grant to perms: what a key with perms acts
+// with when its holder has the grants.
+func restrictGrants(grants []Grant, perms []Permission) []Grant {
+	out := make([]Grant, 0, len(grants))
+	for _, g := range grants {
+		if held := intersectPermissions(perms, g.Permissions); len(held) > 0 {
+			g.Permissions = held
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+func containsPermission(perms []Permission, p Permission) bool {
+	for _, q := range perms {
+		if q == p {
+			return true
+		}
+	}
+	return false
+}
+
+func joinPermissions(perms []Permission) string {
+	out := make([]string, len(perms))
+	for i, p := range perms {
+		out[i] = string(p)
+	}
+	return strings.Join(out, ", ")
 }
 
 func writeAPIKeyError(w http.ResponseWriter, err error) {

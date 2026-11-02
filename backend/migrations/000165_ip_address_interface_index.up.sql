@@ -1,0 +1,21 @@
+-- WP-608 (NFR-03, F-118): index of the addresses of an interface.
+--
+-- Every sighting of a device synchronizes its interfaces and addresses
+-- (ipam SyncDiscoveredInterfaces, REC-07): it confirms each reported
+-- address of an interface (interface_id = $1) and counts a miss for the
+-- addresses of the device's interfaces the record did not report (a join
+-- over interface_id). No index led by interface_id existed: the only one
+-- naming it, uq_ip_address_org_vrf_interface_address (organization_id,
+-- vrf_id, interface_id, address), has vrf_id in front of it, so both
+-- statements read the index entries of every address of the organization
+-- (about 128 and 256 buffers at 10,000 addresses, as reticora_app; at the
+-- NFR-01 volumes 200,000 addresses). In the re-discovery of the load test
+-- they were 400 of 894 buffers per record. Deleting an interface checks
+-- the foreign key ip_address.interface_id the same way.
+--
+-- golang-migrate runs a file in one transaction, so CREATE INDEX
+-- CONCURRENTLY is not possible here. IF NOT EXISTS lets an operator build
+-- the index beforehand without a long lock (docs/schema-baseline.md,
+-- "Indizes ohne lange Sperren").
+
+CREATE INDEX IF NOT EXISTS idx_ip_address_interface ON ip_address (interface_id) WHERE interface_id IS NOT NULL;

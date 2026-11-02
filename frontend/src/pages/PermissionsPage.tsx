@@ -5,6 +5,7 @@ import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 export function PermissionsPage() {
   const { t } = useTranslation();
@@ -42,7 +43,7 @@ export function PermissionsPage() {
         <EmptyState title={t('permissions.emptyTitle')} description={t('permissions.emptyHint')} />
       ) : (
         <Card title={`${t('permissions.catalogue')} (${permissions.length})`}>
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('permissions.catalogue')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -71,7 +72,7 @@ export function PermissionsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
     </div>

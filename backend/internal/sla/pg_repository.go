@@ -75,7 +75,7 @@ func (r *PGRepository) GetPolicy(ctx context.Context, orgID, id string) (*Policy
 		var err error
 		item, err = scanPolicy(tx.QueryRow(ctx, "SELECT "+policyColumns+" FROM sla WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("sla policy not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -131,7 +131,7 @@ func (r *PGRepository) UpdatePolicy(ctx context.Context, orgID, id string, req U
 			var err error
 			item, err = scanPolicy(tx.QueryRow(ctx, "SELECT "+policyColumns+" FROM sla WHERE id = $1 AND organization_id = $2", id, orgID))
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("sla policy not found")
+				return ErrNotFound
 			}
 			return err
 		}
@@ -139,7 +139,7 @@ func (r *PGRepository) UpdatePolicy(ctx context.Context, orgID, id string, req U
 		var err error
 		item, err = scanPolicy(tx.QueryRow(ctx, fmt.Sprintf("UPDATE sla SET %s WHERE id = $1 AND organization_id = $2 RETURNING %s", strings.Join(set, ", "), policyColumns), args...))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("sla policy not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -153,20 +153,25 @@ func (r *PGRepository) DeletePolicy(ctx context.Context, orgID, id string) error
 			return fmt.Errorf("delete sla policy: %w", err)
 		}
 		if cmd.RowsAffected() == 0 {
-			return fmt.Errorf("sla policy not found")
+			return ErrNotFound
 		}
 		return nil
 	})
 }
 
 func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error) {
+	// The policy id reaches SQL only as a UUID (API-03, F-047); a malformed
+	// one names no policy.
+	if slaID != "" && !api.IsUUID(slaID) {
+		return nil, ErrNotFound
+	}
 	var state *TicketSLA
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		policyID := slaID
 		if policyID == "" {
 			if err := tx.QueryRow(ctx, `SELECT id::text FROM sla WHERE organization_id = $1 AND priority = $2 AND (client_id IS NULL OR client_id::text = $3) ORDER BY client_id NULLS LAST, created_at DESC LIMIT 1`, orgID, t.Priority, "").Scan(&policyID); err != nil {
 				if err == pgx.ErrNoRows {
-					return fmt.Errorf("sla policy not found")
+					return ErrNotFound
 				}
 				return fmt.Errorf("select sla policy: %w", err)
 			}
@@ -179,7 +184,7 @@ func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *tick
 		var businessCalendar bool
 		if err := tx.QueryRow(ctx, "SELECT response_target_minutes, resolution_target_minutes, business_calendar FROM sla WHERE organization_id = $1 AND id = $2", orgID, policyID).Scan(&responseMinutes, &resolutionMinutes, &businessCalendar); err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("sla policy not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("read sla policy: %w", err)
 		}
@@ -211,7 +216,7 @@ func (r *PGRepository) GetForTicket(ctx context.Context, orgID, ticketID string)
 		var id string
 		if err := tx.QueryRow(ctx, "SELECT id::text FROM ticket_sla WHERE "+ticketSLAVisible+" AND organization_id = $1 AND ticket_id = $2", orgID, ticketID).Scan(&id); err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("ticket sla not found")
+				return ErrTicketSLANotFound
 			}
 			return err
 		}

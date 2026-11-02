@@ -1,0 +1,22 @@
+# Raritan PX3 (PDU2-MIB) of PDU 1 with two inlets, snmpwalk -On of
+# inletSensorDecimalDigits (inletSensorConfigurationTable column 7) and
+# measurementsInletSensorValue (measurementsInletSensorTable column 4),
+# index pduId.inletId.sensorType: rmsCurrent(1), rmsVoltage(4),
+# activePower(5), activeEnergy(8). The outlet tables of this device are
+# collector/plugins/power/testdata/raritan-px.walk.
+.1.3.6.1.4.1.13742.6.3.3.4.1.7.1.1.1 = Gauge32: 3
+.1.3.6.1.4.1.13742.6.3.3.4.1.7.1.1.4 = Gauge32: 0
+.1.3.6.1.4.1.13742.6.3.3.4.1.7.1.1.5 = Gauge32: 0
+.1.3.6.1.4.1.13742.6.3.3.4.1.7.1.1.8 = Gauge32: 0
+.1.3.6.1.4.1.13742.6.3.3.4.1.7.1.2.1 = Gauge32: 3
+.1.3.6.1.4.1.13742.6.3.3.4.1.7.1.2.4 = Gauge32: 0
+.1.3.6.1.4.1.13742.6.3.3.4.1.7.1.2.5 = Gauge32: 0
+.1.3.6.1.4.1.13742.6.3.3.4.1.7.1.2.8 = Gauge32: 0
+.1.3.6.1.4.1.13742.6.5.2.3.1.4.1.1.1 = Gauge32: 4250
+.1.3.6.1.4.1.13742.6.5.2.3.1.4.1.1.4 = Gauge32: 231
+.1.3.6.1.4.1.13742.6.5.2.3.1.4.1.1.5 = Gauge32: 912
+.1.3.6.1.4.1.13742.6.5.2.3.1.4.1.1.8 = Gauge32: 1234567
+.1.3.6.1.4.1.13742.6.5.2.3.1.4.1.2.1 = Gauge32: 1100
+.1.3.6.1.4.1.13742.6.5.2.3.1.4.1.2.4 = Gauge32: 230
+.1.3.6.1.4.1.13742.6.5.2.3.1.4.1.2.5 = Gauge32: 236
+.1.3.6.1.4.1.13742.6.5.2.3.1.4.1.2.8 = Gauge32: 765432

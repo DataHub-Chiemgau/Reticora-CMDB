@@ -15,9 +15,12 @@ import (
 
 // ICMP echo (DIS-01). Capability: the collector first opens an
 // unprivileged ICMP datagram socket (Linux, allowed for the group in
-// net.ipv4.ping_group_range – Docker sets the full range in containers);
-// otherwise a raw socket, which needs CAP_NET_RAW (systemd unit:
-// AmbientCapabilities=CAP_NET_RAW; image: file capability on the binary).
+// net.ipv4.ping_group_range – Docker sets the full range in containers
+// with their own network namespace; with host networking the host's value
+// applies); otherwise a raw socket, which needs CAP_NET_RAW (systemd unit
+// of install-vm.sh: AmbientCapabilities=CAP_NET_RAW). The image sets no
+// file capability and runs as nobody, so there only the unprivileged
+// socket works, or NET_RAW as root in the container (collector/Dockerfile).
 // Without either, ICMP is off and the sweep relies on TCP and ARP.
 
 // Pinger sends one ICMP echo request and waits for the reply.

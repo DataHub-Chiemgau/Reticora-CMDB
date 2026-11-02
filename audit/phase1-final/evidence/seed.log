@@ -1,0 +1,6 @@
+==> Seeding database...
+cd backend && go run ./cmd/seed -database-url "postgres://reticora:reticora@localhost:5432/reticora_migrations?sslmode=disable" \
+	-objects 40 -metrics 2000
+demo	9c741956-c776-b03d-6652-27f1f4ae33d2	admin@demo.local
+acme	8d47b7d0-d07b-96df-c81e-7b8187a15867	admin@acme.local
+seed: done in 403ms

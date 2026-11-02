@@ -1,0 +1,18 @@
+{
+  "name": "reticora-e2e-prev",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "UI-18/NFR-07 (WP-531, E-88): the mocked suite of frontend/e2e with the previous minor of @playwright/test (Chromium, Firefox, WebKit n-1) and Chrome n-1 from Chrome for Testing.",
+  "scripts": {
+    "e2e": "playwright test --config playwright.prev.config.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.61.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "playwright-core": "1.61.1",
+    "yaml": "2.9.1"
+  }
+}

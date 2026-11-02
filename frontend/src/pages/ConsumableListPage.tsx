@@ -108,7 +108,7 @@ export function ConsumableListPage() {
             <p className="text-sm text-gray-600 dark:text-gray-300">{c.sku || '—'}</p>
             <p className="mt-1 text-lg font-semibold">
               {c.stock_level} {c.unit}{' '}
-              <span className="text-xs font-normal text-gray-500">/ min {c.min_level}</span>
+              <span className="text-xs font-normal text-muted">/ min {c.min_level}</span>
             </p>
             <div className="mt-3 flex gap-2">
               <Button

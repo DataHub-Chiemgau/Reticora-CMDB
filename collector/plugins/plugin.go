@@ -3,9 +3,11 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Result represents a single discovered or collected item.
@@ -49,10 +51,59 @@ type Plugin interface {
 	// Name is the protocol the plugin speaks ("snmp", "redfish" …).
 	Name() string
 	// Probe checks cheaply which targets answer the protocol; each hit
-	// carries what probing learned.
+	// carries what probing learned. A target that answered but could not
+	// be probed for a reason the operator must see (e.g. a certificate the
+	// plugin refused) is returned as a *ProbeErrors next to the hits; any
+	// other error fails the probe of all targets.
 	Probe(ctx context.Context, targets []string, creds map[string]string) ([]Result, error)
 	// Collect gathers the DeviceRecord of one target (DIS-05).
 	Collect(ctx context.Context, target string, creds map[string]string) (*DeviceRecord, error)
+}
+
+// ErrAuthFailed marks a collection the target refused for its credentials
+// (e.g. HTTP 401/403): the target answered, but did not accept the account
+// or denied it access. The scope run reports the cause auth_failed (DIS-08).
+var ErrAuthFailed = errors.New("auth_failed")
+
+// ErrUnreachable marks a collection that could not reach the target: the
+// connection failed, timed out or broke off. The scope run reports the cause
+// unreachable (DIS-08).
+var ErrUnreachable = errors.New("unreachable")
+
+// ErrorCause is the cause of a collection error the plugin marked
+// (auth_failed, unreachable, tls); empty otherwise, then the server derives
+// the cause from the message (DIS-08).
+func ErrorCause(err error) string {
+	switch {
+	case errors.Is(err, ErrAuthFailed):
+		return "auth_failed"
+	case errors.Is(err, ErrUnreachable):
+		return "unreachable"
+	case errors.Is(err, ErrTLSUntrusted):
+		return "tls"
+	}
+	return ""
+}
+
+// TargetError is the failure of one target in a probe.
+type TargetError struct {
+	Target string
+	Err    error
+}
+
+// ProbeErrors are the targets a probe could not check (DIS-08); Probe
+// returns them next to its hits, and the scope run reports each with
+// protocol, target and cause (ErrorCause).
+type ProbeErrors struct {
+	Targets []TargetError
+}
+
+func (e *ProbeErrors) Error() string {
+	msgs := make([]string, len(e.Targets))
+	for i, t := range e.Targets {
+		msgs[i] = t.Target + ": " + t.Err.Error()
+	}
+	return strings.Join(msgs, "; ")
 }
 
 // CollectRecord turns the result of a plugin's collection into the
@@ -69,20 +120,19 @@ func CollectRecord(protocol string, res *Result, err error, observedAt time.Time
 }
 
 // credentialAliases maps protocols that share the credentials of another
-// protocol: SNMP-based power polling uses the SNMP community, WMI and NAS keep
-// using the SSH account they used before credentials were namespaced.
+// protocol: SNMP-based power polling uses the SNMP community. No other
+// protocol borrows a namespace; in particular WMI and NAS never receive the
+// SSH account (F-028).
 var credentialAliases = map[string]string{
 	"power": "snmp",
-	"nas":   "ssh",
-	"wmi":   "ssh",
 }
 
 // CredentialsFor selects the credentials a protocol plugin may receive (COL-02).
 // Collector credentials are namespaced by protocol ("ssh.username",
-// "redfish.password", "snmp.community"); the plugin gets only the entries of
-// its own namespace with the prefix removed. A protocol never receives the
-// credentials of another protocol unless credentialAliases says so; in
-// particular SSH credentials never reach Redfish targets.
+// "redfish.password", "snmp.community", "wmi.password"); the plugin gets only
+// the entries of its own namespace with the prefix removed. A protocol never
+// receives the credentials of another protocol unless credentialAliases says
+// so; without entries of its namespace it gets none, never a fallback.
 func CredentialsFor(protocol string, all map[string]string) map[string]string {
 	namespace := protocol
 	if alias, ok := credentialAliases[protocol]; ok {
@@ -96,4 +146,15 @@ func CredentialsFor(protocol string, all map[string]string) map[string]string {
 		}
 	}
 	return out
+}
+
+// OctetText renders an SNMP OctetString value as text: NUL padding and
+// surrounding space are dropped; a value that still holds a NUL byte is
+// binary and stays empty (PostgreSQL refuses NUL in text and JSON).
+func OctetText(b []byte) string {
+	s := strings.TrimFunc(string(b), func(r rune) bool { return r == 0 || unicode.IsSpace(r) })
+	if strings.IndexByte(s, 0) >= 0 {
+		return ""
+	}
+	return s
 }

@@ -3,6 +3,7 @@ package graphqlbff
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -138,6 +139,76 @@ func TestLimits(t *testing.T) {
 	_, resp := run(t, slow, perms, gql(`{ cis { totalCount } }`))
 	if time.Since(start) > 5*time.Second || len(resp.Errors) == 0 {
 		t.Errorf("deadline: %v %+v", time.Since(start), resp)
+	}
+}
+
+// TestTopologyComplexityScalesWithNodes is the retest of F-333 (WP-593,
+// SEC-10): a topology costs its selection per node it may hold, without a
+// root MaxTopologyNodes (2,000), from a root the nodes a walk of depth hops
+// reaches at 10 edges per CI. A rootless topology with nested CI fields
+// exceeds MaxComplexity like three full pages of cis; a rooted topology of
+// depth 1 with a few fields passes.
+func TestTopologyComplexityScalesWithNodes(t *testing.T) {
+	f := newBFFFixture(t)
+	fields := "id name status ciTypeId clientId siteId locationId hostname fqdn serialNumber manufacturer model managementIp lifecycleState health version createdAt updatedAt"
+	rootless := `{ topology { nodes { id name ci { ` + fields + ` } } } }`
+	resp := f.query(t, allRead, rootless)
+	if len(resp.Errors) == 0 || !strings.Contains(resp.Errors[0].Message, "complexity") || resp.Data["topology"] != nil {
+		t.Errorf("rootless topology with nested CI fields: %+v, want the complexity refusal", resp)
+	}
+	if f.cis.single+f.cis.batch+f.cis.nodes != 0 {
+		t.Errorf("refused topology read CIs: %d single, %d batch, %d node reads", f.cis.single, f.cis.batch, f.cis.nodes)
+	}
+	// Even two fields per node and edge exceed the budget at 2,000 nodes.
+	if resp = f.query(t, allRead, `{ topology { nodes { id name } edges { sourceCiId targetCiId } } }`); len(resp.Errors) == 0 ||
+		!strings.Contains(resp.Errors[0].Message, "complexity") {
+		t.Errorf("rootless topology with two fields per node and edge: %+v, want the complexity refusal", resp)
+	}
+	// One field per node stays within the budget (2 x 2,000).
+	resp = f.query(t, allRead, `{ topology { nodes { id } } }`)
+	if graph, _ := resp.Data["topology"].(map[string]any); len(resp.Errors) != 0 || len(graph["nodes"].([]any)) != 21 {
+		t.Errorf("rootless topology with one field: %+v", resp)
+	}
+
+	rooted := `{ topology(rootCiId: "` + f.hub + `", depth: 1) { nodes { id name status } edges { sourceCiId targetCiId relType } } }`
+	resp = f.query(t, allRead, rooted)
+	if graph, _ := resp.Data["topology"].(map[string]any); len(resp.Errors) != 0 || len(graph["nodes"].([]any)) != 21 || len(graph["edges"].([]any)) != 20 {
+		t.Errorf("rooted topology of depth 1 with a few fields: %+v", resp)
+	}
+	// The nested CI fields from a root of depth 1 pass as well (11 nodes).
+	if resp = f.query(t, allRead, `{ topology(rootCiId: "`+f.hub+`", depth: 1) { nodes { id name ci { `+fields+` } } } }`); len(resp.Errors) != 0 {
+		t.Errorf("rooted topology of depth 1 with nested CI fields: %+v", resp)
+	}
+	// From a root the estimate grows with the depth up to 2,000 nodes: the
+	// same selection is refused at depth 3.
+	if resp = f.query(t, allRead, `{ topology(rootCiId: "`+f.hub+`", depth: 3) { nodes { id name ci { `+fields+` } } } }`); len(resp.Errors) == 0 ||
+		!strings.Contains(resp.Errors[0].Message, "complexity") {
+		t.Errorf("rooted topology of depth 3 with nested CI fields: %+v, want the complexity refusal", resp)
+	}
+
+	ptr := func(n int) *int { return &n }
+	for _, c := range []struct {
+		root  string
+		depth *int
+		want  int
+	}{
+		{"", nil, 2000},
+		{"", ptr(1), 2000},
+		{f.hub, ptr(1), 11},
+		{f.hub, nil, 111},
+		{f.hub, ptr(2), 111},
+		{f.hub, ptr(3), 1111},
+		{f.hub, ptr(4), 2000},
+		{f.hub, ptr(20), 2000},
+		{f.hub, ptr(1 << 30), 2000},
+		{f.hub, ptr(0), 11},
+	} {
+		if got := topologyNodeEstimate(c.root, c.depth); got != c.want {
+			t.Errorf("topologyNodeEstimate(%q, %v) = %d, want %d", c.root, c.depth, got, c.want)
+		}
+	}
+	if got := saturatingMul(math.MaxInt/1000, 2000); got != math.MaxInt {
+		t.Errorf("saturatingMul over the int range = %d, want MaxInt", got)
 	}
 }
 

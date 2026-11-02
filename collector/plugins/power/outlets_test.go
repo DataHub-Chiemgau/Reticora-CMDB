@@ -3,6 +3,9 @@ package power
 import (
 	"context"
 	"net"
+	"os"
+	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,7 +15,7 @@ import (
 	"github.com/gosnmp/gosnmp"
 )
 
-// startV2cAgent answers SNMPv2c GET and GETBULK from mib.
+// startV2cAgent answers SNMPv2c GET, GETNEXT and GETBULK from mib.
 func startV2cAgent(t *testing.T, mib map[string]gosnmp.SnmpPDU) int {
 	t.Helper()
 	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
@@ -59,7 +62,19 @@ func startV2cAgent(t *testing.T, mib map[string]gosnmp.SnmpPDU) int {
 						vars = append(vars, gosnmp.SnmpPDU{Name: v.Name, Type: gosnmp.NoSuchObject})
 					}
 				}
-			case gosnmp.GetBulkRequest, gosnmp.GetNextRequest:
+			case gosnmp.GetNextRequest:
+				// One successor per requested variable (RFC 3416 4.2.2).
+				for _, v := range req.Variables {
+					next := gosnmp.SnmpPDU{Name: v.Name, Type: gosnmp.EndOfMibView}
+					for _, oid := range oids {
+						if less(strings.TrimPrefix(v.Name, "."), oid) {
+							next = mib[oid]
+							break
+						}
+					}
+					vars = append(vars, next)
+				}
+			case gosnmp.GetBulkRequest:
 				start := strings.TrimPrefix(req.Variables[0].Name, ".")
 				limit := max(int(req.MaxRepetitions), 1)
 				for _, oid := range oids {
@@ -119,9 +134,86 @@ func TestCollectReadsOutletMapping(t *testing.T) {
 	if v := rec.Validate(); len(v) > 0 {
 		t.Errorf("record breaks the contract: %v", v)
 	}
-	for name, want := range map[string]bool{"Outlet 12": true, "outlet_3": true, "Outlet": true, "web01": false, "Outlet web": false} {
+	for name, want := range map[string]bool{"Outlet 12": true, "outlet_3": true, "Outlet": true, "Outlet Group 3": true,
+		"web01": false, "Outlet web": false, "group-a": false} {
 		if isDefaultOutletName(name) != want {
 			t.Errorf("isDefaultOutletName(%q) != %v", name, want)
 		}
+	}
+}
+
+// loadWalk reads a fixture walk (snmpwalk -On: "OID = TYPE: value") from
+// testdata as the MIB of the SNMP fake; STRING and INTEGER values.
+func loadWalk(t *testing.T, name string) map[string]gosnmp.SnmpPDU {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mib := map[string]gosnmp.SnmpPDU{}
+	for n, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		oid, typed, ok := strings.Cut(line, " = ")
+		kind, value, ok2 := strings.Cut(typed, ": ")
+		if !ok || !ok2 {
+			t.Fatalf("%s:%d: %q is no walk line", name, n+1, line)
+		}
+		oid = strings.TrimPrefix(oid, ".")
+		switch kind {
+		case "STRING":
+			mib[oid] = gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.OctetString, Value: []byte(strings.Trim(value, `"`))}
+		case "INTEGER":
+			v, err := strconv.Atoi(value)
+			if err != nil {
+				t.Fatalf("%s:%d: %v", name, n+1, err)
+			}
+			mib[oid] = gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.Integer, Value: v}
+		default:
+			t.Fatalf("%s:%d: type %s not supported", name, n+1, kind)
+		}
+	}
+	return mib
+}
+
+// TestCollectReadsVendorOutletTables covers WP-161/WP-498 (IMP-09): the
+// outlet names and states of Raritan PX (PDU2-MIB), APC sPDU (PowerNet-MIB)
+// and the outlet groups of an APC UPS, read from fixture walks of these
+// devices; factory and empty names are left out. A device without an
+// outlet table has no outlets and no error.
+func TestCollectReadsVendorOutletTables(t *testing.T) {
+	type outlet struct{ name, state string }
+	for _, tc := range []struct {
+		walk       string
+		deviceType string
+		want       []outlet
+	}{
+		{"raritan-px.walk", "pdu", []outlet{{"esx01 PSU1", "on"}, {"esx02 PSU1", "off"}}},
+		{"apc-spdu.walk", "pdu", []outlet{{"fw01-A", "on"}, {"nas01 #2", "off"}}},
+		{"apc-ups.walk", "ups", []outlet{{"pdu-a in1", "on"}, {"pdu-b in1", "off"}}},
+		{"ups-no-outlets.walk", "ups", nil},
+	} {
+		t.Run(tc.walk, func(t *testing.T) {
+			p := &Plugin{Timeout: time.Second, Port: startV2cAgent(t, loadWalk(t, tc.walk))}
+			rec, err := p.Collect(context.Background(), "127.0.0.1", map[string]string{"community": "public"})
+			if err != nil {
+				t.Fatalf("collect: %v", err)
+			}
+			if rec.Power == nil || rec.Power.DeviceType != tc.deviceType {
+				t.Fatalf("power = %+v, want device type %s", rec.Power, tc.deviceType)
+			}
+			var got []outlet
+			for _, o := range rec.Power.Outlets {
+				got = append(got, outlet{o.Name, o.State})
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("outlets = %v, want %v", got, tc.want)
+			}
+			if v := rec.Validate(); len(v) > 0 {
+				t.Errorf("record breaks the contract: %v", v)
+			}
+		})
 	}
 }

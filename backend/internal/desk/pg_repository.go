@@ -55,13 +55,13 @@ func scanBooking(s pgx.Row) (*Booking, error) {
 	return b, nil
 }
 
-// Desks and bookings carry no client or site column yet (WP-029). A desk is
-// visible when its room's site is visible under the transaction's tenant
-// scope, whose site policy filters the subquery; a booking follows its desk.
+// A desk is visible when its room is visible under the transaction's tenant
+// scope: the room's location row carries the organization, client and site
+// predicate (migration 000062 section 6), a LEFT JOIN over building would
+// admit the room of an invisible building (WP-340). A booking follows its
+// desk.
 const (
-	deskVisible = `(desk.room_id IS NULL OR EXISTS (SELECT 1 FROM room LEFT JOIN building ON building.id = room.building_id
-		WHERE room.id = desk.room_id
-		AND (building.site_id IS NULL OR EXISTS (SELECT 1 FROM site WHERE site.id = building.site_id))))`
+	deskVisible    = `(desk.room_id IS NULL OR EXISTS (SELECT 1 FROM location WHERE location.id = desk.room_id))`
 	bookingVisible = "EXISTS (SELECT 1 FROM desk WHERE desk.id = desk_booking.desk_id AND " + deskVisible + ")"
 )
 

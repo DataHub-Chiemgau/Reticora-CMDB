@@ -25,7 +25,9 @@ const defaultOpenAPISpecPath = "api/openapi.yaml"
 
 var defaultOpenAPIValidator = NewOpenAPIValidator()
 
-// RouteSpec describes lightweight request validation rules.
+// RouteSpec describes lightweight request validation rules: the required
+// query parameters, whether the operation requires a body and the media
+// types its body may have.
 type RouteSpec struct {
 	RequiredQueryParams []string
 	RequiresBody        bool
@@ -33,6 +35,9 @@ type RouteSpec struct {
 }
 
 // OpenAPIValidator performs lightweight route-based request validation.
+// Its rules come from the requestBody and parameters of the OpenAPI
+// document (API-04); without a document it falls back to the registry of
+// registerKnownRoutes, which never demands more than the document.
 type OpenAPIValidator struct {
 	routes    map[string]RouteSpec // key: "POST /api/v1/cis"
 	specPath  string
@@ -40,11 +45,15 @@ type OpenAPIValidator struct {
 	// deprecated holds the lifecycle of the operations the specification
 	// marks deprecated (API-01), keyed like routes.
 	deprecated map[string]Deprecation
+	// loadErr says why the document was not loaded (F-218); nil when it
+	// was read and parsed without error.
+	loadErr error
 }
 
 // Deprecation is the lifecycle of a deprecated operation (API-01): when it
 // was deprecated, when it is switched off (at least 12 months later) and
-// its successor.
+// its successor, a path template whose placeholders name path parameters
+// of the deprecated operation.
 type Deprecation struct {
 	DeprecatedAt time.Time
 	Sunset       time.Time
@@ -55,14 +64,17 @@ type Deprecation struct {
 // sunset.
 const MinSunsetNotice = 365 * 24 * time.Hour
 
-// NewOpenAPIValidator creates a new validator with known route rules.
+// NewOpenAPIValidator creates a new validator with the rules of the
+// OpenAPI document, or the known route rules when no document is found.
 func NewOpenAPIValidator() *OpenAPIValidator {
 	validator := &OpenAPIValidator{
 		routes:   make(map[string]RouteSpec),
 		specPath: configuredSpecPath(),
 	}
 	validator.loadSpec()
-	validator.registerKnownRoutes()
+	if len(validator.routes) == 0 {
+		validator.registerKnownRoutes()
+	}
 	return validator
 }
 
@@ -83,20 +95,22 @@ func (v *OpenAPIValidator) Middleware(next http.Handler) http.Handler {
 			httpx.ValidationError(w, r, err.Error())
 			return
 		}
-		v.writeDeprecation(w, r)
 		spec, ok := v.lookup(r.Method, r.URL.Path)
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		if shouldValidateContentType(r.Method) {
+		// The Content-Type is checked only for a body that is sent or that
+		// the operation requires: a bodiless POST such as the cookie-only
+		// refresh (AUT-02) needs none.
+		if shouldValidateContentType(r.Method) && (spec.RequiresBody || bodySent(r)) {
 			allowed := spec.AllowedContentTypes
 			if len(allowed) == 0 {
 				allowed = []string{"application/json"}
 			}
 			if !contentTypeAllowed(r.Header.Get("Content-Type"), allowed) {
-				httpx.ValidationError(w, r, "Content-Type must be application/json")
+				httpx.ValidationError(w, r, "Content-Type must be "+strings.Join(allowed, " or "))
 				return
 			}
 		}
@@ -109,6 +123,16 @@ func (v *OpenAPIValidator) Middleware(next http.Handler) http.Handler {
 		}
 
 		if spec.RequiresBody {
+			// A binary body (document content) is streamed to its handler,
+			// which limits and checks it.
+			if !isJSONMediaType(r.Header.Get("Content-Type")) {
+				if r.ContentLength == 0 {
+					httpx.ValidationError(w, r, "request body is required")
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				httpx.ValidationError(w, r, "unable to read request body")
@@ -133,9 +157,13 @@ func (v *OpenAPIValidator) Middleware(next http.Handler) http.Handler {
 }
 
 func (v *OpenAPIValidator) loadSpec() {
+	var readErr error
 	for _, candidate := range resolveSpecCandidates(v.specPath) {
 		data, err := os.ReadFile(candidate)
 		if err != nil {
+			if readErr == nil {
+				readErr = err
+			}
 			continue
 		}
 		v.specPath = candidate
@@ -145,13 +173,189 @@ func (v *OpenAPIValidator) loadSpec() {
 			slog.Warn("openapi: deprecations not loaded", "path", candidate, "error", perr)
 		}
 		v.deprecated = deprecated
+		routes, rerr := ParseRouteSpecs(data)
+		if err := errors.Join(perr, rerr); err != nil {
+			v.loadErr = fmt.Errorf("parse %s: %w", candidate, err)
+		}
+		if rerr != nil {
+			slog.Warn("openapi: validation rules not loaded, using the built-in registry", "path", candidate, "error", rerr)
+			return
+		}
+		v.routes = routes
 		return
 	}
+	if readErr == nil {
+		readErr = errors.New("no path configured")
+	}
+	v.loadErr = fmt.Errorf("read %s (RETICORA_OPENAPI_SPEC_PATH): %w", v.specPath, readErr)
+}
+
+// OpenAPISpecNotLoaded is the /readyz detail "openapi" of a server that
+// runs without the OpenAPI document (F-218).
+const OpenAPISpecNotLoaded = "not loaded"
+
+// CheckSpec reports whether the OpenAPI document was loaded (F-218).
+// Without it the lifecycle headers of deprecated operations (API-01) and
+// the validation rules of the document are missing. In production that is
+// an error that stops the start; elsewhere it is logged as a warning, and
+// the server reports OpenAPISpecNotLoaded under details.openapi of /readyz.
+func (v *OpenAPIValidator) CheckSpec(production bool) (loaded bool, err error) {
+	if v.loadErr == nil {
+		return true, nil
+	}
+	if production {
+		return false, fmt.Errorf("openapi: specification not loaded: %w", v.loadErr)
+	}
+	slog.Warn("openapi: specification not loaded; deprecated operations carry no Deprecation and Sunset headers, "+
+		"requests are validated against the built-in registry", "error", v.loadErr)
+	return false, nil
+}
+
+// CheckOpenAPISpec is CheckSpec of the validator the server uses.
+func CheckOpenAPISpec(production bool) (loaded bool, err error) {
+	return defaultOpenAPIValidator.CheckSpec(production)
+}
+
+// DeprecationHeaders sets the lifecycle headers of deprecated operations
+// (API-01) with the validator the server uses. It runs early in the chain,
+// before authentication, so that the 401, 403 and 429 answers of a
+// deprecated operation carry them too (F-220).
+func DeprecationHeaders(next http.Handler) http.Handler {
+	return defaultOpenAPIValidator.DeprecationHeaders(next)
+}
+
+// DeprecationHeaders sets the lifecycle headers of a deprecated operation
+// before the request reaches next.
+func (v *OpenAPIValidator) DeprecationHeaders(next http.Handler) http.Handler {
+	if v == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v.writeDeprecation(w, r)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// specMethods are the operations of an OpenAPI path item.
+var specMethods = []string{"get", "put", "post", "delete", "patch", "head", "options"}
+
+// specParameter is an OpenAPI parameter or a reference to one.
+type specParameter struct {
+	Ref      string `yaml:"$ref"`
+	Name     string `yaml:"name"`
+	In       string `yaml:"in"`
+	Required bool   `yaml:"required"`
+}
+
+// specRequestBody is an OpenAPI requestBody or a reference to one.
+type specRequestBody struct {
+	Ref      string               `yaml:"$ref"`
+	Required bool                 `yaml:"required"`
+	Content  map[string]yaml.Node `yaml:"content"`
+}
+
+// ParseRouteSpecs derives the validation rules of every operation of an
+// OpenAPI document (API-04): a required body only where the requestBody is
+// required, the media types of its content, and the required query
+// parameters of the path item and the operation. Operations without such a
+// rule are left out.
+func ParseRouteSpecs(spec []byte) (map[string]RouteSpec, error) {
+	var doc struct {
+		Paths      map[string]map[string]yaml.Node `yaml:"paths"`
+		Components struct {
+			Parameters    map[string]specParameter   `yaml:"parameters"`
+			RequestBodies map[string]specRequestBody `yaml:"requestBodies"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(spec, &doc); err != nil {
+		return nil, fmt.Errorf("parse spec: %w", err)
+	}
+	if len(doc.Paths) == 0 {
+		return nil, errors.New("spec has no paths")
+	}
+	resolveParameter := func(p specParameter) (specParameter, error) {
+		if p.Ref == "" {
+			return p, nil
+		}
+		resolved, ok := doc.Components.Parameters[strings.TrimPrefix(p.Ref, "#/components/parameters/")]
+		if !ok {
+			return p, fmt.Errorf("unresolved parameter %s", p.Ref)
+		}
+		return resolved, nil
+	}
+	out := map[string]RouteSpec{}
+	var errs []error
+	for path, items := range doc.Paths {
+		var shared []specParameter
+		if node, ok := items["parameters"]; ok {
+			if err := node.Decode(&shared); err != nil {
+				errs = append(errs, fmt.Errorf("%s parameters: %w", path, err))
+				continue
+			}
+		}
+		for method := range items {
+			if !slices.Contains(specMethods, method) {
+				continue
+			}
+			node := items[method]
+			key := routeKey(strings.ToUpper(method), path)
+			var op struct {
+				Parameters  []specParameter  `yaml:"parameters"`
+				RequestBody *specRequestBody `yaml:"requestBody"`
+			}
+			if err := node.Decode(&op); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", key, err))
+				continue
+			}
+			// An operation parameter overrides the path item's parameter
+			// of the same name and location.
+			params := map[string]specParameter{}
+			for _, raw := range append(slices.Clone(shared), op.Parameters...) {
+				p, err := resolveParameter(raw)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", key, err))
+					continue
+				}
+				params[p.In+" "+p.Name] = p
+			}
+			var route RouteSpec
+			for _, p := range params {
+				if p.In == "query" && p.Required {
+					route.RequiredQueryParams = append(route.RequiredQueryParams, p.Name)
+				}
+			}
+			slices.Sort(route.RequiredQueryParams)
+			if body := op.RequestBody; body != nil {
+				if body.Ref != "" {
+					resolved, ok := doc.Components.RequestBodies[strings.TrimPrefix(body.Ref, "#/components/requestBodies/")]
+					if !ok {
+						errs = append(errs, fmt.Errorf("%s: unresolved requestBody %s", key, body.Ref))
+						continue
+					}
+					body = &resolved
+				}
+				route.RequiresBody = body.Required
+				for mediaType := range body.Content {
+					route.AllowedContentTypes = append(route.AllowedContentTypes, mediaType)
+				}
+				slices.Sort(route.AllowedContentTypes)
+			}
+			// An operation without body and required query parameter has
+			// no rule; it is not registered, so a body it does not declare
+			// is left to its handler.
+			if len(route.AllowedContentTypes) == 0 && len(route.RequiredQueryParams) == 0 {
+				continue
+			}
+			out[key] = route
+		}
+	}
+	return out, errors.Join(errs...)
 }
 
 // ParseDeprecations reads the operations marked deprecated in an OpenAPI
 // document with their lifecycle: x-deprecated-at and x-sunset (dates),
-// x-successor (path). A deprecated operation without x-sunset is an error,
+// x-successor (path template; writeDeprecation fills its placeholders with
+// the path parameters of the same name of the request). A deprecated operation without x-sunset is an error,
 // as is a sunset less than 12 months after the deprecation (API-01).
 func ParseDeprecations(spec []byte) (map[string]Deprecation, error) {
 	var doc struct {
@@ -165,7 +369,7 @@ func ParseDeprecations(spec []byte) (map[string]Deprecation, error) {
 	for path, items := range doc.Paths {
 		for method := range items {
 			// Path items also hold parameters, summary and the like.
-			if !slices.Contains([]string{"get", "put", "post", "delete", "patch", "head", "options"}, method) {
+			if !slices.Contains(specMethods, method) {
 				continue
 			}
 			var op struct {
@@ -204,17 +408,22 @@ func ParseDeprecations(spec []byte) (map[string]Deprecation, error) {
 
 // writeDeprecation sets the lifecycle headers of a deprecated operation
 // (API-01): Deprecation (RFC 9745, the deprecation date), Sunset (RFC 8594)
-// and a successor-version link.
+// and a successor-version link (RFC 8288). The link names a URI: the
+// placeholders of the successor are filled with the path parameters of the
+// request (F-219); a successor with a placeholder the operation's path does
+// not have (an ID from the body) gets no link.
 func (v *OpenAPIValidator) writeDeprecation(w http.ResponseWriter, r *http.Request) {
 	if len(v.deprecated) == 0 {
 		return
 	}
-	d, ok := v.deprecated[routeKey(r.Method, cleanRoutePath(r.URL.Path))]
+	path := cleanRoutePath(r.URL.Path)
+	template := path
+	d, ok := v.deprecated[routeKey(r.Method, path)]
 	if !ok {
 		for key, candidate := range v.deprecated {
 			parts := strings.SplitN(key, " ", 2)
-			if parts[0] == r.Method && routePatternMatches(parts[1], cleanRoutePath(r.URL.Path)) {
-				d, ok = candidate, true
+			if parts[0] == r.Method && routePatternMatches(parts[1], path) {
+				d, template, ok = candidate, parts[1], true
 				break
 			}
 		}
@@ -224,11 +433,50 @@ func (v *OpenAPIValidator) writeDeprecation(w http.ResponseWriter, r *http.Reque
 	}
 	w.Header().Set("Deprecation", "@"+strconv.FormatInt(d.DeprecatedAt.Unix(), 10))
 	w.Header().Set("Sunset", d.Sunset.UTC().Format(http.TimeFormat))
-	if d.Successor != "" {
-		w.Header().Set("Link", "<"+d.Successor+">; rel=\"successor-version\"")
+	if successor, ok := expandSuccessor(d.Successor, template, r.URL.EscapedPath()); ok {
+		w.Header().Set("Link", "<"+successor+">; rel=\"successor-version\"")
 	}
 }
 
+// expandSuccessor fills the placeholders of the successor template with the
+// segments of the escaped request path that stand at the placeholders of
+// the same name in the operation's template. It reports false for an empty
+// successor and for one with a placeholder the template does not fill.
+func expandSuccessor(successor, template, escapedPath string) (string, bool) {
+	if successor == "" {
+		return "", false
+	}
+	params := map[string]string{}
+	templateParts := strings.Split(strings.Trim(template, "/"), "/")
+	pathParts := strings.Split(strings.Trim(cleanRoutePath(escapedPath), "/"), "/")
+	// An encoded slash in a parameter changes the segment count; such a
+	// request fills no placeholder.
+	if len(templateParts) == len(pathParts) {
+		for i, segment := range templateParts {
+			if isPathPlaceholder(segment) && pathParts[i] != "" {
+				params[strings.Trim(segment, "{}")] = pathParts[i]
+			}
+		}
+	}
+	parts := strings.Split(successor, "/")
+	for i, segment := range parts {
+		if !isPathPlaceholder(segment) {
+			continue
+		}
+		value, ok := params[strings.Trim(segment, "{}")]
+		if !ok {
+			return "", false
+		}
+		parts[i] = value
+	}
+	return strings.Join(parts, "/"), true
+}
+
+// registerKnownRoutes is the fallback registry for a server without the
+// OpenAPI document. It must never be stricter than the document
+// (TestAuditT2ValidatorRegistryMatchesOpenAPIRequestBodies): bodiless
+// operations such as the refresh, the audit verification and the webhook
+// test are not registered.
 func (v *OpenAPIValidator) registerKnownRoutes() {
 	bodyJSON := RouteSpec{RequiresBody: true, AllowedContentTypes: []string{"application/json"}}
 	jsonOnly := RouteSpec{AllowedContentTypes: []string{"application/json"}}
@@ -245,8 +493,6 @@ func (v *OpenAPIValidator) registerKnownRoutes() {
 		"GET /api/v1/webhooks",
 		"GET /api/v1/webhooks/{id}",
 		"DELETE /api/v1/webhooks/{id}",
-		"POST /api/v1/webhooks/{id}/test",
-		"POST /api/v1/audit/verify",
 		"GET /api/v1/collectors",
 		"GET /api/v1/auth/me",
 		"GET /api/v1/entitlements",
@@ -298,7 +544,6 @@ func (v *OpenAPIValidator) registerKnownRoutes() {
 		"POST /api/v1/collectors",
 		"POST /api/v1/ingest/bulk",
 		"POST /api/v1/auth/callback",
-		"POST /api/v1/auth/refresh",
 		"POST /api/v1/entitlements",
 		"POST /api/v1/users",
 		"PATCH /api/v1/users/{id}",
@@ -349,16 +594,32 @@ func (v *OpenAPIValidator) lookup(method, path string) (RouteSpec, bool) {
 	if spec, ok := v.routes[routeKey(method, cleanPath)]; ok {
 		return spec, true
 	}
+	// Of several matching templates the one with the fewest placeholders
+	// wins (/cis/search before /cis/{id}), as in the router.
+	best, bestKey, found := RouteSpec{}, "", false
 	for key, spec := range v.routes {
 		parts := strings.SplitN(key, " ", 2)
-		if len(parts) != 2 || parts[0] != method {
+		if len(parts) != 2 || parts[0] != method || !routePatternMatches(parts[1], cleanPath) {
 			continue
 		}
-		if routePatternMatches(parts[1], cleanPath) {
-			return spec, true
+		if !found || moreSpecific(parts[1], strings.SplitN(bestKey, " ", 2)[1]) {
+			best, bestKey, found = spec, key, true
 		}
 	}
-	return RouteSpec{}, false
+	return best, found
+}
+
+// moreSpecific reports whether template a is more specific than b: the
+// first segment where one is literal and the other a placeholder decides.
+func moreSpecific(a, b string) bool {
+	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
+	for i := range min(len(as), len(bs)) {
+		ap, bp := isPathPlaceholder(as[i]), isPathPlaceholder(bs[i])
+		if ap != bp {
+			return bp
+		}
+	}
+	return a < b
 }
 
 func configuredSpecPath() string {
@@ -394,20 +655,43 @@ func shouldValidateContentType(method string) bool {
 	}
 }
 
+// bodySent reports whether the request carries a body: a declared length
+// or a body of unknown length (chunked).
+func bodySent(r *http.Request) bool {
+	return r.ContentLength != 0
+}
+
 func contentTypeAllowed(header string, allowed []string) bool {
 	if strings.TrimSpace(header) == "" {
 		return false
 	}
-	mediaType, _, err := mime.ParseMediaType(header)
-	if err != nil {
-		mediaType = strings.TrimSpace(strings.Split(header, ";")[0])
-	}
+	mediaType := parseMediaType(header)
 	for _, candidate := range allowed {
-		if mediaType == candidate {
+		switch {
+		case mediaType == candidate,
+			// A binary body (application/octet-stream, */*) may have any
+			// media type; its handler checks the type (document upload).
+			candidate == "application/octet-stream", candidate == "*/*",
+			strings.HasSuffix(candidate, "/*") && strings.HasPrefix(mediaType, strings.TrimSuffix(candidate, "*")):
 			return true
 		}
 	}
 	return false
+}
+
+func parseMediaType(header string) string {
+	mediaType, _, err := mime.ParseMediaType(header)
+	if err != nil {
+		mediaType = strings.ToLower(strings.TrimSpace(strings.Split(header, ";")[0]))
+	}
+	return mediaType
+}
+
+// isJSONMediaType reports whether the Content-Type names JSON
+// (application/json or a +json type such as application/scim+json).
+func isJSONMediaType(header string) bool {
+	mediaType := parseMediaType(header)
+	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
 }
 
 func routePatternMatches(pattern, path string) bool {

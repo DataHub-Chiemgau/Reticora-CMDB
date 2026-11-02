@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
@@ -22,7 +24,9 @@ import (
 // (one of two supplies keeps the server up, both take it down) with the
 // failed CIs, the impacted CIs with paths and a summary; /impact/{ci_id}
 // stays the short form; GET /topology without a root over 2,000 CIs is
-// 422.
+// 422. WP-403: 100 CIs answer, 101 are 422 on ci_ids; ci_ids with a CI of
+// the other organization or, for a client-1 principal, of client 2 is 404
+// like an unknown id, only own CIs answer 200.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestMultiImpactAgainstPostgres(t *testing.T) {
@@ -84,6 +88,87 @@ func TestMultiImpactAgainstPostgres(t *testing.T) {
 	} {
 		if code, body := call(f.OrgA, path); code != want {
 			t.Errorf("%s: %d, want %d (%s)", path, code, want, body)
+		}
+	}
+
+	// WP-403: at most 100 CIs per analysis; a CI of organization B or, for
+	// a client-1 principal, of client 2 among them is not found, like an
+	// unknown id; the own CIs answer.
+	ofClient2 := f.CI(t, f.OrgA, f.Client2, "multi-client2")
+	ofOrgB := f.CI(t, f.OrgB, "", "multi-org-b")
+	clientScope := database.OrgWideScope(f.OrgA, f.User)
+	clientScope.Clients = database.ScopeIDs(f.Client1)
+	client1 := tenant.WithTenant(database.ContextWithTenantScope(bg, &clientScope),
+		tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	callAs := func(ctx context.Context, path string) (int, []byte) {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
+		return w.Code, w.Body.Bytes()
+	}
+	own := []string{pduA, pduB, server, vm}
+	rows, err := f.Admin.Query(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status)
+		SELECT $1, $2, ci_type_id, 'multi-many-' || g, 'active' FROM ci, generate_series(1, 97) g WHERE ci.id = $3
+		RETURNING id::text`, f.OrgA, f.Client1, pduA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		own = append(own, id)
+	}
+	rows.Close()
+	if len(own) != topology.MaxImpactCIs+1 {
+		t.Fatalf("seeded %d own CIs, want %d", len(own), topology.MaxImpactCIs+1)
+	}
+	if hundred := impact("/api/v1/impact?ci_ids=" + strings.Join(own[:topology.MaxImpactCIs], ",")); len(hundred.FailedCIs) != topology.MaxImpactCIs ||
+		hundred.Summary.Failed != topology.MaxImpactCIs {
+		t.Errorf("100 CIs: %d failed, summary %+v", len(hundred.FailedCIs), hundred.Summary)
+	}
+	var fp struct {
+		Field string `json:"field"`
+	}
+	if code, body := call(f.OrgA, "/api/v1/impact?ci_ids="+strings.Join(own, ",")); code != http.StatusUnprocessableEntity ||
+		json.Unmarshal(body, &fp) != nil || fp.Field != "ci_ids" {
+		t.Errorf("101 CIs: %d %s, want 422 on ci_ids", code, body)
+	}
+	for _, c := range []struct {
+		name    string
+		ctx     context.Context
+		ids     []string
+		missing string
+	}{
+		{"organization A with a CI of organization B", ctxOf(f.OrgA), []string{pduA, ofOrgB}, ofOrgB},
+		{"organization B with a CI of organization A", ctxOf(f.OrgB), []string{ofOrgB, pduA}, pduA},
+		{"client 1 with a CI of client 2", client1, []string{pduA, ofClient2}, ofClient2},
+		{"client 1 with only a CI of client 2", client1, []string{ofClient2}, ofClient2},
+	} {
+		code, body := callAs(c.ctx, "/api/v1/impact?ci_ids="+strings.Join(c.ids, ","))
+		var p struct {
+			Detail string `json:"detail"`
+		}
+		if code != http.StatusNotFound || json.Unmarshal(body, &p) != nil || p.Detail != "ci not found: "+c.missing {
+			t.Errorf("%s: %d %s, want 404 ci not found: %s", c.name, code, body, c.missing)
+		}
+		if strings.Contains(string(body), "multi-") {
+			t.Errorf("%s: the answer names a CI: %s", c.name, body)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		ids  []string
+	}{
+		{"client 1 with its own CIs", client1, []string{pduA, pduB}},
+		{"organization A with a CI of client 2", ctxOf(f.OrgA), []string{pduA, ofClient2}},
+		{"organization B with its own CI", ctxOf(f.OrgB), []string{ofOrgB}},
+	} {
+		code, body := callAs(c.ctx, "/api/v1/impact?ci_ids="+strings.Join(c.ids, ","))
+		var a answer
+		if code != http.StatusOK || json.Unmarshal(body, &a) != nil || len(a.FailedCIs) != len(c.ids) {
+			t.Errorf("%s: %d %s", c.name, code, body)
 		}
 	}
 

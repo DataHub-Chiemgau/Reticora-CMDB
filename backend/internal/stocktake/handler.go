@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -31,6 +32,19 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/stocktakes/{id}/scans", h.ListScans)
 	r.Get("/api/v1/stocktakes/{id}/difference", h.Difference)
 	r.Post("/api/v1/stocktakes/{id}/complete", h.Complete)
+}
+
+// orgWideOrForbidden answers 403 and reports false when the request's
+// principal is restricted in the client or site scope (F-365): a stocktake is
+// a row of the whole organization, so only an org-wide principal changes,
+// completes or deletes it (E-09); the repository refuses the write as well.
+// Without a tenant scope the repository fails closed.
+func orgWideOrForbidden(w http.ResponseWriter, r *http.Request) bool {
+	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && (!scope.Clients.IsAll() || !scope.Sites.IsAll()) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "only a principal with an organization-wide scope may change a stocktake")
+		return false
+	}
+	return true
 }
 
 // List handles GET /api/v1/stocktakes
@@ -151,6 +165,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !orgWideOrForbidden(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var req UpdateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
@@ -179,6 +196,9 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !orgWideOrForbidden(w, r) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -311,6 +331,9 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !orgWideOrForbidden(w, r) {
+		return
+	}
 	stocktakeID := chi.URLParam(r, "id")
 	applyCorrections := true
 	if r.Body != nil && r.ContentLength != 0 {

@@ -3,11 +3,14 @@ package export
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // MemoryJobRepository is an in-memory JobRepository for tests and the
@@ -17,6 +20,9 @@ type MemoryJobRepository struct {
 	jobs  map[string]*Job
 	order []string
 	next  int
+	// outbox keeps the events CompleteJob records with a completion, as
+	// the PostgreSQL repository appends them to event_outbox (tests).
+	outbox []events.Event
 }
 
 // NewMemoryJobRepository creates an empty in-memory job repository.
@@ -40,10 +46,36 @@ func (r *MemoryJobRepository) CreateJob(_ context.Context, orgID string, job *Jo
 }
 
 // ownedBy mirrors the creator restriction of the PostgreSQL repository: with
-// a tenant scope in ctx, only the scope's user owns jobs.
+// a tenant scope in ctx, only the scope's user owns jobs, and only while the
+// job's scope snapshot lies in the scope (WP-409).
 func ownedBy(ctx context.Context, job *Job) bool {
 	scope, ok := database.TenantScopeFromContext(ctx)
-	return !ok || (scope.UserID != "" && job.InitiatedBy == scope.UserID)
+	return !ok || (scope.UserID != "" && job.InitiatedBy == scope.UserID && withinScope(job.Scope, &scope))
+}
+
+// withinScope reports whether in every dimension the scope is org-wide or
+// holds every id of the snapshot; a job without snapshot needs an org-wide
+// scope (ownJob of the PostgreSQL repository).
+func withinScope(snapshot *JobScope, scope *database.TenantScope) bool {
+	if snapshot == nil {
+		snapshot = &JobScope{}
+	}
+	within := func(ids []string, set database.ScopeSet) bool {
+		if set.IsAll() {
+			return true
+		}
+		if ids == nil {
+			return false
+		}
+		allowed := set.IDs()
+		for _, id := range ids {
+			if !slices.ContainsFunc(allowed, func(a string) bool { return strings.EqualFold(a, id) }) {
+				return false
+			}
+		}
+		return true
+	}
+	return within(snapshot.Clients, scope.Clients) && within(snapshot.Sites, scope.Sites) && within(snapshot.Teams, scope.Teams)
 }
 
 func (r *MemoryJobRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {
@@ -111,6 +143,7 @@ func (r *MemoryJobRepository) CompleteJob(_ context.Context, orgID, id string, o
 	job.CompletedAt = &completedAt
 	job.ExpiresAt = &expiresAt
 	job.UpdatedAt = completedAt
+	r.outbox = append(r.outbox, *completedEvent(orgID, id, job.Format, job.InitiatedBy, rowCount))
 	return nil
 }
 
@@ -149,6 +182,17 @@ func (r *MemoryJobRepository) ClaimPending(_ context.Context, limit int) ([]Job,
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+// Heartbeat implements JobRepository.
+func (r *MemoryJobRepository) Heartbeat(_ context.Context, orgID, id string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if job, ok := r.jobs[id]; ok && job.OrganizationID == orgID && job.Status == JobStatusRunning {
+		at = at.UTC()
+		job.StartedAt = &at
+	}
+	return nil
 }
 
 // ReclaimStale implements JobRepository.

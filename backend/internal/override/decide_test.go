@@ -28,6 +28,40 @@ func TestSourceRanksFollowREC03(t *testing.T) {
 	}
 }
 
+// TestDefaultPrioritiesFollowSourceRanks covers WP-478 (REC-03, retest of
+// F-230): the built-in source priorities, which GET
+// /reconciliation/source-policy shows without a policy of the
+// organization, are the sources of the REC-03 rank table by descending
+// rank (same rank by name), each once; the former list ranked manual and
+// import behind sweep.
+func TestDefaultPrioritiesFollowSourceRanks(t *testing.T) {
+	want := []string{
+		"manual", "manual_override", "override", "import", "workflow", "ipmi", "redfish",
+		"agent", "snmp", "api", "integration", "wmi", "nas", "ssh", "sweep",
+	}
+	if strings.Join(DefaultPriorities, ",") != strings.Join(want, ",") {
+		t.Errorf("DefaultPriorities = %v, want %v", DefaultPriorities, want)
+	}
+	if len(DefaultPriorities) != len(SourceRanks) {
+		t.Errorf("DefaultPriorities has %d sources, the rank table %d", len(DefaultPriorities), len(SourceRanks))
+	}
+	seen := map[string]bool{}
+	for i, source := range DefaultPriorities {
+		if _, ok := SourceRanks[source]; !ok || seen[source] {
+			t.Errorf("DefaultPriorities[%d] = %q: not in the rank table or repeated", i, source)
+		}
+		seen[source] = true
+		if i > 0 && SourceRank(DefaultPriorities[i-1]) < SourceRank(source) {
+			t.Errorf("%s (%d) before %s (%d): not descending", DefaultPriorities[i-1],
+				SourceRank(DefaultPriorities[i-1]), source, SourceRank(source))
+		}
+	}
+	policy, err := NewMemoryRepository().Policy(context.Background(), "org")
+	if err != nil || strings.Join(policy.Priorities, ",") != strings.Join(want, ",") || !policy.IsDefault {
+		t.Errorf("default policy = %+v, %v; want the priorities %v", policy, err, want)
+	}
+}
+
 type stubReader struct {
 	fv  *FieldValue
 	err error

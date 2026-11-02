@@ -2,7 +2,7 @@
  * cmdbHooks — TanStack Query hooks for the enterprise CMDB extension API.
  * Mirrors the conventions of api/hooks.ts (query keys, invalidation).
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   attributeDefinitionApi,
   ciTypeApi,
@@ -18,19 +18,43 @@ import {
   historyApi,
   impactApi,
   savedViewApi,
+  ATTRIBUTE_INDEX_JOB_KIND,
+  type AttributeDefinition,
   type AttributeIndexFlags,
+  type AttributeIndexJob,
   type CITypeCreateRequest,
+  type LocationUpdateRequest,
+  type SavedView,
 } from './cmdb';
 import type { FieldDefinition } from '../lib/fieldmeta';
 
-export function useCITypes(
-  params: { include_inactive?: boolean; category?: string; search?: string } = {},
-) {
-  return useQuery({ queryKey: ['ci-types', params], queryFn: () => ciTypeApi.list(params) });
+/** Query options a caller may set; the CI dialog loads only while open, uncached (MET-04). */
+interface QueryControl {
+  enabled?: boolean;
+  staleTime?: number;
 }
 
-export function useCIType(id: string | undefined) {
-  return useQuery({ queryKey: ['ci-types', id], queryFn: () => ciTypeApi.get(id!), enabled: !!id });
+export function useCITypes(
+  params: { include_inactive?: boolean; category?: string; search?: string; limit?: number } = {},
+  options: QueryControl = {},
+) {
+  return useQuery({
+    queryKey: ['ci-types', params],
+    queryFn: () => ciTypeApi.list(params),
+    ...options,
+  });
+}
+
+export function useCIType(
+  id: string | undefined,
+  { enabled = true, ...options }: QueryControl = {},
+) {
+  return useQuery({
+    queryKey: ['ci-types', id],
+    queryFn: () => ciTypeApi.get(id!),
+    ...options,
+    enabled: !!id && enabled,
+  });
 }
 
 export function useCITypeTemplates() {
@@ -63,10 +87,64 @@ export function useSetCITypeActive() {
   });
 }
 
+/** The index jobs of the attribute definitions (one shared query). */
+const INDEX_JOBS_KEY = ['jobs', ATTRIBUTE_INDEX_JOB_KIND];
+
+/**
+ * FlagUpdateError is a partial success of useUpsertCITypeField: the field
+ * is saved, its index flags are not (e.g. 409 while CIs share a value,
+ * MET-15). refusal is the answer of PATCH /attribute-definitions/{id}.
+ */
+export class FlagUpdateError extends Error {
+  readonly field: FieldDefinition;
+  readonly refusal: unknown;
+
+  constructor(field: FieldDefinition, refusal: unknown) {
+    super(refusal instanceof Error ? refusal.message : String(refusal));
+    this.name = 'FlagUpdateError';
+    this.field = field;
+    this.refusal = refusal;
+  }
+}
+
+/** The organization-wide and system fields of GET /ci-fields/global (MET-13). */
+const GLOBAL_FIELDS_KEY = ['ci-fields', 'global'];
+
+/**
+ * The changes of an attribute definition: the type (none: a global field),
+ * the global fields, the definitions and the index jobs.
+ */
+function invalidateAttributes(qc: QueryClient, typeId?: string) {
+  if (typeId) qc.invalidateQueries({ queryKey: ['ci-types', typeId] });
+  qc.invalidateQueries({ queryKey: ['ci-types'] });
+  qc.invalidateQueries({ queryKey: GLOBAL_FIELDS_KEY });
+  qc.invalidateQueries({ queryKey: ['attribute-definitions'] });
+  qc.invalidateQueries({ queryKey: INDEX_JOBS_KEY });
+}
+
+/**
+ * saveWithIndexFlags saves a field and then, when the editor set them, its
+ * index flags (PATCH /attribute-definitions/{id}); a refused flag update is
+ * a FlagUpdateError with the saved field.
+ */
+async function saveWithIndexFlags(
+  save: () => Promise<FieldDefinition & { id?: string }>,
+  index: AttributeIndexFlags | undefined,
+): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> {
+  const saved = await save();
+  const id = saved.id;
+  if (!index || !id) return { field: saved };
+  try {
+    return { field: saved, definition: await attributeDefinitionApi.setIndexFlags(id, index) };
+  } catch (err) {
+    throw new FlagUpdateError(saved, err);
+  }
+}
+
 export function useUpsertCITypeField() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       typeId,
       field,
       index,
@@ -74,18 +152,109 @@ export function useUpsertCITypeField() {
       typeId: string;
       field: FieldDefinition;
       index?: AttributeIndexFlags;
-    }) => {
-      const saved = await ciTypeApi.upsertField(typeId, field);
-      const id = (saved as FieldDefinition & { id?: string }).id;
-      if (index && id) {
-        await attributeDefinitionApi.setIndexFlags(id, index);
-      }
-      return saved;
-    },
-    onSuccess: (_d, v) => {
-      qc.invalidateQueries({ queryKey: ['ci-types', v.typeId] });
-      qc.invalidateQueries({ queryKey: ['ci-types'] });
-    },
+    }): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> =>
+      saveWithIndexFlags(() => ciTypeApi.upsertField(typeId, field), index),
+    // A refused flag update leaves the field saved: the list reloads either way.
+    onSettled: (_d, _e, v) => invalidateAttributes(qc, v.typeId),
+  });
+}
+
+/** The global fields: the organization-wide ones and the read-only system ones (MET-13). */
+export function useGlobalFields(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: GLOBAL_FIELDS_KEY,
+    queryFn: () => ciFieldApi.listGlobal(),
+    enabled: options.enabled ?? true,
+  });
+}
+
+/** The global attribute definitions with their index flags (MET-15). */
+export function useGlobalAttributeDefinitions() {
+  return useQuery({
+    queryKey: ['attribute-definitions', { scope: 'global' }],
+    queryFn: () => attributeDefinitionApi.list({ scope: 'global' }),
+  });
+}
+
+/**
+ * PUT /ci-fields/global: an organization-wide field for every CI type of
+ * the organization, then its index flags as useUpsertCITypeField does.
+ */
+export function useUpsertGlobalField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      field,
+      index,
+    }: {
+      field: FieldDefinition;
+      index?: AttributeIndexFlags;
+    }): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> =>
+      saveWithIndexFlags(() => ciFieldApi.upsertGlobal(field), index),
+    onSettled: () => invalidateAttributes(qc),
+  });
+}
+
+/** DELETE /ci-fields/global/{name}: removes an organization-wide field. */
+export function useDeleteGlobalField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => ciFieldApi.deleteGlobal(name),
+    onSuccess: () => invalidateAttributes(qc),
+  });
+}
+
+/** The attribute definitions of a CI type with their index flags (MET-10, MET-15). */
+export function useAttributeDefinitions(ciTypeId: string | undefined) {
+  return useQuery({
+    queryKey: ['attribute-definitions', { ci_type_id: ciTypeId }],
+    queryFn: () => attributeDefinitionApi.list({ ci_type_id: ciTypeId, scope: 'type' }),
+    enabled: !!ciTypeId,
+  });
+}
+
+/**
+ * PATCH of the index flags of an existing definition; it queues the index
+ * job (DB-04). typeId is the type of the definition, none for a global one.
+ */
+export function useSetAttributeIndexFlags() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, flags }: { id: string; typeId?: string; flags: AttributeIndexFlags }) =>
+      attributeDefinitionApi.setIndexFlags(id, flags),
+    onSettled: (_d, _e, v) => invalidateAttributes(qc, v.typeId),
+  });
+}
+
+function isActiveJob(job: AttributeIndexJob) {
+  return job.status === 'queued' || job.status === 'running';
+}
+
+function definitionOf(job: AttributeIndexJob): string {
+  const params = job.params as { definition_id?: unknown } | null | undefined;
+  return typeof params?.definition_id === 'string' ? params.definition_id.toLowerCase() : '';
+}
+
+/**
+ * useAttributeIndexJob follows the newest index job of a definition: the
+ * server queues it before it answers the flag change, the list is newest
+ * first. It refreshes while the job is queued or running. The jobs of all
+ * definitions share one request.
+ */
+export function useAttributeIndexJob(definitionId: string | undefined) {
+  return useQuery({
+    queryKey: INDEX_JOBS_KEY,
+    queryFn: () => attributeDefinitionApi.indexJobs(),
+    enabled: !!definitionId,
+    retry: false,
+    select: (page) =>
+      (page.data ?? []).find((job) => definitionOf(job) === definitionId?.toLowerCase()) ?? null,
+    refetchInterval: (query) =>
+      (query.state.data?.data ?? []).some(
+        (job) => definitionOf(job) === definitionId?.toLowerCase() && isActiveJob(job),
+      )
+        ? 2_000
+        : false,
   });
 }
 
@@ -127,10 +296,11 @@ export function useDeleteInstanceField(ciId: string) {
 }
 
 // Relationship types
-export function useRelationshipTypes() {
+export function useRelationshipTypes(enabled = true) {
   return useQuery({
     queryKey: ['relationship-types'],
     queryFn: () => relationshipTypeApi.list({ limit: 100 }),
+    enabled,
   });
 }
 
@@ -162,8 +332,10 @@ export function useLifecycleTransition(entityType: 'assets' | 'cis', id: string)
 }
 
 // Locations
-export function useLocationTree() {
-  return useQuery({ queryKey: ['locations', 'tree'], queryFn: () => locationApi.tree() });
+// The tree is read where a page needs it: the CI detail page names the
+// location, site and room of a CI only when it has one (CI-06, DB-05).
+export function useLocationTree({ enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({ queryKey: ['locations', 'tree'], queryFn: () => locationApi.tree(), enabled });
 }
 
 export function useCreateLocation() {
@@ -171,6 +343,23 @@ export function useCreateLocation() {
   return useMutation({
     mutationFn: locationApi.create,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['locations'] }),
+  });
+}
+
+/**
+ * useUpdateLocation renames and/or moves a node (PATCH /locations/{id},
+ * LOC-07). A move re-derives path, site and client of the whole subtree, so
+ * the tree, every location detail and the history are refetched.
+ */
+export function useUpdateLocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: LocationUpdateRequest }) =>
+      locationApi.update(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['locations'] });
+      qc.invalidateQueries({ queryKey: ['history'] });
+    },
   });
 }
 
@@ -272,6 +461,20 @@ export function useFieldProvenance(ciId: string | undefined) {
   });
 }
 
+/**
+ * Setting or clearing an override changes the effective value of the CI and
+ * raises its version (API-07): the CI detail, the CI lists and the field values
+ * are read again, so the page shows the new value without a reload (CI-10,
+ * F-100) and the edit form sends the new version as If-Match.
+ */
+function invalidateOverride(qc: QueryClient, ciId: string) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['ci-fields', ciId] }),
+    qc.invalidateQueries({ queryKey: ['ci', ciId] }),
+    qc.invalidateQueries({ queryKey: ['cis'] }),
+  ]);
+}
+
 export function useSetOverride(ciId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -286,10 +489,7 @@ export function useSetOverride(ciId: string) {
       reason: string;
       protectedFlag?: boolean;
     }) => overrideApi.setOverride(ciId, field, value, reason, protectedFlag),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ci-fields', ciId] });
-      qc.invalidateQueries({ queryKey: ['ci', ciId] });
-    },
+    onSuccess: () => invalidateOverride(qc, ciId),
   });
 }
 
@@ -297,7 +497,7 @@ export function useClearOverride(ciId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (field: string) => overrideApi.clearOverride(ciId, field),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ci-fields', ciId] }),
+    onSuccess: () => invalidateOverride(qc, ciId),
   });
 }
 
@@ -343,6 +543,16 @@ export function useSaveView() {
   });
 }
 
+/** Changes an own view (PATCH, owner only, E-86): sort, columns, sharing. */
+export function useUpdateSavedView() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<SavedView> }) =>
+      savedViewApi.update(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views'] }),
+  });
+}
+
 export function useDeleteSavedView() {
   const qc = useQueryClient();
   return useMutation({
@@ -351,9 +561,20 @@ export function useDeleteSavedView() {
   });
 }
 
-export function useFilterQuery() {
-  return useMutation({
-    mutationFn: (spec: Record<string, unknown> & { entity_kind?: string }) =>
-      savedViewApi.query(spec),
+/**
+ * Runs a structured filter spec (POST /search/query, search:read plus the
+ * read permission of the entity kind). A query rather than a mutation, so a
+ * failed run can be repeated with refetch(); null runs nothing. Not retried
+ * automatically: a 403 is an answer, not a transient failure (F-055).
+ */
+export function useFilterQuery(spec: (Record<string, unknown> & { entity_kind?: string }) | null) {
+  return useQuery({
+    queryKey: ['search-query', spec],
+    queryFn: () => savedViewApi.query(spec!),
+    enabled: spec !== null,
+    // Every run of a view asks the server; a cached result only bridges
+    // the wait.
+    staleTime: 0,
+    retry: false,
   });
 }

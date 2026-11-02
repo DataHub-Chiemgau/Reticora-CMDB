@@ -62,6 +62,8 @@ func (r *Registry) WithEgress(opts egress.Options) *Registry {
 
 // ValidateBaseURL checks a connector base URL when it is stored: the SCIM
 // rules of NewSCIMConnector and the egress destination policy.
+// validation: the texts of NewSCIMConnector (URL parse, https) and
+// egress.Options.ValidateURL, without a DNS lookup.
 func (r *Registry) ValidateBaseURL(connectorType, baseURL string) error {
 	if connectorType != ConnectorTypeSCIM {
 		return nil

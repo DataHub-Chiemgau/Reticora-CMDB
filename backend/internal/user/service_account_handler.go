@@ -5,12 +5,14 @@ import (
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
 // ServiceAccountHandler serves /api/v1/service-accounts (RBA-08, API-05).
-// Reading needs user:read, every change user:manage (authz).
+// Reading needs user:read, every change user:manage, assigning roles
+// role:manage (authz) within the caller's rights.
 type ServiceAccountHandler struct {
 	repo ServiceAccountRepository
 }
@@ -31,7 +33,10 @@ func (h *ServiceAccountHandler) RegisterRoutes(r chi.Router) {
 }
 
 func writeServiceAccountError(w http.ResponseWriter, err error) {
+	var ceiling *RoleCeilingError
 	switch {
+	case errors.As(err, &ceiling):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ceiling.Error())
 	case errors.Is(err, ErrServiceAccountNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "service account not found")
 	case errors.Is(err, ErrServiceAccountInUse):
@@ -43,15 +48,21 @@ func writeServiceAccountError(w http.ResponseWriter, err error) {
 	}
 }
 
-// List returns the organization's service accounts with their roles.
+// List returns a page of the organization's service accounts with their
+// roles, newest first on (created_at, id): limit (default 50, at most 200)
+// and the signed cursor of API-02 (F-215).
 func (h *ServiceAccountHandler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
-	items, err := h.repo.ListServiceAccounts(r.Context(), t.OrganizationID)
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListServiceAccounts(r.Context(), t.OrganizationID, page)
 	if err != nil {
 		writeServiceAccountError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[ServiceAccount]{Data: items, Total: len(items), Limit: len(items)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(items, total, page, serviceAccountPosition))
 }
 
 // Create adds a service account without roles.
@@ -108,8 +119,15 @@ func (h *ServiceAccountHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// SetRoles replaces the role assignments of an account.
+// SetRoles replaces the role assignments of an account. Like assigning a
+// user's roles it needs role:manage and never grants or removes more than
+// the caller holds (RBA-08, RBA-03).
 func (h *ServiceAccountHandler) SetRoles(w http.ResponseWriter, r *http.Request) {
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok || !p.Has(identity.PermRoleManage) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "assigning roles requires role:manage")
+		return
+	}
 	var req struct {
 		Roles []ServiceAccountRole `json:"roles"`
 	}
@@ -117,7 +135,7 @@ func (h *ServiceAccountHandler) SetRoles(w http.ResponseWriter, r *http.Request)
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	sa, err := h.repo.SetServiceAccountRoles(r.Context(), tenant.FromContext(r.Context()).OrganizationID, chi.URLParam(r, "id"), req.Roles)
+	sa, err := h.repo.SetServiceAccountRoles(r.Context(), tenant.FromContext(r.Context()).OrganizationID, chi.URLParam(r, "id"), &p, req.Roles)
 	if err != nil {
 		writeServiceAccountError(w, err)
 		return

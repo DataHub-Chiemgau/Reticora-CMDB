@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
@@ -58,5 +59,119 @@ func TestAPIKeyStoreScope(t *testing.T) {
 	}
 	if !used {
 		t.Fatal("last_used_at was not set")
+	}
+}
+
+// TestAPIKeyStoreManagementScope covers the management paths of the API key
+// store (TEN-06, AUT-04 AC4 of WP-012; evidence WP-536): List, Revoke and
+// Rotate run in the caller's tenant transaction. A principal of organization
+// B naming organization A gets ErrTenantMismatch; naming its own organization
+// with a key id of organization A it gets ErrAPIKeyNotFound, its list holds
+// no key of A, and the key row of A stays unchanged (no revocation, no
+// shortened expiry, no successor). Without a tenant scope every path returns
+// ErrNoTenantScope. The organization's own principal lists, rotates and
+// revokes its key (control).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAPIKeyStoreManagementScope(t *testing.T) {
+	f := scopetest.Seed(t, "1e")
+	store := identity.NewPGAPIKeyStore(f.App)
+	bg := context.Background()
+	ctxA, ctxB := f.OrgCtx(f.OrgA), f.OrgCtx(f.OrgB)
+
+	save := func(ctx context.Context, org, prefix string) string {
+		t.Helper()
+		owner := f.AppUser(t, org, "owner-"+prefix)
+		key := identity.StoredAPIKey{OrganizationID: org, Name: "scopetest-" + prefix, KeyHash: "hash-" + prefix, KeyPrefix: prefix,
+			Environment: "live", CreatedBy: owner}
+		if err := store.Save(ctx, &key); err != nil {
+			t.Fatalf("save key %s: %v", prefix, err)
+		}
+		var id string
+		if err := f.Admin.QueryRow(bg, `SELECT id::text FROM api_key WHERE key_prefix = $1`, prefix).Scan(&id); err != nil {
+			t.Fatalf("read key %s: %v", prefix, err)
+		}
+		return id
+	}
+	idA := save(ctxA, f.OrgA, "mgmt1ea")
+	idB := save(ctxB, f.OrgB, "mgmt1eb")
+
+	// row is the state of a key row a change through the store would
+	// touch, with the number of keys rotated from it.
+	row := func(id string) string {
+		t.Helper()
+		var state string
+		if err := f.Admin.QueryRow(bg, `SELECT concat_ws('|', name, revoked_at, expires_at, last_used_at,
+				(SELECT COUNT(*) FROM api_key s WHERE s.rotated_from = k.id))
+			FROM api_key k WHERE id = $1`, id).Scan(&state); err != nil {
+			t.Fatalf("read key row: %v", err)
+		}
+		return state
+	}
+	before := row(idA)
+	unchanged := func(step string) {
+		t.Helper()
+		if after := row(idA); after != before {
+			t.Errorf("%s changed the organization-A key: %q -> %q", step, before, after)
+		}
+	}
+	overlap := time.Now().Add(time.Hour)
+
+	// Scope of organization B naming organization A.
+	if _, err := store.List(ctxB, f.OrgA); !errors.Is(err, database.ErrTenantMismatch) {
+		t.Errorf("list A with B scope: got %v, want ErrTenantMismatch", err)
+	}
+	if err := store.Revoke(ctxB, f.OrgA, idA); !errors.Is(err, database.ErrTenantMismatch) {
+		t.Errorf("revoke A with B scope: got %v, want ErrTenantMismatch", err)
+	}
+	unchanged("revoke with B scope naming A")
+	if _, err := store.Rotate(ctxB, f.OrgA, idA, overlap); !errors.Is(err, database.ErrTenantMismatch) {
+		t.Errorf("rotate A with B scope: got %v, want ErrTenantMismatch", err)
+	}
+	unchanged("rotate with B scope naming A")
+
+	// Scope and organization B with a key id of organization A.
+	keys, err := store.List(ctxB, f.OrgB)
+	if err != nil {
+		t.Fatalf("list B: %v", err)
+	}
+	if len(keys) != 1 || keys[0].ID != idB {
+		t.Errorf("list B: %d keys %+v, want only the organization-B key", len(keys), keys)
+	}
+	if err = store.Revoke(ctxB, f.OrgB, idA); !errors.Is(err, identity.ErrAPIKeyNotFound) {
+		t.Errorf("revoke A key as B: got %v, want ErrAPIKeyNotFound", err)
+	}
+	unchanged("revoke of the A key as B")
+	if _, err = store.Rotate(ctxB, f.OrgB, idA, overlap); !errors.Is(err, identity.ErrAPIKeyNotFound) {
+		t.Errorf("rotate A key as B: got %v, want ErrAPIKeyNotFound", err)
+	}
+	unchanged("rotate of the A key as B")
+
+	// Without a tenant scope.
+	if _, err = store.List(bg, f.OrgA); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("list without scope: got %v, want ErrNoTenantScope", err)
+	}
+	if err = store.Revoke(bg, f.OrgA, idA); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("revoke without scope: got %v, want ErrNoTenantScope", err)
+	}
+	if _, err = store.Rotate(bg, f.OrgA, idA, overlap); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("rotate without scope: got %v, want ErrNoTenantScope", err)
+	}
+	unchanged("calls without scope")
+
+	// Control: organization A lists, rotates and revokes its own key.
+	keys, err = store.List(ctxA, f.OrgA)
+	if err != nil || len(keys) != 1 || keys[0].ID != idA {
+		t.Fatalf("list A: %v %+v, want only the organization-A key", err, keys)
+	}
+	rotated, err := store.Rotate(ctxA, f.OrgA, idA, overlap)
+	if err != nil {
+		t.Fatalf("rotate A: %v", err)
+	}
+	if err = store.Revoke(ctxA, f.OrgA, rotated.Created.ID); err != nil {
+		t.Fatalf("revoke the successor of the A key: %v", err)
+	}
+	if after := row(idA); after == before {
+		t.Error("the rotation by organization A left its key row unchanged")
 	}
 }

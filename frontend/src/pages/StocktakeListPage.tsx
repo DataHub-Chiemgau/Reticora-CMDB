@@ -7,6 +7,7 @@ import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 /** The stocktake statuses and scopes; their labels come from the catalog. */
 export const STOCKTAKE_STATUSES = ['planned', 'in_progress', 'completed', 'cancelled'] as const;
@@ -84,7 +85,7 @@ export function StocktakeListPage() {
         <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
       ) : (
         <Card title={`${t('stocktake.title', 'Inventur')} (${data?.total ?? 0})`}>
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('stocktake.title', 'Inventur')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -129,14 +130,14 @@ export function StocktakeListPage() {
                 ))}
                 {(!data?.data || data.data.length === 0) && (
                   <tr>
-                    <td colSpan={6} className="py-4 text-center text-gray-400">
+                    <td colSpan={6} className="py-4 text-center text-gray-600 dark:text-gray-300">
                       {t('common.noData', 'Keine Daten')}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
 

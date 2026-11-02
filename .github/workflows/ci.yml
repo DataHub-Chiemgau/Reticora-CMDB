@@ -9,6 +9,14 @@ on:
 permissions:
   contents: read
 
+# Pinned nats-server for the tests that start their own server
+# (TEST_NATS_SERVER_BIN); 2.10.x like the image nats:2.10-alpine. The step
+# "Install nats-server" is the same in the jobs go-modules (collector),
+# migrations and auditdefect (WP-337, WP-374).
+env:
+  NATS_SERVER_VERSION: "2.10.29"
+  NATS_SERVER_SHA256: e314da74a83a1d3876db8814c27eb990fe729640fd6452025b441bcede8390da
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -20,13 +28,20 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
 
       - name: Download dependencies
         run: go mod download
 
       - name: Build
         run: go build ./...
+
+      # internal/config renders deploy/k8s (WP-422); in the CI the test fails
+      # without KUSTOMIZE, the same pin as the job k8s-manifests.
+      - name: Install kustomize
+        run: |
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
 
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
@@ -57,7 +72,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
 
       - name: Download dependencies
         run: go mod download
@@ -68,6 +83,19 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # The collector's mTLS NATS channel is tested against a real nats-server.
+      - name: Install nats-server
+        if: matrix.module == 'collector'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/nats.tgz" \
+            "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          echo "${NATS_SERVER_SHA256}  $RUNNER_TEMP/nats.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/nats.tgz" -C "$RUNNER_TEMP" --strip-components=1 "nats-server-v${NATS_SERVER_VERSION}-linux-amd64/nats-server"
+          mv "$RUNNER_TEMP/nats-server" "$RUNNER_TEMP/bin/nats-server"
+          echo "TEST_NATS_SERVER_BIN=$RUNNER_TEMP/bin/nats-server" >> "$GITHUB_ENV"
+
       - name: Test
         run: go test -race ./...
 
@@ -76,8 +104,9 @@ jobs:
     services:
       postgres:
         # TimescaleDB is required by migration 000020 (metric_sample hypertable);
-        # matches the docker-compose database image.
-        image: timescale/timescaledb:2.17.2-pg16
+        # every TimescaleDB image of the repository is this reference, pinned
+        # by version and digest (E-96, tests/ci-config.test.sh).
+        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
         env:
           POSTGRES_USER: reticora
           POSTGRES_PASSWORD: reticora
@@ -100,16 +129,37 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # TEC-12 (WP-534): the scope filters of the OpenSearch backend are
+      # tested against a real OpenSearch, the version of deploy/ (single
+      # node, security plugin off; internal/search/
+      # opensearch_real_integration_test.go).
+      opensearch:
+        image: opensearchproject/opensearch:2.13.0
+        env:
+          discovery.type: single-node
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+          DISABLE_SECURITY_PLUGIN: "true"
+          # The runner's disk fill level must not block the test index.
+          cluster.routing.allocation.disk.threshold_enabled: "false"
+          OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 18
     env:
       PGPASSWORD: reticora
       DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_migrations?sslmode=disable
       TEST_REDIS_URL: redis://localhost:6379/0
+      TEST_OPENSEARCH_URL: http://localhost:9200
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
 
       - name: Install golang-migrate
         run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
@@ -123,8 +173,51 @@ jobs:
       - name: Re-apply all migrations
         run: migrate -path backend/migrations -database "$DATABASE_URL" up
 
+      # TEN-03/F-057 (WP-349): the application pools of the tests log in as a
+      # runtime login without SUPERUSER/BYPASSRLS, member of reticora_app only
+      # (TEST_APP_DATABASE_URL, scopetest.AppDSN); the bootstrap superuser in
+      # TEST_DATABASE_URL stays the admin login for seeding and fixtures.
+      - name: Create the runtime test login
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE reticora_test_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD 'reticora_test_runtime';
+          GRANT reticora_app TO reticora_test_runtime;
+          SQL
+
+      # INS-05/OPS-01 (WP-604): update of the TimescaleDB extension of an
+      # existing database (scripts/ops/timescaledb-update.sh, start_stack of
+      # install-cloud.sh) with stubs, and against a database of its own that
+      # is created with timescaledb 2.17.2 and migrated: afterwards
+      # default_version, the event trigger enabled, no migration left and
+      # TestSchemaBaselineMatchesMigratedSchema green. The database is dropped
+      # at the end.
+      - name: TimescaleDB extension update from an older version
+        env:
+          TSDB_UPDATE_TEST_DATABASE_URL: postgres://reticora:reticora@localhost:5432/postgres?sslmode=disable
+        run: ./tests/timescaledb-update.test.sh
+
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@v1.13.0
+
+      # internal/config renders deploy/k8s (WP-422); in the CI the test fails
+      # without KUSTOMIZE, the same pin as the job k8s-manifests.
+      - name: Install kustomize
+        run: |
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
+
+      # COL-08/PRI-07 (WP-374): the collector edge tests run
+      # deploy/docker-compose/nats-edge.conf with a real nats-server.
+      - name: Install nats-server
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/nats.tgz" \
+            "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          echo "${NATS_SERVER_SHA256}  $RUNNER_TEMP/nats.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/nats.tgz" -C "$RUNNER_TEMP" --strip-components=1 "nats-server-v${NATS_SERVER_VERSION}-linux-amd64/nats-server"
+          mv "$RUNNER_TEMP/nats-server" "$RUNNER_TEMP/bin/nats-server"
+          echo "TEST_NATS_SERVER_BIN=$RUNNER_TEMP/bin/nats-server" >> "$GITHUB_ENV"
 
       # The ingest.> pipeline is tested against a real JetStream
       # (REC-01, internal/discovery/consumer_integration_test.go). Service
@@ -135,6 +228,20 @@ jobs:
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 
+      # OPS-04/NFR-05 (WP-544): setupObjectStorage creates the buckets and
+      # switches on their versioning against a real MinIO, the image of
+      # deploy/docker-compose (cmd/server/objectstorage_integration_test.go).
+      # Service containers cannot pass arguments ("server /data"), so MinIO
+      # is started here.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=reticora -e MINIO_ROOT_PASSWORD=reticora_dev \
+            pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 \
+            server /data
+          for _ in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:9000/minio/health/live && exit 0; sleep 1; done
+          docker logs minio; exit 1
+
       # Every PostgreSQL test activates itself through TEST_DATABASE_URL, so the
       # whole module runs without a name filter. -p 1 runs packages one after
       # another: they share this database and some fixtures are not isolated.
@@ -144,27 +251,37 @@ jobs:
         working-directory: backend
         env:
           TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+          TEST_APP_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora_migrations?sslmode=disable
           TEST_NATS_URL: nats://localhost:4222
+          TEST_S3_ENDPOINT: http://localhost:9000
+          TEST_S3_ACCESS_KEY: reticora
+          TEST_S3_SECRET_KEY: reticora_dev
         run: gotestsum --format testname --jsonfile test-db.json -- -count=1 -p 1 ./...
 
-      - name: Summarize PostgreSQL test run
+      # ABN-02/NFR-10 (WP-436, retest of F-115 and F-280): the plan budget of
+      # the CI list, its filters and the identity search, ten times in a row.
+      # Every run migrates a database of its own (budgetDatabase), so the
+      # plans never depend on the rows other tests left in this one.
+      - name: CI query budget, ten runs on fresh databases
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+          TEST_APP_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora_migrations?sslmode=disable
+        run: go test -count=10 -run TestCIQueryBudget ./internal/ci/
+
+      # F-283/TST-04 (WP-499): the only evaluation of test-db.json. Every
+      # skipped test or subtest fails the job unless it is in the allow-list
+      # of the script; the job provides PostgreSQL, Redis, NATS, the
+      # nats-server binary and kustomize. This replaces the grep for
+      # "TEST_DATABASE_URL not set" and the natsedge-specific skip check of
+      # WP-374 (COL-08/PRI-07). F-194/TST-02 (WP-559): every target test of
+      # the TST-02 scenarios (tests/tst02-targets.txt) must have run with
+      # result pass; a missing or skipped one fails the job with its name.
+      # Synthetic cases: tests/ci-db-summary.test.sh in the job gate.
+      - name: Summarize PostgreSQL test run, fail on skipped tests and TST-02 targets not passed
         if: always()
         working-directory: backend
-        run: |
-          set -euo pipefail
-          test -s test-db.json || { echo "::error::no test output recorded"; exit 1; }
-          pkgs=$(go list $(grep -rl --include='*_test.go' 'TEST_DATABASE_URL' . | xargs -n1 dirname | sort -u) | jq -R . | jq -sc .)
-          jq -r --argjson pkgs "$pkgs" '
-            select(.Test != null and (.Test | contains("/") | not))
-            | select(.Action == "pass" or .Action == "fail" or .Action == "skip")
-            | select(.Package as $p | $pkgs | index($p))
-            | "\(.Action)\t\(.Package | sub(".*/backend/"; ""))\t\(.Test)"' test-db.json | sort -k2 > db-tests.txt
-          cat db-tests.txt
-          echo "Tests in $(echo "$pkgs" | jq length) PostgreSQL-backed packages: passed=$(grep -c '^pass' db-tests.txt || true) failed=$(grep -c '^fail' db-tests.txt || true) skipped=$(grep -c '^skip' db-tests.txt || true)"
-          if grep -q 'TEST_DATABASE_URL not set' test-db.json; then
-            echo "::error::PostgreSQL integration tests were skipped although TEST_DATABASE_URL is set"
-            exit 1
-          fi
+        run: ../scripts/ci/db-test-summary.sh --require-pass ../tests/tst02-targets.txt test-db.json
 
       - name: Assert every tenant policy uses app.org_id
         run: |
@@ -189,8 +306,14 @@ jobs:
         run: make seed
 
   # GLO-11/DOD-01: docs/traceability.csv is checked on every PR (E-30).
-  # Format, known IDs, existing test files and the rows the plan prescribes for
-  # the PR's work packages block; completeness is reported until gate G1.
+  # Format, known IDs, test files (by form; other evidence only from the
+  # allow-list of planned rows, never the gate checklist) and the rows the
+  # plans prescribe for the PR's work packages block. Since gate G1 every
+  # [B]/[Q] ID needs a row or an entry in docs/acceptance/g1-ausnahmen.csv
+  # (E-76); [Pn]/[A] completeness is reported. The plans are
+  # docs/plan/implementierungsplan.md and the G1 remediation plan
+  # docs/plan/g1-korrektur/implementierungsplan.md (WP-336); WP numbers are
+  # unique across both.
   traceability:
     runs-on: ubuntu-latest
     steps:
@@ -198,27 +321,126 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
 
       # Work packages are taken from the PR title and the "Arbeitspakete:" line
-      # of the PR template. Untrusted text is only read through env variables.
-      - name: Determine work packages of the pull request
-        if: github.event_name == 'pull_request'
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          wps=$( { printf '%s\n' "$PR_TITLE"; printf '%s\n' "$PR_BODY" | grep -iE '^[*_ ]*Arbeitspakete?[*_ ]*:' || true; } \
-            | grep -oE 'WP-[0-9]{3}' | sort -u | tr '\n' ' ' || true)
-          echo "Work packages: ${wps:-none}"
-          echo "TRACEABILITY_WPS=${wps}" >> "$GITHUB_ENV"
-
+      # of the PR template, ranges included ("WP-332 – WP-335"). The untrusted
+      # texts reach the Go test only as env variables; no shell reads them.
       - name: Check docs/traceability.csv
         working-directory: backend
+        env:
+          TRACEABILITY_PR_TITLE: ${{ github.event.pull_request.title }}
+          TRACEABILITY_PR_BODY: ${{ github.event.pull_request.body }}
         run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/
 
+  # TST-04 (WP-337): the defect tests of the Phase-1 acceptance audit run
+  # against tests/audit/expected-failures.txt. A listed test that turned green
+  # must be moved into the regular suite, an unlisted red test is a regression,
+  # an aborted test (build failure, panic, missing setup) always fails. See
+  # tests/audit/README.md.
+  auditdefect:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+        env:
+          POSTGRES_USER: reticora
+          POSTGRES_PASSWORD: reticora
+          POSTGRES_DB: reticora_auditdefect
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reticora"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_auditdefect?sslmode=disable
+      TEST_DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_auditdefect?sslmode=disable
+      TEST_REDIS_URL: redis://localhost:6379/0
+      TEST_NATS_URL: nats://localhost:4222
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ratchet self-test
+        run: ./tests/audit/run-auditdefect.test.sh
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Install nats-server
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/nats.tgz" \
+            "https://github.com/nats-io/nats-server/releases/download/v${NATS_SERVER_VERSION}/nats-server-v${NATS_SERVER_VERSION}-linux-amd64.tar.gz"
+          echo "${NATS_SERVER_SHA256}  $RUNNER_TEMP/nats.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/nats.tgz" -C "$RUNNER_TEMP" --strip-components=1 "nats-server-v${NATS_SERVER_VERSION}-linux-amd64/nats-server"
+          mv "$RUNNER_TEMP/nats-server" "$RUNNER_TEMP/bin/nats-server"
+          echo "TEST_NATS_SERVER_BIN=$RUNNER_TEMP/bin/nats-server" >> "$GITHUB_ENV"
+
+      - name: Install migrate, kustomize, amtool and PyYAML
+        run: |
+          set -euo pipefail
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/am.tgz" \
+            https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz
+          echo "23c3f5a3c73de91dbaec419f3c492bef636deb02680808e5d842e6553aa16074  $RUNNER_TEMP/am.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/am.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 alertmanager-0.27.0.linux-amd64/amtool
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Apply all migrations
+        run: migrate -path backend/migrations -database "$DATABASE_URL" up
+
+      - name: Start NATS with JetStream
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+          for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
+          docker logs nats; exit 1
+
+      - name: Defect tests against the expected-failure list
+        run: ./tests/audit/run-auditdefect.sh --kinds go,sh,vitest --out "$RUNNER_TEMP/auditdefect"
+
+      - name: Upload the comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auditdefect
+          path: ${{ runner.temp }}/auditdefect/
+          retention-days: 14
+
   # Gate G1 (WP-213): REP-01 structure, gate checklist, open Critical findings,
-  # frozen acceptance artefacts and workflow syntax.
+  # frozen acceptance artefacts and workflow syntax; the break-glass alert
+  # (WP-362, SEC-07); the container log retention (WP-458, NFR-06).
   gate:
     runs-on: ubuntu-latest
     steps:
@@ -229,6 +451,88 @@ jobs:
 
       - name: Gate and structure checks (REP-01, GATE-01/02/05, SEQ-01, DOD-01, GLO-11)
         run: ./tests/rep01-structure.test.sh
+
+      # SEC-11/TST-04 (WP-389): every release image is in the image-scan
+      # matrix and scanned before the push, the scan exceptions keep the CVE
+      # fix SLA, the database image is pinned.
+      - name: CI configuration of the scans (SEC-11, TST-04)
+        run: ./tests/ci-config.test.sh
+
+      # F-283/TST-04 (WP-499): the skip rule of the job migrations on
+      # synthetic test2json output.
+      - name: Skip rule of the DB job (TST-04)
+        run: ./tests/ci-db-summary.test.sh
+
+      # SEC-07 (WP-362): every break-glass use alarms. promtool pinned to the
+      # Prometheus 3.5 LTS release, checksum from its sha256sums.txt.
+      - name: Install promtool
+        run: |
+          set -euo pipefail
+          curl -sSfL -o "$RUNNER_TEMP/prometheus.tgz" \
+            https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz
+          echo "e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a  $RUNNER_TEMP/prometheus.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/prometheus.tgz" -C "$RUNNER_TEMP" --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
+          echo "PROMTOOL=$RUNNER_TEMP/promtool" >> "$GITHUB_ENV"
+
+      - name: Break-glass alert rule and promtool unit test (SEC-07)
+        env:
+          REQUIRE_PROMTOOL: "1"
+        run: ./tests/audit/t2-break-glass-alert.test.sh
+
+      # OPS-06 (WP-449): the outage suite without the installed stack: SMTP
+      # scenario (F-135), load accounting and the negative self-test against
+      # stubs (F-136), Mailpit overlay, outage.yml. The suite itself runs in
+      # outage.yml.
+      - name: Outage suite configuration and load accounting (OPS-06)
+        run: ./tests/outage/config.test.sh
+
+      # NFR-05/OPS-04 (WP-445): the restore proof without the backup chain:
+      # write window against both RPO limits (F-130), the RPO line against
+      # fixture numbers, restore-pitr.sh against stubs, restore-test.yml and
+      # the expectation of its rpo-negative job. The proof itself runs in
+      # restore-test.yml.
+      - name: Restore proof configuration and RPO evaluation (NFR-05, OPS-04)
+        run: ./tests/restore-pitr-config.test.sh
+
+      # NFR-06 (WP-458, F-150, E-77): every compose service logs to journald;
+      # install-cloud.sh writes the 30-day journald drop-in where
+      # systemd-journald runs, otherwise it selects the json-file rotation
+      # through COMPOSE_FILE (systemctl and docker stubbed, docker compose
+      # config with and without the rotation, negative copies of the compose
+      # file).
+      - name: Container logs 30 days (NFR-06)
+        run: ./tests/audit/log-retention.test.sh
+
+      - name: Installer log retention, journald drop-in or json-file fallback (NFR-06)
+        run: ./tests/install-log-retention.test.sh
+
+  # OPS-05 (WP-446): the Alertmanager configuration loads (amtool
+  # check-config), the PrometheusRule groups pass promtool check rules and
+  # their unit tests in deploy/monitoring/tests. amtool v0.27.0 and promtool
+  # v2.54.1 pinned, checksums from the releases' sha256sums.txt.
+  monitoring-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install amtool, promtool and PyYAML
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL -o "$RUNNER_TEMP/am.tgz" \
+            https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz
+          echo "23c3f5a3c73de91dbaec419f3c492bef636deb02680808e5d842e6553aa16074  $RUNNER_TEMP/am.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/am.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 alertmanager-0.27.0.linux-amd64/amtool
+          curl -sSfL -o "$RUNNER_TEMP/prometheus.tgz" \
+            https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz
+          echo "31715ef65e8a898d0f97c8c08c03b6b9afe485ac84e1698bcfec90fc6e62924f  $RUNNER_TEMP/prometheus.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/prometheus.tgz" -C "$RUNNER_TEMP/bin" --strip-components=1 prometheus-2.54.1.linux-amd64/promtool
+          echo "AMTOOL=$RUNNER_TEMP/bin/amtool" >> "$GITHUB_ENV"
+          echo "PROMTOOL=$RUNNER_TEMP/bin/promtool" >> "$GITHUB_ENV"
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+
+      - name: Alertmanager configuration and alert rules (OPS-05)
+        run: ./tests/monitoring-config.test.sh
 
   lint:
     runs-on: ubuntu-latest
@@ -249,10 +553,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
-
-      - name: Check golangci-lint pin matches the Makefile
-        run: grep -qx "GOLANGCI_LINT_VERSION := ${GOLANGCI_LINT_VERSION}" Makefile
+          go-version: "1.26.10"
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
@@ -260,6 +561,28 @@ jobs:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: ${{ matrix.module }}
           args: --config=${{ github.workspace }}/backend/.golangci.yml
+
+      # TST-04 (WP-499, retest WP-001): v2 schema (golangci-lint config
+      # verify with the binary installed above), linters a superset of the
+      # v1 set, the pin of this job equals the Makefile, every go.work module
+      # in the matrix, with negative fixtures; scripts/ci/lint-debt.sh
+      # against a stub. Replaces the grep for the Makefile pin.
+      - name: Lint toolchain contract (TST-04)
+        if: ${{ !cancelled() }}
+        env:
+          REQUIRE_GOLANGCI_LINT: "1"
+        run: |
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+          ./tests/lint-toolchain.test.sh
+
+      # F-123 (WP-499): the backlog hidden by issues.new-from-rev, counted
+      # for this module without the baseline; fails when it rises above
+      # tests/lint-debt-baseline.txt, the numbers go to the job summary.
+      - name: Lint debt without new-from-rev (F-123)
+        if: ${{ !cancelled() }}
+        run: |
+          command -v golangci-lint || { echo "::error::golangci-lint not on PATH"; exit 1; }
+          ./scripts/ci/lint-debt.sh "${{ matrix.module }}"
 
   frontend:
     runs-on: ubuntu-latest
@@ -306,7 +629,9 @@ jobs:
   # and mobile Safari. TST-03 (WP-201): so do the browser flows CI, review,
   # drag/undo, topology, export and command palette (e2e/*.spec.ts, mocked
   # backend in e2e/support/backend.ts); the onboarding suite against a real
-  # installation runs in install-smoke.yml.
+  # installation runs in install-smoke.yml. WP-531: one job and one report
+  # artifact per project (playwright-report-<project>, also when green); the
+  # previous browser versions run in e2e-prev.yml (E-88).
   e2e:
     runs-on: ubuntu-latest
     needs: [frontend]
@@ -355,18 +680,27 @@ jobs:
         env:
           BASE_URL: http://localhost:4173
 
+      # NFR-07/UI-18 (WP-531, F-173): the evidence of every project, also
+      # when it is green: the HTML report (playwright-report/) and the
+      # screenshots, traces and error-context.md of failed tests
+      # (test-results/).
       - name: Upload test results
-        if: failure()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.project }}
-          path: frontend/playwright-report/
-          retention-days: 7
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: error
+          retention-days: 30
 
   # SEC-11/TST-04 (WP-004): dependency and container scans on every PR.
   # Critical and High findings block; accepted findings need an entry with an
   # expiry within the CVE fix SLA in security/scan-exceptions.txt (see
-  # docs/security/abhaengigkeitsscans.md). Reports are uploaded as artifacts.
+  # docs/security/abhaengigkeitsscans.md), checked by
+  # scripts/ci/check-scan-exceptions.sh before every scan (WP-389). Reports
+  # are uploaded as artifacts.
   govulncheck:
     runs-on: ubuntu-latest
     strategy:
@@ -376,9 +710,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check scan exceptions (SEC-11 SLA)
+        run: ./scripts/ci/check-scan-exceptions.sh
+
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
@@ -416,6 +753,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check scan exceptions (SEC-11 SLA)
+        run: ./scripts/ci/check-scan-exceptions.sh
 
       - uses: actions/setup-node@v4
         with:
@@ -467,22 +807,30 @@ jobs:
           - image: frontend
             context: frontend
             dockerfile: frontend/Dockerfile
+          # reticora-postgres of release.yml (WP-389, F-124).
+          - image: postgres
+            context: deploy/docker-compose/postgres
+            dockerfile: deploy/docker-compose/postgres/Dockerfile
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check scan exceptions (SEC-11 SLA)
+        run: ./scripts/ci/check-scan-exceptions.sh
 
       - name: Build image
         run: docker build -t "reticora-${{ matrix.image }}:scan" -f "${{ matrix.dockerfile }}" "${{ matrix.context }}"
 
       # Trivy (E-31): OS packages and application dependencies of the built
       # image. Critical/High findings with an available fix block; the
-      # exceptions file uses the .trivyignore format with exp: dates. The
-      # pinned CLI image drives the runner's Docker daemon.
+      # exceptions file uses the .trivyignore format with exp: dates. The CLI
+      # image, pinned by version and digest (as in release.yml), drives the
+      # runner's Docker daemon.
       - name: Scan image with Trivy
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "$PWD:/work" -w /work \
-            aquasec/trivy:0.75.0 image \
+            aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image \
             --severity CRITICAL,HIGH --ignore-unfixed \
             --ignorefile security/scan-exceptions.txt \
             --format json --output "trivy-${{ matrix.image }}.json" \
@@ -505,7 +853,8 @@ jobs:
           retention-days: 30
 
   # NFR-09/PRI-11 (WP-105): the Terraform module only accepts EU regions for
-  # all data locations (primary, backups, logs, search index).
+  # all data locations (primary, backups, logs, search index). NFR-05
+  # (WP-443): a production plan needs a backup replica in another EU region.
   terraform:
     runs-on: ubuntu-latest
     defaults:
@@ -525,29 +874,25 @@ jobs:
           terraform init -backend=false -input=false
           terraform validate
 
-      - name: EU regions are accepted
-        run: terraform plan -input=false -var region=eu-central-1 -var backup_region=europe-west3 -var log_region=westeurope -var search_region=fsn1
-
-      - name: Non-EU regions are rejected
-        run: |
-          set -u
-          for var in region=us-east-1 region=eu-west-2 region=eu-central-2 region=europe-west6 \
-                     backup_region=us-west-2 log_region=eastus search_region=switzerlandnorth \
-                     backup_replica_region=us-east-1 backup_retention_days=30; do
-            if terraform plan -input=false -var "$var" > /dev/null 2>&1; then
-              echo "::error::terraform accepted the non-EU setting $var"
-              exit 1
-            fi
-            echo "rejected: $var"
-          done
+      # tests/backup.tftest.hcl: production without, with an identical and
+      # with a distinct EU replica region; EU regions accepted and non-EU
+      # regions rejected for every data location. Plans only, no provider.
+      - name: Backup replication and EU regions (terraform test)
+        run: terraform test
 
   k8s-manifests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+
       - name: Install kustomize
-        run: go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+        run: |
+          go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+          echo "KUSTOMIZE=$(go env GOPATH)/bin/kustomize" >> "$GITHUB_ENV"
 
       - name: Validate base and overlays build
         # kustomize build parses every manifest and resolves patches/components,
@@ -565,10 +910,295 @@ jobs:
         run: |
           set -euo pipefail
           for overlay in deploy/k8s/base deploy/k8s/overlays/staging deploy/k8s/overlays/prod; do
-            ref=$(kustomize build "$overlay" | grep -A6 -- '- name: RETICORA_MASTER_KEY' || true)
-            if ! grep -q 'name: reticora-secrets' <<<"$ref" || ! grep -q 'key: master-key' <<<"$ref"; then
+            ref=$(kustomize build "$overlay" | grep -A6 -- '- name: RETICORA_MASTER_KEY$' || true)
+            if ! grep -q 'name: reticora-secrets' <<<"$ref" || ! grep -q 'key: master-key$' <<<"$ref"; then
               echo "::error::$overlay does not inject RETICORA_MASTER_KEY from secret reticora-secrets/master-key"
               exit 1
             fi
             echo "$overlay: RETICORA_MASTER_KEY <- reticora-secrets/master-key"
           done
+
+      # SEC-06/OPS-03 (WP-642, F-370): the master key rotation of
+      # docs/ops/workers.md needs RETICORA_MASTER_KEY_PREVIOUS in the server:
+      # Compose passes it from .env (docker compose config, optional), the
+      # base takes it from reticora-secrets/master-key-previous with
+      # optional: true.
+      - name: Previous master key reaches the server (SEC-06)
+        run: |
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+          ./tests/audit/master-key-rotation-deploy.test.sh
+
+      # OPS-01/OPS-03 (WP-422, F-036): base, staging and prod provide every key
+      # of requiredOutsideDevelopment plus the OIDC client and
+      # RETICORA_INVITATION_ACCEPT_URL, none by an optional reference, and the
+      # server's start check accepts the rendered env; fixture overlays without
+      # the issuer or the accept URL are reported. deploy/README.md names every
+      # key.
+      - name: Assert required configuration
+        working-directory: backend
+        run: go test -count=1 -v -run 'TestAuditT5K8sRenderedEnvSatisfiesStartCheck|TestK8sREADMENamesRequiredEnv' ./internal/config/
+
+      # F-293 (WP-422): every Reticora image of the prod build is a signed
+      # release image of release.yml, ghcr.io/datahub-chiemgau/<image of the
+      # release matrix> with a version tag v*. NATS, OpenSearch and the
+      # TimescaleDB image of the pg_dump CronJob are upstream images the release
+      # does not build. Negative fixture: an overlay that switches the server
+      # back to reticora-cmdb/server is rejected.
+      - name: Assert release image origin
+        run: |
+          set -euo pipefail
+          released=$(sed -nE 's/^ +- image: (reticora-[a-z0-9-]+)$/\1/p' .github/workflows/release.yml)
+          [ -n "$released" ] || { echo "::error::no image found in the release.yml matrix"; exit 1; }
+          # foreign_images <dir>: the images of the build that are neither a
+          # release image nor one of the upstream images.
+          foreign_images() {
+            kustomize build "$1" | sed -nE 's/^ *(- )?image: *"?([^" ]+)"?$/\2/p' | sort -u | while read -r image; do
+              case "$image" in
+                ghcr.io/datahub-chiemgau/*)
+                  name=${image#ghcr.io/datahub-chiemgau/}
+                  name=${name%%[:@]*}
+                  if grep -qxF "$name" <<<"$released" &&
+                    [[ $image =~ ^ghcr\.io/datahub-chiemgau/[a-z0-9-]+:v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(@sha256:[0-9a-f]{64})?$ ]]; then
+                    continue
+                  fi
+                  ;;
+                nats:* | opensearchproject/opensearch:* | timescale/timescaledb:*) continue ;;
+              esac
+              echo "$image"
+            done
+          }
+          images=$(kustomize build deploy/k8s/overlays/prod | sed -nE 's/^ *(- )?image: *//p' | sort -u)
+          echo "$images"
+          grep -q '^ghcr\.io/datahub-chiemgau/reticora-server:v' <<<"$images" || { echo "::error::the prod build has no release image of the server"; exit 1; }
+          foreign=$(foreign_images deploy/k8s/overlays/prod)
+          if [ -n "$foreign" ]; then
+            echo "::error::deploy/k8s/overlays/prod uses images that are no release images ghcr.io/datahub-chiemgau/reticora-*:v*: $(tr '\n' ' ' <<<"$foreign")"
+            exit 1
+          fi
+          fixture=$(mktemp -d "$RUNNER_TEMP/k8s-images.XXXXXX")
+          printf '%s\n' 'resources:' "  - $(realpath --relative-to="$fixture" deploy/k8s/overlays/prod)" 'images:' \
+            '  - name: ghcr.io/datahub-chiemgau/reticora-server' '    newName: reticora-cmdb/server' '    newTag: "1.0.0"' \
+            >"$fixture/kustomization.yaml"
+          foreign=$(foreign_images "$fixture")
+          if [ "$foreign" != "reticora-cmdb/server:1.0.0" ]; then
+            echo "::error::the image check does not reject reticora-cmdb/server in a fixture overlay (reported: '$foreign')"
+            exit 1
+          fi
+          echo "fixture overlay with reticora-cmdb/server:1.0.0: rejected"
+
+      # OPS-04/NFR-05 (WP-444, F-128, E-74 transitional rule): the prod build
+      # archives WAL. A ConfigMap sets archive_mode = on, archive_command =
+      # 'pgbackrest --stanza=reticora archive-push %p' and archive_timeout of
+      # at most 900 s; a StatefulSet container of the image reticora-postgres
+      # starts PostgreSQL with that file (config_file) on a
+      # PersistentVolumeClaim; a container of the same pod runs the pgBackRest
+      # TLS server with server.crt/server.key of the secret
+      # reticora-pgbackrest, and the Service reticora-db (pg1-host of the
+      # backup component) selects the pod on port 8432. Negative fixture: an
+      # overlay with the backup component but without the component postgres
+      # is rejected. The runtime proof is the case wal_archive of the workflow
+      # k8s-smoke.
+      - name: Assert WAL archiving
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+          cat >"$RUNNER_TEMP/wal_archiving.py" <<'PY'
+          # The problems of the WAL archiving in a kustomize build (stdin), one per line.
+          import re
+          import sys
+
+          import yaml
+
+          docs = [d for d in yaml.safe_load_all(sys.stdin) if d]
+          problems = []
+
+
+          def settings(text):
+              # key = value lines of a postgresql.conf, quotes and comments removed
+              out = {}
+              for line in text.splitlines():
+                  m = re.match(r"\s*(\w+)\s*=?\s*('(?:[^']|'')*'|[^#\s]*)", line)
+                  if m:
+                      out[m.group(1)] = m.group(2).strip("'")
+              return out
+
+
+          def command(c):
+              return (c.get("command") or []) + (c.get("args") or [])
+
+
+          confs = [(d["metadata"]["name"], key, settings(text)) for d in docs if d["kind"] == "ConfigMap"
+                   for key, text in (d.get("data") or {}).items() if "archive_mode" in settings(text)]
+          if not confs:
+              problems.append("no ConfigMap sets archive_mode")
+          for name, key, s in confs:
+              where = f"ConfigMap {name}, {key}"
+              if s.get("archive_mode") != "on":
+                  problems.append(f"{where}: archive_mode is {s.get('archive_mode')!r}, not on")
+              if s.get("archive_command") != "pgbackrest --stanza=reticora archive-push %p":
+                  problems.append(f"{where}: archive_command is {s.get('archive_command')!r}, not pgBackRest archive-push")
+              timeout = s.get("archive_timeout", "")
+              if not timeout.isdigit() or not 0 < int(timeout) <= 900:
+                  problems.append(f"{where}: archive_timeout {timeout or 'unset'} is not 1..900 s (RPO 15 min)")
+              users = []
+              for sts in (d for d in docs if d["kind"] == "StatefulSet"):
+                  pod = sts["spec"]["template"]["spec"]
+                  maps = {v["name"]: v.get("configMap") or {} for v in pod.get("volumes", [])}
+                  for c in pod["containers"]:
+                      for m in c.get("volumeMounts", []):
+                          cm = maps.get(m["name"], {})
+                          items = {i["key"]: i["path"] for i in cm.get("items", [])} if cm.get("items") else {key: key}
+                          if cm.get("name") == name and key in items and \
+                                  f"config_file={m['mountPath'].rstrip('/')}/{items[key]}" in command(c):
+                              users.append((sts, pod, c))
+              if not users:
+                  problems.append(f"no StatefulSet container starts PostgreSQL with config_file of the {where}")
+              for sts, pod, c in users:
+                  at = f"StatefulSet {sts['metadata']['name']}"
+                  if "/reticora-postgres:" not in c["image"]:
+                      problems.append(f"{at}: {c['name']} runs {c['image']}, not the image reticora-postgres")
+                  if not sts["spec"].get("volumeClaimTemplates"):
+                      problems.append(f"{at}: no volumeClaimTemplates, the data directory does not persist")
+                  if not any("pgbackrest server" in " ".join(command(x)) for x in pod["containers"]):
+                      problems.append(f"{at}: no container runs the pgBackRest TLS server (pgbackrest server)")
+                  keys = set()
+                  for v in pod.get("volumes", []):
+                      refs = [v["secret"]] if "secret" in v else \
+                          [p["secret"] for p in v.get("projected", {}).get("sources", []) if "secret" in p]
+                      for ref in refs:
+                          if ref.get("secretName", ref.get("name")) == "reticora-pgbackrest":
+                              keys |= {i["key"] for i in ref.get("items", [])}
+                  if not {"server.crt", "server.key"} <= keys:
+                      problems.append(f"{at}: server.crt and server.key of the secret reticora-pgbackrest are not mounted")
+                  # The pgBackRest TLS server of the Alpine image resolves
+                  # tls-server-address with musl: "*" is no address there and
+                  # the server exits at start (k8s-smoke, [049]).
+                  server_conf = "\n".join(text for d in docs if d["kind"] == "ConfigMap"
+                                          for key, text in (d.get("data") or {}).items() if key.startswith("pgbackrest"))
+                  address = re.findall(r"^\s*tls-server-address\s*=\s*(\S*)", server_conf, re.M)
+                  if not address or any(a in ("", "*") for a in address):
+                      problems.append(f"{at}: tls-server-address is {address or 'unset'}, not an address the TLS server can bind")
+                  labels = sts["spec"]["template"]["metadata"].get("labels", {})
+                  svc = [d for d in docs if d["kind"] == "Service" and d["metadata"]["name"] == "reticora-db"]
+                  selector = svc[0]["spec"].get("selector") if svc else None
+                  if not selector or any(labels.get(k) != v for k, v in selector.items()) or \
+                          8432 not in [p.get("port") for p in svc[0]["spec"].get("ports", [])]:
+                      problems.append(f"no Service reticora-db that selects the pods of the {at} on port 8432")
+          print("\n".join(problems))
+          PY
+          problems=$(kustomize build deploy/k8s/overlays/prod | python3 "$RUNNER_TEMP/wal_archiving.py")
+          if [ -n "$problems" ]; then
+            echo "::error::deploy/k8s/overlays/prod does not archive WAL: $(tr '\n' ';' <<<"$problems")"
+            exit 1
+          fi
+          echo "deploy/k8s/overlays/prod: archive_mode = on, archive_command pgbackrest archive-push, archive_timeout <= 900 s, TLS server reticora-db:8432"
+          fixture=$(mktemp -d "$RUNNER_TEMP/k8s-wal.XXXXXX")
+          printf '%s\n' 'resources:' "  - $(realpath --relative-to="$fixture" deploy/k8s/base)" 'components:' \
+            "  - $(realpath --relative-to="$fixture" deploy/k8s/base/components/backup)" >"$fixture/kustomization.yaml"
+          problems=$(kustomize build "$fixture" | python3 "$RUNNER_TEMP/wal_archiving.py")
+          if [ -z "$problems" ]; then
+            echo "::error::the WAL archiving check accepts a fixture overlay without the component postgres"
+            exit 1
+          fi
+          echo "fixture overlay without the component postgres: rejected ($(tr '\n' ';' <<<"$problems"))"
+
+  # COL-06/TEC-15 (WP-546, open evidence of WP-148): the updater's
+  # CosignVerifier against the real cosign and a real keyless Sigstore bundle
+  # (edgecore/update/cosign_real_test.go, tools per E-31). The job signs a
+  # test artifact and a second file in the same directory (the foreign bundle
+  # of the negative case) with the OIDC identity of this workflow, then runs
+  # the test twice: with that identity the signed artifact is accepted and the
+  # changed artifact and the foreign bundle are refused; with the pinned
+  # release identity (no COSIGN_EXPECT_IDENTITY) the signature is refused for
+  # the identity. Release bundles are checked in release.yml (WP-545).
+  cosign-verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # keyless signing (Fulcio) with the identity of this workflow
+    env:
+      COSIGN_VERSION: v2.4.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: edgecore/go.mod
+
+      - uses: sigstore/cosign-installer@v3.7.0
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Sign a test artifact and a foreign artifact (cosign keyless)
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/cosign-verify"
+          mkdir -p "$dir"
+          printf 'reticora cosign-verify artifact %s run %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$dir/reticora-test-artifact"
+          printf 'reticora cosign-verify foreign artifact %s run %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$dir/reticora-foreign-artifact"
+          for file in reticora-test-artifact reticora-foreign-artifact; do
+            cosign sign-blob --yes --bundle "$dir/$file.sigstore.json" "$dir/$file"
+          done
+          # The certificate names this workflow at the ref of the run
+          # (owner/repo/.github/workflows/ci.yml@refs/...), as a regexp.
+          identity="^https://github\.com/$(printf '%s' "$GITHUB_WORKFLOW_REF" | sed 's/[*.+?^$(){}|[\\]/\\&/g')\$"
+          echo "CI workflow identity: $identity"
+          {
+            echo "COSIGN_DIR=$dir"
+            echo "CI_IDENTITY=$identity"
+          } >> "$GITHUB_ENV"
+
+      - name: Real cosign with the identity of this workflow (accepted; changed artifact and foreign bundle refused)
+        working-directory: edgecore
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/cosign-ci-identity.log"
+          COSIGN_BIN="$(command -v cosign)" \
+            RELEASE_ARTIFACT="$COSIGN_DIR/reticora-test-artifact" \
+            RELEASE_BUNDLE="$COSIGN_DIR/reticora-test-artifact.sigstore.json" \
+            COSIGN_EXPECT_IDENTITY="$CI_IDENTITY" \
+            go test -tags cosignreal -count=1 -v -run '^TestCosignVerifierWithRealCosign$' ./update/ 2>&1 | tee "$log"
+          for name in 'TestCosignVerifierWithRealCosign' \
+            'TestCosignVerifierWithRealCosign/signed_artifact_with_the_expected_identity_is_accepted' \
+            'TestCosignVerifierWithRealCosign/artifact_changed_by_one_byte_is_refused' \
+            'TestCosignVerifierWithRealCosign/foreign_bundle_is_refused' \
+            'TestCosignVerifierWithRealCosign/another_identity_is_refused'; do
+            if ! grep -qE -- "--- PASS: ${name} \(" "$log"; then
+              echo "::error::$name did not pass with the identity of this workflow"
+              exit 1
+            fi
+          done
+          if grep -qE -- '--- (SKIP|FAIL)|no tests to run' "$log"; then
+            echo "::error::TestCosignVerifierWithRealCosign skipped or failed a case"
+            exit 1
+          fi
+
+      - name: Real cosign with the pinned release identity (refused for the identity)
+        working-directory: edgecore
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/cosign-release-identity.log"
+          # The test is expected to fail here: keep its exit code.
+          rc=0
+          COSIGN_BIN="$(command -v cosign)" \
+            RELEASE_ARTIFACT="$COSIGN_DIR/reticora-test-artifact" \
+            RELEASE_BUNDLE="$COSIGN_DIR/reticora-test-artifact.sigstore.json" \
+            go test -tags cosignreal -count=1 -v -run '^TestCosignVerifierWithRealCosign$' ./update/ > "$log" 2>&1 || rc=$?
+          cat "$log"
+          positive='TestCosignVerifierWithRealCosign/signed_artifact_with_the_expected_identity_is_accepted'
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::a signature of this workflow was accepted for the pinned release identity"
+            exit 1
+          fi
+          if ! grep -qE -- "--- FAIL: ${positive} \(" "$log" \
+            || ! grep -q 'none of the expected identities matched' "$log"; then
+            echo "::error::exit $rc, but not refused for the identity"
+            exit 1
+          fi
+          # Only the positive case fails; every refusal case still passes.
+          if grep -E -- '--- FAIL: TestCosignVerifierWithRealCosign/' "$log" | grep -qvF -- "--- FAIL: ${positive} ("; then
+            echo "::error::another case than the identity check failed"
+            exit 1
+          fi
+          echo "refused for the pinned release identity (exit $rc): identity mismatch"

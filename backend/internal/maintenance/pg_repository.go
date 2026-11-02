@@ -41,6 +41,16 @@ const (
 	windowCIVisible = "EXISTS (SELECT 1 FROM ci WHERE ci.id = maintenance_window_ci.ci_id)"
 	windowVisible   = "(NOT EXISTS (SELECT 1 FROM maintenance_window_ci WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id)" +
 		" OR EXISTS (SELECT 1 FROM maintenance_window_ci WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id AND " + windowCIVisible + "))"
+	// windowWritable admits a window for UPDATE and DELETE (WP-341, migration
+	// 000139): an org-wide principal writes every window; a principal
+	// restricted in the client or site scope only a window with CIs that it
+	// sees completely and may write (client and site in its scope, migration
+	// 000146), so neither a window that also covers another client's CI or an
+	// org-wide CI nor one without CIs (org-wide) is writable (E-09).
+	windowWritable = "(" + database.OrgWideScopeSQL +
+		" OR (maintenance_window.ci_count > 0 AND maintenance_window.ci_count = (SELECT count(*) FROM maintenance_window_ci" +
+		" WHERE maintenance_window_ci.maintenance_window_id = maintenance_window.id AND " + windowCIVisible +
+		" AND " + database.ScopedWriteSQL + ")))"
 )
 
 func (r *PGRepository) ciIDsTx(ctx context.Context, tx pgx.Tx, orgID, windowID string) ([]string, error) {
@@ -178,10 +188,10 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateW
 		}
 		var err error
 		if len(sets) == 0 {
-			w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2", orgID, id))
+			w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowWritable+" AND organization_id = $1 AND id = $2", orgID, id))
 		} else {
 			sets = append(sets, "updated_at = now()")
-			w, err = scanWindow(tx.QueryRow(ctx, "UPDATE maintenance_window SET "+strings.Join(sets, ", ")+" WHERE "+windowVisible+" AND organization_id = $1 AND id = $2 RETURNING "+windowCols, args...))
+			w, err = scanWindow(tx.QueryRow(ctx, "UPDATE maintenance_window SET "+strings.Join(sets, ", ")+" WHERE "+windowWritable+" AND organization_id = $1 AND id = $2 RETURNING "+windowCols, args...))
 		}
 		if err == pgx.ErrNoRows {
 			return fmt.Errorf("maintenance window not found")
@@ -197,7 +207,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateW
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2", orgID, id)
+		tag, err := tx.Exec(ctx, "DELETE FROM maintenance_window WHERE "+windowWritable+" AND organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return err
 		}
@@ -208,11 +218,29 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
+// visibleWindowTx reports api.ErrNotFound for a window the transaction's
+// tenant scope does not see, like GetByID (F-367): announcing a hidden or
+// unknown window, or listing its notifications, answers 404 instead of an
+// empty success.
+func visibleWindowTx(ctx context.Context, tx pgx.Tx, orgID, windowID string) error {
+	var visible bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2)", orgID, windowID).Scan(&visible); err != nil {
+		return err
+	}
+	if !visible {
+		return fmt.Errorf("maintenance window not found: %w", api.ErrNotFound)
+	}
+	return nil
+}
+
 // NotifyClients derives affected clients from the window's CIs and records
 // one sent notification per client.
 func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string) ([]Notification, error) {
 	out := []Notification{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := visibleWindowTx(ctx, tx, orgID, windowID); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `
 			SELECT DISTINCT ci.client_id::text
 			FROM maintenance_window_ci mwc
@@ -238,14 +266,22 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 			return err
 		}
 		// Queued, not sent: no channel delivers yet, so neither status nor
-		// sent_at may claim a delivery.
+		// sent_at may claim a delivery. One notification per window, client
+		// and channel (migration 000173, F-235): a repeated announcement
+		// queues nothing new and returns the stored notification.
 		for _, clientID := range clientIDs {
-			n := Notification{OrganizationID: orgID, WindowID: windowID, ClientID: clientID, Channel: "webhook", Status: NotificationPending}
-			if err := tx.QueryRow(ctx, `
+			if _, err := tx.Exec(ctx, `
 				INSERT INTO maintenance_notification (organization_id, maintenance_window_id, client_id, channel, status)
 				VALUES ($1, $2, $3::uuid, 'webhook', $4)
-				RETURNING id::text, created_at
-			`, orgID, windowID, clientID, NotificationPending).Scan(&n.ID, &n.CreatedAt); err != nil {
+				ON CONFLICT (maintenance_window_id, client_id, channel) DO NOTHING
+			`, orgID, windowID, clientID, NotificationPending); err != nil {
+				return err
+			}
+			n := Notification{}
+			if err := tx.QueryRow(ctx, "SELECT "+notificationCols+` FROM maintenance_notification
+				WHERE organization_id = $1 AND maintenance_window_id = $2 AND client_id = $3::uuid AND channel = 'webhook'`,
+				orgID, windowID, clientID).
+				Scan(&n.ID, &n.OrganizationID, &n.WindowID, &n.ClientID, &n.Channel, &n.Status, &n.SentAt, &n.CreatedAt); err != nil {
 				return err
 			}
 			out = append(out, n)
@@ -258,6 +294,9 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 func (r *PGRepository) ListNotifications(ctx context.Context, orgID, windowID string) ([]Notification, error) {
 	out := []Notification{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := visibleWindowTx(ctx, tx, orgID, windowID); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, "SELECT "+notificationCols+" FROM maintenance_notification WHERE organization_id = $1 AND maintenance_window_id = $2 ORDER BY created_at ASC", orgID, windowID)
 		if err != nil {
 			return err

@@ -8,8 +8,8 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -26,7 +26,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/disposal"
@@ -62,7 +61,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
@@ -77,7 +75,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -179,6 +176,13 @@ type Options struct {
 	// audit fails and is logged, tests and --no-db).
 	Operator     operator.Config
 	OperatorPool *pgxpool.Pool
+	// OpsAlerts configures the Alertmanager bridge of the operator path
+	// (OPS-05, E-75): without an operator organization it answers 404.
+	// Notifier queues its notifications on the channels of that
+	// organization; without it, or without OperatorPool, a configured
+	// bridge answers 503.
+	OpsAlerts operator.AlertConfig
+	Notifier  *notify.Notifier
 	// UserProvisioner auto-creates the app_user on first OIDC login (nil
 	// disables). DefaultProvisionRole names the standard role assigned on
 	// first login (empty assigns none).
@@ -197,8 +201,10 @@ type Options struct {
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
-	// Egress is the destination policy of webhook and connector URLs
-	// (SEC-08); the zero value blocks every internal destination.
+	// Egress is the destination policy of webhook and connector URLs and
+	// of own SMTP servers (SEC-08), when they are stored (webhooks, IGA
+	// connectors, notification channels) and called; the zero value
+	// blocks every internal destination.
 	Egress egress.Options
 	// RouteMiddleware runs on every API route after its authorization, in
 	// order (API-04: validation, then idempotency).
@@ -208,31 +214,60 @@ type Options struct {
 	// IngestQueue carries discovery records over ingest.> (REC-01); nil
 	// processes them in the request.
 	IngestQueue *discovery.NATSIngestQueue
+	// JobQueue runs the submitted job kinds on the JOBS work queue on NATS
+	// (TEC-14, jobkinds.go); nil runs them in the accepting process.
+	JobQueue *jobs.Queue
 	// Signup is the self-signup flow (TLC-01); nil answers 503.
 	Signup *signup.Service
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
 	// signup (WP-112); without it signups answer 503.
 	SignupProtection *signup.Protection
 	// Events reports facts after their commit into the event outbox
-	// (review.created, export.completed, job.failed; NTF-05); optional.
+	// (NTF-05); optional. review.created (WP-549), export.completed, job.failed
+	// and webhook.dead (WP-550) are written in the transaction of their change.
 	Events events.Emitter
 	// Notifications are the notification stores (NTF-04); nil keeps them
 	// in memory.
 	Notifications *notify.Center
 	// InvitationAccounts creates the IdP account of an accepted invitation.
+	// It is wired only together with InvitationMailer
+	// (user.InvitationHandler.WithAccounts).
 	InvitationAccounts user.InvitationAccounts
+	// InvitationMailer sends the invitation mail straight to the invited
+	// address over the central SMTP server where the acceptance creates the
+	// IdP account; nil without central SMTP.
+	InvitationMailer user.InvitationMailer
+	// InvitationAcceptURL is the page the link of the invitation mail opens
+	// (RETICORA_INVITATION_ACCEPT_URL); empty: issuing and renewing
+	// invitations answers 503.
+	InvitationAcceptURL string
+	// MFA binds the IdP account of every new org_admin to the second factor
+	// (WP-358): role assignment and first login of the PostgreSQL user
+	// repository, and the login callback for org_admin from the IdP group
+	// org_admin or the default role (WP-367). nil binds nothing (tests,
+	// development without Keycloak admin client); user.UnavailableMFA fails
+	// every org_admin grant.
+	MFA user.MFAEnforcer
 	// CollectorCA signs the collector certificates (COL-04); nil answers
 	// certificate requests with 503.
 	CollectorCA *discovery.CA
 	// Modules are the enabled late modules (WP-214, E-03); nil enables all
 	// (tests). The server passes the set from RETICORA_MODULES.
 	Modules *ModuleSet
+	// RetentionSoftDeleteDays is the configured soft-delete retention
+	// (RETICORA_RETENTION_SOFT_DELETE_DAYS): the window of POST
+	// /cis/{id}/restore (CI-05); 0 keeps the default of 90 days.
+	RetentionSoftDeleteDays int
 }
 
 // registrar is implemented by every domain handler.
 type registrar interface {
 	RegisterRoutes(r chi.Router)
 }
+
+// errMergeGone refuses the revert of a merge job whose merge no longer
+// exists (409).
+var errMergeGone = errors.New("the merge of the job no longer exists")
 
 // NewRouter builds the complete API router. Every route the server exposes is
 // registered here; there is no other registration site. It also returns the
@@ -250,10 +285,12 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 }
 
 // agentHandler builds the agent handler; with a session issuer, enrollment
-// returns the agent's signed credential (AGT-03).
-func agentHandler(repos *Repositories, sessions *identity.SessionIssuer) *agent.Handler {
+// returns the agent's signed credential (AGT-03). Values that differ from a
+// manual override open an override_conflict review in the review queue of
+// discovery (REC-12).
+func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflicts agent.ConflictReviews) *agent.Handler {
 	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security).
-		WithFieldGuard(override.NewGuard(repos.Override))
+		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflicts)
 	if sessions != nil {
 		h.WithAgentTokens(sessions)
 	}
@@ -271,21 +308,50 @@ func operatorHandler(opts *Options) *operator.Handler {
 	return h
 }
 
-// invitationHandler builds the invitations (TLC-03); with an IdP admin
-// client the acceptance creates the account.
+// alertBridge builds the Alertmanager bridge (OPS-05, E-75): the alerts go
+// to the channels of the operator organization, written in its tenant
+// transaction; refused requests are recorded in operator_audit.
+func alertBridge(repos *Repositories, opts *Options) *operator.AlertBridge {
+	b := operator.NewAlertBridge(opts.OpsAlerts, operator.NewAuditor(opts.OperatorPool))
+	if opts.OperatorPool != nil && opts.Notifier != nil && opts.Notifications != nil && repos.Permission != nil {
+		b.WithDelivery(opts.OperatorPool, opts.Notifier, opts.Notifications.Channels,
+			notify.NewPGResolver(opts.OperatorPool, repos.Permission))
+	}
+	return b
+}
+
+// apiKeyHandler builds the api-keys resource with the same owner and
+// service-account resolvers as the API key service in cmd/server, so that
+// rotation, revocation and service-account binding are checked against the
+// key holder's rights (AUT-04, RBA-08); a new key counts against
+// max_api_keys (ENT-03).
+func apiKeyHandler(repos *Repositories, opts *Options) *identity.APIKeyHandler {
+	h := identity.NewAPIKeyHandler(repos.APIKeys).WithOwnerAccess(repos.Permission).WithQuota(opts.Entitlements)
+	if repos.ServiceAccounts != nil {
+		h.WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
+	}
+	return h
+}
+
+// invitationHandler builds the invitations (TLC-03); the accept URL makes
+// the link of the invitation mail, with an IdP admin client and the
+// invitation mailer the acceptance creates the account and the mail goes
+// straight to the invitee; the acceptance counts against max_users
+// (ENT-03).
 func invitationHandler(repos *Repositories, opts *Options) *user.InvitationHandler {
-	h := user.NewInvitationHandler(repos.Invitations)
+	h := user.NewInvitationHandler(repos.Invitations).WithAcceptURL(opts.InvitationAcceptURL).WithQuota(opts.Entitlements)
 	if opts.InvitationAccounts != nil {
-		h.WithAccounts(opts.InvitationAccounts)
+		h.WithAccounts(opts.InvitationAccounts, opts.InvitationMailer)
 	}
 	return h
 }
 
 // userHandler builds the user handler; with a session blacklist, deactivation
-// ends the user's sessions immediately (TLC-04).
-func userHandler(repos *Repositories, sessions *identity.SessionIssuer) *user.Handler {
-	h := user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment)
-	if revocations := sessions.Revocations(); revocations != nil {
+// ends the user's sessions immediately (TLC-04); POST /users counts against
+// max_users (ENT-03).
+func userHandler(repos *Repositories, opts *Options) *user.Handler {
+	h := user.NewHandler(repos.User, repos.Contact).WithPrivacySources(repos.Ticket, repos.Assignment).WithQuota(opts.Entitlements)
+	if revocations := opts.Sessions.Revocations(); revocations != nil {
 		h.WithSessionRevoker(revocations)
 	}
 	return h
@@ -294,6 +360,14 @@ func userHandler(repos *Repositories, sessions *identity.SessionIssuer) *user.Ha
 func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
 	if err := validate(repos, opts); err != nil {
 		return nil, nil, err
+	}
+	if pg, ok := repos.User.(*user.PGRepository); ok && opts.MFA != nil {
+		pg.WithMFA(opts.MFA)
+	}
+	if pg, ok := repos.User.(*user.PGRepository); ok {
+		// A first login with an invitation counts against max_users
+		// (ENT-03).
+		pg.WithQuota(opts.Entitlements)
 	}
 
 	mux := chi.NewRouter()
@@ -321,12 +395,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.RefreshSessions != nil {
 		identityHandler.WithRefreshSessions(opts.RefreshSessions)
 	}
+	if opts.MFA != nil {
+		// org_admin from the IdP group org_admin or the default role
+		// (WP-367).
+		identityHandler.WithMFA(opts.MFA)
+	}
 	// New discovered CIs respect max_cis; over the limit they are held as
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
 	var bffJobs graphqlbff.JobSource
-	var historyJobs history.SnapshotJobs
+	historyHandler := history.NewHandler(repos.History)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
@@ -341,19 +420,36 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
-					return ci.ErrMergeUnsupported
+					return &jobs.RevertRefusedError{Reason: ci.ErrMergeUnsupported}
 				}
+				// The refusals of the unmerge answer with the sentinel's text
+				// (409); like an unmerge without force, a survivor changed
+				// after the merge refuses the revert (E-80). A repository
+				// error reaches the client sanitized (API-03).
 				_, err := opts.CIService.RevertMerge(ctx, job.OrganizationID, job.RefID)
+				// A later open merge of the survivor blocks the revert like
+				// the unmerge; the refusal names that merge (F-416).
+				var later *ci.UnmergeLaterMergeError
+				if errors.As(err, &later) {
+					return &jobs.RevertRefusedError{Reason: later}
+				}
+				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrUnmergeConflict, ci.ErrMergeUnsupported} {
+					if errors.Is(err, refusal) {
+						return &jobs.RevertRefusedError{Reason: refusal}
+					}
+				}
+				if err != nil && err.Error() == "not found" {
+					return &jobs.RevertRefusedError{Reason: errMergeGone}
+				}
 				return err
 			})
 		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100
-		// ids on as well (API-08, JOB-04).
-		jobService.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute})
-		jobService.Register(jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 1, Timeout: 15 * time.Minute})
-		historyJobs = jobService
+		// ids on (API-08, JOB-04) and state snapshots as well, on the job
+		// queue when there is one (jobkinds.go, TEC-14).
 		if opts.CIService != nil {
-			opts.CIService.WithJobs(jobTracker).WithBulkJobs(jobService)
+			opts.CIService.WithJobs(jobTracker)
 		}
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -365,10 +461,26 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The collectors' edge data path checks the discovery license like the
 	// entitlement middleware on the HTTP ingest (COL-08, ENT-07).
 	if opts.Entitlements != nil {
-		discoveryHandler.WithEdgeLicense(edgeLicense{svc: opts.Entitlements})
+		discoveryHandler.WithEdgeLicense(DiscoveryLicense(opts.Entitlements))
 	}
 	if opts.CollectorCA != nil {
 		discoveryHandler.WithCA(opts.CollectorCA)
+	}
+	// The collectors' metric samples arrive on the edge (.metrics) and run
+	// through the ingest of POST /monitoring/metrics with the monitoring
+	// entitlement of that route (MON-02, F-046).
+	monitoringHandler := monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).
+		WithCIResolver(monitoring.CIAddressResolver{CIs: repos.CI})
+	var monitoringFeatures discovery.FeatureStatus
+	if opts.Entitlements != nil {
+		monitoringFeatures = opts.Entitlements
+	}
+	discoveryHandler.WithEdgeMetrics(monitoringHandler, monitoringFeatures)
+	// The location tree is core; its rack nodes are written only with
+	// rack_view, like /api/v1/racks (ENT-05, F-400).
+	locationsHandler := locations.NewHandler(repos.LocationTree)
+	if opts.Entitlements != nil {
+		locationsHandler.WithFeatures(opts.Entitlements)
 	}
 	// Discovered values pass the field rules of manual writes (CI-03).
 	if opts.CIService != nil {
@@ -381,19 +493,40 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.IngestQueue != nil {
 		opts.IngestQueue.Attach(discoveryHandler)
 	}
-	// Review merges run as jobs (JOB-04).
+	// Review merges run as jobs (JOB-04); the merge of a probable
+	// duplicate is the CI-12 merge, a ci.merge job of its own (CH29).
 	if jobTracker != nil {
 		discoveryHandler.WithReviewJobs(jobTracker)
+		// Discovery jobs are generic jobs discovery.<job_type> whose
+		// status follows discovery_job (JOB-01, F-146).
+		discoveryHandler.WithJobTracker(jobTracker)
 	}
-	if opts.Events != nil {
-		discoveryHandler.WithReviewNotifier(reviewEvents{emitter: opts.Events})
-		exportWorker.Events = opts.Events
+	if opts.CIService != nil {
+		discoveryHandler.WithMerger(opts.CIService)
 	}
 	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType)
+	// The Ask path sends the question and the CI context to the provider only
+	// with the organization's opt-in and the ai add-on (AI-02); the same
+	// consent as the CI chunk indexer of cmd/server.
+	var aiEntitlements ai.EntitlementChecker
+	if opts.Entitlements != nil {
+		aiEntitlements = opts.Entitlements
+	}
+	aiConsent := ai.NewOrgConsent(repos.AI, aiEntitlements)
+	// Workflow and agent open override_conflict reviews through the review
+	// queue of discovery, deduplicated with its items (REC-12). Both modules
+	// stay switched off in G1 (E-03); the protection holds once they are on.
+	// The queue is built here, after the last option of the handler.
+	conflictReviews := discoveryHandler.ReviewService()
+	// One executor runs the runs of the workflow API and the run an IGA
+	// access request starts (WFL-04).
+	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
+		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
-		identity.NewAPIKeyHandler(repos.APIKeys),
+		alertBridge(&repos, &opts),
+		apiKeyHandler(&repos, &opts),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		invitationHandler(&repos, &opts),
 		entitlement.NewHandler(opts.Entitlements),
@@ -420,40 +553,42 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
-		agentHandler(&repos, opts.Sessions),
+		agentHandler(&repos, opts.Sessions, conflictReviews),
 		security.NewHandler(repos.Security),
 		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
-		userHandler(&repos, opts.Sessions),
+		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		form.NewHandler(repos.Form),
-		workflow.NewHandler(repos.Workflow, workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
-			WithFieldGuard(override.NewGuard(repos.Override))),
+		workflow.NewHandler(repos.Workflow, workflowRuns),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(opts), entitlementLister{svc: opts.Entitlements})),
-		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).WithEgress(opts.Egress),
+		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).
+			WithWorkflowRuns(accessRequestRuns(opts.Modules, workflowRuns)).WithEgress(opts.Egress),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		ipam.NewHandler(repos.IPAM),
-		monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).WithCIResolver(ciAddressResolver{repo: repos.CI}),
+		monitoringHandler,
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, nil), repos.LifecycleResolver),
-		locations.NewHandler(repos.LocationTree),
+		locationsHandler,
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		override.NewHandler(repos.Override, opts.Dispatcher),
-		historyHandler(repos.History, historyJobs),
+		historyHandler,
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
-		ai.NewHandler(repos.AI, opts.AIProvider, ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider)),
+		ai.NewHandler(repos.AI, opts.AIProvider,
+			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
+			WithConsent(aiConsent),
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
 		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
 		modulesHandler{set: opts.Modules},
@@ -489,6 +624,16 @@ func alertStoreFor(store monitoring.MetricStore) monitoring.AlertStore {
 		return evaluating.AlertStore()
 	}
 	return nil
+}
+
+// accessRequestRuns is the executor that starts the workflow run of an IGA
+// access request (WFL-04): none while the workflows module is off (E-03),
+// so a switched-off module executes no workflow action.
+func accessRequestRuns(modules *ModuleSet, runs *workflow.Executor) iga.RunStarter {
+	if !modules.Enabled("workflows") {
+		return nil
+	}
+	return runs
 }
 
 // reportAuditVerifier returns the audit-chain verifier for the security
@@ -597,10 +742,13 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	registry.MustRegister(collectors.NewGoCollector())
 	observability.RegisterWorkerMetrics(registry)
 	jobs.RegisterMetrics(registry)
+	audit.RegisterMetrics(registry)
 	override.RegisterMetrics(registry)
 	operator.RegisterMetrics(registry)
 	entitlement.RegisterMetrics(registry)
 	discovery.RegisterMetrics(registry)
+	rack.RegisterMetrics(registry)
+	iga.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 
@@ -616,23 +764,16 @@ func routeAuditor(opts *Options) middleware.RouteAuditor {
 	if opts.AuditPool == nil {
 		return nil
 	}
-	return pgRouteAuditor{pool: opts.AuditPool, recorder: audit.NewPGRecorder()}
+	// Intents, entries and the scheduler's entries belong to the
+	// organization's chain (E-08, WP-504); the auditor reads the rows of
+	// the snapshot register in the principal's scope, so the entries of
+	// routes without a domain recorder hold old and new values (AUD-07,
+	// WP-505).
+	return audit.NewPGRouteAuditor(opts.AuditPool)
 }
 
-// pgRouteAuditor writes a route's audit entry org-wide on behalf of the
-// organization: the entry belongs to the organization's chain (E-08).
-type pgRouteAuditor struct {
-	pool     *pgxpool.Pool
-	recorder *audit.PGRecorder
-}
-
-func (a pgRouteAuditor) RecordRoute(ctx context.Context, entry *audit.Entry) error {
-	scope := database.OrgWideScope(entry.OrganizationID, "")
-	return database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := a.recorder.Record(ctx, tx, *entry)
-		return err
-	})
-}
+// The production route auditor reads route snapshots (WP-505).
+var _ middleware.RouteSnapshotter = (*audit.PGRouteAuditor)(nil)
 
 // ciHandler builds the CI handler; without the event outbox it hands CI
 // events to the webhook dispatcher directly.
@@ -643,21 +784,29 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 	} else {
 		h = ci.NewHandler(opts.CIService, opts.Dispatcher)
 	}
+	// The restore window is the configured soft-delete retention (CI-05).
+	if opts.RetentionSoftDeleteDays > 0 {
+		opts.CIService.WithRestoreRetention(time.Duration(opts.RetentionSoftDeleteDays) * 24 * time.Hour)
+	}
 	// GET /cis/{id}?include= (API-05) embeds up to includeLimit related
-	// rows of each kind.
+	// rows of each kind; a kind with more rows the caller may see is marked
+	// as truncated (F-223).
 	const includeLimit = 200
 	page := api.PaginationParams{Limit: includeLimit}
 	if repos.Override != nil {
 		h.WithProvenance(repos.Override)
 	}
 	return h.WithIncludes(map[string]ci.IncludeFunc{
-		"relationships": func(ctx context.Context, orgID, ciID string) (any, error) {
-			rels, _, err := repos.Relationship.List(ctx, orgID, ciID, page)
-			return rels, err
+		"relationships": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
+			rels, total, err := repos.Relationship.List(ctx, orgID, ciID, page)
+			return rels, total > len(rels), err
 		},
-		"contacts": func(ctx context.Context, orgID, ciID string) (any, error) {
-			contacts, _, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
-			return contacts, err
+		"contacts": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
+			contacts, total, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
+			if contacts == nil {
+				contacts = []contact.CIContact{}
+			}
+			return contacts, total > len(contacts), err
 		},
 	})
 }
@@ -667,25 +816,5 @@ func notifyHandler(opts *Options) *notify.Handler {
 	if opts.Notifications == nil {
 		opts.Notifications = notify.NewMemoryCenter()
 	}
-	return notify.NewHandler(opts.Notifications)
-}
-
-// reviewEvents reports opened review items as review.created (NTF-05).
-type reviewEvents struct{ emitter events.Emitter }
-
-func (r reviewEvents) ReviewOpened(ctx context.Context, item *reviews.Item) {
-	if err := r.emitter.Emit(ctx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated, EntityID: item.ID,
-		Data: map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey}}); err != nil {
-		slog.Error("report opened review item", "item", item.ID, "error", err)
-	}
-}
-
-// historyHandler serves the history; with the job model the state snapshot
-// runs as a job (JOB-04).
-func historyHandler(repo history.Repository, snapshotJobs history.SnapshotJobs) *history.Handler {
-	h := history.NewHandler(repo)
-	if snapshotJobs != nil {
-		h.WithJobs(snapshotJobs)
-	}
-	return h
+	return notify.NewHandler(opts.Notifications).WithEgress(opts.Egress)
 }

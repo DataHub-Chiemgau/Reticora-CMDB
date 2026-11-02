@@ -54,12 +54,15 @@ type CollectorPatch struct {
 	Status *string `json:"status,omitempty"`
 }
 
+// validate refuses an empty name and a status other than disabled and
+// active with 422 on the field, like the site binding of the repository
+// (collectorError, F-423).
 func (p *CollectorPatch) validate() error {
 	if p.Name != nil && *p.Name == "" {
-		return &api.FieldError{Field: "name", Message: "name must not be empty"}
+		return &api.FieldError{Field: "name", Message: "name must not be empty", Status: http.StatusUnprocessableEntity}
 	}
 	if p.Status != nil && *p.Status != CollectorDisabled && *p.Status != CollectorActive {
-		return &api.FieldError{Field: "status", Message: "status can be set to disabled or active"}
+		return &api.FieldError{Field: "status", Message: "status can be set to disabled or active", Status: http.StatusUnprocessableEntity}
 	}
 	return nil
 }
@@ -152,7 +155,9 @@ type StatusChanges struct {
 	Offline, Paused, Resumed int
 }
 
-// Run checks every organization.
+// Run checks every organization. A failing organization does not stop the
+// others (F-256): Run returns the errors joined at the end, the totals
+// count the organizations that succeeded.
 func (m *StatusMonitor) Run(ctx context.Context) (StatusChanges, error) {
 	var total StatusChanges
 	var orgs []string
@@ -167,16 +172,22 @@ func (m *StatusMonitor) Run(ctx context.Context) (StatusChanges, error) {
 	if err != nil {
 		return total, fmt.Errorf("list organizations: %w", err)
 	}
+	var errs []error
 	for _, org := range orgs {
+		if ctx.Err() != nil {
+			errs = append(errs, ctx.Err())
+			break
+		}
 		c, oerr := m.RunOrg(ctx, org)
 		if oerr != nil {
-			return total, fmt.Errorf("organization %s: %w", org, oerr)
+			errs = append(errs, fmt.Errorf("organization %s: %w", org, oerr))
+			continue
 		}
 		total.Offline += c.Offline
 		total.Paused += c.Paused
 		total.Resumed += c.Resumed
 	}
-	return total, nil
+	return total, errors.Join(errs...)
 }
 
 // RunOrg checks the collectors of one organization.

@@ -1,0 +1,249 @@
+passed	ApiError	exposes per-field violations from a 422 problem detail
+passed	ApiError	keeps the detail as the message when there are no violations
+passed	ApiError	falls back to the status text when the body is not JSON
+passed	ApiError	ignores malformed violation entries instead of throwing
+passed	relationshipApi	PATCHes verification state to the relationship endpoint
+passed	relationshipApi	creates and deletes relationships on the collection endpoint
+passed	fetchAPI authentication	attaches the bearer token when a session exists
+passed	fetchAPI authentication	refreshes once on 401 and retries the original request
+passed	logout	ends the server session with the access token and the cookie, then clears the local session
+passed	logout	clears the local session when the server is unreachable
+passed	ciApi.update optimistic concurrency	sends the CI version as If-Match and surfaces a 409 conflict
+passed	bffQuery	posts the query to /bff/graphql with the session and returns data
+passed	bffQuery	throws the GraphQL errors
+passed	impact clients	ask for the fields they read, never for the full answer with paths (NFR-02)
+passed	generated client helpers	renders path parameters
+passed	generated client helpers	encodes path parameters
+passed	generated client helpers	throws when a path parameter is missing
+passed	generated client helpers	skips empty query values
+passed	createApiClient	issues typed requests through the transport
+passed	createApiClient	serialises request bodies
+passed	authStore	sets, persists, and clears the current session
+passed	authStore	rehydrates a stored session on load
+passed	OIDC callback handling	rejects a mismatched state without exchanging the code
+passed	OIDC login on insecure origins	fails with a readable error when the Web Crypto API is unavailable
+passed	OIDC configuration validation	reports an incomplete server configuration instead of redirecting with undefined parameters
+passed	CommandPalette	shows real search results
+passed	CommandPalette	is operable with the keyboard only (UI-10)
+passed	CommandPalette	closes with Escape and reopens with Ctrl+K
+passed	NotificationCenter	shows the unread count and marks one notification as read
+passed	NotificationCenter	marks all notifications as read
+passed	withScope	adds client and site only to GETs of scoped lists
+passed	withScope	leaves lists unchanged without a selection
+passed	ScopeSwitcher	offers only the accessible clients and the sites of the chosen client
+passed	ScopeSwitcher	drops a stored client the user can no longer access
+passed	ScopeSwitcher	changing the client resets the site
+passed	i18n catalog	labels every value of dashboard.roles in both languages
+passed	i18n catalog	labels every value of stocktake.statuses in both languages
+passed	i18n catalog	labels every value of stocktake.scopes in both languages
+passed	i18n catalog	labels every value of citypes.dataTypes in both languages
+passed	i18n catalog	labels every value of discovery.collectorStatus in both languages
+passed	i18n catalog	keeps enumeration values as lower-case English keys
+passed	i18n catalog	maps the stored German dashboard roles onto the English values
+passed	i18n catalog	../pages/DashboardPage.tsx has no literal option labels
+passed	i18n catalog	../pages/DiscoveryPage.tsx has no literal option labels
+passed	i18n catalog	../pages/StocktakeListPage.tsx has no literal option labels
+passed	i18n catalog	../pages/CITypeAdminPage.tsx has no literal option labels
+passed	i18n resources	keeps de-DE and en-US key sets in sync
+passed	i18n resources	has no empty translation values
+passed	i18n resources	covers every t() key used in source files (fallbacks would hide gaps)
+passed	navFeatureFor	leaves core CMDB surface ungated
+passed	navFeatureFor	gates add-on modules behind their entitlement feature
+passed	navFeatureFor	uses the phase-1 feature keys of ENT-02
+passed	useModules	hides the pages of switched-off late modules (WP-214)
+passed	useUndoableDelete	executes the delete only after the undo window expires
+passed	useUndoableDelete	cancels the pending delete when undo is pressed
+passed	evaluateField	shows the field when the predicate matches
+passed	evaluateField	hides and de-requires the field when the predicate does not match
+passed	evaluateField	applies conditional required and read-only
+passed	evaluateField	restricts allowed values conditionally
+passed	matchPredicate	evaluates {"field":"n","op":"gt","value":4} as true
+passed	matchPredicate	evaluates {"field":"n","op":"gte","value":5} as true
+passed	matchPredicate	evaluates {"field":"n","op":"lt","value":6} as true
+passed	matchPredicate	evaluates {"field":"n","op":"lte","value":5} as true
+passed	matchPredicate	evaluates {"field":"n","op":"eq","value":5} as true
+passed	matchPredicate	evaluates {"field":"n","op":"ne","value":5} as false
+passed	matchPredicate	evaluates {"field":"n","op":"in","value":[4,5]} as true
+passed	matchPredicate	evaluates {"field":"s","op":"contains","value":"world"} as true
+passed	matchPredicate	evaluates {"field":"list","op":"contains","value":"a"} as true
+passed	matchPredicate	evaluates {"field":"empty","op":"empty"} as true
+passed	matchPredicate	evaluates {"field":"missing","op":"empty"} as true
+passed	matchPredicate	evaluates {"field":"s","op":"not_empty"} as true
+passed	validateValue	requires values only when required
+passed	validateValue	validates ip/mac/email/url
+passed	validateValue	validates enum options
+passed	validateValue	validates numeric bounds
+passed	ruleOf	builds the shared rule AST of a definition
+passed	ruleOf	rejects calendar days that do not exist and out-of-range IPv4
+passed	ruleOf	counts code points like the server
+passed	rule AST conformance	has cases
+passed	rule AST conformance	required: absent value
+passed	rule AST conformance	required: null
+passed	rule AST conformance	required: whitespace string is empty
+passed	rule AST conformance	required: empty array
+passed	rule AST conformance	required: zero is a value
+passed	rule AST conformance	required: false is a value
+passed	rule AST conformance	required: text
+passed	rule AST conformance	pattern: match
+passed	rule AST conformance	pattern: no match
+passed	rule AST conformance	pattern: unanchored matches anywhere
+passed	rule AST conformance	pattern: empty value passes
+passed	rule AST conformance	pattern: absent value passes
+passed	rule AST conformance	pattern: number is not a string
+passed	rule AST conformance	pattern: each array element
+passed	rule AST conformance	pattern: unicode class
+passed	rule AST conformance	range: inside
+passed	rule AST conformance	range: bounds are inclusive
+passed	rule AST conformance	range: below min
+passed	rule AST conformance	range: above max
+passed	rule AST conformance	range: only max
+passed	rule AST conformance	range: numeric string is no number
+passed	rule AST conformance	range: boolean is no number
+passed	rule AST conformance	range: each array element
+passed	rule AST conformance	length: code points, not bytes
+passed	rule AST conformance	length: astral character counts once
+passed	rule AST conformance	length: too long
+passed	rule AST conformance	length: number has no length
+passed	rule AST conformance	enum: member
+passed	rule AST conformance	enum: not a member
+passed	rule AST conformance	enum: case matters
+passed	rule AST conformance	enum: number compares by value
+passed	rule AST conformance	enum: string is not a number
+passed	rule AST conformance	enum: boolean member
+passed	rule AST conformance	enum: array elements
+passed	rule AST conformance	enum: empty value passes
+passed	rule AST conformance	all: violations in order
+passed	rule AST conformance	all: required first, others skip empty
+passed	rule AST conformance	all: nested
+passed	rule AST conformance	all: empty list holds
+passed	rule AST conformance	invalid: unknown op
+passed	rule AST conformance	invalid: pattern missing
+passed	rule AST conformance	invalid: pattern does not compile
+passed	rule AST conformance	invalid: lookahead is outside the common subset
+passed	rule AST conformance	invalid: backreference is outside the common subset
+passed	rule AST conformance	invalid: range without bounds
+passed	rule AST conformance	invalid: range min above max
+passed	rule AST conformance	invalid: range of unknown
+passed	rule AST conformance	invalid: enum without values
+passed	rule AST conformance	invalid: enum with an object
+passed	rule AST conformance	invalid: nested invalid rule
+passed	rule AST conformance	invalid: unknown property
+passed	AssistantPage	asks a question and renders citations
+passed	AuditPage	lists audit entries
+passed	AuditPage	shows an intact result after verification
+passed	AuditPage	surfaces a broken chain with its position
+passed	buildNeighborList	returns the other endpoint with its direction
+passed	buildNeighborList	drops edges whose endpoint node is missing or unrelated to the CI
+passed	CIDetailPage	renders the CI, its relationships and its neighbors
+passed	CIDetailPage	shows time and location and the unified history (CI-06)
+passed	CIDetailPage	shows an error state with a retry action when the CI cannot be loaded
+passed	CIFormModal server-side validation	renders a 422 violation on the matching input and unmapped ones in the banner
+passed	CIFormModal server-side validation	shows the plain detail when the failure has no violations
+passed	CIListPage	links every row to the deep-linkable detail page
+passed	CIListPage	offers the create action from the empty state
+passed	CIListPage	bulk-updates the status of selected CIs in one request
+passed	CIListPage	shows the error of every CI the bulk change failed for
+passed	CIListPage filter persistence	applies filters taken from the URL on first render
+passed	CIListPage filter persistence	writes typed filters into the URL so they survive a reload
+passed	CIListPage filter persistence	drops cleared filters from the query string
+passed	CompliancePage	renders score and failing results
+passed	DashboardPage	renders summary cards with counts
+passed	DashboardPage	does not crash when a list endpoint returns data:null (legacy/empty backend)
+passed	DashboardPage	switches the widget set when the role changes
+passed	DashboardPage	hides the widgets of switched-off modules (WP-214)
+passed	DiscoveryPage scopes (DIS-09)	lists the scopes of a collector and creates a new one
+passed	DiscoveryPage scopes (DIS-09)	shows the state and the causes of failed scope runs (DIS-08)
+passed	DiscoveryPage scopes (DIS-09)	confirms a suggested scope (INS-06)
+passed	ExportPage	renders a completed job with a download link
+passed	ExportPage	shows the empty state when no jobs exist
+passed	FormsPage	renders a form definition and fields
+passed	IGAPage	renders connectors, tasks and empty review states
+passed	JobCenterPage	shows the progress and cancels a running job
+passed	JobCenterPage	shows the result of a succeeded job
+passed	JobCenterPage	filters by status
+passed	LocationTreePage	renders the canonical tree with all descendants
+passed	LocationTreePage	offers only the child kinds of the parent matrix and shows field violations
+passed	LocationTreePage	creates a site for a client
+passed	MonitoringPage	renders alert rules
+passed	MonitoringPage	shows the empty state when no alert rules exist
+passed	currentStep	orders the steps
+passed	OnboardingPage	signs up with the solved ALTCHA challenge
+passed	OnboardingPage	verifies the link and leads to the sign-in
+passed	OnboardingPage	explains an expired verification link
+passed	OnboardingPage	creates an enrollment code while no collector is connected
+passed	OnboardingPage	confirms a reported scope
+passed	OnboardingPage	finishes once the first CIs are there
+passed	PermissionsPage	renders the catalogue and highlights effective permissions
+passed	buildRackUnits	labels mounts with the CI name and falls back to the CI id
+passed	buildRackUnits	renders rear mounts when the rear face is selected
+passed	RackPage	selects the first rack and renders its mounts
+passed	RackPage	switches to the rear face and shows rear mounts
+passed	RackPage	shows an empty state when no racks exist
+passed	reviewDiff	compares the observed fields with the CI
+passed	reviewDiff	shows the conflicting field of a value conflict
+passed	commonActions	offers only actions every selected item allows, never merge
+passed	ReviewInboxPage	filters by type and escalation
+passed	ReviewInboxPage	shows the diff and merges into the chosen candidate
+passed	ReviewInboxPage	offers only the allowed actions of a type
+passed	ReviewInboxPage	resolves several items with one action and reports failures
+passed	room plan coordinate math	maps the center to 0.5/0.5
+passed	room plan coordinate math	clamps drops outside the plan to the nearest edge
+passed	room plan coordinate math	offsets relative to the plan origin
+passed	room plan coordinate math	moves by 1 % per arrow key, 10 % with Shift, clamped to the plan
+passed	RoomPlanPage without drag and drop	moves a focused object with the arrow keys
+passed	RoomPlanPage without drag and drop	positions an object through the coordinate form
+passed	SLAPage	renders SLA policies and empty breach state
+passed	SavedViewsPage	saves the currently running filter as a personal view
+passed	SavedViewsPage	does not save when the name prompt is cancelled
+passed	SavedViewsPage	deletes a personal view
+passed	SavedViewsPage	marks a view shared with roles
+passed	SecurityPage	renders the security report with findings
+passed	SecurityPage	keeps the DSGVO controls without the compliance module (WP-214)
+passed	buildGraphModel	maps nodes and drops edges with unknown endpoints
+passed	buildGraphModel	collapses parallel edges between the same pair into one labelled edge
+passed	buildGraphModel	falls back to the default color for unknown status values
+passed	computeOutageImpact	marks all transitively dependent nodes as impacted
+passed	computeOutageImpact	returns an empty set for leaf nodes
+passed	computeOutageImpact	terminates on cyclic graphs
+passed	TopologyPage	renders the graph and an accessible node list
+passed	TopologyPage	shows an empty state when the tenant has no topology yet
+passed	TopologyPage	passes the focused CI from the query string to the API
+passed	TopologyPage	shows the outage impact panel when a failure is simulated
+passed	TopologyPage	filters by CI type id
+passed	TopologyPage	asks for a filter when the topology is too large
+passed	TopologyPage	opens a start dialog with site and type above 2,000 CIs (UI-06)
+passed	TopologyPage	simulates several failing CIs jointly (IMP-05)
+passed	TopologyPage	adds a further failure to a running simulation
+passed	multiple failures	parses the failed CIs of the URL
+passed	multiple failures	unites the impact of several failures without the failed CIs
+passed	WebhooksPage	renders subscriptions and an empty dead-letter queue
+passed	WebhooksPage	shows the empty state when no subscriptions exist
+passed	WebhooksPage	retries a dead delivery (WHK-01)
+passed	WorkflowPage	renders workflow definitions and approval runs
+passed	sparklinePath	scales the series into the box
+passed	CIMetricsSection	loads the series of the CI on demand and draws one line each
+passed	CIMetricsSection	says so when monitoring is not enabled
+passed	CIParentAssetCard	renders the inventory data inherited from the parent asset
+passed	CIParentAssetCard	marks the inherited block read-only and explains where the data comes from
+passed	CIParentAssetCard	renders nothing for a standalone CI so the simple workflow stays simple
+passed	CIParentAssetCard	renders nothing when the payload has no composition link
+passed	CIParentAssetCard	still identifies the parent when its asset record cannot be read
+passed	verificationBadgeVariant	maps the verification vocabulary onto distinct badge variants
+passed	CIRelationshipsCard	verifies an unverified relationship with a PATCH
+passed	CIRelationshipsCard	does not offer a verify action for an already verified relationship
+passed	CIRelationshipsCard	removes a discovery edge with force so it stays suppressed (REL-04)
+passed	CIRelationshipsCard	surfaces a rejected mutation instead of failing silently
+passed	ProvenanceTooltip	shows source, rank, times and reason of an observed value on focus
+passed	ProvenanceTooltip	names author and reason of an override and the value it covers
+passed	ProvenanceTooltip	marks a value of the CI record
+passed	ProvenanceSection	lists every typed field of the provenance API with a tooltip
+passed	TopologyGraph	shows a note when the renderer cannot start
+passed	Modal keyboard operation	moves focus into the dialog, traps Tab and restores focus on Escape
+passed	Modal keyboard operation	has a keyboard reachable, labelled close button
+passed	Select keyboard operation	is a labelled native select that is focusable and changes by keyboard
+passed	EmptyState	explains the empty view and renders the offered action
+passed	ErrorState	announces the failure and retries on demand
+passed	ErrorState	omits the retry button when no handler is supplied
+passed	SkeletonList	marks the placeholder as busy and exposes the loading label
+passed	LoginPage	explains an unreachable backend instead of "Failed to fetch"
+passed	LoginPage	asks for a secure connection on an insecure origin

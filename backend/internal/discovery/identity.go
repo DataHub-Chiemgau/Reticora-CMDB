@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -70,8 +71,8 @@ func canonicalMAC(value string) string {
 		return ""
 	}
 	mac := raw[0:2] + ":" + raw[2:4] + ":" + raw[4:6] + ":" + raw[6:8] + ":" + raw[8:10] + ":" + raw[10:12]
-	var first byte
-	if _, err := fmt.Sscanf(raw[0:2], "%02x", &first); err != nil {
+	first, err := strconv.ParseUint(raw[0:2], 16, 8)
+	if err != nil {
 		return ""
 	}
 	switch {
@@ -335,8 +336,10 @@ type IdentityCandidateFinder interface {
 
 func identityQuery(item *IngestItem) IdentityQuery {
 	q := IdentityQuery{ManagementIP: item.ManagementIP}
+	// The serial number compares case-insensitively, as ResolveIdentity
+	// does (F-246).
 	if usableSerial(item.SerialNumber) {
-		q.SerialNumber = strings.TrimSpace(item.SerialNumber)
+		q.SerialNumber = strings.ToLower(strings.TrimSpace(item.SerialNumber))
 	}
 	if uuid := incomingUUID(item); usableUUID(uuid) {
 		q.HardwareUUID = strings.ToLower(uuid)
@@ -355,7 +358,7 @@ func identityQuery(item *IngestItem) IdentityQuery {
 // IdentityKeys are the identity values of the records of a batch, each
 // once per kind, in the form identityFilter binds them (NFR-03, WP-333).
 type IdentityKeys struct {
-	Serials   []string // serial_number = v
+	Serials   []string // serial_number_lc = v, lower case
 	UUIDs     []string // hardware_uuid = v, canonical lower case
 	MACs      []string // primary_mac = v or a fingerprint MAC, canonical
 	IPs       []string // management_ip = v, host address only
@@ -770,7 +773,9 @@ func (h *Handler) identityCandidates(ctx context.Context, orgID string, item *In
 	return out, nil
 }
 
-// neighborCandidates returns the CIs topology neighbors can resolve to.
+// neighborCandidates returns the CIs topology neighbors can resolve to. A
+// neighbor many records of the batch report (the switch of a rack) is
+// looked up once (WP-608, NFR-03).
 func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []IngestItem) []ci.Item {
 	finder, ok := h.repo.(IdentityCandidateFinder)
 	if !ok {
@@ -778,6 +783,7 @@ func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []
 		return all
 	}
 	seen := map[string]bool{}
+	queried := map[string]bool{}
 	var out []ci.Item
 	for i := range items {
 		for _, rel := range items[i].Relationships {
@@ -788,10 +794,15 @@ func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []
 			if host := strings.ToLower(strings.TrimSpace(rel.TargetHostname)); host != "" {
 				q.Hostnames = []string{host}
 			}
+			key := q.ManagementIP + "\x00" + strings.Join(q.MACs, ",") + "\x00" + strings.Join(q.Hostnames, ",")
+			if queried[key] {
+				continue
+			}
 			ids, err := finder.IdentityCandidates(ctx, orgID, &q)
 			if err != nil {
 				continue
 			}
+			queried[key] = true
 			for _, id := range ids {
 				if seen[id] {
 					continue

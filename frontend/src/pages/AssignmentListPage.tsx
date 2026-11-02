@@ -7,14 +7,16 @@ import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
+import { ScrollRegion } from '../components/ScrollRegion';
 
-const statusOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'active', label: 'Aktiv' },
-  { value: 'returned', label: 'Zurückgegeben' },
-  { value: 'transferred', label: 'Transferiert' },
-  { value: 'overdue', label: 'Überfällig' },
-];
+// Stored assignment statuses (English keys); the labels come from the catalog.
+export const ASSIGNMENT_STATUSES = [
+  'active',
+  'returned',
+  'transferred',
+  'overdue',
+  'cancelled',
+] as const;
 
 function statusVariant(status: string) {
   switch (status) {
@@ -33,6 +35,13 @@ function statusVariant(status: string) {
 
 export function AssignmentListPage() {
   const { t } = useTranslation();
+  const statusOptions = [
+    { value: '', label: t('common.all', 'Alle') },
+    ...ASSIGNMENT_STATUSES.map((value) => ({
+      value,
+      label: t(`assignment.statuses.${value}`, value),
+    })),
+  ];
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -80,7 +89,7 @@ export function AssignmentListPage() {
         <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
       ) : (
         <Card title={`${t('assignment.title', 'Zuweisungen')} (${data?.total ?? 0})`}>
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('assignment.title', 'Zuweisungen')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -97,7 +106,9 @@ export function AssignmentListPage() {
                     <td className="py-2">{item.assignment_type}</td>
                     <td className="py-2">{item.assigned_to}</td>
                     <td className="py-2">
-                      <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
+                      <Badge variant={statusVariant(item.status)}>
+                        {t(`assignment.statuses.${item.status}`, item.status)}
+                      </Badge>
                     </td>
                     <td className="py-2">
                       {new Date(item.assigned_at).toLocaleDateString('de-DE')}
@@ -117,14 +128,14 @@ export function AssignmentListPage() {
                 ))}
                 {(!data?.data || data.data.length === 0) && (
                   <tr>
-                    <td colSpan={5} className="py-4 text-center text-gray-400">
+                    <td colSpan={5} className="py-4 text-center text-gray-600 dark:text-gray-300">
                       {t('common.noData', 'Keine Daten')}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         </Card>
       )}
 

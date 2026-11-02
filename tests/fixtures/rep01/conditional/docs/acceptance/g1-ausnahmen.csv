@@ -1,0 +1,10 @@
+id;art;grund;entscheidung;lieferung
+AUT-05;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76 Option 2;A-02 v2-Text (Fixture), Frist vor GA
+AUT-06;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76 Option 2;A-02 v2-Text (Fixture), Frist vor GA
+NET-04;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76 Option 2;A-02 v2-Text (Fixture), Frist vor GA
+NFR-08;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76 Option 2;A-07 Pentest-Zusammenfassung (Fixture), Frist vor GA
+NFR-09;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76 Option 2;A-11 Subprozessorenliste (Fixture), Frist vor GA
+ABN-01;erklaerung;Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76 Option 2;A-02 Szenariotexte (Fixture), Frist vor GA
+GATE-03;erklaerung;Pentest-Anteil: Erklärung des Auftraggebers, Nachweis ausstehend (Fixture);E-76 Option 2;A-07 Pentest-Zusammenfassung (Fixture), Frist vor GA
+GATE-02;erklaerung;abgeleitet aus den übrigen Zeilen (Fixture);E-76 Option 2;Wegfall der übrigen Ausnahmen, Frist der übrigen Zeilen (vor GA)
+GATE-04;np;GA-Regel, nicht Teil von G1 (Fixture);E-03;keine zu G1

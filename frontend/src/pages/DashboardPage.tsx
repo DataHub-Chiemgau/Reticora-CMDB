@@ -1,10 +1,13 @@
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import {
   useAssetList,
   useCIList,
+  useAllCollectors,
   useCollectors,
   useComplianceScore,
+  useHasPermission,
   useSLABreaches,
   useStocktakeList,
   useTicketList,
@@ -12,14 +15,17 @@ import {
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
 import { useModules } from '../hooks/useEntitlements';
+import { useEscalatedReviewCount } from '../hooks/useReviews';
 import { DASHBOARD_ROLES, useDashboardStore } from '../stores/dashboard';
 import type { DashboardRole, DashboardWidget } from '../stores/dashboard';
 
 const allWidgets: DashboardWidget[] = [
   'ciSummary',
   'collectors',
+  'reviewEscalation',
   'slaBreaches',
   'compliance',
   'assets',
@@ -84,11 +90,10 @@ function CISummaryWidget() {
 
 function CollectorsWidget() {
   const { t } = useTranslation();
-  const collectors = useCollectors({ limit: 1000, offset: 0 });
+  // Every page of the list: the API answers at most 200 per page (F-362).
+  const collectors = useAllCollectors();
 
-  // Guard against a malformed/legacy payload where `data` is null instead of
-  // an array — `.filter` on null throws during render and blanks the page.
-  const collectorList = collectors.data?.data ?? [];
+  const collectorList = collectors.data ?? [];
   const collectorCount = collectorList.filter((collector) => collector.status === 'active').length;
 
   return (
@@ -97,6 +102,66 @@ function CollectorsWidget() {
       value={collectorCount}
       isLoading={collectors.isLoading}
     />
+  );
+}
+
+/**
+ * ReviewEscalationWidget counts the review items open longer than 14 days
+ * (REC-08, F-247) and leads to the inbox filtered on them. Without
+ * discovery:read (GET /review-items) it is not shown and asks nothing.
+ */
+function ReviewEscalationWidget() {
+  const { t } = useTranslation();
+  const canRead = useHasPermission('discovery:read');
+  const escalated = useEscalatedReviewCount(canRead === true);
+  if (canRead === false) {
+    return null;
+  }
+  const count = escalated.data;
+  return (
+    <Card title={t('dashboard.widgets.reviewEscalation')}>
+      {escalated.error ? (
+        <ErrorState
+          title={t('dashboard.reviewEscalation.loadError')}
+          description={escalated.error instanceof Error ? escalated.error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void escalated.refetch()}
+        />
+      ) : count === undefined ? (
+        <p className="text-3xl font-semibold text-gray-900 dark:text-gray-100">
+          {t('app.loading')}
+        </p>
+      ) : (
+        <>
+          <p
+            className={
+              count > 0
+                ? 'text-3xl font-semibold text-amber-700 dark:text-amber-300'
+                : 'text-3xl font-semibold text-gray-900 dark:text-gray-100'
+            }
+          >
+            {count}
+          </p>
+          {count > 0 ? (
+            <>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                {t('dashboard.reviewEscalation.hint')}
+              </p>
+              <Link
+                to="/reviews?escalated=true"
+                className="mt-2 inline-block text-sm font-medium text-primary underline"
+              >
+                {t('dashboard.reviewEscalation.open')}
+              </Link>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+              {t('dashboard.reviewEscalation.none')}
+            </p>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 
@@ -195,9 +260,40 @@ function TicketsWidget() {
   );
 }
 
-const widgetRenderers: Record<DashboardWidget, () => React.JSX.Element> = {
+/**
+ * SetupBanner leads back to the onboarding until it is finished: without a
+ * collector or without CIs (UI-17, F-351). The queries are the widgets' own.
+ */
+function SetupBanner() {
+  const { t } = useTranslation();
+  const collectors = useCollectors({ limit: 1, offset: 0 });
+  const cis = useCIList({ limit: 1, offset: 0 });
+  if (!collectors.isSuccess || !cis.isSuccess) {
+    return null;
+  }
+  if ((collectors.data?.total ?? 0) > 0 && (cis.data?.total ?? 0) > 0) {
+    return null;
+  }
+  return (
+    <section
+      aria-labelledby="dashboard-setup-title"
+      className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+    >
+      <h3 id="dashboard-setup-title" className="font-semibold">
+        {t('dashboard.setup.title')}
+      </h3>
+      <p className="mt-1">{t('dashboard.setup.text')}</p>
+      <Link to="/onboarding" className="mt-2 inline-block font-medium underline">
+        {t('dashboard.setup.continue')}
+      </Link>
+    </section>
+  );
+}
+
+const widgetRenderers: Record<DashboardWidget, () => React.JSX.Element | null> = {
   ciSummary: CISummaryWidget,
   collectors: CollectorsWidget,
+  reviewEscalation: ReviewEscalationWidget,
   slaBreaches: SLABreachesWidget,
   compliance: ComplianceWidget,
   assets: AssetsWidget,
@@ -240,6 +336,8 @@ export function DashboardPage() {
           }))}
         />
       </div>
+
+      <SetupBanner />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {widgets.map((widget) => {

@@ -1,6 +1,8 @@
 package discovery
 
 import (
+	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -86,6 +88,15 @@ func truncate(s string, n int) string {
 // ok, partial (errors and records) or failed (errors, no records). It
 // counts the run and its errors in the metrics.
 func NormalizeRunResult(result map[string]any) map[string]any {
+	out, errs := normalizeRunResult(result)
+	scopeRuns.WithLabelValues(out["status"].(string)).Inc()
+	countRunErrors(errs)
+	return out
+}
+
+// normalizeRunResult is NormalizeRunResult without the metrics; it also
+// returns the errors. A discovery job's result is normalized the same way.
+func normalizeRunResult(result map[string]any) (map[string]any, []ErrorState) {
 	out := map[string]any{}
 	for k, v := range result {
 		out[k] = v
@@ -140,7 +151,11 @@ func NormalizeRunResult(result map[string]any) map[string]any {
 	} else {
 		delete(out, "errors")
 	}
-	scopeRuns.WithLabelValues(state).Inc()
+	return out, errs
+}
+
+// countRunErrors counts reported run errors by protocol and cause.
+func countRunErrors(errs []ErrorState) {
 	for _, e := range errs {
 		protocol := e.Protocol
 		if protocol == "" {
@@ -148,7 +163,6 @@ func NormalizeRunResult(result map[string]any) map[string]any {
 		}
 		discoveryErrors.WithLabelValues(protocol, e.Cause).Inc()
 	}
-	return out
 }
 
 // ScopeHealthOf derives the health of a scope from its last run result.
@@ -201,4 +215,47 @@ var (
 		Namespace: "reticora", Name: "discovery_errors_total",
 		Help: "Discovery errors reported by the collectors, by protocol and cause.",
 	}, []string{"protocol", "cause"})
+	// The losses and the backpressure the collectors report with their
+	// heartbeat (NFR-04, OPS-06, F-234). A collector reports the losses it
+	// has not had acknowledged yet and acknowledges them after the accepted
+	// heartbeat, so every loss is added once.
+	collectorSpoolDropped = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "reticora", Name: "collector_spool_dropped_total",
+		Help: "Data the collectors reported as lost, by kind: messages (spool batches, rejected records, agent telemetry) and samples (metric samples and traps, E-79).",
+	}, []string{"kind"})
+	collectorSpoolBackpressure = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "reticora", Name: "collector_spool_backpressure_total",
+		Help: "Collector heartbeats reporting backpressure: the spool is saturated and collection is paused.",
+	})
 )
+
+// Kinds of reticora_collector_spool_dropped_total.
+const (
+	DroppedKindMessages = "messages"
+	DroppedKindSamples  = "samples"
+)
+
+// recordSpoolReport makes the spool report of an accepted heartbeat
+// visible: losses and backpressure raise the metrics and are logged as
+// an operator-visible warning. Negative values are ignored.
+func recordSpoolReport(ctx context.Context, orgID, collectorID string, s *CollectorSpoolReport) {
+	if s == nil || (s.DroppedMessages <= 0 && s.DroppedSamples <= 0 && !s.Backpressure) {
+		return
+	}
+	if s.DroppedMessages > 0 {
+		collectorSpoolDropped.WithLabelValues(DroppedKindMessages).Add(float64(s.DroppedMessages))
+	}
+	if s.DroppedSamples > 0 {
+		collectorSpoolDropped.WithLabelValues(DroppedKindSamples).Add(float64(s.DroppedSamples))
+	}
+	if s.Backpressure {
+		collectorSpoolBackpressure.Inc()
+	}
+	slog.WarnContext(ctx, "collector reported spool data loss or backpressure",
+		"event", "collector.spool.degraded",
+		"organization_id", orgID, "collector_id", collectorID,
+		"spool_messages", s.Messages, "spool_bytes", s.Bytes,
+		"spool_oldest_age_seconds", s.OldestAgeSeconds,
+		"dropped_messages", s.DroppedMessages, "dropped_bytes", s.DroppedBytes,
+		"dropped_samples", s.DroppedSamples, "backpressure", s.Backpressure)
+}

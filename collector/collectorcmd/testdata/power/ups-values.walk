@@ -1,0 +1,9 @@
+# APC Smart-UPS SRT 5000, snmpwalk -On of the UPS-MIB values (RFC 1628)
+# the power poll reads: upsBatteryStatus (normal 2),
+# upsEstimatedMinutesRemaining, upsEstimatedChargeRemaining and
+# upsOutputPercentLoad of output line 1. Identity and outlet groups of this
+# device are collector/plugins/power/testdata/apc-ups.walk.
+.1.3.6.1.2.1.33.1.2.1.0 = INTEGER: 2
+.1.3.6.1.2.1.33.1.2.3.0 = INTEGER: 42
+.1.3.6.1.2.1.33.1.2.4.0 = INTEGER: 97
+.1.3.6.1.2.1.33.1.4.4.1.5.1 = INTEGER: 31

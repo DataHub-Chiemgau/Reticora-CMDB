@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"gopkg.in/yaml.v3"
 )
 
 // TestDisabledWorkerDoesNotStart covers WP-098 (OPS-02): a worker whose
@@ -135,21 +138,278 @@ func TestWorkerMetricsAreRegisteredAndRecorded(t *testing.T) {
 }
 
 // TestWorkerAlertRulesCoverTheWorkerMetrics: deploy/monitoring alerts on
-// stopped workers, errors, missing successful runs and backlog.
+// stopped workers, errors, missing successful runs and backlog, each on its
+// worker metrics with its severity and hold time. ReticoraWorkerNoSuccess
+// starts from the running workers and removes those with a recent success,
+// so a worker without a last-success series fires too (WP-446, F-295). Every
+// alert has a promtool case where it fires and one where it does not in
+// deploy/monitoring/tests/worker-rules.test.yaml (run by
+// tests/monitoring-config.test.sh).
 func TestWorkerAlertRulesCoverTheWorkerMetrics(t *testing.T) {
-	raw, err := os.ReadFile("../../../deploy/monitoring/worker-rules.yaml")
+	var rule struct {
+		Kind string
+		Spec struct {
+			Groups []struct {
+				Rules []struct {
+					Alert  string
+					Expr   string
+					For    string
+					Labels map[string]string
+				}
+			}
+		}
+	}
+	readYAML(t, "../../../deploy/monitoring/worker-rules.yaml", &rule)
+	if rule.Kind != "PrometheusRule" {
+		t.Fatalf("worker-rules.yaml: kind %q", rule.Kind)
+	}
+	type alert struct{ expr, hold, severity string }
+	alerts := map[string]alert{}
+	for _, g := range rule.Spec.Groups {
+		for _, r := range g.Rules {
+			if r.Alert == "" {
+				continue
+			}
+			if _, dup := alerts[r.Alert]; dup {
+				t.Errorf("worker-rules.yaml defines %s twice", r.Alert)
+			}
+			alerts[r.Alert] = alert{r.Expr, r.For, r.Labels["severity"]}
+		}
+	}
+	for _, want := range []struct {
+		alert, severity, hold string
+		metrics               []string
+	}{
+		{"ReticoraWorkerStopped", "critical", "5m", []string{"reticora_worker_enabled", "reticora_worker_up"}},
+		{"ReticoraWorkerErrors", "warning", "15m", []string{"reticora_worker_errors_total"}},
+		{"ReticoraWorkerNoSuccess", "critical", "30m", []string{"reticora_worker_up", "reticora_worker_last_success_timestamp_seconds"}},
+		{"ReticoraWorkerBacklog", "warning", "15m", []string{"reticora_worker_backlog"}},
+		{"ReticoraWorkerBacklogGrowing", "warning", "30m", []string{"reticora_worker_backlog"}},
+	} {
+		got, ok := alerts[want.alert]
+		if !ok {
+			t.Errorf("worker-rules.yaml lacks alert %s", want.alert)
+			continue
+		}
+		for _, m := range want.metrics {
+			if !strings.Contains(got.expr, m) {
+				t.Errorf("%s: expression does not use %s: %s", want.alert, m, got.expr)
+			}
+		}
+		if got.severity != want.severity || got.hold != want.hold {
+			t.Errorf("%s: severity %q, for %q; want %q, %q", want.alert, got.severity, got.hold, want.severity, want.hold)
+		}
+	}
+	// F-295: the last-success series may be missing (no successful cycle
+	// since the process started); it may only remove workers, never be
+	// required for the alert.
+	parts := regexp.MustCompile(`\bunless\s+on\s*\(\s*worker\s*\)`).Split(alerts["ReticoraWorkerNoSuccess"].expr, -1)
+	if len(parts) != 2 || !strings.Contains(parts[0], "reticora_worker_up") ||
+		strings.Contains(parts[0], "reticora_worker_last_success_timestamp_seconds") ||
+		!strings.Contains(parts[1], "reticora_worker_last_success_timestamp_seconds") {
+		t.Errorf("ReticoraWorkerNoSuccess must be 'running workers unless on (worker) a recent success', "+
+			"so that a worker without a last-success series fires: %s", alerts["ReticoraWorkerNoSuccess"].expr)
+	}
+
+	var unit struct {
+		RuleFiles []string `yaml:"rule_files"`
+		Tests     []struct {
+			AlertRuleTest []struct {
+				Alertname string           `yaml:"alertname"`
+				ExpAlerts []map[string]any `yaml:"exp_alerts"`
+			} `yaml:"alert_rule_test"`
+		}
+	}
+	readYAML(t, "../../../deploy/monitoring/tests/worker-rules.test.yaml", &unit)
+	if !slices.Equal(unit.RuleFiles, []string{"worker-rules.groups.yaml"}) {
+		t.Errorf("worker-rules.test.yaml: rule_files %v, want the extracted groups of worker-rules.yaml", unit.RuleFiles)
+	}
+	fires, silent := map[string]bool{}, map[string]bool{}
+	for _, tc := range unit.Tests {
+		for _, a := range tc.AlertRuleTest {
+			if len(a.ExpAlerts) > 0 {
+				fires[a.Alertname] = true
+			} else {
+				silent[a.Alertname] = true
+			}
+		}
+	}
+	for name := range alerts {
+		if !fires[name] || !silent[name] {
+			t.Errorf("worker-rules.test.yaml: %s needs a case where it fires (%v) and one where it does not (%v)", name, fires[name], silent[name])
+		}
+	}
+}
+
+// TestDiscoveryAlertRulesCoverTheDiscoveryMetrics covers WP-496 (DIS-08,
+// F-267): deploy/monitoring/discovery-rules.yaml alerts on failing scope
+// runs, failed logins, failed uploads and configuration errors, each on the
+// discovery metrics with its severity and hold time; every alert has a
+// promtool case where it fires and one where it does not in
+// deploy/monitoring/tests/discovery-rules.test.yaml (run by
+// tests/monitoring-config.test.sh). docs/ops/discovery-metrics.md describes
+// both metrics with their labels, every state and cause, and every alert.
+func TestDiscoveryAlertRulesCoverTheDiscoveryMetrics(t *testing.T) {
+	const runs, errs = "reticora_discovery_scope_runs_total", "reticora_discovery_errors_total"
+	var rule struct {
+		Kind string
+		Spec struct {
+			Groups []struct {
+				Rules []struct {
+					Alert  string
+					Expr   string
+					For    string
+					Labels map[string]string
+				}
+			}
+		}
+	}
+	readYAML(t, "../../../deploy/monitoring/discovery-rules.yaml", &rule)
+	if rule.Kind != "PrometheusRule" {
+		t.Fatalf("discovery-rules.yaml: kind %q", rule.Kind)
+	}
+	type alert struct{ expr, hold, severity string }
+	alerts := map[string]alert{}
+	for _, g := range rule.Spec.Groups {
+		for _, r := range g.Rules {
+			if r.Alert == "" {
+				continue
+			}
+			if _, dup := alerts[r.Alert]; dup {
+				t.Errorf("discovery-rules.yaml defines %s twice", r.Alert)
+			}
+			alerts[r.Alert] = alert{r.Expr, r.For, r.Labels["severity"]}
+		}
+	}
+	for _, want := range []struct {
+		alert, severity, hold string
+		parts                 []string
+	}{
+		{"ReticoraDiscoveryScopeRunsFailing", "warning", "1h", []string{runs, `state="failed"`}},
+		{"ReticoraDiscoveryAuthFailures", "warning", "30m", []string{errs, `cause="` + discovery.CauseAuthFailed + `"`, "by (protocol)"}},
+		{"ReticoraDiscoveryUploadFailures", "warning", "30m", []string{errs, `cause="` + discovery.CauseUpload + `"`}},
+		{"ReticoraDiscoveryConfigErrors", "warning", "1h", []string{errs, `cause="` + discovery.CauseConfig + `"`, "by (protocol)"}},
+	} {
+		got, ok := alerts[want.alert]
+		if !ok {
+			t.Errorf("discovery-rules.yaml lacks alert %s", want.alert)
+			continue
+		}
+		for _, p := range want.parts {
+			if !strings.Contains(got.expr, p) {
+				t.Errorf("%s: expression does not use %s: %s", want.alert, p, got.expr)
+			}
+		}
+		if got.severity != want.severity || got.hold != want.hold {
+			t.Errorf("%s: severity %q, for %q; want %q, %q", want.alert, got.severity, got.hold, want.severity, want.hold)
+		}
+	}
+
+	var unit struct {
+		RuleFiles []string `yaml:"rule_files"`
+		Tests     []struct {
+			AlertRuleTest []struct {
+				Alertname string           `yaml:"alertname"`
+				ExpAlerts []map[string]any `yaml:"exp_alerts"`
+			} `yaml:"alert_rule_test"`
+		}
+	}
+	readYAML(t, "../../../deploy/monitoring/tests/discovery-rules.test.yaml", &unit)
+	if !slices.Equal(unit.RuleFiles, []string{"discovery-rules.groups.yaml"}) {
+		t.Errorf("discovery-rules.test.yaml: rule_files %v, want the extracted groups of discovery-rules.yaml", unit.RuleFiles)
+	}
+	fires, silent := map[string]bool{}, map[string]bool{}
+	for _, tc := range unit.Tests {
+		for _, a := range tc.AlertRuleTest {
+			if len(a.ExpAlerts) > 0 {
+				fires[a.Alertname] = true
+			} else {
+				silent[a.Alertname] = true
+			}
+		}
+	}
+	for name := range alerts {
+		if !fires[name] || !silent[name] {
+			t.Errorf("discovery-rules.test.yaml: %s needs a case where it fires (%v) and one where it does not (%v)", name, fires[name], silent[name])
+		}
+	}
+
+	raw, err := os.ReadFile("../../../docs/ops/discovery-metrics.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rules := string(raw)
-	for _, want := range []string{
-		"alert: ReticoraWorkerStopped", "reticora_worker_up", "reticora_worker_enabled",
-		"alert: ReticoraWorkerErrors", "reticora_worker_errors_total",
-		"alert: ReticoraWorkerNoSuccess", "reticora_worker_last_success_timestamp_seconds",
-		"alert: ReticoraWorkerBacklog", "reticora_worker_backlog",
-	} {
-		if !strings.Contains(rules, want) {
-			t.Errorf("worker-rules.yaml lacks %s", want)
+	doc := string(raw)
+	mentions := []string{runs, errs, "`state`", "`protocol`", "`cause`", "deploy/monitoring/discovery-rules.yaml",
+		"`" + discovery.ScopeStateOK + "`", "`" + discovery.ScopeStatePartial + "`", "`" + discovery.ScopeStateFailed + "`"}
+	for _, cause := range []string{discovery.CauseUnreachable, discovery.CauseTimeout, discovery.CauseRefused,
+		discovery.CauseAuthFailed, discovery.CauseTLS, discovery.CauseProtocol, discovery.CauseConfig,
+		discovery.CauseUpload, discovery.CauseUnknown} {
+		mentions = append(mentions, "`"+cause+"`")
+	}
+	for name := range alerts {
+		mentions = append(mentions, "`"+name+"`")
+	}
+	for _, m := range mentions {
+		if !strings.Contains(doc, m) {
+			t.Errorf("docs/ops/discovery-metrics.md does not describe %s", m)
 		}
+	}
+}
+
+func readYAML(t *testing.T, path string, v any) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = yaml.Unmarshal(raw, v); err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+}
+
+// TestAuditT3HealthRefreshRunsInG1 covers WP-480 (DB-05, MON-02, F-087):
+// under the G1 default module set (RETICORA_MODULES unset, E-03) the worker
+// that refreshes ci.health may start. The refresh used to run only inside
+// the alert evaluator, worker config.WorkerMonitoring, which the module
+// alerting (P3) gates, so ci.health stayed 'unknown'. Now the worker
+// config.WorkerHealth refreshes it; it belongs to no late module, the
+// monitoring worker stays gated by alerting.
+//
+// Retest:
+//
+//	cd backend && go test -count=1 -v -run 'TestAuditT3HealthRefreshRunsInG1' ./internal/server/
+func TestAuditT3HealthRefreshRunsInG1(t *testing.T) {
+	// Control: with the alerting module the monitoring worker starts.
+	alerting, err := ParseModules("alerting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !alerting.WorkerAllowed(config.WorkerMonitoring) {
+		t.Fatalf("control: monitoring worker not allowed with RETICORA_MODULES=alerting")
+	}
+
+	g1, err := ParseModules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var allowed []string
+	for _, name := range config.WorkerNames {
+		hostsHealth := name == config.WorkerMonitoring || strings.Contains(name, "health")
+		if hostsHealth && g1.WorkerAllowed(name) {
+			allowed = append(allowed, name)
+		}
+	}
+	if !slices.Equal(allowed, []string{config.WorkerHealth}) {
+		t.Errorf("G1 default module set (RETICORA_MODULES unset): workers that may refresh ci.health %v, want [%s] (%q stays gated by module 'alerting'; DB-05)",
+			allowed, config.WorkerHealth, config.WorkerMonitoring)
+	}
+	// The health worker belongs to no late module, so no module set stops it.
+	for _, m := range LateModules {
+		if slices.Contains(m.Workers, config.WorkerHealth) {
+			t.Errorf("module %s lists the worker %s; ci.health belongs to G1", m.Key, config.WorkerHealth)
+		}
+	}
+	if !alerting.WorkerAllowed(config.WorkerHealth) {
+		t.Errorf("RETICORA_MODULES=alerting stops the worker %s", config.WorkerHealth)
 	}
 }

@@ -2,12 +2,22 @@ package form
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
+
+var (
+	// ErrNotFound: the form definition is unknown, of another organization
+	// or outside the caller's scope; all answer 404 alike (TEN-04).
+	ErrNotFound = errors.New("form definition not found")
+	// ErrSubmissionNotFound: the submission is unknown, of another
+	// organization or outside the caller's scope (404).
+	ErrSubmissionNotFound = errors.New("form submission not found")
 )
 
 // Repository defines persistence for form definitions and submissions.
@@ -51,7 +61,7 @@ func (r *MemoryRepository) GetDefinition(_ context.Context, orgID, id string) (*
 	defer r.mu.RUnlock()
 	def := r.definitions[id]
 	if def == nil || def.OrganizationID != orgID {
-		return nil, fmt.Errorf("form definition not found")
+		return nil, ErrNotFound
 	}
 	cp := *def
 	return &cp, nil
@@ -60,7 +70,8 @@ func (r *MemoryRepository) CreateDefinition(_ context.Context, def *Definition) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.next++
-	def.ID = fmt.Sprintf("form-%d", r.next)
+	// UUID form, as the handler accepts only UUID ids (API-03).
+	def.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.next)
 	now := time.Now().UTC()
 	def.CreatedAt = now
 	def.UpdatedAt = now
@@ -79,7 +90,7 @@ func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string,
 	defer r.mu.Unlock()
 	def := r.definitions[id]
 	if def == nil || def.OrganizationID != orgID {
-		return nil, fmt.Errorf("form definition not found")
+		return nil, ErrNotFound
 	}
 	if req.ClientID != nil {
 		def.ClientID = *req.ClientID
@@ -108,7 +119,7 @@ func (r *MemoryRepository) DeleteDefinition(_ context.Context, orgID, id string)
 	defer r.mu.Unlock()
 	def := r.definitions[id]
 	if def == nil || def.OrganizationID != orgID {
-		return fmt.Errorf("form definition not found")
+		return ErrNotFound
 	}
 	delete(r.definitions, id)
 	return nil
@@ -131,7 +142,7 @@ func (r *MemoryRepository) GetSubmission(_ context.Context, orgID, id string) (*
 	defer r.mu.RUnlock()
 	sub := r.submissions[id]
 	if sub == nil || sub.OrganizationID != orgID {
-		return nil, fmt.Errorf("form submission not found")
+		return nil, ErrSubmissionNotFound
 	}
 	cp := *sub
 	return &cp, nil
@@ -141,10 +152,10 @@ func (r *MemoryRepository) CreateSubmission(_ context.Context, sub *Submission) 
 	defer r.mu.Unlock()
 	def := r.definitions[sub.FormID]
 	if def == nil || def.OrganizationID != sub.OrganizationID {
-		return fmt.Errorf("form definition not found")
+		return ErrNotFound
 	}
 	r.next++
-	sub.ID = fmt.Sprintf("submission-%d", r.next)
+	sub.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.next)
 	now := time.Now().UTC()
 	sub.CreatedAt = now
 	sub.UpdatedAt = now

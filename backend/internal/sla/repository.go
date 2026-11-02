@@ -2,6 +2,7 @@ package sla
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,6 +10,15 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
+)
+
+var (
+	// ErrNotFound: the SLA policy is unknown, of another organization or
+	// outside the caller's scope, or no policy matches the ticket; all
+	// answer alike (TEN-04).
+	ErrNotFound = errors.New("sla policy not found")
+	// ErrTicketSLANotFound: the ticket has no visible SLA state (404).
+	ErrTicketSLANotFound = errors.New("ticket sla not found")
 )
 
 // Repository defines persistence operations for SLA policies and ticket state.
@@ -57,7 +67,7 @@ func (r *MemoryRepository) GetPolicy(_ context.Context, orgID, id string) (*Poli
 	defer r.mu.RUnlock()
 	p, ok := r.policies[id]
 	if !ok || p.OrganizationID != orgID {
-		return nil, fmt.Errorf("sla policy not found")
+		return nil, ErrNotFound
 	}
 	cp := *p
 	return &cp, nil
@@ -67,7 +77,8 @@ func (r *MemoryRepository) CreatePolicy(_ context.Context, p *Policy) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nextID++
-	p.ID = fmt.Sprintf("sla-%d", r.nextID)
+	// UUID form, as the handlers accept only UUID ids (API-03).
+	p.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID)
 	now := time.Now().UTC()
 	p.CreatedAt, p.UpdatedAt = now, now
 	cp := *p
@@ -80,7 +91,7 @@ func (r *MemoryRepository) UpdatePolicy(_ context.Context, orgID, id string, req
 	defer r.mu.Unlock()
 	p, ok := r.policies[id]
 	if !ok || p.OrganizationID != orgID {
-		return nil, fmt.Errorf("sla policy not found")
+		return nil, ErrNotFound
 	}
 	if req.ClientID != nil {
 		p.ClientID = *req.ClientID
@@ -110,7 +121,7 @@ func (r *MemoryRepository) DeletePolicy(_ context.Context, orgID, id string) err
 	defer r.mu.Unlock()
 	p, ok := r.policies[id]
 	if !ok || p.OrganizationID != orgID {
-		return fmt.Errorf("sla policy not found")
+		return ErrNotFound
 	}
 	delete(r.policies, id)
 	return nil
@@ -121,10 +132,10 @@ func (r *MemoryRepository) ApplyForTicket(_ context.Context, orgID string, t *ti
 	defer r.mu.Unlock()
 	policy := r.findPolicyLocked(orgID, t.Priority, t.RelatedCIID, slaID)
 	if policy == nil {
-		return nil, fmt.Errorf("sla policy not found")
+		return nil, ErrNotFound
 	}
 	r.nextID++
-	state := buildState(fmt.Sprintf("ticket-sla-%d", r.nextID), orgID, t, policy)
+	state := buildState(fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID), orgID, t, policy)
 	r.states[t.ID] = state
 	cp := *state
 	return &cp, nil
@@ -135,7 +146,7 @@ func (r *MemoryRepository) GetForTicket(_ context.Context, orgID, ticketID strin
 	defer r.mu.Unlock()
 	state, ok := r.states[ticketID]
 	if !ok || state.OrganizationID != orgID {
-		return nil, fmt.Errorf("ticket sla not found")
+		return nil, ErrTicketSLANotFound
 	}
 	refreshState(state, time.Now().UTC())
 	cp := *state

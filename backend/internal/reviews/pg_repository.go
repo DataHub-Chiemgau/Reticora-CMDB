@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,11 +25,20 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// visible: review items carry no client column; an item is visible when all
-// its candidate CIs are visible under the transaction's tenant scope.
-const visible = `NOT EXISTS (
+// visible: an item with candidate CIs is visible when all of them are
+// visible under the transaction's tenant scope. An item without candidates
+// is visible only when its client and site match a scope restricted in that
+// dimension (fail-closed, E-08): one without a client (or site) is for
+// org-wide principals only. The policies of migration 000140 enforce the
+// same.
+const visible = `(CASE WHEN cardinality(COALESCE(review_item.candidate_ci_ids, '{}'::uuid[])) = 0 THEN
+	(NULLIF(current_setting('` + database.ClientScopeGUC + `', true), '') IS NULL
+	 OR review_item.client_id = ANY (string_to_array(current_setting('` + database.ClientScopeGUC + `', true), ',')::uuid[]))
+	AND (NULLIF(current_setting('` + database.SiteScopeGUC + `', true), '') IS NULL
+	 OR review_item.site_id = ANY (string_to_array(current_setting('` + database.SiteScopeGUC + `', true), ',')::uuid[]))
+ELSE NOT EXISTS (
 	SELECT 1 FROM unnest(review_item.candidate_ci_ids) AS candidate(id)
-	WHERE NOT EXISTS (SELECT 1 FROM ci WHERE ci.id = candidate.id))`
+	WHERE NOT EXISTS (SELECT 1 FROM ci WHERE ci.id = candidate.id)) END)`
 
 const selectColumns = `
 	id::text,
@@ -44,7 +54,9 @@ const selectColumns = `
 	COALESCE(resolution, ''),
 	status = 'open' AND created_at < now() - make_interval(secs => $1::double precision),
 	created_at,
-	updated_at
+	updated_at,
+	COALESCE(client_id::text, ''),
+	COALESCE(site_id::text, '')
 `
 
 var escalationSeconds = EscalationAge.Seconds()
@@ -95,7 +107,8 @@ func (r *PGRepository) ListReviewItems(ctx context.Context, orgID string, filter
 }
 
 // CreateReviewItem implements Repository. With an ObjectKey an open item of
-// the same object and type is returned instead of a second one.
+// the same object and type is returned instead of a second one. A new item
+// writes review.created in its transaction (recordCreated).
 func (r *PGRepository) CreateReviewItem(ctx context.Context, item *Item) error {
 	return database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Payload == nil {
@@ -111,11 +124,11 @@ func (r *PGRepository) CreateReviewItem(ctx context.Context, item *Item) error {
 		}
 		var id string
 		err := tx.QueryRow(ctx, `
-			INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids, object_key)
-			VALUES ($1, $2, $3, $4::jsonb, $5::uuid[], NULLIF($6, ''))
+			INSERT INTO review_item (organization_id, kind, status, payload, candidate_ci_ids, object_key, client_id, site_id)
+			VALUES ($1, $2, $3, $4::jsonb, $5::uuid[], NULLIF($6, ''), NULLIF($7, '')::uuid, NULLIF($8, '')::uuid)
 			ON CONFLICT (organization_id, kind, object_key) WHERE status = 'open' AND object_key IS NOT NULL DO NOTHING
 			RETURNING id::text`,
-			item.OrganizationID, item.Kind, status, item.Payload, candidates, item.ObjectKey).Scan(&id)
+			item.OrganizationID, item.Kind, status, item.Payload, candidates, item.ObjectKey, scopeID(item.ClientID), scopeID(item.SiteID)).Scan(&id)
 		deduplicated := false
 		if errors.Is(err, pgx.ErrNoRows) {
 			deduplicated = true
@@ -137,7 +150,26 @@ func (r *PGRepository) CreateReviewItem(ctx context.Context, item *Item) error {
 		}
 		*item = *stored
 		item.Deduplicated = deduplicated
-		return nil
+		if deduplicated {
+			return nil
+		}
+		return recordCreated(ctx, tx, stored)
+	})
+}
+
+// recordCreated writes review.created of a newly opened item in the
+// transaction that inserts it (NTF-05, EVT-01), like recordResolved: a
+// rolled back item is never announced. The data carries the client and site
+// of the item (review_item.client_id/site_id, derived from the candidate CIs
+// or set by the producer), so that the notification reaches the reviewers
+// of that client and site (F-323); empty for an org-wide item.
+func recordCreated(ctx context.Context, tx pgx.Tx, item *Item) error {
+	data := map[string]any{"id": item.ID, "kind": item.Kind, "object_key": item.ObjectKey,
+		"candidate_ci_ids": item.CandidateCIIDs, "client_id": item.ClientID, "site_id": item.SiteID}
+	return database.BeforeCommit(ctx, func() error {
+		_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewCreated,
+			EntityID: item.ID, Data: data})
+		return err
 	})
 }
 
@@ -156,9 +188,48 @@ func (r *PGRepository) GetReviewItem(ctx context.Context, orgID, id string) (*It
 	return item, nil
 }
 
-// ResolveReviewItem implements Repository. Resolving an unlicensed_ci item
-// is audited (ENT-03).
+// RunInTx implements Locker: fn runs in one transaction of the context's
+// tenant scope, which every repository call with fn's context joins.
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
+// LockReviewItem implements Locker: the row of the item stays locked until
+// the context transaction ends, so a concurrent resolution of the item
+// waits and then finds it resolved (F-404). Under the tenant scope like
+// GetReviewItem (the restrictive update policies of migration 000140 apply
+// as well).
+func (r *PGRepository) LockReviewItem(ctx context.Context, orgID, id string) (*Item, error) {
+	if !audit.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var item *Item
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		item, err = scan(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM review_item WHERE id = $2 AND organization_id = $3 AND %s FOR UPDATE OF review_item",
+			selectColumns, visible), escalationSeconds, id, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// ResolveReviewItem implements Repository. Only an open item is resolved:
+// the status check and the change are one statement, so of two concurrent
+// resolutions one changes the item and the other gets ErrAlreadyResolved
+// (F-404). Resolving an unlicensed_ci item is audited (ENT-03); resolved_by
+// and the audit actor are both resolution.ResolvedBy, the principal of the
+// request (the system when empty). Every resolution writes review.resolved
+// in its transaction (EVT-02).
 func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, resolution *Resolution) (*Item, error) {
+	if !audit.IsUUID(id) {
+		return nil, ErrNotFound
+	}
 	var item *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
@@ -166,30 +237,67 @@ func (r *PGRepository) ResolveReviewItem(ctx context.Context, orgID, id string, 
 			UPDATE review_item
 			SET status = $4, action = NULLIF($5, ''), resolution = $6, resolved_by = NULLIF($7, '')::uuid,
 			    resolved_at = now(), updated_at = now()
-			WHERE id = $2 AND organization_id = $3 AND %s
+			WHERE id = $2 AND organization_id = $3 AND status = 'open' AND %s
 			RETURNING %s`, visible, selectColumns),
 			escalationSeconds, id, orgID, resolution.Status, resolution.Action, resolution.Note, resolution.ResolvedBy))
+		if errors.Is(err, pgx.ErrNoRows) {
+			var exists bool
+			if qerr := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM review_item WHERE id = $1 AND organization_id = $2 AND "+visible+")",
+				id, orgID).Scan(&exists); qerr != nil {
+				return fmt.Errorf("read review item: %w", qerr)
+			}
+			if exists {
+				return ErrAlreadyResolved
+			}
+			return ErrNotFound
+		}
 		if err != nil {
 			return err
 		}
-		if item.Kind != KindUnlicensedCI {
-			return nil
+		if item.Kind == KindUnlicensedCI {
+			actorType := "user"
+			if resolution.ResolvedBy == "" {
+				actorType = "system"
+			}
+			if _, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+				OrganizationID: orgID, ActorID: resolution.ResolvedBy, ActorType: actorType,
+				Action: "unlicensed_ci." + item.Status, ResourceType: "review_item", ResourceID: item.ID,
+				Changes: map[string]any{"resolution": item.Resolution, "device_key": item.Payload["device_key"]},
+			}); err != nil {
+				return err
+			}
 		}
-		actorType := "user"
-		if resolution.ResolvedBy == "" {
-			actorType = "system"
-		}
-		_, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
-			OrganizationID: orgID, ActorID: resolution.ResolvedBy, ActorType: actorType,
-			Action: "unlicensed_ci." + item.Status, ResourceType: "review_item", ResourceID: item.ID,
-			Changes: map[string]any{"resolution": item.Resolution, "device_key": item.Payload["device_key"]},
-		})
-		return err
+		return recordResolved(ctx, tx, item)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return item, nil
+}
+
+// recordResolved writes review.resolved of item in tx: in a context
+// transaction (an effect that resolves the item with its own writes, e.g.
+// the CI it creates) right before its commit, else at once
+// (database.BeforeCommit, WP-334). The data names the item and its
+// resolution, not the reported payload.
+func recordResolved(ctx context.Context, tx pgx.Tx, item *Item) error {
+	data := map[string]any{"id": item.ID, "kind": item.Kind, "status": item.Status, "action": item.Action,
+		"resolution": item.Resolution, "resolved_by": item.ResolvedBy, "resolved_at": item.ResolvedAt,
+		"object_key": item.ObjectKey, "candidate_ci_ids": item.CandidateCIIDs, "client_id": item.ClientID, "site_id": item.SiteID}
+	return database.BeforeCommit(ctx, func() error {
+		_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: item.OrganizationID, Type: events.ReviewResolved,
+			EntityID: item.ID, Data: data})
+		return err
+	})
+}
+
+// scopeID passes a client or site id to the derivation trigger; anything but
+// a UUID is no scope (the trigger keeps only ids of the organization).
+func scopeID(id string) string {
+	if audit.IsUUID(id) {
+		return id
+	}
+	return ""
 }
 
 type scanner interface {
@@ -203,7 +311,7 @@ func scan(s scanner) (*Item, error) {
 	var createdAt, updatedAt time.Time
 	if err := s.Scan(&item.ID, &item.OrganizationID, &item.Kind, &item.Status, &item.Payload, &candidates,
 		&item.ObjectKey, &item.Action, &item.ResolvedBy, &resolvedAt, &item.Resolution, &item.Escalated,
-		&createdAt, &updatedAt); err != nil {
+		&createdAt, &updatedAt, &item.ClientID, &item.SiteID); err != nil {
 		return nil, err
 	}
 	if item.Payload == nil {

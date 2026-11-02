@@ -15,10 +15,19 @@ type Retriever struct {
 	search      search.Backend
 	permissions permission.Repository
 	provider    Provider
+	consent     Consent
 }
 
 func NewRetriever(repo Repository, searchBackend search.Backend, permissions permission.Repository, provider Provider) *Retriever {
 	return &Retriever{repo: repo, search: searchBackend, permissions: permissions, provider: provider}
+}
+
+// WithConsent attaches the per-organization consent of the question
+// embedding (AI-02). Without one, the question is never embedded and
+// chunks are ranked lexically (fail-closed).
+func (r *Retriever) WithConsent(consent Consent) *Retriever {
+	r.consent = consent
+	return r
 }
 func Cosine(a, b []float64) float64 {
 	if len(a) == 0 || len(a) != len(b) {
@@ -68,7 +77,9 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 		return nil, nil, err
 	}
 	qvec := []float64(nil)
-	if r.provider != nil && r.provider.EmbeddingsEnabled() {
+	// The question goes to the provider only with the organization's
+	// consent (AI-02).
+	if r.provider != nil && r.provider.EmbeddingsEnabled() && r.consent != nil && r.consent.AllowsExternalAI(ctx, orgID) {
 		qvec, _ = r.provider.Embed(question)
 	}
 	type scored struct {

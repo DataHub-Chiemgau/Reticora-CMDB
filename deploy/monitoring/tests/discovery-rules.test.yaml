@@ -1,0 +1,138 @@
+# promtool unit test of deploy/monitoring/discovery-rules.yaml (WP-496,
+# DIS-08, F-267): each of the four discovery alerts fires and stays silent
+# where it must. promtool reads plain rule groups, not a PrometheusRule: the
+# groups of spec.groups are extracted into discovery-rules.groups.yaml next
+# to a copy of this file (tests/monitoring-config.test.sh, CI job
+# monitoring-config):
+#
+#   promtool test rules discovery-rules.test.yaml
+rule_files:
+  - discovery-rules.groups.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ReticoraDiscoveryScopeRunsFailing: two of three runs fail (server-1 and
+  # server-2 together); pending from the start, firing after an hour.
+  - interval: 1m
+    input_series:
+      - series: 'reticora_discovery_scope_runs_total{instance="server-1:8080",job="reticora-server",state="failed"}'
+        values: '0+1x130'
+      - series: 'reticora_discovery_scope_runs_total{instance="server-2:8080",job="reticora-server",state="failed"}'
+        values: '0+1x130'
+      - series: 'reticora_discovery_scope_runs_total{instance="server-1:8080",job="reticora-server",state="ok"}'
+        values: '0+1x130'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ReticoraDiscoveryScopeRunsFailing
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: ReticoraDiscoveryScopeRunsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Most discovery scope runs fail"
+              description: "More than half of the scope runs of the last hour failed. The Discovery page shows the failed scopes with the cause of each error (health); check reachability, credentials and the collectors' logs."
+
+  # Not: one run in four fails (partial runs do not count as failed), and
+  # no runs at all (the ratio is not defined).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_discovery_scope_runs_total{instance="server-1:8080",job="reticora-server",state="failed"}'
+        values: '0+1x130'
+      - series: 'reticora_discovery_scope_runs_total{instance="server-1:8080",job="reticora-server",state="partial"}'
+        values: '0+2x130'
+      - series: 'reticora_discovery_scope_runs_total{instance="server-1:8080",job="reticora-server",state="ok"}'
+        values: '0+1x130'
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: ReticoraDiscoveryScopeRunsFailing
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'reticora_discovery_scope_runs_total{instance="server-1:8080",job="reticora-server",state="failed"}'
+        values: '7x130'
+      - series: 'reticora_discovery_scope_runs_total{instance="server-1:8080",job="reticora-server",state="ok"}'
+        values: '3x130'
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: ReticoraDiscoveryScopeRunsFailing
+        exp_alerts: []
+
+  # ReticoraDiscoveryAuthFailures: Redfish logins fail once a minute (30 in
+  # 30 minutes) and fire per protocol. Not: SNMP with 6 failures in 30
+  # minutes, and SNMP timeouts (another cause).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_discovery_errors_total{instance="server-1:8080",job="reticora-server",protocol="redfish",cause="auth_failed"}'
+        values: '0+1x90'
+      - series: 'reticora_discovery_errors_total{instance="server-1:8080",job="reticora-server",protocol="snmp",cause="auth_failed"}'
+        values: '0+0.2x90'
+      - series: 'reticora_discovery_errors_total{instance="server-1:8080",job="reticora-server",protocol="snmp",cause="timeout"}'
+        values: '0+5x90'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ReticoraDiscoveryAuthFailures
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: ReticoraDiscoveryAuthFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              protocol: redfish
+            exp_annotations:
+              summary: "Discovery logins over redfish keep failing"
+              description: "More than 10 authentication failures over redfish in 30 minutes. Check the credentials bound to the scopes (credential_ids) or those of the client and the organization (E-67)."
+
+  # ReticoraDiscoveryUploadFailures: uploads keep failing for 30 minutes.
+  # Not: an upload failure that stopped (the counter stays at 4).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_discovery_errors_total{instance="server-1:8080",job="reticora-server",protocol="upload",cause="upload_failed"}'
+        values: '0+1x90'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReticoraDiscoveryUploadFailures
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: ReticoraDiscoveryUploadFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Collectors cannot upload discovery results"
+              description: "Collectors have reported failed uploads for 30 minutes; their results wait in the spool. Check the NATS edge and the ingest worker (reticora_worker_* of ingest)."
+  - interval: 1m
+    input_series:
+      - series: 'reticora_discovery_errors_total{instance="server-1:8080",job="reticora-server",protocol="upload",cause="upload_failed"}'
+        values: '0 1 2 3 4x90'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: ReticoraDiscoveryUploadFailures
+        exp_alerts: []
+
+  # ReticoraDiscoveryConfigErrors: a truncated scope (protocol scope) is
+  # reported with every run for more than an hour. Not: a configuration
+  # error that was fixed (the counter stays at 2), and auth failures.
+  - interval: 1m
+    input_series:
+      - series: 'reticora_discovery_errors_total{instance="server-1:8080",job="reticora-server",protocol="scope",cause="config_error"}'
+        values: '0+1x130'
+      - series: 'reticora_discovery_errors_total{instance="server-1:8080",job="reticora-server",protocol="snmp",cause="config_error"}'
+        values: '0 1 2x130'
+      - series: 'reticora_discovery_errors_total{instance="server-1:8080",job="reticora-server",protocol="ssh",cause="auth_failed"}'
+        values: '0+1x130'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ReticoraDiscoveryConfigErrors
+        exp_alerts: []
+      - eval_time: 125m
+        alertname: ReticoraDiscoveryConfigErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              protocol: scope
+            exp_annotations:
+              summary: "Discovery configuration errors over scope"
+              description: "Scope runs have reported configuration errors over scope for an hour (for example an SNMPv3 credential without authPriv or a truncated scope). The Discovery page names the scope and the message."

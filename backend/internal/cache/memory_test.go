@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -121,5 +122,56 @@ func TestMemoryStore_SetNoTTL(t *testing.T) {
 	}
 	if !found || val != "val" {
 		t.Fatalf("expected to find 'val', got found=%v val=%q", found, val)
+	}
+}
+
+// TestMemoryStore_Decrement covers the release of a pre-auth reservation
+// (WP-462, AUT-10): Decrement lowers an existing counter atomically and
+// keeps its expiry; a missing or expired key is not created.
+func TestMemoryStore_Decrement(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+
+	for range 3 {
+		if _, err := store.Increment(ctx, "counter", 30*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count, err := store.Decrement(ctx, "counter"); err != nil || count != 2 {
+		t.Fatalf("decrement of 3: %d %v, want 2", count, err)
+	}
+	if count, err := store.Increment(ctx, "counter", time.Hour); err != nil || count != 3 {
+		t.Fatalf("increment after decrement: %d %v, want 3", count, err)
+	}
+
+	// The expiry of the window stays: neither call extends it.
+	time.Sleep(40 * time.Millisecond)
+	if _, found, _ := store.Get(ctx, "counter"); found {
+		t.Fatal("decremented counter outlived its TTL")
+	}
+	if count, err := store.Decrement(ctx, "counter"); err != nil || count != 0 {
+		t.Fatalf("decrement of an expired key: %d %v, want 0", count, err)
+	}
+	if count, err := store.Decrement(ctx, "missing"); err != nil || count != 0 {
+		t.Fatalf("decrement of a missing key: %d %v, want 0", count, err)
+	}
+	if _, found, _ := store.Get(ctx, "missing"); found {
+		t.Fatal("decrement created a missing key")
+	}
+
+	// Concurrent increments and decrements stay exact.
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = store.Increment(ctx, "parallel", time.Minute)
+			_, _ = store.Increment(ctx, "parallel", time.Minute)
+			_, _ = store.Decrement(ctx, "parallel")
+		}()
+	}
+	wg.Wait()
+	if value, _, _ := store.Get(ctx, "parallel"); value != "50" {
+		t.Fatalf("parallel counter %s, want 50", value)
 	}
 }

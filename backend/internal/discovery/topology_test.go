@@ -3,7 +3,9 @@ package discovery
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -205,6 +207,65 @@ func TestDeriveTopologyRules(t *testing.T) {
 	}
 	if derived, _ = DeriveTopology("ci-sw", noPort[1:], resolve, nil); len(derived) != 1 || derived[0].Confidence != fdbConfidence {
 		t.Errorf("FDB without LLDP: %+v", derived)
+	}
+}
+
+// TestDeriveTopologyOrder covers WP-582 (TOP-01, F-269): the edges do not
+// depend on the order of the neighbors. An FDB entry naming the CI of an
+// LLDP/CDP neighbor on another port gives no FDB edge, before or after the
+// neighbor: the edge has 1.0 in both orders. Equal edges keep the highest
+// confidence; the trunk filter (more than four MACs) is unchanged in both
+// orders.
+func TestDeriveTopologyOrder(t *testing.T) {
+	resolve := func(ip, mac, host string) (string, bool) {
+		switch {
+		case ip == "10.0.0.2" || mac == "00:00:00:00:00:02":
+			return "ci-peer", true
+		case host == "sw2" || mac == "00:00:00:00:00:12":
+			return "ci-sw2", true
+		case mac != "":
+			return "ci-" + strings.ReplaceAll(mac, ":", ""), true
+		}
+		return "", false
+	}
+	fdb := func(port, mac string) wire.IngestRelationship {
+		return wire.IngestRelationship{TargetMAC: mac, TypeKey: "connected_to", Protocol: "fdb", LocalInterface: port}
+	}
+	rels := []wire.IngestRelationship{
+		// The peer's MAC learned on an access port, the peer itself as LLDP
+		// neighbor on its uplink port (port names differ, F-269).
+		fdb("Gi1/0/5", "00:00:00:00:00:02"),
+		{TargetIP: "10.0.0.2", TypeKey: "connected_to", Protocol: "lldp", LocalInterface: "GigabitEthernet1/0/1"},
+		// The same for a CDP neighbor.
+		fdb("Gi1/0/6", "00:00:00:00:00:12"),
+		{TargetHostname: "sw2", TypeKey: "connected_to", Protocol: "cdp", LocalInterface: "Gi1/0/2"},
+		// An FDB-only host on an access port: 0.6.
+		fdb("Gi1/0/7", "00:00:00:00:00:13"),
+		// Five MACs on one port: trunk, no edge.
+		fdb("Gi1/0/48", "00:00:00:00:00:21"), fdb("Gi1/0/48", "00:00:00:00:00:22"), fdb("Gi1/0/48", "00:00:00:00:00:23"),
+		fdb("Gi1/0/48", "00:00:00:00:00:24"), fdb("Gi1/0/48", "00:00:00:00:00:25"),
+		// A reported neighbor twice with different confidences: the higher.
+		{TargetMAC: "00:00:00:00:00:31", TypeKey: "connected_to", Confidence: 0.3},
+		{TargetMAC: "00:00:00:00:00:31", TypeKey: "connected_to", Confidence: 0.9},
+	}
+	want := map[string]float64{"ci-peer": 1.0, "ci-sw2": 1.0, "ci-000000000013": 0.6, "ci-000000000031": 0.9}
+	reversed := slices.Clone(rels)
+	slices.Reverse(reversed)
+	for name, order := range map[string][]wire.IngestRelationship{"FDB first": rels, "LLDP first": reversed} {
+		derived, unknown := DeriveTopology("ci-sw", order, resolve, nil)
+		got := map[string]float64{}
+		for _, d := range derived {
+			if _, dup := got[d.TargetCIID]; dup || d.RelType != "connected_to" || d.SourceCIID != "ci-sw" {
+				t.Errorf("%s: edge %+v (duplicate or wrong type)", name, d)
+			}
+			got[d.TargetCIID] = d.Confidence
+		}
+		if !maps.Equal(got, want) {
+			t.Errorf("%s: edges = %v, want %v", name, got, want)
+		}
+		if len(unknown) != 0 {
+			t.Errorf("%s: unknown = %+v", name, unknown)
+		}
 	}
 }
 

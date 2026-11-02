@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -46,13 +47,19 @@ func setupCompositionDB(t *testing.T) *PGRepository {
 		for _, stmt := range []string{
 			`DELETE FROM composition WHERE organization_id = $1`,
 			`DELETE FROM asset WHERE organization_id = $1`,
-			`DELETE FROM organization WHERE id = $1`,
 		} {
 			if _, err := admin.Exec(ctx, stmt, cycOrg); err != nil {
 				t.Logf("cleanup %q: %v", stmt, err)
 			}
 		}
 		_, _ = admin.Exec(ctx, "SET session_replication_role = origin")
+		// The organization goes with the foreign keys active: ON DELETE
+		// CASCADE removes the default VRF and the standard roles its insert
+		// triggers created; in replica mode they stayed behind and the next
+		// run's seed failed on vrf_organization_id_name_key.
+		if _, delErr := admin.Exec(ctx, `DELETE FROM organization WHERE id = $1`, cycOrg); delErr != nil {
+			t.Logf("cleanup organization: %v", delErr)
+		}
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -74,7 +81,7 @@ func setupCompositionDB(t *testing.T) *PGRepository {
 		}
 	}
 
-	pool, err := database.NewPool(ctx, dsn)
+	pool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatalf("application pool: %v", err)
 	}

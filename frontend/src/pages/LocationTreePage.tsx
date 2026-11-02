@@ -1,16 +1,19 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import type { TFunction } from 'i18next';
 import {
   useClients,
   useCreateLocation,
   useDeleteLocation,
   useLocationTree,
+  useUpdateLocation,
 } from '../api/cmdbHooks';
 import {
   LOCATION_CHILD_KINDS,
   type LocationKind,
   type LocationTreeNode as TreeNode,
+  type LocationUpdateRequest,
 } from '../api/cmdb';
 import { ApiError } from '../api/client';
 import { Badge } from '../components/ui/Badge';
@@ -21,6 +24,7 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { cn } from '../components/ui/utils';
 
 const KIND_ICONS: Record<LocationKind, string> = {
   site: '🏢',
@@ -34,15 +38,69 @@ const KIND_ICONS: Record<LocationKind, string> = {
 };
 
 /**
+ * parentOptions lists the nodes `node` may be moved below: the parent matrix
+ * (LOC-10) must allow its kind there, and neither the node itself nor one of
+ * its descendants qualifies (that would be a cycle). The label is the path of
+ * names from the site, so equal names in different sites stay apart.
+ */
+function parentOptions(roots: TreeNode[], node: TreeNode): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  const walk = (list: TreeNode[], trail: string[]) => {
+    for (const candidate of list) {
+      if (candidate.id === node.id) continue; // skips the whole subtree
+      const names = [...trail, candidate.name];
+      if (LOCATION_CHILD_KINDS[candidate.kind].includes(node.kind)) {
+        out.push({ value: candidate.id, label: names.join(' › ') });
+      }
+      walk(candidate.children, names);
+    }
+  };
+  walk(roots, []);
+  return out;
+}
+
+/**
+ * ancestorsOf returns the ids of the nodes above the node `id`, from its
+ * root down, or undefined when the tree has no such node.
+ */
+function ancestorsOf(roots: TreeNode[], id: string): string[] | undefined {
+  const walk = (list: TreeNode[], trail: string[]): string[] | undefined => {
+    for (const candidate of list) {
+      if (candidate.id === id) return trail;
+      const found = walk(candidate.children, [...trail, candidate.id]);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return walk(roots, []);
+}
+
+/**
  * LocationTreePage shows and edits the canonical location tree (LOC-10):
  * sites are the roots, and each node offers only the child kinds the parent
- * matrix allows. Field violations of the API are shown on the inputs.
+ * matrix allows. Every node can be renamed and, except a site, moved below
+ * another allowed parent (LOC-07); deleting asks first, and a refusal names
+ * the kinds of the objects that still reference the node (LOC-11). Field
+ * violations of the API are shown on the inputs, a missing permission (403)
+ * as a visible message. `?node=<id>` (the link of a search hit, SRC-01,
+ * F-334) opens the path to that node, marks it and moves focus to it.
  */
 export function LocationTreePage() {
   const { t } = useTranslation();
   const { data, isLoading, error, refetch } = useLocationTree();
   const create = useCreateLocation();
+  const update = useUpdateLocation();
   const remove = useDeleteLocation();
+  const roots = useMemo(() => data?.data ?? [], [data]);
+
+  const [searchParams] = useSearchParams();
+  const targetId = searchParams.get('node') ?? '';
+  const targetPath = useMemo(
+    () => (targetId ? ancestorsOf(roots, targetId) : undefined),
+    [roots, targetId],
+  );
+  const expanded = useMemo(() => new Set(targetPath ?? []), [targetPath]);
+  const selectedId = targetPath ? targetId : undefined;
 
   const [showCreate, setShowCreate] = useState(false);
   const [parent, setParent] = useState<TreeNode | undefined>();
@@ -52,6 +110,10 @@ export function LocationTreePage() {
     client_id: '',
   });
   const clients = useClients(showCreate && !parent);
+
+  const [editing, setEditing] = useState<TreeNode | undefined>();
+  const [editDraft, setEditDraft] = useState({ name: '', parent_id: '' });
+  const [deleting, setDeleting] = useState<TreeNode | undefined>();
 
   const openCreate = (parentNode?: TreeNode) => {
     setParent(parentNode);
@@ -64,12 +126,49 @@ export function LocationTreePage() {
     setShowCreate(true);
   };
 
+  const openEdit = (node: TreeNode) => {
+    update.reset();
+    setEditDraft({ name: node.name, parent_id: node.parent_id ?? '' });
+    setEditing(node);
+  };
+
+  const openDelete = (node: TreeNode) => {
+    remove.reset();
+    setDeleting(node);
+  };
+
+  const kindLabel = (kind: LocationKind) => t(`locations.kinds.${kind}`, kind);
+  /** problemText is the message of a failed request; a 403 is translated. */
+  const problemText = (err: Error) =>
+    err instanceof ApiError && err.status === 403
+      ? t('locations.forbidden', 'Keine Berechtigung für diese Aktion.')
+      : err.message;
+
   const violations = create.error instanceof ApiError ? create.error.violationsByField() : {};
   const generalError =
-    create.error && Object.keys(violations).length === 0 ? create.error.message : undefined;
-  const kindLabel = (kind: LocationKind) => t(`locations.kinds.${kind}`, kind);
+    create.error && Object.keys(violations).length === 0 ? problemText(create.error) : undefined;
   const childKinds = parent ? LOCATION_CHILD_KINDS[parent.kind] : [];
   const clientOptions = (clients.data?.data ?? []).map((c) => ({ value: c.id, label: c.name }));
+
+  // A site is a root: it can be renamed, not moved.
+  const canMove = editing !== undefined && editing.kind !== 'site';
+  const editParents = editing && canMove ? parentOptions(roots, editing) : [];
+  const editViolations = update.error instanceof ApiError ? update.error.violationsByField() : {};
+  const editFieldError =
+    editViolations.name !== undefined || (canMove && editViolations.parent_id !== undefined);
+  const editGeneralError = update.error && !editFieldError ? problemText(update.error) : undefined;
+
+  let deleteError: string | undefined;
+  if (remove.error) {
+    const kinds = remove.error instanceof ApiError ? remove.error.dependencies : [];
+    deleteError =
+      remove.error instanceof ApiError && remove.error.status === 409 && kinds.length > 0
+        ? t('locations.inUse', {
+            kinds: kinds.map((kind) => t(`locations.dependencies.${kind}`, kind)).join(', '),
+            defaultValue: 'noch verwendet von {{kinds}}',
+          })
+        : problemText(remove.error);
+  }
 
   return (
     <div className="space-y-4">
@@ -98,26 +197,37 @@ export function LocationTreePage() {
           onRetry={() => void refetch()}
         />
       ) : null}
-      {remove.error ? (
+      {deleteError ? (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {t('locations.deleteFailed', 'Löschen nicht möglich')}: {remove.error.message}
+          {t('locations.deleteFailed', 'Löschen nicht möglich')}: {deleteError}
+        </p>
+      ) : null}
+      {targetId && data && !targetPath ? (
+        <p role="status" className="text-sm text-muted">
+          {t(
+            'locations.nodeNotFound',
+            'Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.',
+          )}
         </p>
       ) : null}
 
       <Card>
-        {(data?.data ?? []).length === 0 && !isLoading ? (
-          <p className="text-sm text-gray-500">
+        {roots.length === 0 && !isLoading ? (
+          <p className="text-sm text-muted">
             {t('locations.empty', 'Noch keine Standorte. Legen Sie zuerst einen Standort an.')}
           </p>
         ) : (
           <ul className="space-y-1">
-            {(data?.data ?? []).map((node) => (
+            {roots.map((node) => (
               <LocationTreeItem
                 key={node.id}
                 node={node}
                 depth={0}
+                expanded={expanded}
+                selectedId={selectedId}
                 onAddChild={openCreate}
-                onDelete={(id) => remove.mutate(id)}
+                onEdit={openEdit}
+                onDelete={openDelete}
                 kindLabel={kindLabel}
                 t={t}
               />
@@ -193,6 +303,102 @@ export function LocationTreePage() {
           </div>
         </form>
       </Modal>
+
+      <Modal
+        open={editing !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setEditing(undefined);
+        }}
+        title={t('locations.editTitle', {
+          name: editing?.name ?? '',
+          defaultValue: '{{name}} bearbeiten',
+        })}
+      >
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!editing) return;
+            // Only the changed fields are sent: a rename is {name}, a move
+            // {parent_id}, both together one PATCH /locations/{id}.
+            const patch: LocationUpdateRequest = {};
+            if (editDraft.name !== editing.name) patch.name = editDraft.name;
+            if (canMove && editDraft.parent_id !== (editing.parent_id ?? '')) {
+              patch.parent_id = editDraft.parent_id;
+            }
+            if (Object.keys(patch).length === 0) {
+              setEditing(undefined);
+              return;
+            }
+            update.mutate(
+              { id: editing.id, data: patch },
+              { onSuccess: () => setEditing(undefined) },
+            );
+          }}
+        >
+          <Input
+            label={t('locations.name', 'Name')}
+            value={editDraft.name}
+            required
+            error={editViolations.name}
+            onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })}
+          />
+          {canMove ? (
+            <Select
+              label={t('locations.parent', 'Übergeordneter Knoten')}
+              options={editParents}
+              value={editDraft.parent_id}
+              error={editViolations.parent_id}
+              onChange={(e) => setEditDraft({ ...editDraft, parent_id: e.target.value })}
+            />
+          ) : null}
+          {editGeneralError ? (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {editGeneralError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setEditing(undefined)}>
+              {t('common.cancel', 'Abbrechen')}
+            </Button>
+            <Button type="submit" disabled={update.isPending}>
+              {t('common.save', 'Speichern')}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={deleting !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(undefined);
+        }}
+        title={t('locations.deleteTitle', {
+          name: deleting?.name ?? '',
+          defaultValue: '„{{name}}“ löschen?',
+        })}
+        description={t(
+          'locations.deleteConfirm',
+          'Der Knoten wird endgültig gelöscht. Solange Unterpunkte oder andere Objekte auf ihn verweisen, lehnt der Server das Löschen ab.',
+        )}
+      >
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={() => setDeleting(undefined)}>
+            {t('common.cancel', 'Abbrechen')}
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            disabled={remove.isPending}
+            onClick={() => {
+              if (deleting) remove.mutate(deleting.id);
+              setDeleting(undefined);
+            }}
+          >
+            {t('common.delete', 'Löschen')}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -200,25 +406,51 @@ export function LocationTreePage() {
 function LocationTreeItem({
   node,
   depth,
+  expanded,
+  selectedId,
   onAddChild,
+  onEdit,
   onDelete,
   kindLabel,
   t,
 }: {
   node: TreeNode;
   depth: number;
+  /** The nodes on the path to the linked node: they are opened. */
+  expanded: ReadonlySet<string>;
+  /** The linked node (`?node=`): marked and focused. */
+  selectedId: string | undefined;
   onAddChild: (parent: TreeNode) => void;
-  onDelete: (id: string) => void;
+  onEdit: (node: TreeNode) => void;
+  onDelete: (node: TreeNode) => void;
   kindLabel: (kind: LocationKind) => string;
   t: TFunction;
 }) {
-  const [open, setOpen] = useState(depth < 2);
+  const onPath = expanded.has(node.id);
+  const [open, setOpen] = useState(depth < 2 || onPath);
+  useEffect(() => {
+    if (onPath) setOpen(true);
+  }, [onPath]);
+  const selected = node.id === selectedId;
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selected) return;
+    rowRef.current?.focus({ preventScroll: true });
+    rowRef.current?.scrollIntoView?.({ block: 'center' });
+  }, [selected]);
   const children = node.children;
   const canHaveChildren = LOCATION_CHILD_KINDS[node.kind].length > 0;
   return (
     <li>
       <div
-        className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800"
+        ref={rowRef}
+        tabIndex={selected ? -1 : undefined}
+        aria-current={selected ? 'true' : undefined}
+        className={cn(
+          'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800',
+          selected &&
+            'bg-primary/10 outline-none ring-2 ring-inset ring-primary hover:bg-primary/10 dark:bg-primary/20 dark:hover:bg-primary/20',
+        )}
         style={{ paddingLeft: `${depth * 1.25 + 0.5}rem` }}
       >
         {children.length > 0 ? (
@@ -226,7 +458,7 @@ function LocationTreeItem({
             onClick={() => setOpen(!open)}
             aria-label={open ? 'collapse' : 'expand'}
             aria-expanded={open}
-            className="w-4 text-gray-400"
+            className="w-4 text-muted"
           >
             {open ? '▾' : '▸'}
           </button>
@@ -234,9 +466,11 @@ function LocationTreeItem({
           <span className="w-4" />
         )}
         <span aria-hidden>{KIND_ICONS[node.kind]}</span>
-        <span className="font-medium text-gray-900 dark:text-gray-100">{node.name}</span>
+        <span className="min-w-0 font-medium text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100">
+          {node.name}
+        </span>
         <Badge variant="neutral">{kindLabel(node.kind)}</Badge>
-        <span className="ml-auto flex gap-2">
+        <span className="ml-auto flex flex-wrap gap-2">
           {canHaveChildren ? (
             <button
               className="text-xs text-primary hover:underline"
@@ -245,10 +479,10 @@ function LocationTreeItem({
               + {t('locations.addChild', 'Unterpunkt')}
             </button>
           ) : null}
-          <button
-            className="text-xs text-red-600 hover:underline"
-            onClick={() => onDelete(node.id)}
-          >
+          <button className="text-xs text-primary hover:underline" onClick={() => onEdit(node)}>
+            {t('common.edit', 'Bearbeiten')}
+          </button>
+          <button className="text-xs text-danger hover:underline" onClick={() => onDelete(node)}>
             {t('common.delete', 'Löschen')}
           </button>
         </span>
@@ -260,7 +494,10 @@ function LocationTreeItem({
               key={child.id}
               node={child}
               depth={depth + 1}
+              expanded={expanded}
+              selectedId={selectedId}
               onAddChild={onAddChild}
+              onEdit={onEdit}
               onDelete={onDelete}
               kindLabel={kindLabel}
               t={t}

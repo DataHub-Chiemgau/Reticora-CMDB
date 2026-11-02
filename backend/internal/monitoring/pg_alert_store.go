@@ -44,7 +44,7 @@ const ruleColumns = `id::text, organization_id::text, name, metric_name, conditi
 func (s *PGAlertStore) ListRules(ctx context.Context, orgID string) ([]AlertRule, error) {
 	rules := make([]AlertRule, 0)
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, "SELECT "+ruleColumns+" FROM alert_rule ORDER BY name ASC")
+		rows, err := tx.Query(ctx, "SELECT "+ruleColumns+" FROM alert_rule ORDER BY name ASC, id ASC")
 		if err != nil {
 			return fmt.Errorf("list alert rules: %w", err)
 		}
@@ -80,7 +80,7 @@ func (s *PGAlertStore) CreateRule(ctx context.Context, rule AlertRule) (AlertRul
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return AlertRule{}, fmt.Errorf("alert rule already exists")
+			return AlertRule{}, ErrAlertRuleExists
 		}
 		return AlertRule{}, fmt.Errorf("create alert rule: %w", err)
 	}

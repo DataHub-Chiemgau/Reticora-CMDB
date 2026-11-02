@@ -2,6 +2,7 @@ package export
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -195,6 +196,116 @@ func TestExportRejectsUnknownFormat(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestCSVNeutralizesFormulas is the retest of F-338 (WP-593, EXP-01): a
+// cell of the csv and datev layouts that starts with =, +, -, @, a tab or
+// a CR is prefixed with ', so a spreadsheet shows it as text; the rows stay
+// the same in number and the job export (RenderFormat) writes the same
+// cells as the streaming endpoint. JSON is not touched.
+func TestCSVNeutralizesFormulas(t *testing.T) {
+	bg := context.Background()
+	repo := ci.NewMemoryRepository()
+	for _, item := range []*ci.Item{
+		{OrganizationID: "org-1", CITypeID: "type-server", Name: "=1+1", Status: "active",
+			Manufacturer: "+cmd|' /C calc'!A0", Model: "-2+3", SerialNumber: "@SUM(A1:A2)", FirmwareVersion: "\t=1",
+			Attributes: map[string]any{"location": "=HYPERLINK(\"http://evil.example\")", "cost_center": "-1"}},
+		{OrganizationID: "org-1", CITypeID: "type-server", Name: "srv a=1", Status: "active",
+			Manufacturer: "Dell", Model: "R740-XD", Attributes: map[string]any{}},
+	} {
+		if err := repo.Create(bg, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+
+	read := func(t *testing.T, body string) [][]string {
+		t.Helper()
+		r := csv.NewReader(strings.NewReader(strings.TrimPrefix(body, utf8BOM)))
+		r.Comma = ';'
+		records, err := r.ReadAll()
+		if err != nil {
+			t.Fatalf("parse %q: %v", body, err)
+		}
+		return records
+	}
+	byName := func(records [][]string, column int) map[string][]string {
+		rows := map[string][]string{}
+		for _, rec := range records[1:] {
+			rows[rec[column]] = rec
+		}
+		return rows
+	}
+	for _, c := range []struct {
+		format string
+		// the name column and the cells of the first CI in layout order
+		name  int
+		cells map[int]string
+	}{
+		{"csv", 1, map[int]string{1: "'=1+1", 4: "'+cmd|' /C calc'!A0", 5: "'-2+3", 6: "'@SUM(A1:A2)", 8: "'\t=1"}},
+		{"datev", 1, map[int]string{1: "'=1+1", 2: "'+cmd|' /C calc'!A0", 3: "'-2+3", 4: "'@SUM(A1:A2)",
+			6: "'=HYPERLINK(\"http://evil.example\")", 7: "'-1"}},
+	} {
+		t.Run(c.format, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format="+c.format, nil)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("export: %d %s", w.Code, w.Body.String())
+			}
+			records := read(t, w.Body.String())
+			if len(records) != 3 {
+				t.Fatalf("%d records, want the header and 2 rows: %q", len(records), records)
+			}
+			rows := byName(records, c.name)
+			evil, plain := rows["'=1+1"], rows["srv a=1"]
+			if evil == nil || plain == nil {
+				t.Fatalf("rows %q, want the neutralised and the plain CI", records)
+			}
+			for col, want := range c.cells {
+				if evil[col] != want {
+					t.Errorf("column %s: %q, want %q", records[0][col], evil[col], want)
+				}
+			}
+			// A cell without a leading trigger stays as it is.
+			for _, cell := range plain {
+				if strings.HasPrefix(cell, "'") {
+					t.Errorf("plain row %q has a prefixed cell %q", plain, cell)
+				}
+			}
+
+			// The job export renders the same cells.
+			var out strings.Builder
+			n, err := RenderFormat(tenantCtx(httptest.NewRequest("GET", "/", nil)).Context(), repo, "org-1", c.format, JobFilters{}, &out)
+			if err != nil || n != 2 {
+				t.Fatalf("RenderFormat: %d rows, %v", n, err)
+			}
+			job := read(t, out.String())
+			if len(job) != 3 || byName(job, c.name)["'=1+1"][1] != "'=1+1" {
+				t.Errorf("job export %q, want the same neutralised rows", job)
+			}
+			for col, want := range c.cells {
+				if got := byName(job, c.name)["'=1+1"][col]; got != want {
+					t.Errorf("job export column %s: %q, want %q", job[0][col], got, want)
+				}
+			}
+		})
+	}
+
+	// Each trigger of the OWASP guidance, and nothing else.
+	for in, want := range map[string]string{"=1+1": "'=1+1", "+1": "'+1", "-1": "'-1", "@x": "'@x", "\tx": "'\tx",
+		"\rx": "'\rx", "": "", "a=1": "a=1", "'=1": "'=1", " =1": " =1", "Ä=1": "Ä=1"} {
+		if got := neutralizeFormula(in); got != want {
+			t.Errorf("neutralizeFormula(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// JSON keeps the values: it is no spreadsheet format.
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format=json", nil)))
+	if !strings.Contains(w.Body.String(), `"name":"=1+1"`) {
+		t.Errorf("json export: %s", w.Body.String())
 	}
 }
 

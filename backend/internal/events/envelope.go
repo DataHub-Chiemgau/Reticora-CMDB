@@ -33,10 +33,12 @@ func (e *Envelope) Subject() string {
 const (
 	StreamName    = "RETICORA_EVENTS"
 	SubjectPrefix = "events."
-	// StreamMaxAge and StreamMaxBytes are the retention of the stream
-	// (30 days, 10 GB; NFR-06).
-	StreamMaxAge   = 30 * 24 * time.Hour
-	StreamMaxBytes = 10 << 30
+	// StreamMaxAge and StreamMaxBytes are the default retention of the
+	// stream (30 days, 10 GB; NFR-06); RETICORA_EVENTS_MAX_AGE and
+	// RETICORA_EVENTS_MAX_BYTES set it per installation (Publisher.MaxAge,
+	// Publisher.MaxBytes).
+	StreamMaxAge         = 30 * 24 * time.Hour
+	StreamMaxBytes int64 = 10 << 30
 )
 
 // Event types of EVT-02, and those NTF-05 notifies of besides.
@@ -62,6 +64,10 @@ const (
 	InvitationCreated   = "invitation.created"
 	WebhookDead         = "webhook.dead"
 	CertificateExpiring = "certificate.expiring"
+	// APIKeyCreatorDeactivated: the user who created service-account keys
+	// was deactivated or anonymized; the keys stay valid and the org_admins
+	// are asked to rotate them (TLC-04, decision E-64 option 2).
+	APIKeyCreatorDeactivated = "apikey.creator_deactivated"
 )
 
 // Types lists the event types.
@@ -70,6 +76,7 @@ var Types = []string{
 	RelationshipCreated, RelationshipRemoved, CollectorEnrolled, CollectorOffline,
 	ReviewCreated, ReviewResolved, ExportCompleted, JobFailed, EntitlementWarning,
 	EntitlementExpired, InvitationCreated, WebhookDead, CertificateExpiring,
+	APIKeyCreatorDeactivated,
 }
 
 // IsType reports whether t is an event type of EVT-02.

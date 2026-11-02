@@ -23,7 +23,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -104,6 +106,9 @@ type IngestItem struct {
 	ScopeID     string    `json:"-"`
 	SiteID      string    `json:"-"`
 	ClientID    string    `json:"-"`
+	// seq is the position of the record among the messages ProcessMessages
+	// processes, plus one; 0 elsewhere. A record failure names it (WP-481).
+	seq int
 
 	// Attributes carries dynamic discovery attributes (spec §1 hybrid model).
 	// They feed per-field provenance records (spec §13) without being forced
@@ -125,8 +130,9 @@ type BulkIngestResponse struct {
 	// ProtectedInstanceFields counts matched CIs where discovered values for
 	// instance attributes were not written (MET-14).
 	ProtectedInstanceFields int `json:"protected_instance_fields,omitempty"`
-	// InvalidValues counts discovered values the field metadata rejected;
-	// they are not stored (CI-03, MET-11).
+	// InvalidValues counts discovered values the field metadata or the data
+	// type of their typed column rejected; they are not stored, the rest of
+	// their record is (CI-03, MET-11, WP-501).
 	InvalidValues int `json:"invalid_values,omitempty"`
 	// Duplicates counts records whose record_id was processed within the
 	// last 48 hours; they change nothing (REC-01).
@@ -144,6 +150,13 @@ type BulkIngestResponse struct {
 	// reached (ENT-03, CH21); already queued devices count again.
 	Unlicensed int    `json:"unlicensed,omitempty"`
 	JobID      string `json:"job_id,omitempty"`
+	// Accepted counts the records processed, deduplicated or queued;
+	// Rejected those refused with an error, each listed in Errors. A record
+	// that fails does not take the others of its request down (REC-01,
+	// WP-481).
+	Accepted int                 `json:"accepted"`
+	Rejected int                 `json:"rejected"`
+	Errors   []IngestRecordError `json:"errors,omitempty"`
 }
 
 // Repository defines persistence operations for collectors, discovery jobs and
@@ -151,12 +164,24 @@ type BulkIngestResponse struct {
 type Repository interface {
 	ListCollectors(ctx context.Context, orgID string, page api.PaginationParams) ([]Collector, int, error)
 	RegisterCollector(ctx context.Context, c *Collector) error
+	// CountCollectors counts the collectors of the organization that are
+	// not disabled, the stock max_collectors is checked against (ENT-03).
+	// It counts organization-wide, whatever the caller's client or site
+	// scope.
+	CountCollectors(ctx context.Context, orgID string) (int64, error)
 	// Heartbeat records a heartbeat and returns the collector's status: a
 	// pending or offline collector becomes active, a paused one stays
 	// paused, a disabled one is refused (ErrCollectorDisabled).
 	Heartbeat(ctx context.Context, orgID, collectorID string) (status string, err error)
-	// UpdateCollector changes name, site or status (disable, enable).
+	// UpdateCollector changes name, site or status (disable, enable); an
+	// unknown collector or one of another organization fails with
+	// api.ErrNotFound. A disable revokes the collector's certificates and,
+	// once committed, is announced to the edge workers; one of them cuts its
+	// open NATS connections (PGRepository.WithDisableAnnouncer, COL-04).
 	UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error)
+	// CollectorStatus returns the status of a collector of the
+	// organization; an unknown collector fails with api.ErrNotFound.
+	CollectorStatus(ctx context.Context, orgID, collectorID string) (string, error)
 
 	// Enrollment codes (zero-config onboarding).
 	CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error
@@ -167,10 +192,15 @@ type Repository interface {
 	// With issue, the collector's first certificate is issued (CN =
 	// collector id) and recorded in the same transaction (COL-04).
 	EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error)
-	// RenewCertificate issues a new certificate for the collector once the
-	// current one reached 60 % of its lifetime (ErrRenewalNotDue before);
-	// disabled collectors get none (ErrCollectorDisabled).
-	RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error)
+	// EnrollCollectorWithQuota is EnrollCollector that first checks
+	// max_collectors of the code's organization with quota (nil: no
+	// check), in the same transaction and before the code is consumed: a
+	// refused enrollment returns the guard's error, registers nothing and
+	// leaves the code valid (ENT-03).
+	EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error)
+	// Renewal is no repository call of the API: the collector renews over
+	// its NATS channel with proof of its current key (CertificateRenewal,
+	// PGRepository.RenewEdgeCertificate, F-012).
 
 	// Discovery jobs.
 	ListJobs(ctx context.Context, orgID string, filter JobFilter, page api.PaginationParams) ([]Job, int, error)
@@ -196,6 +226,7 @@ type MemoryRepository struct {
 	records      map[string]time.Time
 	scopes       map[string]*Scope
 	orgSettings  map[string]map[string]any
+	orgTimezone  map[string]string
 	seq          int
 }
 
@@ -251,6 +282,23 @@ func (r *MemoryRepository) ListCollectors(_ context.Context, orgID string, page 
 	return result[start:end], total, nil
 }
 
+// CountCollectors implements Repository.
+func (r *MemoryRepository) CountCollectors(_ context.Context, orgID string) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.countCollectors(orgID), nil
+}
+
+func (r *MemoryRepository) countCollectors(orgID string) int64 {
+	var n int64
+	for _, c := range r.collectors {
+		if c.OrganizationID == orgID && c.Status != CollectorDisabled {
+			n++
+		}
+	}
+	return n
+}
+
 func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -276,7 +324,7 @@ func (r *MemoryRepository) UpdateCollector(_ context.Context, orgID, collectorID
 	defer r.mu.Unlock()
 	c, ok := r.collectors[collectorID]
 	if !ok || c.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
+		return nil, api.ErrNotFound
 	}
 	if patch.Name != nil {
 		c.Name = *patch.Name
@@ -290,6 +338,17 @@ func (r *MemoryRepository) UpdateCollector(_ context.Context, orgID, collectorID
 	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	cp := *c
 	return &cp, nil
+}
+
+// CollectorStatus implements Repository.
+func (r *MemoryRepository) CollectorStatus(_ context.Context, orgID, collectorID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.collectors[collectorID]
+	if !ok || c.OrganizationID != orgID {
+		return "", api.ErrNotFound
+	}
+	return c.Status, nil
 }
 
 func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *EnrollmentCode) error {
@@ -311,12 +370,27 @@ func (r *MemoryRepository) CreateEnrollmentCode(_ context.Context, code *Enrollm
 }
 
 func (r *MemoryRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error) {
+	return r.EnrollCollectorWithQuota(ctx, rawCode, c, issue, nil)
+}
+
+// EnrollCollectorWithQuota implements Repository.
+func (r *MemoryRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error) {
 	r.mu.Lock()
 	id, ok := r.enrollHashes[enrollmentCodeHash(rawCode)]
 	code := r.enrollCodes[id]
 	if !ok || code == nil || code.UsedAt != nil || time.Now().UTC().After(code.ExpiresAt) {
 		r.mu.Unlock()
 		return nil, fmt.Errorf("enrollment code invalid, expired or already used")
+	}
+	if err := applyEnrollmentBinding(code.ClientID, code.SiteID, c); err != nil {
+		r.mu.Unlock()
+		return nil, err
+	}
+	if quota != nil {
+		if err := quota.AllowCreate(ctx, code.OrganizationID, entitlement.LimitMaxCollectors, r.countCollectors(code.OrganizationID)); err != nil {
+			r.mu.Unlock()
+			return nil, err
+		}
 	}
 	now := time.Now().UTC()
 	code.UsedAt = &now
@@ -329,31 +403,15 @@ func (r *MemoryRepository) EnrollCollector(ctx context.Context, rawCode string, 
 	if issue == nil {
 		return nil, nil
 	}
-	return r.RenewCertificate(ctx, c.OrganizationID, c.ID, issue)
-}
-
-// RenewCertificate implements Repository.
-func (r *MemoryRepository) RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.collectors[collectorID]
-	if !ok || c.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
-	}
-	if c.Status == CollectorDisabled {
-		return nil, ErrCollectorDisabled
-	}
-	if c.CertNotAfter != "" {
-		notAfter, _ := time.Parse(time.RFC3339Nano, c.CertNotAfter)
-		if !NeedsRenewal(notAfter.Add(-CertValidity), notAfter, time.Now().UTC()) {
-			return nil, ErrRenewalNotDue
-		}
-	}
-	cert, err := issue(ctx, orgID, collectorID)
+	cert, err := issue(ctx, c.OrganizationID, c.ID)
 	if err != nil {
 		return nil, err
 	}
-	c.CertFingerprint, c.CertNotAfter = cert.Fingerprint, cert.NotAfter.Format(time.RFC3339Nano)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if stored, ok := r.collectors[c.ID]; ok {
+		stored.CertFingerprint, stored.CertNotAfter = cert.Fingerprint, cert.NotAfter.Format(time.RFC3339Nano)
+	}
 	return cert, nil
 }
 
@@ -377,12 +435,20 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID strin
 // enroll. Only the SHA-256 hash is persisted; the raw code is carried on the
 // struct only transiently between creation and hashing.
 type EnrollmentCode struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organization_id"`
-	Label          string     `json:"label,omitempty"`
-	ExpiresAt      time.Time  `json:"expires_at"`
-	UsedAt         *time.Time `json:"used_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	// ClientID and SiteID bind the enrolled collector (F-406, migration
+	// 000187): "" leaves the dimension to the collector, which a creator
+	// holding collector:manage org-wide there allows. A site decides the
+	// client.
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	// CreatedBy is the user that minted the code.
+	CreatedBy string     `json:"created_by,omitempty"`
+	Label     string     `json:"label,omitempty"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 
 	// rawCode is never serialized; it exists only so the handler can return
 	// the code once at creation time.
@@ -422,7 +488,7 @@ type FieldProvenance struct {
 
 // Handler provides HTTP handlers for discovery endpoints.
 type Handler struct {
-	limits     LimitGuard
+	limits     QuotaGuard
 	license    EdgeLicense
 	repo       Repository
 	ciRepo     ci.Repository
@@ -447,6 +513,9 @@ type Handler struct {
 	// (REC-01, WP-334).
 	serial     sync.Map
 	reviewJobs jobs.Tracker
+	// merger carries out the resolution merge of probable_duplicate items
+	// as the CI-12 merge (WithMerger).
+	merger CIMerger
 	// tx runs the frame of a batch and each record in one transaction
 	// (NFR-03); without one every repository call is its own transaction.
 	tx TxRunner
@@ -458,6 +527,13 @@ type Handler struct {
 	// beforeCreate, when set, runs after a transaction decided to create
 	// new CIs and before it inserts them (tests of concurrent lanes).
 	beforeCreate func(ctx context.Context)
+	// metrics and features take the collectors' metric samples on the
+	// edge (WithEdgeMetrics, MON-02).
+	metrics  MetricsIngester
+	features FeatureStatus
+	// scopeCycles counts the scope requests that failed on the server's
+	// side (worker discovery_scopes, OPS-05); nil counts none.
+	scopeCycles *observability.Cycles
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.
@@ -602,28 +678,21 @@ func (h *Handler) decide(ctx context.Context, w *override.Write) override.Decisi
 
 // queueOverrideConflict opens an override_conflict review for a field unless
 // one is open already or the value was dismissed (REC-12, deduplicated per
-// field). A failure does not fail the ingest: the override stays in place
-// either way.
-func (h *Handler) queueOverrideConflict(ctx context.Context, orgID, ciID, field string, value any, source string) bool {
-	item := &ReviewItem{
-		OrganizationID: orgID,
-		Kind:           ReviewKindOverrideConflict,
-		Status:         ReviewStatusOpen,
-		Payload:        map[string]any{"ci_id": ciID, "field": field, "observed_value": value, "source": source},
-		CandidateCIIDs: []string{ciID},
-		ObjectKey:      "ci:" + ciID + "/" + field,
-	}
+// field; the call of workflow and agent as well). device is the CI as read
+// before the report: it holds the value reported before this one. A failure
+// does not fail the ingest: the override stays in place either way.
+func (h *Handler) queueOverrideConflict(ctx context.Context, orgID string, device *ci.Item, field string, value any, source string) bool {
+	previous, hasPrevious := device.ObservedUnderOverride(field)
 	// One open item per field; a dismissed value stays suppressed until the
-	// source reports another one (REC-12). The savepoint undoes a review
-	// that failed after its insert, so the record's transaction goes on.
-	var opened bool
-	err := database.Savepoint(ctx, func(ctx context.Context) error {
-		var openErr error
-		opened, openErr = h.ReviewService().OpenUnlessDismissed(ctx, item, "observed_value")
-		return openErr
+	// source reports another one (REC-12, F-248). The service's savepoint
+	// undoes a review that failed after its insert, so the record's
+	// transaction goes on.
+	opened, err := h.ReviewService().OpenOverrideConflict(ctx, &reviews.OverrideConflict{
+		OrganizationID: orgID, CIID: device.ID, Field: field, Value: value, Source: source, Rank: override.SourceRank(source),
+		Previous: previous, HasPrevious: hasPrevious,
 	})
 	if err != nil {
-		slog.WarnContext(ctx, "override conflict review not created", "ci_id", ciID, "field", field, "error", err)
+		slog.WarnContext(ctx, "override conflict review not created", "ci_id", device.ID, "field", field, "error", err)
 		return false
 	}
 	return opened
@@ -695,7 +764,6 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/collectors", h.RegisterCollector)
 	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
 	r.Patch("/api/v1/collectors/{id}", h.UpdateCollector)
-	r.Post("/api/v1/collectors/{id}/certificate", h.RenewCertificate)
 	r.Get("/api/v1/collectors/pki", h.PKI)
 	// Zero-config onboarding: an operator mints a short-lived enrollment code;
 	// the collector redeems it (unauthenticated, code = the credential) for its
@@ -769,6 +837,18 @@ func (h *Handler) RegisterCollector(w http.ResponseWriter, r *http.Request) {
 		c.Config = make(map[string]any)
 	}
 
+	if h.limits != nil {
+		current, err := h.repo.CountCollectors(r.Context(), t.OrganizationID)
+		if err == nil {
+			err = h.limits.AllowCreate(r.Context(), t.OrganizationID, entitlement.LimitMaxCollectors, current)
+		}
+		if err != nil {
+			if !api.WriteEntitlementError(w, err) {
+				api.WriteRepoError(w, err)
+			}
+			return
+		}
+	}
 	if err := h.repo.RegisterCollector(r.Context(), &c); err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -790,9 +870,21 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Label      string `json:"label"`
 		TTLMinutes int    `json:"ttl_minutes,omitempty"`
+		// ClientID and SiteID bind the code to a client and site within
+		// the creator's scope (F-406).
+		ClientID string `json:"client_id,omitempty"`
+		SiteID   string `json:"site_id,omitempty"`
 	}
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	// The code binds the collector to the client and site the creator may
+	// register collectors in (F-406, E-08): a body client_id at enrollment
+	// cannot leave them.
+	clientID, siteID, err := enrollmentBinding(r.Context(), req.ClientID, req.SiteID)
+	if err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	// Enrollment codes are valid for 24 hours (COL-04); a shorter validity
@@ -809,21 +901,33 @@ func (h *Handler) CreateEnrollmentCode(w http.ResponseWriter, r *http.Request) {
 	}
 	code := &EnrollmentCode{
 		OrganizationID: t.OrganizationID,
+		ClientID:       clientID,
+		SiteID:         siteID,
 		Label:          req.Label,
+		CreatedBy:      t.UserID,
 		ExpiresAt:      time.Now().UTC().Add(ttl),
 	}
 	code.SetRawCode(raw)
 	if err := h.repo.CreateEnrollmentCode(r.Context(), code); err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, map[string]any{
+	out := map[string]any{
 		"id":         code.ID,
 		"code":       raw,
 		"label":      code.Label,
 		"expires_at": code.ExpiresAt.UTC().Format(time.RFC3339),
-	})
+	}
+	if code.ClientID != "" {
+		out["client_id"] = code.ClientID
+	}
+	if code.SiteID != "" {
+		out["site_id"] = code.SiteID
+	}
+	api.WriteJSON(w, http.StatusCreated, out)
 }
 
 // EnrollCollector handles POST /api/v1/collectors/enroll. The enrollment code
@@ -851,7 +955,8 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 
 	// The code is consumed and the collector registered (active) in one
 	// step: the request is unauthenticated, the code authorizes registration
-	// for its organization (E-08); a code works exactly once (COL-04).
+	// for its organization and in the client and site it is bound to (E-08,
+	// F-406); a code works exactly once (COL-04).
 	c := &Collector{
 		Name:     req.Name,
 		Version:  req.Version,
@@ -868,12 +973,18 @@ func (h *Handler) EnrollCollector(w http.ResponseWriter, r *http.Request) {
 		}
 		issue = h.issuer(req.CSR)
 	}
-	cert, err := h.repo.EnrollCollector(r.Context(), req.Code, c, issue)
+	// max_collectors of the code's organization is checked before the code
+	// is consumed: at the limit the answer is 403 entitlement-limit and the
+	// code stays valid (ENT-03).
+	cert, err := h.repo.EnrollCollectorWithQuota(r.Context(), req.Code, c, issue, h.limits)
 	if err != nil {
 		var fe *api.FieldError
 		switch {
+		case api.WriteEntitlementError(w, err):
 		case errors.As(err, &fe):
-			api.WriteRepoError(w, err)
+			// A client or site outside the code's binding (F-406) or an
+			// unknown site: 422, the code stays unused.
+			api.WriteFieldError(w, err)
 		case errors.Is(err, ErrInvalidCSR):
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		default:
@@ -905,15 +1016,19 @@ func generateEnrollmentCode() (string, error) {
 }
 
 // CollectorSpoolReport is the offline spool state a collector sends with its
-// heartbeat (NFR-04, COL-05, OPS-06). Dropped counters only grow while the
-// collector runs.
+// heartbeat (NFR-04, COL-05, OPS-06). The dropped counters are the losses
+// since the last heartbeat the server accepted: the collector acknowledges
+// them after that heartbeat's 204.
 type CollectorSpoolReport struct {
 	Messages         int   `json:"messages"`
 	Bytes            int64 `json:"bytes"`
 	OldestAgeSeconds int64 `json:"oldest_age_seconds"`
 	DroppedMessages  int64 `json:"dropped_messages"`
 	DroppedBytes     int64 `json:"dropped_bytes"`
-	Backpressure     bool  `json:"backpressure"`
+	// DroppedSamples counts metric samples and traps the collector dropped
+	// on upload failures (E-79: counted, not spooled).
+	DroppedSamples int64 `json:"dropped_samples"`
+	Backpressure   bool  `json:"backpressure"`
 }
 
 // CollectorHeartbeatRequest is the optional body of a collector heartbeat.
@@ -951,15 +1066,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	// A paused collector stops scanning until the license is active again
 	// (ENT-07).
 	w.Header().Set(CollectorStatusHeader, status)
-	if s := req.Spool; s != nil && (s.DroppedMessages > 0 || s.Backpressure) {
-		slog.WarnContext(r.Context(), "collector reported spool data loss or backpressure",
-			"event", "collector.spool.degraded",
-			"organization_id", t.OrganizationID, "collector_id", id,
-			"spool_messages", s.Messages, "spool_bytes", s.Bytes,
-			"spool_oldest_age_seconds", s.OldestAgeSeconds,
-			"dropped_messages", s.DroppedMessages, "dropped_bytes", s.DroppedBytes,
-			"backpressure", s.Backpressure)
-	}
+	recordSpoolReport(r.Context(), t.OrganizationID, id, req.Spool)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -987,11 +1094,12 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	// processed in this request.
 	msgs := newIngestMessages(r.Context(), t, r.Header.Get("X-Collector-ID"), items)
 	resp, err := h.dispatch(r.Context(), msgs)
-	if err != nil {
+	// Records that fail are listed in the answer; only when no record was
+	// accepted does the request fail as a whole (WP-481).
+	if err = resp.finish(received, rejected, err); err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	resp.Received, resp.RejectedFuture = received, rejected
 	api.WriteJSON(w, http.StatusAccepted, resp)
 }
 
@@ -1001,25 +1109,34 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 //
 // With a transaction runner (the PostgreSQL repository) the frame of the
 // batch runs in one short transaction and every record in exactly one more
-// (NFR-03). A failing record rolls back completely and stops the batch: the
-// records before it stay committed, get their topology and are entered in
-// the ledger, and the error makes the queue deliver the batch again, which
-// skips them as duplicates.
+// (NFR-03). A failing record rolls back completely and the batch goes on
+// with the next record (WP-481): the records processed get their topology
+// and are entered in the ledger, and the error, an *IngestErrors, names each
+// failed record. A record that failed transiently holds back the records
+// after it that share one of its identity keys (the keys of the identity
+// lock, E-56): they fail with it and keep their order when the batch is
+// delivered again; a record that failed for good holds back nothing. A
+// frame that fails for good runs each record in a frame of its own, so
+// that only the records that cause it fail.
 //
 // With the batch queries of the repository and the batch creation of the
 // CI repository (WP-333), each window of up to ingestBatch records (with
 // the ingest locks also bounded by its identity keys, see windowEnd) first
 // runs one more transaction: one candidate query for all its records, and
-// its new devices created together. Updates of known devices and every
-// record the batch leaves follow one by one in the order of the records;
-// the records of one device keep their order. When a record fails, the
-// devices its window created in the batch stay committed like the records
-// before it and are entered in the ledger.
+// its new devices created together. Records from the queue (with the
+// ingest locks) also update the known devices there, under the window's
+// identity locks (WP-608). Every record the batch leaves follows one by one
+// in the order of the records; without the ingest locks the updates of
+// known devices do as well. The records of one device keep their order.
+// When a record fails in the batch of its window, the window rolls back and
+// its records follow one by one (processWindow).
 func (h *Handler) processItems(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
 	var resp BulkIngestResponse
 	if h.ciRepo == nil {
 		return resp, nil
 	}
+	// The CI stores the catalog key of the profile's system template.
+	mapSystemTemplates(ctx, orgID, items)
 	// Whether the transactions take the ingest locks (WP-334): records
 	// consumed from the queue and parallel lanes do.
 	locking := h.locking(ctx)
@@ -1040,6 +1157,14 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 		reason := retryReason(err)
 		if !locking || attempt >= maxRecordRetries ||
 			(reason != "deadlock" && reason != "serialization" && reason != "out_of_memory") || !retryPause(ctx, reason, attempt) {
+			if len(items) > 1 && classifyRecordError(err).permanent {
+				// A record makes the frame fail for good, e.g. the review of
+				// an unknown type outside the sender's scope: each record
+				// runs on its own, so that only it fails (WP-481).
+				slog.WarnContext(ctx, "ingest frame failed for good; its records are processed one by one",
+					"event", "ingest.frame.fallback", "organization_id", orgID, "records", len(items), "error", err)
+				return h.processEach(ctx, orgID, items)
+			}
 			return resp, err
 		}
 		recordRetries.WithLabelValues(reason).Inc()
@@ -1057,11 +1182,27 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 	n := len(frame.items)
 	resolvedCIID := make([]string, n)
 	handled := make([]bool, n)
-	var recordErr error
-windows:
+	// created[i] reports that record i created its CI (WP-498): the power
+	// chain derives the feeds of new CIs from the stored power devices.
+	created := make([]bool, n)
+	// failed are the records that failed; held the identity keys of those
+	// that failed transiently, which hold back the records after them.
+	var failed []RecordError
+	held := heldKeys{}
+	frame.blocked = make([]bool, n)
 	for start, end := 0, 0; start < n; start = end {
 		end = h.windowEnd(orgID, frame, start)
-		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, &resp)
+		if len(held) > 0 {
+			// The batch of the window leaves the records held back, and those
+			// after them that share a key with them.
+			for i := start; i < end; i++ {
+				if keys := identityLockKeys(orgID, frame.identity, &frame.items[i]); frame.typeIDs[i] != "" && held.holds(keys) {
+					frame.blocked[i] = true
+					held.add(keys)
+				}
+			}
+		}
+		h.processWindow(ctx, orgID, frame, start, end, handled, resolvedCIID, created, &resp)
 		for i := start; i < end; i++ {
 			if handled[i] {
 				continue
@@ -1071,10 +1212,28 @@ windows:
 				handled[i] = true
 				continue
 			}
+			var keys []int32
+			if len(held) > 0 {
+				keys = identityLockKeys(orgID, frame.identity, &frame.items[i])
+				if frame.blocked[i] || held.holds(keys) {
+					failed = append(failed, newRecordError(&frame.items[i], errHeldBack))
+					held.add(keys)
+					continue
+				}
+			}
 			out, err := h.runRecord(ctx, orgID, frame, i)
 			if err != nil {
-				recordErr = err
-				break windows
+				f := newRecordError(&frame.items[i], err)
+				failed = append(failed, f)
+				slog.WarnContext(ctx, "ingest record failed; the batch goes on with the next record", "event", "ingest.record.failed",
+					"organization_id", orgID, "record_id", f.RecordID, "permanent", f.Permanent, "error", err)
+				if !f.Permanent {
+					if keys == nil {
+						keys = identityLockKeys(orgID, frame.identity, &frame.items[i])
+					}
+					held.add(keys)
+				}
+				continue
 			}
 			// Counted once the record's transaction has committed.
 			resp.add(&out.resp)
@@ -1082,26 +1241,40 @@ windows:
 			handled[i] = true
 			if out.created {
 				frame.total++
+				created[i] = true
 			}
 		}
 	}
 
-	var processed []IngestItem
-	var processedCIID []string
+	var processed, createdItems []IngestItem
+	var processedCIID, createdCIID []string
 	for i := range frame.items {
 		if handled[i] {
 			processed = append(processed, frame.items[i])
 			processedCIID = append(processedCIID, resolvedCIID[i])
+			if created[i] && resolvedCIID[i] != "" {
+				createdItems = append(createdItems, frame.items[i])
+				createdCIID = append(createdCIID, resolvedCIID[i])
+			}
 		}
 	}
 	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, h.neighborCandidates(ctx, orgID, processed))
 	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
 	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
+	// The new CIs of the batch take their feeds from the outlets of power
+	// devices processed before them, in an earlier batch or another lane.
+	resp.Relationships += h.derivePowerFeedsOf(ctx, orgID, createdItems, createdCIID)
+	// Likewise the LLDP/CDP edges that devices processed before them
+	// reported to the new CIs (F-374).
+	resp.Relationships += h.deriveNeighborsOf(ctx, orgID, createdItems, createdCIID, processedCIID)
 	if err := h.markProcessed(ctx, orgID, processed); err != nil {
-		return resp, errors.Join(recordErr, err)
+		return resp, &IngestErrors{Records: failed, Rest: err}
 	}
 	settle(ctx, processed)
-	return resp, recordErr
+	if len(failed) > 0 {
+		return resp, &IngestErrors{Records: failed}
+	}
+	return resp, nil
 }
 
 // batchFrame is what the frame of a batch prepares for its records: the
@@ -1120,7 +1293,8 @@ type batchFrame struct {
 	// candidates[i] are the identity candidates of record i the batch query
 	// of its window read (WP-333); valid only with prefetched[i] and
 	// without locks: with them, the batch's identity locks end with its
-	// commit, so a record reads its candidates again under its own.
+	// commit, so a record reads its candidates again under its own (the
+	// known devices of the window are updated within it, updateInWindow).
 	candidates [][]ci.Item
 	prefetched []bool
 	// limitExclusive makes every creation of the batch take the exclusive
@@ -1130,6 +1304,13 @@ type batchFrame struct {
 	// locking makes the transactions of the records take the identity and
 	// max_cis locks and retry a lost race (Handler.locking, WP-334).
 	locking bool
+	// blocked marks the records an earlier transient record failure holds
+	// back (WP-481); the batch of their window leaves them.
+	blocked []bool
+	// uniqueKeys are the keys of the unique attributes (MET-15), global
+	// ones included, per id of the types the frame looked up; nil when the
+	// repository cannot read them with the types (mayHoldUnique, F-432).
+	uniqueKeys map[string][]string
 }
 
 // recordOutcome is what processing one record changed.
@@ -1153,6 +1334,13 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 	if len(items) == 0 {
 		return frame, nil
 	}
+	// Typed values a manual write refuses are dropped and counted before
+	// anything resolves identities with them (WP-501). The items are copied:
+	// a frame that starts again checks the values of the caller again.
+	items = slices.Clone(items)
+	for i := range items {
+		frame.resp.InvalidValues += dropInvalidTyped(ctx, &items[i])
+	}
 
 	// Resolve ci_type_name to the canonical ci_type UUID before
 	// reconciliation. Collectors send the type name (e.g. "switch"); the CI
@@ -1160,10 +1348,11 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 	// (organization_id IS NULL) and org-specific types. Items whose type can
 	// be resolved neither as UUID nor by name are queued for review instead of
 	// failing the whole batch with a 500.
-	types, err := h.lookupTypes(ctx, orgID, frameTypeNames(items))
+	types, unique, err := h.lookupFrameTypes(ctx, orgID, frameTypeNames(items))
 	if err != nil {
 		return nil, err
 	}
+	frame.uniqueKeys = unique
 	frame.typeIDs = resolveCITypeIDs(items, types)
 	frame.noProfile = make([]bool, len(items))
 	for i := range items {
@@ -1172,22 +1361,18 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 			frame.noProfile[i] = unclassifiedDevice(item)
 			continue
 		}
+		clientID, siteID := h.deviceReviewScope(ctx, orgID, item)
+		// The record with its client and identity, for new (CI-13).
+		payload := devicePayload(item)
+		payload["reason"] = "unknown_ci_type"
 		opened, openErr := h.openReview(ctx, &ReviewItem{
 			OrganizationID: orgID,
 			Kind:           ReviewKindUnclassifiedDevice,
 			Status:         ReviewStatusOpen,
-			Payload: map[string]any{
-				"reason":        "unknown_ci_type",
-				"ci_type_name":  item.CITypeName,
-				"name":          item.Name,
-				"manufacturer":  item.Manufacturer,
-				"model":         item.Model,
-				"serial_number": item.SerialNumber,
-				"management_ip": item.ManagementIP,
-				"fingerprint":   item.Fingerprint,
-				"raw_data":      item.RawData,
-			},
-			ObjectKey: deviceKey(item),
+			ClientID:       clientID,
+			SiteID:         siteID,
+			Payload:        payload,
+			ObjectKey:      deviceKey(item),
 		})
 		if openErr != nil {
 			return nil, openErr
@@ -1197,14 +1382,15 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 		}
 	}
 
-	// The CI count for max_cis; identity candidates are looked up per item
-	// over the whole inventory (REC-02).
+	// The CI count for max_cis, over every active CI of the organization
+	// whatever the scope of the sender (F-403); identity candidates are
+	// looked up per item over the whole inventory (REC-02).
 	if h.limits != nil {
-		_, total, countErr := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+		total, countErr := ci.CountActive(ctx, h.ciRepo, orgID)
 		if countErr != nil {
 			return nil, countErr
 		}
-		frame.total = int64(total)
+		frame.total = total
 	}
 	if frame.identity, err = h.identityContext(ctx, orgID, types); err != nil {
 		return nil, err
@@ -1221,47 +1407,34 @@ func (h *Handler) openFrame(ctx context.Context, orgID string, items []IngestIte
 	return frame, nil
 }
 
+// deviceReviewScope returns the client and site of a review item about an
+// ingested device without candidate CIs: those of its record or, when the
+// record names neither, those of its collector. Without either the item has
+// no client and only org-wide principals see it (migration 000140).
+func (h *Handler) deviceReviewScope(ctx context.Context, orgID string, item *IngestItem) (clientID, siteID string) {
+	if item.ClientID != "" || item.SiteID != "" || item.CollectorID == "" {
+		return item.ClientID, item.SiteID
+	}
+	repo, ok := h.repo.(ScopeRepository)
+	if !ok {
+		return "", ""
+	}
+	col, err := repo.ScopeCollector(ctx, orgID, item.CollectorID)
+	if err != nil {
+		return "", ""
+	}
+	return col.ClientID, col.SiteID
+}
+
 // processRecord reconciles record i of the frame; with a transaction runner
 // it runs in the record's own transaction. out receives what it changed.
 func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchFrame, i int, out *recordOutcome) error {
 	item := frame.items[i]
-	typeID, identity := frame.typeIDs[i], frame.identity
-	resp := &out.resp
 	// Records that share an identity key never run at the same time: the
 	// locks come first, before anything is read (WP-334).
 	if err := h.lockIdentities(ctx, orgID, frame, &item); err != nil {
 		return err
 	}
-
-	// No collector profile matched (DIS-02): the device becomes a
-	// generic_device CI and a reviewer classifies it.
-	if frame.noProfile[i] {
-		opened, openErr := h.openReview(ctx, &ReviewItem{
-			OrganizationID: orgID,
-			Kind:           ReviewKindUnclassifiedDevice,
-			Status:         ReviewStatusOpen,
-			Payload: map[string]any{
-				"reason":        ReasonNoProfileMatch,
-				"ci_type_name":  ci.GenericDeviceType,
-				"name":          item.Name,
-				"manufacturer":  item.Manufacturer,
-				"model":         item.Model,
-				"serial_number": item.SerialNumber,
-				"management_ip": item.ManagementIP,
-				"sys_object_id": item.SysObjectID,
-				"fingerprint":   item.Fingerprint,
-				"raw_data":      item.RawData,
-			},
-			ObjectKey: deviceKey(&item),
-		})
-		if openErr != nil {
-			return openErr
-		}
-		if opened {
-			resp.ReviewItems++
-		}
-	}
-
 	var candidates []ci.Item
 	if i < len(frame.prefetched) && frame.prefetched[i] && !frame.locking {
 		// Read by the batch query of the window (WP-333): no record before
@@ -1273,6 +1446,34 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 			return err
 		}
 	}
+	return h.reconcileRecord(ctx, orgID, frame, i, &item, candidates, out)
+}
+
+// reconcileRecord reconciles a copy of rec, record i of the frame, against
+// its identity candidates in the context transaction, which holds the
+// identity locks of the record when the frame's records take them: the
+// transaction of the record (processRecord) or the batch transaction of its
+// window (batchWindow). out receives what it changed.
+func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batchFrame, i int, rec *IngestItem, candidates []ci.Item,
+	out *recordOutcome) error {
+	item := *rec
+	typeID, identity := frame.typeIDs[i], frame.identity
+	resp := &out.resp
+
+	// No collector profile matched (DIS-02): the device becomes a
+	// generic_device CI and a reviewer classifies it, once the identity is
+	// resolved and only while the CI is still a generic_device.
+	openUnclassified := func(device *ci.Item) error {
+		if !frame.noProfile[i] {
+			return nil
+		}
+		opened, err := h.reviewUnclassified(ctx, orgID, &item, device, identity)
+		if opened {
+			resp.ReviewItems++
+		}
+		return err
+	}
+
 	result := ResolveIdentity(candidates, &item, identity)
 	// No live CI: a soft-deleted one may be the device (CI-13).
 	if result.Action == ReconcileCreated {
@@ -1288,7 +1489,6 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 			return nil
 		}
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
 	source := item.Source
 	if source == "" {
 		source = ci.SourceSweep
@@ -1331,6 +1531,13 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 			}
 		}
 		withoutTakenIdentity(&item, candidates)
+		// Likewise a value of a unique attribute another active CI holds
+		// (MET-15, F-432).
+		takenDropped, takenErr := h.withoutTakenUnique(ctx, frame, orgID, typeID, &item)
+		if takenErr != nil {
+			return takenErr
+		}
+		resp.InvalidValues += takenDropped
 		if h.beforeCreate != nil {
 			h.beforeCreate(ctx)
 		}
@@ -1352,6 +1559,9 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 				return reviewErr
 			}
 			resp.ReviewItems++
+		}
+		if err := openUnclassified(&newItem); err != nil {
+			return err
 		}
 	case ReconcileMatched:
 		matched := findCI(candidates, result.MatchedCIID)
@@ -1404,19 +1614,24 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 			}
 			if d.Conflict {
 				conflict = true
-				if h.queueOverrideConflict(ctx, orgID, matched.ID, field, value, source) {
+				if h.queueOverrideConflict(ctx, orgID, matched, field, value, source) {
 					resp.ReviewItems++
 				}
 			}
 			return d.Write
 		}
 		// A sighting updates last_seen_at without history and brings an
-		// unknown CI back to active (REC-07, AUD-03).
-		update := ci.UpdateRequest{LastSeenAt: &now}
-		if matched.Status == "unknown" {
-			active := "active"
-			update.Status = &active
-		}
+		// unknown CI back to active (REC-07, AUD-03) with the event
+		// ci.online in the record's transaction (REC-09, LCY-05, F-268;
+		// ci.RecordUpdater). It is dated by the record's observed_at
+		// (GLO-12): the repository keeps the later of the two times, and a
+		// record not newer than the last sighting brings no CI back and
+		// raises no ci.online. The repository decides on the locked row
+		// (UpdateRequest.Sighting): a CI the offline detector set unknown
+		// after the match read it is active again as well (F-412).
+		seen := seenAt(&item)
+		lastSeen := seen.Format(time.RFC3339Nano)
+		update := ci.UpdateRequest{LastSeenAt: &lastSeen, Sighting: true}
 		for _, f := range []struct {
 			name           string
 			value, current string
@@ -1429,7 +1644,14 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 			{"hardware_uuid", strings.ToLower(incomingUUID(&item)), strings.ToLower(matched.HardwareUUID), &update.HardwareUUID},
 			{"management_ip", item.ManagementIP, matched.ManagementIP, &update.ManagementIP},
 		} {
-			if f.value == "" || f.value == f.current {
+			// An unchanged value is decided only when it changes the
+			// observation of an overridden field (F-248).
+			if f.value == "" || (f.value == f.current && !matched.ObservationChanged(f.name, f.value)) {
+				continue
+			}
+			// The serial number identifies case-insensitively (F-246): one in
+			// other case is the same value, no change and no conflict.
+			if f.name == "serial_number" && normalizedEqual(f.value, f.current) {
 				continue
 			}
 			if decide(f.name, f.value, f.current) {
@@ -1441,6 +1663,16 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 				override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource)),
 			"raw_data": item.RawData,
 		}
+		if txErr != nil {
+			return txErr
+		}
+		// A value of a unique attribute another active CI holds is not
+		// written (MET-15, F-432), as for a new device.
+		dropped, takenErr := h.withoutTakenUniqueWrites(ctx, frame, orgID, matched, attributes, writes)
+		if takenErr != nil {
+			return takenErr
+		}
+		resp.InvalidValues += dropped
 		// In a fixed order: two transactions that write field values of
 		// one CI take their row locks in the same order (WP-334).
 		for _, k := range slices.Sorted(maps.Keys(attributes)) {
@@ -1448,7 +1680,8 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 			if k == "fingerprint" || k == "raw_data" {
 				continue
 			}
-			if current, ok := matched.Attributes[k]; ok && reflect.DeepEqual(current, v) {
+			if current, ok := matched.Attributes[k]; ok && reflect.DeepEqual(current, v) &&
+				!matched.ObservationChanged(k, v) {
 				continue
 			}
 			if decide(k, v, matched.Attributes[k]) {
@@ -1472,17 +1705,30 @@ func (h *Handler) processRecord(ctx context.Context, orgID string, frame *batchF
 			resp.ProtectedInstanceFields++
 		}
 		update.Attributes = writes
-		updated, err := h.ciRepo.Update(ctx, orgID, result.MatchedCIID, update)
+		// The fields, the status and the reclassification of a
+		// generic_device classified now (CI-11) are one change of the
+		// record in one transaction: one change set with the record's
+		// origin and one event ci.changed (AUD-03, EVT-02).
+		changed, err := ci.UpdateRecord(ctx, h.ciRepo, orgID, result.MatchedCIID, &ci.RecordUpdate{
+			Update: update, TypeID: raisedType(matched, typeID, identity),
+			Origin: ci.RecordOrigin{CollectorID: item.CollectorID, ObservedAt: item.ObservedAt, RecordID: item.RecordID},
+		})
 		if err != nil {
 			return err
 		}
+		updated := changed.CI
 		if conflict {
 			resp.ProtectedOverrides++
 		}
-		// A generic_device classified now becomes the specific type
-		// through the type change service (CI-11).
-		if typeErr := h.raiseGenericType(ctx, orgID, updated, typeID, identity); typeErr != nil {
-			return typeErr
+		// The CI is classified now: its unclassified_device item closes
+		// as reclassified (DIS-02).
+		if changed.TypeChanged && updated.CITypeID != identity.GenericDeviceTypeID {
+			if resolveErr := h.resolveReclassified(ctx, orgID, updated.ID); resolveErr != nil {
+				return resolveErr
+			}
+		}
+		if reviewErr := openUnclassified(updated); reviewErr != nil {
+			return reviewErr
 		}
 		out.ciID = updated.ID
 		resp.Updated++
@@ -1553,9 +1799,11 @@ type windowOutcome struct {
 	total      int64
 	unlicensed queuedDevices
 	// done[k] reports that record start+k was handled completely in the
-	// batch, with the CI ciID[k] (held and unlicensed records have none).
+	// batch, with the CI ciID[k] (held and unlicensed records have none);
+	// created[k] that the batch created that CI.
 	done       []bool
 	ciID       []string
+	created    []bool
 	candidates [][]ci.Item
 	prefetched []bool
 }
@@ -1573,13 +1821,15 @@ type pendingCI struct {
 // one transaction (NFR-03, WP-333): one query for the live candidates of
 // all records, one for the soft-deleted candidates of the new devices, and
 // the new devices created together (ci.BatchCreator), indexed together and
-// with their provenance in one statement. It marks the records it handled
-// and leaves the candidates it read to the records that follow one by one.
+// with their provenance in one statement; with the ingest locks also the
+// updates of the known devices (updateInWindow, WP-608). It marks the
+// records it handled and leaves the candidates it read to the records that
+// follow one by one.
 // It never fails the ingest: when the batch cannot run or rolls back, every
 // record of the window is processed on its own, which reports any error
 // for its record.
 func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchFrame, start, end int, handled []bool,
-	resolvedCIID []string, resp *BulkIngestResponse) {
+	resolvedCIID []string, created []bool, resp *BulkIngestResponse) {
 	finder, ok := h.repo.(BatchIdentityFinder)
 	creator, creates := h.ciRepo.(ci.BatchCreator)
 	if !ok || !creates || h.tx == nil {
@@ -1589,7 +1839,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 	qs, include := make([]IdentityQuery, n), make([]bool, n)
 	records := 0
 	for k := range n {
-		if frame.typeIDs[start+k] == "" {
+		if frame.typeIDs[start+k] == "" || (start+k < len(frame.blocked) && frame.blocked[start+k]) {
 			continue
 		}
 		qs[k] = identityQuery(&frame.items[start+k])
@@ -1611,7 +1861,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 		return h.inTx(ctx, orgID, func(ctx context.Context) error {
 			w = windowOutcome{
 				total: frame.total, unlicensed: queuedDevices{keys: maps.Clone(frame.unlicensed.keys)},
-				done: make([]bool, n), ciID: make([]string, n), candidates: make([][]ci.Item, n), prefetched: make([]bool, n),
+				done: make([]bool, n), ciID: make([]string, n), created: make([]bool, n), candidates: make([][]ci.Item, n), prefetched: make([]bool, n),
 			}
 			return h.batchWindow(ctx, orgID, frame, start, qs, include, finder, creator, &w)
 		})
@@ -1634,7 +1884,7 @@ func (h *Handler) processWindow(ctx context.Context, orgID string, frame *batchF
 		i := start + k
 		frame.candidates[i], frame.prefetched[i] = w.candidates[k], w.prefetched[k]
 		if w.done[k] {
-			handled[i], resolvedCIID[i] = true, w.ciID[k]
+			handled[i], resolvedCIID[i], created[i] = true, w.ciID[k], w.created[k]
 		}
 	}
 }
@@ -1689,9 +1939,21 @@ func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFra
 			deletedOf[k] = resurrectionGuard(&qs[k])
 		}
 	}
-	if len(fresh) == 0 {
-		return nil
+	if len(fresh) > 0 {
+		if err := h.createInWindow(ctx, orgID, frame, start, qs, finder, creator, candidates, results, fresh, deletedOf, w); err != nil {
+			return err
+		}
 	}
+	return h.updateInWindow(ctx, orgID, frame, start, first, results, candidates, w)
+}
+
+// createInWindow creates the new devices fresh of the window together
+// (WP-333): one query for their soft-deleted candidates, the creation with
+// one statement, indexed together and with their provenance in one
+// statement.
+func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batchFrame, start int, qs []IdentityQuery,
+	finder BatchIdentityFinder, creator ci.BatchCreator, candidates [][]ci.Item, results []ReconcileResult, fresh []int,
+	deletedOf []bool, w *windowOutcome) error {
 	// No live CI: a soft-deleted one may be the device (CI-13).
 	var deleted [][]ci.Item
 	if dkeys, drefs := batchKeys(qs, deletedOf); !dkeys.empty() {
@@ -1717,10 +1979,17 @@ func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFra
 	var pending []pendingCI
 	for _, k := range fresh {
 		i := start + k
+		typeID := frame.typeIDs[i]
+		// A new device with a value of a unique attribute (MET-15, F-432)
+		// is left to its own transaction, which checks the value against
+		// the other CIs and the devices of the batch before it.
+		if frame.mayHoldUnique(typeID, discoveredAttributes(&frame.items[i])) {
+			w.prefetched[k], w.candidates[k] = false, nil
+			continue
+		}
 		// The batch works on a copy: a record it leaves is processed on its
 		// own from what it reported.
 		item := cloneItem(&frame.items[i])
-		typeID := frame.typeIDs[i]
 		held, reviewed, err := h.resurrectionWith(ctx, orgID, &item, frame.identity, deleted[k])
 		if err != nil {
 			return err
@@ -1816,7 +2085,42 @@ func (h *Handler) batchWindow(ctx context.Context, orgID string, frame *batchFra
 			w.resp.ReviewItems++
 		}
 		w.resp.Created++
-		w.done[rec.k], w.ciID[rec.k] = true, rec.ci.ID
+		w.done[rec.k], w.ciID[rec.k], w.created[rec.k] = true, rec.ci.ID, true
+	}
+	return nil
+}
+
+// updateInWindow updates the known devices of the window in its batch
+// transaction when the frame's records take the ingest locks (WP-608,
+// NFR-03). The window holds the identity locks of its records until its
+// commit, so the candidates it read stay valid; a record in a transaction
+// of its own takes the locks and reads the candidates again, and takes the
+// organization's audit and outbox locks and commits for itself. Only the
+// first record of a device in the window is updated here, in the order of
+// the records and after the new devices; the others follow one by one. A
+// record that fails rolls the window back, and its records are processed
+// one by one (processWindow). Without the locks the records use the
+// window's candidates in transactions of their own (WP-333).
+func (h *Handler) updateInWindow(ctx context.Context, orgID string, frame *batchFrame, start int, first []bool,
+	results []ReconcileResult, candidates [][]ci.Item, w *windowOutcome) error {
+	if !frame.locking {
+		return nil
+	}
+	for k := range first {
+		i := start + k
+		// A device no collector profile matched opens its review on its own.
+		if !first[k] || results[k].Action != ReconcileMatched || frame.noProfile[i] {
+			continue
+		}
+		// The window works on a copy: a record it leaves is processed on its
+		// own from what it reported.
+		var out recordOutcome
+		item := cloneItem(&frame.items[i])
+		if err := h.reconcileRecord(ctx, orgID, frame, i, &item, candidates[k], &out); err != nil {
+			return err
+		}
+		w.resp.add(&out.resp)
+		w.done[k], w.ciID[k] = true, out.ciID
 	}
 	return nil
 }
@@ -1887,24 +2191,14 @@ func firstNonEmpty(preferred, fallback string) string {
 	return fallback
 }
 
-// raiseGenericType reclassifies a matched generic_device CI to the specific
-// type the device reported (CI-11); discovery never changes other types.
-func (h *Handler) raiseGenericType(ctx context.Context, orgID string, matched *ci.Item, typeID string, ic *IdentityContext) error {
-	if ic == nil || ic.GenericDeviceTypeID == "" || matched.CITypeID != ic.GenericDeviceTypeID ||
-		typeID == "" || typeID == ic.GenericDeviceTypeID {
-		return nil
+// raisedType returns the specific type typeID a matched generic_device CI
+// is raised to (CI-11), or "": discovery never changes other types. A
+// matched CI the candidates did not carry has no type here; the repository
+// checks the types again in the record's transaction.
+func raisedType(matched *ci.Item, typeID string, ic *IdentityContext) string {
+	if ic == nil || ic.GenericDeviceTypeID == "" || typeID == "" || typeID == ic.GenericDeviceTypeID ||
+		(matched.CITypeID != "" && matched.CITypeID != ic.GenericDeviceTypeID) {
+		return ""
 	}
-	changer, ok := h.ciRepo.(ci.TypeChanger)
-	if !ok {
-		return nil
-	}
-	result, err := changer.ChangeType(ctx, orgID, matched.ID, typeID, ci.TypeChangeDiscovery)
-	switch {
-	case errors.Is(err, ci.ErrReclassificationRefused), errors.Is(err, ci.ErrUnknownType):
-		return nil
-	case err != nil:
-		return fmt.Errorf("reclassify generic device: %w", err)
-	}
-	*matched = *result.CI
-	return nil
+	return typeID
 }

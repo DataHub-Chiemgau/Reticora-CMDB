@@ -68,7 +68,7 @@ export function SecurityPage() {
           <div className="flex items-center gap-2">
             <select
               aria-label={t('security.standardLabel')}
-              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               value={standard}
               onChange={(e) => setStandard(e.target.value)}
             >
@@ -106,7 +106,7 @@ export function SecurityPage() {
               <div className="text-4xl font-bold text-primary">
                 {Math.round(data?.compliance_score.score ?? 0)}%
               </div>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted">
                 {t('compliance.scoreHint', {
                   passed: data?.compliance_score.passed ?? 0,
                   failed: data?.compliance_score.failed ?? 0,
@@ -119,7 +119,7 @@ export function SecurityPage() {
                 {(['critical', 'high', 'medium', 'low'] as const).map((sev) => (
                   <li key={sev} className="flex items-center justify-between">
                     <Badge variant={sev === 'critical' || sev === 'high' ? 'danger' : 'info'}>
-                      {sev}
+                      {t(`compliance.severities.${sev}`, sev)}
                     </Badge>
                     <span className="font-mono text-gray-700 dark:text-gray-300">
                       {data?.failures_by_severity?.[sev] ?? 0}
@@ -140,14 +140,18 @@ export function SecurityPage() {
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">{finding.rule_name}</span>
-                      <Badge variant="danger">{finding.severity}</Badge>
-                      <Badge variant="info">{finding.category}</Badge>
-                      <span className="text-gray-500">
+                      <Badge variant="danger">
+                        {t(`compliance.severities.${finding.severity}`, finding.severity)}
+                      </Badge>
+                      <Badge variant="info">
+                        {t(`compliance.categories.${finding.category}`, finding.category)}
+                      </Badge>
+                      <span className="text-muted">
                         {t('security.affectedCIs', { count: finding.affected_cis.length })}
                       </span>
                     </div>
                     {finding.remediation_hint ? (
-                      <p className="mt-1 text-gray-500">{finding.remediation_hint}</p>
+                      <p className="mt-1 text-muted">{finding.remediation_hint}</p>
                     ) : null}
                   </li>
                 ))}
@@ -176,7 +180,7 @@ export function SecurityPage() {
             <input
               type="number"
               min={0}
-              className="w-32 rounded-md border border-gray-300 px-2 py-1.5 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+              className="w-32 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               placeholder={String(retention.data?.retention_days ?? 0)}
               value={retentionDays}
               onChange={(e) => setRetentionDays(e.target.value)}
@@ -185,7 +189,7 @@ export function SecurityPage() {
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-gray-600 dark:text-gray-300">{t('security.retentionMode')}</span>
             <select
-              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
               value={retentionMode}
               onChange={(e) => setRetentionMode(e.target.value as 'anonymize' | 'delete')}
             >
@@ -198,7 +202,7 @@ export function SecurityPage() {
           </Button>
         </form>
         {retention.data ? (
-          <p className="mt-2 text-sm text-gray-500">
+          <p className="mt-2 text-sm text-muted">
             {t('security.retentionCurrent', {
               days: retention.data.retention_days,
               mode: t(
@@ -207,7 +211,7 @@ export function SecurityPage() {
             })}
           </p>
         ) : (
-          <p className="mt-2 text-sm text-gray-500">{t('security.retentionNone')}</p>
+          <p className="mt-2 text-sm text-muted">{t('security.retentionNone')}</p>
         )}
         {saveRetention.isError ? (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">

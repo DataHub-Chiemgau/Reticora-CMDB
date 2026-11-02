@@ -20,9 +20,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/bootstrap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -32,21 +32,17 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/signup"
@@ -61,6 +57,11 @@ import (
 var version = "dev"
 
 func main() {
+	// Operator command of the collector CA (COL-04): server collector-ca
+	// status|rollover|retire [--force] (collectorca.go).
+	if len(os.Args) > 1 && os.Args[1] == collectorCACommand {
+		os.Exit(runCollectorCA(context.Background(), os.Args[2:], config.Load(), os.Stdout, os.Stderr))
+	}
 	noDB := flag.Bool("no-db", false,
 		"run with in-memory repositories for local development; all data is lost on restart")
 	checkIssuer := flag.Bool("check-oidc-issuer", false,
@@ -76,6 +77,11 @@ func main() {
 	// passwords never reach the log (SEC-01).
 	logger := slog.New(httpx.NewRedactingHandler(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel})))
 	slog.SetDefault(logger)
+	// A deprecated switch or a worker switch without a worker (OPS-02,
+	// F-289) is reported, not refused.
+	for _, w := range cfg.Warnings() {
+		slog.Warn("configuration warning", "warning", w)
+	}
 
 	// Fail-closed start (OPS-01): missing or invalid settings stop the server
 	// instead of silently falling back to development defaults.
@@ -85,6 +91,18 @@ func main() {
 	}
 	// readiness collects the dependencies /readyz verifies.
 	var readiness []server.ReadinessCheck
+
+	// Without the OpenAPI document deprecated operations lose their
+	// lifecycle headers (API-01, F-218): production refuses to start,
+	// elsewhere the warning is logged and /readyz names it.
+	specLoaded, err := middleware.CheckOpenAPISpec(cfg.Environment == config.EnvProduction)
+	if err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(1)
+	}
+	if !specLoaded {
+		readiness = append(readiness, openAPINotLoadedReadiness())
+	}
 
 	shutdown, err := observability.Init(cfg.OTelEndpoint, "reticora-server", cfg.Environment)
 	if err != nil {
@@ -116,12 +134,6 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("envelope encryption initialized")
-	// Pagination cursors are signed with a key derived from the master key,
-	// so every replica accepts the cursors of the others (API-02).
-	if err = api.SetCursorKey(encryptor.Derive("reticora/pagination-cursor/v1")); err != nil {
-		slog.Error("failed to set the cursor key", "error", err)
-		os.Exit(1)
-	}
 
 	// Initialize OIDC provider. When RETICORA_OIDC_CA_CERT_FILE is set the
 	// provider calls (discovery, JWKS, token exchange) additionally trust that
@@ -160,7 +172,7 @@ func main() {
 	case err == nil:
 		defer redisClient.Close()
 		cacheStore = cache.NewRedisStore(redisClient.Unwrap())
-		readiness = append(readiness, server.ReadinessCheck{Name: "redis", Check: redisClient.Ping})
+		readiness = append(readiness, server.ReadinessCheck{Name: "redis", Address: redisClient.Unwrap().Options().Addr, Check: redisClient.Ping})
 		slog.Info("Redis cache store initialized")
 	case *noDB || (cfg.IsDevelopment() && !cfg.IsSet("RETICORA_REDIS_URL")):
 		slog.Warn("Redis unreachable; using the per-process in-memory cache (development only)", "error", err)
@@ -191,6 +203,11 @@ func main() {
 
 	if *noDB {
 		slog.Warn("running with --no-db: all state is in-memory and lost on restart")
+		// The derived secrets come from a derivation root of this process.
+		if err = encryptor.UseEphemeralDerivationRoot(); err != nil {
+			slog.Error("failed to draw the derivation root", "error", err)
+			os.Exit(1)
+		}
 		repos = server.MemoryRepositories()
 		// File-backed blob storage keeps asynchronous exports usable in the
 		// development mode; the signed URL is a development-only file: URL.
@@ -218,6 +235,20 @@ func main() {
 			os.Exit(1)
 		}
 		readiness = append(readiness, dbCheck)
+		// The derived secrets (Derive) come from the derivation root of the
+		// installation, not from the master key, so they survive a
+		// master-key rotation (SEC-06, WP-459). The first start draws it;
+		// a root the master keys do not unseal stops the start: a new one
+		// would change every derived secret.
+		rootCreated, rootErr := crypto.LoadDerivationRoot(context.Background(), pool, encryptor)
+		if rootErr != nil {
+			slog.Error("failed to open the derivation root of the derived secrets", "error", rootErr)
+			os.Exit(1)
+		}
+		if rootCreated {
+			slog.Info("created the derivation root of the derived secrets: the keys of the collector NATS endpoint and " +
+				"the pagination cursor key changed once; restart nats-edge if it was running (docs/ops/workers.md, key rotation)")
+		}
 		repos = server.PostgresRepositories(pool, audit.NewPGRecorder())
 		auditHandler = audit.NewHandler(pool)
 		auditPool = pool
@@ -230,11 +261,17 @@ func main() {
 		// the streaming export stays available. Configured object storage
 		// that cannot be used is fatal outside development.
 		if cfg.S3Configured() {
-			s3Store, s3Err := setupObjectStorage(cfg)
+			// /readyz probes the host:port the S3 client connects to, also
+			// for a URL or an endpoint without port (F-127).
+			s3Check, s3Err := server.ObjectStorageReadiness(cfg.S3Endpoint, cfg.S3UseSSL)
+			var s3Store *blob.S3Store
+			if s3Err == nil {
+				s3Store, s3Err = setupObjectStorage(cfg)
+			}
 			switch {
 			case s3Err == nil:
 				blobStore = s3Store
-				readiness = append(readiness, server.TCPReadiness("object_storage", cfg.S3Endpoint))
+				readiness = append(readiness, s3Check)
 			case cfg.IsDevelopment():
 				slog.Warn("S3 blob storage unavailable; asynchronous export jobs are disabled", "error", s3Err)
 			default:
@@ -244,6 +281,13 @@ func main() {
 		} else {
 			slog.Warn("object storage not configured (RETICORA_S3_*); asynchronous export jobs are disabled")
 		}
+	}
+	// Pagination cursors are signed with a key derived from the derivation
+	// root, so every replica accepts the cursors of the others (API-02),
+	// also after a master-key rotation.
+	if err = api.SetCursorKey(encryptor.Derive("reticora/pagination-cursor/v1")); err != nil {
+		slog.Error("failed to set the cursor key", "error", err)
+		os.Exit(1)
 	}
 	// With NATS the discovery ingest runs over ingest.> (REC-01): HTTP
 	// ingest publishes, the consumer processes. NATS is reported by /readyz.
@@ -281,13 +325,19 @@ func main() {
 		}
 		defer nc.Close()
 		coreNATS = nc
+		// A disable (PATCH /collectors/{id}) is announced on the internal
+		// NATS; the edge worker of one replica cuts the collector's open
+		// connections (COL-04, F-025).
+		if discoveryRepo, ok := repos.Discovery.(*discovery.PGRepository); ok {
+			discoveryRepo.WithDisableAnnouncer(nc)
+		}
 		js, natsErr := jetstream.New(nc)
 		if natsErr != nil {
 			slog.Error("failed to open JetStream for the job queue", "error", natsErr)
 			os.Exit(1)
 		}
 		eventStream = js
-		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs).WithEvents(emitterOf(auditPool)), js)
+		jobQueue = jobs.NewQueue(jobs.NewService(repos.Jobs), js)
 		queueCtx, cancelQueue := context.WithTimeout(context.Background(), 30*time.Second)
 		natsErr = jobQueue.Setup(queueCtx)
 		cancelQueue()
@@ -320,11 +370,12 @@ func main() {
 			repos.Search = osBackend
 		}
 	}
-	// Keep the tenant search index in sync with every CI write (REST handler,
-	// collector bulk ingest, workflow executor). Indexing is best-effort: a
-	// failing search backend never breaks CI persistence, and the index can
-	// always be rebuilt via POST /api/v1/search/reindex.
-	repos.CI = ci.NewIndexingRepository(repos.CI, search.NewCIIndexer(repos.Search))
+	// A rack placement moves the CI (and the CIs of its asset) in SQL; the
+	// remote index learns of the new client and site only through this
+	// decorator (TEC-12, WP-346). The PostgreSQL index follows by trigger.
+	if hybrid, ok := repos.Search.(*search.HybridBackend); ok {
+		repos.Rack = rack.NewIndexingRepository(repos.Rack, hybrid)
+	}
 	// In the air-gapped profile no external AI call is made at all (AI-02).
 	aiProvider := ai.NewProvider(&ai.ProviderConfig{
 		BaseURL: cfg.LLMBaseURL, APIKey: cfg.LLMAPIKey, ChatModel: cfg.LLMChatModel, EmbeddingModel: cfg.LLMEmbeddingModel,
@@ -338,8 +389,8 @@ func main() {
 		Cache:   cacheStore,
 		Enforce: cfg.EntitlementEnforcement,
 	})
-	// A missing entitlement row means not entitled (ENT-05): organizations
-	// without rows get the rows of their plan once.
+	// A missing entitlement row means not entitled (ENT-05): every
+	// organization gets the missing rows of its plan at each start (F-210).
 	if err = provisionEntitlements(context.Background(), entitlementSvc, auditPool, cfg.DefaultPlan); err != nil {
 		slog.Error("entitlement provisioning failed", "error", err)
 		os.Exit(1)
@@ -347,20 +398,20 @@ func main() {
 	slog.Info("entitlement enforcement configured",
 		"default_plan", cfg.DefaultPlan, "enforced", cfg.EntitlementEnforcement)
 
-	// Mirror CI mutations into the retrieval chunk store so the governed RAG
-	// assistant has tenant-owned content to ground its answers. Chunks are
-	// embedded only for organizations that opted in and hold the ai add-on
-	// (AI-02); otherwise they stay lexical.
-	aiOptIn, _ := repos.AI.(ai.OptInSource)
-	repos.CI = ci.NewIndexingRepository(repos.CI, ai.NewCIChunkIndexer(repos.AI, aiProvider).
-		WithConsent(ai.OrgConsent{OptIn: aiOptIn, Entitlements: entitlementSvc}))
-
-	// Webhook and connector destinations are user input: every outbound call
-	// goes through the egress client (SEC-08).
+	// Webhook and connector destinations and own SMTP servers are user
+	// input: every outbound call goes through the egress client or dialer,
+	// and the handlers check them against the same policy when they are
+	// stored (Options.Egress, SEC-08).
 	egressPolicy := egress.Options{AllowPrivate: cfg.EgressAllowPrivate}
 	// Notifications (NTF-01, NTF-04): channels with encrypted provider
 	// settings, the in-app center and the delivery queue of the notifier.
 	smtpSender := centralSMTP(cfg)
+	// A configured central SMTP server is a dependency of the instance
+	// (OPS-01, F-126): while it is unreachable, /readyz answers 503 and the
+	// instance leaves the load balancer.
+	if smtpSender != nil {
+		readiness = append(readiness, server.SMTPReadiness(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPTLS))
+	}
 	notifications := notify.NewMemoryCenter()
 	if auditPool != nil {
 		notifications = &notify.Center{
@@ -373,19 +424,27 @@ func main() {
 	notifier := notify.NewNotifier(notifications.Channels, notifications.Deliveries, notifications.Preferences,
 		notify.NewSender(map[string]notify.Provider{
 			notify.ProviderCentralSMTP: notify.NewEmailProvider(smtpSender),
-			notify.ProviderSMTP:        notify.NewEmailProvider(smtpSender),
+			notify.ProviderSMTP:        notify.NewEmailProvider(smtpSender).WithEgress(egressPolicy),
 			notify.ProviderInApp:       notify.NewInAppProvider(notifications.Inbox),
 			notify.ProviderWebhook:     notify.NewWebhookProvider(egress.NewClient(egressPolicy)),
-		}))
+		})).
+		// E-mail channels send only with notifications_email (ENT-05).
+		WithEntitlements(entitlementSvc)
+	if auditPool != nil {
+		// E-mails of the categories a user bundles become digest items;
+		// the scheduler kind notify.digest queues them per window (NTF-04).
+		notifier.WithDigest(notify.NewPGDigestStore(auditPool))
+	}
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
 		// object the account may read (RBA-08).
-		Access:     user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
+		Access: user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
+		// Events without client_id/site_id in the payload are scoped by
+		// the CIs and assets they reference.
+		Objects:    objectResolverOf(auditPool),
 		Deliveries: repos.WebhookDeliveries,
 		// The retry worker runs under its operator switch below (OPS-02).
 		PollInterval: -1,
-		// Dead deliveries are reported (NTF-05).
-		Events: emitterOf(auditPool),
 	})
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -407,10 +466,13 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("late modules", "enabled", modules.EnabledKeys())
+	// CI writes keep the search index in sync and, only with the module ai
+	// (F-301), the retrieval chunks; the consent is the one the router wires
+	// into the Ask path (AI-02).
+	repos.CI = bootstrap.NewCIRepository(repos.CI, repos.Search, repos.AI, aiProvider,
+		ai.NewOrgConsent(repos.AI, entitlementSvc), modules)
 	// A worker of a switched-off module does not start (WP-214).
-	workerEnabled := func(name string) bool {
-		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)
-	}
+	workerEnabled := workerSwitch(cfg, modules)
 	// The backlog per lane as the ingest worker's 30-s sampler read it last,
 	// informational: it never takes the instance out of the load balancer,
 	// and a request never asks NATS (WP-334, OPS-05). Only the ingest worker
@@ -419,218 +481,8 @@ func main() {
 	if ingestQueue != nil && workerEnabled(config.WorkerIngest) {
 		readiness = append(readiness, server.ReadinessCheck{Name: "ingest", Detail: ingestQueue.ReadinessDetail})
 	}
-	mux, httpMetrics, err := server.NewRouter(repos, server.Options{
-		Version:            version,
-		Modules:            modules,
-		MetricsTenantLabel: cfg.MetricsTenantLabel,
-		Entitlements:       entitlementSvc,
-		Dispatcher:         webhookDispatcher,
-		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
-		Credentials:        credentialService,
-		OIDC:               oidcProvider,
-		Sessions:           sessionIssuer,
-		RefreshSessions:    refreshSessions,
-		Operator: operator.Config{
-			BreakGlassToken: cfg.OperatorToken,
-			Group:           cfg.OperatorGroup,
-			MFAACRValues:    strings.Split(cfg.OperatorMFAACR, ","),
-		},
-		OperatorPool:         auditPool,
-		UserProvisioner:      userProvisioner(repos),
-		DefaultProvisionRole: cfg.DefaultProvisionRole,
-		Audit:                auditHandler,
-		AuditPool:            auditPool,
-		AIProvider:           aiProvider,
-		Blobs:                blobStore,
-		Egress:               egressPolicy,
-		RouteMiddleware: []func(http.Handler) http.Handler{
-			middleware.OpenAPIValidation,
-			middleware.IdempotencyWithStore(cacheStore),
-		},
-		Readiness:        readiness,
-		IngestQueue:      ingestQueue,
-		Signup:           signupService(cfg, auditPool, smtpSender),
-		Notifications:    notifications,
-		Events:           emitterOf(auditPool),
-		SignupProtection: signupProtection(cfg, cacheStore),
-		// Invitations need the database; in --no-db mode they answer 503.
-		InvitationAccounts: invitationAccounts(cfg),
-		CollectorCA:        collectorPKI,
-	})
-	if err != nil {
-		slog.Error("failed to build API router", "error", err)
-		os.Exit(1)
-	}
-
-	// The scheduler of the system jobs (JOB-02, OPS-03): advisory-lock
-	// leader and stored catch-up state on PostgreSQL, process-local with
-	// --no-db.
-	var systemScheduler *jobs.Scheduler
-	if auditPool != nil {
-		systemScheduler = jobs.NewScheduler(jobs.NewPGLocker(auditPool), jobs.NewPGStateStore(auditPool))
-	} else {
-		systemScheduler = jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
-	}
-	// Release expired reservations (spec §10); reservations belong to the
-	// inventory module (WP-214).
-	var systemJobs []jobs.Schedule
-	if modules.Enabled("inventory") {
-		systemJobs = append(systemJobs, reservation.NewSweeper(repos.Reservation, webhookDispatcher).Schedule())
-	}
-	// Retention runs per kind of data (NFR-06, AUD-09) and key rotation
-	// (SEC-06).
-	if auditPool != nil {
-		systemJobs = append(systemJobs, jobs.NewRotation(auditPool, encryptor, dekRotator{repo: credential.NewPGRepository(auditPool)},
-			webhook.NewPGRepository(auditPool)).Schedules()...)
-		systemJobs = append(systemJobs, jobs.NewRetention(auditPool, jobs.RetentionFromDays(cfg.RetentionAuditYears,
-			cfg.RetentionHistoryDays, cfg.RetentionSoftDeleteDays, cfg.RetentionReviewItemDays)).Schedules()...)
-		// Collector status: offline after five minutes without heartbeat,
-		// paused while the discovery license is not active (COL-01, COL-05).
-		collectorStatus := discovery.NewStatusMonitor(auditPool)
-		collectorStatus.Licensed = func(ctx context.Context, orgID string) (bool, error) {
-			_, status, serr := entitlementSvc.Status(ctx, orgID, entitlement.FeatureDiscovery)
-			return status == entitlement.StatusActive, serr
-		}
-		systemJobs = append(systemJobs, collectorStatus.Schedule())
-		// CIs not seen for three scope intervals become unknown (REC-09,
-		// LCY-05); RETICORA_OFFLINE_DETECTOR_ENABLED switches it off.
-		if cfg.OfflineDetector {
-			systemJobs = append(systemJobs, lifecycle.NewOfflineDetector(auditPool).Schedule())
-		}
-		// Unconfirmed and suppressed discovery edges are removed (TOP-02).
-		systemJobs = append(systemJobs, relationship.NewCleanup(auditPool).Schedule())
-		// Personal data of existing history entries into the vault (SEC-05).
-		systemJobs = append(systemJobs, jobs.NewPIIBackfill(auditPool).Schedule())
-		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).
-		if typeRepo, ok := repos.CIType.(*citype.PGRepository); ok && repos.Jobs != nil {
-			ddlJob := citype.NewDDLJob(auditPool, jobs.NewService(repos.Jobs))
-			typeRepo.WithIndexScheduler(ddlJob)
-			systemJobs = append(systemJobs, ddlJob.Schedule())
-		}
-	}
-	for i := range systemJobs {
-		if err = systemScheduler.Register(&systemJobs[i]); err != nil {
-			slog.Error("failed to register a system job", "error", err)
-			os.Exit(1)
-		}
-	}
-
-	// Background workers, each under its operator switch
-	// RETICORA_WORKER_<NAME>_ENABLED (OPS-02), so they can run on dedicated
-	// instances.
-	workers := []server.Worker{{
-		// Re-send persisted webhook deliveries that are due for a retry.
-		Name: config.WorkerWebhookDispatcher,
-		Run:  func(ctx context.Context) { webhookDispatcher.RunRetries(ctx, 15*time.Second) },
-		Backlog: backlogOf(repos.WebhookDeliveries, func(ctx context.Context, c dueCounter) (int, error) {
-			return c.CountDue(ctx, time.Now().UTC())
-		}),
-	}, {
-		// System jobs on the scheduler (JOB-02): one replica leads through
-		// a PostgreSQL advisory lock and runs the due slots.
-		Name: config.WorkerScheduler,
-		Run:  systemScheduler.Run,
-	}}
-	// Process queued asynchronous export jobs. All replicas share the queue
-	// via FOR UPDATE SKIP LOCKED, so jobs are never run twice.
-	if blobStore != nil {
-		exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, blobStore)
-		if repos.Jobs != nil {
-			exportWorker.Tracker = jobs.NewService(repos.Jobs)
-			exportWorker.Events = emitterOf(auditPool)
-		}
-		workers = append(workers, server.Worker{
-			Name: config.WorkerExport,
-			Run:  func(ctx context.Context) { exportWorker.Run(ctx, 2*time.Second) },
-			Backlog: backlogOf(repos.ExportJobs, func(ctx context.Context, c pendingCounter) (int, error) {
-				return c.CountPending(ctx)
-			}),
-		})
-	}
-	// Publish the domain events of the outbox to RETICORA_EVENTS and the
-	// webhook subscriptions (EVT-01, WP-136).
-	if repos.EventOutbox && auditPool != nil {
-		// Subscribed events become notifications (NTF-05).
-		publisher := events.NewPublisher(auditPool, eventStream, webhookDispatcher,
-			notify.NewEventConsumer(notify.NewPGResolver(auditPool, permission.NewPGRepository(auditPool)), notifier))
-		setupCtx, cancelSetup := context.WithTimeout(context.Background(), 30*time.Second)
-		err = publisher.Setup(setupCtx)
-		cancelSetup()
-		if err != nil {
-			slog.Error("failed to set up the event stream on NATS", "error", err)
-			os.Exit(1)
-		}
-		workers = append(workers, server.Worker{Name: config.WorkerEvents, Run: publisher.Run})
-	}
-	// Deliver queued notifications with retry (NTF-04).
-	if collectorPKI != nil && (cfg.PKIDir != "" || cfg.NATSEdgeURL != "") {
-		edgeSecrets, edgeErr := discovery.DeriveEdgeSecrets(encryptor)
-		if edgeErr != nil {
-			slog.Error("failed to derive the collector NATS endpoint keys", "error", edgeErr)
-			os.Exit(1)
-		}
-		edge := &discovery.EdgeConfig{Pool: auditPool, CA: collectorPKI, Secrets: edgeSecrets, PKIDir: cfg.PKIDir,
-			Hosts: splitList(cfg.NATSEdgeHosts), URL: cfg.NATSEdgeURL}
-		workers = append(workers, server.Worker{Name: config.WorkerNATSEdge, Run: func(ctx context.Context) { discovery.RunEdge(ctx, edge) }})
-	}
-	// Credential bundles for the collectors over their NATS channel,
-	// encrypted for each collector's key (COL-02).
-	if collectorPKI != nil && coreNATS != nil {
-		gate := discovery.NewBundleGate(auditPool, collectorPKI)
-		workers = append(workers, server.Worker{Name: config.WorkerCredentialBundles, Run: func(ctx context.Context) {
-			if serr := credentialService.ServeBundles(ctx, coreNATS, gate, gate); serr != nil {
-				slog.Error("credential bundles", "error", serr)
-			}
-		}})
-	}
-	// Discovery scopes, their run results and the subnets a collector
-	// reports after enrollment (scope_suggested) over the collectors' NATS
-	// channel (DIS-09).
-	if coreNATS != nil {
-		scopeChannel := discovery.NewHandler(repos.Discovery, repos.CI)
-		workers = append(workers, server.Worker{Name: config.WorkerDiscoveryScopes, Run: func(ctx context.Context) {
-			if serr := scopeChannel.ServeCollectorScopes(ctx, coreNATS); serr != nil {
-				slog.Error("discovery scopes", "error", serr)
-			}
-		}})
-	}
-	workers = append(workers, server.Worker{Name: config.WorkerNotifier, Run: func(ctx context.Context) { notifier.Run(ctx, 5*time.Second) }})
-	// Run the jobs announced on the JOBS work queue (TEC-14).
-	if jobQueue != nil {
-		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: jobQueue.Run})
-	}
-	// Consume ingest.> (REC-01).
-	if ingestQueue != nil {
-		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: ingestQueue.Run, Backlog: ingestQueue.Backlog})
-	}
-	// Evaluate monitoring alert rules against the metric store. Fired alerts
-	// are logged via the default notifier; evaluation state is persisted in
-	// the alert store so restarts neither re-notify nor lose pending
-	// durations.
-	if alertStore, ok := repos.Metrics.(monitoring.EvaluatingStore); ok {
-		evaluator := monitoring.NewEvaluator(repos.Metrics, alertStore.AlertStore(), nil)
-		// The health of the CIs follows the monitoring state (DB-05).
-		if refresher, ok := repos.Metrics.(monitoring.HealthRefreshingStore); ok {
-			evaluator.WithHealth(refresher.HealthRefresher())
-		}
-		workers = append(workers, server.Worker{
-			Name: config.WorkerMonitoring,
-			Run:  func(ctx context.Context) { evaluator.Run(ctx, time.Minute) },
-		})
-	}
-	workerSet, err := server.StartWorkers(workerEnabled, workers...)
-	if err != nil {
-		slog.Error("worker registration failed", "error", err)
-		os.Exit(1)
-	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := workerSet.Stop(ctx); err != nil {
-			slog.Error("worker shutdown error", "error", err)
-		}
-	}()
-
+	// Every grant of org_admin binds the IdP account to MFA (WP-358).
+	mfa := mfaEnforcer(cfg)
 	// Session tokens are always verified cryptographically unless the operator
 	// explicitly opted into the insecure development mode. API keys are
 	// verified against the database when available, which gives service
@@ -650,31 +502,117 @@ func main() {
 		slog.Warn("INSECURE DEVELOPMENT MODE: bearer tokens are accepted without signature verification")
 	}
 
-	if err := middleware.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+	if err = middleware.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		slog.Error("invalid RETICORA_TRUSTED_PROXIES", "error", err)
 		os.Exit(1)
 	}
 
-	// Middleware chain per API-04:
-	// RequestID/Tracing -> Recovery -> Security-Headers -> Pre-Auth-Limit
-	// (per IP, AUT-10) -> Auth -> Tenant -> Entitlement -> Rate-Limit ->
-	// [per route: Authz -> Validation -> Idempotency] -> Handler.
-	// Validation and idempotency are route middleware (server.Options), so
-	// they run after the route's authorization. The HTTP metrics middleware
-	// sits just inside the tenant middleware so the organization_id label is
-	// populated from the request context.
-	handler := middleware.Chain(
-		middleware.RequestID,
-		middleware.Recovery,
-		middleware.Logger,
-		middleware.SecurityHeaders,
-		middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
-		authMiddleware,
-		middleware.TenantMiddleware,
-		httpMetrics,
-		entitlementSvc.Middleware,
-		middleware.RateLimiterWithLimits(middleware.RateLimits{PerCredential: cfg.RateLimitRPM, PerOrganization: cfg.RateLimitOrgRPM}, cacheStore),
-	)(mux)
+	handler, err := newHTTPHandler(repos, server.Options{
+		Version:            version,
+		Modules:            modules,
+		MetricsTenantLabel: cfg.MetricsTenantLabel,
+		Entitlements:       entitlementSvc,
+		Dispatcher:         webhookDispatcher,
+		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
+		Credentials:        credentialService,
+		OIDC:               oidcProvider,
+		Sessions:           sessionIssuer,
+		RefreshSessions:    refreshSessions,
+		Operator: operator.Config{
+			BreakGlassToken: cfg.OperatorToken,
+			Group:           cfg.OperatorGroup,
+			MFAACRValues:    strings.Split(cfg.OperatorMFAACR, ","),
+		},
+		OperatorPool:         auditPool,
+		OpsAlerts:            operator.AlertConfig{Token: cfg.OpsAlertToken, OrgID: cfg.OpsAlertOrgID},
+		Notifier:             notifier,
+		UserProvisioner:      userProvisioner(repos),
+		DefaultProvisionRole: cfg.DefaultProvisionRole,
+		Audit:                auditHandler,
+		AuditPool:            auditPool,
+		AIProvider:           aiProvider,
+		Blobs:                blobStore,
+		Egress:               egressPolicy,
+		Readiness:            readiness,
+		IngestQueue:          ingestQueue,
+		JobQueue:             jobQueue,
+		Signup:               signupService(cfg, auditPool, smtpSender),
+		Notifications:        notifications,
+		Events:               emitterOf(auditPool),
+		SignupProtection:     signupProtection(cfg, cacheStore),
+		// Invitations need the database; in --no-db mode they answer 503.
+		InvitationAccounts:  invitationAccounts(cfg, smtpSender != nil),
+		InvitationMailer:    invitationMailer(smtpSender),
+		InvitationAcceptURL: invitationAcceptURL(cfg),
+		MFA:                 mfa,
+		CollectorCA:         collectorPKI,
+		// The restore window of a deleted CI is its retention (CI-05).
+		RetentionSoftDeleteDays: cfg.RetentionSoftDeleteDays,
+	}, httpStages{
+		preAuth:     middleware.PreAuthRateLimiter(cfg.PreAuthRateLimitRPM, cacheStore),
+		auth:        authMiddleware,
+		tenant:      middleware.TenantMiddleware,
+		entitlement: entitlementSvc.Middleware,
+		rateLimit:   middleware.RateLimiterWithLimits(middleware.RateLimits{PerCredential: cfg.RateLimitRPM, PerOrganization: cfg.RateLimitOrgRPM}, cacheStore),
+		validation:  middleware.OpenAPIValidation,
+		idempotency: middleware.IdempotencyWithStore(cacheStore),
+	})
+	if err != nil {
+		slog.Error("failed to build API router", "error", err)
+		os.Exit(1)
+	}
+
+	// The scheduler of the system jobs (JOB-02, OPS-03): advisory-lock
+	// leader and stored catch-up state on PostgreSQL, process-local with
+	// --no-db.
+	var systemScheduler *jobs.Scheduler
+	if auditPool != nil {
+		systemScheduler = jobs.NewScheduler(jobs.NewPGLocker(auditPool), jobs.NewPGStateStore(auditPool))
+	} else {
+		systemScheduler = jobs.NewScheduler(jobs.NewMemoryLocker(), jobs.NewMemoryStateStore())
+	}
+	if err = registerSystemJobs(systemScheduler, &systemJobDeps{cfg: cfg, pool: auditPool, encryptor: encryptor,
+		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher,
+		jobQueue: jobQueue, notifier: notifier}); err != nil {
+		slog.Error("failed to register a system job", "error", err)
+		os.Exit(1)
+	}
+
+	// Background workers, each under its operator switch
+	// RETICORA_WORKER_<NAME>_ENABLED (OPS-02), so they can run on dedicated
+	// instances (workers.go).
+	workers, err := buildWorkers(&workerDeps{cfg: cfg, pool: auditPool, encryptor: encryptor, repos: &repos, mfa: mfa,
+		dispatcher: webhookDispatcher, scheduler: systemScheduler, blobs: blobStore, eventStream: eventStream,
+		notifier: notifier, collectorPKI: collectorPKI, coreNATS: coreNATS, credentials: credentialService,
+		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc})
+	if err != nil {
+		slog.Error("failed to set up the workers", "error", err)
+		os.Exit(1)
+	}
+	workerSet, err := server.StartWorkers(workerEnabled, workers...)
+	if err != nil {
+		slog.Error("worker registration failed", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := workerSet.Stop(ctx); err != nil {
+			slog.Error("worker shutdown error", "error", err)
+		}
+	}()
+
+	// The profiling listener (RETICORA_PPROF_ADDR, WP-438): off unless set,
+	// loopback only and development only (config.Validate).
+	if cfg.PprofAddr != "" {
+		profiling, addr, perr := startProfiling(cfg.PprofAddr)
+		if perr != nil {
+			slog.Error("failed to start the profiling listener", "error", perr)
+			os.Exit(1)
+		}
+		defer profiling.Close()
+		slog.Warn("profiling listener enabled", "addr", addr.String())
+	}
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -704,9 +642,57 @@ func main() {
 	}
 }
 
-// provisionEntitlements stores the plan's entitlement rows for every
-// organization without rows. Without a database (--no-db) the demo
-// organization gets the default plan.
+// httpStages are the configured stages of the API-04 request chain.
+type httpStages struct {
+	preAuth, auth, tenant, entitlement, rateLimit func(http.Handler) http.Handler
+	// validation and idempotency run per route after its authorization.
+	validation, idempotency func(http.Handler) http.Handler
+}
+
+// openAPINotLoadedReadiness is the informational /readyz detail
+// details.openapi of a server without the OpenAPI document (F-218).
+func openAPINotLoadedReadiness() server.ReadinessCheck {
+	return server.ReadinessCheck{Name: "openapi", Detail: func(context.Context) (any, error) {
+		return middleware.OpenAPISpecNotLoaded, nil
+	}}
+}
+
+// newHTTPHandler builds the API router and the middleware chain the server
+// serves (API-04):
+// RequestID/Tracing -> Recovery -> Security-Headers -> Lifecycle headers
+// (API-01, before Auth so that 401/403/429 carry them, F-220) ->
+// Pre-Auth-Limit (per IP, AUT-10) -> Auth -> Tenant -> Entitlement ->
+// Rate-Limit ->
+// [per route: Authz -> Validation -> Idempotency] -> Handler.
+// Validation and idempotency are route middleware (server.Options), so
+// they run after the route's authorization. The HTTP metrics middleware
+// sits just inside the tenant middleware so the organization_id label is
+// populated from the request context.
+func newHTTPHandler(repos server.Repositories, opts server.Options, stages httpStages) (http.Handler, error) {
+	opts.RouteMiddleware = []func(http.Handler) http.Handler{stages.validation, stages.idempotency}
+	mux, httpMetrics, err := server.NewRouter(repos, opts)
+	if err != nil {
+		return nil, err
+	}
+	return middleware.Chain(
+		middleware.RequestID,
+		middleware.Recovery,
+		middleware.Logger,
+		middleware.SecurityHeaders,
+		middleware.DeprecationHeaders,
+		stages.preAuth,
+		stages.auth,
+		stages.tenant,
+		httpMetrics,
+		stages.entitlement,
+		stages.rateLimit,
+	)(mux), nil
+}
+
+// provisionEntitlements stores the missing entitlement rows of its plan for
+// every organization (F-210); existing rows stay unchanged and the added
+// feature keys are logged per organization. Without a database (--no-db)
+// the demo organization gets the default plan.
 func provisionEntitlements(ctx context.Context, svc *entitlement.Service, pool *pgxpool.Pool, defaultPlan string) error {
 	plans := map[string]entitlement.Plan{}
 	if pool == nil {
@@ -796,6 +782,10 @@ func setupObjectStorage(cfg *config.Config) (*blob.S3Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Signed download URLs name the public origin, not minio:9000 (F-376).
+	if err := store.SetPublicURL(cfg.S3PublicURL); err != nil {
+		return nil, err
+	}
 	for _, bucket := range []string{export.ExportBucket, "reticora-documents", cfg.S3Bucket} {
 		if bucket == "" {
 			continue
@@ -848,26 +838,6 @@ func runIssuerCheck(cfg *config.Config) int {
 	return 0
 }
 
-// Backlog sources of the workers (OPS-05); the PostgreSQL repositories
-// implement them, the in-memory ones of --no-db report no backlog.
-type (
-	pendingCounter interface {
-		CountPending(ctx context.Context) (int, error)
-	}
-	dueCounter interface {
-		CountDue(ctx context.Context, now time.Time) (int, error)
-	}
-)
-
-// backlogOf returns count bound to repo when repo implements C, else nil.
-func backlogOf[C any](repo any, count func(context.Context, C) (int, error)) func(context.Context) (int, error) {
-	c, ok := repo.(C)
-	if !ok {
-		return nil
-	}
-	return func(ctx context.Context) (int, error) { return count(ctx, c) }
-}
-
 // centralSMTP is the installation's SMTP server (TEC-13); nil without
 // RETICORA_SMTP_HOST.
 func centralSMTP(cfg *config.Config) *notify.SMTPSender {
@@ -885,8 +855,10 @@ func centralSMTP(cfg *config.Config) *notify.SMTPSender {
 }
 
 // signupService builds the self-signup flow (TLC-01). Signups need the
-// database, the Keycloak admin client and the central SMTP server for the
-// verification e-mail; without one of them every signup answers 503.
+// database, the Keycloak admin client, the central SMTP server for the
+// verification e-mail and the verify URL; without one of them every signup
+// answers 503, and the start log names what is missing. The same service
+// creates the organizations of the operator path (TLC-02).
 func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SMTPSender) *signup.Service {
 	sc := signup.DefaultConfig()
 	sc.TrialPlan = entitlement.Plan(cfg.TrialPlan)
@@ -898,7 +870,9 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SM
 		accounts signup.Accounts
 	)
 	if pool != nil {
-		repo = signup.NewPGRepository(pool)
+		// New organizations get an e-mail channel over the central SMTP
+		// server when there is one (F-157).
+		repo = signup.NewPGRepository(pool).WithCentralSMTP(smtpSender != nil)
 	}
 	if kc := keycloakAccounts(cfg); kc != nil {
 		accounts = kc
@@ -907,19 +881,83 @@ func signupService(cfg *config.Config, pool *pgxpool.Pool, smtpSender *notify.SM
 	if smtpSender != nil {
 		mailer = notify.SignupMailer{Sender: smtpSender}
 	}
-	svc := signup.NewService(repo, mailer, accounts, sc)
-	slog.Info("self-signup configured", "available", svc.Available())
+	// The operator path invites the first org_admin with Keycloak's
+	// execute-actions-email, which sends over the realm's SMTP settings;
+	// the installer gives the realm the central SMTP settings. Without the
+	// central SMTP server the realm has none either: the refused mail would
+	// roll back every creation, so the account is left to the IdP.
+	invitationMail := smtpSender != nil
+	svc := signup.NewService(repo, mailer, accounts, sc).WithInvitationMail(invitationMail)
+	operatorInvites := invitationMail && accounts != nil
+	if missing := missingSignupPrerequisites(cfg, pool != nil, smtpSender != nil, accounts != nil); len(missing) > 0 {
+		slog.Warn("self-signup configured", "available", false, "missing", missing,
+			"effect", "GET /api/v1/signup/challenge and POST /api/v1/signup answer 503 until the missing settings are configured",
+			"operator_invitations", operatorInvites)
+	} else {
+		slog.Info("self-signup configured", "available", true, "verify_url", cfg.SignupVerifyURL,
+			"operator_invitations", operatorInvites)
+	}
+	if accounts != nil && !invitationMail {
+		slog.Info("no central SMTP server (RETICORA_SMTP_HOST): organizations created by an operator get no IdP invitation for their first org_admin")
+	}
 	return svc
+}
+
+// missingSignupPrerequisites names what self-signup still lacks, each by
+// the setting that provides it (TLC-01); empty when signups can be
+// completed. database, smtp and accounts report whether the database pool,
+// the central SMTP sender and the Keycloak admin client exist. The names
+// stay here: package signup knows no environment variables.
+func missingSignupPrerequisites(cfg *config.Config, database, smtp, accounts bool) []string {
+	var missing []string
+	if !database {
+		missing = append(missing, "database (the server runs with --no-db)")
+	}
+	if !smtp {
+		missing = append(missing, "RETICORA_SMTP_HOST")
+	}
+	if !accounts {
+		switch {
+		case cfg.KeycloakAdminClientID == "":
+			missing = append(missing, "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID")
+		case cfg.KeycloakAdminClientSecret == "":
+			missing = append(missing, "RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET")
+		default:
+			// Both are set, but the client could not be built; the
+			// error is logged as "Keycloak admin client disabled".
+			missing = append(missing, "a working Keycloak admin client (see \"Keycloak admin client disabled\")")
+		}
+	}
+	if cfg.SignupVerifyURL == "" {
+		missing = append(missing, "RETICORA_SIGNUP_VERIFY_URL")
+	}
+	return missing
 }
 
 // keycloakAccounts is the Keycloak admin client that creates the accounts
 // of signups, operator-created organizations and accepted invitations; nil
-// without RETICORA_KEYCLOAK_ADMIN_CLIENT_ID.
+// without RETICORA_KEYCLOAK_ADMIN_CLIENT_ID. Its calls go to the issuer URL
+// like those of the OIDC provider and therefore trust the same PEM bundle
+// (RETICORA_OIDC_CA_CERT_FILE): with a private CA, or with a certificate the
+// server image does not know, the admin token request otherwise fails with
+// an x509 error while the sign-in works (WP-646). With
+// RETICORA_KEYCLOAK_INTERNAL_URL the calls go to Keycloak directly, since the
+// public reverse proxy does not expose the admin REST API.
 func keycloakAccounts(cfg *config.Config) *signup.KeycloakAccounts {
 	if cfg.KeycloakAdminClientID == "" {
 		return nil
 	}
-	kc, err := signup.NewKeycloakAccounts(cfg.OIDCIssuerURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret, nil)
+	client, err := identity.NewHTTPClientWithCA(cfg.OIDCCACertFile)
+	if err != nil {
+		slog.Error("Keycloak admin client disabled", "path", cfg.OIDCCACertFile, "error", err)
+		return nil
+	}
+	client, err = signup.RouteThroughInternalURL(client, cfg.OIDCIssuerURL, cfg.KeycloakInternalURL)
+	if err != nil {
+		slog.Error("Keycloak admin client disabled", "error", err)
+		return nil
+	}
+	kc, err := signup.NewKeycloakAccounts(cfg.OIDCIssuerURL, cfg.KeycloakAdminClientID, cfg.KeycloakAdminClientSecret, client)
 	if err != nil {
 		slog.Error("Keycloak admin client disabled", "error", err)
 		return nil
@@ -928,12 +966,82 @@ func keycloakAccounts(cfg *config.Config) *signup.KeycloakAccounts {
 }
 
 // invitationAccounts lets accepted invitations create their IdP account
-// (TLC-03); nil leaves the account to the IdP.
-func invitationAccounts(cfg *config.Config) user.InvitationAccounts {
+// (TLC-03); nil leaves the account to the IdP. That account is created with
+// a verified address and the password of the acceptance, so with it the
+// token reaches the invitee's mailbox only: issue and renewal leave it out
+// of their response, and invitationMailer sends the mail straight over the
+// central SMTP server (InvitationHandler.WithAccounts). centralSMTP reports
+// whether the installation has that server. Without it the client is not
+// wired, since the invitee would get neither mail nor link: the inviter
+// gets the link in the response as before, and the invitee signs in with
+// an existing IdP account of the address, which the first login links.
+func invitationAccounts(cfg *config.Config, centralSMTP bool) user.InvitationAccounts {
+	if !centralSMTP {
+		if cfg.KeycloakAdminClientID != "" {
+			slog.Info("no central SMTP server (RETICORA_SMTP_HOST): accepted invitations create no IdP account, the invitee signs in with an existing one")
+		}
+		return nil
+	}
 	if kc := keycloakAccounts(cfg); kc != nil {
 		return kc
 	}
 	return nil
+}
+
+// invitationMailer sends the invitation mail straight to the invited
+// address over the central SMTP server, never over a channel of the
+// organization; nil without that server.
+func invitationMailer(smtpSender *notify.SMTPSender) user.InvitationMailer {
+	if smtpSender == nil {
+		return nil
+	}
+	return notify.InvitationMailer{Sender: smtpSender}
+}
+
+// invitationAcceptURL is the page the link of the invitation mail opens;
+// without it issuing and renewing invitations answers 503.
+func invitationAcceptURL(cfg *config.Config) string {
+	if cfg.InvitationAcceptURL == "" {
+		slog.Warn("no RETICORA_INVITATION_ACCEPT_URL: issuing and renewing invitations answers 503 until it is configured")
+	}
+	return cfg.InvitationAcceptURL
+}
+
+// mfaEnforcer binds the IdP accounts of new org_admins to MFA through the
+// Keycloak admin client (WP-358). Without the client every org_admin grant
+// fails (503) outside development; in development nothing is bound.
+func mfaEnforcer(cfg *config.Config) user.MFAEnforcer {
+	if kc := keycloakAccounts(cfg); kc != nil {
+		return kc
+	}
+	if cfg.IsDevelopment() {
+		slog.Warn("no Keycloak admin client: org_admins are not bound to MFA (development only)")
+		return nil
+	}
+	slog.Warn("no Keycloak admin client (RETICORA_KEYCLOAK_ADMIN_CLIENT_ID): granting org_admin fails until it is configured")
+	return user.UnavailableMFA{}
+}
+
+// reconcileMFA binds the org_admins that exist already to MFA (WP-358). A
+// run with failures (Keycloak still starting, for instance) is repeated a
+// few times; the run is idempotent.
+func reconcileMFA(ctx context.Context, users *user.PGRepository) {
+	for attempt := 1; ; attempt++ {
+		bound, failed, err := users.ReconcileMFA(ctx)
+		if err != nil {
+			slog.ErrorContext(ctx, "mfa reconciliation", "attempt", attempt, "error", err)
+		} else {
+			slog.InfoContext(ctx, "mfa reconciliation finished", "attempt", attempt, "bound", bound, "failed", failed)
+		}
+		if (err == nil && failed == 0) || attempt == 5 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Minute):
+		}
+	}
 }
 
 // signupProtection builds the captcha, the disposable-domain policy and the
@@ -981,19 +1089,14 @@ func emitterOf(pool *pgxpool.Pool) events.Emitter {
 	return events.NewPGEmitter(pool)
 }
 
-// dekRotator adapts the credential store to the rotation runs.
-type dekRotator struct{ repo *credential.PGRepository }
-
-func (d dekRotator) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (keyVersion, rotated int, err error) {
-	res, err := d.repo.RotateOrgDEK(ctx, orgID, enc)
-	if err != nil {
-		return 0, 0, err
+// objectResolverOf resolves the objects of webhook events in PostgreSQL;
+// without a database (--no-db) bound subscriptions receive only events whose
+// payload carries the scope.
+func objectResolverOf(pool *pgxpool.Pool) webhook.ObjectResolver {
+	if pool == nil {
+		return nil
 	}
-	return res.KeyVersion, res.Rotated, nil
-}
-
-func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
-	return d.repo.RewrapOrgDEK(ctx, orgID, enc)
+	return webhook.NewPGObjectResolver(pool)
 }
 
 // collectorCA is the internal CA of the collector certificates (COL-04);

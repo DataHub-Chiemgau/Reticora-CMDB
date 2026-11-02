@@ -1,0 +1,17 @@
+154:#15 0.360 WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/APKINDEX.tar.gz: DNS: name does not exist
+155:#15 0.361 WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/APKINDEX.tar.gz: DNS: name does not exist
+200:0.360 WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/APKINDEX.tar.gz: DNS: name does not exist
+201:0.361 WARNING: fetching https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/APKINDEX.tar.gz: DNS: name does not exist
+222:✘ Error: Image build failed.
+  23 | >>> RUN apk --no-cache upgrade && apk --no-cache add ca-certificates tzdata
+
+  24 |     # Install the binary as root:root 0755. /usr/local/bin is root-owned, so the
+
+  25 |     # copy must happen before dropping privileges to the nobody user below.
+
+--------------------
+
+target server: failed to solve: process "/bin/sh -c apk --no-cache upgrade && apk --no-cache add ca-certificates tzdata" did not complete successfully: exit code: 99
+
+✘ Error: Image build failed.
+INSTALL_EXIT=1

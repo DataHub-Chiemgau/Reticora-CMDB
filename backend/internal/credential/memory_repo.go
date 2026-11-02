@@ -1,10 +1,12 @@
 package credential
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"time"
 )
@@ -86,6 +88,11 @@ func (r *MemoryRepository) List(_ context.Context, orgID string) ([]Credential, 
 			results = append(results, c.Credential)
 		}
 	}
+	// The order of the PostgreSQL repository (newest first, then id): the
+	// list is paged by offset (API-02).
+	slices.SortFunc(results, func(a, b Credential) int {
+		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), cmp.Compare(b.ID, a.ID))
+	})
 	return results, nil
 }
 

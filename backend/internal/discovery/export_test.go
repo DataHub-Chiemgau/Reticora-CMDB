@@ -61,6 +61,12 @@ func ProcessItemsInLane(ctx context.Context, h *Handler, orgID string, lane int,
 // scope of ctx, and returns how each delivery ended ("ack", "nak", "term")
 // in the order of observed_at.
 func ConsumeRecords(ctx context.Context, h *Handler, orgID string, recs ...DeviceRecord) []string {
+	return ConsumeRecordsDelivered(ctx, h, orgID, 1, recs...)
+}
+
+// ConsumeRecordsDelivered is ConsumeRecords with every delivery being the
+// delivered-th of its message (ingestMaxDeliver: the last).
+func ConsumeRecordsDelivered(ctx context.Context, h *Handler, orgID string, delivered uint64, recs ...DeviceRecord) []string {
 	items := make([]IngestItem, len(recs))
 	for i := range recs {
 		items[i] = itemFromRecord(&recs[i])
@@ -73,7 +79,7 @@ func ConsumeRecords(ctx context.Context, h *Handler, orgID string, recs ...Devic
 		if err != nil {
 			panic(err)
 		}
-		fakes[i] = &fakeDelivery{data: data, delivered: 1}
+		fakes[i] = &fakeDelivery{data: data, delivered: delivered}
 		deliveries[i] = fakes[i]
 	}
 	consumeBatch(ctx, h, deliveries)
@@ -83,6 +89,10 @@ func ConsumeRecords(ctx context.Context, h *Handler, orgID string, recs ...Devic
 	}
 	return results
 }
+
+// IngestMaxDeliver is the number of deliveries after which the queue gives
+// an ingest message up.
+const IngestMaxDeliver = ingestMaxDeliver
 
 // ItemFromRecord is the ingest item of a record.
 func ItemFromRecord(rec *DeviceRecord) IngestItem { return itemFromRecord(rec) }
@@ -117,3 +127,29 @@ const (
 
 // SetLockTimeout replaces the lock timeout of r's ingest lock statements.
 func SetLockTimeout(r *PGRepository, d time.Duration) { r.lockTimeout = d }
+
+// CALockClass is the class of the CA lock (WP-430): a change of the
+// collector CA holds it exclusively, the issuance of a collector certificate
+// shared.
+const CALockClass = caLockClass
+
+// LoadedCAFingerprint is the SHA-256 (hex) of the active CA in ca's memory,
+// without the version check of a use; empty before the first use.
+func LoadedCAFingerprint(ca *CA) string {
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	if ca.st == nil {
+		return ""
+	}
+	return ca.st.active.info().Fingerprint
+}
+
+// CAChangeMessage is the announcement AnnounceCAChange publishes for the
+// version of collector_ca at the time at.
+func CAChangeMessage(ca *CA, version string, at time.Time) ([]byte, error) {
+	return ca.caChangeMessage(version, at)
+}
+
+// VerifyCAChange is the check of an announcement on
+// CollectorCAChangedSubject at now.
+func VerifyCAChange(ca *CA, data []byte, now time.Time) error { return ca.verifyCAChange(data, now) }

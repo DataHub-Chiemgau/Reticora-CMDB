@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -18,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -55,6 +57,13 @@ type Handler struct {
 	findings    FindingRecorder
 	tokens      TokenIssuer
 	guard       *override.Guard
+	conflicts   ConflictReviews
+}
+
+// ConflictReviews opens the override_conflict review of a field
+// (reviews.Service, the call of discovery as well, REC-12).
+type ConflictReviews interface {
+	OpenOverrideConflict(ctx context.Context, c *reviews.OverrideConflict) (bool, error)
 }
 
 // TokenIssuer signs the agent credential (implemented by
@@ -116,6 +125,13 @@ func NewHandler(repo Repository, metrics MetricStore, cis CIUpserter, typeResolv
 // (AGT-05). Without one the rank table alone decides.
 func (h *Handler) WithFieldGuard(g *override.Guard) *Handler {
 	h.guard = g
+	return h
+}
+
+// WithConflictReviews makes telemetry open an override_conflict review for
+// a value that differs from a manual override (REC-12).
+func (h *Handler) WithConflictReviews(r ConflictReviews) *Handler {
+	h.conflicts = r
 	return h
 }
 
@@ -323,6 +339,14 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The subject of an agent credential (agent:<id>) is no user id: the CI
+	// history records the change without actor (system, source of the
+	// route), the agent stays visible in the CI attributes.
+	if strings.HasPrefix(t.UserID, agentSubjectPrefix) {
+		t.UserID = ""
+		r = r.WithContext(tenant.WithTenant(r.Context(), t))
+	}
+
 	// Resolve the registered agent and its linked CI.
 	ag, err := h.repo.GetByAgentID(r.Context(), t.OrganizationID, payload.AgentID)
 	if err != nil {
@@ -336,6 +360,12 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 
 	ciID, err := h.reconcileCI(r.Context(), t.OrganizationID, ag, payload)
 	if err != nil {
+		if errors.Is(err, errLinkedCIUnreadable) {
+			// Nothing was written: the collector sends the telemetry again.
+			slog.WarnContext(r.Context(), "agent telemetry refused: linked CI unreadable", "agent", ag.AgentID, "error", err)
+			api.WriteUnavailable(w, "the linked CI of the agent cannot be read, try again later")
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}
@@ -385,9 +415,11 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 
 // reconcileCI finds or creates the endpoint CI for the agent (source "agent")
 // and stores the software inventory in the CI attributes. The CI linked to
-// the agent is the anchor; only an unlinked agent is matched by hostname,
-// and only when exactly one CI carries it (AGT-05). Every attribute of an
-// existing CI goes through the central write decision with rank 85.
+// the agent is the anchor (a merged one through its survivor); only an
+// unlinked agent, or one whose linked CI was deleted, is matched by
+// hostname, and only when exactly one CI carries it (AGT-05, E-20). Every
+// attribute of an existing CI goes through the central write decision with
+// rank 85.
 func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payload TelemetryPayload) (string, error) {
 	if h.cis == nil {
 		return "", nil
@@ -411,20 +443,19 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 	if target != nil {
 		return target.ID, h.updateCI(ctx, orgID, target, attrs, payload.CollectedAt)
 	}
-	if ag.CIID == "" {
-		ambiguous, err := h.hostnameMatches(ctx, orgID, ag.Hostname)
-		if err != nil {
-			return "", err
-		}
-		if ambiguous > 1 {
-			// Several CIs carry the hostname: linking one would be a guess
-			// (CH29); the agent stays unlinked until an operator links it.
-			slog.WarnContext(ctx, "agent not linked: hostname matches several CIs", "agent", ag.AgentID, "hostname", ag.Hostname)
-			return "", nil
-		}
+	ambiguous, err := h.hostnameMatches(ctx, orgID, ag.Hostname)
+	if err != nil {
+		return "", err
 	}
-	// No match: create the endpoint CI. The ci_type key resolves to the UUID
-	// via the tenant-aware type lookup (global system types included).
+	if ambiguous > 1 {
+		// Several CIs carry the hostname: linking one would be a guess
+		// (CH29); the agent stays unlinked until an operator links it.
+		slog.WarnContext(ctx, "agent not linked: hostname matches several CIs", "agent", ag.AgentID, "hostname", ag.Hostname)
+		return "", nil
+	}
+	// No match: create the endpoint CI in the agent's client (the scope of
+	// its credential). The ci_type key resolves to the UUID via the
+	// tenant-aware type lookup (global system types included).
 	typeID := ""
 	if h.typeResolve != nil {
 		id, err := h.typeResolve.LookupCITypeID(ctx, orgID, endpointCITypeKey(payload.OS))
@@ -435,6 +466,7 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 	now := time.Now().UTC()
 	item := &ci.Item{
 		OrganizationID:  orgID,
+		ClientID:        ag.ClientID,
 		CITypeID:        typeID,
 		Name:            ag.Hostname,
 		Hostname:        ag.Hostname,
@@ -450,23 +482,59 @@ func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payl
 	return item.ID, nil
 }
 
+// errLinkedCIUnreadable: the CI linked to the agent could not be read for
+// another reason than its absence (database unreachable, timeout). The
+// telemetry is refused with 503 instead of creating a second CI (F-083).
+var errLinkedCIUnreadable = errors.New("the linked CI of the agent cannot be read")
+
+// maxMergeHops bounds the merged_into chain anchorCI follows.
+const maxMergeHops = 8
+
 // anchorCI returns the CI linked to the agent, or for an unlinked agent the
-// only CI carrying its hostname; nil when there is none.
+// only CI carrying its hostname; nil when there is none. A merged linked CI
+// leads to its survivor (tombstone, CI-12); only a linked CI that is gone
+// without tombstone (deleted) reconciles the agent afresh like an unlinked
+// one (E-20). Every other read error is returned (errLinkedCIUnreadable).
 func (h *Handler) anchorCI(ctx context.Context, orgID string, ag *Agent) (*ci.Item, error) {
 	if ag.CIID != "" {
-		item, err := h.cis.GetByID(ctx, orgID, ag.CIID)
-		if err == nil {
-			return item, nil
+		item, err := h.linkedCI(ctx, orgID, ag.CIID)
+		if err != nil || item != nil {
+			return item, err
 		}
-		// The linked CI is gone: the agent is reconciled afresh.
-		slog.WarnContext(ctx, "linked CI of the agent not found", "agent", ag.AgentID, "ci_id", ag.CIID, "error", err)
-		return nil, nil
+		slog.WarnContext(ctx, "linked CI of the agent deleted: reconciled afresh", "agent", ag.AgentID, "ci_id", ag.CIID)
 	}
 	matches, err := h.exactHostname(ctx, orgID, ag.Hostname)
 	if err != nil || len(matches) != 1 {
 		return nil, err
 	}
 	return &matches[0], nil
+}
+
+// linkedCI reads the linked CI and follows merged_into to the survivor;
+// nil when the CI is gone without tombstone.
+func (h *Handler) linkedCI(ctx context.Context, orgID, id string) (*ci.Item, error) {
+	tombstones, _ := h.cis.(ci.TombstoneReader)
+	for hop := 0; hop <= maxMergeHops; hop++ {
+		item, err := h.cis.GetByID(ctx, orgID, id)
+		if err == nil {
+			return item, nil
+		}
+		if !errors.Is(err, ci.ErrNotFound) {
+			return nil, fmt.Errorf("%w: %w", errLinkedCIUnreadable, err)
+		}
+		if tombstones == nil {
+			return nil, nil
+		}
+		survivor, found, err := tombstones.MergedInto(ctx, orgID, id)
+		if err != nil {
+			return nil, fmt.Errorf("%w: tombstone: %w", errLinkedCIUnreadable, err)
+		}
+		if !found {
+			return nil, nil
+		}
+		id = survivor
+	}
+	return nil, fmt.Errorf("merge chain of the linked CI longer than %d", maxMergeHops)
 }
 
 func (h *Handler) hostnameMatches(ctx context.Context, orgID, hostname string) (int, error) {
@@ -496,9 +564,12 @@ func (h *Handler) updateCI(ctx context.Context, orgID string, item *ci.Item, att
 		observedAt = time.Now().UTC()
 	}
 	writes := map[string]any{}
-	var written []*override.Write
+	var written, conflicts []*override.Write
 	for k, v := range attrs {
-		if current, ok := item.Attributes[k]; ok && reflect.DeepEqual(current, v) {
+		// An unchanged value is decided only when it changes the
+		// observation of an overridden field (F-248).
+		if current, ok := item.Attributes[k]; ok && reflect.DeepEqual(current, v) &&
+			!item.ObservationChanged(k, v) {
 			continue
 		}
 		w := &override.Write{
@@ -511,6 +582,9 @@ func (h *Handler) updateCI(ctx context.Context, orgID string, item *ci.Item, att
 		}
 		if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
 			written = append(written, w)
+		}
+		if d.Conflict {
+			conflicts = append(conflicts, w)
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -526,7 +600,28 @@ func (h *Handler) updateCI(ctx context.Context, orgID string, item *ci.Item, att
 			slog.WarnContext(ctx, "agent provenance not recorded", "ci_id", item.ID, "field", w.Field, "error", err)
 		}
 	}
+	h.queueOverrideConflicts(ctx, item, conflicts)
 	return nil
+}
+
+// queueOverrideConflicts opens an override_conflict review for each value
+// that differs from a manual override, like discovery does (REC-12): one
+// open item per field, a dismissed value suppressed until the agent reports
+// another one. A failed review does not refuse the telemetry; the override
+// stays either way.
+func (h *Handler) queueOverrideConflicts(ctx context.Context, item *ci.Item, conflicts []*override.Write) {
+	if h.conflicts == nil {
+		return
+	}
+	for _, w := range conflicts {
+		previous, hasPrevious := item.ObservedUnderOverride(w.Field)
+		if _, err := h.conflicts.OpenOverrideConflict(ctx, &reviews.OverrideConflict{
+			OrganizationID: w.OrganizationID, CIID: w.CIID, Field: w.Field, Value: w.Value, Source: w.Source,
+			Rank: override.SourceRank(w.Source), Previous: previous, HasPrevious: hasPrevious,
+		}); err != nil {
+			slog.WarnContext(ctx, "override conflict review not created", "ci_id", w.CIID, "field", w.Field, "error", err)
+		}
+	}
 }
 
 // recordFindings turns software inventory entries that are marked vulnerable

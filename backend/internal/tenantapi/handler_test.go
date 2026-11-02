@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -171,9 +172,20 @@ func TestSiteBuildingRoomHierarchy(t *testing.T) {
 
 // TestOrganizationFields covers WP-107 (LOC-01, API-05): GET/PATCH /org with
 // IANA time zone, ISO 4217 currency and canonical BCP 47 locale; invalid
-// values are rejected with 400 naming the field.
+// values are rejected with 400 naming the field. The PATCH runs as an
+// org-wide holder of user:manage (WP-633).
 func TestOrganizationFields(t *testing.T) {
 	_, _, mux := setup()
+	all := identity.ScopeSet{All: true}
+	orgAdmin := identity.Principal{OrganizationID: "org-1", Permissions: []identity.Permission{identity.PermUserManage},
+		Scope: &identity.Scope{Clients: all, Sites: all, Teams: all}}
+	patch := func(body string) *httptest.ResponseRecorder {
+		r := withTenant(httptest.NewRequest("PATCH", "/api/v1/org", bytes.NewBufferString(body)), "org-1")
+		r = r.WithContext(identity.WithPrincipal(r.Context(), orgAdmin))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
 
 	w := do(mux, "GET", "/api/v1/org", "", "org-1")
 	var o Organization
@@ -181,7 +193,7 @@ func TestOrganizationFields(t *testing.T) {
 		o.Timezone != "UTC" || o.Currency != "EUR" || o.Locale != "de-DE" {
 		t.Fatalf("get org: %d %s", w.Code, w.Body.String())
 	}
-	w = do(mux, "PATCH", "/api/v1/org", `{"timezone":"Europe/Berlin","currency":"CHF","locale":"de-ch","name":"Acme MSP"}`, "org-1")
+	w = patch(`{"timezone":"Europe/Berlin","currency":"CHF","locale":"de-ch","name":"Acme MSP"}`)
 	if err := json.Unmarshal(w.Body.Bytes(), &o); w.Code != http.StatusOK || err != nil ||
 		o.Timezone != "Europe/Berlin" || o.Currency != "CHF" || o.Locale != "de-CH" || o.Name != "Acme MSP" {
 		t.Fatalf("patch org: %d %s", w.Code, w.Body.String())
@@ -197,14 +209,98 @@ func TestOrganizationFields(t *testing.T) {
 		{`{"locale":""}`, "locale"},
 		{`{"name":""}`, "name"},
 	} {
-		w = do(mux, "PATCH", "/api/v1/org", tc.body, "org-1")
+		w = patch(tc.body)
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"field":"`+tc.field+`"`) {
 			t.Errorf("%s: %d %s", tc.body, w.Code, w.Body.String())
 		}
 	}
 	// Slug and plan are not part of the PATCH.
-	if w = do(mux, "PATCH", "/api/v1/org", `{"plan":"enterprise"}`, "org-1"); w.Code != http.StatusBadRequest {
+	if w = patch(`{"plan":"enterprise"}`); w.Code != http.StatusBadRequest {
 		t.Errorf("plan accepted: %d", w.Code)
+	}
+}
+
+// TestOrganizationAIOptInRequiresOrgWideUserManage covers WP-463 (AI-02)
+// and WP-633 (RBA-03, F-359): only a principal holding user:manage for the
+// whole organization changes the organization. A principal bound to a
+// client, a site or a team, one holding user:manage only in such a scope, a
+// client-bound API key or a request without principal gets 403 for every
+// field, with or without ai_opt_in, and the organization stays unchanged;
+// the check precedes the validation, so an invalid body gets 403 as well.
+func TestOrganizationAIOptInRequiresOrgWideUserManage(t *testing.T) {
+	_, repo, mux := setup()
+	all := identity.ScopeSet{All: true}
+	some := identity.ScopeSet{IDs: []string{"c-1"}}
+	manage := []identity.Permission{identity.PermUserManage}
+	patch := func(body string, p *identity.Principal) *httptest.ResponseRecorder {
+		r := withTenant(httptest.NewRequest("PATCH", "/api/v1/org", bytes.NewBufferString(body)), "org-1")
+		if p != nil {
+			r = r.WithContext(identity.WithPrincipal(r.Context(), *p))
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	optIn := func() bool {
+		o, _ := repo.GetOrganization(context.Background(), "org-1")
+		return o.AIOptIn
+	}
+	org := func() string {
+		o, _ := repo.GetOrganization(context.Background(), "org-1")
+		b, _ := json.Marshal(o)
+		return string(b)
+	}
+	for name, p := range map[string]*identity.Principal{
+		"no principal":   nil,
+		"client-bound":   {OrganizationID: "org-1", Permissions: manage, Scope: &identity.Scope{Clients: some, Sites: all, Teams: all}},
+		"site-bound":     {OrganizationID: "org-1", Permissions: manage, Scope: &identity.Scope{Clients: some, Sites: some, Teams: all}},
+		"team-bound":     {OrganizationID: "org-1", Permissions: manage, Scope: &identity.Scope{Clients: all, Sites: all, Teams: some}},
+		"client API key": {OrganizationID: "org-1", Permissions: manage, ClientScope: "c-1", Type: identity.PrincipalTypeAPIKey},
+		"user:manage narrower": {OrganizationID: "org-1", Permissions: append(manage, identity.PermCIRead),
+			Scope:            &identity.Scope{Clients: all, Sites: all, Teams: all},
+			PermissionScopes: map[identity.Permission]identity.Scope{identity.PermUserManage: {Clients: some, Sites: all, Teams: all}}},
+		"org-wide without user:manage": {OrganizationID: "org-1", Permissions: []identity.Permission{identity.PermCIRead},
+			Scope: &identity.Scope{Clients: all, Sites: all, Teams: all}},
+	} {
+		if w := patch(`{"ai_opt_in":true,"name":"Changed"}`, p); w.Code != http.StatusForbidden || optIn() {
+			t.Errorf("%s: %d %s, ai_opt_in %v; want 403 and false", name, w.Code, w.Body.String(), optIn())
+		}
+		for _, body := range []string{
+			`{"name":"Renamed"}`,
+			`{"timezone":"Pacific/Auckland"}`,
+			`{"currency":"JPY"}`,
+			`{"locale":"ja-JP"}`,
+			`{"settings":{"probe":"bound"}}`,
+			`{"name":""}`,
+		} {
+			before := org()
+			w := patch(body, p)
+			if w.Code != http.StatusForbidden || !strings.HasPrefix(w.Header().Get("Content-Type"), "application/problem+json") {
+				t.Errorf("%s: PATCH %s without ai_opt_in: %d %q %s; want 403 problem+json",
+					name, body, w.Code, w.Header().Get("Content-Type"), w.Body.String())
+			}
+			if after := org(); after != before {
+				t.Errorf("%s: PATCH %s changed the organization: %s -> %s", name, body, before, after)
+			}
+		}
+	}
+
+	orgAdmin := &identity.Principal{OrganizationID: "org-1", Permissions: manage, Scope: &identity.Scope{Clients: all, Sites: all, Teams: all}}
+	var o Organization
+	w := patch(`{"ai_opt_in":true}`, orgAdmin)
+	if err := json.Unmarshal(w.Body.Bytes(), &o); w.Code != http.StatusOK || err != nil || !o.AIOptIn || !optIn() {
+		t.Fatalf("org-wide user:manage: %d %s; want 200 with ai_opt_in true", w.Code, w.Body.String())
+	}
+	apiKey := &identity.Principal{OrganizationID: "org-1", Permissions: manage, Type: identity.PrincipalTypeAPIKey}
+	if w := patch(`{"ai_opt_in":false}`, apiKey); w.Code != http.StatusOK || optIn() {
+		t.Errorf("org-wide API key with user:manage: %d %s; want 200 with ai_opt_in false", w.Code, w.Body.String())
+	}
+	if w := patch(`{"name":"Renamed by the org admin","timezone":"Europe/Vienna"}`, orgAdmin); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"name":"Renamed by the org admin"`) || !strings.Contains(w.Body.String(), `"timezone":"Europe/Vienna"`) {
+		t.Errorf("org-wide user:manage PATCH without ai_opt_in: %d %s; want 200 with the new name and time zone", w.Code, w.Body.String())
+	}
+	if w := patch(`{"currency":"CHF"}`, apiKey); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"currency":"CHF"`) {
+		t.Errorf("org-wide API key PATCH without ai_opt_in: %d %s; want 200 with currency CHF", w.Code, w.Body.String())
 	}
 }
 

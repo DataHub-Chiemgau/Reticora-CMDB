@@ -16,12 +16,14 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 )
 
 // The tests of this file cover GQL-02 (WP-185): topology, rackLayout,
 // searchEverything, reviewInbox and jobs resolve read-only with their
 // permissions; nested CIs are read through the dataloader in one batch.
+// rackLayout and the rack fields check rack_view (ENT-05, WP-471, F-070).
 
 // countingCIs counts the CI reads of a request.
 type countingCIs struct {
@@ -116,7 +118,7 @@ func newBFFFixture(t *testing.T) *bffFixture {
 		t.Fatal(err)
 	}
 	f.h = NewHandler(f.cis, rels).
-		WithEntitlements(entitled{FeatureCMDBCore: true, entitlement.FeatureTopology: true}).
+		WithEntitlements(entitled{FeatureCMDBCore: true, entitlement.FeatureTopology: true, entitlement.FeatureRackView: true}).
 		WithSources(&Sources{Topology: topology.NewHandler(f.cis, rels), Racks: racks, Search: idx, Reviews: reviewRepo, Jobs: jobSvc})
 	return f
 }
@@ -165,6 +167,10 @@ func TestNewQueries(t *testing.T) {
 	if f.cis.single > 2 || f.cis.batch > 2 || f.cis.nodes != 1 {
 		t.Errorf("topology CI reads: %d single, %d batch, %d node reads", f.cis.single, f.cis.batch, f.cis.nodes)
 	}
+	// A depth below 1 is bad input, not the default depth (F-255).
+	if resp = f.query(t, allRead, `{ topology(rootCiId: "`+f.hub+`", depth: 0) { nodes { id } } }`); resp.code() != codeBadInput {
+		t.Errorf("topology depth 0: %+v", resp)
+	}
 
 	resp = f.query(t, allRead, `{ rackLayout(rackId: "`+f.rack+`") { rack { name heightUnits } mounts { positionU ci { name } } freeFront freeRear } }`)
 	raw, _ := json.Marshal(resp.Data)
@@ -210,5 +216,39 @@ func TestNewQueriesCheckTheirPermission(t *testing.T) {
 	f.h.WithEntitlements(entitled{FeatureCMDBCore: true})
 	if resp := f.query(t, allRead, `{ topology(rootCiId: "`+f.hub+`") { nodes { id } } }`); resp.code() != codeForbidden {
 		t.Errorf("topology without the entitlement: %+v", resp.Errors)
+	}
+}
+
+// TestRackFieldsNeedRackView covers WP-471 (ENT-05, F-070): rackLayout and
+// the CI of a rack mount check the rack_view entitlement, not cmdb_core.
+// Without the feature the query is FORBIDDEN and returns no rack data; with
+// it the layout and the mounted CIs resolve.
+func TestRackFieldsNeedRackView(t *testing.T) {
+	f := newBFFFixture(t)
+	q := `{ rackLayout(rackId: "` + f.rack + `") { rack { name } mounts { positionU ci { name } } freeFront } }`
+
+	f.h.WithEntitlements(entitled{FeatureCMDBCore: true, entitlement.FeatureTopology: true})
+	resp := f.query(t, allRead, q)
+	if resp.code() != codeForbidden || resp.Data["rackLayout"] != nil {
+		t.Errorf("rackLayout without rack_view: data %v errors %+v, want FORBIDDEN and no data", resp.Data, resp.Errors)
+	}
+	if resp = f.query(t, allRead, `{ cis { totalCount } }`); len(resp.Errors) != 0 {
+		t.Errorf("control: cis (cmdb_core) without rack_view: %+v", resp.Errors)
+	}
+	// The CI of a mount checks the feature on its own as well.
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"})
+	ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: "user-1", OrganizationID: "org-1", Permissions: allRead, Type: identity.PrincipalTypeUser})
+	if item, err := (&rackMountResolver{f.h.resolver}).Ci(ctx, &rack.RackMount{CIID: f.ids[0]}); err == nil || item != nil {
+		t.Errorf("RackMount.ci without rack_view: %v, %v, want FORBIDDEN", item, err)
+	}
+
+	f.h.WithEntitlements(entitled{FeatureCMDBCore: true, entitlement.FeatureRackView: true})
+	resp = f.query(t, allRead, q)
+	raw, _ := json.Marshal(resp.Data["rackLayout"])
+	if len(resp.Errors) != 0 || !strings.Contains(string(raw), `"name":"R1"`) || strings.Count(string(raw), `"name":"leaf-`) != 2 {
+		t.Errorf("rackLayout with rack_view: %s %+v, want the rack and its two mounted CIs", raw, resp.Errors)
+	}
+	if item, err := (&rackMountResolver{f.h.resolver}).Ci(ctx, &rack.RackMount{CIID: f.ids[0]}); err != nil || item == nil {
+		t.Errorf("RackMount.ci with rack_view: %v, %v", item, err)
 	}
 }

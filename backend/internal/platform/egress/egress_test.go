@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -64,6 +65,9 @@ func TestAllowed(t *testing.T) {
 		{"64:ff9b::a00:1", false, true},
 		{"0.0.0.0", false, false},
 		{"224.0.0.1", false, false},
+		// A zone does not take an address out of its network (WP-399).
+		{"fe80::1%eth0", false, true},
+		{"fd00:ec2::254%1", false, false},
 	} {
 		ip := netip.MustParseAddr(c.ip)
 		if got := strict.Allowed(ip); got != c.strict {
@@ -72,6 +76,59 @@ func TestAllowed(t *testing.T) {
 		if got := onPrem.Allowed(ip); got != c.onPrem {
 			t.Errorf("on-prem Allowed(%s) = %v, want %v", c.ip, got, c.onPrem)
 		}
+	}
+}
+
+// TestAllowedIPv6TransitionAddresses covers WP-563 (SEC-08, F-205): 6to4
+// (2002::/16), Teredo (2001::/32) and IPv4-compatible (::/96) addresses
+// are judged by the IPv4 address they embed (Teredo: server and inverted
+// client), like NAT64 and IPv4-mapped ones; a resolved name with such an
+// address is refused when dialed. Public IPv6 addresses stay allowed.
+func TestAllowedIPv6TransitionAddresses(t *testing.T) {
+	strict, onPrem := Options{}, Options{AllowPrivate: true}
+	for _, c := range []struct {
+		ip, what       string
+		strict, onPrem bool
+	}{
+		{"2002:7f00:1::1", "6to4 of 127.0.0.1", false, true},
+		{"2002:a9fe:a9fe::1", "6to4 of the metadata service", false, false},
+		{"2002:a00:5::1", "6to4 of 10.0.0.5", false, true},
+		{"2002:5db8:d822::1", "6to4 of 93.184.216.34", true, true},
+		{"2001:0:4136:e378:8000:63bf:80ff:fffe", "Teredo, client 127.0.0.1", false, true},
+		{"2001:0:4136:e378:8000:63bf:5601:5601", "Teredo, client 169.254.169.254", false, false},
+		{"2001:0:7f00:1:8000:63bf:a247:27dd", "Teredo, server 127.0.0.1", false, true},
+		{"2001:0:4136:e378:8000:63bf:a247:27dd", "Teredo, server 65.54.227.120, client 93.184.216.34", true, true},
+		{"::127.0.0.1", "IPv4-compatible 127.0.0.1", false, true},
+		{"::a9fe:a9fe", "IPv4-compatible metadata service", false, false},
+		{"::c0a8:101", "IPv4-compatible 192.168.1.1", false, true},
+		{"::5db8:d822", "IPv4-compatible 93.184.216.34", true, true},
+		{"::", "unspecified", false, false},
+		{"::1", "loopback", false, true},
+		{"2606:4700::1111", "public", true, true},
+		{"2a00:1450:4001:80b::200e", "public", true, true},
+		{"2001:4860:4860::8888", "public in 2001::/16, not Teredo", true, true},
+	} {
+		ip := netip.MustParseAddr(c.ip)
+		if got := strict.Allowed(ip); got != c.strict {
+			t.Errorf("strict Allowed(%s) (%s) = %v, want %v", c.ip, c.what, got, c.strict)
+		}
+		if got := onPrem.Allowed(ip); got != c.onPrem {
+			t.Errorf("on-prem Allowed(%s) (%s) = %v, want %v", c.ip, c.what, got, c.onPrem)
+		}
+	}
+	for _, raw := range []string{"http://[2002:7f00:1::1]/", "https://[2002:a9fe:a9fe::1]/latest/",
+		"https://[2001:0:4136:e378:8000:63bf:80ff:fffe]/", "http://[::127.0.0.1]:8080/"} {
+		if err := strict.ValidateURL(raw); !errors.Is(err, ErrBlockedDestination) {
+			t.Errorf("ValidateURL(%q) = %v, want ErrBlockedDestination", raw, err)
+		}
+	}
+	dialer := NewDialer(Options{Resolver: &staticResolver{answers: map[string][]string{"sixtofour.test": {"2002:7f00:1::1"}}}})
+	dialer.dial = func(context.Context, string, string) (net.Conn, error) {
+		t.Error("a 6to4 address of 127.0.0.1 was dialed")
+		return nil, errors.New("dialed")
+	}
+	if _, err := dialer.DialContext(context.Background(), "tcp", "sixtofour.test:443"); !errors.Is(err, ErrBlockedDestination) {
+		t.Errorf("dial sixtofour.test: %v, want ErrBlockedDestination", err)
 	}
 }
 
@@ -90,6 +147,7 @@ func TestValidateURL(t *testing.T) {
 		"https://printer.local/":              false,
 		"http:///nohost":                      false,
 		"http://[fd00:ec2::254]/latest/meta/": false,
+		"http://[fe80::1%25eth0]/":            false,
 	} {
 		err := Options{}.ValidateURL(raw)
 		if (err == nil) != ok {
@@ -104,6 +162,134 @@ func TestValidateURL(t *testing.T) {
 	}
 	if err := (Options{AllowPrivate: true}).ValidateURL("http://169.254.169.254/"); err == nil {
 		t.Error("on-prem metadata endpoint accepted")
+	}
+}
+
+// TestValidateHost covers WP-399 (SEC-08): the host check of destinations
+// that are no URL (an organization's own SMTP server) blocks IP literals
+// and names of the internal network, with AllowPrivate only metadata.
+func TestValidateHost(t *testing.T) {
+	for _, c := range []struct {
+		host           string
+		strict, onPrem bool
+	}{
+		{"mail.example.org", true, true},
+		{"Mail.Example.org.", true, true},
+		{"93.184.216.34", true, true},
+		{"10.0.0.5", false, true},
+		{" 127.0.0.1 ", false, true},
+		{"fd12:3456::25", false, true},
+		{"localhost", false, true},
+		{"relay.corp.internal", false, true},
+		{"169.254.169.254", false, false},
+		{"fd00:ec2::254", false, false},
+		{"", false, false},
+	} {
+		if err := (Options{}).ValidateHost(c.host); (err == nil) != c.strict || (err != nil && !errors.Is(err, ErrBlockedDestination)) {
+			t.Errorf("strict ValidateHost(%q) = %v, want ok=%v", c.host, err, c.strict)
+		}
+		if err := (Options{AllowPrivate: true}).ValidateHost(c.host); (err == nil) != c.onPrem {
+			t.Errorf("on-prem ValidateHost(%q) = %v, want ok=%v", c.host, err, c.onPrem)
+		}
+	}
+}
+
+// recordingDial stands in for the network: it records the addresses the
+// dialer connects to and returns one end of a pipe.
+type recordingDial struct {
+	mu    sync.Mutex
+	addrs []string
+}
+
+func (r *recordingDial) dial(_ context.Context, _, address string) (net.Conn, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.addrs = append(r.addrs, address)
+	client, server := net.Pipe()
+	_ = server.Close()
+	return client, nil
+}
+
+// TestDialerChecksTheResolvedAddress covers WP-399 (SEC-08): the dialer of
+// non-HTTP destinations judges the address a name resolves to when it
+// connects, so a name that passed the check when it was stored and now
+// points into the internal network (DNS rebinding) is refused, also when
+// only one of its addresses does; a public destination is connected, to
+// the address that was checked, with one lookup.
+func TestDialerChecksTheResolvedAddress(t *testing.T) {
+	resolver := &staticResolver{answers: map[string][]string{
+		"mail.example.test": {"93.184.216.34"},
+		"rebind.test":       {"10.0.0.5"},
+		"loopback.test":     {"127.0.0.1"},
+		"ula.test":          {"fd12:3456::25"},
+		"metadata.test":     {"169.254.169.254"},
+		"mixed.test":        {"93.184.216.34", "192.168.1.10"},
+		"mapped.test":       {"::ffff:10.0.0.5"},
+		"v6.example.test":   {"2606:4700::1111"},
+	}}
+	wire := &recordingDial{}
+	d := NewDialer(Options{Resolver: resolver})
+	d.dial = wire.dial
+	for _, target := range []string{"rebind.test:25", "loopback.test:587", "ula.test:465", "metadata.test:25",
+		"mixed.test:25", "mapped.test:25", "10.0.0.5:25", "[fd00:ec2::254]:25"} {
+		conn, err := d.DialContext(context.Background(), "tcp", target)
+		if err == nil {
+			conn.Close()
+		}
+		if !errors.Is(err, ErrBlockedDestination) {
+			t.Errorf("dial %s: %v, want ErrBlockedDestination", target, err)
+		}
+		// The error reaches the tenant: it does not answer the lookup.
+		if host, _, _ := net.SplitHostPort(target); err != nil && resolver.answers[host] != nil {
+			for _, a := range resolver.answers[host] {
+				if strings.Contains(err.Error(), a) {
+					t.Errorf("dial %s: the error names the resolved address: %v", target, err)
+				}
+			}
+		}
+	}
+	if len(wire.addrs) != 0 {
+		t.Fatalf("blocked destinations were connected: %v", wire.addrs)
+	}
+	for target, want := range map[string]string{
+		"mail.example.test:587": "93.184.216.34:587",
+		"v6.example.test:465":   "[2606:4700::1111]:465",
+		"93.184.216.34:25":      "93.184.216.34:25",
+	} {
+		conn, err := d.DialContext(context.Background(), "tcp", target)
+		if err != nil {
+			t.Errorf("dial %s: %v", target, err)
+			continue
+		}
+		conn.Close()
+		if got := wire.addrs[len(wire.addrs)-1]; got != want {
+			t.Errorf("dial %s connected to %s, want %s", target, got, want)
+		}
+	}
+	if resolver.calls["mail.example.test"] != 1 {
+		t.Errorf("lookups of mail.example.test = %d, want 1", resolver.calls["mail.example.test"])
+	}
+	// Rebinding: the name that was public on the last connection points
+	// into the internal network now.
+	resolver.mu.Lock()
+	resolver.answers["mail.example.test"] = []string{"10.0.0.5"}
+	resolver.mu.Unlock()
+	connected := len(wire.addrs)
+	if _, err := d.DialContext(context.Background(), "tcp", "mail.example.test:587"); !errors.Is(err, ErrBlockedDestination) ||
+		len(wire.addrs) != connected {
+		t.Errorf("dial after rebinding to 10.0.0.5: %v, want ErrBlockedDestination and no connection", err)
+	}
+
+	// On premises the internal relay is reachable; metadata stays blocked.
+	onPrem := NewDialer(Options{AllowPrivate: true, Resolver: resolver})
+	onPrem.dial = wire.dial
+	if conn, err := onPrem.DialContext(context.Background(), "tcp", "rebind.test:2525"); err != nil {
+		t.Errorf("on-prem dial of an internal relay: %v", err)
+	} else {
+		conn.Close()
+	}
+	if _, err := onPrem.DialContext(context.Background(), "tcp", "metadata.test:25"); !errors.Is(err, ErrBlockedDestination) {
+		t.Errorf("on-prem dial of the metadata endpoint: %v", err)
 	}
 }
 

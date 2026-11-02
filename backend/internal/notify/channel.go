@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
 // Channel kinds (NTF-01); sms and pager get their providers with NTF-02.
@@ -32,7 +34,9 @@ const (
 	// the organization as sender name.
 	ProviderCentralSMTP = "central_smtp"
 	// ProviderSMTP sends over the organization's own SMTP (dedicated,
-	// on-premises, air-gapped).
+	// on-premises, air-gapped). Its server is held to the egress policy
+	// (SEC-08): a relay in the internal network needs
+	// RETICORA_EGRESS_ALLOW_PRIVATE=true.
 	ProviderSMTP    = "smtp"
 	ProviderInApp   = "inapp"
 	ProviderWebhook = "webhook"
@@ -95,11 +99,48 @@ func (c *Channel) Validate() error {
 	return nil
 }
 
+// CheckEgress checks the destination of the channel against the egress
+// policy of the installation when it is stored (SEC-08): the server of an
+// organization's own SMTP channel (SMTPConfig.CheckEgress) and the url of a
+// webhook channel (egress.Options.ValidateURL, 400 on the field url,
+// F-204); the central server is the operator's configuration. The address
+// a name resolves to is checked again on every connection.
+func (c *Channel) CheckEgress(opts egress.Options) error {
+	switch c.Provider {
+	case ProviderSMTP:
+		cfg, err := SMTPConfigFrom(c.Config)
+		if err != nil {
+			return err
+		}
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
+		return cfg.CheckEgress(opts)
+	case ProviderWebhook:
+		u, _ := c.Config["url"].(string)
+		if u == "" {
+			// Validate refuses the channel without url.
+			return nil
+		}
+		if err := opts.ValidateURL(u); err != nil {
+			// Metadata endpoints stay blocked with the setting as well.
+			if (egress.Options{AllowPrivate: true}).ValidateURL(u) == nil {
+				err = fmt.Errorf("%w; a webhook in the internal network needs %s", err, allowPrivate)
+			}
+			return &DestinationError{Field: "url", Err: err, Status: http.StatusBadRequest}
+		}
+	}
+	return nil
+}
+
 // Recipient is one addressee of a message.
 type Recipient struct {
 	UserID string `json:"user_id,omitempty"`
 	Email  string `json:"email,omitempty"`
 	Name   string `json:"name,omitempty"`
+	// Locale is the user's locale (app_user.locale); empty for an address
+	// without an account, which reads the organization's (NTF-03).
+	Locale string `json:"-"`
 }
 
 // Message is what a channel delivers.
@@ -109,6 +150,8 @@ type Message struct {
 	Body     string         `json:"body"`
 	To       []Recipient    `json:"to"`
 	Data     map[string]any `json:"data,omitempty"`
+	// SenderName is the organization's sender name of an e-mail (NTF-03).
+	SenderName string `json:"-"`
 }
 
 // Delivery is the result of a send.

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -34,8 +35,14 @@ type Handler struct {
 	provenance ProvenanceSource
 }
 
-// IncludeFunc loads one related collection of a CI for ?include= (API-05).
-type IncludeFunc func(ctx context.Context, orgID, ciID string) (any, error)
+// IncludeFunc loads one related collection of a CI for ?include= (API-05);
+// truncated reports that the collection holds more rows the caller may see
+// than it returns.
+type IncludeFunc func(ctx context.Context, orgID, ciID string) (items any, truncated bool, err error)
+
+// IncludeTruncated is the member of a CI with includes that names the
+// embedded collections capped by the server (truncated.<name> = true).
+const IncludeTruncated = "truncated"
 
 // IncludeAsset is always available: the canonical asset facts of the CI.
 const IncludeAsset = "asset"
@@ -183,6 +190,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 // withIncludes embeds the requested related collections into the CI
 // (API-05): include=relationships,contacts,asset. An unknown name is 422.
+// A collection the server capped is named in truncated (F-223).
 func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, raw string) (map[string]json.RawMessage, error) {
 	encoded, err := json.Marshal(item)
 	if err != nil {
@@ -192,6 +200,7 @@ func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, ra
 	if uerr := json.Unmarshal(encoded, &body); uerr != nil {
 		return nil, uerr
 	}
+	truncated := map[string]bool{}
 	for _, name := range strings.Split(raw, ",") {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -202,8 +211,12 @@ func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, ra
 		case name == IncludeAsset:
 			value = item.Asset
 		case ok:
-			if value, err = load(ctx, orgID, item.ID); err != nil {
+			var capped bool
+			if value, capped, err = load(ctx, orgID, item.ID); err != nil {
 				return nil, err
+			}
+			if capped {
+				truncated[name] = true
 			}
 		default:
 			known := []string{IncludeAsset}
@@ -218,11 +231,17 @@ func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, ra
 			return nil, err
 		}
 	}
+	if len(truncated) > 0 {
+		if body[IncludeTruncated], err = json.Marshal(truncated); err != nil {
+			return nil, err
+		}
+	}
 	return body, nil
 }
 
 // Restore handles POST /api/v1/cis/{id}/restore: a deleted CI comes back
-// within the retention (CI-05); after it the answer is 410.
+// within the retention (CI-05); after it the answer is 410. A CI that is not
+// deleted or was merged is 409.
 func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -237,8 +256,14 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ErrMergeConflict):
 		api.WriteError(w, http.StatusConflict, "Conflict", "the CI was merged; use the unmerge")
 		return
+	case errors.Is(err, ErrNotDeleted):
+		api.WriteError(w, http.StatusConflict, "Conflict", "the CI is not deleted")
+		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no deleted CI with this id")
+		return
+	case api.WriteEntitlementError(w, err):
+		// max_cis is reached: the CI stays deleted (ENT-03).
 		return
 	case err != nil:
 		if api.WriteFieldError(w, err) {
@@ -269,13 +294,16 @@ func (h *Handler) ChangeType(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.ChangeType(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), strings.TrimSpace(body.CITypeID))
 	switch {
 	case errors.Is(err, ErrUnknownType):
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
+		// Unknown and of another organization alike (TEN-09).
+		writeValidationError(w, ciTypeViolation(ciTypeNotFound))
 		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return
 	case err != nil:
-		api.WriteRepoError(w, err)
+		if !writeValidationError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	w.Header().Set("ETag", api.ETag(result.CI.Version))
@@ -322,17 +350,65 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
+// ProblemUnmergeLaterMerge is the problem type of an unmerge a later open
+// merge of the survivor blocks (409, F-416).
+const ProblemUnmergeLaterMerge = "urn:reticora:problem:unmerge-later-merge"
+
 // Unmerge handles POST /api/v1/cis/{id}/unmerge: the merged CI of the path
 // and its survivor return to their state before the merge, within 30 days
-// (CI-12); afterwards 410.
+// (CI-12); afterwards 410. A survivor changed after the merge answers 409
+// with the changed fields; ?force=true restores the snapshot over them
+// (E-80). A survivor that is part of a later open merge answers 409
+// unmerge-later-merge naming that merge, also with force (F-416).
 func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	result, err := h.svc.Unmerge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	force := false
+	if raw := r.URL.Query().Get("force"); raw != "" {
+		parsed, perr := strconv.ParseBool(raw)
+		if perr != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", "force must be true or false")
+			return
+		}
+		force = parsed
+	}
+	result, err := h.svc.Unmerge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), force)
+	var changed *UnmergeConflictError
+	var later *UnmergeLaterMergeError
 	switch {
+	case errors.As(err, &later):
+		// A later open merge of the survivor is unmerged first; force does
+		// not override it (F-416).
+		api.WriteProblemBody(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			LaterMergeID         string `json:"later_merge_id,omitempty"`
+			LaterMergeVictimID   string `json:"later_merge_victim_id"`
+			LaterMergeSurvivorID string `json:"later_merge_survivor_id,omitempty"`
+		}{
+			ProblemDetail: api.ProblemDetail{
+				Type: ProblemUnmergeLaterMerge, Title: "Conflict", Status: http.StatusConflict,
+				Detail: later.Error(),
+			},
+			LaterMergeID: later.MergeID, LaterMergeVictimID: later.VictimID, LaterMergeSurvivorID: later.SurvivorID,
+		})
+		return
+	case errors.As(err, &changed):
+		w.Header().Set("ETag", api.ETag(changed.Current))
+		api.WriteProblemBody(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			Fields         []string `json:"fields"`
+			CurrentVersion int64    `json:"current_version"`
+		}{
+			ProblemDetail: api.ProblemDetail{
+				Type: "urn:reticora:problem:conflict", Title: "Conflict", Status: http.StatusConflict,
+				Detail: changed.Error(),
+			},
+			Fields: changed.Fields, CurrentVersion: changed.Current,
+		})
+		return
 	case errors.Is(err, ErrSnapshotExpired):
 		api.WriteError(w, http.StatusGone, "Gone", err.Error())
 		return
@@ -344,6 +420,9 @@ func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no merge of this CI to revert")
+		return
+	case api.WriteEntitlementError(w, err):
+		// max_cis is reached: the merge stays (ENT-03).
 		return
 	case err != nil:
 		if api.WriteFieldError(w, err) {
@@ -501,10 +580,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		if writeValidationError(w, err) {
 			return
 		}
-		if api.WriteDBError(w, err) {
+		// Only a missing CI is 404; any other failure is not hidden as one
+		// (F-229).
+		if errors.Is(err, ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 			return
 		}
-		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+		api.WriteRepoError(w, err)
 		return
 	}
 	if h.dispatcher != nil {
@@ -585,22 +667,11 @@ func writeValidationError(w http.ResponseWriter, err error) bool {
 		return true
 	}
 	// A value of a unique attribute another CI holds (MET-15): 409 with the
-	// attributes.
+	// attributes (UniqueError.ConflictViolations), as every handler that
+	// passes the error to api.WriteFieldError answers it.
 	var taken *UniqueError
 	if errors.As(err, &taken) {
-		violations := make([]Violation, len(taken.Fields))
-		for i, f := range taken.Fields {
-			violations[i] = Violation{Field: f, Detail: "another CI already holds this value of the unique attribute"}
-		}
-		api.WriteJSON(w, http.StatusConflict, struct {
-			api.ProblemDetail
-			Violations []Violation `json:"violations"`
-		}{
-			ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
-				Status: http.StatusConflict, Detail: taken.Error()},
-			Violations: violations,
-		})
-		return true
+		return api.WriteFieldError(w, taken)
 	}
 	ve, ok := AsValidationError(err)
 	if !ok {

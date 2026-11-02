@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -170,5 +171,172 @@ func TestImpactPathsAgainstPostgres(t *testing.T) {
 	physical := impact("?categories=physical")
 	if len(physical) != 1 || physical[0].ID != blade || physical[0].Path[0].RelType != "contains" {
 		t.Errorf("physical: %+v", physical)
+	}
+}
+
+// TestAuditT3BlastRadiusMarksHeuristicCIs covers IMP-03 for the blast
+// radius against PostgreSQL (WP-490, F-098; formerly an auditdefect test of
+// WP-176): a CI reached only over connected_to is listed with
+// heuristic=true and counted in heuristic_count, not in affected_count,
+// as GET /impact/{ci_id} marks it.
+//
+// Seed: switch connected_to server, vm hosted_on server, server powered_by
+// pdu (all client 1), PostgreSQL repositories.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAuditT3BlastRadiusMarksHeuristicCIs(t *testing.T) {
+	f := scopetest.Seed(t, "d7")
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	sw := f.CI(t, f.OrgA, f.Client1, "audit-t3-switch")
+	server := f.CI(t, f.OrgA, f.Client1, "audit-t3-server")
+	vm := f.CI(t, f.OrgA, f.Client1, "audit-t3-vm")
+	pdu := f.CI(t, f.OrgA, f.Client1, "audit-t3-pdu")
+	if _, err := f.Admin.Exec(context.Background(), `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type) VALUES
+		($1, $2, $3, 'connected_to'), ($1, $4, $3, 'hosted_on'), ($1, $3, $5, 'powered_by')`, f.OrgA, sw, server, vm, pdu); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	topology.NewHandler(ci.NewPGRepository(f.App), relationship.NewPGRepository(f.App)).
+		WithRelationshipTypes(relationshiptype.NewPGRepository(f.App)).RegisterRoutes(mux)
+	get := func(path string, out any) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body.String())
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), out); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Control: the impact endpoint classifies server and vm as heuristic.
+	var imp struct {
+		Impacted []topology.ImpactNode `json:"impacted"`
+	}
+	get("/api/v1/impact/"+sw, &imp)
+	heuristic := map[string]bool{}
+	for _, n := range imp.Impacted {
+		heuristic[n.ID] = n.Heuristic
+	}
+	if !heuristic[server] || !heuristic[vm] {
+		t.Fatalf("control: /impact/{switch} heuristic flags = %v, want server and vm heuristic", heuristic)
+	}
+
+	type blastRadius struct {
+		AffectedCIs    []map[string]any `json:"affected_cis"`
+		AffectedCount  int              `json:"affected_count"`
+		HeuristicCount int              `json:"heuristic_count"`
+		ClientIDs      []string         `json:"client_ids"`
+	}
+	var blast blastRadius
+	get("/api/v1/cis/"+sw+"/blast-radius", &blast)
+	for _, n := range blast.AffectedCIs {
+		id, _ := n["id"].(string)
+		if flag, _ := n["heuristic"].(bool); flag != heuristic[id] {
+			t.Errorf("blast radius of the switch lists %v with heuristic=%v, /impact says %v (IMP-03)", n["name"], flag, heuristic[id])
+		}
+	}
+	if len(blast.AffectedCIs) != 2 || blast.AffectedCount != 0 || blast.HeuristicCount != 2 || len(blast.ClientIDs) != 0 {
+		t.Errorf("blast radius of the switch: %d CIs, affected_count %d, heuristic_count %d, clients %v; want 2 heuristic hits, none affected",
+			len(blast.AffectedCIs), blast.AffectedCount, blast.HeuristicCount, blast.ClientIDs)
+	}
+
+	// The pdu fails: server and vm are certain, the switch a heuristic hit.
+	var fromPDU blastRadius
+	get("/api/v1/cis/"+pdu+"/blast-radius", &fromPDU)
+	if fromPDU.AffectedCount != 2 || fromPDU.HeuristicCount != 1 || len(fromPDU.AffectedCIs) != 3 {
+		t.Fatalf("blast radius of the pdu: %+v", fromPDU)
+	}
+	for i, want := range []bool{false, false, true} {
+		if flag, _ := fromPDU.AffectedCIs[i]["heuristic"].(bool); flag != want {
+			t.Errorf("blast radius of the pdu, CI %d (%v): heuristic %v, want %v (certain first)", i, fromPDU.AffectedCIs[i]["name"], flag, want)
+		}
+	}
+}
+
+// TestDependenciesDirectionAgainstPostgres covers IMP-01 and IMP-07 for GET
+// /cis/{id}/dependencies against PostgreSQL (WP-490, retest of F-099):
+// upstream and downstream follow the impact_direction, not the raw edge
+// direction. vm hosted_on server puts the server upstream of the vm and the
+// vm downstream of the server; powered_by and the containment projected
+// from parent_ci_id alike. A deleted CI and a CI of another client stay
+// out for a principal of client 1, and connected_to is no dependency.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestDependenciesDirectionAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "b5")
+	bg := context.Background()
+	pdu := f.CI(t, f.OrgA, f.Client1, "dep-pdu")
+	server := f.CI(t, f.OrgA, f.Client1, "dep-server")
+	vm := f.CI(t, f.OrgA, f.Client1, "dep-vm")
+	chassis := f.CI(t, f.OrgA, f.Client1, "dep-chassis")
+	blade := f.CI(t, f.OrgA, f.Client1, "dep-blade")
+	sw := f.CI(t, f.OrgA, f.Client1, "dep-switch")
+	gone := f.CI(t, f.OrgA, f.Client1, "dep-deleted")
+	foreign := f.CI(t, f.OrgA, f.Client2, "dep-foreign")
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type) VALUES
+			($1, $2, $3, 'hosted_on'), ($1, $3, $4, 'powered_by'), ($1, $5, $3, 'connected_to'),
+			($1, $6, $3, 'hosted_on'), ($1, $7, $3, 'hosted_on')`, []any{f.OrgA, vm, server, pdu, sw, gone, foreign}},
+		{`UPDATE ci SET parent_ci_id = $2 WHERE id = $1`, []any{blade, chassis}},
+		{`UPDATE ci SET deleted_at = now() WHERE id = $1`, []any{gone}},
+	} {
+		if _, err := f.Admin.Exec(bg, q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
+		}
+	}
+	mux := chi.NewRouter()
+	topology.NewHandler(ci.NewPGRepository(f.App), relationship.NewPGRepository(f.App)).
+		WithRelationshipTypes(relationshiptype.NewPGRepository(f.App)).RegisterRoutes(mux)
+	serve := func(scope context.Context, path string) *httptest.ResponseRecorder {
+		ctx := tenant.WithTenant(scope, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
+		return w
+	}
+	client1 := f.ClientCtx(f.Client1)
+	for _, c := range []struct {
+		name  string
+		scope context.Context
+		id    string
+		query string
+		want  []string
+	}{
+		{"upstream of the vm", client1, vm, "?direction=upstream", []string{server, pdu}},
+		{"upstream of the vm, depth 1", client1, vm, "?direction=upstream&depth=1", []string{server}},
+		{"downstream of the server", client1, server, "?direction=downstream", []string{vm}},
+		{"downstream of the server, org-wide", f.OrgCtx(f.OrgA), server, "", []string{vm, foreign}},
+		{"downstream of the pdu", client1, pdu, "", []string{server, vm}},
+		{"upstream of the server", client1, server, "?direction=upstream", []string{pdu}},
+		{"downstream of the chassis", client1, chassis, "?direction=downstream", []string{blade}},
+		{"upstream of the blade", client1, blade, "?direction=upstream", []string{chassis}},
+		{"upstream of the switch", client1, sw, "?direction=upstream", nil},
+		{"downstream of the switch", client1, sw, "?direction=downstream", nil},
+	} {
+		w := serve(c.scope, "/api/v1/cis/"+c.id+"/dependencies"+c.query)
+		var body topology.DependencyResult
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("%s: %d %s", c.name, w.Code, w.Body.String())
+		}
+		got := map[string]bool{}
+		for _, n := range body.Nodes {
+			got[n.ID] = true
+		}
+		ok := len(got) == len(c.want) && body.Count == len(c.want)
+		for _, id := range c.want {
+			ok = ok && got[id]
+		}
+		if !ok {
+			t.Errorf("%s: %v (count %d), want %v", c.name, got, body.Count, c.want)
+		}
+	}
+	// An invalid depth is a 400 on the field depth (F-255).
+	if w := serve(client1, "/api/v1/cis/"+vm+"/dependencies?depth=abc"); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), `"field":"depth"`) {
+		t.Errorf("depth=abc: %d %s", w.Code, w.Body.String())
 	}
 }

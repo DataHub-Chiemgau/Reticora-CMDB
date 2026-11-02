@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -30,16 +31,55 @@ const submissionVisible = `EXISTS (SELECT 1 FROM form_def WHERE form_def.id = fo
 		AND (ticket.related_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = ticket.related_ci_id))
 		AND (ticket.related_asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = ticket.related_asset_id))))`
 
-// requireVisible fails with "not found" when the written row of table does not
-// satisfy visible, i.e. when a write pointed it at an object outside the
-// tenant scope; the transaction is then rolled back.
+// requireVisible fails with api.ErrNotFound when the written row of table
+// does not satisfy visible, i.e. when a write pointed it at an object outside
+// the tenant scope; the transaction is then rolled back.
 func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
 	var ok bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
 		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
 	if !ok {
-		return fmt.Errorf("not found")
+		return api.ErrNotFound
+	}
+	return nil
+}
+
+// requireSubmissionRefs fails when an object a submission names is no UUID
+// or not visible under the caller's scope: the form definition with
+// ErrNotFound, the CI or the ticket (by its related CI and asset, as in
+// submissionVisible) with a 422 field error. The foreign keys of
+// form_submission are checked without row level security: an object of
+// another organization or client passed them, an unknown one failed with the
+// constraint text, so the two could be told apart (TEN-04, API-03, F-047).
+func requireSubmissionRefs(ctx context.Context, tx pgx.Tx, sub *Submission) error {
+	for _, ref := range []struct {
+		id, field, table, visible string
+		missing                   error
+	}{
+		{sub.FormID, "", "form_def", "true", ErrNotFound},
+		{sub.CIID, "ci_id", "ci", "true", &api.FieldError{Field: "ci_id", Message: "CI not found", Status: http.StatusUnprocessableEntity}},
+		{sub.TicketID, "ticket_id", "ticket", `(ticket.related_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = ticket.related_ci_id))
+			AND (ticket.related_asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = ticket.related_asset_id))`,
+			&api.FieldError{Field: "ticket_id", Message: "ticket not found", Status: http.StatusUnprocessableEntity}},
+	} {
+		if ref.id == "" {
+			continue
+		}
+		if !api.IsUUID(ref.id) {
+			if ref.field == "" {
+				return ref.missing
+			}
+			return api.RequireUUID(ref.field, ref.id)
+		}
+		var visible bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+ref.table+" WHERE id = $1 AND organization_id = $2 AND "+ref.visible+")",
+			ref.id, sub.OrganizationID).Scan(&visible); err != nil {
+			return fmt.Errorf("check %s of submission: %w", ref.table, err)
+		}
+		if !visible {
+			return ref.missing
+		}
 	}
 	return nil
 }
@@ -85,7 +125,7 @@ func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*De
 		var err error
 		item, err = scanDefinition(tx.QueryRow(ctx, "SELECT "+definitionColumns+" FROM form_def WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("form definition not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -141,13 +181,16 @@ func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, r
 		if len(set) == 0 {
 			var err error
 			item, err = scanDefinition(tx.QueryRow(ctx, "SELECT "+definitionColumns+" FROM form_def WHERE id=$1 AND organization_id=$2", id, orgID))
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
 			return err
 		}
 		set = append(set, "updated_at = now()")
 		var err error
 		item, err = scanDefinition(tx.QueryRow(ctx, fmt.Sprintf("UPDATE form_def SET %s WHERE id=$1 AND organization_id=$2 RETURNING %s", strings.Join(set, ", "), definitionColumns), args...))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("form definition not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -160,7 +203,7 @@ func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) e
 			return err
 		}
 		if cmd.RowsAffected() == 0 {
-			return fmt.Errorf("form definition not found")
+			return ErrNotFound
 		}
 		return nil
 	})
@@ -209,7 +252,7 @@ func (r *PGRepository) GetSubmission(ctx context.Context, orgID, id string) (*Su
 		var err error
 		item, err = scanSubmission(tx.QueryRow(ctx, "SELECT "+submissionColumns+" FROM form_submission WHERE "+submissionVisible+" AND organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("form submission not found")
+			return ErrSubmissionNotFound
 		}
 		return err
 	})
@@ -222,6 +265,9 @@ func (r *PGRepository) CreateSubmission(ctx context.Context, sub *Submission) er
 		}
 		if sub.Status == "" {
 			sub.Status = "submitted"
+		}
+		if err := requireSubmissionRefs(ctx, tx, sub); err != nil {
+			return err
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO form_submission (organization_id, form_id, values, submitted_by, ci_id, ticket_id, status) VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,NULLIF($6,'')::uuid,$7) RETURNING id::text, created_at, updated_at`, sub.OrganizationID, sub.FormID, sub.Values, sub.SubmittedBy, sub.CIID, sub.TicketID, sub.Status).Scan(&sub.ID, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
 			return err

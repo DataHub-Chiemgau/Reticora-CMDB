@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
 // TestG1DefaultSwitchesLateModulesOff covers API-06 and RBA-05 (WP-214,
@@ -103,6 +104,27 @@ func TestModulesSwitchOnPerKey(t *testing.T) {
 
 	if _, err := ParseModules("ticketing,tickting"); err == nil {
 		t.Error("an unknown module key is accepted")
+	}
+}
+
+// TestAccessRequestRunsFollowWorkflowsModule covers WP-603 (WFL-04, E-03):
+// an IGA access request starts its workflow run only while the workflows
+// module is on; with iga alone no workflow action runs.
+func TestAccessRequestRunsFollowWorkflowsModule(t *testing.T) {
+	runs := workflow.NewExecutor(workflow.NewMemoryRepository(), nil, nil, nil, nil)
+	igaOnly, err := ParseModules("iga")
+	if err != nil {
+		t.Fatal(err)
+	}
+	both, err := ParseModules("iga,workflows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accessRequestRuns(igaOnly, runs) != nil {
+		t.Error("access requests start workflow runs with the workflows module off")
+	}
+	if accessRequestRuns(both, runs) == nil || accessRequestRuns(nil, runs) == nil {
+		t.Error("access requests start no workflow run with the workflows module on")
 	}
 }
 

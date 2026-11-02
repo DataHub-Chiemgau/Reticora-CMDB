@@ -11,10 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -26,6 +28,24 @@ var ErrServiceAccountNotFound = errors.New("service account not found")
 // ErrServiceAccountInUse is returned when a service account that API keys or
 // webhook subscriptions are bound to is deleted.
 var ErrServiceAccountInUse = errors.New("service account is bound to API keys or webhook subscriptions")
+
+// RoleCeilingError is returned when a role assignment change exceeds the
+// caller's rights (RBA-08, RBA-03): Missing are the permissions the caller
+// does not hold in a scope covering the assignment's scope; Removed is set
+// when an existing assignment the new list drops is not covered.
+type RoleCeilingError struct {
+	Missing []identity.Permission
+	Removed *ServiceAccountRole
+}
+
+// validation: a fixed rule text with the role and the missing permissions.
+func (e *RoleCeilingError) Error() string {
+	if e.Removed != nil {
+		return "removing the assignment of role " + e.Removed.RoleID + e.Removed.scopeText() +
+			" requires " + joinPermissions(e.Missing) + " in its scope"
+	}
+	return "the role assignments would grant " + joinPermissions(e.Missing) + " beyond the caller's rights"
+}
 
 // ServiceAccount is a non-human principal of an organization (RBA-08). It
 // holds role assignments like a user; API keys and webhook subscriptions
@@ -50,6 +70,25 @@ type ServiceAccountRole struct {
 	ScopeSiteID   *string `json:"scope_site_id,omitempty"`
 }
 
+func (r *ServiceAccountRole) scopeText() string {
+	switch {
+	case r.ScopeSiteID != nil:
+		return " in site " + *r.ScopeSiteID
+	case r.ScopeClientID != nil:
+		return " in client " + *r.ScopeClientID
+	}
+	return " organization-wide"
+}
+
+// sameAssignment reports whether a and b assign the same role in the same
+// scope.
+func sameAssignment(a, b ServiceAccountRole) bool {
+	eq := func(x, y *string) bool {
+		return (x == nil) == (y == nil) && (x == nil || strings.EqualFold(*x, *y))
+	}
+	return strings.EqualFold(a.RoleID, b.RoleID) && eq(a.ScopeClientID, b.ScopeClientID) && eq(a.ScopeSiteID, b.ScopeSiteID)
+}
+
 // ServiceAccountUpdate is a partial update.
 type ServiceAccountUpdate struct {
 	Name        *string `json:"name"`
@@ -60,21 +99,30 @@ type ServiceAccountUpdate struct {
 // ServiceAccountRepository persists service accounts and resolves their
 // rights.
 type ServiceAccountRepository interface {
-	ListServiceAccounts(ctx context.Context, orgID string) ([]ServiceAccount, error)
+	// ListServiceAccounts returns a page newest first on (created_at, id),
+	// at most one account more than the limit, and the number of accounts
+	// (API-02, see api.NewestFirstSQL).
+	ListServiceAccounts(ctx context.Context, orgID string, page api.PaginationParams) ([]ServiceAccount, int, error)
 	GetServiceAccount(ctx context.Context, orgID, id string) (*ServiceAccount, error)
 	CreateServiceAccount(ctx context.Context, sa *ServiceAccount) error
 	UpdateServiceAccount(ctx context.Context, orgID, id string, req ServiceAccountUpdate) (*ServiceAccount, error)
 	DeleteServiceAccount(ctx context.Context, orgID, id string) error
-	SetServiceAccountRoles(ctx context.Context, orgID, id string, roles []ServiceAccountRole) (*ServiceAccount, error)
+	// SetServiceAccountRoles replaces the assignments on behalf of caller;
+	// every new and every removed assignment must lie within the caller's
+	// rights (RoleCeilingError).
+	SetServiceAccountRoles(ctx context.Context, orgID, id string, caller *identity.Principal, roles []ServiceAccountRole) (*ServiceAccount, error)
 	// ServiceAccountGrants returns the role grants of an active service
 	// account; an inactive or unknown account has none.
 	ServiceAccountGrants(ctx context.Context, orgID, id string) ([]identity.Grant, error)
 }
 
-// CanReadEvent reports whether the service account may read an object with
-// the given permission in the client and site the object belongs to (empty:
-// org-wide object). It is the filter of webhook deliveries (RBA-08).
-func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, serviceAccountID, permission, clientID, siteID string) (bool, error) {
+// CanReadEvent reports whether the service account may read every object of
+// an event with the given permission; it is the filter of webhook deliveries
+// (RBA-08). objects holds the client and site of each object: "" is NULL,
+// a shared row that client- and site-scoped readers read as well (RLS).
+// Without objects the scope of the event is unknown (webhook/scope.go):
+// only an account that holds the permission org-wide may read it.
+func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, serviceAccountID, permission string, objects []webhook.ObjectScope) (bool, error) {
 	grants, err := repo.ServiceAccountGrants(ctx, orgID, serviceAccountID)
 	if err != nil {
 		return false, err
@@ -85,10 +133,18 @@ func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, ser
 	if !ok {
 		return false, nil
 	}
-	inScope := func(set identity.ScopeSet, id string) bool {
-		return id == "" || set.All || slices.Contains(set.IDs, id)
+	if len(objects) == 0 {
+		return scope.OrgWide(), nil
 	}
-	return inScope(scope.Clients, clientID) && inScope(scope.Sites, siteID), nil
+	inScope := func(set identity.ScopeSet, id string) bool {
+		return id == "" || set.All || slices.ContainsFunc(set.IDs, func(s string) bool { return strings.EqualFold(s, id) })
+	}
+	for _, o := range objects {
+		if !inScope(scope.Clients, o.ClientID) || !inScope(scope.Sites, o.SiteID) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // ServiceAccountAccess adapts a repository to the webhook dispatcher and the
@@ -96,13 +152,25 @@ func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, ser
 type ServiceAccountAccess struct{ Repo ServiceAccountRepository }
 
 // CanReadEvent implements webhook.SubscriberAccess.
-func (a ServiceAccountAccess) CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission, clientID, siteID string) (bool, error) {
-	return CanReadEvent(ctx, a.Repo, orgID, serviceAccountID, permission, clientID, siteID)
+func (a ServiceAccountAccess) CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission string, objects []webhook.ObjectScope) (bool, error) {
+	return CanReadEvent(ctx, a.Repo, orgID, serviceAccountID, permission, objects)
 }
 
 // ServiceAccountGrants implements identity.ServiceAccountAccessResolver.
 func (a ServiceAccountAccess) ServiceAccountGrants(ctx context.Context, orgID, id string) ([]identity.Grant, error) {
 	return a.Repo.ServiceAccountGrants(ctx, orgID, id)
+}
+
+// ServiceAccountState implements identity.ServiceAccountKeyResolver.
+func (a ServiceAccountAccess) ServiceAccountState(ctx context.Context, orgID, id string) (exists, active bool, err error) {
+	sa, err := a.Repo.GetServiceAccount(ctx, orgID, id)
+	if errors.Is(err, ErrServiceAccountNotFound) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	return true, sa.IsActive, nil
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -197,10 +265,19 @@ func getServiceAccountTx(ctx context.Context, tx pgx.Tx, orgID, id string, lock 
 }
 
 // ListServiceAccounts implements ServiceAccountRepository.
-func (r *PGServiceAccounts) ListServiceAccounts(ctx context.Context, orgID string) ([]ServiceAccount, error) {
+func (r *PGServiceAccounts) ListServiceAccounts(ctx context.Context, orgID string, page api.PaginationParams) ([]ServiceAccount, int, error) {
 	out := []ServiceAccount{}
+	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+serviceAccountColumns+` FROM service_account WHERE organization_id = $1 ORDER BY name`, orgID)
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM service_account WHERE organization_id = $1`, orgID).Scan(&total); err != nil {
+			return fmt.Errorf("count service accounts: %w", err)
+		}
+		where, tail, args, err := api.NewestFirstSQL(page, 2)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT `+serviceAccountColumns+` FROM service_account WHERE organization_id = $1 AND `+where+` `+tail,
+			append([]any{orgID}, args...)...)
 		if err != nil {
 			return fmt.Errorf("list service accounts: %w", err)
 		}
@@ -225,7 +302,7 @@ func (r *PGServiceAccounts) ListServiceAccounts(ctx context.Context, orgID strin
 		}
 		return nil
 	})
-	return out, err
+	return out, total, err
 }
 
 // GetServiceAccount implements ServiceAccountRepository.
@@ -314,13 +391,20 @@ func (r *PGServiceAccounts) DeleteServiceAccount(ctx context.Context, orgID, id 
 	})
 }
 
-// SetServiceAccountRoles replaces the role assignments of an account.
-func (r *PGServiceAccounts) SetServiceAccountRoles(ctx context.Context, orgID, id string, roles []ServiceAccountRole) (*ServiceAccount, error) {
+// SetServiceAccountRoles replaces the role assignments of an account. Like a
+// user's role assignment it never grants more than the caller holds
+// (RBA-08, RBA-03): every assignment of the new list and every existing
+// assignment the list drops must be covered by the caller's rights
+// (identity.GrantCeiling); otherwise nothing changes and nothing is audited.
+func (r *PGServiceAccounts) SetServiceAccountRoles(ctx context.Context, orgID, id string, caller *identity.Principal, roles []ServiceAccountRole) (*ServiceAccount, error) {
 	var sa *ServiceAccount
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		if _, err = getServiceAccountTx(ctx, tx, orgID, id, true); err != nil {
+		current, err := getServiceAccountTx(ctx, tx, orgID, id, true)
+		if err != nil {
 			return err
+		}
+		if ceilingErr := checkRoleCeiling(ctx, tx, orgID, caller, current.Roles, roles); ceilingErr != nil {
+			return ceilingErr
 		}
 		if _, err = tx.Exec(ctx, `DELETE FROM service_account_role WHERE service_account_id = $1`, id); err != nil {
 			return fmt.Errorf("clear service account roles: %w", err)
@@ -343,9 +427,79 @@ func (r *PGServiceAccounts) SetServiceAccountRoles(ctx context.Context, orgID, i
 	return sa, err
 }
 
+// checkRoleCeiling returns a RoleCeilingError when caller does not cover an
+// assignment of next or an assignment of current missing from next. An
+// assignment of a client- or site-scoped role without that scope grants
+// nothing at use, but is checked as organization-wide (fail-closed).
+func checkRoleCeiling(ctx context.Context, tx pgx.Tx, orgID string, caller *identity.Principal, current, next []ServiceAccountRole) error {
+	var missing []identity.Permission
+	for _, role := range next {
+		grant, err := assignmentGrant(ctx, tx, orgID, role)
+		if err != nil {
+			return err
+		}
+		for _, perm := range identity.GrantCeiling(caller, []identity.Grant{grant}) {
+			if !slices.Contains(missing, perm) {
+				missing = append(missing, perm)
+			}
+		}
+	}
+	if len(missing) > 0 {
+		return &RoleCeilingError{Missing: missing}
+	}
+	for _, old := range current {
+		if slices.ContainsFunc(next, func(r ServiceAccountRole) bool { return sameAssignment(r, old) }) {
+			continue
+		}
+		grant, err := assignmentGrant(ctx, tx, orgID, old)
+		if err != nil {
+			return err
+		}
+		if m := identity.GrantCeiling(caller, []identity.Grant{grant}); len(m) > 0 {
+			return &RoleCeilingError{Missing: m, Removed: &old}
+		}
+	}
+	return nil
+}
+
+// assignmentGrant is the grant of one assignment: the catalog permissions of
+// the role (as ServiceAccountGrants resolves them) in the assignment's scope.
+// A site assignment without client names the client of its site, like
+// ServiceAccountGrants; a site the caller cannot read keeps no client and then
+// needs the caller's rights in all clients (identity.GrantCeiling,
+// fail-closed). An unknown role grants nothing; the assignment itself is then
+// refused.
+func assignmentGrant(ctx context.Context, tx pgx.Tx, orgID string, role ServiceAccountRole) (identity.Grant, error) {
+	grant := identity.Grant{}
+	if role.ScopeClientID != nil {
+		grant.Clients = []string{*role.ScopeClientID}
+	}
+	if role.ScopeSiteID != nil {
+		grant.Sites = []string{*role.ScopeSiteID}
+		if role.ScopeClientID == nil {
+			client, err := siteClient(ctx, tx, orgID, *role.ScopeSiteID)
+			if err != nil {
+				return grant, err
+			}
+			if client != "" {
+				grant.Clients = []string{client}
+			}
+		}
+	}
+	target, found, err := readStandardRole(ctx, tx, orgID, role.RoleID)
+	if err != nil || !found {
+		return grant, err
+	}
+	grant.Permissions = target.Permissions
+	return grant, nil
+}
+
 // ServiceAccountGrants implements ServiceAccountRepository. It runs on behalf
 // of the account's organization, without a principal scope (E-08), like the
-// grant resolution of a user at login.
+// grant resolution of a user at login. Like a user's site assignment
+// (permission.AccessGrants), a site assignment is confined to the client of
+// its site (RBA-03, TEN-09); a site outside the organization, or of another
+// client than scope_client_id, grants nothing (fail-closed, E-08).
 func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id string) ([]identity.Grant, error) {
 	grants := []identity.Grant{}
 	if !isUUID(id) {
@@ -354,7 +508,7 @@ func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id 
 	scope := database.OrgWideScope(orgID, "")
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT sar.scope_client_id::text, sar.scope_site_id::text,
+			SELECT COALESCE(s.client_id, sar.scope_client_id)::text, sar.scope_site_id::text,
 			       ARRAY(SELECT DISTINCT k FROM (
 			           SELECT rp.permission_key AS k FROM role_permission rp
 			            WHERE rp.role_id = sar.role_id AND rp.organization_id = sar.organization_id
@@ -363,9 +517,11 @@ func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id 
 			  FROM service_account_role sar
 			  JOIN service_account sa ON sa.id = sar.service_account_id AND sa.is_active
 			  JOIN role ro ON ro.id = sar.role_id AND ro.organization_id = sar.organization_id
+			  LEFT JOIN site s ON s.id = sar.scope_site_id AND s.organization_id = sar.organization_id
 			 WHERE sar.organization_id = $1 AND sar.service_account_id = $2
 			   AND (ro.scope <> 'client' OR sar.scope_client_id IS NOT NULL)
-			   AND (ro.scope <> 'site' OR sar.scope_site_id IS NOT NULL)`, orgID, id)
+			   AND (ro.scope <> 'site' OR sar.scope_site_id IS NOT NULL)
+			   AND (sar.scope_site_id IS NULL OR s.client_id = COALESCE(sar.scope_client_id, s.client_id))`, orgID, id)
 		if err != nil {
 			return fmt.Errorf("list service account grants: %w", err)
 		}
@@ -413,7 +569,7 @@ func (m *MemoryServiceAccounts) find(orgID, id string) *ServiceAccount {
 }
 
 // ListServiceAccounts implements ServiceAccountRepository.
-func (m *MemoryServiceAccounts) ListServiceAccounts(_ context.Context, orgID string) ([]ServiceAccount, error) {
+func (m *MemoryServiceAccounts) ListServiceAccounts(_ context.Context, orgID string, page api.PaginationParams) ([]ServiceAccount, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := []ServiceAccount{}
@@ -422,7 +578,13 @@ func (m *MemoryServiceAccounts) ListServiceAccounts(_ context.Context, orgID str
 			out = append(out, *sa)
 		}
 	}
-	return out, nil
+	return api.NewestFirstSlice(out, page, serviceAccountPosition)
+}
+
+// serviceAccountPosition is the (created_at, id) position of a service
+// account in its list.
+func serviceAccountPosition(sa *ServiceAccount) (createdAt time.Time, id string) {
+	return sa.CreatedAt, sa.ID
 }
 
 // GetServiceAccount implements ServiceAccountRepository.
@@ -488,8 +650,10 @@ func (m *MemoryServiceAccounts) DeleteServiceAccount(_ context.Context, orgID, i
 	return ErrServiceAccountNotFound
 }
 
-// SetServiceAccountRoles implements ServiceAccountRepository.
-func (m *MemoryServiceAccounts) SetServiceAccountRoles(_ context.Context, orgID, id string, roles []ServiceAccountRole) (*ServiceAccount, error) {
+// SetServiceAccountRoles implements ServiceAccountRepository. Role
+// permissions are not known here and the assignments grant nothing, so there
+// is no ceiling to check.
+func (m *MemoryServiceAccounts) SetServiceAccountRoles(_ context.Context, orgID, id string, _ *identity.Principal, roles []ServiceAccountRole) (*ServiceAccount, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	sa := m.find(orgID, id)

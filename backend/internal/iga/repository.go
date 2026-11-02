@@ -2,6 +2,7 @@ package iga
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,6 +10,16 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
+
+// Objects that are unknown or of another organization; both answer 404
+// alike with the fixed text (TEN-04).
+var (
+	ErrConnectorNotFound     = errors.New("connector not found")
+	ErrTaskNotFound          = errors.New("task not found")
+	ErrAccessRequestNotFound = errors.New("access request not found")
+	ErrReviewItemNotFound    = errors.New("review item not found")
+	ErrDriftNotFound         = errors.New("drift not found")
 )
 
 type Repository interface {
@@ -31,6 +42,11 @@ type Repository interface {
 	ListAccessRequests(ctx context.Context, orgID, status string, page api.PaginationParams) ([]AccessRequest, int, error)
 	CreateAccessRequest(ctx context.Context, req *AccessRequest) error
 	DecideAccessRequest(ctx context.Context, orgID, id, status, actorID, comment string) (*AccessRequest, error)
+	// ApproveAccessRequest approves the request and stores the provisioning
+	// task of its entitlement (ApprovalTask) as one unit: when the task
+	// cannot be written the approval is undone and the request stays
+	// pending (F-056).
+	ApproveAccessRequest(ctx context.Context, orgID, id, actorID, comment string) (*AccessRequest, error)
 
 	ListReviews(ctx context.Context, orgID, status string, page api.PaginationParams) ([]AccessReview, int, error)
 	CreateReview(ctx context.Context, r *AccessReview, items []AccessReviewItem) error
@@ -41,6 +57,16 @@ type Repository interface {
 	CreateDrift(ctx context.Context, f *DriftFinding) error
 	UpdateDrift(ctx context.Context, f *DriftFinding) error
 	GetDrift(ctx context.Context, orgID, id string) (*DriftFinding, error)
+}
+
+// ApprovalTask is the provisioning task an approved access request needs:
+// its subject joins the entitlement's group on the request's connector. A
+// request without a connector needs none (nil).
+func ApprovalTask(ar *AccessRequest) *ProvisioningTask {
+	if ar.ConnectorID == "" {
+		return nil
+	}
+	return &ProvisioningTask{OrganizationID: ar.OrganizationID, ConnectorID: ar.ConnectorID, UserID: ar.SubjectUserID, Action: TaskActionAddGroupMember, Payload: JSONMap{"entitlement": ar.Entitlement, "group_id": ar.Entitlement, "account_id": ar.SubjectUserID}}
 }
 
 type MemoryRepository struct {
@@ -58,9 +84,11 @@ type MemoryRepository struct {
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{connectors: map[string]*ConnectorConfig{}, tasks: map[string]*ProvisioningTask{}, policies: map[string]*LifecyclePolicy{}, requests: map[string]*AccessRequest{}, reviews: map[string]*AccessReview{}, reviewItems: map[string]*AccessReviewItem{}, drift: map[string]*DriftFinding{}}
 }
-func (r *MemoryRepository) id(prefix string) string {
+// id returns ids of UUID form, as the handler accepts only UUID ids
+// (API-03); all kinds share the counter.
+func (r *MemoryRepository) id(_ string) string {
 	r.next++
-	return fmt.Sprintf("%s-%d", prefix, r.next)
+	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.next)
 }
 
 func page[T any](items []T, p api.PaginationParams) ([]T, int, error) {
@@ -87,7 +115,7 @@ func (r *MemoryRepository) GetConnector(_ context.Context, orgID, id string) (*C
 	defer r.mu.RUnlock()
 	v := r.connectors[id]
 	if v == nil || v.OrganizationID != orgID {
-		return nil, fmt.Errorf("connector not found")
+		return nil, ErrConnectorNotFound
 	}
 	cp := *v
 	return &cp, nil
@@ -114,7 +142,7 @@ func (r *MemoryRepository) UpdateConnector(_ context.Context, orgID, id string, 
 	defer r.mu.Unlock()
 	c := r.connectors[id]
 	if c == nil || c.OrganizationID != orgID {
-		return nil, fmt.Errorf("connector not found")
+		return nil, ErrConnectorNotFound
 	}
 	if req.Name != nil {
 		c.Name = *req.Name
@@ -146,7 +174,7 @@ func (r *MemoryRepository) DeleteConnector(_ context.Context, orgID, id string) 
 	defer r.mu.Unlock()
 	c := r.connectors[id]
 	if c == nil || c.OrganizationID != orgID {
-		return fmt.Errorf("connector not found")
+		return ErrConnectorNotFound
 	}
 	delete(r.connectors, id)
 	return nil
@@ -156,7 +184,7 @@ func (r *MemoryRepository) MarkConnectorSynced(_ context.Context, orgID, id stri
 	defer r.mu.Unlock()
 	c := r.connectors[id]
 	if c == nil || c.OrganizationID != orgID {
-		return fmt.Errorf("connector not found")
+		return ErrConnectorNotFound
 	}
 	c.LastSyncAt = &at
 	c.UpdatedAt = at
@@ -180,7 +208,7 @@ func (r *MemoryRepository) GetTask(_ context.Context, orgID, id string) (*Provis
 	defer r.mu.RUnlock()
 	v := r.tasks[id]
 	if v == nil || v.OrganizationID != orgID {
-		return nil, fmt.Errorf("task not found")
+		return nil, ErrTaskNotFound
 	}
 	cp := *v
 	return &cp, nil
@@ -212,7 +240,7 @@ func (r *MemoryRepository) UpdateTask(_ context.Context, t *ProvisioningTask) er
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.tasks[t.ID] == nil {
-		return fmt.Errorf("task not found")
+		return ErrTaskNotFound
 	}
 	t.UpdatedAt = time.Now().UTC()
 	cp := *t
@@ -290,7 +318,7 @@ func (r *MemoryRepository) DecideAccessRequest(_ context.Context, orgID, id, sta
 	defer r.mu.Unlock()
 	a := r.requests[id]
 	if a == nil || a.OrganizationID != orgID {
-		return nil, fmt.Errorf("access request not found")
+		return nil, ErrAccessRequestNotFound
 	}
 	now := time.Now().UTC()
 	a.Status = status
@@ -300,6 +328,21 @@ func (r *MemoryRepository) DecideAccessRequest(_ context.Context, orgID, id, sta
 	a.UpdatedAt = now
 	cp := *a
 	return &cp, nil
+}
+
+// ApproveAccessRequest decides and stores the task; the memory CreateTask
+// does not fail, so no decision has to be undone.
+func (r *MemoryRepository) ApproveAccessRequest(ctx context.Context, orgID, id, actor, comment string) (*AccessRequest, error) {
+	ar, err := r.DecideAccessRequest(ctx, orgID, id, "approved", actor, comment)
+	if err != nil {
+		return nil, err
+	}
+	if task := ApprovalTask(ar); task != nil {
+		if err := r.CreateTask(ctx, task); err != nil {
+			return nil, err
+		}
+	}
+	return ar, nil
 }
 
 func (r *MemoryRepository) ListReviews(_ context.Context, orgID, status string, p api.PaginationParams) ([]AccessReview, int, error) {
@@ -353,7 +396,7 @@ func (r *MemoryRepository) DecideReviewItem(_ context.Context, orgID, id, decisi
 	defer r.mu.Unlock()
 	it := r.reviewItems[id]
 	if it == nil || it.OrganizationID != orgID {
-		return nil, fmt.Errorf("review item not found")
+		return nil, ErrReviewItemNotFound
 	}
 	now := time.Now().UTC()
 	it.Decision = decision
@@ -397,7 +440,7 @@ func (r *MemoryRepository) UpdateDrift(_ context.Context, f *DriftFinding) error
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.drift[f.ID] == nil {
-		return fmt.Errorf("drift not found")
+		return ErrDriftNotFound
 	}
 	f.UpdatedAt = time.Now().UTC()
 	cp := *f
@@ -409,7 +452,7 @@ func (r *MemoryRepository) GetDrift(_ context.Context, orgID, id string) (*Drift
 	defer r.mu.RUnlock()
 	v := r.drift[id]
 	if v == nil || v.OrganizationID != orgID {
-		return nil, fmt.Errorf("drift not found")
+		return nil, ErrDriftNotFound
 	}
 	cp := *v
 	return &cp, nil

@@ -15,9 +15,40 @@ integrierten Stands (`58863fa`, `dea65b7`) und die Nachträge zu seinen nicht
 blockierenden Befunden vom 2026-10-15 (`3f2bfd5`, `458a96d`, `111bdc4`,
 `f354c5a`, `0f165cc`; Abschnitt „G1-Nachbesserung“).
 Die Erstfassung prüfte `main` nach dem Lasttest (PR #60) zuzüglich WP-208
-(Kanalmatrix, Migration 000136). Der Stand ist lokal geprüft; der CI-Lauf auf
-dem Release-Kandidaten steht aus. Am 2026-10-15 hat der Auftraggeber E-17,
+(Kanalmatrix, Migration 000136). Der Stand ist lokal geprüft; den CI-Lauf auf
+dem Release-Kandidaten führt der Abschnitt „Läufe auf dem
+Release-Kandidaten“ (WP-595). Am 2026-10-15 hat der Auftraggeber E-17,
 E-56, E-57 und E-58 entschieden und G1 freigegeben (Abschnitt „Ergebnis“).
+
+Fortschreibung vom 2026-10-25 (WP-452, `t5-review-g1`) auf dem Stand
+`425a655`, also mit den gemergten Korrektur-WPs des G1-Korrekturplans
+(`docs/plan/g1-korrektur/implementierungsplan.md`):
+
+- SR-11 ist nach dem Bewertungsschema (`docs/audit/README.md`) High und
+  behoben.
+- Neu sind SR-12 und SR-13 (Abschnitt „Neue Befunde“) und SR-14 bis SR-26,
+  die übrigen P0-Befunde des Phase-1-Abnahmeaudits mit Sicherheitswirkung
+  (Abschnitt „Befunde des Phase-1-Abnahmeaudits“).
+- V4 und SR-03 nennen die geprüften Kombinationen der Kanalmatrix (Abschnitt
+  „Kanalmatrix: Kanal × Scope-Art“).
+- Die Scanergebnisse bewerten die Advisories der Entwicklungsabhängigkeiten
+  (F-297).
+
+Die Testläufe dazu sind lokal. Die Läufe auf dem Release-Kandidaten und die
+endgültige Statuspflege übernimmt WP-595 (`t5-rc-evidence`).
+
+Fortschreibung vom 2026-10-28 (WP-654, `k6n-vitest-update`): Die Critical-
+und High-Advisories der Entwicklungsabhängigkeiten sind durch die
+Aktualisierung behoben (`vitest` 4.1.12 ohne `tinypool`, `vite` 6.4.5 und
+Patch-Stände der transitiven Pakete). npm audit meldet über alle
+Abhängigkeiten kein High und kein Critical (Abschnitt „Scanergebnisse“).
+
+Fortschreibung vom 2026-11-01 (WP-699, `k7n-sr-coverage-reaudit-findings`,
+F-428) auf dem Stand `6a499ac`: Die Befunde der Korrektur G1 ab F-355
+(`audit/g1-reaudit/FINDINGS.md`) mit Sicherheitswirkung oder Critical nach
+dem Bewertungsschema stehen als SR-27 bis SR-49 im Review, alle behoben; die
+übrigen mit Begründung im Abschnitt „Befunde der Korrektur ohne
+Sicherheitswirkung“ (Abschnitt „Befunde der Korrektur G1 (ab F-355)“).
 
 ## Ergebnis
 
@@ -34,17 +65,31 @@ E-56, E-57 und E-58 entschieden und G1 freigegeben (Abschnitt „Ergebnis“).
 - **Neue Befunde:** Das Review ergab sieben neue Befunde (SR-01 bis SR-07).
   Die G1-Nachbesserung behebt zwei davon und hinterlässt drei Restrisiken
   (SR-08 bis SR-10). Das Gesamtreview fand zusätzlich einen vorbestehenden
-  Fehler (SR-11). Stand der elf Befunde (unten):
+  Fehler (SR-11). Die Fortschreibung vom 2026-10-25 nimmt den
+  Site-Scope-Bypass im Rack-Kanal (SR-12) und den Review-Items-Leak (SR-13)
+  auf. Stand der 13 Befunde (unten):
   - Behoben:
-    - drei High (mandantenübergreifende Client-Verweise; Discovery
+    - zwei Critical (Site-Scope-Bypass im Rack-Kanal; Review-Items ohne
+      Kandidaten über Clients)
+    - vier High (mandantenübergreifende Client-Verweise; Discovery
       überschreibt einen gleichzeitig gesetzten manuellen Wert;
-      Ingest-Durchsatz NFR-03)
+      Ingest-Durchsatz NFR-03; Reaktivieren in der Produktionsverdrahtung,
+      SR-11)
     - ein Medium (Impact im Worst Case, NFR-02)
   - Offen:
     - zwei Medium
-    - vier Low (drei Restrisiken der G1-Nachbesserung, ein vorbestehender
-      Fehler in der Decorator-Kette des CI-Repositorys)
+    - drei Low (Restrisiken der G1-Nachbesserung)
     - ein Info (Referenzhost des Lasttests)
+- **Befunde des Phase-1-Abnahmeaudits:** Die übrigen 13 P0-Befunde mit
+  Sicherheitswirkung (F-001, F-004 bis F-015) stehen als SR-14 bis SR-26 mit
+  Severity Critical im Review. Ihre Korrektur-WPs sind gemergt, jeder Befund
+  ist mit einem regulären Test belegt behoben (lokal grün auf `425a655`).
+- **Befunde der Korrektur G1 (ab F-355):** 23 Befunde stehen als SR-27 bis
+  SR-49 im Review: 13 Critical (davon F-411 und F-416 als stiller
+  Datenverlust ohne Sicherheitswirkung), 3 High, 2 Medium, 4 Low, 1 Info;
+  F-397 ist Teil von SR-18. Alle sind behoben und mit einem regulären Test
+  belegt (lokal grün auf `6a499ac`). Die übrigen Befunde haben keine
+  Sicherheitswirkung; F-386 und F-422 bis F-426 sind offen bzw. in Korrektur.
 - **G1-Nachbesserung:** Die sicherheitsrelevanten Änderungen von WP-332 bis
   WP-335 sind mit Tests belegt (Abschnitt „G1-Nachbesserung“ unten). Die
   Schwächen, die die Reviews der WPs und das Gesamtreview des integrierten
@@ -53,11 +98,18 @@ E-56, E-57 und E-58 entschieden und G1 freigegeben (Abschnitt „Ergebnis“).
   Clusters füllen konnten, und Identitätssperren im Lock-Raum der
   Scheduler-Sperre (behoben in `58863fa`). Die nicht blockierenden Befunde
   des Gesamtreviews sind am 2026-10-15 nachgetragen, darunter fehlende
-  Identitätssperren mit einer Spur über mehrere Instanzen; offen bleibt nur
-  der vorbestehende SR-11.
+  Identitätssperren mit einer Spur über mehrere Instanzen; offen blieb nur
+  der vorbestehende SR-11, behoben mit WP-418 (`t5-sr11-decorator`).
 - **Scans:** govulncheck, npm audit und Trivy sind ohne blockierende Funde, und
   es gibt keine Ausnahmen. Die G1-Nachbesserung ändert keine Abhängigkeiten;
-  der Scan-Lauf auf dem Release-Kandidaten steht aus.
+  den Scan-Lauf auf dem Release-Kandidaten führt der Abschnitt „Läufe auf
+  dem Release-Kandidaten“ (WP-595). In den
+  Entwicklungsabhängigkeiten meldete npm audit am 2026-10-25 2 Critical
+  (tinypool, vitest) und 6 High. Sie sind nicht ausgeliefert; als
+  Lieferkettenrisiko (T19) behebt sie die Aktualisierung mit WP-654 am
+  2026-10-28. Für die zwei Critical liegt das drei Tage nach der Frist
+  (2026-10-25), für die High innerhalb der Frist (Abschnitt
+  „Scanergebnisse“).
 - **Pentest:** Der externe Pentest (WP-210, E-28, B3) ist laut Erklärung des
   Auftraggebers vom 2026-10-15 erledigt. Bericht, Befunde und Nachtest
   liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in
@@ -65,23 +117,33 @@ E-56, E-57 und E-58 entschieden und G1 freigegeben (Abschnitt „Ergebnis“).
 
 **Freigabe des Sicherheitsreviews:** Das Review ist mit der Freigabe des
 Auftraggebers vom 2026-10-15 freigegeben. Unter den Befunden SR-01 bis SR-11
-ist kein High und kein Critical mehr offen; SR-02 ist mit WP-332 bis WP-334
-behoben. Das Ausstiegskriterium „keine offenen High/Critical“ verlangt
-zusätzlich den Pentest-Nachweis (WP-210, B3). Ihn ersetzt bis zu seinem
-Eingang die Erklärung des Auftraggebers vom 2026-10-15, B3 sei erledigt;
-nachzureichen sind Zusammenfassung und Befundliste in
-`docs/security/pentest-g1.md`. Enthält die Befundliste ein offenes High oder
-Critical, gilt das Kriterium nicht mehr als erfüllt.
+war am 2026-10-15 kein High und kein Critical als offen geführt; SR-02 ist
+mit WP-332 bis WP-334 behoben. SR-11 stand dabei entgegen dem
+Bewertungsschema auf Low (F-119), und SR-12 und SR-13 fehlten (F-040); beides
+korrigiert die Fortschreibung vom 2026-10-25. Seitdem ist unter SR-01 bis
+SR-26 kein High und kein Critical offen, ebenso unter SR-27 bis SR-49 (Befunde
+der Korrektur, Fortschreibung vom 2026-11-01); die Critical-Advisories der
+Entwicklungsabhängigkeiten sind mit WP-654 behoben (Abschnitt
+„Scanergebnisse“). Das
+Ausstiegskriterium „keine offenen High/Critical“ verlangt zusätzlich den
+Pentest-Nachweis (WP-210, B3). Die Erklärung des Auftraggebers vom
+2026-10-15, B3 sei erledigt, ersetzt ihn nach der Übergangsregel von E-76
+(`docs/plan/g1-korrektur/entscheidungen.md`) nicht; nachzureichen sind
+Zusammenfassung und Befundliste in `docs/security/pentest-g1.md` (A-07,
+WP-453). Enthält die Befundliste ein offenes High oder Critical, ist das
+Kriterium nicht erfüllt.
 
 Die Referenzumgebung des Lasttests ist anerkannt: Der Auftraggeber hat E-58
 am 2026-10-15 entschieden (Option 1). Den Lasttest belegen der lokale
 Nachweislauf auf Commit `dbbfded` und der grüne `load.yml`-Lauf 38665599979
 auf Commit `918a832`; nach dem Merge wiederholt der nächtliche Lauf ihn auf
 dem Release-Kandidaten. SR-06 bleibt offen, bis vor GA ein dedizierter
-Referenzhost bereitsteht. G1 ist mit der Freigabe des Auftraggebers vom
-2026-10-15 bestanden; nachzureichen sind der grüne CI-Lauf auf PR #64 mit dem
-Merge nach `main` und die Nachweise zu B3 (Pentest), B4 (v2-Texte) und B6
-(Subprozessorenliste, NFR-09), die der Auftraggeber für erledigt erklärt hat.
+Referenzhost bereitsteht. Der Auftraggeber hat G1 am 2026-10-15 freigegeben.
+Nach E-76 ersetzt seine Erklärung die Nachweise nicht; das Gate-Ergebnis
+lautet „offen“ (`docs/acceptance/g1-gate.md`, WP-451). Nachzureichen sind der
+grüne CI-Lauf auf PR #64 mit dem Merge nach `main` und die Nachweise zu B3
+(Pentest), B4 (v2-Texte) und B6 (Subprozessorenliste, NFR-09), die der
+Auftraggeber für erledigt erklärt hat.
 B5 ist mit E-17 geschlossen; gemessen ist mit 10.000 Objekten
 (`docs/acceptance/g1-gate.md`).
 
@@ -110,7 +172,124 @@ Artefakte des Laufs vor (30 Tage).
 
 Die G1-Nachbesserung (WP-332 bis WP-335) ändert weder `go.mod`/`go.sum` noch
 `package.json`/`package-lock.json` noch die Dockerfiles. Die Scan-Jobs laufen
-im CI-Lauf des Release-Kandidaten erneut; dieser Lauf steht aus.
+im CI-Lauf des Release-Kandidaten erneut (Abschnitt „Läufe auf dem
+Release-Kandidaten“, WP-595).
+
+### Entwicklungsabhängigkeiten (F-297, T19)
+
+Der Job `npm-audit` blockiert nur High und Critical der
+Produktionsabhängigkeiten; die Funde der Entwicklungsabhängigkeiten stehen nur
+im Bericht. Das Review bewertete sie bis zum 2026-10-25 nicht (F-297).
+
+Lauf: lokal am 2026-10-25 auf `425a655`, `frontend/package-lock.json`,
+npm 10.9.4, `npm audit --package-lock-only` mit und ohne `--omit=dev`.
+
+- Produktionsabhängigkeiten: 0 Critical, 0 High, 2 Moderate (`react-router`,
+  `react-router-dom`); der Job `npm-audit` bleibt grün.
+- Alle Abhängigkeiten: 2 Critical, 6 High, 7 Moderate. Jedes Critical und
+  High liegt in einer Entwicklungsabhängigkeit. Das Audit zählte am
+  2026-10-18 2 Critical und 10 High (F-297).
+
+Bewertung als Lieferkettenrisiko (Threat T19, `docs/security/threat-model.md`):
+
+- Die Pakete werden nicht ausgeliefert. Das Image `reticora-frontend` enthält
+  nur das gebaute Bundle (`frontend/Dockerfile`: nginx-Stufe mit `/app/dist`).
+- Sie laufen in der Build-Stufe des Images, in CI-Jobs wie `frontend` (Lint,
+  Tests, Build, `generate:api:check`) und auf Entwicklerrechnern, jeweils mit
+  Code und Daten des Repositorys. Die Skripte in `frontend/package.json`
+  starten weder den Browser-Modus noch die Oberfläche von Vitest
+  (`frontend/vitest.config.ts`: jsdom); den Vite-Dev-Server startet nur
+  `npm run dev` auf dem Entwicklerrechner.
+- Wer die Eingaben dieser Werkzeuge steuert, kann in der CI und auf
+  Entwicklerrechnern Code ausführen (tinypool) oder sie lahmlegen (High:
+  Ressourcenverbrauch, Absturz). Die Gadgets in tinypool brauchen eine
+  Prototype Pollution im selben Prozess, also manipulierten Code oder
+  manipulierte Daten im Testlauf.
+- SEC-11 verlangt die Behebung von Critical binnen 7 und von High binnen
+  30 Tagen. Gerechnet wird ab der ersten Meldung, hier spätestens dem
+  Phase-1-Abnahmeaudit vom 2026-10-18 (F-297).
+- Maßnahme ist die Aktualisierung. Eine Ausnahme in
+  `security/scan-exceptions.txt` verlängert die Frist nicht, und der Job
+  wertet sie für Entwicklungsabhängigkeiten nicht aus.
+- WP-452 änderte keine Abhängigkeiten. Die Aktualisierung führt WP-654
+  (`k6n-vitest-update`, K6-Nachträge) aus.
+- Die Critical-Zeilen blieben offen, bis die Aktualisierung gemergt war. Bis
+  dahin verboten sie das Gate-Ergebnis „bestanden“
+  (`tests/rep01-structure.test.sh --final`). WP-654 behebt sie am
+  2026-10-28, drei Tage nach der Frist; SEC-11 ist für diese zwei Funde
+  nicht eingehalten. Die High sind innerhalb ihrer Frist behoben.
+
+Aktualisierung (WP-654, 2026-10-28), mit npm erzeugt (`package.json`,
+`package-lock.json`):
+
+- `vitest` 3.2.7 → 4.1.12 (`devDependencies`: `^4.1.12`), damit alle
+  `@vitest/*`-Pakete 4.1.12. Vitest 4 bringt seinen Worker-Pool selbst mit:
+  `tinypool` und `vite-node` sind nicht mehr installiert. 4.1.12 ist die
+  kleinste Version außerhalb aller Advisory-Bereiche (`vitest` bis 4.1.10,
+  `@vitest/mocker` bis 4.1.11, `tinypool` bis 2.1.1). Die von npm audit
+  vorgeschlagene 5.0.5 verlangt Node `^22.12.0`; die CI-Jobs und die
+  Build-Stufe des Images (`frontend/Dockerfile`) laufen auf Node 20.
+- Ohne Major-Sprung, innerhalb der Bereiche von `package.json`: `vite`
+  6.4.3 → 6.4.5, `@redocly/openapi-core` 1.34.18 → 1.34.22, `js-yaml`
+  4.3.1 → 4.3.2, `brace-expansion` 1.1.18/2.1.4/5.0.9 → 1.1.21/2.1.7/5.0.12,
+  `browserslist` 4.28.4 → 4.29.5, `source-map-js` 1.2.1 → 1.2.2, dazu die
+  Moderate `postcss-selector-parser` 6.1.4 → 6.1.5 und
+  `baseline-browser-mapping` 2.10.41 → 2.11.34.
+- Die Produktionsabhängigkeiten bleiben unverändert. Konfiguration und Tests
+  brauchen keine Anpassung: Vitest 4.1.12 führt dieselben 74 Testdateien mit
+  592 Tests grün aus wie 3.2.7; Lint, Typprüfung, Build,
+  `generate:api:check` und die gemockte E2E-Suite (Chromium, mobiles
+  Chrome) sind grün.
+
+Lauf: lokal am 2026-10-28, `frontend/package-lock.json`, Schritte des Jobs
+`npm-audit` (`npm audit --omit=dev --json`, `npm audit --json`) mit npm
+10.8.2 (Node 20 wie CI) und npm 10.9.4 (Node 22), dazu
+`npm audit --omit=optional`:
+
+- Vorher (Basis `92f109f`): Produktionsabhängigkeiten 0 Critical, 0 High,
+  2 Moderate; alle Abhängigkeiten 2 Critical, 6 High, 5 Moderate.
+- Nachher: Produktionsabhängigkeiten 0 Critical, 0 High, 2 Moderate; alle
+  Abhängigkeiten 0 Critical, 0 High, 2 Moderate. Der Job `npm-audit` bleibt
+  grün.
+
+| Paket | Schweregrad | Status | Advisories (npm audit) | Herkunft | Maßnahme | Frist (SEC-11) |
+|---|---|---|---|---|---|---|
+| `tinypool` 1.1.1 | Critical | behoben (WP-654, 2026-10-28) | GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr: Prototype-Pollution-Gadget in den Worker- bzw. `run()`-Optionen führt zu Codeausführung | transitiv über `vitest` | Aktualisierung von `vitest` auf 4.1.12; `tinypool` ist nicht mehr installiert | 2026-10-25 (überschritten) |
+| `vitest` 3.2.7 | Critical | behoben (WP-654, 2026-10-28) | über `tinypool`; dazu GHSA-82fw-gwwq-j7x9 und über `@vitest/mocker` 3.2.7 GHSA-qxg6-89mg-rqv8 (je Moderate) | direkt (`devDependencies`) | Aktualisierung auf 4.1.12 (`@vitest/mocker` 4.1.12); 5.0.5 verlangt Node 22 | 2026-10-25 (überschritten) |
+| `vite` 6.4.3 | High | behoben (WP-654, 2026-10-28) | GHSA-587h-7wmj-h5pm (`launch-editor`); dazu drei Moderate und ein Low | direkt (`devDependencies`) | Aktualisierung auf 6.4.5 | 2026-11-17 |
+| `js-yaml` 4.3.1 | High | behoben (WP-654, 2026-10-28) | GHSA-2883-xcg3-v3hh | transitiv (`@redocly/openapi-core`, `@eslint/eslintrc`) | Aktualisierung auf 4.3.2 | 2026-11-17 |
+| `@redocly/openapi-core` 1.34.18 | High | behoben (WP-654, 2026-10-28) | über `js-yaml` | transitiv über `openapi-typescript` (`npm run generate:api`) | Aktualisierung auf 1.34.22 | 2026-11-17 |
+| `brace-expansion` 1.1.18, 2.1.4, 5.0.9 | High | behoben (WP-654, 2026-10-28) | GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p; dazu GHSA-q2hr-2g5m-vwhr (Moderate) | transitiv (u. a. Lint und Codegenerierung) | Aktualisierung auf 1.1.21, 2.1.7, 5.0.12 | 2026-11-17 |
+| `browserslist` 4.28.4 | High | behoben (WP-654, 2026-10-28) | GHSA-c83g-rgw3-j3cx, GHSA-73wf-gq98-2v4g | transitiv (Build) | Aktualisierung auf 4.29.5 | 2026-11-17 |
+| `source-map-js` 1.2.1 | High | behoben (WP-654, 2026-10-28) | GHSA-68fv-2mgg-jv7q | transitiv über `postcss` (Build) | Aktualisierung auf 1.2.2 | 2026-11-17 |
+
+Offen sind nur die zwei Moderate der Produktionsabhängigkeiten
+`react-router` und `react-router-dom` 6.30.4 (GHSA-wrjc-x8rr-h8h6,
+GHSA-337j-9hxr-rhxg; npm audit meldet den Fix 6.30.6 ohne Major-Sprung).
+WP-654 ändert die ausgelieferten Pakete nicht; sie folgen der nächsten
+Aktualisierung, SEC-11 setzt für Moderate keine Frist.
+
+## Läufe auf dem Release-Kandidaten
+
+WP-595 (`t5-rc-evidence`): Release-Kandidat ist der Stand von `main` nach
+dem Merge aller Korrektur-WPs mit dem Tag `v1.0.0-rc.<n>`. Die Läufe führt
+nur WP-595 aus; WP-600 übernimmt ihre Lauf-IDs und wiederholt Läufe nur bei
+Commits nach dem Tag. Ein roter Lauf steht hier mit Ursache und Folge-WP.
+Die übrigen Läufe stehen in `docs/acceptance/g1-gate.md` (Abschnitt „Läufe
+auf dem Release-Kandidaten“) und `docs/acceptance/g1-installation.md`.
+
+| Punkt | Wert |
+|---|---|
+| Tag | `v1.0.0-rc.<n>`: RC-Lauf ausstehend (WP-595) |
+| Commit | RC-Lauf ausstehend (WP-595) |
+
+| Workflow | Jobs | Lauf | Ergebnis |
+|---|---|---|---|
+| `ci.yml` | `govulncheck` (backend, collector, edgecore) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `ci.yml` | `npm-audit` | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `ci.yml` | `image-scan` (vier Images) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `ci.yml` | `traceability`, `gate` und alle übrigen Jobs (Regression) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `release.yml` | Pre-Release mit SBOMs, Sigstore-Bundles, Image-Signaturen, SBOM-Attestierungen und dem `cosign_real`-Test | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
 
 ## ASVS Level 2 – Abgleich je Kapitel
 
@@ -119,7 +298,7 @@ im CI-Lauf des Release-Kandidaten erneut; dieser Lauf steht aus.
 | V1 Architektur | Threat-Model, Mandantentrennung in der DB (RLS FORCE), ein DB-Einstieg `WithTenant` | `docs/security/threat-model.md`, `backend/internal/tenant/rls/` |
 | V2 Authentisierung | OIDC mit PKCE über Keycloak, MFA für Operatoren, API-Schlüssel mit Hash und Ablauf | T1, T2, T15 |
 | V3 Sessions | RS256-JWT mit 15 min, Refresh-Rotation, Widerruf über Redis | T1 |
-| V4 Zugriffskontrolle | Routen-Rechte-Tabelle (fail closed), Scopes je Client/Site/Team, Kanalmatrix | T6, T7, `backend/internal/server/authz_test.go` |
+| V4 Zugriffskontrolle | Routen-Rechte-Tabelle (fail closed), Scopes je Client/Site/Team; Kanalmatrix mit 29 Kanälen für jede der 6 Scope-Arten seit WP-409 (30 mit den Benachrichtigungskanälen seit WP-689), Lücken davor und außerhalb der Matrix im Abschnitt „Kanalmatrix: Kanal × Scope-Art“ | T6, T7, `backend/internal/server/authz_test.go`, `backend/internal/tenant/rls/channel_matrix_integration_test.go` |
 | V5 Validierung | OpenAPI-Validierung der Anfragen, typisierte Fehler (RFC 7807) | `backend/internal/middleware/` (Validation) |
 | V7 Logging | Audit-Kette, Redaktion personenbezogener Daten | T16, T17 |
 | V8 Datenschutz | PII-Vault, Envelope-Encryption der Credentials | T17 |
@@ -129,21 +308,293 @@ im CI-Lauf des Release-Kandidaten erneut; dieser Lauf steht aus.
 | V13 API | Rate-Limits, Idempotenz, GraphQL-Limits, keine Introspection in production | T3, T4, T5 |
 | V14 Konfiguration | Fail-closed-Start außerhalb development, Feature-Gates je Modul | `backend/internal/config/`, WP-214 |
 
+### Kanalmatrix: Kanal × Scope-Art
+
+`TestChannelMatrix` (`backend/internal/tenant/rls/channel_matrix_integration_test.go`)
+läuft seit WP-409 (`t1-channel-matrix`, `52ac11d`) tabellengetrieben über
+`rls.Channels` und `rls.ScopeKinds` (`backend/internal/tenant/rls/matrix_fixtures.go`):
+
+- Scope-Arten: Org, Client, Site, Team, Mehrfach (zwei Clients, eine Site)
+  und die andere Organisation, dazu ein zweiter org-weiter Nutzer der
+  Organisation.
+- Lesend (27 Kanäle, 28 seit WP-689): CIs, Suche, Export, Topologie, Impact, Metriken,
+  Beziehungen, Sites, Gebäude, Räume, Racks mit Layout, Mounts, Review-Items
+  mit und ohne Kandidaten, Webhooks, Benachrichtigungen,
+  Benachrichtigungskanäle mit Zustellungen (seit WP-689), Jobs, Export-Jobs und
+  je GraphQL-Query-Feld ein Kanal (`cis`, `ci`, `relationships`,
+  `currentUser`, `topology`, `rackLayout`, `searchEverything`, `reviewInbox`,
+  `jobs`).
+- Schreibend (15 Kanäle, 16 seit WP-689): CIs, Beziehungen, Sites, Gebäude, Räume, Racks,
+  Mounts, Review-Items mit und ohne Kandidaten, Webhooks, Benachrichtigungen,
+  Benachrichtigungskanäle (seit WP-689), Jobs, Export-Jobs, Ingest und Verweise auf Objekte der anderen Organisation
+  (`reference`: Kontakte, Subnetze über Client und VRF, Kontaktlinks,
+  Discovery-Scopes, Rollenzuweisungen über Benutzer und Rolle).
+- Jede der 294 Kombinationen aus Kanal, Nutzer und Lesen bzw. Schreiben prüft
+  den exakten Status: 2xx im Scope, 404 außerhalb und für die andere
+  Organisation, 403, 409 oder 422 nach Fall, nie 5xx. Schreibzugriffe prüft
+  sie zusätzlich per SELECT auf ihre Wirkung. Ein Kanal ohne Matrixzeile und
+  ein GraphQL-Query-Feld ohne Kanal lassen den Test scheitern.
+- Lauf am 2026-10-25 auf `425a655`: 294 Subtests grün.
+
+Fehlende Kombinationen:
+
+- Bis WP-409 prüfte die Matrix (WP-208) Locations nur über `/sites`,
+  Review-Items nur mit Kandidaten, Webhooks, Jobs und Benachrichtigungen nur
+  lesend und GraphQL nur über `cis` (F-058). Racks, Mounts und `rackLayout`
+  unter Site-Scope fehlten. Deshalb blieb SR-12 unentdeckt, und V4 und SR-03
+  zitierten die Matrix bis 2026-10-25 zu Unrecht als Beleg für Racks (F-040).
+  Review-Items ohne Kandidaten fehlten ebenso (SR-13). Seit WP-409 läuft
+  jeder Kanal der Tabelle für jede Scope-Art.
+- Nicht in `rls.Channels` stehen die übrigen REST-Ressourcen mit
+  Mandantendaten. Dazu gehören Kontakte, Credentials, IPAM, Collectoren,
+  Audit-Log, Historie, gespeicherte Sichten, Benutzer, Rollen und
+  API-Schlüssel sowie die Modul-Objekte Dokumente, Wartungsfenster,
+  Compliance und Assets; Discovery-Scopes und Rollenzuweisungen nur als
+  Verweise. Für sie prüfen die Scope-Tests der Pakete
+  (`backend/internal/*/*_scope_integration_test.go`) die Repository-Ebene
+  und `TestRLSMatrix` jede Mandantentabelle mit Principals jeder Scope-Art
+  (lokal grün auf `425a655`). Eigene Tests haben die Compliance-Auswertung
+  (SR-14), Dokumente und Wartungsfenster (SR-15) und die Scope-Kette des
+  Site-Grants (SR-25). Einen HTTP-Lauf je Scope-Art hat die Matrix für diese
+  Ressourcen nicht.
+- Audit-Log (F-389, WP-660): Die Audit-Liste filterte für eingeschränkte
+  Principals nur die Domänentypen `ci`, `asset`, `contact`, `credential`,
+  `document` und `ticket`; die Einträge des Routen-Audits (`racks`,
+  `relationships`, `assets` …) zeigte sie mit Namen und alten und neuen
+  Werten auch für Objekte fremder Clients und Sites. Seit WP-660 hat jeder
+  Typ, den ein Auditor schreibt, eine Scope-Regel (`audit/scope.go`): sichtbar
+  ist ein Eintrag nur, wenn der Principal die genannte Zeile lesen darf;
+  unbekannte Typen sind verborgen. HTTP-Lauf für Client- und Site-Scope mit
+  org-weiter Kontrolle: `TestAuditLogHidesForeignClientRouteEntries`
+  (`backend/internal/server/audit_log_scope_integration_test.go`);
+  Architekturtests `TestEveryAuditedRouteHasAScopeRule` und
+  `TestEveryRecordedResourceTypeHasAScopeRule`. Der Audit-Anteil der
+  CI-Historie (`GET /history/ci/{id}`, F-410, WP-681) liest seither auch die
+  Routeneinträge `cis`, `ci-contacts` und `network-interfaces` des CI und
+  wendet dieselbe Regel an (`audit.VisibleEntries`): Ein eingeschränkter
+  Principal sieht dort nur Einträge, die ihm die Audit-Liste zeigt
+  (`TestCIHistoryIncludesRouteAuditOfCISubresources`,
+  `backend/internal/server/history_route_audit_integration_test.go`).
+- Rollendefinitionen (F-396, WP-667): Die Grant-Obergrenze von WP-394/WP-395
+  galt für das Zuweisen und Entziehen, über die Rollendefinition aber nur für
+  hinzugefügte Rechte. Ein client-gebundener Inhaber von `role:manage`
+  durfte eine org-weite Zuweisung nicht entziehen (403), leerte aber dieselbe
+  Custom-Rolle (`PATCH /roles/{id}`), löschte sie samt Zuweisungen
+  (`DELETE /roles/{id}`) oder nahm einer Standardrolle hinzugefügte Rechte
+  (`PUT /roles/{id}/permissions`). Seit WP-667 verlangt jedes Entfernen von
+  Rechten und jedes Löschen einer Rolle die Entzugs-Obergrenze für jede
+  Zuweisung der Rolle (Benutzer und Service-Accounts;
+  `permission.CheckRoleNarrowing`), sonst 403 ohne Änderung. HTTP-Lauf über
+  den Produktionsrouter: `TestRoleDefinitionChangeNeverReachesBeyondCallerScope`
+  (`backend/internal/user/role_definition_ceiling_integration_test.go`).
+- Benachrichtigungskanäle (F-418, WP-689): Kanäle und Zustellungen gehören
+  der Organisation, nicht einem Client: Ein Kanal erhält die
+  Benachrichtigungen aller Clients, eine Zustellung nennt Empfänger aller
+  Clients. Die Routen prüften nur `notification:manage` in irgendeinem Scope.
+  Ein client-gebundener Inhaber las alle Kanäle und Zustellungen (mit Name
+  und E-Mail fremder Empfänger), legte einen Webhook-Kanal an, der die
+  Benachrichtigungen anderer Clients mit deren Empfängern erhielt, und
+  änderte oder löschte die Kanäle der Organisation. Seit WP-689 verwalten
+  nur org-weite Inhaber von `notification:manage` die Kanäle und lesen die
+  Zustellungen (`identity.HoldsOrgWide`, dasselbe Muster wie `PATCH /org`
+  für F-359); ein an Client, Site oder Team gebundener Inhaber erhält auf
+  allen sechs Routen 403 ohne Wirkung. Webhook-Kanäle bleiben damit
+  dokumentierte org-weite Ziele. HTTP-Lauf mit Principals, die wie beim
+  Login aus der Datenbank aufgelöst werden:
+  `TestNotificationAdministrationRequiresOrgWideScope`
+  (`backend/internal/server/notification_channel_scope_integration_test.go`);
+  Matrixzeile `notification-channels` für jede Scope-Art.
+- Raumlayout (F-427, WP-698): Das Layout eines Raums (`room.layout`, CI-Id →
+  Position) wurde ungefiltert ausgeliefert. Wechselte ein CI zu einem
+  anderen Client, lasen client-gebundene Nutzer des alten Raums dessen Id und
+  Position; ihr nächster PATCH scheiterte mit 422 oder löschte fremde
+  Einträge. Seit WP-698 liefern `GET /rooms`, `GET /rooms/{id}` und die
+  PATCH-Antwort nur Einträge von CIs, die der Aufrufer sieht, die nicht
+  gelöscht sind und im Raum stehen; ein PATCH ersetzt nur diese Einträge und
+  behält die für den Aufrufer unsichtbaren unter der Zeilensperre des Raums.
+  Ein Schlüssel muss ein solches CI sein; ein CI eines anderen Clients wird
+  wie eine unbekannte Id abgelehnt (422 mit demselben Text, kein
+  Existenz-Orakel). Test: `TestRoomLayoutForeignClientEntriesAgainstPostgres`
+  (`backend/internal/tenantapi/room_layout_integration_test.go`).
+- Die endgültige Formulierung nach WP-409 auf dem Release-Kandidaten
+  übernimmt WP-595 (`t5-rc-evidence`).
+
 ## Neue Befunde
 
 | ID | Severity | Status | Befund | Maßnahme |
 |---|---|---|---|---|
+| SR-12 | Critical | **behoben** (WP-340) | Site-Scope-Bypass im Rack-Kanal (F-002 des Phase-1-Abnahmeaudits): `rackVisible` verband Raum und Gebäude per LEFT JOIN und ließ `building.site_id IS NULL` zu. War das Gebäude für einen site-gescopten Principal unsichtbar, wurde das Rack sichtbar. Racks fremder Sites, auch anderer Clients (etwa für einen Principal mit Client 1 und Site 1), waren über Liste, Detail, Layout, Mounts und GraphQL `rackLayout` lesbar und per DELETE löschbar; der location-Eintrag verwaiste. Severity nach dem Bewertungsschema: Critical (Scope-Isolation; nach TEN-09 ist jede Cross-Client-Exposition Critical). Der Befund fehlte im Review bis 2026-10-25, und V4 und SR-03 zitierten die Kanalmatrix als Beleg für Racks, obwohl sie Racks unter Site-Scope nicht prüfte (F-040). | WP-340 (`t1-rack-site-scope`, `5b29d6f`): `rackVisible` prüft die Location-Zeile des Racks, deren Policy Org-, Client- und Site-Scope erzwingt; `ListMounts` antwortet für fremde Racks 404; `deskVisible` ist gleich korrigiert. Seit WP-393 (`t1-located-site-scope`, Migration 000152) tragen Räume und Racks `site_id` mit RLS. Nachweis: `TestRackChannelSiteScope` (`backend/internal/tenant/rls/rack_channel_scope_integration_test.go`), lokal grün auf `425a655`; Matrixzeilen `rack`, `mount` und `graphql-rack-layout` für jede Scope-Art (WP-409). |
+| SR-13 | Critical | **behoben** (WP-342) | Review-Items ohne Kandidaten leaken über Clients (F-003 des Phase-1-Abnahmeaudits): `review_item` trug weder Client noch Site (Policy nur auf die Organisation), und das Go-Prädikat „alle Kandidaten sichtbar“ war für leere `candidate_ci_ids` immer wahr. Ein Client-1-Principal mit `discovery:read` listete, las und verwarf Items zu Geräten, Collectoren und Subnetzen von Client 2 (Gerätename, Management-IP, Seriennummer, Rohdaten, CIDR), über REST und GraphQL `reviewInbox`. Severity nach dem Bewertungsschema: Critical (Scope-Isolation, Integritätsverlust). | WP-342 (`t1-review-scope`, `c8225dd`): Migration 000140 leitet `client_id` und `site_id` des Items aus den Kandidaten bzw. dem Collector ab, die Policies prüfen Client und Site, kandidatenlose Items sind für gescopte Principals fail-closed. Nachweis: `TestReviewItemsWithoutCandidatesStayInClientScope` und `TestReviewItemRowsCarryClientScope` (`backend/internal/tenant/rls/review_item_scope_integration_test.go`), lokal grün auf `425a655`; Matrixzeile `review-without-candidates` für jede Scope-Art (WP-409). |
 | SR-01 | High | **behoben** (WP-208) | Mandantenübergreifende Client-Verweise: Fremdschlüssel auf `client` prüfen nur die ID und laufen ohne RLS. Organisation B konnte Standorte, CIs, Kontakte und Subnetze mit einem Client von Organisation A anlegen. | Migration 000136: alle 21 Verweise auf `client` mit Organisation; Kanalmatrix und `TestClientReferencesCarryOrganization` verhindern Regressionen. |
 | SR-07 | High | **behoben** (WP-207-Nachtrag) | Discovery während einer manuellen Änderung: Die zentrale Schreibentscheidung lief vor der Schreibtransaktion. Ein Override, das dazwischen committet wurde, schützte den Wert nicht, und `ci.model` trug den Discovery-Wert trotz geschütztem Override (gefunden von `TestDiscoveryConcurrency`). | Das CI-Repository entfernt Felder mit Override aus automatisierten Schreibvorgängen unter der Zeilensperre (`dropOverriddenFields`); deterministischer Test `TestAutomatedWriteKeepsOverride`. |
 | SR-02 | High | **behoben** (WP-332 bis WP-334) | Ingest-Durchsatz im Erstlauf (WP-206) 58 statt 200 Records/s je Instanz (NFR-03). Unter Dauerlast staute sich die Queue, die Verzögerung stieg über 30 s (Verfügbarkeit). Datenverlust trat nicht auf, die Queue ist persistent. | G1-Nachbesserung: eine Transaktion je Record (WP-332), Batch-Schreibpfad für neue Geräte (WP-333), parallele Spuren mit Identitätssperre (WP-334; E-56 entschieden: Option 1 mit Identitätssperre). Wiederholungslauf auf Commit `dbbfded` mit 4 Spuren (Standard): Abbau ab Sendeende 233 Records/s, Verzögerung Record → sichtbar höchstens 3,1 s bei 200 Records/s Angebot, Spool-Flush von 10.000 Records in 35,9 s, kein fehlender Record (`docs/acceptance/lasttest-g1.md`). Mit einer Spur (`RETICORA_INGEST_LANES=1`) 182 Records/s, das verfehlt NFR-03. Reserve: SR-08; Referenzumgebung: SR-06. |
+| SR-11 | High | **behoben** (WP-418) | Vorbestehend (schon auf `02ebb76`, nicht durch die G1-Nachbesserung), gefunden im Gesamtreview: Der Indexing-Decorator des CI-Repositorys (`ci.NewIndexingRepository`, `backend/internal/ci/indexing_repository.go`) reichte die optionalen Schnittstellen `Restore` und `UniqueConflicts` nicht durch, und `main.go` legte ihn in der Produktion immer um das CI-Repository. Das Auflösen eines Reviews `resurrected_device` mit `merge` antwortete in der Produktion 501 („this repository cannot reactivate CIs“); „reaktivieren“ aus CI-13 war in der Produktionsverdrahtung nicht nutzbar. Die Vorabprüfung eindeutiger Attribute (MET-15) entfiel; den Konflikt fing nur der Unique-Index der Datenbank (DB-04). Das Wiederherstellen per `POST /cis/{id}/restore` (CI-05) war nicht betroffen. Severity nach dem Bewertungsschema: High, weil eine Kernfunktion mit Tag [B] in der Produktion fehlte und das ein Gate sperrt. Die Fassung vom 2026-10-15 führte SR-11 als Low (F-119). | WP-418 (`t5-sr11-decorator`, `423a538`): Der Decorator reicht `Restore` (mit Neuindizierung) und `UniqueConflicts` durch; `bootstrap.NewCIRepository` baut die Kette wie `main.go`. Nachweis: `TestAuditT5CIReactivationThroughProductionDecoratorChain` (`backend/internal/tenant/rls/ci_decorator_chain_integration_test.go`; Kette aus `main.go`: `merge` 200, CI reaktiviert, Audit `ci.restored`, Suchdokument, Principal eines anderen Clients 404, eindeutiges Attribut 409), lokal grün auf `425a655`; `TestIndexingRepositoryForwardsOptionalInterfaces`. CI-13 ist erst nach WP-369 (`t3-resurrect-new`, F-022, `44a0db2`) abgenommen: Bis dahin legte „neues CI“ bei `resurrected_device` ein org-weites CI ohne Identität an. Den Gate-Status von CI-13 und MET-15 setzt WP-595 (`t5-rc-evidence`). |
 | SR-05 | Medium | **behoben** (WP-335) | Impact im Worst Case (ganze Organisation, 10.000 CIs) im Erstlauf unter Parallellast p95 2,39 s statt < 2 s; Antwort ca. 5 MB. | Adaptive Kantenlesung, schlanke Knotenprojektion, `hops` und `via` je CI. Die Oberfläche fragt die kompakte Form über den Sparse-Fieldset `fields=` ab (API-02); die Standardantwort ist nur additiv erweitert (E-57 entschieden: Option A). Wiederholungslauf auf Commit `dbbfded`: p95 477 ms (kompakte Form) und 546 ms (Standardform mit Pfaden); kompakte Antwort 2,39 MB (239 Byte je betroffenem CI). Referenzumgebung: SR-06. |
-| SR-03 | Medium | offen | Von 194 Fremdschlüsseln zwischen Mandantentabellen enthalten 178 die Organisation nicht. Die Anwendung prüft referenzierte Objekte unter RLS; die Kanalmatrix belegt das für 13 Schreibpfade (Standorte, Racks, Mounts, CIs, Kanten, Kontakte, Subnetze, Scopes, Rollen). Die Datenbank allein verhindert fremde Verweise nicht (Defense in Depth). | Folge-WP: zusammengesetzte Fremdschlüssel nach dem Muster von 000136, priorisiert nach Schreibpfaden. |
-| SR-04 | Medium | offen | Ausdrucksindizes mit nicht-leakproof Funktionen sind unter RLS für die App-Rolle unbenutzbar. `idx_ci_fts` (`to_tsvector`) führt zu linearem Aufwand bei der Volltextsuche (Verfügbarkeit bei großen Beständen). Für Hostname und FQDN ist das mit 000134 behoben. Dieselbe Ursache hat der Abgleich über Fingerprint-MACs im Ingest (`jsonb`-Containment): Er liest je Batch alle CIs der Organisation (WP-333; vorher je Record mit MACs). | Folge-WP: gespeicherte `tsvector`-Spalte mit Index; Katalogtest gegen neue Ausdrucksindizes auf RLS-Tabellen; für Fingerprint-MACs eine Seitentabelle mit B-Baum-Index (Migration). |
+| SR-03 | Medium | offen | Von 194 Fremdschlüsseln zwischen Mandantentabellen enthalten 178 die Organisation nicht (Zählung der Erstfassung). Die Anwendung prüft referenzierte Objekte unter RLS. Die Kanalmatrix belegt das seit WP-409 (`t1-channel-matrix`) für jede Scope-Art: in den Schreibzeilen mit Elternobjekt oder Verweis (Gebäude, Räume, Racks, Mounts, CIs, Kanten, Ingest) und in der Zeile `reference` für Verweise auf Objekte der anderen Organisation (Kontakte, Subnetze über Client und VRF, Kontaktlinks, Discovery-Scopes, Rollenzuweisungen über Benutzer und Rolle). Bis WP-409 prüfte sie Racks unter Site-Scope nicht (F-040, SR-12); fehlende Kombinationen im Abschnitt „Kanalmatrix: Kanal × Scope-Art“. Die Datenbank allein verhindert fremde Verweise nicht (Defense in Depth). | Folge-WP: zusammengesetzte Fremdschlüssel nach dem Muster von 000136, priorisiert nach Schreibpfaden. |
+| SR-04 | Medium | offen (MAC- und Attributklasse **behoben**, WP-434, WP-435) | Ausdrucksindizes mit nicht-leakproof Funktionen sind unter RLS für die App-Rolle unbenutzbar. `idx_ci_fts` (`to_tsvector`) führt zu linearem Aufwand bei der Volltextsuche (Verfügbarkeit bei großen Beständen). Für Hostname und FQDN ist das mit 000134 behoben. Dieselbe Ursache hatte der Abgleich über Fingerprint-MACs im Ingest (`jsonb`-Containment, F-114 Identitätsteil): Er las je Batch alle CIs der Organisation (WP-333; vorher je Record mit MACs). Behoben mit Migration 000161 (WP-434): Primäre und Interface-MACs stehen in der Seitentabelle `ci_identity_mac` (B-Baum-Index `(organization_id, mac)`, ENABLE + FORCE RLS mit den Policies von `ci`, gepflegt vom Trigger auf `ci` mit den Rechten des Schreibenden); die Identitätssuche vergleicht nur mit leakproof-Gleichheit. Nachweis: `TestAuditIdentitySearchWithMACsUsesIndexes` (als `reticora_app` kein Seq Scan auf `ci`, Index von `ci_identity_mac`), Wiederentdeckung über die Queue mit 10.500 CIs ohne Organisations-Scan (`TestReconciliationBeyondTenThousandCIs`). Dieselbe Ursache hatte der Attributfilter der CI-Liste (F-114 Attributteil): `attributes ->> key` (`jsonb_object_field_text`, nicht leakproof) machte die Ausdrucksindizes `idx_attr_<id>` für die App-Rolle unbenutzbar (als Owner Index Scan, als `reticora_app` Seq Scan über die Organisation). Behoben mit Migration 000162 (WP-435, E-73 Übergangsregel Option A): Index und Filter nutzen `reticora_attr_text(jsonb, text)`, `->>` als LEAKPROOF-Funktion; der DDL-Job baut bestehende Indizes einmalig neu (der alte erst nach gültigem neuem gelöscht). Sicherheitsreview der Funktion: PL/pgSQL (nie inlinebar, sonst löste der Planer sie zu `->>` auf), IMMUTABLE STRICT PARALLEL SAFE, SECURITY INVOKER, `search_path = pg_catalog`, Eigentümer Superuser (nur er kann sie ändern); sie wirft für keine Eingabe und nennt keinen Wert in einer Meldung (NULL, Nicht-Objekte, Arrays, Skalare, fehlende, leere und 10-MB-Schlüssel, 10-MB-Werte, 1.000 Ebenen tief: `TestAttrTextIsLeakproof`). Offen bleiben wie bei den leakproof-Funktionen von PostgreSQL nur Ressourcengrenzen (Speicher, Abbruch; ein Containerwert mit JSON-Text über 1 GB). LEAKPROOF verlangt Superuser bei der Migration; ohne ihn bricht 000162 mit Verweis auf E-73 Option B ab. Nachweis: `TestAttributeFilterUsesIndexUnderRLS` (Produkt-SQL der Liste als `reticora_app`, org-weit und client-gescopt: Index Scan using `idx_attr_<id>` mit dem Attributwert in der Indexbedingung; Negativfall ohne Index), `TestAttributeIndexRebuild` (Neuaufbau, Unique-Semantik, Abbrüche). | Folge-WP: gespeicherte `tsvector`-Spalte mit Index; Katalogtest gegen neue Ausdrucksindizes auf RLS-Tabellen. |
 | SR-08 | Low | offen | Die Reserve bei NFR-03 ist knapp (Verfügbarkeit). Mit Spuren begrenzt der Abschnitt unter den Advisory-Locks von Audit-Kette und Event-Outbox je Organisation den Durchsatz. Darin berechnet der Trigger der Outbox-Nummerierung (Migration 000120, `event_outbox_number()`) je Zeile `max(sequence)` über die Events der Organisation; mit veralteter Statistik aggregiert der Plan über alle Events. Ebenso wählen die Batch-Kandidatenabfragen (WP-333) nach großen Importen bis zur nächsten Analyse Pläne über die ganze Organisation. Frühere Läufe desselben Codes lagen bei 210–233 Records/s. | Folge-WP mit Migration: Zähler je Organisation oder `ORDER BY sequence DESC LIMIT 1`; das verkürzt den Lock-Abschnitt von etwa 200 ms auf etwa 20 ms je Batch. `ANALYZE` nach Massenimport oder robuste Abfrageform. |
 | SR-09 | Low | offen | `max_cis` (ENT-03) hat mit Spuren zwei kleine Überschreitungsfenster. `AdoptUnlicensed` (Anlage offener `unlicensed_ci`-Einträge, wenn das Limit steigt) nimmt die `max_cis`-Sperre nicht und kann gleichzeitig mit dem Ingest anlegen (vorbestehend). Drain-Spuren nach dem Verringern der Spurzahl können das Limit je um höchstens 100 überschreiten. | Folge-WP: `AdoptUnlicensed` nimmt die `max_cis`-Sperre der Organisation und zählt in der Transaktion neu wie der Ingest (WP-334). Drain-Spuren sind in `docs/betrieb/ingest-spuren.md` beschrieben. |
 | SR-10 | Low | offen | Ein Record mit mehr als 256 Identitätsschlüsseln (Stack oder Chassis mit vielen Port-MACs, Record mit Tausenden MACs) nimmt die Identitätssperre seiner Organisation exklusiv. Für die Dauer seiner Transaktion warten alle sperrenden Ingest-Transaktionen dieser Organisation. Andere Organisationen warten nur, soweit ihre Records im selben Spur-Batch dahinter stehen. Der DeviceRecord-Vertrag begrenzt die Zahl der MACs und Interfaces nicht. Die Lock-Tabelle des Clusters bleibt geschützt (Abschnitt „G1-Nachbesserung“). | Folge-WP: Obergrenze für MACs und Interfaces je Record (Änderung des DeviceRecord-Vertrags, API-01) oder konfigurierbare Sperrgrenze. |
-| SR-11 | Low | offen | Vorbestehend (schon auf `02ebb76`, nicht durch die G1-Nachbesserung), gefunden im Gesamtreview: Der Indexing-Decorator des CI-Repositorys (`ci.NewIndexingRepository`, `backend/internal/ci/indexing_repository.go`) reicht die optionalen Schnittstellen `Restore` und `UniqueConflicts` nicht durch. `main.go` legt ihn in der Produktion immer um das CI-Repository. Folgen: Das Auflösen eines Reviews `resurrected_device` mit `merge` antwortet in der Produktion 501 („this repository cannot reactivate CIs“); „reaktivieren“ aus CI-13 ist damit in der Produktionsverdrahtung nicht nutzbar. `resurrect_test.go` nutzt das Repository ohne Decorator und sieht das nicht. Die Vorabprüfung eindeutiger Attribute (MET-15) entfällt; den Konflikt fängt nur der Unique-Index der Datenbank (DB-04). Mandantentrennung und Eindeutigkeit bleiben gewahrt; das Wiederherstellen per `POST /cis/{id}/restore` (CI-05) ist nicht betroffen. | Folge-WP außerhalb der G1-Nachbesserung: `Restore` (weiterreichen und neu indizieren) und `UniqueConflicts` (weiterreichen) im Decorator ergänzen; ein Test baut die Kette aus `main.go` (PostgreSQL, Such- und KI-Decorator) und prüft jede optionale Schnittstelle, die Aufrufer erwarten (`ciRestorer`, `UniqueChecker`, `BatchCreator`, `NodeReader`, `BatchReader`, `TypeChanger`, `Merger`, `Restorer`). |
 | SR-06 | Info | offen | Der Lasttest lief nicht auf einem dedizierten Referenzhost. Auch der Wiederholungslauf auf Commit `dbbfded` lief auf einem Host mit 4 vCPU und 15 GB RAM, den sich PostgreSQL, NATS, Redis, Server und k6 teilten (Größenklasse des Mindestsizings nach INS-07). | E-58 (entschieden am 2026-10-15, Option 1): Der Auftraggeber erkennt den Lastnachweis auf 4-vCPU-Hosts als G1-Nachweis für GATE-03 an, mit Auflagen, darunter mindestens ein grüner `load.yml`-Lauf auf dem Commit des Release-Kandidaten und ein dedizierter Referenzhost vor GA. Die Auflage des `load.yml`-Laufs ist für Commit `918a832` erfüllt: Seit `458a96d` läuft jedes Szenario in `load.yml` als eigener Job mit frischem Seed und `ANALYZE`, und Run 38665599979 auf dem Standard-Runner `ubuntu-latest` (4 CPUs, 15,61 GB RAM) hält alle Schwellen ein, zweiter Nachweis neben dem lokalen Lauf (`docs/acceptance/lasttest-g1.md`). SR-06 bleibt offen, bis vor GA ein dedizierter Referenzhost bereitsteht; G1 sperrt es nicht. Nächtlicher Lauf `load.yml`, nach dem Merge auf dem Release-Kandidaten; dedizierter Referenzhost vor GA. |
+
+## Befunde des Phase-1-Abnahmeaudits
+
+Das Phase-1-Abnahmeaudit (`audit/phase1-final/PHASE1_FINDINGS.md`,
+2026-10-18) führt 16 P0-Befunde. F-002 und F-003 sind SR-12 und SR-13
+(oben); F-016 (CI-Dialog mit fest kodierten Typschlüsseln) hat keine
+Sicherheitswirkung. Die übrigen 13 stehen hier:
+
+- Severity nach dem Bewertungsschema (`docs/audit/README.md`): Critical, weil
+  jeder Befund die Mandanten- oder Scope-Isolation bricht, Zugangsdaten
+  preisgibt oder Rechte ausweitet (Auth-Bypass).
+- Korrektur-WP nach der Tabelle „Schwere Befunde (P0/P1) und ihre Korrektur“
+  in `docs/plan/g1-korrektur/implementierungsplan.md`; alle sind gemergt.
+- Status nach dem Stand `425a655`: behoben, wenn der Nachweis ein regulärer
+  Test ohne Build-Tag `auditdefect` ist und grün läuft. Das gilt für alle 13.
+- Lauf am 2026-10-25 auf `425a655` (PostgreSQL mit TimescaleDB 2.31.0 und
+  Migration 000160, NATS 2.10.29, Redis, `go test -count=1 -p 1`): die 20
+  genannten Backend-Tests (8 Pakete) und 4 Collector-Tests (4 Pakete) sind
+  grün, keiner ist übersprungen.
+- Die Real-Stack-Nachweise von SR-16 und SR-25 laufen nur im CI-Job
+  `install-smoke` und sind hier nicht ausgeführt. Die Läufe auf dem
+  Release-Kandidaten übernimmt WP-595 (`t5-rc-evidence`).
+
+| ID | Severity | Status | Befund | Korrektur-WP | Nachweis |
+|---|---|---|---|---|---|
+| SR-14 | Critical | **behoben** | F-001: Die Compliance-Auswertung durch einen client-gescopten Principal (Standardrolle engineer) lieferte und überschrieb die Ergebnisse der CIs anderer Clients; der Evaluator ersetzte den Scope des Aufrufers durch einen org-weiten. | WP-339 (`t1-compliance-scope`, `e721281`): Auswertung nur für org-weite Principals, sonst 403. | `TestComplianceEvaluationStaysInCallerScope` (`backend/internal/tenant/rls/compliance_channel_integration_test.go`) |
+| SR-15 | Critical | **behoben** | F-004: Ein teilgescopter Principal änderte und löschte geteilte Dokumente und Wartungsfenster; die FK-Kaskade entfernte die Links anderer Clients. | WP-341 (`t1-doc-window-writes`, `b7aff9a`): Schreiben nur bei vollständig sichtbaren Links (Migration 000139). | `TestDocumentWritesOutsideScope`, `TestMaintenanceWindowWritesOutsideScope` (`backend/internal/tenant/rls/module_object_writes_integration_test.go`) |
+| SR-16 | Critical | **behoben** | F-005: Keine MFA-Pflicht für org_admins aus Signup, Einladung, Operator-Pfad, Rollenzuweisung, IdP-Gruppe, Default-Rolle und Realm-Gruppe reticora-admin; die Konten waren nur durch ein Passwort geschützt. | WP-367 (`t2-mfa-login-path`, `6562ad5`); Teile WP-357 (`t2-mfa-accounts`, `07fb145`) und WP-358 (`t2-mfa-role-sync`, `00b2e4e`). | `TestAuditT2FirstOrgAdminAccountRequiresMFA`, `TestAuditT2RealmAdminGroupRequiresMFA` (`backend/internal/signup/mfa_test.go`); `TestRoleAssignmentOrgAdminRequiresMFA`, `TestInvitationAcceptanceOrgAdminRequiresMFA`, `TestFirstLoginWithOrgAdminInvitationRequiresMFA` (`backend/internal/user/role_assignment_mfa_test.go`); `TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA` (`backend/internal/identity/handler_test.go`); Real-Stack `frontend/e2e-real/mfa-admin.spec.ts` (nur CI) |
+| SR-17 | Critical | **behoben** | F-006: Jeder Halter von `apikey:manage` rotierte oder widerrief jeden API-Key der Organisation und erhielt beim Rotieren eines org-weiten Admin-Keys den Klartext eines Nachfolgers mit dessen Rechten. | WP-354 (`t2-apikey-authz`, `ae575c1`): nur Owner oder ein Aufrufer, der die Rechte des Keys im Scope des Inhabers hält. | `TestAuditT2APIKeyRotateRevokeOnlyByEntitledCaller` (`backend/internal/identity/apikey_authz_integration_test.go`) |
+| SR-18 | Critical | **behoben** | F-007: Die Bindung eines API-Keys an einen Service-Account prüfte den Scope nicht; ein client-gebundener Ersteller erhielt über einen org-weiten Service-Account einen org-weiten Key. | WP-354 (`t2-apikey-authz`, `ae575c1`): Bindung nur im Scope des Erstellers, sonst 403. Die Prüfung galt nur beim Binden: Spätere org-weite Rollen des Accounts machten einen schon gebundenen Key eines client-beschränkten Erstellers org-weit (F-397). WP-668 (`k7n-bound-key-creator-scope`, Migration 000185): Der Key speichert den Scope des Erstellers je Recht und handelt bei jeder Anfrage nur im Schnitt mit den aktuellen Rechten des Accounts; Keys von vor 000185 höchstens mit den aktuellen Rechten ihres Erstellers (`docs/betrieb/upgrade-hinweise.md`). | `TestAuditT2KeyBindingNeverBroadensCreatorScope`, `TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening` (`backend/internal/identity/apikey_authz_integration_test.go`), `TestBoundKeyCreatorCeiling` (`backend/internal/identity/ceiling_test.go`) |
+| SR-19 | Critical | **behoben** | F-008: Rollen eines Service-Accounts ließen sich ohne Rechte- und Scope-Prüfung zuweisen, die Route verlangte nur `user:manage`; ein Halter von `user:manage` erzeugte Admin-Service-Accounts. | WP-355 (`t2-sa-role-ceiling`, `3e58a7f`): `role:manage` und Grant-Obergrenze. | `TestAuditT2ServiceAccountRolesWithinCallerRights` (`backend/internal/identity/apikey_authz_integration_test.go`), `TestAuditT2ServiceAccountRoleAssignmentNeedsRoleManage` (`backend/internal/server/t2_auth_chain_test.go`), `TestServiceAccountRoleCeiling` (`backend/internal/user/service_account_integration_test.go`) |
+| SR-20 | Critical | **behoben** | F-009: Der Webhook-Filter stellte `ci.merged` und `relationship.removed` über CIs anderer Clients an client-gebundene Service-Accounts zu; ein Payload ohne Scope galt als org-weit. | WP-356 (`t2-webhook-bound-scope`, `4cae303`): Scope serverseitig aufgelöst, fail-closed bei unbekanntem Scope. | `TestAuditT2BoundSubscriptionGetsOnlyReadableClientEvents` (`backend/internal/webhook/bound_filter_integration_test.go`) |
+| SR-21 | Critical | **behoben** | F-010: Das WMI-Plugin sendete Zugangsdaten per HTTP Basic im Klartext (Port 5985) und im HTTPS-Modus ohne Zertifikatsprüfung; über einen Protokoll-Alias erhielt es das SSH-Konto. | WP-378 (`t4-cred-scope`, `bf8d16a`); Teil WP-377 (`t4-wmi-tls`, `70626ed`): WinRM nur über geprüftes TLS, Credentials je Art. | `TestAuditWMICredentialTransport` (`collector/plugins/wmi/wmi_test.go`), `TestAuditT2CredentialsArePerProtocol` (`collector/plugins/plugin_test.go`) |
+| SR-22 | Critical | **behoben** | F-011: Das NAS-Plugin sendete Konto und Passwort der Synology in der URL über HTTP (Port 5000) und an ungeprüftes HTTPS (5001). | WP-379 (`t4-nas-tls`, `3b798fa`): Anmeldung per POST über geprüftes TLS. | `TestAuditNASCredentialTransport` (`collector/plugins/nas/nas_test.go`) |
+| SR-23 | Critical | **behoben** | F-012: Der HTTP-Erneuerungsendpunkt war nicht an den Collector gebunden; ein Principal mit `discovery:ingest` stellte sich ein Collector-Zertifikat für den eigenen Schlüssel aus und konnte die Credential-Bundles der Scopes öffnen. | WP-375 (`t4-pki-renew-server`, `e80b75f`): Erneuerung nur über die mTLS-Identität des Collectors, HTTP-Erneuerung entfernt. | `TestAuditCertificateRenewalBoundToCollector` (`backend/internal/discovery/renew_edge_integration_test.go`) |
+| SR-24 | Critical | **behoben** | F-013: Der Collector ignorierte `credential_ids` je Scope; das erste Credential je Protokoll galt für alle Scopes, auch über Client-Grenzen. | WP-378 (`t4-cred-scope`, `bf8d16a`): Credentials je Scope und je Art. | `TestAuditPerScopeCredentials` (`collector/collectorcmd/discovery_credentials_test.go`) |
+| SR-25 | Critical | **behoben** | F-014: Ein Site-Grant setzte den Client-Scope auf „alle“; Site-Nutzer lasen Kontakte, Credential-Metadaten, Assets und unplatzierte CIs fremder Clients. | WP-392 (`t6-asset-site-scope`, `6c92576`); Teil WP-390 (`t6-site-grant-scope`, `85e117d`): Site-Grant auf den Client des Standorts begrenzt, Site-Scope für Assets. | `TestSiteGrantConfinedToClient`, `TestSiteGrantConfinedToClientAndSite` (`backend/internal/locations/sitescope_integration_test.go`); Real-Stack `frontend/e2e-real/tenant-isolation.spec.ts` T18 (nur CI) |
+| SR-26 | Critical | **behoben** | F-015: Keine Grant-Obergrenze; ein client-gescopter Inhaber von `user:manage` erzeugte org-weite org_admin-Einladungen und -Rollenzuweisungen. | WP-394 (`t6-invite-ceiling`, `ae60e06`): Zielrechte und Zielscope nur innerhalb der eigenen. | `TestAuditDefectInvitationGrantCeiling`, `TestAuditDefectRoleAssignmentGrantCeiling` (`backend/internal/user/invitation_integration_test.go`) |
+
+## Befunde der Korrektur G1 (ab F-355)
+
+Die Korrektur G1 führt ihre neuen Befunde in `audit/g1-reaudit/FINDINGS.md`
+(ab F-355, Konvention 16 des Korrekturplans): Befunde aus der Umsetzung von
+K4 bis K6 und aus der Wiederholungsprüfung K7. Die Fortschreibung vom
+2026-11-01 (WP-699, `k7n-sr-coverage-reaudit-findings`, F-428) nimmt sie auf
+dem Stand `6a499ac` ins Review auf:
+
+- Als SR-Befund (Tabelle unten) steht jeder Befund mit Sicherheitswirkung:
+  Mandanten- oder Scope-Isolation (Lesen, Schreiben oder Integrität von Daten
+  außerhalb des Scopes), Authentifizierung und Rechte, Secrets und Krypto,
+  Integrität des Audits und Offenlegung von Interna. Dazu kommen die Befunde,
+  die nach dem Bewertungsschema ohne Sicherheitswirkung Critical sind
+  (stiller Datenverlust: SR-44, SR-46), weil GATE-01 die Critical-Befunde aus
+  dem Review liest. F-397 ist Teil von SR-18 (oben).
+- Severity nach dem Bewertungsschema (`docs/audit/README.md`), unabhängig von
+  der Priorität des Befunds: Critical für Scope-Isolation, stillen
+  Datenverlust, Secrets/Krypto und Auth-Bypass; Medium und Low, wo die
+  Isolation der Objekte nicht berührt ist (nur Zähler, Interna, Konsistenz),
+  Info, wo der Befund im G1-Release nicht erreichbar ist. Die Begründung
+  steht je Zeile.
+- Status: behoben, wenn das Korrektur-WP gemergt ist und der kodierende Test
+  regulär (ohne Build-Tag `auditdefect`) grün läuft. Lauf am 2026-11-01 auf
+  `6a499ac` (PostgreSQL mit TimescaleDB 2.31.0 und Migration 000188,
+  `go test -count=1 -p 1`): die 28 genannten Go-Tests (18 Pakete) sind grün,
+  keiner ist übersprungen; `tests/audit/master-key-rotation-deploy.test.sh`
+  5 von 5 grün. Die Real-Stack- und Vitest-Nachweise laufen im CI.
+- Alle übrigen Befunde der Liste stehen mit Begründung im Abschnitt
+  „Befunde der Korrektur ohne Sicherheitswirkung“. `tests/rep01-structure.test.sh`
+  verlangt für jeden Befund P0 bis P2 der Übersicht von
+  `audit/g1-reaudit/FINDINGS.md` eine SR-Zeile, die ihn nennt, oder eine
+  Zeile dort, auch für später hinzukommende Befunde; mit `--final` darf kein
+  SR-Befund mit Critical oder High offen sein.
+
+| ID | Severity | Status | Befund | Korrektur-WP | Nachweis |
+|---|---|---|---|---|---|
+| SR-27 | Critical | **behoben** | F-359 (P2): Ein client-gebundener Inhaber von `user:manage` änderte Name, Zeitzone, Währung, Sprache und Einstellungen der Organisation, die für alle Clients gelten. Critical: Schreiben außerhalb des Scopes (Scope-Isolation, RBA-03). | WP-633 (`k4n-org-fields-scope`, `1e5ef11`): `PATCH /org` nur für org-weite Inhaber von `user:manage`, sonst 403. | `TestOrganizationFieldsRequireOrgWideUserManage` (`backend/internal/tenantapi/tenantapi_scope_integration_test.go`) |
+| SR-28 | Medium | **behoben** | F-360 (P2): Die Höhenprüfung des Racks las die Mounts unter dem Scope des Aufrufers; ein gescopter Nutzer verkleinerte ein Rack unter die Mounts eines anderen Clients. Medium: Integrität der Belegung eines anderen Clients; keine fremde Zeile gelesen oder geschrieben, nichts offengelegt. | WP-634 (`k4n-rack-height-scope`, `4b456ad`): Prüfung gegen alle Mounts, 409 ohne Angaben zum fremden Mount. | `TestAuditK4RackHeightCoversInvisibleMounts` (`backend/internal/rack/height_integration_test.go`) |
+| SR-29 | Critical | **behoben** | F-363 (P2): Nicht zugeordnete Discovery-Ergebnisse folgten der Client-Bindung ihres Collectors nicht; Scan-Rohdaten (Adressen, Gerätedaten) eines Collectors von Client 2 blieben für andere Clients lesbar. Critical: Cross-Client-Exposition (TEN-09). | WP-636 (`k5n-collector-result-scope`, `b7448cc`): Die Ergebnisse folgen Client und Site des Collectors (Trigger wie 000141, Backfill). | `TestAuditCollectorBindingMovesUnmatchedResults` (`backend/internal/tenant/rls/audit_t1_child_derivation_integration_test.go`) |
+| SR-30 | Critical | **behoben** | F-364 (P0): Der Login eines Nutzers ohne Rollenzuweisung vergab die Standardrolle org-weit neu; eine entzogene Client-Zuweisung wurde zu org-weitem Lesezugriff. Critical: Rechteausweitung über die Client-Grenze (Auth, TEN-09). | WP-637 (`k5n-login-default-role`, `b2d0cf6`): Standardrolle nur bei der Erstanlage, Login ohne Zuweisung ohne Session. | `TestAuditCallbackWithoutAssignmentIssuesNoSession` (`backend/internal/identity/callback_scope_integration_test.go`) |
+| SR-31 | Critical | **behoben** | F-365 (P2): Ein client-gescopter Principal änderte, schloss und löschte eine org-weite Inventur samt den Scans anderer Clients (E-09). Critical: Schreiben und Löschen außerhalb des Scopes; Modul Stocktake [P2], in G1 abgeschaltet (E-03). | WP-638 (`k5n-stocktake-org-writes`, `9a944b9`): Ändern, Abschließen und Löschen nur durch org-weite Principals. | `TestAuditStocktakeOrgWideWritesNeedOrgWideScope` (`backend/internal/stocktake/stocktake_scope_integration_test.go`) |
+| SR-32 | Critical | **behoben** | F-366 (P1): Arbeitsplatzbuchung, Schlüsselausgabe und Schulungszuweisung nahmen Nutzer und Kurse anderer Organisationen an (Existenzorakel, Kaskade aus der fremden Organisation). Critical: Mandantenisolation (TEN-09); Module [P4], in G1 abgeschaltet (E-03). | WP-639 (`k5n-module-org-refs`, `0232492`): nur Referenzen der eigenen Organisation, sonst wie eine unbekannte ID. | `TestAuditDeskBookingStaysInOrganization` (`backend/internal/desk/desk_scope_integration_test.go`), `TestAuditKeyIssueStaysInOrganization` (`backend/internal/keymgmt/keymgmt_scope_integration_test.go`), `TestAuditTrainingAssignmentStaysInOrganization` (`backend/internal/training/training_scope_integration_test.go`) |
+| SR-33 | High | **behoben** | F-370 (P1): Compose und Kubernetes reichten `RETICORA_MASTER_KEY_PREVIOUS` nicht an den Server; die dokumentierte Rotation des Master-Keys war nicht durchführbar. High: Krypto-Betrieb, ein Schlüssel ließ sich nicht rotieren (SEC-06); kein Secret offengelegt. | WP-642 (`k5n-master-key-previous`, `3802900`): Variable in Compose und in den Kubernetes-Manifesten (optionales Secret). | `tests/audit/master-key-rotation-deploy.test.sh` (`compose_master_key_previous`, `k8s_master_key_previous`); Real-Stack `frontend/e2e-real/key-rotation.spec.ts` K01 (nur CI) |
+| SR-34 | Medium | **behoben** | F-372 (P2): Das Fehlerfeld gespiegelter Jobs enthielt den rohen Datenbankfehler (SQLSTATE, Spaltentypen), lesbar mit `job:read`. Medium: Offenlegung von Interna, keine Daten fremder Scopes. | WP-643 (`k5n-review-merge-errors`, `5e65ac6`): bereinigter Jobfehler. | `TestAuditReviewMergeJobErrorIsSanitized` (`backend/internal/server/review_merge_job_integration_test.go`) |
+| SR-35 | Info | **behoben** | F-385 (P3): Unterschriften von Zuweisungen speicherten den Namen des Unterzeichners im Klartext statt als PII-Surrogat (SEC-05). Info: Das Modul Inventar ist im G1-Release abgeschaltet (E-03), der Klartext entsteht nur mit `RETICORA_MODULES=inventory`. | WP-656 (`k7n-assignment-signature-surrogate`, `ddcc530`): Surrogat, Bestandsnamen über den Backfill in den Vault. | `TestAssignmentSignatureKeepsSurrogate` (`backend/internal/assignment/pii_integration_test.go`) |
+| SR-36 | Critical | **behoben** | F-389 (P2): Die Audit-Liste zeigte client- und site-beschränkten Principals die Einträge des Routen-Audits über Objekte fremder Clients und Sites (Namen, alte und neue Werte). Critical: Cross-Client-Exposition (TEN-06, TEN-09). | WP-660 (`k7n-audit-log-scope`, `a3915c1`): Scope-Regel für jeden Typ der Auditoren, unbekannte Typen fail-closed. | `TestAuditLogHidesForeignClientRouteEntries` (`backend/internal/server/audit_log_scope_integration_test.go`) |
+| SR-37 | Low | **behoben** | F-392 (P3): Ein NUL-Byte im Schlüssel des JSON-Körpers ergab 503 „audit trail unavailable“, eines im /admin-Pfad 500; die abgewiesene anonyme Anfrage fehlte in `operator_audit`, und eine großgeschriebene Organisations-ID setzte die Prüfung der Operator-Audit-Kette auf „ungültig“. Low: Lücke und Fehlalarm im Operator-Audit (AUD-07, SEC-07), keine Daten verändert. | WP-663 (`k7n-route-audit-body-keys`, `fb8adfe`): 400 vor der Audit-Absicht, /admin-Pfade kodiert protokolliert. | `TestRouteAuditInvalidBodyKeyIsClientError` (`backend/internal/server/route_audit_integration_test.go`), `TestOperatorAuditRecordsAnyRequestPath` (`backend/internal/operator/audit_integration_test.go`) |
+| SR-38 | High | **behoben** | F-393 (P2): Ein gelöschter Benutzer behielt bis zum Ablauf seines Tokens (≤ 15 min) Lese- und Schreibzugriff; seine API-Keys blieben unwiderrufen, kein Audit-Eintrag `user.deleted`. High: Zugang nach dem Entfernen (TLC-04, AUT-02), zeitlich begrenzt; die Deaktivierung sperrte sofort. | WP-664 (`k7n-user-delete-ends-access`, `3eca249`): Löschung beendet jeden Zugang wie die Deaktivierung, in derselben Transaktion; Audit `user.deleted`. | `TestUserDeletionEndsAccess` (`backend/internal/identity/user_deletion_integration_test.go`), `TestUserDeletionRevocationFailureRollsBack` (`backend/internal/user/user_deletion_revocation_integration_test.go`) |
+| SR-39 | Critical | **behoben** | F-396 (P1): Ein client-gebundener Inhaber von `role:manage` nahm org-weiten Zuweisungen über die Rollendefinition die Rechte (PATCH, DELETE und PUT `/roles/{id}`…). Critical: Wirkung auf Rechte außerhalb des eigenen Scopes (Scope-Isolation). | WP-667 (`k7n-role-definition-ceiling`, `6deb530`): Rechte entfernen und Rollen löschen nur mit der Entzugs-Obergrenze jeder Zuweisung. | `TestRoleDefinitionChangeNeverReachesBeyondCallerScope` (`backend/internal/user/role_definition_ceiling_integration_test.go`) |
+| SR-40 | Low | **behoben** | F-398 (P3): `PUT /roles/{id}/permissions` auf einer Standardrolle antwortete 200, die Seed-Rechte blieben wirksam; Antwort, Rechteliste und Audit wichen von den wirksamen Rechten ab. Low: unwirksamer Rechteentzug mit irreführendem Audit, keine Rechteausweitung. | WP-669 (`k7n-standard-role-permissions`, `96bb4d0`): Seed-Rechte nicht entfernbar (409), Anzeige der wirksamen Rechte. | `TestReplaceRolePermissionsOfStandardRoleTakesEffectOrIsRefused` (`backend/internal/permission/standard_role_permissions_integration_test.go`) |
+| SR-41 | Critical | **behoben** | F-406 (P2): Ein Enrollment-Code trug keine Client-Bindung; ein auf Client 1 beschränkter Engineer schrieb einen aktiven Collector in Client 2 oder org-weit ein und konnte so die Zugangsdaten fremder Scopes erhalten. Critical: Scope-Isolation, Zugangsdaten. | WP-677 (`k7n-enrollment-client-binding`, `08b45ef`): Code bindet den Collector an Client und Site seines Erzeugers. | `TestEnrollmentCodeBindsCreatorClients` (`backend/internal/server/enrollment_client_binding_integration_test.go`) |
+| SR-42 | Critical | **behoben** | F-407 (P2): Der Edge-Ingest band die Records eines client-gebundenen Collectors nicht an dessen Client; CIs fremder Clients wurden angelegt und überschrieben. Critical: Schreiben außerhalb des Scopes (TEN-09). | WP-678 (`k7n-edge-ingest-collector-client`, `408f133`): Records erhalten Client und Site des Collectors. | `TestEdgeIngestBindsRecordsToCollectorClient` (`backend/internal/discovery/edge_record_client_integration_test.go`) |
+| SR-43 | High | **behoben** | F-409 (P2): Die Laufzeitrolle konnte Audit-Einträge umschreiben und die Kette neu verketten (`app.audit_pii_migration`, `audit_rechain`); `audit-verify` meldete die Kette intakt. High: Manipulationsnachweis (AUD-04) gegen die Laufzeitrolle wirkungslos; setzt deren Übernahme voraus. | WP-680 (`k7n-audit-append-only-runtime`, `95d7ee8`, Migration 000188): Siegel nur über `audit_seal_pii`, keine Neuverkettung, Prüfung gegen das Original. | `TestRuntimeRoleCannotRewriteAuditChain` (`backend/internal/audit/append_only_integration_test.go`) |
+| SR-44 | Critical | **behoben** | F-411 (P3): Das Kanten-Cleanup löschte Discovery-Kanten, die während des Laufs verifiziert oder bestätigt wurden; 70–99 % der mit 200 beantworteten Verifikationen gingen verloren. Ohne Sicherheitswirkung; Critical nach dem Bewertungsschema, weil eine bestätigte Schreibanfrage still verloren ging (stiller Datenverlust). | WP-682 (`k7n-relationship-cleanup-race`, `0a5dccb`): Verifikation und Frist beim Löschen geprüft. | `TestCleanupKeepsEdgeVerifiedDuringRun` (`backend/internal/relationship/cleanup_race_integration_test.go`) |
+| SR-45 | Low | **behoben** | F-414 (P3): Die Ablehnung eines Kontingents nannte eingeschränkten Principals den Bestand der ganzen Organisation („N of L in use“). Low: Cross-Client-Information beschränkt auf Zähler, keine Objekte und Kennungen. | WP-685 (`k7n-entitlement-limit-detail`, `244733a`): Bestand nur für org-weite Aufrufer. | `TestEntitlementLimitDetailHidesOrgCountFromScopedCallers` (`backend/internal/server/t2_entitlement_gates_test.go`) |
+| SR-46 | Critical | **behoben** | F-416 (P2): Das Unmerge in einer Merge-Kette belebte einen Survivor, der Opfer eines offenen Merges war, und verschob danach Beziehungen, Schnittstellen, Kontakte und Historie auf das falsche CI. Ohne Sicherheitswirkung; Critical nach dem Bewertungsschema: stille Verfälschung des Bestands, nur in der Datenbank sichtbar. | WP-687 (`k7n-unmerge-chain`, `ac91f7b`): 409 mit dem späteren Merge, auch mit force und beim Job-Revert. | `TestUnmergeRefusesWhileSurvivorIsMergedVictim` (`backend/internal/ci/unmerge_integration_test.go`), `TestMergeJobRevertRefusesWhileSurvivorIsMergedVictim` (`backend/internal/server/merge_chain_revert_integration_test.go`) |
+| SR-47 | Critical | **behoben** | F-418 (P2): Ein client-gebundener Inhaber von `notification:manage` verwaltete die Benachrichtigungskanäle der Organisation und las alle Zustellungen; ein von ihm angelegter Webhook-Kanal erhielt die Benachrichtigungen anderer Clients mit Name und E-Mail fremder Empfänger. Critical: Cross-Client-Exposition personenbezogener Daten (TEN-09). | WP-689 (`k7n-notification-admin-org-wide`, `3f6e818`): Kanäle und Zustellungen nur für org-weite Inhaber. | `TestNotificationAdministrationRequiresOrgWideScope` (`backend/internal/server/notification_channel_scope_integration_test.go`), `TestChannelAdministrationNeedsOrgWideScope` (`backend/internal/notify/handler_test.go`); Matrixzeile `notification-channels` von `TestChannelMatrix` |
+| SR-48 | Low | **behoben** | F-421 (P3): Die Eindeutigkeit mit Scope `org` galt für Schreibende mit Client-Scope nur, solange ein gültiger Unique-Index bestand; sie vergaben Werte, die ein CI eines anderen Clients trägt. Low: Integrität über die Client-Grenze, kein fremder Wert gelesen oder geändert. | WP-692 (`k7n-unique-org-scope-client-writer`, `6a499ac`): Prüfung über die CIs außerhalb des Scopes, ohne sie zu nennen. | `TestUniqueAttributeOrgScopeForClientWriter` (`backend/internal/ci/unique_attr_integration_test.go`) |
+| SR-49 | Critical | **behoben** | F-427 (P2): Das Raumlayout behielt und akzeptierte Schlüssel von CIs eines anderen Clients; client-beschränkte Nutzer lasen deren ID und Position, und ein PATCH löschte die fremde Position. Critical: Cross-Client-Exposition und Schreiben außerhalb des Scopes (TEN-09). | WP-698 (`k7n-room-layout-client-scope`, `a2a1152`): nur sichtbare CIs des Raums, unsichtbare Einträge bleiben. | `TestRoomLayoutForeignClientEntriesAgainstPostgres` (`backend/internal/tenantapi/room_layout_integration_test.go`); `frontend/src/pages/RoomPlanPage.test.tsx` (F-427) |
+
+## Befunde der Korrektur ohne Sicherheitswirkung
+
+Die übrigen Befunde von `audit/g1-reaudit/FINDINGS.md`, alle Prioritäten,
+mit dem Grund, warum sie keine Sicherheitswirkung haben und nach dem
+Bewertungsschema nicht Critical sind. F-422 bis F-426 sind auf `6a499ac` in
+Korrektur (WP-693 bis WP-697); F-386 wartet auf E-101. Die Begründung muss
+mindestens fünf Wörter haben (`tests/rep01-structure.test.sh`).
+
+| Befund | Prio | Begründung |
+|---|---|---|
+| F-355 | P2 | Barrierefreiheit (WCAG-Kontrast im dunklen Thema), keine Daten und keine Rechte berührt. |
+| F-356 | P2 | Barrierefreiheit (verschachtelte Bedienelemente der Karte), keine Daten und keine Rechte berührt. |
+| F-357 | P2 | Barrierefreiheit (seitlich scrollende Tabellen ohne Fokus), keine Daten und keine Rechte berührt. |
+| F-358 | P2 | Funktionsmangel: Ad-hoc-Jobs liefen nicht; kein Zugriff außerhalb des Scopes, nichts offengelegt. |
+| F-361 | P2 | Barrierefreiheit (Kontrast der Löschaktionen), keine Daten und keine Rechte berührt. |
+| F-362 | P2 | Listenbegrenzung in Dashboard und Karte; Anzeige unvollständig, kein Zugriff auf fremde Daten. |
+| F-367 | P3 | Fehlervertrag 200 statt 404 mit leerer Antwort; keine Daten fremder Clients, keine Wirkung. |
+| F-368 | P2 | Die TLS-Prüfung greift (das Zertifikat wird abgelehnt), nur die Fehlermeldung fehlte. |
+| F-369 | P2 | Fehlermeldung bei nicht erreichbarem Ziel fehlte; Betriebsdiagnose, keine Daten und keine Rechte. |
+| F-371 | P3 | Fehlervertrag 500 statt 404 beim Merge in ein gelöschtes CI, feste Fehlertexte. |
+| F-373 | P2 | Rechte zu eng: die Standardrolle sah ihre eigenen Clients nicht; keine Ausweitung, die Korrektur listet nur Clients des Scopes. |
+| F-374 | P2 | Topologie des ersten Zyklus unvollständig (Reihenfolge der Lanes); kein Leck, kein Verlust. |
+| F-375 | P3 | Testumgebung: WebKit verwirft das Secure-Cookie über Plain-HTTP korrekt; im unterstützten HTTPS-Betrieb keine Wirkung. |
+| F-376 | P1 | Erreichbarkeit des Exports: die signierte URL nannte den internen Objektspeicher; der Browser lud nichts über ungesicherte Wege, keine fremden Daten. |
+| F-377 | P2 | Selbstaussperrung durch eigene Aktion des Administrators; keine Rechteausweitung, kein Zugriff Dritter. |
+| F-378 | P3 | Upgrade-Pfad früher Testinstallationen (Migration 000089); keine Daten und keine Rechte berührt. |
+| F-379 | P3 | Konsistenz Mount und Standort; laut Befund keine Offenlegung fremder Daten und kein Datenverlust. |
+| F-380 | P3 | Konsistenz `asset.location_id` und `ci.location_id`; das fremde CI blieb unsichtbar und unverändert. |
+| F-381 | P3 | Darstellung beidseitiger Einbauten auf der Rackseite; API und Daten korrekt, keine Offenlegung. |
+| F-382 | P3 | Doppeltes Review nach accept; die angenommene Kante bleibt, keine Daten und keine Rechte berührt. |
+| F-383 | P3 | Benachrichtigungssprache je Empfänger nicht einstellbar; keine Daten und keine Rechte berührt. |
+| F-384 | P3 | Zeitweise roter Regressionstest; die Begrenzung der Parallelität im Collector greift. |
+| F-386 | P3 | Zwei statt einer Transaktion je Batch; die Ledger-Semantik bleibt korrekt, kein Verlust (offen, E-101). |
+| F-387 | P2 | Schutzfunktion zu streng (429 bei gültigen Anmeldedaten); die Brute-Force-Sperre bleibt belegt (`TestPreAuthBruteForceStillTripsUnderConcurrency`). |
+| F-388 | P3 | Schwellen der Lastskripte (Nachweisqualität des Lasttests); keine Produktwirkung, keine Daten berührt. |
+| F-390 | P3 | Fehlervertrag 500 statt 404/422 bei Credentials mit festen Texten; keine Offenlegung, keine Datenabweichung. |
+| F-391 | P3 | 503 und ERROR-Log bei NUL-Byte in der Pfad-ID; der Audit-Trail bleibt lückenlos, keine Daten verändert. |
+| F-394 | P3 | Fehlervertrag 500 statt 404 beim Metrik-Ingest; laut Befund keine Daten fremder Mandanten offengelegt oder geschrieben. |
+| F-395 | P3 | Fehlervertrag 502 statt 401 bei unbekannter Organisation im Login; keine fremde Organisation erreicht. |
+| F-399 | P2 | Lizenzgrenze `max_cis` über Nebenwege umgangen (ENT-06, Abrechnung); keine Mandanten- oder Rechtewirkung. |
+| F-400 | P3 | Paketgrenzen discovery und rack_view auf Nebenwegen umgangen (ENT-06); keine Mandanten- oder Rechtewirkung. |
+| F-401 | P3 | API-Vertrag `null` statt `[]` bei leeren Listen; keine Daten und keine Rechte berührt. |
+| F-402 | P3 | Dokumentierte Filter der Beziehungsliste ohne Wirkung; laut Befund kein Leck, nur sichtbare Beziehungen. |
+| F-403 | P2 | Lizenzgrenze `max_cis` nur im Scope gezählt (Abrechnung); keine Daten anderer Clients gelesen oder geschrieben. |
+| F-404 | P2 | Doppelte Wirkung gleichzeitiger Auflösungen; jede Wirkung hat ein Nutzer angefordert, daher kein stiller Verlust. |
+| F-405 | P3 | Fehlervertrag 500 statt 409/422/404 der Review-Auflösung; keine Daten und keine Rechte berührt. |
+| F-408 | P3 | Falsches Feld in der 400-Antwort; die Definition wird korrekt abgelehnt, keine Datenwirkung. |
+| F-410 | P3 | CI-Historie unvollständig; laut Befund kein Leck, der Audit-Trail selbst ist vollständig. |
+| F-412 | P3 | Scheinausfälle (`unknown`) bei parallelem Ingest; Statusanzeige, keine Daten und keine Rechte. |
+| F-413 | P3 | Automatische Statuswechsel fehlten in Historie und Audit-Log; keine Benutzeraktion blieb ohne Audit. |
+| F-415 | P3 | Eingabevalidierung: ungültiger Wert des Aufrufers als Vorgabe gespeichert, keine Änderung ohne Anfrage. |
+| F-417 | P3 | Bewertungsskript des Lastnachweises zu nachsichtig; keine Produktwirkung, keine Daten berührt. |
+| F-419 | P3 | Dubletten derselben UUID in anderer Schreibweise; nur sichtbare CIs, keine Rechte berührt. |
+| F-420 | P3 | Zu viele Betroffene für gescopte Principals; kein Leck, die Korrektur zählt verborgene Versorger, ohne sie zu nennen. |
+| F-422 | P3 | Override-Verlust nur an soft-gelöschten CIs, nicht am aktiven Bestand (Befund: daher P3); die Sichtbarkeit unter dem Scope wird geprüft (in Korrektur, WP-693). |
+| F-423 | P3 | Fehlervertrag 500 statt 422 beim Anlegen und Ändern von Collectors; keine Datenwirkung (in Korrektur, WP-694). |
+| F-424 | P3 | Typlisten und gelöschte CIs beim Anlegen von Kanten nicht geprüft; laut Befund keine Mandantenwirkung (in Korrektur, WP-695). |
+| F-425 | P2 | Enrollment-Dialog ohne Client-Auswahl seit WP-677; Bedienbarkeit, laut Befund kein Leck (in Korrektur, WP-696). |
+| F-426 | P3 | Unbekannte Filterwerte der Review-Liste ohne 400; kein Leck, kein Schreibzugriff (in Korrektur, WP-697). |
+| F-428 | P3 | Dokumentationslücke dieses Reviews (fehlende SR-Zeilen); behoben mit dieser Fortschreibung (WP-699). |
 
 ## G1-Nachbesserung (WP-332 bis WP-335)
 
@@ -225,9 +676,9 @@ nachgetragen:
   beschriebene Entfernung wirkte nicht, weil der Server ihn wieder anlegt.
   Die Lock-Tabelle ist nach einer Formel zu bemessen, die das HPA-Maximum
   von 10 Replikaten abdeckt (`docs/betrieb/ingest-spuren.md`).
-- **Vorbestehend:** Der Indexing-Decorator reicht `Restore` und
-  `UniqueConflicts` nicht durch (SR-11, Folge-WP außerhalb der
-  G1-Nachbesserung).
+- **Vorbestehend:** Der Indexing-Decorator reichte `Restore` und
+  `UniqueConflicts` nicht durch (SR-11, behoben außerhalb der
+  G1-Nachbesserung mit WP-418).
 
 ### Änderungen und Nachweise
 
@@ -280,15 +731,18 @@ nachgetragen:
   ist grün, alle k6-Schwellen eingehalten; damit ist die Auflage von E-58
   für diesen Commit erfüllt. Nach dem Merge wiederholt der nächtliche Lauf
   ihn auf dem Release-Kandidaten.
-- Ausstehend: CI-Lauf auf dem Release-Kandidaten (mit den Scan-Jobs und
-  `TestMigrationsRoundtrip`).
+- CI-Lauf auf dem Release-Kandidaten (mit den Scan-Jobs und
+  `TestMigrationsRoundtrip`): Abschnitt „Läufe auf dem Release-Kandidaten“
+  (WP-595).
 
 ## Externer Pentest
 
 WP-210: Nach E-28 beauftragt der Auftraggeber den Pentest (Aufgabe A-07).
 Bericht und Nachtest werden in `docs/security/pentest-g1.md` zusammengefasst.
-Am 2026-10-15 hat der Auftraggeber den Pentest (B3) für erledigt erklärt;
-GATE-03 ist damit durch seine Erklärung PASS. Bericht, Befunde und Nachtest
+Am 2026-10-15 hat der Auftraggeber den Pentest (B3) für erledigt erklärt.
+Nach der Übergangsregel von E-76 ersetzt die Erklärung den Nachweis nicht;
+GATE-03 und NFR-08 stehen auf „offen“ (`docs/acceptance/g1-gate.md`,
+WP-451). Bericht, Befunde und Nachtest
 liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in
 `docs/security/pentest-g1.md` nachzureichen.
 
@@ -371,7 +825,7 @@ Impact.
 | CI-05 | [B] | High | geschlossen | WP-031, WP-169, WP-170 |
 | CI-11 | [B] | High | geschlossen | WP-172 |
 | CI-12 | [B] | High | geschlossen | WP-173, WP-174 |
-| CI-13 | [B] | High | geschlossen | WP-087 |
+| CI-13 | [B] | High | geschlossen | WP-087, WP-369, WP-418 |
 | COL-01 | [B] | High | geschlossen | WP-143 |
 | COL-04 | [B] | High | geschlossen | WP-144, WP-145 |
 | COL-06 | [B], Air-Gapped [O] | High | geschlossen | WP-102, WP-148 |
@@ -468,7 +922,7 @@ Impact.
 | TEC-14 | [B] | High | geschlossen | WP-130 |
 | TEC-15 | [B] | High | geschlossen | WP-102 |
 | TEN-03 | [B] | High | geschlossen | WP-007, WP-064 |
-| TEN-09 | [Q] | High | geschlossen | WP-007, WP-065, WP-208 |
+| TEN-09 | [Q] | High | geschlossen | WP-007, WP-065, WP-208, WP-340, WP-342, WP-409 |
 | TEN-10 | [B] | High | geschlossen | WP-082 |
 | TLC-01 | [B] | High | geschlossen | WP-111, WP-112 |
 | TLC-02 | [B]; Reseller [P4] | High | geschlossen | WP-113 |

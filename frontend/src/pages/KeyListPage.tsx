@@ -99,7 +99,11 @@ export function KeyListPage() {
           <Card
             key={k.id}
             title={k.name}
-            actions={<Badge variant={statusVariant(k.status)}>{k.status}</Badge>}
+            actions={
+              <Badge variant={statusVariant(k.status)}>
+                {t(`keys.statuses.${k.status}`, k.status)}
+              </Badge>
+            }
           >
             <p className="text-sm text-gray-600 dark:text-gray-300">
               {k.key_type} · {k.identifier || '—'}

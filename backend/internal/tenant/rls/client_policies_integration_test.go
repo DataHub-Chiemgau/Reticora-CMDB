@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 )
 
 // Fixture ids of the client policy test (WP-023); distinct from the other
@@ -38,7 +39,9 @@ var clientPolicyTables = []clientPolicyTable{
 	{"internal_order", "order_number, title", "'wp023-' || gen_random_uuid(), 'Order'"},
 	{"key_item", "name", "'Key ' || gen_random_uuid()"},
 	{"location_node_retired", "id, node", "gen_random_uuid(), '{}'::jsonb"},
-	{"maintenance_notification", "maintenance_window_id", "'" + cpWindow + "'"},
+	// One notification per window, client and channel (migration 000173):
+	// every row gets a channel of its own.
+	{"maintenance_notification", "maintenance_window_id, channel", "'" + cpWindow + "', 'wp023-' || gen_random_uuid()"},
 	{"quantity_item", "name", "'Item ' || gen_random_uuid()"},
 	{"sla", "name, priority, response_target_minutes, resolution_target_minutes", "'SLA ' || gen_random_uuid(), 'low', 10, 20"},
 }
@@ -98,7 +101,7 @@ func seedClientPolicies(t *testing.T, ctx context.Context, dsn string) (*pgxpool
 		}
 	}
 
-	pool, err := database.NewPool(ctx, dsn)
+	pool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatalf("application pool: %v", err)
 	}

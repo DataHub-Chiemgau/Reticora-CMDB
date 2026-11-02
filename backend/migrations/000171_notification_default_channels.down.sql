@@ -1,0 +1,4 @@
+-- Migration notification_default_channels down: nothing to undo. The
+-- backfilled in-app channels cannot be told apart from channels an
+-- organization created itself and may already carry notifications and
+-- deliveries; they stay. A following up creates no second one.

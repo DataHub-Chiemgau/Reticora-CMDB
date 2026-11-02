@@ -12,6 +12,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -64,15 +66,34 @@ func (r *PGRepository) withEffectiveTx(ctx context.Context, tx pgx.Tx, fv *Field
 // ci_field_value carries no client column yet (WP-025).
 const visibleCI = "EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_field_value.ci_id)"
 
+// liveCI is visibleCI without soft-deleted CIs: the field values of a
+// deleted CI are gone for the manual paths (GET /cis/{id}/fields, override
+// set and clear, the accept of an override_conflict item) as the CI is for
+// GET /cis/{id} (F-422).
+const liveCI = "EXISTS (SELECT 1 FROM ci WHERE ci.id = ci_field_value.ci_id AND ci.deleted_at IS NULL)"
+
 // requireVisibleCI rejects writes to a CI the tenant scope does not show; the
 // foreign key alone would accept a CI of another client. It locks the CI row
 // (lockCI).
 func requireVisibleCI(ctx context.Context, tx pgx.Tx, ciID string) error {
-	visible, err := lockCI(ctx, tx, ciID)
+	visible, _, err := lockCI(ctx, tx, ciID)
 	if err != nil {
 		return err
 	}
 	if !visible {
+		return fmt.Errorf("not found")
+	}
+	return nil
+}
+
+// requireLiveCI is requireVisibleCI for a manual write: a soft-deleted CI
+// is not found either (F-422).
+func requireLiveCI(ctx context.Context, tx pgx.Tx, ciID string) error {
+	_, live, err := lockCI(ctx, tx, ciID)
+	if err != nil {
+		return err
+	}
+	if !live {
 		return fmt.Errorf("not found")
 	}
 	return nil
@@ -85,23 +106,33 @@ func requireVisibleCI(ctx context.Context, tx pgx.Tx, ciID string) error {
 // the CI row first (discovery LockCI, SELECT … FOR UPDATE): taking it first
 // here too keeps one lock order, so the two wait for each other instead of
 // deadlocking (40P01). Only a row the scope may update is locked; the others
-// are not written either.
-func lockCI(ctx context.Context, tx pgx.Tx, ciID string) (visible bool, err error) {
+// are not written either. live reports a visible CI that is not
+// soft-deleted.
+func lockCI(ctx context.Context, tx pgx.Tx, ciID string) (visible, live bool, err error) {
 	var locked bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1),
-		EXISTS (SELECT 1 FROM ci WHERE id = $1 FOR UPDATE)`, ciID).Scan(&visible, &locked); err != nil {
-		return false, fmt.Errorf("check ci visibility: %w", err)
+		EXISTS (SELECT 1 FROM ci WHERE id = $1 AND deleted_at IS NULL),
+		EXISTS (SELECT 1 FROM ci WHERE id = $1 FOR UPDATE)`, ciID).Scan(&visible, &live, &locked); err != nil {
+		return false, false, fmt.Errorf("check ci visibility: %w", err)
 	}
-	return visible, nil
+	return visible, live, nil
 }
 
 // ListForCI returns all tracked field values of a CI with resolved effective
-// values and divergence flags.
+// values and divergence flags. A CI that is unknown, not visible or
+// soft-deleted is ErrNotFound (F-422).
 func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]FieldValue, error) {
 	var out []FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var live bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1 AND deleted_at IS NULL)`, ciID).Scan(&live); err != nil {
+			return fmt.Errorf("check ci visibility: %w", err)
+		}
+		if !live {
+			return ErrNotFound
+		}
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_field_value WHERE ci_id = $1 AND "+visibleCI+" ORDER BY field_name ASC",
+			"SELECT %s FROM ci_field_value WHERE ci_id = $1 AND "+liveCI+" ORDER BY field_name ASC",
 			selectColumns), ciID)
 		if err != nil {
 			return fmt.Errorf("list field values: %w", err)
@@ -319,17 +350,28 @@ func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, 
 	})
 }
 
-// SetOverride sets or replaces the manual override of a field.
+// SetOverride sets or replaces the manual override of a field. The override
+// is a manual write: in the same transaction the CI takes the value, its
+// version rises and its history records the change (raiseVersion, API-07).
+// A reserved namespace is ErrReservedName, a structural column
+// ErrNotOverridable.
 func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error) {
 	if reason == "" {
 		return nil, fmt.Errorf("override reason is required")
+	}
+	if IsReservedName(fieldName) {
+		return nil, ErrReservedName
 	}
 	if structuralFields[fieldName] {
 		return nil, ErrNotOverridable
 	}
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
+		if err := requireLiveCI(ctx, tx, ciID); err != nil {
+			return err
+		}
+		before, err := ciFieldValue(ctx, tx, ciID, fieldName)
+		if err != nil {
 			return err
 		}
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
@@ -353,12 +395,17 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 		if syncErr := syncCIField(ctx, tx, ciID, fieldName, value); syncErr != nil {
 			return syncErr
 		}
+		version, err := raiseVersion(ctx, tx, orgID, ciID, fieldName, before, value)
+		if err != nil {
+			return err
+		}
 		if auditErr := recordAudit(ctx, tx, orgID, ciID, "ci.override_set", map[string]any{
 			"field": fieldName, "value": value, "reason": reason, "protected": protected,
 		}); auditErr != nil {
 			return auditErr
 		}
 		out = r.withEffectiveTx(ctx, tx, fv)
+		out.CIVersion = version
 		return nil
 	})
 	return out, err
@@ -371,6 +418,9 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 func SetOverrideTx(ctx context.Context, tx pgx.Tx, orgID, ciID, fieldName string, value any, author, reason string, protected bool) error {
 	if reason == "" {
 		return fmt.Errorf("override reason is required")
+	}
+	if IsReservedName(fieldName) {
+		return ErrReservedName
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO ci_field_value (
@@ -409,14 +459,35 @@ func userID(author string) any {
 }
 
 // ClearOverride removes the manual override of a field. In the same
-// transaction the CI returns to the observed value, when there is one, and
-// the change is audited (OVR-01).
+// transaction the CI returns to the observed value, when there is one, its
+// version rises and its history records the change (raiseVersion, API-07),
+// and the change is audited (OVR-01). An unknown, invisible or soft-deleted
+// CI (F-422) and a field without a value are ErrNotFound, a reserved
+// namespace ErrReservedName; a field without an override keeps the version.
 func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
+	if IsReservedName(fieldName) {
+		return nil, ErrReservedName
+	}
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		// The CI row first (lockCI); an invisible CI is not found by the
-		// update below.
-		if _, err := lockCI(ctx, tx, ciID); err != nil {
+		// The CI row first (lockCI).
+		_, live, err := lockCI(ctx, tx, ciID)
+		if err != nil {
+			return err
+		}
+		if !live {
+			return ErrNotFound
+		}
+		var overridden bool
+		if err = tx.QueryRow(ctx, `SELECT override_at IS NOT NULL OR override_value IS NOT NULL
+			FROM ci_field_value WHERE ci_id = $1 AND field_name = $2`, ciID, fieldName).Scan(&overridden); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("read override: %w", err)
+		}
+		before, err := ciFieldValue(ctx, tx, ciID, fieldName)
+		if err != nil {
 			return err
 		}
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
@@ -424,26 +495,37 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 				override_value = NULL, override_author = NULL,
 				override_reason = NULL, override_at = NULL, protected = false
 			WHERE ci_id = $1 AND field_name = $2 AND %s
-			RETURNING %s`, visibleCI, selectColumns), ciID, fieldName)
+			RETURNING %s`, liveCI, selectColumns), ciID, fieldName)
 		fv, err := scan(row)
 		if err != nil {
-			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
 			}
 			return fmt.Errorf("clear override: %w", err)
 		}
 		changes := map[string]any{"field": fieldName}
+		after := before
 		if fv.DiscoveredAt != nil && !structuralFields[fieldName] {
 			if syncErr := syncCIField(ctx, tx, ciID, fieldName, fv.DiscoveredValue); syncErr != nil {
 				return syncErr
 			}
 			changes["restored_value"] = fv.DiscoveredValue
 			changes["restored_source"] = fv.DiscoveredSource
+			after = fv.DiscoveredValue
+		}
+		var version int64
+		if overridden {
+			if version, err = raiseVersion(ctx, tx, orgID, ciID, fieldName, before, after); err != nil {
+				return err
+			}
+		} else if err = tx.QueryRow(ctx, `SELECT version FROM ci WHERE id = $1`, ciID).Scan(&version); err != nil {
+			return fmt.Errorf("read ci version: %w", err)
 		}
 		if auditErr := recordAudit(ctx, tx, orgID, ciID, "ci.override_cleared", changes); auditErr != nil {
 			return auditErr
 		}
 		out = r.withEffectiveTx(ctx, tx, fv)
+		out.CIVersion = version
 		return nil
 	})
 	return out, err
@@ -591,6 +673,20 @@ func nilIfEmpty(value string) any {
 // ErrNotOverridable rejects an override of a structural CI column.
 var ErrNotOverridable = errors.New("field cannot be overridden")
 
+// ErrReservedName rejects a reserved attribute namespace (_overrides,
+// _observed, _provenance, _instance) as the field of an override: the
+// namespaces are no fields (GLO-13, CI-10, E-23); the handler answers 400
+// with the field "name". The CHECK constraint
+// ci_field_value_field_name_not_reserved (migration 000166) holds the rule
+// in the database as well.
+var ErrReservedName = errors.New("reserved attribute namespace, not a field name (GLO-13)")
+
+// IsReservedName reports whether fieldName is a reserved attribute
+// namespace (GLO-13).
+func IsReservedName(fieldName string) bool {
+	return fieldmeta.ReservedNames[fieldName]
+}
+
 // overrideColumns maps the CI columns an override sets to their SQL type;
 // structuralFields are columns no override touches. Every other field is an
 // attribute. They mirror the effective view of the ci package.
@@ -608,6 +704,108 @@ var (
 	}
 )
 
+// attributePath is the path of the attribute fieldName in ci.attributes:
+// instance attributes live in attributes._instance (CI-10).
+func attributePath(ctx context.Context, tx pgx.Tx, ciID, fieldName string) (path []string, instance bool, err error) {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2)`,
+		ciID, fieldName).Scan(&instance); err != nil {
+		return nil, false, fmt.Errorf("instance attribute %s: %w", fieldName, err)
+	}
+	if instance {
+		return []string{"_instance", fieldName}, true, nil
+	}
+	return []string{fieldName}, false, nil
+}
+
+// isColumn reports whether fieldName is a CI column rather than an
+// attribute.
+func isColumn(fieldName string) bool {
+	_, ok := overrideColumns[fieldName]
+	return ok || structuralFields[fieldName]
+}
+
+// ciFieldValue reads the value the CI row holds for the column or attribute
+// fieldName (nil when there is none).
+func ciFieldValue(ctx context.Context, tx pgx.Tx, ciID, fieldName string) (any, error) {
+	var raw []byte
+	if isColumn(fieldName) {
+		// fieldName is one of the fixed column names of isColumn.
+		if err := tx.QueryRow(ctx, fmt.Sprintf(`SELECT to_jsonb(%s) FROM ci WHERE id = $1`, fieldName), ciID).Scan(&raw); err != nil {
+			return nil, fmt.Errorf("read ci %s: %w", fieldName, err)
+		}
+	} else {
+		path, _, err := attributePath(ctx, tx, ciID, fieldName)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.QueryRow(ctx, `SELECT attributes #> $2::text[] FROM ci WHERE id = $1`, ciID, path).Scan(&raw); err != nil {
+			return nil, fmt.Errorf("read ci %s: %w", fieldName, err)
+		}
+	}
+	var value any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return nil, fmt.Errorf("decode ci %s: %w", fieldName, err)
+		}
+	}
+	return value, nil
+}
+
+// raiseVersion records an override change as the manual write it is (rank
+// 100, API-07): ci.version rises by one and a ci_change row of type override
+// carries the field and the new version, so checkPrecondition of the ci
+// package refuses a PATCH of the field with an older If-Match (409, F-021).
+// The field is named as a PATCH names it: a column by its name, an attribute
+// as "attributes" with the member as old and new value, since attributes
+// count as one field there. Personal values are stored as vault surrogates
+// (SEC-05), as in every CI change. It returns the new version.
+func raiseVersion(ctx context.Context, tx pgx.Tx, orgID, ciID, fieldName string, oldValue, newValue any) (int64, error) {
+	name := fieldName
+	if !isColumn(fieldName) {
+		name = "attributes"
+		oldValue, newValue = map[string]any{fieldName: oldValue}, map[string]any{fieldName: newValue}
+	}
+	oldJSON, err := changeJSON(ctx, tx, orgID, name, oldValue)
+	if err != nil {
+		return 0, err
+	}
+	newJSON, err := changeJSON(ctx, tx, orgID, name, newValue)
+	if err != nil {
+		return 0, err
+	}
+	var version int64
+	err = tx.QueryRow(ctx, `
+		WITH raised AS (
+			UPDATE ci SET version = version + 1, updated_at = now()
+			WHERE id = $2 AND organization_id = $1
+			RETURNING version
+		)
+		INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, ci_version)
+		SELECT $1, $2, $3, 'override', $4, $5::jsonb, $6::jsonb, version FROM raised
+		RETURNING ci_version`,
+		orgID, ciID, userID(strings.TrimSpace(tenant.FromContext(ctx).UserID)), name, oldJSON, newJSON).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("raise ci version: %w", err)
+	}
+	return version, nil
+}
+
+// changeJSON is the stored JSON of a historized value of fieldName.
+func changeJSON(ctx context.Context, tx pgx.Tx, orgID, fieldName string, value any) (string, error) {
+	sealed, _, err := pii.SealFieldTx(ctx, tx, orgID, fieldName, value)
+	if err != nil {
+		return "", fmt.Errorf("seal ci change value: %w", err)
+	}
+	raw, err := json.Marshal(sealed)
+	if err != nil {
+		return "", fmt.Errorf("marshal ci change value: %w", err)
+	}
+	return string(raw), nil
+}
+
 // syncCIField writes value into the CI column or attribute fieldName; nil
 // clears the column or removes the attribute.
 func syncCIField(ctx context.Context, tx pgx.Tx, ciID, fieldName string, value any) error {
@@ -619,15 +817,9 @@ func syncCIField(ctx context.Context, tx pgx.Tx, ciID, fieldName string, value a
 		}
 		_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE ci SET %s = $2::text::%s, updated_at = now() WHERE id = $1`, fieldName, sqlType), ciID, text)
 	} else {
-		// Instance attributes live in attributes._instance (CI-10).
-		var instance bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2)`,
-			ciID, fieldName).Scan(&instance); err != nil {
-			return fmt.Errorf("instance attribute %s: %w", fieldName, err)
-		}
-		path := []string{fieldName}
-		if instance {
-			path = []string{"_instance", fieldName}
+		path, instance, pathErr := attributePath(ctx, tx, ciID, fieldName)
+		if pathErr != nil {
+			return pathErr
 		}
 		if value == nil {
 			_, err = tx.Exec(ctx, `UPDATE ci SET attributes = COALESCE(attributes, '{}'::jsonb) #- $2::text[], updated_at = now() WHERE id = $1`, ciID, path)

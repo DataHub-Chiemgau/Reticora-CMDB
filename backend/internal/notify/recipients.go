@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,9 +17,9 @@ import (
 )
 
 // Audience is who a notification is meant for (NTF-03): users by role,
-// team or subscription, and the contacts of a CI by contact role. Users
-// receive it only if they may read the object: they need Permission in
-// the object's client and site.
+// team or subscription, the contacts of a CI by contact role and the
+// contacts of the object's client. Users receive it only if they may read
+// the object: they need Permission in the object's client and site.
 type Audience struct {
 	// Permission is the read permission of the object (e.g. ci:read).
 	Permission identity.Permission
@@ -38,12 +39,26 @@ type Audience struct {
 	// (owner, escalation, operator, responsible, vendor).
 	CIID         string
 	ContactRoles []string
+	// ClientContacts adds the contacts of the object's client
+	// (contact.client_id = ClientID); never those of another client.
+	ClientContacts *ClientContacts
 	// DirectUserIDs are users the notification concerns personally (the
 	// initiator of an export): active users, without the permission
 	// check. Direct are addresses outside the organization's users (an
 	// invitee).
 	DirectUserIDs []string
 	Direct        []Recipient
+}
+
+// ClientContacts selects the contacts of the object's client (NTF-03).
+type ClientContacts struct {
+	// ContactRoles limits them to these roles (contact.role, compared
+	// case-insensitively); empty: every contact of the client.
+	ContactRoles []string
+	// Organization is the explicit organization target: it adds the
+	// organization-wide contacts (without a client). Without it they are
+	// never addressed, also not for an organization-wide object.
+	Organization bool
 }
 
 // GrantSource reads the role grants of a user (permission repository).
@@ -54,6 +69,47 @@ type GrantSource interface {
 // Resolver turns an audience into recipients.
 type Resolver interface {
 	Resolve(ctx context.Context, orgID string, a *Audience) ([]Recipient, error)
+}
+
+// BrandingSource reads an organization's branding (NTF-03). A Resolver
+// that is one brands the notifications of the EventConsumer; without one
+// they are German for recipients without a locale and unbranded.
+type BrandingSource interface {
+	Branding(ctx context.Context, orgID string) (*Branding, error)
+}
+
+// loadBranding reads the branding of orgID in tx (a transaction in the
+// organization's scope): name, locale and settings.branding.sender_name.
+// An organization the scope does not show has none.
+func loadBranding(ctx context.Context, tx pgx.Tx, orgID string) (*Branding, error) {
+	var name, locale, sender string
+	err := tx.QueryRow(ctx, `SELECT name, locale, COALESCE(settings->'branding'->>'sender_name', '')
+		FROM organization WHERE id::text = $1`, orgID).Scan(&name, &locale, &sender)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read branding: %w", err)
+	}
+	return newBranding(name, locale, sender), nil
+}
+
+// userLocales reads the locale of the users ids of orgID in tx.
+func userLocales(ctx context.Context, tx pgx.Tx, orgID string, ids []string) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `SELECT id::text, locale FROM app_user WHERE organization_id = $1 AND id::text = ANY($2)`, orgID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read user locales: %w", err)
+	}
+	out := map[string]string{}
+	var id, locale string
+	_, err = pgx.ForEachRow(rows, []any{&id, &locale}, func() error {
+		out[id] = locale
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read user locales: %w", err)
+	}
+	return out, nil
 }
 
 // PGResolver resolves audiences against PostgreSQL.
@@ -67,12 +123,24 @@ func NewPGResolver(pool *pgxpool.Pool, grants GrantSource) *PGResolver {
 	return &PGResolver{pool: pool, grants: grants}
 }
 
+// Branding implements BrandingSource.
+func (r *PGResolver) Branding(ctx context.Context, orgID string) (*Branding, error) {
+	var out *Branding
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = loadBranding(ctx, tx, orgID)
+		return err
+	})
+	return out, err
+}
+
 type candidate struct {
-	id, email, name string
+	id, email, name, locale string
 }
 
 // Resolve implements Resolver: active users among the candidates who hold
-// the permission in the object's scope, then the CI contacts; each address
+// the permission in the object's scope, then the contacts; each address
 // once, users before contacts, ordered by name.
 func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]Recipient, error) {
 	if a.Permission == "" && (len(a.Roles) > 0 || len(a.TeamIDs) > 0 || len(a.UserIDs) > 0 || a.AllWithPermission) {
@@ -84,7 +152,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		if len(a.Roles) > 0 || len(a.TeamIDs) > 0 || len(a.UserIDs) > 0 || a.AllWithPermission {
 			rows, err := tx.Query(ctx, `
-				SELECT u.id::text, COALESCE(u.email, ''), COALESCE(u.display_name, '')
+				SELECT u.id::text, COALESCE(u.email, ''), COALESCE(u.display_name, ''), u.locale
 				FROM app_user u
 				WHERE u.organization_id = $1 AND u.is_active AND (
 					$5
@@ -99,7 +167,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			}
 			users, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
 				var c candidate
-				scanErr := row.Scan(&c.id, &c.email, &c.name)
+				scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale)
 				return c, scanErr
 			})
 			if err != nil {
@@ -107,14 +175,14 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			}
 		}
 		if len(a.DirectUserIDs) > 0 {
-			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, '') FROM app_user
+			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, ''), locale FROM app_user
 				WHERE organization_id = $1 AND is_active AND id::text = ANY($2) ORDER BY display_name, id`, orgID, a.DirectUserIDs)
 			if err != nil {
 				return fmt.Errorf("resolve direct users: %w", err)
 			}
 			direct, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
 				var c candidate
-				scanErr := row.Scan(&c.id, &c.email, &c.name)
+				scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale)
 				return c, scanErr
 			})
 			if err != nil {
@@ -122,8 +190,6 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			}
 		}
 		if a.CIID != "" && len(a.ContactRoles) > 0 {
-			// Name and e-mail of a contact live in the PII vault (AUD-01);
-			// rows not moved there yet keep them in the columns.
 			rows, err := tx.Query(ctx, `
 				SELECT DISTINCT COALESCE(c.email, ''), COALESCE(c.display_name, ''), COALESCE(c.pii_subject_id::text, '')
 				FROM ci_contact cc JOIN contact c ON c.id = cc.contact_id AND c.organization_id = cc.organization_id
@@ -132,42 +198,43 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			if err != nil {
 				return fmt.Errorf("resolve contacts: %w", err)
 			}
-			type linked struct{ email, name, subject string }
-			found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (linked, error) {
-				var c linked
-				scanErr := row.Scan(&c.email, &c.name, &c.subject)
-				return c, scanErr
-			})
+			found, err := revealContacts(ctx, tx, orgID, rows)
 			if err != nil {
 				return fmt.Errorf("resolve contacts: %w", err)
 			}
-			var subjects map[string]*pii.Subject
-			if vault := pii.Default(); vault != nil {
-				ids := make([]string, 0, len(found))
-				for _, c := range found {
-					if c.subject != "" {
-						ids = append(ids, c.subject)
-					}
-				}
-				if subjects, err = vault.ResolveTx(ctx, tx, orgID, ids); err != nil {
-					return fmt.Errorf("resolve contacts: %w", err)
-				}
-			}
-			for _, c := range found {
-				if s := subjects[c.subject]; s != nil {
-					c.email, c.name = s.Data["email"], s.Data["name"]
-				}
-				if c.email != "" {
-					contacts = append(contacts, Recipient{Email: c.email, Name: c.name})
-				}
-			}
-			sort.Slice(contacts, func(i, j int) bool {
-				if contacts[i].Name != contacts[j].Name {
-					return contacts[i].Name < contacts[j].Name
-				}
-				return contacts[i].Email < contacts[j].Email
-			})
+			contacts = append(contacts, found...)
 		}
+		if cc := a.ClientContacts; cc != nil && (a.ClientID != "" || cc.Organization) {
+			roles := make([]string, 0, len(cc.ContactRoles))
+			for _, r := range cc.ContactRoles {
+				if r = strings.ToLower(strings.TrimSpace(r)); r != "" {
+					roles = append(roles, r)
+				}
+			}
+			// The client is the object's: a contact of another client never
+			// matches, one without a client only on the organization target.
+			rows, err := tx.Query(ctx, `
+				SELECT COALESCE(c.email, ''), COALESCE(c.display_name, ''), COALESCE(c.pii_subject_id::text, '')
+				FROM contact c
+				WHERE c.organization_id = $1
+				  AND (($2 <> '' AND c.client_id::text = $2) OR ($3 AND c.client_id IS NULL))
+				  AND (cardinality($4::text[]) = 0 OR lower(btrim(c.role)) = ANY($4::text[]))`,
+				orgID, a.ClientID, cc.Organization, roles)
+			if err != nil {
+				return fmt.Errorf("resolve client contacts: %w", err)
+			}
+			found, err := revealContacts(ctx, tx, orgID, rows)
+			if err != nil {
+				return fmt.Errorf("resolve client contacts: %w", err)
+			}
+			contacts = append(contacts, found...)
+		}
+		sort.Slice(contacts, func(i, j int) bool {
+			if contacts[i].Name != contacts[j].Name {
+				return contacts[i].Name < contacts[j].Name
+			}
+			return contacts[i].Email < contacts[j].Email
+		})
 		return nil
 	})
 	if err != nil {
@@ -189,7 +256,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		out = append(out, r)
 	}
 	for _, u := range direct {
-		add(Recipient{UserID: u.id, Email: u.email, Name: u.name})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Locale: u.locale})
 	}
 	for _, u := range users {
 		grants, err := r.grants.AccessGrants(ctx, orgID, u.id)
@@ -199,14 +266,50 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		if !permission.Covers(grants, a.Permission, a.ClientID, a.SiteID) {
 			continue
 		}
-		add(Recipient{UserID: u.id, Email: u.email, Name: u.name})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Locale: u.locale})
 	}
-	sort.SliceStable(contacts, func(i, j int) bool { return contacts[i].Name < contacts[j].Name })
 	for _, c := range contacts {
 		add(c)
 	}
 	for _, r := range a.Direct {
 		add(r)
+	}
+	return out, nil
+}
+
+// revealContacts reads contact rows (e-mail, name, vault subject) and
+// returns those with an address. Name and e-mail of a contact live in the
+// PII vault (AUD-01); rows not moved there yet keep them in the columns.
+func revealContacts(ctx context.Context, tx pgx.Tx, orgID string, rows pgx.Rows) ([]Recipient, error) {
+	type linked struct{ email, name, subject string }
+	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (linked, error) {
+		var c linked
+		scanErr := row.Scan(&c.email, &c.name, &c.subject)
+		return c, scanErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	var subjects map[string]*pii.Subject
+	if vault := pii.Default(); vault != nil {
+		ids := make([]string, 0, len(found))
+		for _, c := range found {
+			if c.subject != "" {
+				ids = append(ids, c.subject)
+			}
+		}
+		if subjects, err = vault.ResolveTx(ctx, tx, orgID, ids); err != nil {
+			return nil, err
+		}
+	}
+	var out []Recipient
+	for _, c := range found {
+		if s := subjects[c.subject]; s != nil {
+			c.email, c.name = s.Data["email"], s.Data["name"]
+		}
+		if c.email != "" {
+			out = append(out, Recipient{Email: c.email, Name: c.name})
+		}
 	}
 	return out, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
@@ -44,17 +45,19 @@ func (s *Service) DefinitionForKey(ctx context.Context, orgID, key string) (*Def
 			return s.repo.GetByID(ctx, orgID, d.ID)
 		}
 	}
-	return nil, fmt.Errorf("lifecycle definition %q not found", key)
+	return nil, fmt.Errorf("%w: lifecycle definition %q not found", ErrNoLifecycleModel, key)
 }
 
-// Transition executes a guarded lifecycle transition for an entity.
+// Transition executes a guarded lifecycle transition for an entity. A
+// request the definition rejects is a 422 *api.FieldError; a definition that
+// cannot be resolved is ErrNoLifecycleModel.
 //
 // Required fields are resolved from the transition's target state definition
 // and from the transition itself, then validated against the transition
 // context (e.g. storage_location, deployment_location, disposal_date).
 func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, definitionKey string, req TransitionRequest) (*TransitionResult, error) {
 	if req.ToState == "" {
-		return nil, fmt.Errorf("to_state is required")
+		return nil, &api.FieldError{Field: "to_state", Message: "to_state is required", Status: http.StatusUnprocessableEntity}
 	}
 	def, err := s.DefinitionForKey(ctx, orgID, definitionKey)
 	if err != nil {
@@ -66,7 +69,8 @@ func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, d
 	}
 	target, ok := stateByKey[req.ToState]
 	if !ok {
-		return nil, fmt.Errorf("unknown lifecycle state %q", req.ToState)
+		return nil, &api.FieldError{Field: "to_state", Message: fmt.Sprintf("unknown lifecycle state %q", req.ToState),
+			Status: http.StatusUnprocessableEntity}
 	}
 
 	current, err := s.states.CurrentState(ctx, orgID, entityType, entityID)
@@ -91,10 +95,12 @@ func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, d
 		}
 	}
 	if !guardFound && current != "" {
-		return nil, fmt.Errorf("no lifecycle transition from %q to %q", current, req.ToState)
+		return nil, &api.FieldError{Field: "to_state", Message: fmt.Sprintf("no lifecycle transition from %q to %q", current, req.ToState),
+			Status: http.StatusUnprocessableEntity}
 	}
 	if current == "" && !target.IsInitial && !guardFound {
-		return nil, fmt.Errorf("initial lifecycle state must be %q", initialKey(def))
+		return nil, &api.FieldError{Field: "to_state", Message: fmt.Sprintf("initial lifecycle state must be %q", initialKey(def)),
+			Status: http.StatusUnprocessableEntity}
 	}
 
 	if err := validateRequiredFields(required, req.Context); err != nil {
@@ -131,7 +137,8 @@ func validateRequiredFields(required []string, ctx map[string]any) error {
 	for _, field := range required {
 		v, ok := ctx[field]
 		if !ok || v == nil || v == "" {
-			return fmt.Errorf("lifecycle transition requires field %q", field)
+			return &api.FieldError{Field: "context", Message: fmt.Sprintf("lifecycle transition requires field %q", field),
+				Status: http.StatusUnprocessableEntity}
 		}
 	}
 	return nil

@@ -108,12 +108,20 @@ variable "backup_retention_days" {
 }
 
 variable "backup_replica_region" {
-  description = "EU region the versioned backup and document buckets are replicated to (NFR-05); must differ from the backup region"
+  description = "EU region the versioned backup and document buckets are replicated to (NFR-05); required for production, must differ from the backup region"
   type        = string
   default     = null
 
   validation {
     condition     = var.backup_replica_region == null ? true : contains(local.eu_regions, var.backup_replica_region)
     error_message = "backup_replica_region must be an EU region (NFR-09: backup replicas stay in the EU)."
+  }
+
+  # Production replicates the backups into a second EU region (NFR-05,
+  # WP-443): a missing replica or one in the backup region fails the plan.
+  # Referring to var.environment and the backup region needs Terraform 1.9.
+  validation {
+    condition     = var.environment != "production" || (var.backup_replica_region != null && var.backup_replica_region != local.data_locations.backups)
+    error_message = "production requires backup_replica_region: an EU region other than the backup region (NFR-05)."
   }
 }

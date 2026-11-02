@@ -46,10 +46,8 @@ const (
 	PermRoleRead           Permission = "role:read"
 	PermRoleManage         Permission = "role:manage"
 	PermPermissionRead     Permission = "permission:read"
-	// PermPermissionManage grants permission-grant administration. The value
-	// follows the canonical catalog key ("permission:write"), not the
-	// constant name, for backwards compatibility with stored role grants.
-	PermPermissionManage  Permission = "permission:write"
+	// Role grants are replaced with role:manage; permission:write is retired
+	// (migration 000147, WP-363).
 	PermEntitlementRead   Permission = "entitlement:read"
 	PermEntitlementManage Permission = "entitlement:manage"
 	PermAuditRead         Permission = "audit:read"
@@ -104,11 +102,9 @@ const (
 
 	// Enterprise CMDB + asset/inventory extension (spec §21). These keys are
 	// seeded into the permission catalogue by migration 000055.
-	PermCITypeManageNew           Permission = "ci_type:manage"
 	PermCIAttributeManage         Permission = "ci_attribute:manage"
 	PermCIInstanceAttributeManage Permission = "ci_instance_attribute:manage"
 	PermRelationshipTypeManage    Permission = "relationship_type:manage"
-	PermAssetAssign               Permission = "asset:assign"
 	PermAssetMove                 Permission = "asset:move"
 	PermAssetReserve              Permission = "asset:reserve"
 	PermInventoryManage           Permission = "inventory:manage"
@@ -117,7 +113,6 @@ const (
 	PermSavedViewRead             Permission = "saved_view:read"
 	PermSavedViewWrite            Permission = "saved_view:write"
 	// Special actions with their own permission (RBA-06, WP-045).
-	PermCredentialDecrypt    Permission = "credential:decrypt"
 	PermLifecycleTransition  Permission = "lifecycle:transition"
 	PermReconciliationManage Permission = "reconciliation:manage"
 )
@@ -162,7 +157,6 @@ func allPermissions() []Permission {
 		PermRoleRead,
 		PermRoleManage,
 		PermPermissionRead,
-		PermPermissionManage,
 		PermEntitlementRead,
 		PermEntitlementManage,
 		PermAuditRead,
@@ -214,11 +208,9 @@ func allPermissions() []Permission {
 		PermSearchRead,
 		PermSearchWrite,
 		PermAIRead,
-		PermCITypeManageNew,
 		PermCIAttributeManage,
 		PermCIInstanceAttributeManage,
 		PermRelationshipTypeManage,
-		PermAssetAssign,
 		PermAssetMove,
 		PermAssetReserve,
 		PermInventoryManage,
@@ -226,7 +218,6 @@ func allPermissions() []Permission {
 		PermOverrideWrite,
 		PermSavedViewRead,
 		PermSavedViewWrite,
-		PermCredentialDecrypt,
 		PermLifecycleTransition,
 		PermReconciliationManage,
 	}
@@ -234,7 +225,7 @@ func allPermissions() []Permission {
 
 // SessionClaims represent the internal RS256 session JWT claims. On the wire
 // they follow AUT-02 (see MarshalJSON): sub, org, scopes, cls[], sts[],
-// tms[], name, email, plus jti, iat and exp as NumericDate.
+// tms[], name, email, plus sid, jti, iat and exp as NumericDate.
 type SessionClaims struct {
 	Subject        string
 	OrganizationID string
@@ -251,6 +242,10 @@ type SessionClaims struct {
 	Groups           []string
 	Name             string
 	Email            string
+	// SessionID (sid) names the session: the refresh family started at
+	// login. Every refresh keeps it, so the per-session rate limit of API-04
+	// counts the session, not the access token.
+	SessionID string
 	// ID is the token id (jti) a logout revokes.
 	ID string
 	// Operator marks an operator session of the /admin path (SEC-07). Such a
@@ -279,6 +274,7 @@ type sessionClaimsWire struct {
 	Groups           []string                        `json:"groups,omitempty"`
 	Name             string                          `json:"name,omitempty"`
 	Email            string                          `json:"email,omitempty"`
+	SessionID        string                          `json:"sid,omitempty"`
 	ID               string                          `json:"jti,omitempty"`
 	Operator         bool                            `json:"opr,omitempty"`
 	IssuedAt         int64                           `json:"iat,omitempty"`
@@ -356,6 +352,7 @@ func (c SessionClaims) MarshalJSON() ([]byte, error) { //nolint:gocritic // see 
 		Groups:         c.Groups,
 		Name:           c.Name,
 		Email:          c.Email,
+		SessionID:      c.SessionID,
 		ID:             c.ID,
 		Operator:       c.Operator,
 		IssuedAt:       numericDate(c.IssuedAt),
@@ -392,6 +389,7 @@ func (c *SessionClaims) UnmarshalJSON(data []byte) error {
 		Groups:         w.Groups,
 		Name:           w.Name,
 		Email:          w.Email,
+		SessionID:      w.SessionID,
 		ID:             w.ID,
 		Operator:       w.Operator,
 		IssuedAt:       fromNumericDate(w.IssuedAt),

@@ -1,8 +1,10 @@
 // Package egress provides the outbound HTTP client for user-configured
-// destinations (webhooks, SCIM connectors). It blocks private, loopback,
-// link-local, cloud-metadata and IPv6 unique-local targets, connects to the
-// address it checked (DNS pinning against rebinding) and re-checks every one
-// of at most three redirects (SEC-08).
+// destinations (webhooks, SCIM connectors) and the dialer for other
+// protocols (an organization's own SMTP server). It blocks private,
+// loopback, link-local, cloud-metadata and IPv6 unique-local targets and
+// IPv6 transition addresses that embed such an IPv4 address, connects to
+// the address it checked (DNS pinning against rebinding) and re-checks
+// every one of at most three redirects (SEC-08).
 package egress
 
 import (
@@ -35,9 +37,9 @@ type Resolver interface {
 // Options configures a client.
 type Options struct {
 	// AllowPrivate permits private, loopback and link-local destinations,
-	// for on-premises installations whose webhooks and connectors live in
-	// the internal network (RETICORA_EGRESS_ALLOW_PRIVATE). Cloud metadata
-	// endpoints stay blocked.
+	// for on-premises installations whose webhooks, connectors and SMTP
+	// relays live in the internal network (RETICORA_EGRESS_ALLOW_PRIVATE).
+	// Cloud metadata endpoints stay blocked.
 	AllowPrivate bool
 	// Timeout bounds a request; zero uses DefaultTimeout.
 	Timeout time.Duration
@@ -82,16 +84,54 @@ func mustPrefixes(cidrs ...string) []netip.Prefix {
 	return out
 }
 
+// IPv6 transition prefixes whose addresses embed an IPv4 address (F-205).
+var (
+	nat64Prefix        = netip.MustParsePrefix("64:ff9b::/96")
+	sixToFourPrefix    = netip.MustParsePrefix("2002::/16")
+	teredoPrefix       = netip.MustParsePrefix("2001::/32")
+	ipv4CompatPrefix   = netip.MustParsePrefix("::/96")
+	ipv6ReservedPrefix = netip.MustParsePrefix("::/127") // :: and ::1, no IPv4-compatible addresses
+)
+
+// embeddedIPv4 returns the IPv4 addresses an IPv6 transition address
+// carries and is routed to: NAT64 (64:ff9b::/96) and IPv4-compatible
+// addresses (::/96) the last 32 bits, 6to4 (2002::/16) bits 16 to 47,
+// Teredo (2001::/32) its server (bits 32 to 63) and its client (the last
+// 32 bits, inverted). Other addresses return nil.
+func embeddedIPv4(ip netip.Addr) []netip.Addr {
+	if !ip.Is6() {
+		return nil
+	}
+	b := ip.As16()
+	switch {
+	case nat64Prefix.Contains(ip), ipv4CompatPrefix.Contains(ip) && !ipv6ReservedPrefix.Contains(ip):
+		return []netip.Addr{netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})}
+	case sixToFourPrefix.Contains(ip):
+		return []netip.Addr{netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]})}
+	case teredoPrefix.Contains(ip):
+		return []netip.Addr{netip.AddrFrom4([4]byte{b[4], b[5], b[6], b[7]}),
+			netip.AddrFrom4([4]byte{^b[12], ^b[13], ^b[14], ^b[15]})}
+	}
+	return nil
+}
+
 // Allowed reports whether a connection to ip is permitted.
 func (o Options) Allowed(ip netip.Addr) bool {
-	ip = ip.Unmap()
-	// NAT64 (64:ff9b::/96) embeds an IPv4 address: judge that address.
-	if ip.Is6() && netip.MustParsePrefix("64:ff9b::/96").Contains(ip) {
-		b := ip.As16()
-		ip = netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]})
-	}
+	// A prefix never contains an address with a zone (fe80::1%eth0): judge
+	// the address without it.
+	ip = ip.WithZone("").Unmap()
 	if !ip.IsValid() {
 		return false
+	}
+	// NAT64, 6to4, Teredo and IPv4-compatible addresses reach an IPv4
+	// address: judge every one they embed (F-205).
+	if embedded := embeddedIPv4(ip); embedded != nil {
+		for _, v4 := range embedded {
+			if !o.Allowed(v4) {
+				return false
+			}
+		}
+		return true
 	}
 	for _, p := range metadataPrefixes {
 		if p.Contains(ip) {
@@ -113,6 +153,7 @@ func (o Options) Allowed(ip netip.Addr) bool {
 // host, no credentials in the URL, and no host that is blocked without a DNS
 // lookup (IP literals, localhost, internal suffixes). The authoritative
 // check of the resolved address happens on every connection.
+// validation: ErrBlockedDestination with the refused URL part.
 func (o Options) ValidateURL(raw string) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -124,7 +165,15 @@ func (o Options) ValidateURL(raw string) error {
 	if u.User != nil {
 		return fmt.Errorf("%w: credentials in the URL", ErrBlockedDestination)
 	}
-	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	return o.ValidateHost(u.Hostname())
+}
+
+// ValidateHost checks a destination host (name or IP literal) when it is
+// stored: an IP literal must be allowed; localhost and internal suffixes
+// are blocked unless private destinations are. The authoritative check of
+// the resolved address happens on every connection.
+func (o Options) ValidateHost(host string) error {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
 	if host == "" {
 		return fmt.Errorf("%w: missing host", ErrBlockedDestination)
 	}
@@ -141,9 +190,18 @@ func (o Options) ValidateURL(raw string) error {
 	return nil
 }
 
-// NewClient returns the egress HTTP client. It never uses an environment
-// proxy, which would bypass the destination check.
-func NewClient(opts Options) *http.Client {
+// Dialer opens connections to user-configured destinations: it resolves
+// the host once, refuses it when one of its addresses is blocked and
+// connects to the checked address (DNS pinning against rebinding).
+type Dialer struct {
+	opts     Options
+	resolver Resolver
+	// dial connects to the checked address (tests replace it).
+	dial func(ctx context.Context, network, address string) (net.Conn, error)
+}
+
+// NewDialer returns the egress dialer; Timeout bounds a connect.
+func NewDialer(opts Options) *Dialer {
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -152,28 +210,42 @@ func NewClient(opts Options) *http.Client {
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-	dialer := &net.Dialer{Timeout: timeout}
+	return &Dialer{opts: opts, resolver: resolver, dial: (&net.Dialer{Timeout: timeout}).DialContext}
+}
+
+// DialContext connects to address (host:port) like net.Dialer.DialContext.
+func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	addrs, err := resolve(ctx, d.resolver, host)
+	if err != nil {
+		return nil, err
+	}
+	// Every resolved address must be allowed: a name that also points into
+	// the internal network is rejected as a whole. The error does not name
+	// the address: it reaches the tenant (a delivery's last error) and
+	// would answer lookups of internal names.
+	for _, ip := range addrs {
+		if !d.opts.Allowed(ip) {
+			return nil, fmt.Errorf("%w: %s resolves to a blocked address", ErrBlockedDestination, host)
+		}
+	}
+	// Pinning: connect to the checked address, never resolve again.
+	return d.dial(ctx, network, net.JoinHostPort(addrs[0].Unmap().String(), port))
+}
+
+// NewClient returns the egress HTTP client. It never uses an environment
+// proxy, which would bypass the destination check.
+func NewClient(opts Options) *http.Client {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
 	transport := &http.Transport{
-		Proxy: nil,
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, port, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, err
-			}
-			addrs, err := resolve(ctx, resolver, host)
-			if err != nil {
-				return nil, err
-			}
-			// Every resolved address must be allowed: a name that also
-			// points into the internal network is rejected as a whole.
-			for _, ip := range addrs {
-				if !opts.Allowed(ip) {
-					return nil, fmt.Errorf("%w: %s resolves to %s", ErrBlockedDestination, host, ip)
-				}
-			}
-			// Pinning: connect to the checked address, never resolve again.
-			return dialer.DialContext(ctx, network, net.JoinHostPort(addrs[0].Unmap().String(), port))
-		},
+		Proxy:                 nil,
+		DialContext:           NewDialer(opts).DialContext,
 		ForceAttemptHTTP2:     true,
 		TLSHandshakeTimeout:   timeout,
 		ResponseHeaderTimeout: timeout,

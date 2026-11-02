@@ -138,6 +138,9 @@ func (r *MemoryRepository) RecordDiscovered(_ context.Context, orgID, ciID, fiel
 }
 
 func (r *MemoryRepository) SetOverride(_ context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error) {
+	if IsReservedName(fieldName) {
+		return nil, ErrReservedName
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now().UTC()
@@ -152,11 +155,14 @@ func (r *MemoryRepository) SetOverride(_ context.Context, orgID, ciID, fieldName
 }
 
 func (r *MemoryRepository) ClearOverride(_ context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
+	if IsReservedName(fieldName) {
+		return nil, ErrReservedName
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	fv, ok := r.values[key(orgID, ciID, fieldName)]
 	if !ok {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	fv.OverrideValue = nil
 	fv.OverrideAuthor = ""

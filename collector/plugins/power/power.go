@@ -2,12 +2,14 @@
 package power
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"net"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gosnmp/gosnmp"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
@@ -46,11 +48,21 @@ const (
 	oidEatonSerial = "1.3.6.1.4.1.534.1.1.3.0"
 )
 
+// probeOIDs are the UPS identity a power device answers (Probe).
+var probeOIDs = []string{oidUPSIdentModel, oidAPCModel}
+
+// identityOIDs are read in one GET (collect): the UPS-MIB identity, the
+// APC and Eaton OIDs as fallback.
+var identityOIDs = []string{
+	oidUPSIdentManufacturer, oidUPSIdentModel, oidUPSIdentSerial, oidUPSIdentFirmware,
+	oidAPCModel, oidAPCSerial, oidAPCFirmware, oidEatonModel, oidEatonSerial,
+}
+
 // Plugin collects power infrastructure data from UPS and PDU systems.
 type Plugin struct {
 	Timeout     time.Duration
 	Concurrency int
-	// Port is the SNMP port of the outlet walk (default 161).
+	// Port is the SNMP port (default 161).
 	Port int
 }
 
@@ -98,8 +110,8 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			// Probe the UPS-MIB sysObjectID via SNMP
-			if isPowerDevice(t, community, timeout) {
+			// Probe the UPS identity and the vendor outlet tables via SNMP
+			if kind, ok := p.isPowerDevice(ctx, t, community, timeout); ok {
 				result := plugins.Result{
 					CIType: "power-device",
 					Name:   t,
@@ -108,7 +120,13 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 						"category":   "power",
 						"protocol":   "snmp",
 						"upsCapable": true,
+						// Device type and vendor family select the OID set
+						// of the power readings (MON-02, HitDevice).
+						attrDeviceType: kind.deviceType,
 					},
+				}
+				if kind.family != "" {
+					result.Attributes[attrVendorFamily] = kind.family
 				}
 				mu.Lock()
 				results = append(results, result)
@@ -143,36 +161,18 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 		community = "public"
 	}
 
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", p.port()))
-	conn, err := net.DialTimeout("udp", addr, timeout)
-	if err != nil {
+	g := p.v2cSession(ctx, target, community, timeout)
+	if err := g.Connect(); err != nil {
 		return nil, fmt.Errorf("power: dial %s: %w", target, err)
 	}
-	defer conn.Close()
+	defer g.Conn.Close()
 
-	// Query UPS-MIB identity OIDs
-	manufacturer := snmpGetString(conn, community, oidUPSIdentManufacturer, timeout)
-	model := snmpGetString(conn, community, oidUPSIdentModel, timeout)
-	serial := snmpGetString(conn, community, oidUPSIdentSerial, timeout)
-	firmware := snmpGetString(conn, community, oidUPSIdentFirmware, timeout)
-
-	// If standard UPS-MIB is empty, try APC-specific OIDs
-	if model == "" {
-		model = snmpGetString(conn, community, oidAPCModel, timeout)
-	}
-	if serial == "" {
-		serial = snmpGetString(conn, community, oidAPCSerial, timeout)
-	}
-	if firmware == "" {
-		firmware = snmpGetString(conn, community, oidAPCFirmware, timeout)
-	}
-	// Try Eaton if still empty
-	if model == "" {
-		model = snmpGetString(conn, community, oidEatonModel, timeout)
-	}
-	if serial == "" {
-		serial = snmpGetString(conn, community, oidEatonSerial, timeout)
-	}
+	// UPS-MIB identity; if it is empty, the APC and then the Eaton OIDs.
+	values := getStrings(g, identityOIDs)
+	manufacturer := values[oidUPSIdentManufacturer]
+	model := cmp.Or(values[oidUPSIdentModel], values[oidAPCModel], values[oidEatonModel])
+	serial := cmp.Or(values[oidUPSIdentSerial], values[oidAPCSerial], values[oidEatonSerial])
+	firmware := cmp.Or(values[oidUPSIdentFirmware], values[oidAPCFirmware])
 
 	name := model
 	if name == "" {
@@ -200,143 +200,85 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 			"upsCapable": true,
 		},
 	}
-	// The outlet mapping (IMP-09).
-	if outlets, pdu := p.walkOutlets(ctx, target, community, timeout); len(outlets) > 0 {
+	// The outlet mapping (IMP-09). A device that answers a PDU outlet
+	// table is a PDU, also when no outlet carries a name (as in Probe).
+	outlets, pdu := walkOutlets(g)
+	if len(outlets) > 0 {
 		result.Attributes["outlets"] = outlets
-		if pdu {
-			result.Attributes["deviceType"] = "pdu"
-		}
+	}
+	if pdu {
+		result.Attributes["deviceType"] = "pdu"
 	}
 
 	return result, nil
 }
 
-// isPowerDevice checks if the target responds to UPS-MIB OIDs.
-func isPowerDevice(target, community string, timeout time.Duration) bool {
-	addr := net.JoinHostPort(target, fmt.Sprintf("%d", snmpPort))
-	conn, err := net.DialTimeout("udp", addr, timeout)
+// powerKind is what Probe learns about a power device: the device type
+// ("ups", "pdu", "ats") and the vendor family of the outlet table it
+// answers ("" without one).
+type powerKind struct {
+	deviceType string
+	family     string
+}
+
+// isPowerDevice reports whether target answers the UPS identity model of
+// the UPS-MIB or the APC PowerNet-MIB with a value, or a PDU outlet table
+// of a known vendor (APC rPDU2, APC rPDU/sPDU, Raritan PX). The outlet
+// tables are checked with one GETNEXT, and only when the agent answered
+// the identity GET, so a silent host costs no further timeout.
+func (p *Plugin) isPowerDevice(ctx context.Context, target, community string, timeout time.Duration) (powerKind, bool) {
+	g := p.v2cSession(ctx, target, community, timeout)
+	if err := g.Connect(); err != nil {
+		return powerKind{}, false
+	}
+	defer g.Conn.Close()
+	pkt, err := g.Get(probeOIDs)
 	if err != nil {
-		return false
+		return powerKind{}, false
 	}
-	defer conn.Close()
-
-	// Try UPS-MIB identity OID
-	val := snmpGetString(conn, community, oidUPSIdentModel, timeout)
-	if val != "" {
-		return true
+	values := stringValues(pkt)
+	model := cmp.Or(values[oidUPSIdentModel], values[oidAPCModel])
+	table, found := detectOutletTable(g)
+	switch {
+	case found && table.pdu:
+		return powerKind{deviceType: "pdu", family: table.vendor}, true
+	case model == "":
+		return powerKind{}, false
+	case found:
+		return powerKind{deviceType: classifyPowerDevice("", model), family: table.vendor}, true
+	default:
+		return powerKind{deviceType: classifyPowerDevice("", model)}, true
 	}
-	// Try APC OID
-	val = snmpGetString(conn, community, oidAPCModel, timeout)
-	return val != ""
 }
 
-// snmpGetString sends an SNMP v2c GET and returns the response value as string.
-func snmpGetString(conn net.Conn, community, oid string, timeout time.Duration) string {
-	pkt := buildSNMPGet(community, oid)
-	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return ""
-	}
-	if _, err := conn.Write(pkt); err != nil {
-		return ""
-	}
-
-	buf := make([]byte, 4096)
-	n, err := conn.Read(buf)
-	if err != nil || n < 10 {
-		return ""
-	}
-
-	return extractStringValue(buf[:n])
+// v2cSession builds an SNMPv2c session to target (identity GET and outlet
+// walk).
+func (p *Plugin) v2cSession(ctx context.Context, target, community string, timeout time.Duration) *gosnmp.GoSNMP {
+	return &gosnmp.GoSNMP{Context: ctx, Target: target, Port: uint16(p.port()), Transport: "udp", Community: community,
+		Version: gosnmp.Version2c, Timeout: timeout, Retries: 0, MaxOids: gosnmp.MaxOids}
 }
 
-// buildSNMPGet constructs a minimal SNMPv2c GET-Request packet.
-func buildSNMPGet(community, oid string) []byte {
-	oidBytes := encodeOID(oid)
-	varbind := asn1Seq(append(oidBytes, 0x05, 0x00))
-	varbindList := asn1Seq(varbind)
-
-	requestID := []byte{0x02, 0x01, 0x01}
-	errStatus := []byte{0x02, 0x01, 0x00}
-	errIndex := []byte{0x02, 0x01, 0x00}
-
-	pduContent := append(requestID, errStatus...)
-	pduContent = append(pduContent, errIndex...)
-	pduContent = append(pduContent, varbindList...)
-	pdu := append([]byte{0xA0, byte(len(pduContent))}, pduContent...)
-
-	version := []byte{0x02, 0x01, 0x01}
-	comm := append([]byte{0x04, byte(len(community))}, []byte(community)...)
-
-	msgContent := append(version, comm...)
-	msgContent = append(msgContent, pdu...)
-
-	return asn1Seq(msgContent)
+// getStrings reads oids in one GET and returns the OctetString values by
+// OID. The values come from the decoded varbinds, never from the message
+// header (which echoes the community); what the device does not answer
+// (noSuchObject, no response) stays empty.
+func getStrings(g *gosnmp.GoSNMP, oids []string) map[string]string {
+	pkt, err := g.Get(oids)
+	if err != nil {
+		return map[string]string{}
+	}
+	return stringValues(pkt)
 }
 
-func asn1Seq(content []byte) []byte {
-	return append([]byte{0x30, byte(len(content))}, content...)
-}
-
-func encodeOID(oid string) []byte {
-	var parts []int
-	current := 0
-	for _, c := range oid {
-		if c == '.' {
-			parts = append(parts, current)
-			current = 0
-		} else {
-			current = current*10 + int(c-'0')
+// stringValues returns the OctetString values of a response by OID.
+func stringValues(pkt *gosnmp.SnmpPacket) map[string]string {
+	values := map[string]string{}
+	for _, v := range pkt.Variables {
+		if b, ok := v.Value.([]byte); ok && v.Type == gosnmp.OctetString {
+			values[strings.TrimPrefix(v.Name, ".")] = plugins.OctetText(b)
 		}
 	}
-	parts = append(parts, current)
-
-	if len(parts) < 2 {
-		return []byte{0x06, 0x01, 0x00}
-	}
-
-	encoded := []byte{byte(parts[0]*40 + parts[1])}
-	for i := 2; i < len(parts); i++ {
-		encoded = append(encoded, encodeComponent(parts[i])...)
-	}
-	return append([]byte{0x06, byte(len(encoded))}, encoded...)
-}
-
-func encodeComponent(value int) []byte {
-	if value < 128 {
-		return []byte{byte(value)}
-	}
-	var result []byte
-	result = append(result, byte(value&0x7f))
-	value >>= 7
-	for value > 0 {
-		result = append([]byte{byte(value&0x7f) | 0x80}, result...)
-		value >>= 7
-	}
-	return result
-}
-
-func extractStringValue(data []byte) string {
-	for i := 0; i < len(data)-2; i++ {
-		if data[i] == 0x04 && i+1 < len(data) {
-			length := int(data[i+1])
-			if length > 0 && i+2+length <= len(data) {
-				val := string(data[i+2 : i+2+length])
-				if isPrintable(val) {
-					return val
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func isPrintable(s string) bool {
-	for _, c := range s {
-		if c < 32 || c > 126 {
-			return false
-		}
-	}
-	return true
+	return values
 }
 
 func classifyPowerDevice(manufacturer, model string) string {

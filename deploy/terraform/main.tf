@@ -5,7 +5,8 @@
 # resources are added for a target cloud. Variables: variables.tf.
 
 terraform {
-  # 1.9: variable validations may refer to locals (EU region list).
+  # 1.9: variable validations may refer to locals (EU region list) and to
+  # other variables (production replica, variables.tf).
   required_version = ">= 1.9.0"
 }
 
@@ -31,6 +32,9 @@ output "data_locations" {
 
 # Backup policy every provider implementation applies to the backup bucket
 # (pgBackRest repository) and the document buckets (WP-100, NFR-05/06).
+# Production requires the replica region (validation of
+# backup_replica_region); the versioning of the pgBackRest bucket is checked
+# at runtime by `reticora-backup.sh verify-repo` (docs/backup-dr.md).
 output "backup_policy" {
   description = "Versioning, replication and retention of the backup and document buckets"
   value = {
@@ -43,14 +47,5 @@ output "backup_policy" {
     base_backup    = "daily"
     rpo_minutes    = 15
     rto_hours      = 4
-  }
-}
-
-# Replication is required for production (NFR-05); a missing or identical
-# replica region is reported on every plan.
-check "backup_replication" {
-  assert {
-    condition     = var.environment != "production" ? true : (var.backup_replica_region == null ? false : var.backup_replica_region != local.data_locations.backups)
-    error_message = "production needs backup_replica_region: an EU region other than the backup region (NFR-05)."
   }
 }

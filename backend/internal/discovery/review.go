@@ -2,13 +2,19 @@ package discovery
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
 
@@ -19,7 +25,8 @@ type (
 	ReviewItem = reviews.Item
 	// ReviewFilter narrows a review-item listing.
 	ReviewFilter = reviews.Filter
-	// Resolution is the request body for resolving a review item.
+	// Resolution is the resolution of a review item; its ResolvedBy is the
+	// principal of the request.
 	Resolution = reviews.Resolution
 )
 
@@ -74,6 +81,56 @@ func (h *Handler) WithReviewJobs(tracker jobs.Tracker) *Handler {
 	return h
 }
 
+// CIMerger merges a victim CI into a survivor as the CI-12 merge, a job of
+// kind ci.merge with a tombstone and a snapshot, under the id of the merge
+// row and its job; ci.Service implements it.
+type CIMerger interface {
+	MergeAs(ctx context.Context, orgID, survivorID, victimID, mergeID string) (*ci.MergeResult, error)
+}
+
+// WithMerger attaches the CI-12 merge the resolution merge of a
+// probable_duplicate item runs (CH29). Without one that resolution is
+// refused (501).
+func (h *Handler) WithMerger(m CIMerger) *Handler {
+	h.merger = m
+	return h
+}
+
+// mergeDuplicate merges the duplicate of a probable_duplicate item into the
+// chosen CI (CI-12). A refused merge leaves the item open: a CI another
+// merge holds is 409, a CI that is gone 404. Every attempt of the item runs
+// under the merge id of the item (reviewMergeID): a retry after a failed
+// attempt continues its ci.merge job, which the review.merge job of the
+// item mirrors (E-89, F-330); no failed ci.merge job stays beside the
+// merge that succeeded.
+func (h *Handler) mergeDuplicate(ctx context.Context, orgID, itemID, survivorID, dupID string) error {
+	if h.merger == nil {
+		return refused(http.StatusNotImplemented, "this server cannot merge CIs")
+	}
+	_, err := h.merger.MergeAs(ctx, orgID, survivorID, dupID, reviewMergeID(itemID))
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ci.ErrMergeConflict):
+		return refused(http.StatusConflict, err.Error())
+	case errors.Is(err, ci.ErrMergeUnsupported):
+		return refused(http.StatusNotImplemented, err.Error())
+	case isNotFound(err):
+		return refused(http.StatusNotFound, "the duplicate or the chosen CI was not found")
+	}
+	return err
+}
+
+// reviewMergeID is the id of the CI-12 merge of the review item itemID and
+// of its ci.merge job: a UUID (version 8, RFC 9562) derived from the item,
+// the same for every attempt and different from the item's own id.
+func reviewMergeID(itemID string) string {
+	b := sha256.Sum256([]byte("review_item merge:" + strings.ToLower(itemID)))
+	b[6] = b[6]&0x0f | 0x80
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
 // WithReviewNotifier attaches the notification of opened review items
 // (REC-08, NTF-05).
 func (h *Handler) WithReviewNotifier(n reviews.Notifier) *Handler {
@@ -98,10 +155,87 @@ func (n afterCommitNotifier) ReviewOpened(ctx context.Context, item *reviews.Ite
 // no collector profile matched (DIS-02); its generic_device CI exists.
 const ReasonNoProfileMatch = "no_profile_match"
 
+// ReasonReclassified is the resolution of an unclassified_device item whose
+// CI discovery classified later (DIS-02).
+const ReasonReclassified = "reclassified"
+
 // unclassifiedDevice reports whether the collector's classification chain
 // found no profile for the item (generic_device, classified_by fallback).
 func unclassifiedDevice(item *IngestItem) bool {
 	return item.CITypeName == "generic_device" && item.Attributes["classified_by"] == "fallback"
+}
+
+// unclassifiedReview is the unclassified_device item of a record no
+// collector profile matched (DIS-02), about the CI its identity resolved
+// to; nil unless that CI is a generic_device: another protocol may have
+// classified the device. The CI is the object (one item per CI, REC-08) and
+// the candidate, so the item has the client and site of the CI (WP-342; the
+// database derives them from the candidate, migration 000140).
+func unclassifiedReview(orgID string, item *IngestItem, device *ci.Item, ic *IdentityContext) *ReviewItem {
+	if ic == nil || ic.GenericDeviceTypeID == "" || device.CITypeID != ic.GenericDeviceTypeID {
+		return nil
+	}
+	return &ReviewItem{
+		OrganizationID: orgID,
+		Kind:           ReviewKindUnclassifiedDevice,
+		Status:         ReviewStatusOpen,
+		ClientID:       device.ClientID,
+		SiteID:         device.SiteID,
+		Payload: map[string]any{
+			"reason":        ReasonNoProfileMatch,
+			"ci_id":         device.ID,
+			"ci_type_name":  ci.GenericDeviceType,
+			"name":          item.Name,
+			"manufacturer":  item.Manufacturer,
+			"model":         item.Model,
+			"serial_number": item.SerialNumber,
+			"management_ip": item.ManagementIP,
+			"sys_object_id": item.SysObjectID,
+			"fingerprint":   item.Fingerprint,
+			"raw_data":      item.RawData,
+		},
+		CandidateCIIDs: []string{device.ID},
+		ObjectKey:      "ci:" + device.ID,
+	}
+}
+
+// reviewUnclassified opens the unclassified_device item of record item once
+// its CI is resolved (unclassifiedReview); a dismissed item stays dismissed.
+// It reports whether an item was opened.
+func (h *Handler) reviewUnclassified(ctx context.Context, orgID string, item *IngestItem, device *ci.Item, ic *IdentityContext) (bool, error) {
+	review := unclassifiedReview(orgID, item, device, ic)
+	if review == nil {
+		return false, nil
+	}
+	return h.ReviewService().OpenUnlessDismissed(ctx, review, "reason")
+}
+
+// resolveReclassified closes the open unclassified_device item of a CI that
+// discovery raised from generic_device to a specific type (DIS-02): the
+// device is classified, nothing is left to review.
+func (h *Handler) resolveReclassified(ctx context.Context, orgID, ciID string) error {
+	open, _, err := h.repo.ListReviewItems(ctx, orgID, ReviewFilter{Kind: ReviewKindUnclassifiedDevice, ObjectKey: "ci:" + ciID,
+		Status: ReviewStatusOpen}, api.PaginationParams{Limit: 1})
+	if err != nil {
+		return err
+	}
+	for i := range open {
+		_, err = h.repo.ResolveReviewItem(ctx, orgID, open[i].ID, &Resolution{Status: ReviewStatusResolved,
+			Note: ReasonReclassified})
+		if errors.Is(err, reviews.ErrAlreadyResolved) {
+			// A principal resolved it meanwhile (F-404).
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		id := open[i].ID
+		database.AfterCommit(ctx, func(ctx context.Context) {
+			slog.InfoContext(ctx, "review item resolved", "event", "review.resolved", "organization_id", orgID,
+				"review_item_id", id, "kind", ReviewKindUnclassifiedDevice, "resolution", ReasonReclassified)
+		})
+	}
+	return nil
 }
 
 // openReview opens a review item, deduplicated per object and type, and
@@ -112,6 +246,30 @@ func (h *Handler) openReview(ctx context.Context, item *ReviewItem) (bool, error
 
 func refused(status int, msg string) error {
 	return &reviews.Error{Status: status, Message: msg}
+}
+
+// ciNotFound refuses a resolution whose CI is gone (deleted meanwhile) or
+// not visible with 404, like an unknown item; the item stays open (F-371).
+// Any other error is returned unchanged.
+func ciNotFound(err error) error {
+	if errors.Is(err, ci.ErrNotFound) || isNotFound(err) {
+		return refused(http.StatusNotFound, "the chosen CI was not found")
+	}
+	return err
+}
+
+// restoreRefused refuses the reactivation of a resurrected_device item:
+// a CI merged into another comes back only through the unmerge (409, CI-12),
+// a CI that is not deleted (any more) or not visible is 404 like in
+// ciNotFound; the item stays open.
+func restoreRefused(err error) error {
+	switch {
+	case errors.Is(err, ci.ErrMergeConflict):
+		return refused(http.StatusConflict, "the chosen CI was merged into another; use the unmerge")
+	case errors.Is(err, ci.ErrNotDeleted):
+		return refused(http.StatusNotFound, "the chosen CI was not found")
+	}
+	return ciNotFound(err)
 }
 
 // resolveCIReview carries out merge, new and accept of the CI review types.
@@ -135,14 +293,20 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			if !ok {
 				return false, refused(http.StatusNotImplemented, "this repository cannot reactivate CIs")
 			}
-			if _, err := restorer.Restore(ctx, orgID, res.CIID); err != nil {
+			// The reactivated CI counts against max_cis (ENT-03).
+			if err := h.allowActiveCI(ctx, orgID); err != nil {
 				return false, err
+			}
+			if _, err := restorer.Restore(ctx, orgID, res.CIID); err != nil {
+				return false, restoreRefused(err)
 			}
 			res.Note = "reactivated " + res.CIID
 		case ReviewKindProbableDuplicate:
-			// The new CI is the existing one: it is removed (CH29).
+			// The new CI is the existing one: the CI-12 merge moves its
+			// references to the chosen CI and leaves the duplicate as a
+			// tombstone with a snapshot for the unmerge (CH29, F-096).
 			if dup := payloadString(item.Payload, "ci_id"); dup != "" && dup != res.CIID {
-				if err := h.ciRepo.Delete(ctx, orgID, dup); err != nil && !isNotFound(err) {
+				if err := h.mergeDuplicate(ctx, orgID, item.ID, res.CIID, dup); err != nil {
 					return false, err
 				}
 				res.Note = "merged " + dup + " into " + res.CIID
@@ -156,7 +320,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			DiscoverySource: &source,
 			LastSeenAt:      &now,
 		}); err != nil {
-			return false, err
+			return false, ciNotFound(err)
 		}
 		if res.Note == "" {
 			res.Note = "merged into " + res.CIID
@@ -166,27 +330,18 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			// The device already exists as generic_device CI.
 			return false, refused(http.StatusConflict, "the device is already recorded as generic_device; set its type on the CI and dismiss the item")
 		}
-		nowTime := time.Now().UTC()
-		newItem := ci.Item{
-			OrganizationID:  orgID,
-			CITypeID:        payloadString(item.Payload, "ci_type_name"),
-			Name:            payloadString(item.Payload, "name"),
-			Status:          "active",
-			Manufacturer:    payloadString(item.Payload, "manufacturer"),
-			Model:           payloadString(item.Payload, "model"),
-			SerialNumber:    payloadString(item.Payload, "serial_number"),
-			ManagementIP:    payloadString(item.Payload, "management_ip"),
-			Hostname:        payloadString(item.Payload, "hostname"),
-			FQDN:            payloadString(item.Payload, "fqdn"),
-			Attributes:      map[string]any{"review_item_id": item.ID},
-			DiscoverySource: ci.SourceSweep,
-			FirstSeenAt:     &nowTime,
-			LastSeenAt:      &nowTime,
-		}
-		if err := h.ciRepo.Create(ctx, &newItem); err != nil {
-			return false, err
-		}
-		res.Note = "created new CI " + newItem.ID
+		// The CI, its provenance and the resolution commit together: a
+		// resolution the principal may not write (E-09) leaves no CI.
+		err := h.inTx(ctx, orgID, func(ctx context.Context) error {
+			ciID, err := h.createReviewedDevice(ctx, item, res.CITypeID)
+			if err != nil {
+				return err
+			}
+			res.Note = "created new CI " + ciID
+			_, err = h.repo.ResolveReviewItem(ctx, orgID, item.ID, res)
+			return err
+		})
+		return err == nil, err
 	case reviews.ActionAccept:
 		// The observed identity values replace the stored ones.
 		ciID := payloadString(item.Payload, "matched_ci_id")
@@ -206,11 +361,163 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			return false, refused(http.StatusUnprocessableEntity, "the item reports no value to accept")
 		}
 		if _, err := h.ciRepo.Update(ctx, orgID, ciID, update); err != nil {
-			return false, err
+			return false, ciNotFound(err)
 		}
 		res.Note = "accepted the observed values on " + ciID
 	}
 	return false, nil
+}
+
+// createReviewedDevice creates the CI of the device whose record a review
+// item keeps (devicePayload) as the ingest creates a new device (CI-13): the
+// type resolved (reviewedDeviceType), the reported values checked against
+// the field rules, identity values that identify nothing or that another CI
+// holds left out, the provenance of every field recorded. Client and site
+// are those of the item (reviewedDeviceScope), so the next sighting matches
+// the CI.
+func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem, chosenTypeID string) (string, error) {
+	orgID := item.OrganizationID
+	clientID, siteID, err := h.reviewedDeviceScope(ctx, item)
+	if err != nil {
+		return "", err
+	}
+	device := reviewedDevice(item.Payload)
+	device.ClientID = clientID
+	typeID, err := h.reviewedDeviceType(ctx, orgID, device.CITypeName, chosenTypeID)
+	if err != nil {
+		return "", err
+	}
+	candidates, err := h.identityCandidates(ctx, orgID, &device)
+	if err != nil {
+		return "", err
+	}
+	if _, err = h.dropInvalidObserved(ctx, orgID, typeID, "", &device); err != nil {
+		return "", err
+	}
+	withoutBlocklistedIdentity(&device)
+	withoutTakenIdentity(&device, candidates)
+	source := device.Source
+	if source == "" {
+		source = ci.SourceSweep
+	}
+	newItem := discoveredCI(orgID, &device, typeID, source)
+	// The site is the root of its location tree; the database derives
+	// site_id from the location (DB-05).
+	newItem.LocationID = siteID
+	newItem.Attributes["review_item_id"] = item.ID
+	// A type the principal chose is read under its row level security in
+	// the writing transaction: unknown, of another organization or
+	// deactivated is refused (CI-01, TEN-09).
+	newItem.ChosenType = chosenTypeID != ""
+	// The CI counts against max_cis as one created by POST /cis: over the
+	// limit new is 403 entitlement-limit, no CI is created and the item
+	// stays open with the device record (ENT-03, ENT-08).
+	if err := h.allowActiveCI(ctx, orgID); err != nil {
+		return "", err
+	}
+	// The unique attributes are checked as POST /cis checks them, also
+	// before their index exists: a value another active CI holds is 409
+	// with the violations and the item stays open (MET-15, F-429).
+	if err := ci.CheckUnique(ctx, h.ciRepo, orgID, typeID, newItem.ClientID, "", newItem.Attributes); err != nil {
+		return "", err
+	}
+	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
+		if ve, ok := ci.AsValidationError(err); ok && len(ve.Violations) > 0 {
+			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: ve.Violations[0].Field,
+				Message: ve.Violations[0].Detail}
+		}
+		return "", err
+	}
+	if err := h.recordDiscoveredMany(ctx, orgID, newItem.ID, discoveredFields(&device), source, device.ObservedAt); err != nil {
+		return "", err
+	}
+	return newItem.ID, nil
+}
+
+// errChooseType refuses new for a device whose type is not known (UI-16,
+// F-176): the principal names the type with ci_type_id.
+var errChooseType = &reviews.Error{Status: http.StatusUnprocessableEntity, Field: "ci_type_id",
+	Message: "choose a CI type for the new CI"}
+
+// reviewedDeviceType returns the type ID of the CI new creates: the type the
+// principal chose (ci_type_id of the resolution) or else the type the item
+// recorded, a name resolved as the ingest resolves it (lookupTypes,
+// resolveCITypeIDs); the type of an unknown_ci_type item may exist by now.
+// Without a type that resolves new is refused with 422 and the item stays
+// open.
+func (h *Handler) reviewedDeviceType(ctx context.Context, orgID, typeName, chosen string) (string, error) {
+	if chosen = strings.TrimSpace(chosen); chosen != "" {
+		if !isUUID(chosen) {
+			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: "ci_type_id",
+				Message: "ci_type_id must be the UUID of a CI type"}
+		}
+		return chosen, nil
+	}
+	name := strings.TrimSpace(typeName)
+	if name == "" {
+		return "", errChooseType
+	}
+	var types map[string]string
+	if !isUUID(name) {
+		var err error
+		if types, err = h.lookupTypes(ctx, orgID, []string{name}); err != nil {
+			return "", err
+		}
+	}
+	typeID := resolveCITypeIDs([]IngestItem{{CITypeName: name}}, types)[0]
+	if typeID == "" {
+		return "", errChooseType
+	}
+	return typeID, nil
+}
+
+// reviewedDeviceScope returns the client and site of the CI new creates. The
+// columns of the item decide (WP-342): the database derives them from the
+// candidate CIs or, without candidates, keeps those of the device's record
+// or collector. Without a client column the record in the payload decides
+// (client_id "" for an org-wide sighting). An item from before the payload
+// kept the client takes the client its candidate CIs share; otherwise new
+// is refused, since a guess could hand the device to another client.
+func (h *Handler) reviewedDeviceScope(ctx context.Context, item *ReviewItem) (clientID, siteID string, err error) {
+	if item.ClientID != "" {
+		return item.ClientID, item.SiteID, nil
+	}
+	if recorded, ok := item.Payload["client_id"].(string); ok {
+		siteID = item.SiteID
+		if siteID == "" && recorded != "" {
+			siteID = payloadString(item.Payload, "site_id")
+		}
+		return recorded, siteID, nil
+	}
+	clientID, ok, err := h.candidateClient(ctx, item.OrganizationID, item.CandidateCIIDs)
+	if err != nil {
+		return "", "", err
+	}
+	if !ok {
+		return "", "", refused(http.StatusUnprocessableEntity,
+			"the item does not record the client of the device; dismiss it and wait for the next sighting")
+	}
+	return clientID, item.SiteID, nil
+}
+
+// candidateClient returns the client all candidate CIs share ("" when all
+// are org-wide). ok is false without candidates, when their clients differ
+// or when one cannot be read (soft-deleted or not visible).
+func (h *Handler) candidateClient(ctx context.Context, orgID string, ids []string) (clientID string, ok bool, err error) {
+	for i, id := range ids {
+		candidate, getErr := h.ciRepo.GetByID(ctx, orgID, id)
+		if isNotFound(getErr) {
+			return "", false, nil
+		}
+		if getErr != nil {
+			return "", false, getErr
+		}
+		if i > 0 && candidate.ClientID != clientID {
+			return "", false, nil
+		}
+		clientID = candidate.ClientID
+	}
+	return clientID, len(ids) > 0, nil
 }
 
 func isNotFound(err error) bool {
@@ -243,7 +550,19 @@ func (h *Handler) resolveOverrideConflict(ctx context.Context, item *ReviewItem,
 		return false, refused(http.StatusNotImplemented, "overrides cannot be cleared here")
 	}
 	ciID, field := payloadString(item.Payload, "ci_id"), payloadString(item.Payload, "field")
+	if !isUUID(ciID) || field == "" {
+		return false, refused(http.StatusUnprocessableEntity, "the item names no CI field")
+	}
 	if err := clearer.ClearOverride(ctx, item.OrganizationID, ciID, field); err != nil {
+		// A CI that is gone or a field without an override (any more) is
+		// 404 like an unknown item, a name that is no field 422; the item
+		// stays open (F-405).
+		switch {
+		case errors.Is(err, override.ErrNotFound):
+			return false, refused(http.StatusNotFound, "the CI or the override of "+field+" was not found; dismiss the item")
+		case errors.Is(err, override.ErrReservedName):
+			return false, refused(http.StatusUnprocessableEntity, "the item names no CI field")
+		}
 		return false, err
 	}
 	res.Note = "override of " + field + " removed, observed value accepted"
@@ -334,21 +653,8 @@ func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileR
 	if len(result.CandidateCIIDs) == 0 {
 		return nil
 	}
-	payload := map[string]any{
-		"criterion":     result.Criterion,
-		"ci_type_name":  incoming.CITypeName,
-		"name":          incoming.Name,
-		"manufacturer":  incoming.Manufacturer,
-		"model":         incoming.Model,
-		"serial_number": incoming.SerialNumber,
-		"management_ip": incoming.ManagementIP,
-		"hardware_uuid": incoming.HardwareUUID,
-		"primary_mac":   incoming.PrimaryMAC,
-		"hostname":      incoming.Hostname,
-		"fqdn":          incoming.FQDN,
-		"fingerprint":   incoming.Fingerprint,
-		"raw_data":      incoming.RawData,
-	}
+	payload := devicePayload(&incoming)
+	payload["criterion"] = result.Criterion
 	return &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindAmbiguousIdentity,
@@ -356,6 +662,55 @@ func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileR
 		Payload:        payload,
 		CandidateCIIDs: result.CandidateCIIDs,
 		ObjectKey:      deviceKey(&incoming),
+	}
+}
+
+// devicePayload keeps the record of a device in the payload of a review
+// item that new may turn into a CI (ambiguous_identity, resurrected_device,
+// unclassified_device of an unknown type): what the ingest would create the
+// CI from, with the client and site of the record ("" for an org-wide
+// sighting, CI-13).
+func devicePayload(item *IngestItem) map[string]any {
+	return map[string]any{
+		"ci_type_name":  item.CITypeName,
+		"name":          item.Name,
+		"manufacturer":  item.Manufacturer,
+		"model":         item.Model,
+		"serial_number": item.SerialNumber,
+		"management_ip": item.ManagementIP,
+		"hardware_uuid": item.HardwareUUID,
+		"primary_mac":   item.PrimaryMAC,
+		"hostname":      item.Hostname,
+		"fqdn":          item.FQDN,
+		"sys_object_id": item.SysObjectID,
+		"fingerprint":   item.Fingerprint,
+		"raw_data":      item.RawData,
+		"source":        item.Source,
+		"client_id":     item.ClientID,
+		"site_id":       item.SiteID,
+	}
+}
+
+// reviewedDevice is the device record devicePayload kept; client and site
+// are left to reviewedDeviceScope.
+func reviewedDevice(payload map[string]any) IngestItem {
+	fingerprint, _ := payload["fingerprint"].(map[string]any)
+	rawData, _ := payload["raw_data"].(map[string]any)
+	return IngestItem{
+		CITypeName:   payloadString(payload, "ci_type_name"),
+		Name:         payloadString(payload, "name"),
+		Manufacturer: payloadString(payload, "manufacturer"),
+		Model:        payloadString(payload, "model"),
+		SerialNumber: payloadString(payload, "serial_number"),
+		ManagementIP: payloadString(payload, "management_ip"),
+		HardwareUUID: payloadString(payload, "hardware_uuid"),
+		PrimaryMAC:   payloadString(payload, "primary_mac"),
+		Hostname:     payloadString(payload, "hostname"),
+		FQDN:         payloadString(payload, "fqdn"),
+		SysObjectID:  payloadString(payload, "sys_object_id"),
+		Fingerprint:  fingerprint,
+		RawData:      rawData,
+		Source:       payloadString(payload, "source"),
 	}
 }
 

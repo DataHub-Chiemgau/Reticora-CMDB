@@ -19,7 +19,10 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -73,8 +76,9 @@ func DefaultConfig() Config {
 	}
 }
 
-// Mailer sends the verification e-mail. Until the notification channels
-// exist (WP-137) only tests provide one.
+// Mailer sends the verification e-mail. The server uses
+// notify.SignupMailer over the central SMTP server of the installation
+// (TEC-13); without that server there is no mailer and signups answer 503.
 type Mailer interface {
 	SendSignupVerification(ctx context.Context, to, organizationName, link string) error
 }
@@ -88,7 +92,8 @@ type Account struct {
 }
 
 // Inviter is implemented by Accounts that can create an account without a
-// password and let the IdP mail the user to set one (operator path).
+// password and let the IdP mail the user to set one (operator path). The
+// service uses it only after WithInvitationMail(true).
 type Inviter interface {
 	InviteAccount(ctx context.Context, a Account) (string, error)
 }
@@ -173,8 +178,11 @@ type Service struct {
 	mailer   Mailer
 	accounts Accounts
 	cfg      Config
-	now      func() time.Time
-	newOrgID func() string
+	// invitationMail: the IdP can send mail, so an operator-created
+	// organization's first org_admin is invited through an Inviter.
+	invitationMail bool
+	now            func() time.Time
+	newOrgID       func() string
 }
 
 // NewService creates the service. A nil mailer or accounts makes every
@@ -182,6 +190,21 @@ type Service struct {
 func NewService(repo Repository, mailer Mailer, accounts Accounts, cfg Config) *Service {
 	return &Service{repo: repo, mailer: mailer, accounts: accounts, cfg: cfg,
 		now: time.Now, newOrgID: newUUID}
+}
+
+// WithInvitationMail records whether the IdP can send the invitation mail
+// of an operator-created organization's first org_admin (TLC-02). Keycloak
+// sends it with execute-actions-email over the realm's own SMTP settings;
+// the server enables it only together with the central SMTP server, whose
+// settings the installer also gives the realm. Off (the default),
+// CreateOrganization creates the organization without an IdP account, as
+// without an inviting client: a refused mail would otherwise roll back
+// every creation.
+func (s *Service) WithInvitationMail(enabled bool) *Service {
+	if s != nil {
+		s.invitationMail = enabled
+	}
+	return s
 }
 
 // Available reports whether signups can be completed.
@@ -320,8 +343,10 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // CreateOrganization implements operator.OrgCreator (TLC-02): the creation
 // chain of the signup without verification, with the operator's plan and
-// limits instead of a trial. With an inviting IdP client the first
-// org_admin gets an account and the IdP's mail to set a password.
+// limits instead of a trial. With an inviting IdP client and the IdP's mail
+// (WithInvitationMail) the first org_admin gets an account and the IdP's
+// mail to set a password; otherwise the account is left to the IdP
+// (admin_invited false).
 func (s *Service) CreateOrganization(ctx context.Context, op operator.Identity, req *operator.NewOrganization) (operator.CreatedOrganization, error) {
 	if s == nil || s.repo == nil {
 		return operator.CreatedOrganization{}, operator.ErrCreationUnavailable
@@ -336,6 +361,9 @@ func (s *Service) CreateOrganization(ctx context.Context, op operator.Identity, 
 	}
 	setup := &Setup{OrganizationID: s.newOrgID(), Plan: plan, Entitlements: ents}
 	inviter, invites := s.accounts.(Inviter)
+	// Without the IdP's mail the invitation could not be delivered and its
+	// error would roll the creation back.
+	invites = invites && s.invitationMail
 
 	var accountID string
 	createAccount := func(ctx context.Context) error {
@@ -366,8 +394,10 @@ func (s *Service) CreateOrganization(ctx context.Context, op operator.Identity, 
 				err = errors.Join(err, fmt.Errorf("delete account %s after failed creation: %w", accountID, derr))
 			}
 		}
+		// The fixed text only: err may carry the failed cleanup with the
+		// account id and the IdP's answer (API-03).
 		if errors.Is(err, ErrAccountExists) {
-			return operator.CreatedOrganization{}, &api.ConflictError{Field: "admin_email", Message: err.Error()}
+			return operator.CreatedOrganization{}, &api.ConflictError{Field: "admin_email", Message: ErrAccountExists.Error()}
 		}
 		return operator.CreatedOrganization{}, err
 	}
@@ -489,20 +519,27 @@ func newUUID() string {
 
 // Slugify derives an organization slug from its name: lower-case ASCII
 // letters and digits separated by single hyphens, at most 48 characters;
-// "org" when nothing remains.
+// "org" when nothing remains. Latin letters lose their diacritics, Greek
+// and Cyrillic are transliterated (F-303); other scripts give nothing.
 func Slugify(name string) string {
+	if slug := slugBase(name); slug != "" {
+		return slug
+	}
+	return "org"
+}
+
+// slugBase is Slugify without the fallback: "" when the name has no
+// letters or digits that transliterate to ASCII.
+func slugBase(name string) string {
 	var b strings.Builder
 	dash := false
-	for _, r := range strings.ToLower(name) {
-		switch r {
-		case 'ä':
-			r = 'a'
-		case 'ö':
-			r = 'o'
-		case 'ü':
-			r = 'u'
-		case 'ß':
-			b.WriteString("ss")
+	for _, r := range norm.NFD.String(strings.ToLower(name)) {
+		if unicode.Is(unicode.Mn, r) {
+			// Diacritics of the decomposed letter (ä → a, é → e, й → и).
+			continue
+		}
+		if t, ok := transliteration[r]; ok {
+			b.WriteString(t)
 			dash = false
 			continue
 		}
@@ -520,8 +557,20 @@ func Slugify(name string) string {
 	if len(slug) > 48 {
 		slug = strings.Trim(slug[:48], "-")
 	}
-	if slug == "" {
-		return "org"
-	}
 	return slug
+}
+
+// transliteration maps the lower-case letters without a decomposition to
+// ASCII: Latin ligatures and stroked letters, Greek (ELOT 743) and
+// Cyrillic (ICAO). An empty string drops the letter.
+var transliteration = map[rune]string{
+	'ß': "ss", 'æ': "ae", 'œ': "oe", 'ø': "o", 'ł': "l", 'đ': "d", 'ð': "d", 'þ': "th", 'ı': "i", 'ħ': "h",
+	'α': "a", 'β': "v", 'γ': "g", 'δ': "d", 'ε': "e", 'ζ': "z", 'η': "i", 'θ': "th", 'ι': "i", 'κ': "k",
+	'λ': "l", 'μ': "m", 'ν': "n", 'ξ': "x", 'ο': "o", 'π': "p", 'ρ': "r", 'σ': "s", 'ς': "s", 'τ': "t",
+	'υ': "y", 'φ': "f", 'χ': "ch", 'ψ': "ps", 'ω': "o",
+	'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ж': "zh", 'з': "z", 'и': "i", 'к': "k",
+	'л': "l", 'м': "m", 'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u", 'ф': "f",
+	'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch", 'ъ': "ie", 'ы': "y", 'ь': "", 'э': "e",
+	'ю': "iu", 'я': "ia", 'і': "i", 'є': "ie", 'ґ': "g", 'ђ': "d", 'ј': "j", 'љ': "lj", 'њ': "nj",
+	'ћ': "c", 'џ': "dz", 'ѕ': "dz",
 }

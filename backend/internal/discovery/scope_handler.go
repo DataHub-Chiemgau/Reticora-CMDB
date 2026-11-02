@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -189,7 +193,8 @@ func suggestableSubnet(cidr string) (string, bool) {
 
 // SuggestScopes opens a scope_suggested review for every reported subnet
 // that no scope of the collector covers; a dismissed suggestion stays
-// dismissed. It returns the number of new suggestions.
+// dismissed. It returns the number of new suggestions; a disabled collector
+// is refused.
 func (h *Handler) SuggestScopes(ctx context.Context, orgID, collectorID string, subnets []string) (int, error) {
 	repo, ok := h.repo.(ScopeRepository)
 	if !ok {
@@ -199,10 +204,14 @@ func (h *Handler) SuggestScopes(ctx context.Context, orgID, collectorID string, 
 	if err != nil {
 		return 0, err
 	}
+	if col.Status == CollectorDisabled {
+		return 0, ErrCollectorDisabled
+	}
 	existing, _, err := repo.ListScopes(ctx, orgID, ScopeFilter{CollectorID: collectorID}, api.PaginationParams{Limit: 10000})
 	if err != nil {
 		return 0, err
 	}
+	// A suggestion belongs to the client and site of the collector.
 	opened := 0
 	for _, raw := range subnets {
 		cidr, ok := suggestableSubnet(raw)
@@ -213,6 +222,8 @@ func (h *Handler) SuggestScopes(ctx context.Context, orgID, collectorID string, 
 			OrganizationID: orgID,
 			Kind:           ReviewKindScopeSuggested,
 			Status:         ReviewStatusOpen,
+			ClientID:       col.ClientID,
+			SiteID:         col.SiteID,
 			ObjectKey:      "scope:" + collectorID + ":" + cidr,
 			Payload: map[string]any{
 				"collector_id":   collectorID,
@@ -248,8 +259,25 @@ func coveredByScope(scopes []Scope, cidr string) bool {
 	return false
 }
 
-// resolveScopeSuggested creates the scope of an accepted suggestion.
+// resolveScopeSuggested creates the scope of an accepted suggestion. Accept
+// creates a scope and dismiss suppresses one, so both need discovery:manage
+// besides review:resolve (DIS-09, F-031); without it the item stays open.
+// For the same reason both need the discovery feature, as POST
+// /api/v1/discovery-scopes does: not entitled is 403 feature-not-entitled
+// and the item stays open, an expired license passes (CH21). Reading the
+// queue is cmdb_core (F-400).
 func (h *Handler) resolveScopeSuggested(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
+	if perms, _ := identity.PermissionsFromContext(ctx); !identity.HasPermission(perms, identity.PermDiscoveryManage) {
+		return false, refused(http.StatusForbidden, "missing required permission: "+string(identity.PermDiscoveryManage))
+	}
+	state, problem, err := h.edgeLicense(ctx, item.OrganizationID)
+	if err != nil {
+		return false, err
+	}
+	if state == LicenseNotEntitled {
+		refusal := &entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureDiscovery}
+		return false, &reviews.Error{Status: http.StatusForbidden, Problem: problem, Message: refusal.Error()}
+	}
 	if res.Action != reviews.ActionAccept {
 		return false, nil
 	}
@@ -283,9 +311,18 @@ const (
 	ScopesRequestSuffix = ".scopes.request"
 	ScopesResultSuffix  = ".scopes.result"
 	SubnetsReportSuffix = ".subnets.report"
+	// The collector's ad-hoc discovery jobs (JOB-01, F-358): its open jobs
+	// and the status it reports for one of them.
+	JobsRequestSuffix = ".jobs.request"
+	JobsStatusSuffix  = ".jobs.status"
 )
 
-// CollectorScope is a scope as the collector receives it.
+// CollectorScope is a scope as the collector receives it; CredentialIDs are
+// its effective credentials (E-67), not the stored list. LastRunAt and
+// NextRunAt are the run state the server holds (RFC 3339; a new scope has
+// no last run and is due at its creation): a (re)started collector
+// schedules the sweep from them instead of at once (DIS-10, F-109). Timezone is the organization's time zone, in
+// which the collector evaluates a cron schedule (E-84 option A).
 type CollectorScope struct {
 	ID            string   `json:"id"`
 	Kind          string   `json:"kind"`
@@ -296,6 +333,9 @@ type CollectorScope struct {
 	Schedule      string   `json:"schedule"`
 	CredentialIDs []string `json:"credential_ids"`
 	Plugins       []string `json:"plugins"`
+	LastRunAt     string   `json:"last_run_at,omitempty"`
+	NextRunAt     string   `json:"next_run_at,omitempty"`
+	Timezone      string   `json:"timezone"`
 }
 
 // ScopesResponse answers a scopes request.
@@ -355,21 +395,40 @@ func (h *Handler) CollectorScopes(ctx context.Context, orgID, collectorID string
 	if err != nil {
 		return nil, err
 	}
+	// Each scope carries its effective credentials, the ones of the bundle
+	// the collector resolves for it (E-67); a scope created after the
+	// lookup gets none until the next request.
+	creds, err := repo.ScopeCredentialIDs(ctx, orgID, collectorID)
+	if err != nil {
+		return nil, err
+	}
+	tz, err := repo.OrganizationTimezone(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]CollectorScope, 0, len(scopes))
 	for i := range scopes {
 		s := &scopes[i]
+		ids := creds[s.ID]
+		if ids == nil {
+			ids = []string{}
+		}
 		out = append(out, CollectorScope{ID: s.ID, Kind: s.Kind, Target: s.Target, ClientID: s.ClientID, SiteID: s.SiteID,
-			VRFID: s.VRFID, Schedule: s.Schedule, CredentialIDs: s.CredentialIDs, Plugins: s.Plugins})
+			VRFID: s.VRFID, Schedule: s.Schedule, CredentialIDs: ids, Plugins: s.Plugins,
+			LastRunAt: s.LastRunAt, NextRunAt: s.NextRunAt, Timezone: tz})
 	}
 	return out, nil
 }
 
 // RecordCollectorScopeRun stores a run result of one of the collector's
-// scopes.
+// scopes; an unknown or disabled collector is refused.
 func (h *Handler) RecordCollectorScopeRun(ctx context.Context, orgID, collectorID string, rep *ScopeResultReport) error {
 	repo, ok := h.repo.(ScopeRepository)
 	if !ok {
 		return errors.New("discovery scopes are not available")
+	}
+	if err := h.checkCollector(ctx, orgID, collectorID); err != nil {
+		return err
 	}
 	s, err := repo.GetScope(ctx, orgID, rep.ScopeID)
 	if err != nil {
@@ -390,16 +449,40 @@ func (h *Handler) RecordCollectorScopeRun(ctx context.Context, orgID, collectorI
 	return repo.RecordScopeRun(ctx, orgID, rep.ScopeID, &ScopeRun{At: at, Result: result, NextRun: rep.NextRun})
 }
 
-// ServeCollectorScopes answers the scope requests, run results and subnet
-// reports of the collectors on nc until ctx ends (DIS-09).
-func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error {
-	handlers := map[string]func(ctx context.Context, orgID, collectorID string, data []byte) any{
+// collectorsWithoutScopes holds the collectors this process logged as
+// having no enabled scope (noteCollectorScopes).
+var collectorsWithoutScopes sync.Map
+
+// noteCollectorScopes logs at INFO that a collector received no enabled
+// scope: an empty list tells it to discover nothing, while its subnet
+// reports only wait as scope_suggested reviews on the Discovery page
+// (INS-06). Once per collector and process while it has none, so the
+// refresh of its scopes (every 15 minutes) does not repeat it; once it has
+// a scope again, a later empty list is logged anew.
+func noteCollectorScopes(orgID, collectorID string, scopes int) {
+	if scopes > 0 {
+		collectorsWithoutScopes.Delete(collectorID)
+		return
+	}
+	if _, logged := collectorsWithoutScopes.LoadOrStore(collectorID, struct{}{}); logged {
+		return
+	}
+	slog.Info("collector has no enabled discovery scope; it discovers nothing", "event", "discovery.collector.no_scopes",
+		"organization_id", orgID, "collector_id", collectorID,
+		"hint", "accept a subnet the collector suggested or create a scope for it on the Discovery page")
+}
+
+// scopeHandlers are the handlers of the scope channel subjects by suffix;
+// they run only for a collector the dispatcher checked.
+func (h *Handler) scopeHandlers() map[string]func(ctx context.Context, orgID, collectorID string, data []byte) any {
+	return map[string]func(ctx context.Context, orgID, collectorID string, data []byte) any{
 		ScopesRequestSuffix: func(ctx context.Context, orgID, collectorID string, _ []byte) any {
 			scopes, err := h.CollectorScopes(ctx, orgID, collectorID)
 			if err != nil {
 				slog.Warn("collector scopes refused", "collector_id", collectorID, "error", err)
 				return ScopesResponse{Scopes: []CollectorScope{}, Error: "not available"}
 			}
+			noteCollectorScopes(orgID, collectorID, len(scopes))
 			resp := ScopesResponse{Scopes: scopes}
 			if repo, ok := h.repo.(ScopeRepository); ok {
 				if iv, ierr := repo.DiscoveryIntervals(ctx, orgID); ierr == nil {
@@ -431,18 +514,98 @@ func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error
 			}
 			return map[string]int{"suggested": n}
 		},
+		JobsRequestSuffix: func(ctx context.Context, orgID, collectorID string, _ []byte) any {
+			open, err := h.CollectorJobs(ctx, orgID, collectorID)
+			if err != nil {
+				slog.Warn("collector jobs refused", "collector_id", collectorID, "error", err)
+				return JobsResponse{Jobs: []CollectorJob{}, Error: "not available"}
+			}
+			return JobsResponse{Jobs: open}
+		},
+		JobsStatusSuffix: func(ctx context.Context, orgID, collectorID string, data []byte) any {
+			var rep JobStatusReport
+			if err := json.Unmarshal(data, &rep); err != nil {
+				return map[string]string{"error": "invalid report"}
+			}
+			if _, err := h.RecordCollectorJobStatus(ctx, orgID, collectorID, &rep); err != nil {
+				slog.Warn("job status refused", "collector_id", collectorID, "job_id", rep.JobID, "status", rep.Status, "error", err)
+				return map[string]string{"error": "not recorded"}
+			}
+			return map[string]string{"status": "recorded"}
+		},
 	}
+}
+
+// WithScopeCycles counts the scope requests that failed on the server's
+// side (the collector could not be looked up, the reply could not be sent)
+// into cycles, the cycles of the worker discovery_scopes (OPS-05). An
+// unknown or disabled collector is no failure.
+func (h *Handler) WithScopeCycles(cycles *observability.Cycles) *Handler {
+	h.scopeCycles = cycles
+	return h
+}
+
+// scopeResultSuffixes are the subjects on which a collector delivers
+// discovery results; like the ingest they need an active license (CH21).
+var scopeResultSuffixes = map[string]bool{ScopesResultSuffix: true, SubnetsReportSuffix: true}
+
+// scopeChannelLicensed reports whether the organization's discovery license
+// allows the scope channel subject, and otherwise the error of the reply
+// (ENT-05, ENT-07, F-400): without the discovery entitlement no subject is
+// answered, so the collector gets no scopes or jobs and opens no
+// scope_suggested item; after the license expired the results (run
+// results, subnet reports) are refused like the ingest, while scopes, jobs
+// and job statuses are still answered (the collector is paused). A failed
+// lookup refuses (fail-closed) and counts as a failed request.
+func (h *Handler) scopeChannelLicensed(ctx context.Context, orgID, collectorID, suffix string) (string, bool) {
+	state, _, err := h.edgeLicense(ctx, orgID)
+	if err != nil {
+		h.scopeCycles.Fail()
+		slog.Error("collector scope request: discovery license lookup failed", "organization_id", orgID,
+			"collector_id", collectorID, "suffix", suffix, "error", err)
+		return "not available", false
+	}
+	if state == LicenseNotEntitled || (state != LicenseActive && scopeResultSuffixes[suffix]) {
+		slog.Warn("collector scope request refused", "organization_id", orgID, "collector_id", collectorID,
+			"suffix", suffix, "license", state)
+		return "discovery license " + state, false
+	}
+	return "", true
+}
+
+// ServeCollectorScopes answers the scope requests, run results and subnet
+// reports of the collectors on nc until ctx ends (DIS-09), and their
+// requests for open discovery jobs and the job statuses they report
+// (JOB-01, F-358). A request of an
+// unknown or disabled collector is refused before its handler runs,
+// whatever the suffix, so nothing of it is persisted (COL-04); so is a
+// request the organization's discovery license does not allow
+// (scopeChannelLicensed, F-400).
+func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error {
 	var subs []*nats.Subscription
-	for suffix, handle := range handlers {
+	for suffix, handle := range h.scopeHandlers() {
 		sub, err := nc.Subscribe("collector.*.*"+suffix, func(msg *nats.Msg) {
 			orgID, collectorID, ok := subjectCollector(msg.Subject, suffix)
 			var resp any = map[string]string{"error": "invalid subject"}
 			if ok {
-				resp = handle(systemContext(ctx, orgID), orgID, collectorID, msg.Data)
+				sctx := systemContext(ctx, orgID)
+				if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
+					if !errors.Is(cerr, ErrCollectorDisabled) && !errors.Is(cerr, api.ErrNotFound) {
+						h.scopeCycles.Fail()
+					}
+					slog.Warn("collector scope request refused", "organization_id", orgID, "collector_id", collectorID,
+						"suffix", suffix, "error", cerr)
+					resp = map[string]string{"error": "not available"}
+				} else if refusal, licensed := h.scopeChannelLicensed(sctx, orgID, collectorID, suffix); !licensed {
+					resp = map[string]string{"error": refusal}
+				} else {
+					resp = handle(sctx, orgID, collectorID, msg.Data)
+				}
 			}
 			raw, _ := json.Marshal(resp)
 			if msg.Reply != "" {
 				if rerr := msg.Respond(raw); rerr != nil {
+					h.scopeCycles.Fail()
 					slog.Error("collector scope reply", "error", rerr)
 				}
 			}

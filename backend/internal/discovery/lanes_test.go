@@ -715,9 +715,11 @@ func (r flakyCIs) Create(ctx context.Context, item *ci.Item) error {
 	return r.Repository.Create(ctx, item)
 }
 
-// TestConsumeBatchAcksSettledRecords covers WP-334: when a group fails, its
-// records processed before the failure and those processed before the batch
-// are acknowledged (they are in the ledger), the others redelivered.
+// TestConsumeBatchAcksSettledRecords covers WP-334 and WP-481: when a record
+// of a group fails, the records processed before it and those processed
+// before the batch are acknowledged (they are in the ledger), and so is the
+// record of another device after it, which is processed (WP-481); the
+// failed record is redelivered.
 func TestConsumeBatchAcksSettledRecords(t *testing.T) {
 	repo := NewMemoryRepository()
 	repo.SeedCIType("server", "server")
@@ -744,18 +746,18 @@ func TestConsumeBatchAcksSettledRecords(t *testing.T) {
 	}
 	recordsBefore := testutil.ToFloat64(laneRecords.WithLabelValues("0"))
 	consumeBatch(context.Background(), h, deliveries)
-	want := []string{"ack", "ack", "nak", "nak"}
+	want := []string{"ack", "ack", "nak", "ack"}
 	for i, d := range fakes {
 		if d.result != want[i] {
 			t.Errorf("%s: %s, want %s", msgs[i].Item.SerialNumber, d.result, want[i])
 		}
 	}
-	if n := testutil.ToFloat64(laneRecords.WithLabelValues("0")) - recordsBefore; n != 2 {
-		t.Errorf("reticora_ingest_lane_records_total grew by %v, want 2", n)
+	if n := testutil.ToFloat64(laneRecords.WithLabelValues("0")) - recordsBefore; n != 3 {
+		t.Errorf("reticora_ingest_lane_records_total grew by %v, want 3", n)
 	}
 	items, _, _ := cis.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
-	if len(items) != 2 {
-		t.Errorf("%d CIs, want ACK-0 and ACK-1", len(items))
+	if len(items) != 3 {
+		t.Errorf("%d CIs, want ACK-0, ACK-1 and ACK-3", len(items))
 	}
 }
 
@@ -766,6 +768,7 @@ func TestLaneMetricsRegistered(t *testing.T) {
 	laneBacklog.Reset()
 	laneBacklog.WithLabelValues("legacy").Set(3)
 	recordRetries.WithLabelValues("deadlock").Add(0)
+	deadLetters.WithLabelValues("permanent").Add(0)
 	families, err := reg.Gather()
 	if err != nil {
 		t.Fatal(err)
@@ -774,7 +777,8 @@ func TestLaneMetricsRegistered(t *testing.T) {
 	for _, f := range families {
 		names[f.GetName()] = true
 	}
-	for _, name := range []string{"reticora_ingest_lanes", "reticora_ingest_lane_backlog", "reticora_ingest_record_retries_total"} {
+	for _, name := range []string{"reticora_ingest_lanes", "reticora_ingest_lane_backlog", "reticora_ingest_record_retries_total",
+		"reticora_ingest_dead_letters_total"} {
 		if !names[name] {
 			t.Errorf("%s not registered", name)
 		}

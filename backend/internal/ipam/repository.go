@@ -24,6 +24,23 @@ var (
 	ErrInUse = errors.New("in use")
 )
 
+// InterfaceInUseError refuses the delete of an interface that an edge other
+// than an unverified discovery edge names as an end (409; REL-05, F-042).
+// RelationshipIDs are the edges the caller can see; it is empty when only
+// edges outside the caller's scope keep the interface.
+type InterfaceInUseError struct {
+	RelationshipIDs []string
+}
+
+// validation: a fixed rule text with the IDs of the edges the caller can see.
+func (e *InterfaceInUseError) Error() string {
+	if len(e.RelationshipIDs) == 0 {
+		return "the interface is an end of a relationship; remove the relationship first"
+	}
+	return "the interface is an end of the relationships " + strings.Join(e.RelationshipIDs, ", ") +
+		"; remove them first"
+}
+
 // SubnetFilter holds optional filters for listing subnets.
 type SubnetFilter struct {
 	ClientID string

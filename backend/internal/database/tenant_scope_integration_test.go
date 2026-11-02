@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,7 +64,7 @@ func seedScopeFixture(t *testing.T) (context.Context, *pgxpool.Pool) {
 		}
 	}
 
-	pool, err := database.NewPool(ctx, dsn)
+	pool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatalf("application pool: %v", err)
 	}
@@ -272,7 +273,8 @@ func tracedPool(t *testing.T, app *pgxpool.Pool) (*pgxpool.Pool, *sqlLog) {
 //   - a failed statement whose error was swallowed rolls everything back
 //     (ErrTxAborted); a savepoint keeps the transaction usable after a
 //     unique violation;
-//   - AfterCommit runs after the commit only, detached from the transaction.
+//   - AfterCommit runs after the commit only, detached from the transaction;
+//     AfterCommitBatch drops the items of a savepoint that rolled back.
 func TestContextTxJoin(t *testing.T) {
 	ctx, app := seedScopeFixture(t)
 	pool, log := tracedPool(t, app)
@@ -462,6 +464,43 @@ func TestContextTxJoin(t *testing.T) {
 			clients("join-swallowed-inside"), clients("join-swallowed-after"))
 	}
 
+	// AfterCommitBatch (WP-489): the items of a savepoint that rolled back
+	// leave the batch, a batch opened under it goes with it; the others
+	// reach fn once after the commit.
+	var batches []string
+	collect := func(_ context.Context, items []any) {
+		parts := make([]string, 0, len(items))
+		for _, item := range items {
+			parts = append(parts, item.(string))
+		}
+		batches = append(batches, strings.Join(parts, "+"))
+	}
+	batchErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
+		database.AfterCommitBatch(ctx, "kept", "before", collect)
+		spErr := database.Savepoint(ctx, func(ctx context.Context) error {
+			database.AfterCommitBatch(ctx, "kept", "undone", collect)
+			database.AfterCommitBatch(ctx, "opened", "undone", collect)
+			return insertClient(ctx, scopeClient1, "join-batch-duplicate")
+		})
+		if spErr == nil {
+			t.Error("savepoint with a duplicate client did not fail")
+		}
+		if spErr = database.Savepoint(ctx, func(ctx context.Context) error {
+			database.AfterCommitBatch(ctx, "opened", "released", collect)
+			return nil
+		}); spErr != nil {
+			t.Errorf("released savepoint: %v", spErr)
+		}
+		database.AfterCommitBatch(ctx, "kept", "after", collect)
+		return nil
+	})
+	if batchErr != nil {
+		t.Fatalf("batch transaction: %v", batchErr)
+	}
+	if strings.Join(batches, ",") != "before+after,released" {
+		t.Errorf("batches after the savepoints: %v, want before+after,released", batches)
+	}
+
 	// A rollback drops the callbacks.
 	errAbort := errors.New("abort")
 	if rollbackErr := database.WithRequestTenantTx(reqCtx, pool, scopeOrgA, func(ctx context.Context) error {
@@ -607,12 +646,12 @@ func TestWithTenantQuotesHostileUserID(t *testing.T) {
 	// doubled backslash would leave \' to escape the doubled quote, the next
 	// quote would end the literal and the dollar-quoted rest of the user id
 	// would set another organization.
-	dsn := testDatabaseURL(t)
+	appDSN := scopetest.AppDSN(t)
 	sep := "?"
-	if strings.Contains(dsn, "?") {
+	if strings.Contains(appDSN, "?") {
 		sep = "&"
 	}
-	sjis, err := database.NewPool(ctx, dsn+sep+"client_encoding=SJIS&backslash_quote=on&standard_conforming_strings=off")
+	sjis, err := database.NewPool(ctx, appDSN+sep+"client_encoding=SJIS&backslash_quote=on&standard_conforming_strings=off")
 	if err != nil {
 		t.Fatal(err)
 	}

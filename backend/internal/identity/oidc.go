@@ -55,6 +55,10 @@ type IDTokenClaims struct {
 	// context class of the login; the operator path requires MFA (SEC-07).
 	AMR []string
 	ACR string
+	// Locale is the locale claim (OIDC standard claim, a BCP 47 tag such as
+	// en or de-AT; Keycloak sends it when the realm has internationalization
+	// enabled); empty when the token carries none or no string.
+	Locale string
 }
 
 // oidcHTTPClient is the default HTTP client for provider requests. Unlike
@@ -266,6 +270,7 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		Name            string          `json:"name"`
 		Organization    json.RawMessage `json:"organization_id"`
 		Groups          json.RawMessage `json:"groups"`
+		Locale          json.RawMessage `json:"locale"`
 		AMR             []string        `json:"amr,omitempty"`
 		ACR             string          `json:"acr,omitempty"`
 		Audience        json.RawMessage `json:"aud,omitempty"`
@@ -329,7 +334,18 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		Nonce:          tokenClaims.Nonce,
 		AMR:            tokenClaims.AMR,
 		ACR:            tokenClaims.ACR,
+		Locale:         decodeLocale(tokenClaims.Locale),
 	}, nil
+}
+
+// decodeLocale returns the locale claim; a claim that is no JSON string
+// counts as none and does not fail the login.
+func decodeLocale(raw json.RawMessage) string {
+	var locale string
+	if len(raw) == 0 || json.Unmarshal(raw, &locale) != nil {
+		return ""
+	}
+	return strings.TrimSpace(locale)
 }
 
 const maxIDTokenClockSkew = 2 * time.Minute

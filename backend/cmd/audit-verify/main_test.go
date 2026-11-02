@@ -38,3 +38,20 @@ func TestRunReportsEveryOrganization(t *testing.T) {
 		t.Errorf("unreadable: exit %d", code)
 	}
 }
+
+// TestRunNamesSealedEntries covers WP-680 (AUD-04, SEC-05): a chain with
+// entries the pii.backfill run sealed is intact (exit 0), and the output
+// names the sealed entries and how many of them the vault did not confirm.
+func TestRunNamesSealedEntries(t *testing.T) {
+	verify := func(_ context.Context, _ string) (audit.VerifyResult, error) {
+		return audit.VerifyResult{Intact: true, Checked: 5, Sealed: 2, Unconfirmed: 1}, nil
+	}
+	var out bytes.Buffer
+	if code := run(context.Background(), &out, []string{"org-a"}, verify); code != 0 {
+		t.Errorf("sealed entries: exit %d", code)
+	}
+	if want := "audit chain intact for organization org-a (5 entries verified, 2 of them sealed, " +
+		"1 sealed entries not confirmed against the vault)\n"; out.String() != want {
+		t.Errorf("output %q, want %q", out.String(), want)
+	}
+}

@@ -103,6 +103,13 @@
       "security": "Open security & privacy",
       "map": "Open map",
       "roomplan": "Open room plan"
+    },
+    "contact": {
+      "label": "Contact",
+      "email": "E-mail",
+      "phone": "Phone",
+      "role": "Role",
+      "back": "Back to search"
     }
   },
   "dashboard": {
@@ -111,6 +118,17 @@
     "activeCIs": "Active CIs",
     "maintenanceCIs": "CIs in Maintenance",
     "collectorsOnline": "Collectors Online",
+    "setup": {
+      "title": "Setup not finished yet",
+      "text": "Connect a collector so that the first CIs arrive in your CMDB.",
+      "continue": "Continue setup"
+    },
+    "reviewEscalation": {
+      "hint": "Open for more than 14 days.",
+      "none": "No open reviews older than 14 days.",
+      "open": "Show escalated reviews",
+      "loadError": "The escalated reviews could not be loaded"
+    },
     "roleLabel": "Dashboard role",
     "roleHint": "The widget selection follows the chosen role.",
     "roles": {
@@ -121,6 +139,7 @@
     "widgets": {
       "ciSummary": "CI overview",
       "collectors": "Collector status",
+      "reviewEscalation": "Escalated reviews",
       "slaBreaches": "SLA breaches",
       "compliance": "Compliance score",
       "assets": "Assets",
@@ -169,6 +188,15 @@
     "allStatus": "All Statuses",
     "exportCsv": "Export CSV",
     "exportJson": "Export JSON",
+    "exportJob": {
+      "progress": "{{format}} export: {{status}}",
+      "done": "{{format}} export downloaded ({{rows}} rows)",
+      "filtersIgnored": "Search and site are not applied to the export; it contains all CIs with the selected status, type and client.",
+      "forbidden": "Export not allowed: you lack the permission or your plan does not include exports.",
+      "unavailable": "Export is currently unavailable. Please try again later.",
+      "failed": "The export failed. Please try again.",
+      "timeout": "The export is taking longer than expected. Once it is done, it is available for download under \"Export\"."
+    },
     "overview": "Overview",
     "noAttributes": "No attributes recorded",
     "noRelationships": "No relationships",
@@ -189,7 +217,31 @@
       "partial": "{{succeeded}} CIs updated, {{failed}} failed",
       "failures": "Failed CIs",
       "success": "Updated status of {{count}} CIs",
-      "error": "The bulk change could not be fully applied"
+      "error": "The bulk change could not be fully applied",
+      "selectAllMatches": "Select all {{count}} matches of the filter",
+      "selectFirstMatches": "Select the first {{count}} matches of the filter",
+      "collectError": "The matches of the filter could not be loaded",
+      "capped": "A bulk change covers at most {{max}} CIs: the filter has {{total}} matches, the first {{max}} are selected.",
+      "tooMany": "A bulk change covers at most {{max}} CIs; {{count}} are selected.",
+      "jobHint": "From {{count}} CIs on the change runs as a job; its report appears here.",
+      "jobTitle": "Bulk change as a job",
+      "jobProgress": "Progress of the bulk change",
+      "jobState": "Job: {{status}} ({{progress}} %)",
+      "jobDone": "Job finished: {{succeeded}} of {{total}} CIs updated, {{failed}} failed",
+      "jobCancelled": "Job cancelled: {{succeeded}} of {{total}} CIs updated, {{failed}} failed, {{skipped}} skipped",
+      "jobFailed": "The job failed: {{error}}",
+      "jobLoadError": "The job could not be read",
+      "report": "Report per CI",
+      "reportCI": "CI",
+      "reportResult": "Result",
+      "reportCode": "HTTP status",
+      "reportError": "Error",
+      "results": {
+        "ok": "OK",
+        "error": "Error",
+        "skipped": "Skipped"
+      },
+      "closeReport": "Close report"
     },
     "overrideReason": "Reason",
     "addInstanceField": "Add instance field",
@@ -200,11 +252,14 @@
     "diverged": "diverged",
     "provenance": "Provenance & overrides",
     "noProvenance": "No provenance data yet (created on the next discovery run).",
+    "provenanceLoadError": "The provenance data could not be loaded",
     "instanceFieldsHint": "Fields only for this device (e.g. iLO IP, SAP SID) — without changing the type.",
     "overrideValue": "Value",
     "setOverride": "Set override",
     "protected": "protected",
     "instanceFields": "Instance fields",
+    "instanceFieldsConflict": "Save refused: {{fields}} was changed by someone else in the meantime. Please reload the page and repeat the change.",
+    "instanceFieldsPrecondition": "Save refused: the version of this CI is outdated or unknown. Please reload the page.",
     "provenanceHint": "Discovered vs. effective value. Protected manual overrides are never overwritten by discovery.",
     "discovered": "Discovered",
     "assetCanonical": "Asset (canonical data)",
@@ -215,6 +270,9 @@
     "location": "Location",
     "barcode": "Barcode",
     "warrantyEnd": "Warranty end",
+    "rfidTag": "RFID tag",
+    "purchaseDate": "Purchase date",
+    "invoiceNumber": "Invoice number",
     "supplier": "Supplier",
     "healthState": {
       "ok": "Health: OK",
@@ -228,11 +286,20 @@
     "history": "History",
     "historyEmpty": "No changes yet.",
     "historyLoadError": "The history could not be loaded.",
+    "historyAuditHint": "Audit entries are not included; they require the audit:read permission.",
     "historySite": "Site {{site}}",
     "historySource": {
       "ci_change": "Change",
       "entity_change": "History",
-      "audit": "Audit"
+      "audit": "Audit",
+      "location_change": "Location change"
+    },
+    "statuses": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "maintenance": "Maintenance",
+      "decommissioned": "Decommissioned",
+      "unknown": "Unknown"
     }
   },
   "form": {
@@ -240,6 +307,10 @@
     "editCI": "Edit CI",
     "ciDescription": "Manage master data and status of the Configuration Item.",
     "selectPlaceholder": "Please select",
+    "typeAttributes": "Type attributes",
+    "typesLoadFailed": "The CI types could not be loaded.",
+    "typeSchemaLoadFailed": "The attributes of the CI type could not be loaded.",
+    "assetManaged": "Managed by the asset",
     "fields": {
       "name": "Name",
       "ciType": "CI Type",
@@ -248,12 +319,35 @@
       "model": "Model",
       "serialNumber": "Serial Number",
       "managementIp": "Management IP",
-      "firmwareVersion": "Firmware Version"
+      "firmwareVersion": "Firmware Version",
+      "location": "Location"
     },
     "validation": {
       "nameRequired": "Name is required.",
       "ciTypeRequired": "CI type is required.",
-      "serverRejected": "Please correct the highlighted fields."
+      "serverRejected": "Please correct the highlighted fields.",
+      "field": {
+        "required": "{{label}} is required",
+        "integer": "{{label}} must be an integer",
+        "number": "{{label}} must be a number",
+        "boolean": "{{label}} must be yes or no",
+        "date": "{{label}} must be a date in the format YYYY-MM-DD",
+        "datetime": "{{label}} must be a point in time",
+        "ip": "{{label}} must be an IP address",
+        "mac": "{{label}} must be a MAC address",
+        "url": "{{label}} must be a valid URL",
+        "email": "{{label}} must be a valid email address",
+        "singleLine": "{{label}} must be a single line",
+        "uuid": "{{label}} must be a UUID",
+        "notAllowed": "{{label}}: {{value}} is not an allowed value",
+        "pattern": "{{label}} has an invalid format",
+        "min": "{{label}} must be at least {{limit}}",
+        "max": "{{label}} must be at most {{limit}}",
+        "minLength": "{{label}} must be at least {{limit}} characters long",
+        "maxLength": "{{label}} must be at most {{limit}} characters long",
+        "textExpected": "{{label}} must be a text",
+        "invalid": "{{label}} is invalid"
+      }
     }
   },
   "discovery": {
@@ -267,12 +361,16 @@
     "enroll": {
       "button": "Connect collector",
       "title": "Connect collector",
-      "intro": "Connect a collector: generate a single-use enrollment code and enter it in the collector. Your infrastructure appears automatically.",
+      "intro": "Connect a collector: generate a single-use enrollment code and enter it in the collector. The collector must reach the server on port 4222/TCP. The subnets it reports appear here as suggestions; it scans only the subnets you confirm.",
       "label": "Label (e.g. site)",
       "generate": "Generate code",
       "once": "This code is shown only once and expires. Run in the customer network:",
       "expires": "Valid until",
-      "after": "Then restart the collector and confirm the suggested scopes on this page."
+      "after": "Then restart the collector and confirm the suggested scopes on this page.",
+      "client": "Client",
+      "clientChoose": "Choose a client",
+      "clientHint": "Your access covers several clients: choose the client the collector is bound to.",
+      "failed": "The enrollment code was not created: {{detail}}"
     },
     "collectorStatus": {
       "pending": "Pending",
@@ -280,6 +378,13 @@
       "offline": "Offline",
       "disabled": "Disabled",
       "paused": "Paused (license)"
+    },
+    "collectorHints": {
+      "noEdge": "No edge connection: the collector delivers data only over port 4222/TCP (mTLS), and this connection is not up.",
+      "noEdgeCauses": "Common causes: port 4222/TCP blocked by a firewall, collector not enrolled or not restarted after enrollment, server certificate does not match the host name. See docs/troubleshooting-installation.md, section \"Collector delivers nothing\".",
+      "noScope": "No discovery scope – the collector scans nothing. Confirm suggested subnets or add a scope.",
+      "showSuggestions": "Show suggested subnets ({{count}})",
+      "noScopeRights": "Adding a scope needs the discovery:manage permission, confirming suggestions also review:resolve."
     },
     "scopes": {
       "title": "Discovery scopes",
@@ -299,7 +404,6 @@
       "enable": "Enable",
       "disable": "Disable",
       "delete": "Delete",
-      "invalid": "The scope was refused. Check target and schedule (at least 5 minutes).",
       "health": {
         "ok": "Last run ok",
         "partial": "Partially failed",
@@ -316,6 +420,56 @@
         "config_error": "Configuration error",
         "upload_failed": "Upload failed (buffered)",
         "unknown": "Unknown error"
+      },
+      "edit": "Edit",
+      "editNamed": "Edit scope {{name}}",
+      "enableNamed": "Enable scope {{name}}",
+      "disableNamed": "Disable scope {{name}}",
+      "deleteNamed": "Delete scope {{name}}",
+      "credentialCount": "credentials: {{count}}",
+      "form": {
+        "createTitle": "Add scope to {{collector}}",
+        "editTitle": "Edit scope {{name}}",
+        "name": "Name",
+        "namePlaceholder": "Empty: the target",
+        "site": "Site",
+        "siteNone": "Site of the collector",
+        "vrf": "VRF",
+        "vrfNone": "None (global routing)",
+        "scheduleHint": "Interval (e.g. 24h, at least 5m) or five-field cron expression. Cron runs in the time zone of the organization.",
+        "plugins": "Plugins",
+        "pluginsRequired": "Select at least one plugin.",
+        "targetRequired": "Enter a target.",
+        "credentials": "Credentials",
+        "credentialsHint": "Without a selection the credentials of the client and of the organization apply.",
+        "credentialsNone": "No matching credentials.",
+        "credentialsUnavailable": "The credentials could not be loaded (missing credential:read?). Without a selection the credentials of the client and of the organization apply."
+      },
+      "plugin": {
+        "sweep": "Ping sweep",
+        "snmp": "SNMP",
+        "ssh": "SSH",
+        "wmi": "WMI",
+        "ipmi": "IPMI",
+        "redfish": "Redfish",
+        "power": "UPS/PDU",
+        "nas": "NAS"
+      },
+      "confirmDelete": {
+        "title": "Delete scope?",
+        "text": "The scope {{name}} ({{target}}) is deleted; the collector no longer scans this target.",
+        "confirm": "Delete permanently"
+      },
+      "errors": {
+        "notSaved": "The scope was not saved. Check the marked fields.",
+        "invalidValue": "Invalid value: {{detail}}",
+        "rejected": "The scope was refused: {{detail}}",
+        "saveFailed": "The scope could not be saved: {{reason}}",
+        "toggleFailed": "Scope {{name}} could not be switched: {{reason}}",
+        "deleteFailed": "Scope {{name}} could not be deleted: {{reason}}",
+        "forbidden": "You lack the permission (discovery:manage).",
+        "notFound": "The scope no longer exists.",
+        "reason": "{{detail}}"
       }
     },
     "suggestions": {
@@ -323,7 +477,8 @@
       "intro": "Your collectors reported these subnets after enrollment. Confirm them to have them discovered.",
       "from": "reported by {{collector}}",
       "accept": "Add as scope",
-      "dismiss": "Dismiss"
+      "dismiss": "Dismiss",
+      "failed": "The suggestion could not be resolved: {{reason}}"
     }
   },
   "webhook": {
@@ -354,6 +509,17 @@
     "noDeadLetters": "No dead letters",
     "noDeadLettersHint": "There are currently no permanently failed deliveries.",
     "retry": "Retry",
+    "readOnly": "You can view webhooks; creating, deleting and testing require the webhook:manage permission.",
+    "errors": {
+      "notSaved": "The webhook was not saved. Please check the marked inputs.",
+      "egress": "Destination blocked by the egress protection, not allowed: {{reason}}",
+      "invalidEvent": "Unknown event: {{event}}",
+      "invalidValue": "Invalid value: {{detail}}",
+      "forbidden": "No permission: this action requires the webhook:manage permission.",
+      "notFound": "The webhook no longer exists. Please reload the page.",
+      "rejected": "Refused by the server: {{detail}}",
+      "failed": "The action failed: {{detail}}"
+    },
     "status": {
       "pending": "pending",
       "delivering": "delivering",
@@ -365,13 +531,19 @@
   "accessibility": {
     "closeModal": "Close modal",
     "closePanel": "Close detail view",
-    "toggleDarkMode": "Toggle dark mode",
     "commandPaletteSearch": "Search commands",
     "searchCIs": "Search Configuration Items",
     "filterCIStatus": "Filter CI status",
     "primaryNavigation": "Primary navigation",
     "breadcrumb": "Breadcrumb navigation",
     "skipToContent": "Skip to content"
+  },
+  "theme": {
+    "toggle": "Toggle dark mode – current: {{current}}, next: {{next}}",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "systemResolved": "System ({{theme}})"
   },
   "asset": {
     "title": "Assets",
@@ -397,7 +569,23 @@
     "purchaseCost": "Purchase cost",
     "invoiceNumber": "Invoice number",
     "warrantyEnd": "Warranty end",
-    "status": "Status"
+    "status": "Status",
+    "statuses": {
+      "in_stock": "In stock",
+      "assigned": "Assigned",
+      "maintenance": "Maintenance",
+      "retired": "Retired",
+      "disposed": "Disposed",
+      "lost": "Lost"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "software": "Software",
+      "license": "License",
+      "cloud_resource": "Cloud resource",
+      "accessory": "Accessory",
+      "other": "Other"
+    }
   },
   "assignment": {
     "title": "Assignments",
@@ -407,7 +595,14 @@
     "type": "Type",
     "assignedTo": "Assigned to",
     "assignedAt": "Assigned at",
-    "assetId": "Asset ID"
+    "assetId": "Asset ID",
+    "statuses": {
+      "active": "Active",
+      "returned": "Returned",
+      "transferred": "Transferred",
+      "overdue": "Overdue",
+      "cancelled": "Cancelled"
+    }
   },
   "document": {
     "title": "Documents",
@@ -417,7 +612,16 @@
     "size": "Size",
     "version": "Version",
     "upload": "Create Document",
-    "storageKey": "Storage Key"
+    "categories": {
+      "general": "General",
+      "contract": "Contract",
+      "invoice": "Invoice",
+      "manual": "Manual",
+      "diagram": "Diagram",
+      "certificate": "Certificate",
+      "policy": "Policy",
+      "other": "Other"
+    }
   },
   "stocktake": {
     "title": "Stocktake",
@@ -449,7 +653,21 @@
     "priority": "Priority",
     "category": "Category",
     "createdAt": "Created",
-    "startWork": "Start Work"
+    "startWork": "Start Work",
+    "statuses": {
+      "open": "Open",
+      "in_progress": "In progress",
+      "waiting": "Waiting",
+      "resolved": "Resolved",
+      "closed": "Closed"
+    },
+    "categories": {
+      "incident": "Incident",
+      "request": "Request",
+      "problem": "Problem",
+      "change": "Change",
+      "task": "Task"
+    }
   },
   "userMgmt": {
     "title": "Users & Teams",
@@ -461,7 +679,101 @@
     "lastLogin": "Last Login",
     "memberCount": "Members",
     "permissions": "Permissions",
-    "type": "Type"
+    "type": "Type",
+    "statuses": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "anonymized": "Anonymized"
+    },
+    "deactivate": "Deactivate",
+    "reactivate": "Reactivate",
+    "delete": "Delete",
+    "ownAccount": "Your account",
+    "confirm": {
+      "deactivateTitle": "Deactivate user?",
+      "deactivateText": "{{name}} ({{email}}) can no longer sign in. Running sessions and the user's own API keys are revoked at once.",
+      "reactivateTitle": "Reactivate user?",
+      "reactivateText": "{{name}} ({{email}}) can sign in again.",
+      "deleteTitle": "Delete user?",
+      "deleteText": "{{name}} ({{email}}) is deleted permanently. Open objects of the user must be handed over to another user first.",
+      "deleteConfirm": "Delete permanently"
+    },
+    "errors": {
+      "ownsOpenObjects": "{{name}} cannot be deleted: the user owns open objects (open tickets, active assignments, keys not returned). Hand them over to another user first, or deactivate the user instead.",
+      "referenced": "{{name}} cannot be deleted: existing records refer to the user. Deactivate or anonymize the user instead.",
+      "notFound": "{{name}} no longer exists. Reload the page.",
+      "forbidden": "You are not allowed to change {{name}}.",
+      "unavailable": "{{name}} was not changed: the user's sessions could not be revoked. Try again later.",
+      "failed": "The action for {{name}} failed (HTTP {{status}})."
+    }
+  },
+  "invitations": {
+    "title": "Invitations",
+    "invite": "Invite user",
+    "send": "Send invitation",
+    "email": "Email",
+    "role": "Role",
+    "chooseRole": "Choose a role",
+    "scope": "Scope",
+    "scopeType": "Scope type",
+    "scopeTarget": "Scope target",
+    "chooseTarget": "Choose a client or site",
+    "scopeTypes": {
+      "org": "Organization",
+      "client": "Client",
+      "site": "Site"
+    },
+    "expires": "Valid until",
+    "status": "Status",
+    "statuses": {
+      "pending": "Pending",
+      "accepted": "Accepted",
+      "expired": "Expired"
+    },
+    "renew": "Renew",
+    "revoke": "Revoke",
+    "sent": "Invitation sent to {{email}}, valid until {{expires}}.",
+    "link": "Invitation link (shown only now)",
+    "mailOnly": "Only the invited address receives the invitation link, by email.",
+    "errorTitle": "Invitations could not be loaded",
+    "errors": {
+      "notSaved": "The invitation was not sent. Please check the marked fields.",
+      "emailInvalid": "Please enter a single email address without a name.",
+      "emailPending": "This address already has a pending invitation. Renew it in the list.",
+      "roleInvalid": "This role does not exist in the organization. Choose a standard role.",
+      "scopeTypeMismatch": "The role does not fit the scope type: client roles are granted for a client, site roles for a site.",
+      "scopeInvalid": "Choose an existing client or site.",
+      "scopeRequired": "Please choose the scope target.",
+      "forbidden": "You are not allowed to issue this invitation.",
+      "ceiling": "You can only grant roles whose permissions you hold yourself in the chosen scope.",
+      "notFound": "The invitation no longer exists. The list has been refreshed.",
+      "accepted": "The invitation has already been accepted and can no longer be changed.",
+      "unavailable": "Invitations are not set up on this server. Contact your operations team.",
+      "mailFailed": "The invitation email could not be sent; nothing was saved or changed. Please try again later or contact your operations team.",
+      "rejected": "The server rejected the invitation: {{detail}}",
+      "failed": "The action failed: {{detail}}"
+    }
+  },
+  "invitationAccept": {
+    "title": "Accept invitation",
+    "description": "Create your account. The person who invited you has set your role and access scope.",
+    "displayName": "Display name",
+    "password": "Password (at least {{min}} characters)",
+    "submit": "Create account",
+    "toLogin": "Go to sign-in",
+    "errors": {
+      "notAccepted": "The account was not created. Please check the marked fields.",
+      "passwordTooShort": "The password must have at least {{min}} characters.",
+      "displayNameTooLong": "The display name may have at most {{max}} characters.",
+      "missingToken": "The invitation link is incomplete. Open the full link from the email.",
+      "expired": "This invitation link has expired. Ask the person who invited you to renew the invitation.",
+      "invalid": "This invitation link is invalid or has already been used. Ask for a new invitation.",
+      "userExists": "The organization already has an account for this address. Sign in with it.",
+      "rateLimited": "Too many attempts. Please wait a few minutes and try again.",
+      "userLimit": "The organization has reached its maximum number of users. Contact the person who invited you.",
+      "unavailable": "Accepting is not possible right now. Please try again later.",
+      "failed": "Accepting failed: {{detail}}"
+    }
   },
   "auth": {
     "loginTitle": "Sign in",
@@ -473,8 +785,22 @@
     "callbackTitle": "Completing sign-in",
     "callbackProgress": "Please wait while we verify your session.",
     "callbackError": "Sign-in could not be completed.",
+    "callbackRefused": {
+      "notAdmitted": "Your first sign-in requires an invitation from your organization. Ask your organization's administrators for an invitation.",
+      "noOrganization": "Your account is not assigned to an organization. Contact your organization's administrators.",
+      "userInactive": "Your account is deactivated. Contact your organization's administrators.",
+      "noRole": "Your account has no role in this organization. Ask your organization's administrators for access.",
+      "userLimit": "The organization has reached its maximum number of users. Contact your organization's administrators."
+    },
     "sessionExpired": "Your session has expired. Please sign in again.",
-    "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again."
+    "invitationAccepted": "Your account for {{email}} has been created. Sign in now.",
+    "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again.",
+    "signupPrompt": "No account yet?",
+    "signupLink": "Create account",
+    "otherAccount": {
+      "hint": "If another account is still signed in in this browser, for example in another tab, signing in would use that account instead of the new one. Sign that account out first, or use a private window.",
+      "signOut": "Sign out the other account"
+    }
   },
   "topology": {
     "subtitle": "Relationships between configuration items as a graph.",
@@ -485,6 +811,9 @@
     "empty": "No topology data",
     "emptyHint": "Relationships appear here once they are recorded or derived from discovery.",
     "tooLarge": "The topology holds more than 2,000 CIs. Choose a CI type, a site or a start CI.",
+    "rootNotFound": "CI not found or not visible",
+    "rootNotFoundHint": "The start CI of this view no longer exists or is outside your scope.",
+    "showAll": "Back to the full view",
     "allTypes": "All CI types",
     "filterType": "Filter by CI type",
     "filterDepth": "Traversal depth",
@@ -502,7 +831,13 @@
       "noImpact": "This CI has no dependents — an outage would have no impact on the graph.",
       "add": "Add failure",
       "remove": "Remove from simulation",
-      "impactMany": "If {{failed}} CIs ({{names}}) fail together, {{count}} further CIs are affected (shown in grey)."
+      "impactMany": "If {{failed}} CIs ({{names}}) fail together, {{count}} further CIs are affected (shown in grey).",
+      "loading": "Computing the impact …",
+      "unavailable": "The impact could not be computed.",
+      "preview": "Preview",
+      "provisionalLoading": "Provisional result along the impact direction of the relationship types, without the redundancy check; the server analysis is still running.",
+      "failedHint": "The server analysis is unavailable. Please try again.",
+      "tooMany": "At most {{max}} CIs per analysis can fail together. Remove CIs from the simulation."
     },
     "filterRelType": "Relationship type",
     "allRelTypes": "All relationships",
@@ -537,7 +872,8 @@
     "mountsLoadError": "The mounts could not be loaded",
     "faceLabel": "Select rack face",
     "faceFront": "Front",
-    "faceRear": "Rear"
+    "faceRear": "Rear",
+    "faceBoth": "Front and rear"
   },
   "permissions": {
     "title": "Permissions",
@@ -596,7 +932,15 @@
     "noRuns": "No runs",
     "noRunsHint": "Started workflows appear here.",
     "approve": "Approve",
-    "reject": "Reject"
+    "reject": "Reject",
+    "statuses": {
+      "pending": "Pending",
+      "running": "Running",
+      "waiting_approval": "Waiting for approval",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    }
   },
   "compliance": {
     "title": "Compliance",
@@ -611,7 +955,22 @@
     "emptyRulesHint": "Compliance rules appear here.",
     "failures": "Failing results",
     "noFailures": "No deviations",
-    "noFailuresHint": "No failing results are currently stored."
+    "noFailuresHint": "No failing results are currently stored.",
+    "severities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "resultStatuses": {
+      "pass": "Passed",
+      "fail": "Failed",
+      "not_applicable": "Not applicable"
+    },
+    "categories": {
+      "security": "Security",
+      "hygiene": "Data hygiene"
+    }
   },
   "iga": {
     "loading": "Loading identity governance",
@@ -643,7 +1002,37 @@
     "drift": "Drift findings",
     "remediate": "Remediate",
     "emptyDrift": "No drift detected",
-    "emptyDriftHint": "Connector reconciliation records orphan and missing accounts here."
+    "emptyDriftHint": "Connector reconciliation records orphan and missing accounts here.",
+    "connectorStatuses": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "error": "Error"
+    },
+    "taskStatuses": {
+      "pending": "Pending",
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "requestStatuses": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Withdrawn"
+    },
+    "reviewStatuses": {
+      "draft": "Draft",
+      "active": "Active",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "severities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    }
   },
   "assistant": {
     "title": "AI assistant",
@@ -674,6 +1063,7 @@
     "rows": "Rows",
     "createdAt": "Created",
     "download": "Download",
+    "downloadFailed": "The file could not be downloaded.",
     "emptyTitle": "No export jobs",
     "emptyHint": "Start an export to download CI data as CSV, DATEV or JSON.",
     "status_pending": "Pending",
@@ -793,7 +1183,11 @@
     "positionX": "X (% from left)",
     "positionY": "Y (% from top)",
     "applyPosition": "Apply position",
-    "positionFor": "Position of {{name}}"
+    "positionFor": "Position of {{name}}",
+    "conflict": "The room plan was changed elsewhere in the meantime and has been reloaded. Please check the position and move the object again.",
+    "rangeError": "Position not saved: the coordinates must lie between 0 and 100 %.",
+    "saveError": "Position not saved: {{message}}",
+    "staleObject": "Position not saved: an object is no longer assigned to this room. The room plan was reloaded; please move the object again."
   },
   "consumables": {
     "summary": "Consumable stock with level and minimum level.",
@@ -810,7 +1204,16 @@
     "submit": "Submit",
     "approve": "Approve",
     "reject": "Reject",
-    "supplier": "Supplier"
+    "supplier": "Supplier",
+    "statuses": {
+      "draft": "Draft",
+      "submitted": "Submitted",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "ordered": "Ordered",
+      "received": "Received",
+      "cancelled": "Cancelled"
+    }
   },
   "maintenance": {
     "summary": "Schedule maintenance and notify affected customers.",
@@ -823,7 +1226,33 @@
     "startsAt": "Starts",
     "endsAt": "Ends",
     "queued": "{{count}} notifications queued – delivery pending",
-    "noClients": "No affected customers"
+    "noClients": "No affected customers",
+    "statuses": {
+      "scheduled": "Scheduled",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "notifications": "Notifications",
+    "noNotifications": "No notifications stored",
+    "client": "Customer",
+    "channel": "Channel",
+    "status": "Status",
+    "time": "Time",
+    "searchCIs": "Search affected CIs",
+    "ciResults": "Matching CIs",
+    "selectedCIs": "Selected CIs",
+    "addCI": "Add {{name}}",
+    "removeCI": "Remove {{name}}",
+    "noCIsSelected": "Without a CI the maintenance applies to the whole organization.",
+    "channels": {
+      "webhook": "Webhook"
+    },
+    "notificationStatuses": {
+      "pending": "pending",
+      "sent": "sent",
+      "failed": "failed"
+    }
   },
   "disposal": {
     "summary": "Revision-safe disposal documentation (append-only, BSI/ISO).",
@@ -846,7 +1275,13 @@
     "identifier": "Identifier",
     "issueTitle": "Issue key",
     "assignTo": "Issue to",
-    "selectUser": "Select user"
+    "selectUser": "Select user",
+    "statuses": {
+      "available": "Available",
+      "issued": "Issued",
+      "lost": "Lost",
+      "retired": "Retired"
+    }
   },
   "trainings": {
     "summary": "Courses with assignment, due date and proof.",
@@ -863,7 +1298,12 @@
     "book": "Book",
     "bookTitle": "Book desk",
     "startsAt": "From",
-    "endsAt": "To"
+    "endsAt": "To",
+    "statuses": {
+      "available": "Available",
+      "occupied": "Occupied",
+      "maintenance": "Under maintenance"
+    }
   },
   "agents": {
     "summary": "Registered endpoint agents with policy and kill-switch.",
@@ -874,7 +1314,12 @@
     "enable": "Enable",
     "killSwitch": "Kill switch",
     "policyTitle": "Agent policy",
-    "intervalSeconds": "Interval (seconds)"
+    "intervalSeconds": "Interval (seconds)",
+    "statuses": {
+      "online": "Online",
+      "offline": "Offline",
+      "disabled": "Disabled"
+    }
   },
   "findings": {
     "summary": "Patch posture and vulnerabilities per CI.",
@@ -885,7 +1330,13 @@
     "falsePositive": "False positive",
     "acknowledge": "Acknowledge",
     "resolve": "Resolve",
-    "markFalsePositive": "False positive"
+    "markFalsePositive": "False positive",
+    "severities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    }
   },
   "citypes": {
     "create": "Create type",
@@ -944,7 +1395,51 @@
     },
     "system": "system",
     "logicalShort": "logical",
-    "fieldCount": "Fields: {{count}}"
+    "fieldCount": "Fields: {{count}}",
+    "editField": "Edit field “{{name}}”",
+    "editFieldAction": "Edit: {{name}}",
+    "editFlagsHint": "Saving changes the index settings of the field; an index job builds the index in the background.",
+    "flagSearchable": "searchable",
+    "flagUnique": "unique",
+    "flagUniqueClient": "unique per client",
+    "flagErrors": {
+      "duplicates": "Uniqueness not enabled: CIs already share a value. Resolve the duplicates first. Reason: {{detail}}",
+      "forbidden": "You are not allowed to manage attributes.",
+      "notFound": "The attribute no longer exists.",
+      "reason": "Reason: {{detail}}",
+      "partial": "The field “{{name}}” was saved, its index settings were not. {{reason}}",
+      "flagsNotSaved": "Index settings not saved. {{reason}}",
+      "fieldNotSaved": "Field not saved. {{reason}}",
+      "forbiddenPermission": "Not allowed: your session lacks the permission “{{permission}}”.",
+      "systemType": "System types are read-only and get no fields of their own. Clone the type or add an organization-wide field.",
+      "readOnly": "System attributes are read-only."
+    },
+    "indexJob": {
+      "scheduled": "Index job scheduled",
+      "label": "Index job: {{status}}",
+      "status": {
+        "queued": "queued",
+        "running": "running",
+        "succeeded": "succeeded",
+        "failed": "failed",
+        "cancelled": "cancelled"
+      }
+    },
+    "systemReadOnly": "System type: read-only. Fields cannot be added here and the type cannot be deactivated. To add your own fields:",
+    "systemReadOnlyClone": "“Clone” creates your own type with all fields of this type, which you can extend. Existing CIs and CIs found by discovery keep the system type.",
+    "systemReadOnlyOrgFields": "Organization-wide fields apply to every CI type of the organization, including system types and discovered CIs.",
+    "orgFields": {
+      "title": "Organization-wide fields",
+      "hint": "These fields apply to every CI type of the organization, including system types and CIs found by discovery. System fields are read-only.",
+      "add": "New organization-wide field",
+      "editorHint": "The field applies to every CI type of the organization. Organization-wide fields added here are optional.",
+      "empty": "No organization-wide fields defined.",
+      "readOnly": "Read-only: changing them needs the permission “ci_attribute:manage”.",
+      "editAction": "Edit organization-wide field: {{name}}",
+      "deleteAction": "Delete organization-wide field: {{name}}",
+      "deleteConfirm": "Delete the organization-wide field “{{name}}”? It is then removed from every CI type of the organization.",
+      "deleteFailed": "Field “{{name}}” not deleted. {{reason}}"
+    }
   },
   "inventory": {
     "assigned": "Assigned",
@@ -979,7 +1474,12 @@
     "spofList": "Single points of failure:",
     "clients": "Clients",
     "title": "Impact analysis",
-    "compute": "Compute blast radius"
+    "compute": "Compute blast radius",
+    "heuristic": "Network heuristic",
+    "heuristicList": "Possibly affected:",
+    "heuristicHint": "Reached only over an undirected network connection (connected_to); whether the failure hits these CIs is not certain. They do not count towards the affected CIs, clients and sites.",
+    "heuristicMarker": "Network heuristic",
+    "noneAffected": "No CIs are certainly affected."
   },
   "composition": {
     "inheritedHint": "Shared inventory data (serial, purchase, warranty, location) comes from the parent asset.",
@@ -999,6 +1499,7 @@
     "addChild": "child",
     "createRoot": "Create site",
     "empty": "No locations yet. Create a site first.",
+    "nodeNotFound": "The linked node does not exist or is not visible to you.",
     "client": "Client",
     "deleteFailed": "Cannot delete",
     "title": "Sites & Warehouses",
@@ -1011,6 +1512,28 @@
       "zone": "Zone",
       "shelf": "Shelf",
       "bin": "Bin"
+    },
+    "editTitle": "Edit {{name}}",
+    "parent": "Parent node",
+    "forbidden": "You do not have permission for this action.",
+    "deleteTitle": "Delete “{{name}}”?",
+    "deleteConfirm": "The node is deleted permanently. As long as child locations or other objects reference it, the server refuses the deletion.",
+    "inUse": "still referenced by {{kinds}}",
+    "dependencies": {
+      "location": "child locations",
+      "ci": "CIs",
+      "asset": "assets",
+      "quantity_item": "stock items",
+      "asset_movement": "movements",
+      "rack_mount": "rack mounts",
+      "role_assignment": "role assignments",
+      "vlan": "VLANs",
+      "subnet": "subnets",
+      "collector": "collectors",
+      "discovery_scope": "discovery scopes",
+      "agent_enrollment_token": "valid agent enrollment tokens",
+      "collector_enrollment_code": "valid collector enrollment codes",
+      "ci_merge": "CI merges (tombstones)"
     }
   },
   "savedviews": {
@@ -1025,7 +1548,56 @@
     "shared": "shared",
     "mine": "My views",
     "save": "Save as view",
-    "namePrompt": "View name"
+    "namePrompt": "View name",
+    "forbidden": "No permission for this view",
+    "forbiddenHint": "You lack the read permission for the objects this view queries. Contact your administrator.",
+    "presentation": "Presentation and sharing",
+    "sortBy": "Sort by",
+    "sortDefault": "Default (name)",
+    "sortDir": "Direction",
+    "asc": "Ascending",
+    "desc": "Descending",
+    "columns": "Columns",
+    "columnsHint": "None selected: name and summary.",
+    "sharing": "Sharing",
+    "shareOrg": "Share with the whole organization",
+    "shareRoles": "Share with roles",
+    "rolesUnavailable": "The roles cannot be loaded.",
+    "readOnly": "This view was shared with you; save changes as your own view.",
+    "update": "Save changes",
+    "attribute": "Attribute {{key}}",
+    "fields": {
+      "id": "ID",
+      "name": "Name",
+      "status": "Status",
+      "hostname": "Hostname",
+      "fqdn": "FQDN",
+      "serial_number": "Serial number",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "os_name": "Operating system",
+      "os_version": "OS version",
+      "management_ip": "Management IP",
+      "lifecycle_state": "Lifecycle",
+      "discovery_source": "Discovery source",
+      "health": "Health",
+      "ci_type": "CI type",
+      "client_id": "Client (ID)",
+      "site_id": "Site (ID)",
+      "location_id": "Location (ID)",
+      "is_manual": "Maintained manually",
+      "created_at": "Created",
+      "updated_at": "Updated",
+      "last_seen_at": "Last seen",
+      "asset_tag": "Asset tag",
+      "category": "Category",
+      "supplier": "Supplier",
+      "barcode": "Barcode",
+      "rfid_tag": "RFID tag",
+      "purchase_cost": "Purchase cost",
+      "purchase_date": "Purchase date",
+      "warranty_end": "Warranty end"
+    }
   },
   "lifecycle": {
     "transitionTo": "Transition to",
@@ -1044,6 +1616,7 @@
     "incoming": "Source → this CI",
     "type": "Relationship type",
     "targetCi": "CI ID of the other end",
+    "ciNotFound": "No CI with this ID was found.",
     "notes": "Note",
     "verificationState": "Verification state",
     "state": {
@@ -1056,7 +1629,26 @@
   },
   "relationshipCard": {
     "suppress": "Remove and suppress",
-    "suppressHint": "Discovery edge: removed and not recreated by discovery."
+    "suppressHint": "Discovery edge: removed and not recreated by discovery.",
+    "hiddenOutside": "{{count}} hidden (outside the scope)",
+    "showAll": "Show all",
+    "showInScope": "Show scope only",
+    "outsideScope": "Outside the scope",
+    "suppressTitle": "Remove and suppress relationship",
+    "suppressConfirm": "The discovery edge {{relType}} to {{other}} is removed. Discovery does not create it again until the suppression is lifted.",
+    "suppressReason": "Reason",
+    "suppressReasonInvalid": "The reason has at most 1000 characters.",
+    "suppressions": "Suppressed relationships",
+    "showSuppressions": "Show suppressed relationships",
+    "hideSuppressions": "Hide suppressed relationships",
+    "noSuppressions": "No suppressed relationships.",
+    "suppressionsLoadError": "The suppressed relationships could not be loaded.",
+    "suppressedBy": "Suppressed by {{actor}} on {{date}}",
+    "unknownActor": "unknown",
+    "suppressionReason": "Reason: {{reason}}",
+    "noReason": "No reason given",
+    "lift": "Lift",
+    "liftHint": "Discovery creates the edge again in its next cycle."
   },
   "scope": {
     "label": "Scope",
@@ -1064,7 +1656,11 @@
     "client": "Client",
     "site": "Site",
     "allClients": "All clients",
-    "allSites": "All sites"
+    "allSites": "All sites",
+    "moreClients": "Load more clients",
+    "moreSites": "Load more sites",
+    "outsideCI": "This CI lies outside the selected scope ({{scope}}).",
+    "switchToObject": "Switch scope"
   },
   "reviews": {
     "title": "Review inbox",
@@ -1093,7 +1689,15 @@
     },
     "escalatedOnly": "Escalated only",
     "escalated": "Escalated",
-    "selectAll": "Select all open",
+    "selectAll": "Select all open ({{count}} on this page)",
+    "selectAllMatching": "Select all {{total}} open",
+    "selectAllError": "The open items could not be loaded: {{message}}",
+    "resolveError": "The item could not be resolved: {{message}}",
+    "paging": {
+      "range": "{{from}}–{{to}} of {{total}}",
+      "previous": "Previous page",
+      "next": "Next page"
+    },
     "select": "Select “{{name}}”",
     "bulk": {
       "label": "Bulk action",
@@ -1115,6 +1719,12 @@
     "observed": "Observed",
     "current": "In the CI",
     "differs": "differs",
+    "ciType": "CI type of the new CI",
+    "chooseCIType": "Choose a CI type",
+    "ciTypeHint": "The device reported the type “{{name}}”, which the organization did not know when the device was recorded. Choose the type of the new CI.",
+    "ciTypesLoadError": "The CI types could not be loaded.",
+    "noProfileMatch": "The device is already recorded as a generic device (generic_device). Set the type on the CI, then dismiss this item.",
+    "openCI": "Open CI",
     "loadError": "The review items could not be loaded",
     "empty": "No review items",
     "emptyHint": "Reconciliation has nothing to decide."
@@ -1125,7 +1735,33 @@
     "markRead": "Mark as read",
     "markAllRead": "Mark all read",
     "unread": "Unread",
-    "empty": "No notifications."
+    "empty": "No notifications.",
+    "openUnknown": "Open notifications (unread count unavailable)",
+    "loadError": "The notifications could not be loaded."
+  },
+  "entitlementExpiry": {
+    "title": "Expiring features",
+    "message": "The feature “{{feature}}” expires on {{date}} (in {{days}} days).",
+    "messageOneDay": "The feature “{{feature}}” expires on {{date}} (in 1 day).",
+    "features": {
+      "discovery": "Discovery",
+      "topology": "Topology",
+      "rack_view": "Rack view",
+      "export_csv": "CSV export",
+      "webhooks": "Webhooks",
+      "api_access": "API access",
+      "notifications_email": "E-mail notifications",
+      "inventory": "Inventory",
+      "documents": "Documents",
+      "stocktake": "Stocktake",
+      "ticketing": "Tickets",
+      "monitoring": "Monitoring",
+      "endpoint_agent": "Endpoint agent",
+      "workflow_forms": "Workflows and forms",
+      "compliance": "Compliance",
+      "iga": "IGA",
+      "ai": "AI assistant"
+    }
   },
   "jobs": {
     "title": "Job center",
@@ -1146,7 +1782,14 @@
     "cancel": "Cancel",
     "result": "Result",
     "loadError": "The jobs could not be loaded",
-    "empty": "No jobs"
+    "empty": "No jobs",
+    "cancelDone": "The job was cancelled.",
+    "cancelForbidden": "You may not cancel this job: only its creator or a user with the permission of its kind may.",
+    "cancelConflict": "The job can no longer be cancelled: it has finished, or its kind cannot be cancelled while running.",
+    "cancelNotFound": "The job was not found.",
+    "cancelFailed": "The job could not be cancelled: {{error}}",
+    "partialReport": "Partial report",
+    "partialReportSummary": "Partial report: {{succeeded}} of {{total}} succeeded, {{failed}} failed, {{skipped}} skipped"
   },
   "provenance": {
     "show": "Provenance of {{field}}",
@@ -1181,16 +1824,43 @@
       "email": "E-mail address",
       "name": "Your name",
       "submit": "Create account",
-      "sent": "We sent a confirmation link to {{email}}. Open it to continue."
+      "sent": "We sent a confirmation link to {{email}}. Open it to continue.",
+      "unavailable": "Sign-up is not set up on this server yet: no e-mail delivery (SMTP) is configured. Contact the operator.",
+      "temporarilyUnavailable": "Sign-up is not possible right now. Please try again in a few minutes.",
+      "rateLimited": "Too many attempts. Please wait a few minutes and try again.",
+      "emailBlocked": "This e-mail domain is not accepted for sign-up (for example disposable addresses). Please use your business e-mail address.",
+      "emailInvalid": "Please enter a valid e-mail address (e.g. name@company.com).",
+      "organizationInvalid": "Please enter the name of your organization (at most 200 characters).",
+      "nameTooLong": "Your name may have at most 200 characters.",
+      "captchaFailed": "The automatic security check failed or expired. Please submit the form again.",
+      "failed": "Sign-up failed: {{detail}}"
     },
     "verify": {
       "password": "Set a password (at least 12 characters)",
+      "policy": "At least {{min}} characters with upper-case and lower-case letters, a digit and a special character; not your e-mail address.",
+      "policyNotMet": "The password does not meet the policy yet. Missing: {{rules}}.",
+      "rules": {
+        "length": "at least {{min}} characters",
+        "upper": "an upper-case letter",
+        "lower": "a lower-case letter",
+        "digit": "a digit",
+        "special": "a special character"
+      },
       "submit": "Confirm account",
       "done": "Your organization “{{slug}}” has been created.",
       "login": "Sign in and continue",
       "expired": "The confirmation link has expired. Please sign up again.",
       "invalid": "The confirmation link is invalid or was already used.",
-      "trial": "Your trial runs until {{date}}."
+      "trial": "Your trial runs until {{date}}.",
+      "notAccepted": "The account was not confirmed. Please check the password.",
+      "passwordRejected": "The password was not accepted. It must meet the policy and must not be your e-mail address.",
+      "accountExists": "An account with this e-mail address already exists. Sign in with it or sign up with a different address.",
+      "organizationTaken": "The organization name is already taken. Please sign up again with a different name.",
+      "unavailable": "Confirming is not possible on this server right now. Please try again later or contact the operator.",
+      "failed": "Confirming failed: {{detail}}",
+      "signedIn": "This tab is still signed in as {{user}}. The new account is created anyway; afterwards, sign out here before you sign in with the new account.",
+      "signOutFirst": "You are still signed in as {{user}}. Sign out first, otherwise signing in would use this account again instead of the new one. After signing out (the sign-in service may ask you to confirm), sign in with the new account on the sign-in page.",
+      "signOutAndSignIn": "Sign out and sign in with the new account"
     },
     "collector": {
       "hint": "Install the collector in your network and enter an enrollment code there.",
@@ -1203,7 +1873,8 @@
       "waiting": "No networks reported yet.",
       "accept": "Confirm",
       "dismiss": "Dismiss",
-      "continue": "Continue"
+      "continue": "Continue",
+      "resolveFailed": "The suggestion was not applied: {{message}}"
     },
     "cis": {
       "waiting": "The first discovery is running. As soon as CIs are found, the flow continues."
@@ -1213,5 +1884,10 @@
       "text": "{{count}} CIs are already in your CMDB.",
       "open": "Open the CMDB"
     }
+  },
+  "language": {
+    "label": "Language",
+    "de-DE": "Deutsch",
+    "en-US": "English"
   }
 }

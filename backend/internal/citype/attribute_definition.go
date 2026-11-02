@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // AttributeDefinition is one row of attribute_definition (MET-10, DB-03):
@@ -24,7 +25,10 @@ import (
 // belongs to a CI type (scope "type") or applies to every type of the
 // organization (scope "global", no CI type); organization_id NULL marks a
 // read-only system definition. ci_type.attribute_schema is generated from
-// the type's definitions by the database.
+// the type's definitions by the database. Validation is the rule AST of
+// MET-45 (api/rules.schema.json), evaluated bindingly by internal/rules; a
+// legacy structure in a request or a stored row is translated into it
+// (WP-589), and a required rule makes the definition required.
 type AttributeDefinition struct {
 	ID             string        `json:"id"`
 	OrganizationID string        `json:"organization_id,omitempty"`
@@ -43,7 +47,7 @@ type AttributeDefinition struct {
 	Unique          bool                        `json:"unique"`
 	UniqueScope     string                      `json:"unique_scope"`
 	Inheritable     bool                        `json:"inheritable"`
-	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
+	Validation      *rules.Rule                 `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
 	ReferenceTarget string                      `json:"reference_target,omitempty"`
 	Group           string                      `json:"group,omitempty"`
@@ -55,7 +59,8 @@ type AttributeDefinition struct {
 }
 
 // AttributeDefinitionPatch changes a definition; key, CI type and scope
-// are immutable.
+// are immutable. Validation is a rule AST or the legacy structure (see
+// fieldmeta.ParseValidation); null or {} removes the rules.
 type AttributeDefinitionPatch struct {
 	DisplayName     LocalizedText               `json:"display_name,omitempty"`
 	Description     *string                     `json:"description,omitempty"`
@@ -68,7 +73,7 @@ type AttributeDefinitionPatch struct {
 	Unique          *bool                       `json:"unique,omitempty"`
 	UniqueScope     *string                     `json:"unique_scope,omitempty"`
 	Inheritable     *bool                       `json:"inheritable,omitempty"`
-	Validation      *fieldmeta.ValidationRules  `json:"validation,omitempty"`
+	Validation      json.RawMessage             `json:"validation,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
 	ReferenceTarget *string                     `json:"reference_target,omitempty"`
 	Group           *string                     `json:"group,omitempty"`
@@ -92,7 +97,13 @@ var (
 // AttributeDefinitionStore is the attribute-definitions resource
 // (API-05); the PostgreSQL repository implements it.
 type AttributeDefinitionStore interface {
+	// ListAttributeDefinitions returns every definition the filter selects
+	// (export).
 	ListAttributeDefinitions(ctx context.Context, orgID string, filter AttributeFilter) ([]AttributeDefinition, error)
+	// ListAttributeDefinitionPage returns a page newest first on
+	// (created_at, id), at most one definition more than the limit, and
+	// the number the filter selects (API-02, see api.NewestFirstSQL).
+	ListAttributeDefinitionPage(ctx context.Context, orgID string, filter AttributeFilter, page api.PaginationParams) ([]AttributeDefinition, int, error)
 	GetAttributeDefinition(ctx context.Context, orgID, id string) (*AttributeDefinition, error)
 	CreateAttributeDefinition(ctx context.Context, orgID string, def *AttributeDefinition) error
 	UpdateAttributeDefinition(ctx context.Context, orgID, id string, patch *AttributeDefinitionPatch) (*AttributeDefinition, error)
@@ -106,9 +117,16 @@ func (d *AttributeDefinition) Field() Field {
 		Label: d.DisplayName.WithFallback(d.Key)["en"], Description: d.Description,
 		DataType: d.DataType, Required: d.Required, DefaultValue: defaultString(d.Default),
 		EnumValues: d.EnumValues, UIGroup: d.Group, SortOrder: d.Order,
-		Validation: d.Validation, Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
+		Validation: d.legacyValidation(), Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
 		IsSystem: d.IsSystem,
 	}
+}
+
+// legacyValidation is the validation in the structure composition and the
+// legacy field view read; Validate rejects a rule no value can satisfy.
+func (d *AttributeDefinition) legacyValidation() *fieldmeta.ValidationRules {
+	v, _, _ := fieldmeta.ValidationFromRule(d.Validation)
+	return v
 }
 
 // definition is the shared fieldmeta shape used for validation.
@@ -145,8 +163,18 @@ func (d *AttributeDefinition) Validate() error {
 	if d.UniqueScope != "org" && d.UniqueScope != "client" {
 		return &api.FieldError{Field: "unique_scope", Message: "unique_scope must be org or client"}
 	}
+	if d.Validation != nil {
+		if err := d.Validation.Validate(); err != nil {
+			return &api.FieldError{Field: "validation", Message: err.Error()}
+		}
+		_, required, err := fieldmeta.ValidationFromRule(d.Validation)
+		if err != nil {
+			return &api.FieldError{Field: "validation", Message: err.Error()}
+		}
+		d.Required = d.Required || required
+	}
 	if err := fieldmeta.ValidateDefinition(d.definition()); err != nil {
-		return &api.FieldError{Field: "data_type", Message: err.Error()}
+		return &api.FieldError{Field: definitionField(err), Message: err.Error()}
 	}
 	if len(d.Default) > 0 && string(d.Default) != "null" {
 		var value any
@@ -166,7 +194,32 @@ func (d *AttributeDefinition) Validate() error {
 	return nil
 }
 
-func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) {
+// definitionField is the request field of a fieldmeta.ValidateDefinition
+// rejection (F-408): the field name is the key, the other attributes keep
+// their request names; an error without attribute stays data_type.
+func definitionField(err error) string {
+	var de *fieldmeta.DefinitionError
+	if !errors.As(err, &de) {
+		return "data_type"
+	}
+	switch de.Attribute {
+	case "name":
+		return "key"
+	case "reference_target", "validation", "conditional":
+		return de.Attribute
+	}
+	return "data_type"
+}
+
+// apply changes d; a validation that is no valid rule is a *api.FieldError.
+func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) error {
+	if p.Validation != nil {
+		rule, err := fieldmeta.ParseValidation(p.Validation)
+		if err != nil {
+			return &api.FieldError{Field: "validation", Message: err.Error()}
+		}
+		d.Validation = rule
+	}
 	if p.DisplayName != nil {
 		d.DisplayName = p.DisplayName
 	}
@@ -184,9 +237,6 @@ func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) {
 	setBool(&d.Unique, p.Unique)
 	setString(&d.UniqueScope, p.UniqueScope)
 	setBool(&d.Inheritable, p.Inheritable)
-	if p.Validation != nil {
-		d.Validation = p.Validation
-	}
 	if p.Conditional != nil {
 		d.Conditional = p.Conditional
 	}
@@ -196,6 +246,7 @@ func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) {
 		d.Order = *p.Order
 	}
 	setString(&d.Unit, p.Unit)
+	return nil
 }
 
 func setString(dst, v *string) {
@@ -249,12 +300,8 @@ func scanAttribute(row pgx.Row) (*AttributeDefinition, error) {
 	if len(enumRaw) > 0 {
 		_ = json.Unmarshal(enumRaw, &d.EnumValues)
 	}
-	if len(validationRaw) > 0 && string(validationRaw) != "{}" {
-		var v fieldmeta.ValidationRules
-		if json.Unmarshal(validationRaw, &v) == nil {
-			d.Validation = &v
-		}
-	}
+	// A legacy structure stored before WP-589 is read as its AST.
+	d.Validation = fieldmeta.StoredValidation(validationRaw)
 	if len(conditionRaw) > 0 && string(conditionRaw) != "null" {
 		var c fieldmeta.ConditionalRules
 		if json.Unmarshal(conditionRaw, &c) == nil {
@@ -371,19 +418,62 @@ func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
 	return nil
 }
 
+// errSystemTypeAttribute refuses an organization attribute on a system CI
+// type: system types are read-only for tenants and are extended by
+// inheritance (MET-06, P2). The row-level security of attribute_definition
+// would refuse the row as well (the trigger copies the type's NULL
+// organization), but as an opaque 42501.
+func errSystemTypeAttribute() error {
+	return &api.FieldError{Field: "ci_type_id", Message: "system ci types cannot get organization attributes",
+		Status: http.StatusUnprocessableEntity}
+}
+
+// ciTypeOrganizationTx reads the organization of a CI type the tenant can
+// see: "" for a system type (organization_id NULL); found is false for an
+// unknown type or a type of another organization.
+func ciTypeOrganizationTx(ctx context.Context, tx pgx.Tx, typeID string) (org string, found bool, err error) {
+	err = tx.QueryRow(ctx, `SELECT COALESCE(organization_id::text, '') FROM ci_type WHERE id::text = $1`, typeID).Scan(&org)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read ci type: %w", err)
+	}
+	return org, true, nil
+}
+
 // checkAttributeType resolves the CI type of a new type-scoped definition:
 // it must be a type of the organization (system types are extended by
-// inheritance, MET-06, P2).
+// inheritance, MET-06, P2). An unknown type is a 422 on ci_type_id, the
+// field of the request body.
 func checkAttributeType(ctx context.Context, tx pgx.Tx, typeID string) error {
-	var org string
-	err := tx.QueryRow(ctx, `SELECT COALESCE(organization_id::text, '') FROM ci_type WHERE id::text = $1`, typeID).Scan(&org)
+	org, found, err := ciTypeOrganizationTx(ctx, tx, typeID)
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return &api.FieldError{Field: "ci_type_id", Message: "ci type not found", Status: 422}
 	case err != nil:
-		return fmt.Errorf("read ci type: %w", err)
+		return err
+	case !found:
+		return &api.FieldError{Field: "ci_type_id", Message: "ci type not found", Status: http.StatusUnprocessableEntity}
 	case org == "":
-		return &api.FieldError{Field: "ci_type_id", Message: "system ci types cannot get organization attributes", Status: 422}
+		return errSystemTypeAttribute()
+	}
+	return nil
+}
+
+// checkFieldType resolves the CI type of the legacy field upsert (PUT
+// /ci-types/{id}/fields): an unknown type is the documented 404 of the path
+// ("not found", see writeFieldDefinitionError), a system type the 422 of
+// checkAttributeType. It runs before the definition is looked up, so an
+// existing system definition of the same key is refused the same way
+// instead of reaching an UPDATE that row-level security hides.
+func checkFieldType(ctx context.Context, tx pgx.Tx, typeID string) error {
+	org, found, err := ciTypeOrganizationTx(ctx, tx, typeID)
+	switch {
+	case err != nil:
+		return err
+	case !found:
+		return fmt.Errorf("not found")
+	case org == "":
+		return errSystemTypeAttribute()
 	}
 	return nil
 }
@@ -391,33 +481,71 @@ func checkAttributeType(ctx context.Context, tx pgx.Tx, typeID string) error {
 // ListAttributeDefinitions implements AttributeDefinitionStore: the
 // organization's and the system's definitions.
 func (r *PGRepository) ListAttributeDefinitions(ctx context.Context, orgID string, filter AttributeFilter) ([]AttributeDefinition, error) {
-	out := []AttributeDefinition{}
+	var out []AttributeDefinition
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where, args := []string{"TRUE"}, []any{}
-		if filter.CITypeID != "" {
-			args = append(args, filter.CITypeID)
-			where = append(where, fmt.Sprintf("ci_type_id::text = $%d", len(args)))
-		}
-		if filter.Scope != "" {
-			args = append(args, filter.Scope)
-			where = append(where, fmt.Sprintf("scope = $%d", len(args)))
-		}
-		rows, err := tx.Query(ctx, `SELECT `+attributeColumns+` FROM attribute_definition WHERE `+
-			strings.Join(where, " AND ")+` ORDER BY ci_type_id NULLS FIRST, sort_order, key`, args...)
-		if err != nil {
-			return fmt.Errorf("list attribute definitions: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			d, err := scanAttribute(rows)
-			if err != nil {
-				return fmt.Errorf("scan attribute definition: %w", err)
-			}
-			out = append(out, *d)
-		}
-		return rows.Err()
+		where, args := attributeFilterSQL(filter)
+		var err error
+		out, err = queryAttributes(ctx, tx, `SELECT `+attributeColumns+` FROM attribute_definition WHERE `+
+			where+` ORDER BY ci_type_id NULLS FIRST, sort_order, key`, args)
+		return err
 	})
 	return out, err
+}
+
+// ListAttributeDefinitionPage implements AttributeDefinitionStore: a page of
+// the organization's and the system's definitions newest first on
+// (created_at, id), at most one more than the limit, and their number
+// (API-02, F-215).
+func (r *PGRepository) ListAttributeDefinitionPage(ctx context.Context, orgID string, filter AttributeFilter, page api.PaginationParams) ([]AttributeDefinition, int, error) {
+	var out []AttributeDefinition
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where, args := attributeFilterSQL(filter)
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM attribute_definition WHERE `+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count attribute definitions: %w", err)
+		}
+		keyset, tail, pageArgs, err := api.NewestFirstSQL(page, len(args)+1)
+		if err != nil {
+			return err
+		}
+		out, err = queryAttributes(ctx, tx, `SELECT `+attributeColumns+` FROM attribute_definition WHERE `+
+			where+` AND `+keyset+` `+tail, append(args, pageArgs...))
+		return err
+	})
+	return out, total, err
+}
+
+// attributeFilterSQL renders the conditions of the definition filters.
+func attributeFilterSQL(filter AttributeFilter) (where string, args []any) {
+	conditions := []string{"TRUE"}
+	args = []any{}
+	if filter.CITypeID != "" {
+		args = append(args, filter.CITypeID)
+		conditions = append(conditions, fmt.Sprintf("ci_type_id::text = $%d", len(args)))
+	}
+	if filter.Scope != "" {
+		args = append(args, filter.Scope)
+		conditions = append(conditions, fmt.Sprintf("scope = $%d", len(args)))
+	}
+	return strings.Join(conditions, " AND "), args
+}
+
+// queryAttributes reads the definitions a query selects.
+func queryAttributes(ctx context.Context, tx pgx.Tx, query string, args []any) ([]AttributeDefinition, error) {
+	out := []AttributeDefinition{}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list attribute definitions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		d, err := scanAttribute(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan attribute definition: %w", err)
+		}
+		out = append(out, *d)
+	}
+	return out, rows.Err()
 }
 
 func getAttributeTx(ctx context.Context, tx pgx.Tx, id string, lock bool) (*AttributeDefinition, error) {
@@ -501,7 +629,9 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 			return err
 		}
 		before := *d
-		patch.apply(d)
+		if perr := patch.apply(d); perr != nil {
+			return perr
+		}
 		if verr := d.Validate(); verr != nil {
 			return verr
 		}

@@ -147,9 +147,11 @@ func nilIfEmpty(s string) any {
 	return s
 }
 
-// Emitter records an event outside a caller's transaction: a component
-// whose mutation has already committed (a worker, a dead letter) reports
-// what happened.
+// Emitter records an event in a transaction of its own, after the caller's
+// mutation committed: a failure or crash in between loses the event
+// (F-319). A mutation therefore appends its events in its own transaction
+// with Outbox.Append, as the export, job and webhook stores do for
+// export.completed, job.failed and webhook.dead (WP-550).
 type Emitter interface {
 	Emit(ctx context.Context, e *Event) error
 }

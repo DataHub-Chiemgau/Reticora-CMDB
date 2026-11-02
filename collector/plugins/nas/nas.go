@@ -10,6 +10,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +22,12 @@ import (
 const (
 	defaultTimeout     = 10 * time.Second
 	defaultConcurrency = 16
+	// synologyHTTPSPort is the Synology DSM web API over HTTPS. The plain-HTTP
+	// port 5000 is never contacted: the login would carry the account
+	// readable (COL-02, F-011).
+	synologyHTTPSPort = 5001
+	// maxAPIResponse caps the JSON answer read from a NAS API.
+	maxAPIResponse = 1 << 20
 )
 
 // Known NAS vendor API ports
@@ -27,8 +36,7 @@ var nasPorts = []struct {
 	protocol string
 	vendor   string
 }{
-	{5000, "http", "synology"},
-	{5001, "https", "synology"},
+	{synologyHTTPSPort, "https", "synology"},
 	{8080, "http", "qnap"},
 	{443, "https", "qnap"},
 	{80, "http", "truenas"},
@@ -36,28 +44,69 @@ var nasPorts = []struct {
 }
 
 // Plugin discovers and collects data from NAS platforms.
+//
+// Credentials are sent only over HTTPS with certificate verification
+// (COL-02): by default against the system roots including the target
+// address. Appliances with self-signed or internal certificates are
+// reachable only through an explicit plugins.TLSScope for their network
+// (RETICORA_NAS_TLS_SCOPES), which names a CA bundle or SPKI pins; without
+// trust the collection fails with plugins.ErrTLSUntrusted before any request
+// reaches the appliance. Synology DSM is spoken only over HTTPS (5001): the
+// login is a POST whose body carries account and password, the session ID
+// travels only in POST bodies, never in a URL (access logs of devices and
+// proxies, F-011). The clients follow no redirects, so no credential follows
+// a redirect to plain HTTP or another host.
 type Plugin struct {
 	Timeout     time.Duration
 	Concurrency int
 	client      *http.Client
+	scoped      plugins.TLSClients
+}
+
+// Option configures the plugin.
+type Option func(*Plugin)
+
+// WithTLSScopes adds TLS exceptions per network. The first matching scope
+// wins; targets outside every scope use the default verification.
+func WithTLSScopes(scopes ...plugins.TLSScope) Option {
+	return func(p *Plugin) {
+		p.scoped.Add(p.newClient, scopes...)
+	}
 }
 
 var _ plugins.Plugin = (*Plugin)(nil)
 
 // New creates a NAS plugin instance.
-func New() *Plugin {
-	return &Plugin{
+func New(opts ...Option) *Plugin {
+	p := &Plugin{
 		Timeout:     defaultTimeout,
 		Concurrency: defaultConcurrency,
-		client: &http.Client{
-			Timeout: defaultTimeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true,
-				},
-			},
-		},
 	}
+	p.client = p.newClient(plugins.SystemTLSConfig())
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
+}
+
+// newClient returns a client that verifies with cfg and follows no
+// redirects (plugins.NewTLSClient).
+func (p *Plugin) newClient(cfg *tls.Config) *http.Client {
+	timeout := p.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	return plugins.NewTLSClient(timeout, cfg)
+}
+
+// clientFor returns the HTTP client whose TLS verification applies to target.
+func (p *Plugin) clientFor(target string) *http.Client {
+	fallback := p.client
+	if fallback == nil {
+		// Plugin constructed via struct literal instead of New().
+		fallback = p.newClient(plugins.SystemTLSConfig())
+	}
+	return p.scoped.For(target, fallback)
 }
 
 // Name returns the plugin identifier.
@@ -86,7 +135,7 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			vendor, port := p.detectNASVendor(ctx, t)
+			vendor, port, _ := p.detectNASVendor(ctx, t)
 			if vendor == "" {
 				return
 			}
@@ -124,8 +173,11 @@ func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]st
 
 // collect gathers chassis, storage, and health information from one NAS appliance.
 func (p *Plugin) collect(ctx context.Context, target string, creds map[string]string) (*plugins.Result, error) {
-	vendor, port := p.detectNASVendor(ctx, target)
+	vendor, port, untrusted := p.detectNASVendor(ctx, target)
 	if vendor == "" {
+		if untrusted != nil {
+			return nil, untrusted
+		}
 		return nil, fmt.Errorf("nas: no NAS vendor detected at %s", target)
 	}
 
@@ -137,7 +189,7 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 
 	switch vendor {
 	case "synology":
-		result, err = p.collectSynology(ctx, target, port, username, password)
+		result, err = p.collectSynology(ctx, target, username, password)
 	case "qnap":
 		result, err = p.collectQNAP(ctx, target, port, username, password)
 	case "truenas":
@@ -157,8 +209,11 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 	return result, err
 }
 
-// detectNASVendor probes known NAS ports and identifies the vendor.
-func (p *Plugin) detectNASVendor(ctx context.Context, target string) (string, int) {
+// detectNASVendor probes known NAS ports and identifies the vendor. An
+// HTTPS port whose certificate is not trusted is skipped; when no vendor is
+// found, untrusted reports the first such port (plugins.ErrTLSUntrusted).
+func (p *Plugin) detectNASVendor(ctx context.Context, target string) (vendor string, port int, untrusted error) {
+	client := p.clientFor(target)
 	for _, probe := range nasPorts {
 		if ctx.Err() != nil {
 			break
@@ -172,15 +227,22 @@ func (p *Plugin) detectNASVendor(ctx context.Context, target string) (string, in
 		conn.Close()
 
 		// Verify with an HTTP probe for vendor-specific signatures
-		url := fmt.Sprintf("%s://%s", probe.protocol, addr)
-		if verified := p.verifyVendor(ctx, url, probe.vendor); verified {
-			return probe.vendor, probe.port
+		baseURL := fmt.Sprintf("%s://%s", probe.protocol, addr)
+		verified, err := p.verifyVendor(ctx, client, baseURL, probe.vendor)
+		if verified {
+			return probe.vendor, probe.port, nil
+		}
+		if err != nil && untrusted == nil {
+			untrusted = err
 		}
 	}
-	return "", 0
+	return "", 0, untrusted
 }
 
-func (p *Plugin) verifyVendor(ctx context.Context, baseURL, vendor string) bool {
+// verifyVendor checks the vendor-specific endpoint of baseURL. It sends no
+// credentials; an untrusted certificate is reported as
+// plugins.ErrTLSUntrusted.
+func (p *Plugin) verifyVendor(ctx context.Context, client *http.Client, baseURL, vendor string) (bool, error) {
 	var checkURL string
 	switch vendor {
 	case "synology":
@@ -190,31 +252,41 @@ func (p *Plugin) verifyVendor(ctx context.Context, baseURL, vendor string) bool 
 	case "truenas":
 		checkURL = baseURL + "/api/v2.0/system/info"
 	default:
-		return false
+		return false, nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
 	if err != nil {
-		return false
+		return false, nil
 	}
 
-	resp, err := p.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		return false
+		return false, untrustedError(req, err)
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 
 	// Any response from vendor-specific endpoint confirms the vendor
-	return resp.StatusCode < 500
+	return resp.StatusCode < 500, nil
 }
 
-// collectSynology queries the Synology DSM API for system information.
-func (p *Plugin) collectSynology(ctx context.Context, target string, port int, username, password string) (*plugins.Result, error) {
-	baseURL := fmt.Sprintf("https://%s", net.JoinHostPort(target, fmt.Sprintf("%d", port)))
-	if port == 5000 {
-		baseURL = fmt.Sprintf("http://%s", net.JoinHostPort(target, fmt.Sprintf("%d", port)))
+// untrustedError reports a failed certificate verification of req as
+// plugins.ErrTLSUntrusted (the handshake failed, nothing was sent); other
+// failures yield nil.
+func untrustedError(req *http.Request, err error) error {
+	if !plugins.UntrustedCertificate(err) {
+		return nil
 	}
+	return fmt.Errorf("nas: %w: certificate of %s not trusted by the system roots or RETICORA_NAS_TLS_SCOPES, no credentials sent: %v",
+		plugins.ErrTLSUntrusted, req.URL.Host, err)
+}
+
+// collectSynology queries the Synology DSM API for system information, only
+// over HTTPS (synologyHTTPSPort) with the verification of target.
+func (p *Plugin) collectSynology(ctx context.Context, target, username, password string) (*plugins.Result, error) {
+	baseURL := "https://" + net.JoinHostPort(target, strconv.Itoa(synologyHTTPSPort))
+	client := p.clientFor(target)
 
 	result := &plugins.Result{
 		CIType: "nas",
@@ -223,15 +295,18 @@ func (p *Plugin) collectSynology(ctx context.Context, target string, port int, u
 		Attributes: map[string]any{
 			"category": "nas",
 			"vendor":   "synology",
-			"apiPort":  port,
+			"apiPort":  synologyHTTPSPort,
 		},
 	}
 
 	// Attempt to authenticate and retrieve system info
 	if username != "" {
-		sid := p.synologyLogin(ctx, baseURL, username, password)
+		sid, err := p.synologyLogin(ctx, client, baseURL, username, password)
+		if err != nil {
+			return nil, err
+		}
 		if sid != "" {
-			info := p.synologySystemInfo(ctx, baseURL, sid)
+			info := p.synologySystemInfo(ctx, client, baseURL, sid)
 			if info != nil {
 				if name, ok := info["model"].(string); ok && name != "" {
 					result.Model = name
@@ -253,51 +328,62 @@ func (p *Plugin) collectSynology(ctx context.Context, target string, port int, u
 	return result, nil
 }
 
-func (p *Plugin) synologyLogin(ctx context.Context, baseURL, username, password string) string {
-	url := fmt.Sprintf("%s/webapi/auth.cgi?api=SYNO.API.Auth&version=3&method=login&account=%s&passwd=%s&format=sid",
-		baseURL, username, password)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return ""
-	}
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-
+// synologyLogin signs in with POST /webapi/auth.cgi: account and password
+// travel only in the form body, never in the URL. It returns the session ID,
+// "" when the login failed, and plugins.ErrTLSUntrusted when the
+// certificate is not trusted (the credentials were not sent).
+func (p *Plugin) synologyLogin(ctx context.Context, client *http.Client, baseURL, username, password string) (string, error) {
 	var result struct {
 		Data struct {
 			SID string `json:"sid"`
 		} `json:"data"`
 		Success bool `json:"success"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || !result.Success {
-		return ""
+	ok, err := p.synologyPost(ctx, client, baseURL+"/webapi/auth.cgi", url.Values{
+		"api": {"SYNO.API.Auth"}, "version": {"3"}, "method": {"login"},
+		"account": {username}, "passwd": {password}, "format": {"sid"},
+	}, &result)
+	if !ok || !result.Success {
+		return "", err
 	}
-	return result.Data.SID
+	return result.Data.SID, nil
 }
 
-func (p *Plugin) synologySystemInfo(ctx context.Context, baseURL, sid string) map[string]any {
-	url := fmt.Sprintf("%s/webapi/entry.cgi?api=SYNO.DSM.Info&version=2&method=getinfo&_sid=%s", baseURL, sid)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
+// synologySystemInfo reads SYNO.DSM.Info; the session ID travels only in the
+// POST body.
+func (p *Plugin) synologySystemInfo(ctx context.Context, client *http.Client, baseURL, sid string) map[string]any {
 	var result struct {
 		Data    map[string]any `json:"data"`
 		Success bool           `json:"success"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || !result.Success {
+	ok, _ := p.synologyPost(ctx, client, baseURL+"/webapi/entry.cgi", url.Values{
+		"api": {"SYNO.DSM.Info"}, "version": {"2"}, "method": {"getinfo"}, "_sid": {sid},
+	}, &result)
+	if !ok || !result.Success {
 		return nil
 	}
 	return result.Data
+}
+
+// synologyPost sends form as the body of a POST to endpoint and decodes the
+// JSON answer into out; ok reports a decoded 200 answer. A redirect is not
+// followed, so the body never reaches another URL. Neither the URL nor an
+// error carries a form value.
+func (p *Plugin) synologyPost(ctx context.Context, client *http.Client, endpoint string, form url.Values, out any) (ok bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return false, nil
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, untrustedError(req, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, nil
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, maxAPIResponse)).Decode(out) == nil, nil
 }
 
 // collectQNAP queries QNAP API for system information.
@@ -338,7 +424,7 @@ func (p *Plugin) collectTrueNAS(ctx context.Context, target string, port int, us
 	}
 
 	if username != "" {
-		info := p.truenasSystemInfo(ctx, baseURL, username, password)
+		info := p.truenasSystemInfo(ctx, p.clientFor(target), baseURL, username, password)
 		if info != nil {
 			if hostname, ok := info["hostname"].(string); ok && hostname != "" {
 				result.Name = hostname
@@ -361,15 +447,16 @@ func (p *Plugin) collectTrueNAS(ctx context.Context, target string, port int, us
 	return result, nil
 }
 
-func (p *Plugin) truenasSystemInfo(ctx context.Context, baseURL, username, password string) map[string]any {
-	url := baseURL + "/api/v2.0/system/info"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// truenasSystemInfo reads the system info with HTTP Basic credentials, sent
+// only after the certificate check of the handshake succeeded.
+func (p *Plugin) truenasSystemInfo(ctx context.Context, client *http.Client, baseURL, username, password string) map[string]any {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v2.0/system/info", http.NoBody)
 	if err != nil {
 		return nil
 	}
 	req.SetBasicAuth(username, password)
 
-	resp, err := p.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil
 	}

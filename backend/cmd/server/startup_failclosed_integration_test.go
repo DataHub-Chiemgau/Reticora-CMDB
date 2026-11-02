@@ -1,0 +1,534 @@
+package main
+
+// Phase-1 acceptance audit, group T5-install-ops-gate: REGRESSION test (must
+// pass).
+//
+// WP-097 (OPS-01) test gap high "The fail-closed startup in main.go has no
+// repository test; only audit probes": the real server binary is built and
+// started with a production configuration against the test PostgreSQL,
+// Redis and a private nats-server (TEST_NATS_SERVER_BIN). The server logs in with the runtime login of the tests
+// (scopetest.AppDSN, no SUPERUSER/BYPASSRLS, TEN-03, WP-351), as in the
+// packaged installation; TEST_DATABASE_URL is only the admin login AppDSN
+// derives it from. Every missing or unusable mandatory dependency must stop the start
+// with exit code 1 and a specific message (fail-closed); a complete
+// configuration must become ready (/readyz 200). An empty master key or
+// issuer counts as missing (the empty-value cases of the kind smoke, WP-441).
+//
+// Not covered here: a fresh database without TimescaleDB ("database is not
+// ready") — it needs a second, unmigrated database on the test server.
+//
+// The helpers below (binary build, environment, fake OIDC/S3 endpoints) are
+// shared with startup_readiness_integration_test.go.
+//
+// Retest:
+//   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_08?sslmode=disable \
+//     TEST_REDIS_URL=redis://localhost:56379/0 TEST_NATS_SERVER_BIN=<nats-server> \
+//     go test -count=1 -v -run 'TestAuditT5ServerStartupFailClosed' ./cmd/server/
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+)
+
+var (
+	auditServerOnce sync.Once
+	auditServerDir  string
+	auditServerBin  string
+	auditServerErr  error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if auditServerDir != "" {
+		_ = os.RemoveAll(auditServerDir)
+	}
+	os.Exit(code)
+}
+
+// auditServerBinary builds this package's server binary once per test run.
+func auditServerBinary(t *testing.T) string {
+	t.Helper()
+	auditServerOnce.Do(func() {
+		auditServerDir, auditServerErr = os.MkdirTemp("", "reticora-server-audit-*")
+		if auditServerErr != nil {
+			return
+		}
+		auditServerBin = filepath.Join(auditServerDir, "server")
+		cmd := exec.Command("go", "build", "-o", auditServerBin, ".")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			auditServerErr = fmt.Errorf("go build: %w\n%s", err, out)
+		}
+	})
+	if auditServerErr != nil {
+		t.Fatal(auditServerErr)
+	}
+	return auditServerBin
+}
+
+func auditFreePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+	_ = l.Close()
+	return port
+}
+
+// auditClosedAddress is a 127.0.0.1 port nothing listens on.
+func auditClosedAddress(t *testing.T) string {
+	t.Helper()
+	return "127.0.0.1:" + auditFreePort(t)
+}
+
+// auditFakeOIDC serves a discovery document for <url>/realms/reticora.
+func auditFakeOIDC(t *testing.T) string {
+	t.Helper()
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		issuer := srv.URL + "/realms/reticora"
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"jwks_uri":%q}`,
+			issuer, issuer+"/protocol/openid-connect/auth", issuer+"/protocol/openid-connect/token", issuer+"/protocol/openid-connect/certs")
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL + "/realms/reticora"
+}
+
+// auditFakeS3 answers every S3 call of the startup (bucket exists, enable
+// versioning, location) with success.
+func auditFakeS3(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := r.URL.Query()["location"]; ok {
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?><LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">us-east-1</LocationConstraint>`)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// auditPrivateNATS starts a nats-server with JetStream (TEST_NATS_SERVER_BIN)
+// for one test and returns its URL: production requires RETICORA_NATS_URL
+// (F-282), and the shared NATS of TEST_NATS_URL is not isolated per test.
+func auditPrivateNATS(t *testing.T) string {
+	t.Helper()
+	bin := os.Getenv("TEST_NATS_SERVER_BIN")
+	if bin == "" {
+		if ci, _ := strconv.ParseBool(os.Getenv("CI")); ci {
+			t.Fatal("TEST_NATS_SERVER_BIN not set in the CI: the production start requires RETICORA_NATS_URL")
+		}
+		t.Skip("TEST_NATS_SERVER_BIN not set; the production start requires RETICORA_NATS_URL (private nats-server)")
+	}
+	addr := auditClosedAddress(t)
+	host, port, _ := net.SplitHostPort(addr)
+	cmd := exec.Command(bin, "-a", host, "-p", port, "-js", "-sd", t.TempDir())
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if conn, err := net.DialTimeout("tcp", addr, time.Second); err == nil {
+			_ = conn.Close()
+			return "nats://" + addr
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nats-server did not listen on %s:\n%s", addr, out.String())
+		}
+	}
+}
+
+// auditProductionEnv is a complete production configuration against the
+// test database (runtime login, scopetest.AppDSN), Redis and a private NATS
+// (auditPrivateNATS), with every worker disabled.
+func auditProductionEnv(t *testing.T) map[string]string {
+	t.Helper()
+	redis := os.Getenv("TEST_REDIS_URL")
+	if os.Getenv("TEST_DATABASE_URL") == "" || redis == "" {
+		t.Skip("TEST_DATABASE_URL and TEST_REDIS_URL are required for the server startup test")
+	}
+	natsURL := auditPrivateNATS(t)
+	db := scopetest.AppDSN(t)
+	// Every start is a fresh installation: the derivation root of the
+	// database goes with the master key drawn here (WP-459).
+	auditCleanDerivationRoot(t)
+	t.Cleanup(func() { auditCleanDerivationRoot(t) })
+	key, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{
+		"RETICORA_ENVIRONMENT":  "production",
+		"RETICORA_PORT":         auditFreePort(t),
+		"RETICORA_DATABASE_URL": db,
+		"RETICORA_REDIS_URL":    redis,
+		"RETICORA_NATS_URL":     natsURL,
+		// The event stream reserves its limit in the store of the private
+		// nats-server; the default (NFR-06) may exceed the free disk space.
+		"RETICORA_EVENTS_MAX_BYTES": "67108864",
+		"RETICORA_MASTER_KEY":       key,
+		"RETICORA_OIDC_ISSUER_URL":  auditFakeOIDC(t),
+		"RETICORA_SESSION_KEY_PATH": testSessionKeyPath(t),
+	}
+	for _, name := range config.WorkerNames {
+		env[config.WorkerEnvKey(name)] = "false"
+	}
+	return env
+}
+
+// auditDerivationRoot returns the sealed derivation root of the test
+// database (admin login), nil without one.
+func auditDerivationRoot(t *testing.T) []byte {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("admin connection: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	var sealed []byte
+	if err = conn.QueryRow(ctx, `SELECT sealed FROM platform_secret WHERE name = 'derivation_root'`).Scan(&sealed); err != nil &&
+		!errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("read the derivation root: %v", err)
+	}
+	return sealed
+}
+
+// auditCleanDerivationRoot removes the derivation root of the test
+// database (admin login).
+func auditCleanDerivationRoot(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("admin connection: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	if _, err = conn.Exec(ctx, `DELETE FROM platform_secret`); err != nil {
+		t.Fatalf("remove the derivation root: %v", err)
+	}
+}
+
+type auditServerRun struct {
+	exitCode   int // -1 while running / killed by the test
+	output     string
+	readyCode  int
+	readyBody  string
+	readyError error
+}
+
+// auditStartServer starts the binary with exactly env (plus PATH/HOME). With
+// waitReady it polls /readyz until it answers and then stops the server;
+// otherwise it waits for the process to exit. timeout bounds both.
+func auditStartServer(t *testing.T, env map[string]string, waitReady bool, timeout time.Duration) auditServerRun {
+	t.Helper()
+	return auditRunServer(t, env, waitReady, timeout, nil)
+}
+
+// auditStartServerThen is auditStartServer with waitReady; once /readyz has
+// answered, then runs with a function that probes /readyz again, and the
+// server is stopped afterwards.
+func auditStartServerThen(t *testing.T, env map[string]string, timeout time.Duration, then func(readyz func() (int, string))) auditServerRun {
+	t.Helper()
+	return auditRunServer(t, env, true, timeout, then)
+}
+
+func auditRunServer(t *testing.T, env map[string]string, waitReady bool, timeout time.Duration, then func(readyz func() (int, string))) auditServerRun {
+	t.Helper()
+	bin := auditServerBinary(t)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	run := auditServerRun{exitCode: -1}
+	exitCode := func(err error) int {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode()
+		}
+		if err == nil {
+			return 0
+		}
+		return -1
+	}
+	if !waitReady {
+		select {
+		case err := <-done:
+			run.exitCode = exitCode(err)
+		case <-ctx.Done():
+			run.exitCode = -1
+			<-done
+		}
+		run.output = out.String()
+		return run
+	}
+	url := "http://127.0.0.1:" + env["RETICORA_PORT"] + "/readyz"
+	client := &http.Client{Timeout: 10 * time.Second}
+	deadline := time.Now().Add(timeout - 5*time.Second)
+	for {
+		select {
+		case err := <-done:
+			run.exitCode = exitCode(err)
+			run.output = out.String()
+			run.readyError = fmt.Errorf("server exited before /readyz answered")
+			return run
+		default:
+		}
+		resp, err := client.Get(url)
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			run.readyCode, run.readyBody = resp.StatusCode, strings.TrimSpace(string(body))
+			if then != nil {
+				then(func() (int, string) {
+					again, getErr := client.Get(url)
+					if getErr != nil {
+						t.Errorf("/readyz: %v", getErr)
+						return 0, ""
+					}
+					defer again.Body.Close()
+					body, _ := io.ReadAll(again.Body)
+					return again.StatusCode, strings.TrimSpace(string(body))
+				})
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			run.readyError = fmt.Errorf("/readyz did not answer within %s: %v", timeout, err)
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+	run.output = out.String()
+	return run
+}
+
+// auditRequireRuntimeLogin fails the test when the login of dsn is a
+// superuser or has BYPASSRLS: the start would then not prove that the server
+// runs with the runtime login of the packaged installation.
+func auditRequireRuntimeLogin(t *testing.T, dsn string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("runtime login: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	var login string
+	var super, bypass bool
+	if err := conn.QueryRow(ctx, `SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = session_user`).
+		Scan(&login, &super, &bypass); err != nil {
+		t.Fatalf("runtime login: %v", err)
+	}
+	if super || bypass {
+		t.Fatalf("server login %s is superuser=%t bypassrls=%t; the startup test must use the runtime login (scopetest.AppDSN)", login, super, bypass)
+	}
+}
+
+func auditTail(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func TestAuditT5ServerStartupFailClosed(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(t *testing.T, env map[string]string)
+		message string
+	}{
+		{"missing OIDC issuer", func(_ *testing.T, env map[string]string) { delete(env, "RETICORA_OIDC_ISSUER_URL") },
+			"requires RETICORA_OIDC_ISSUER_URL"},
+		{"missing master key", func(_ *testing.T, env map[string]string) { delete(env, "RETICORA_MASTER_KEY") },
+			"requires RETICORA_MASTER_KEY"},
+		// Production ingests only over the NATS queue with its identity
+		// locks (WP-586, F-282).
+		{"missing NATS URL", func(_ *testing.T, env map[string]string) { delete(env, "RETICORA_NATS_URL") },
+			"requires RETICORA_NATS_URL"},
+		// Kubernetes passes an empty key of a secret or ConfigMap as an empty
+		// variable. The loader treats it as unset, so the start check of the
+		// staging overlay names it: tests/k8s/kind-smoke.sh asserts these
+		// messages in the pod log (WP-441).
+		{"empty master key (staging)", func(_ *testing.T, env map[string]string) {
+			env["RETICORA_ENVIRONMENT"] = config.EnvStaging
+			env["RETICORA_MASTER_KEY"] = ""
+		}, "RETICORA_ENVIRONMENT=staging requires RETICORA_MASTER_KEY"},
+		{"empty OIDC issuer (staging)", func(_ *testing.T, env map[string]string) {
+			env["RETICORA_ENVIRONMENT"] = config.EnvStaging
+			env["RETICORA_OIDC_ISSUER_URL"] = ""
+		}, "RETICORA_ENVIRONMENT=staging requires RETICORA_OIDC_ISSUER_URL"},
+		{"invalid master key", func(_ *testing.T, env map[string]string) { env["RETICORA_MASTER_KEY"] = "not-a-base64-key" },
+			"failed to init envelope encryptor"},
+		{"missing session key", func(t *testing.T, env map[string]string) {
+			env["RETICORA_SESSION_KEY_PATH"] = filepath.Join(t.TempDir(), "absent.pem")
+		}, "session token setup failed"},
+		{"redis unreachable", func(t *testing.T, env map[string]string) {
+			env["RETICORA_REDIS_URL"] = "redis://" + auditClosedAddress(t) + "/0"
+		}, "failed to connect to Redis"},
+		{"database unreachable", func(t *testing.T, env map[string]string) {
+			env["RETICORA_DATABASE_URL"] = "postgres://reticora:reticora@" + auditClosedAddress(t) + "/x?sslmode=disable"
+		}, "failed to connect to database"},
+		{"object storage unreachable", func(t *testing.T, env map[string]string) {
+			env["RETICORA_S3_ENDPOINT"] = auditClosedAddress(t)
+			env["RETICORA_S3_ACCESS_KEY"] = "audit"
+			env["RETICORA_S3_SECRET_KEY"] = "audit-secret"
+		}, "S3 blob storage unavailable"},
+		{"partial object storage configuration", func(t *testing.T, env map[string]string) {
+			env["RETICORA_S3_ENDPOINT"] = auditClosedAddress(t)
+		}, "requires RETICORA_S3_ACCESS_KEY, RETICORA_S3_SECRET_KEY"},
+		{"NATS unreachable", func(t *testing.T, env map[string]string) {
+			env["RETICORA_NATS_URL"] = "nats://" + auditClosedAddress(t)
+		}, "failed to set up the ingest queue on NATS"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := auditProductionEnv(t)
+			tc.mutate(t, env)
+			run := auditStartServer(t, env, false, 90*time.Second)
+			if run.exitCode != 1 {
+				t.Errorf("exit code = %d, want 1 (fail-closed start)\n%s", run.exitCode, auditTail(run.output, 5))
+			}
+			if !strings.Contains(run.output, tc.message) {
+				t.Errorf("start output lacks %q\n%s", tc.message, auditTail(run.output, 5))
+			}
+		})
+	}
+
+	t.Run("complete configuration becomes ready", func(t *testing.T) {
+		env := auditProductionEnv(t)
+		auditRequireRuntimeLogin(t, env["RETICORA_DATABASE_URL"])
+		run := auditStartServer(t, env, true, 90*time.Second)
+		if run.readyError != nil {
+			t.Fatalf("%v (exit %d)\n%s", run.readyError, run.exitCode, auditTail(run.output, 8))
+		}
+		t.Logf("/readyz -> %d %s", run.readyCode, run.readyBody)
+		if run.readyCode != http.StatusOK {
+			t.Errorf("/readyz = %d %s, want 200", run.readyCode, run.readyBody)
+		}
+		for _, check := range []string{`"database":"ok"`, `"redis":"ok"`} {
+			if !strings.Contains(run.readyBody, check) {
+				t.Errorf("/readyz body %s lacks %s", run.readyBody, check)
+			}
+		}
+	})
+
+	// The derivation root (WP-459): the first start draws it; a start with
+	// a master key that does not unseal it stops with exit code 1 and
+	// neither replaces it nor draws another; with that key as the new one
+	// and the first as the previous one (rotation) the start succeeds. The
+	// root appears in no output.
+	t.Run("derivation root of another master key", func(t *testing.T) {
+		env := auditProductionEnv(t)
+		first := env["RETICORA_MASTER_KEY"]
+		run := auditStartServer(t, env, true, 90*time.Second)
+		if run.readyError != nil || run.readyCode != http.StatusOK {
+			t.Fatalf("first start: /readyz %d, %v\n%s", run.readyCode, run.readyError, auditTail(run.output, 8))
+		}
+		sealed := auditDerivationRoot(t)
+		if sealed == nil || !strings.Contains(run.output, "created the derivation root") {
+			t.Fatalf("the first start drew no derivation root\n%s", auditTail(run.output, 8))
+		}
+		outputs := run.output
+		other, err := crypto.GenerateMasterKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		env["RETICORA_MASTER_KEY"] = other
+		run = auditStartServer(t, env, false, 90*time.Second)
+		outputs += run.output
+		if run.exitCode != 1 || !strings.Contains(run.output, "failed to open the derivation root") ||
+			!strings.Contains(run.output, "does not unseal with the configured master keys") {
+			t.Errorf("start with another master key: exit %d, want 1 with the derivation root\n%s", run.exitCode, auditTail(run.output, 5))
+		}
+		if again := auditDerivationRoot(t); !bytes.Equal(again, sealed) {
+			t.Error("the start with another master key replaced the derivation root")
+		}
+		env["RETICORA_MASTER_KEY_PREVIOUS"] = first
+		run = auditStartServer(t, env, true, 90*time.Second)
+		outputs += run.output
+		if run.readyError != nil || run.readyCode != http.StatusOK || strings.Contains(run.output, "created the derivation root") {
+			t.Errorf("start during the rotation: /readyz %d, %v\n%s", run.readyCode, run.readyError, auditTail(run.output, 8))
+		}
+		enc, err := crypto.NewEnvelopeEncryptor(first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, err := enc.UnwrapDEK(sealed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, needle := range []string{hex.EncodeToString(root), base64.StdEncoding.EncodeToString(root), base64.RawURLEncoding.EncodeToString(root)} {
+			if strings.Contains(outputs, needle) {
+				t.Fatal("the server output contains the derivation root")
+			}
+		}
+	})
+
+	t.Run("object storage endpoint host:port is probed", func(t *testing.T) {
+		env := auditProductionEnv(t)
+		s3 := auditFakeS3(t)
+		env["RETICORA_S3_ENDPOINT"] = strings.TrimPrefix(s3.URL, "http://")
+		env["RETICORA_S3_ACCESS_KEY"] = "audit"
+		env["RETICORA_S3_SECRET_KEY"] = "audit-secret"
+		run := auditStartServer(t, env, true, 90*time.Second)
+		if run.readyError != nil {
+			t.Fatalf("%v (exit %d)\n%s", run.readyError, run.exitCode, auditTail(run.output, 8))
+		}
+		t.Logf("RETICORA_S3_ENDPOINT=%s: /readyz -> %d %s", env["RETICORA_S3_ENDPOINT"], run.readyCode, run.readyBody)
+		if run.readyCode != http.StatusOK || !strings.Contains(run.readyBody, `"object_storage":"ok"`) {
+			t.Errorf("/readyz = %d %s, want 200 with object_storage ok", run.readyCode, run.readyBody)
+		}
+	})
+}

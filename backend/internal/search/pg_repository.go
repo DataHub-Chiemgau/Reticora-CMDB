@@ -190,7 +190,7 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 		if err := rows.Err(); err != nil {
 			return err
 		}
-		return contactTitles(ctx, tx, q.OrganizationID, res.Data)
+		return contactDetails(ctx, tx, q.OrganizationID, res.Data)
 	})
 	res.Limit, res.Offset = limit, q.Offset
 	res.HasMore = q.Offset+len(res.Data) < res.Total
@@ -200,6 +200,9 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 // ReindexTenant rebuilds the index of the whole organization. The index must
 // stay complete for every principal, so the rebuild runs org-wide even when a
 // client-scoped administrator triggers it; it returns only a count (E-08).
+// The expressions are the ones of the index triggers: a location links to
+// its node in the tree, a contact has no page and no url (migration 000182,
+// F-334).
 func (r *PGRepository) ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error) {
 	var count int64
 	scope, ok := database.TenantScopeFromContext(ctx)
@@ -219,8 +222,8 @@ SELECT organization_id,'ci',id,name,concat_ws(' ',hostname,manufacturer,model,se
 UNION ALL SELECT organization_id,'asset',id,name,concat_ws(' ',asset_tag,category,status,supplier,serial_number,location,notes),'/assets','{}'::jsonb FROM asset WHERE organization_id=$1
 UNION ALL SELECT organization_id,'document',id,title,concat_ws(' ',description,file_name,category,array_to_string(tags,' ')),'/documents','{}'::jsonb FROM document WHERE organization_id=$1
 UNION ALL SELECT organization_id,'ticket',id,title,concat_ws(' ',description,status,priority,category,array_to_string(tags,' ')),'/tickets','{}'::jsonb FROM ticket WHERE organization_id=$1
-UNION ALL SELECT organization_id,'contact',id,COALESCE(display_name,''),concat_ws(' ',email,phone,role,department,notes),'/contacts','{}'::jsonb FROM contact WHERE organization_id=$1
-UNION ALL SELECT organization_id,'location',id,name,kind,'/locations','{}'::jsonb FROM location WHERE organization_id=$1
+UNION ALL SELECT organization_id,'contact',id,COALESCE(display_name,''),concat_ws(' ',email,phone,role,department,notes),'','{}'::jsonb FROM contact WHERE organization_id=$1
+UNION ALL SELECT organization_id,'location',id,name,kind,'/locations?node='||id,'{}'::jsonb FROM location WHERE organization_id=$1
 UNION ALL SELECT organization_id,'reservation',id,COALESCE(project_ref, reason, 'reservation'),concat_ws(' ',state, reason, project_ref),'/reservations','{}'::jsonb FROM reservation WHERE organization_id=$1`, orgID)
 		count = cmd.RowsAffected()
 		return err
@@ -228,46 +231,68 @@ UNION ALL SELECT organization_id,'reservation',id,COALESCE(project_ref, reason, 
 	return ReindexResult{Indexed: int(count)}, err
 }
 
-// contactTitles shows the names of contact hits: the index keeps no
-// personal data, the name comes from the PII vault (AUD-01, SEC-05).
-func contactTitles(ctx context.Context, tx pgx.Tx, orgID string, hits []Hit) error {
-	vault := pii.Default()
+// contactDetails completes contact hits for the contact card of the command
+// palette (SRC-01, F-334): contacts have no page of their own, the hit
+// carries name (title), e-mail, phone and role (metadata). The index keeps
+// no personal data: name, e-mail and phone come from the PII vault (AUD-01,
+// SEC-05), or from the contact row when no vault is configured, the role
+// from the row. They are read at query time under the caller's tenant
+// scope, so a hit shows what GET /contacts/{id} shows (contact:read).
+func contactDetails(ctx context.Context, tx pgx.Tx, orgID string, hits []Hit) error {
 	var ids []string
 	for i := range hits {
 		if hits[i].EntityType == "contact" {
 			ids = append(ids, hits[i].EntityID)
 		}
 	}
-	if vault == nil || len(ids) == 0 {
+	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text, pii_subject_id::text FROM contact
-		WHERE organization_id = $1 AND id::text = ANY($2) AND pii_subject_id IS NOT NULL`, orgID, ids)
+	rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(pii_subject_id::text, ''), COALESCE(email, ''), COALESCE(phone, ''), COALESCE(role, '')
+		FROM contact WHERE organization_id = $1 AND id::text = ANY($2)`, orgID, ids)
 	if err != nil {
-		return fmt.Errorf("contact names: %w", err)
+		return fmt.Errorf("contact details: %w", err)
 	}
-	subjectOf := map[string]string{}
+	type details struct{ subject, email, phone, role string }
+	byID := map[string]*details{}
 	var subjectIDs []string
 	for rows.Next() {
-		var id, subject string
-		if err = rows.Scan(&id, &subject); err != nil {
+		var id string
+		var d details
+		if err = rows.Scan(&id, &d.subject, &d.email, &d.phone, &d.role); err != nil {
 			rows.Close()
 			return err
 		}
-		subjectOf[id] = subject
-		subjectIDs = append(subjectIDs, subject)
+		byID[id] = &d
+		if d.subject != "" {
+			subjectIDs = append(subjectIDs, d.subject)
+		}
 	}
 	rows.Close()
 	if rerr := rows.Err(); rerr != nil {
 		return rerr
 	}
-	subjects, err := vault.ResolveTx(ctx, tx, orgID, subjectIDs)
-	if err != nil {
-		return fmt.Errorf("contact names: %w", err)
+	var subjects map[string]*pii.Subject
+	if vault := pii.Default(); vault != nil && len(subjectIDs) > 0 {
+		if subjects, err = vault.ResolveTx(ctx, tx, orgID, subjectIDs); err != nil {
+			return fmt.Errorf("contact details: %w", err)
+		}
 	}
 	for i := range hits {
-		if s := subjects[subjectOf[hits[i].EntityID]]; hits[i].EntityType == "contact" && s != nil {
-			hits[i].Title = s.Data["name"]
+		d := byID[hits[i].EntityID]
+		if hits[i].EntityType != "contact" || d == nil {
+			continue
+		}
+		if s := subjects[d.subject]; d.subject != "" && s != nil {
+			hits[i].Title, d.email, d.phone = s.Data["name"], s.Data["email"], s.Data["phone"]
+		}
+		if hits[i].Metadata == nil {
+			hits[i].Metadata = map[string]string{}
+		}
+		for key, value := range map[string]string{"email": d.email, "phone": d.phone, "role": d.role} {
+			if value != "" {
+				hits[i].Metadata[key] = value
+			}
 		}
 	}
 	return nil

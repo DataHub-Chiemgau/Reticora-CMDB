@@ -5,14 +5,19 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // ContactLister gathers every contact record belonging to a person for the
@@ -46,6 +51,7 @@ type Handler struct {
 	tickets     TicketActivityLister
 	assignments AssignmentLister
 	sessions    SessionRevoker
+	quota       QuotaGuard
 }
 
 // NewHandler creates a new user/team/role handler. contacts may be nil; the
@@ -67,21 +73,61 @@ func (h *Handler) WithPrivacySources(tickets TicketActivityLister, assignments A
 	return h
 }
 
-// WithSessionRevoker makes deactivation and anonymization end the sessions
-// and refresh tokens of the user immediately (TLC-04, AUT-02).
+// WithSessionRevoker makes deactivation, anonymization and deletion end the
+// sessions and refresh tokens of the user immediately (TLC-04, AUT-02).
 func (h *Handler) WithSessionRevoker(sessions SessionRevoker) *Handler {
 	h.sessions = sessions
 	return h
 }
 
-// revokeSessions blacklists the sessions of the user. It is called before the
-// deactivation commits, so a failure leaves the user unchanged, and again
-// afterwards to cover tokens refreshed in between.
+// WithQuota enforces max_users on POST /users against the active users of
+// the organization (ENT-03); over the limit the request gets 403
+// entitlement-limit and no user is created.
+func (h *Handler) WithQuota(q QuotaGuard) *Handler {
+	h.quota = q
+	return h
+}
+
+// revokeSessions blacklists the sessions of the user.
 func (h *Handler) revokeSessions(ctx context.Context, userID string) error {
 	if h.sessions == nil {
 		return nil
 	}
 	return h.sessions.RevokeUser(ctx, userID, time.Now().UTC())
+}
+
+// sessionRevocation blacklists the sessions of the user as the
+// DeactivationHook, inside the transaction of the deactivation or deletion
+// once the user was found in the organization: a failure rolls the change
+// back, and a request for a user of another organization writes nothing.
+// err keeps the failure so the handler can answer 503 instead of 404.
+type sessionRevocation struct {
+	h      *Handler
+	userID string
+	err    error
+}
+
+func (s *sessionRevocation) hook(ctx context.Context, _ pgx.Tx) error {
+	s.err = s.h.revokeSessions(ctx, s.userID)
+	return s.err
+}
+
+// uuidSpelling strips the characters PostgreSQL ignores in a uuid literal
+// (braces, hyphens between digit groups).
+var uuidSpelling = strings.NewReplacer("-", "", "{", "", "}", "")
+
+// isOwnAccount reports whether the path id names the caller's own app_user
+// (the user id of the tenant context, as a session or a user's own API key
+// carries it). The comparison ignores case, braces and hyphens, the
+// spellings PostgreSQL accepts for the same uuid, so a differently written
+// id cannot pass the self-lockout guards. A principal without a user id
+// never matches, and a service account or a key without owner has no
+// app_user to match.
+func isOwnAccount(id, callerID string) bool {
+	if callerID == "" {
+		return false
+	}
+	return strings.EqualFold(uuidSpelling.Replace(id), uuidSpelling.Replace(callerID))
 }
 
 // RegisterRoutes registers user/team/role routes on the given mux.
@@ -118,6 +164,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// users/{id}/roles stay until their sunset (API-01).
 	r.Get("/api/v1/role-assignments", h.ListRoleAssignments)
 	r.Post("/api/v1/role-assignments", h.AssignRole)
+	r.Delete("/api/v1/role-assignments/{id}", h.RevokeRoleAssignment)
 }
 
 // --- User handlers ---
@@ -195,6 +242,18 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		ExternalID:     req.ExternalID,
 	}
 
+	if h.quota != nil {
+		active, err := h.repo.CountActiveUsers(r.Context(), t.OrganizationID)
+		if err == nil {
+			err = h.quota.AllowCreate(r.Context(), t.OrganizationID, entitlement.LimitMaxUsers, active)
+		}
+		if err != nil {
+			if !api.WriteEntitlementError(w, err) {
+				api.WriteRepoError(w, err)
+			}
+			return
+		}
+	}
 	if err := h.repo.CreateUser(r.Context(), u); err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -218,17 +277,26 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deactivate := req.Status != nil && !statusIsActive(*req.Status)
-	if deactivate {
-		if err := h.revokeSessions(r.Context(), id); err != nil {
-			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not deactivated")
-			return
-		}
+	// Self-deactivation would revoke the caller's own sessions and can lock
+	// the organization out when the caller is its last admin; it is refused
+	// before any write, revocation or audit entry (F-377). Other fields of
+	// the own account and status active stay allowed.
+	if deactivate && isOwnAccount(id, t.UserID) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot deactivate your own account")
+		return
 	}
-	item, err := h.repo.UpdateUser(r.Context(), t.OrganizationID, id, req)
+	revocation := &sessionRevocation{h: h, userID: id}
+	item, err := h.repo.UpdateUserTx(r.Context(), t.OrganizationID, id, req, revocation.hook)
+	if revocation.err != nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not deactivated")
+		return
+	}
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
 	}
+	// Second revocation after the commit: covers tokens refreshed between
+	// the first one and the commit of the status change.
 	if deactivate {
 		if err := h.revokeSessions(r.Context(), id); err != nil {
 			slog.Warn("second session revocation after deactivation failed", "user_id", id, "error", err)
@@ -246,14 +314,32 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	if err := h.repo.DeleteUser(r.Context(), t.OrganizationID, id); err != nil {
+	// Deleting the own account would lock the caller out like a
+	// self-deactivation; it is refused before the repository runs (F-377).
+	if isOwnAccount(id, t.UserID) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot delete your own account")
+		return
+	}
+	// The deletion ends every access of the user like a deactivation, in
+	// its transaction: API keys revoked, user.deleted recorded, sessions and
+	// refresh tokens blacklisted; if the blacklist cannot be written,
+	// nothing is deleted (TLC-04, AUT-02, F-393).
+	revocation := &sessionRevocation{h: h, userID: id}
+	if err := h.repo.DeleteUserTx(r.Context(), t.OrganizationID, id, revocation.hook); err != nil {
 		switch {
+		case revocation.err != nil:
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not deleted")
 		case errors.Is(err, ErrUserOwnsOpenObjects), errors.Is(err, ErrUserReferenced):
 			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
 		default:
 			api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		}
 		return
+	}
+	// Second revocation after the commit: covers tokens refreshed between
+	// the first one and the commit of the deletion.
+	if err := h.revokeSessions(r.Context(), id); err != nil {
+		slog.Warn("second session revocation after deletion failed", "user_id", id, "error", err)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -347,15 +433,16 @@ func (h *Handler) Anonymize(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	// Self-anonymization would lock the operator out mid-request and orphan
 	// the session; require a second account to do it.
-	if id == t.UserID {
+	if isOwnAccount(id, t.UserID) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot anonymize your own account")
 		return
 	}
-	if err := h.revokeSessions(r.Context(), id); err != nil {
+	revocation := &sessionRevocation{h: h, userID: id}
+	u, err := h.repo.AnonymizeUserTx(r.Context(), t.OrganizationID, id, revocation.hook)
+	if revocation.err != nil {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not anonymized")
 		return
 	}
-	u, err := h.repo.AnonymizeUser(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		return
@@ -373,6 +460,10 @@ func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	userID := chi.URLParam(r, "id")
 	roles, err := h.repo.ListUserRoles(r.Context(), t.OrganizationID, userID)
 	if err != nil {
@@ -380,7 +471,7 @@ func (h *Handler) ListUserRoles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, roles)
+	api.WriteJSON(w, http.StatusOK, api.Page(roles, page))
 }
 
 // ListRoleAssignments handles GET /api/v1/role-assignments?user_id=….
@@ -437,10 +528,13 @@ func (h *Handler) GetTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	item, err := h.repo.GetTeam(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -473,7 +567,7 @@ func (h *Handler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.CreateTeam(r.Context(), team); err != nil {
-		api.WriteRepoError(w, err)
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -487,7 +581,10 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	var req UpdateTeamRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -496,7 +593,7 @@ func (h *Handler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.repo.UpdateTeam(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -510,9 +607,12 @@ func (h *Handler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	if err := h.repo.DeleteTeam(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "team not found")
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -526,14 +626,21 @@ func (h *Handler) ListTeamMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := chi.URLParam(r, "id")
+	teamID, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	members, err := h.repo.ListTeamMembers(r.Context(), t.OrganizationID, teamID)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, members)
+	api.WriteJSON(w, http.StatusOK, api.Page(members, page))
 }
 
 func (h *Handler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
@@ -543,7 +650,10 @@ func (h *Handler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := chi.URLParam(r, "id")
+	teamID, ok := api.ParseUUIDParam(w, r, "id", "team not found")
+	if !ok {
+		return
+	}
 	var req AddMemberRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -567,7 +677,7 @@ func (h *Handler) AddTeamMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.repo.AddTeamMember(r.Context(), t.OrganizationID, member); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
@@ -581,15 +691,45 @@ func (h *Handler) RemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := chi.URLParam(r, "teamId")
-	userID := chi.URLParam(r, "userId")
+	teamID, ok := api.ParseUUIDParam(w, r, "teamId", "team not found")
+	if !ok {
+		return
+	}
+	userID, ok := api.ParseUUIDParam(w, r, "userId", "team member not found")
+	if !ok {
+		return
+	}
 
 	if err := h.repo.RemoveTeamMember(r.Context(), t.OrganizationID, teamID, userID); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "team not found", err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeTeamError answers a failed team, team member or role request: an
+// object that is unknown, of another organization or outside the caller's
+// team scope is 404 with notFound (a member: "team member not found"), a
+// duplicate member 409, a system role 404, a user or lead outside the
+// organization the 422 field error (TEN-04). Database errors go through
+// api.WriteRepoError (23505 is 409 without the constraint name, F-047);
+// their text goes to the log only.
+func writeTeamError(w http.ResponseWriter, r *http.Request, notFound string, err error) {
+	switch {
+	case errors.Is(err, errMemberNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "team member not found")
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", notFound)
+	case errors.Is(err, ErrConflict):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+	case errors.Is(err, ErrSystemRole):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrSystemRole.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.WarnContext(r.Context(), "team or role request failed", "error", err)
+		api.WriteRepoError(w, err)
+	}
 }
 
 // --- Role handlers ---
@@ -624,10 +764,13 @@ func (h *Handler) GetRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "role not found")
+	if !ok {
+		return
+	}
 	item, err := h.repo.GetRole(r.Context(), t.OrganizationID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "role not found")
+		writeTeamError(w, r, "role not found", err)
 		return
 	}
 
@@ -677,16 +820,34 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
+	id, ok := api.ParseUUIDParam(w, r, "id", "role not found")
+	if !ok {
+		return
+	}
 	var req UpdateRoleRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 
-	item, err := h.repo.UpdateRole(r.Context(), t.OrganizationID, id, req)
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "changing a role requires an authenticated principal")
+		return
+	}
+	item, err := h.repo.UpdateRole(r.Context(), t.OrganizationID, id, &p, req)
+	var widening *RoleWideningError
+	var narrowing *permission.RoleNarrowingError
+	switch {
+	case errors.As(err, &widening):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", widening.Error())
+		return
+	case errors.As(err, &narrowing):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", narrowing.Error())
+		return
+	}
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+		writeTeamError(w, r, "role not found", err)
 		return
 	}
 
@@ -700,19 +861,43 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := chi.URLParam(r, "id")
-	if err := h.repo.DeleteRole(r.Context(), t.OrganizationID, id); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+	id, ok := api.ParseUUIDParam(w, r, "id", "role not found")
+	if !ok {
+		return
+	}
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "deleting a role requires an authenticated principal")
+		return
+	}
+	err := h.repo.DeleteRole(r.Context(), t.OrganizationID, id, &p)
+	var narrowing *permission.RoleNarrowingError
+	if errors.As(err, &narrowing) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", narrowing.Error())
+		return
+	}
+	if err != nil {
+		writeTeamError(w, r, "role not found", err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// AssignRole handles POST /api/v1/role-assignments and the sunset path POST
+// /api/v1/roles/assign. The caller must hold role:manage and every permission
+// of the role in a scope covering the assignment's scope (grant ceiling, 403);
+// the check runs before anything is stored and before the MFA binding of an
+// org_admin grant.
 func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "assigning roles requires an authenticated principal")
 		return
 	}
 
@@ -731,24 +916,70 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scopeType := req.ScopeType
-	if scopeType == "" {
-		scopeType = "organization"
-	}
-
 	assignment := &UserRoleAssignment{
 		UserID:       req.UserID,
 		CustomRoleID: req.CustomRoleID,
 		RoleID:       req.RoleID,
-		ScopeType:    scopeType,
+		ScopeType:    req.ScopeType,
 		ScopeID:      req.ScopeID,
 		GrantedBy:    t.UserID,
 	}
 
-	if err := h.repo.AssignRole(r.Context(), t.OrganizationID, assignment); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+	if err := h.repo.AssignRole(r.Context(), t.OrganizationID, &p, assignment); err != nil {
+		writeAssignmentError(w, r, "user_id", req.UserID, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, assignment)
+}
+
+// RevokeRoleAssignment handles DELETE /api/v1/role-assignments/{id} (API-05,
+// AUT-02, F-017): it removes a standard or custom role assignment of the
+// organization. The caller must hold role:manage and every permission of the
+// role in a scope covering the assignment's scope, as for assigning it (grant
+// ceiling, 403); an unknown id or one of another organization is 404. The
+// user loses the rights at the next refresh.
+func (h *Handler) RevokeRoleAssignment(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "revoking roles requires an authenticated principal")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.repo.RevokeRoleAssignment(r.Context(), t.OrganizationID, &p, id); err != nil {
+		writeAssignmentError(w, r, "assignment_id", id, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeAssignmentError answers a refused role assignment or revocation: 403
+// beyond the grant ceiling, 404 for a role, user, team or assignment outside
+// the organization, 422 for an invalid scope, 503 when an org_admin cannot
+// be bound to MFA. Other failures are sanitized (api.WriteRepoError);
+// repository and database texts go to the log only, with the attribute key
+// and value naming the request's user or assignment.
+func writeAssignmentError(w http.ResponseWriter, r *http.Request, key, value string, err error) {
+	var ceiling *GrantCeilingError
+	switch {
+	case errors.As(err, &ceiling):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ceiling.Error())
+	case errors.Is(err, errRoleNotFound), errors.Is(err, errUserNotFound), errors.Is(err, errTeamNotFound),
+		errors.Is(err, errAssignmentNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
+	case errors.Is(err, ErrMFAUnavailable):
+		// No org_admin without MFA (WP-358); the cause names the
+		// admin API and goes to the log only.
+		slog.ErrorContext(r.Context(), "org_admin assignment without enforceable MFA", key, value, "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrMFAUnavailable.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		slog.ErrorContext(r.Context(), "role assignment failed", key, value, "error", err)
+		api.WriteRepoError(w, err)
+	}
 }

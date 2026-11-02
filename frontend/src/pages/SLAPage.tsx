@@ -9,6 +9,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 const priorities = [
   { value: 'low', label: 'Low' },
@@ -96,7 +97,7 @@ export function SLAPage() {
 
       <Card title={`${t('sla.policies')} (${policies.data?.total ?? 0})`}>
         {policies.data?.data.length ? (
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('sla.policies')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -119,7 +120,7 @@ export function SLAPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         ) : (
           <EmptyState title={t('sla.emptyTitle')} description={t('sla.emptyHint')} />
         )}

@@ -5,7 +5,8 @@
 // (ENT-01): one row per feature with enabled, limits (named quotas),
 // valid_until and source. An organization is entitled exactly to its rows
 // (ENT-05): a missing row means not entitled, only cmdb_core is always
-// active. Every organization is provisioned with the rows of its plan once.
+// active. Every organization is provisioned with the missing rows of its
+// plan.
 package entitlement
 
 import (
@@ -65,6 +66,13 @@ const (
 	FeatureCompliance    = "compliance"
 )
 
+// ModuleFeatures are the module feature keys of later phases; each gates a
+// module present in the code.
+var ModuleFeatures = []string{
+	FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
+	FeatureMonitoring, FeatureEndpointAgent, FeatureWorkflowForms, FeatureCompliance,
+}
+
 // Add-ons (CH14, ENT-06): IGA and AI are no part of any plan; they are
 // unlocked only by their own entitlement row.
 const (
@@ -74,6 +82,12 @@ const (
 
 // Addons are the add-on feature keys of CH14.
 var Addons = []string{FeatureIGA, FeatureAI}
+
+// FeatureKeys are the feature keys an entitlement row may carry (F-209):
+// the phase-1 keys of ENT-02, the module keys and the add-ons.
+func FeatureKeys() []string {
+	return slices.Concat(Phase1Features, ModuleFeatures, Addons)
+}
 
 // Quotas of ENT-02, stored in limits.
 const (
@@ -189,44 +203,82 @@ func (e *Entitlement) status(now time.Time) Status {
 var ErrCoreNotDeactivatable = errors.New("cmdb_core is always active and cannot be disabled or expire")
 
 // ValidationError is an entitlement that cannot be stored as given.
-type ValidationError struct{ err error }
+type ValidationError struct {
+	// Field is the request field the error refers to (feature_key, enabled,
+	// valid_until, source or limits).
+	Field string
+	err   error
+}
 
+// validation: the fixed texts of Entitlement.Validate (invalid).
 func (e *ValidationError) Error() string { return e.err.Error() }
 func (e *ValidationError) Unwrap() error { return e.err }
 
-func invalid(err error) error { return &ValidationError{err: err} }
+func invalid(field string, err error) error { return &ValidationError{Field: field, err: err} }
 
-// Validate checks an entitlement before it is stored.
+// Validate checks an entitlement before it is stored: the feature key is
+// one of FeatureKeys and every quota one of Quotas (ENT-02, F-209), so a
+// typo is refused instead of being stored without effect.
 func (e *Entitlement) Validate() error {
 	if strings.TrimSpace(e.FeatureKey) == "" {
-		return invalid(errors.New("feature_key is required"))
+		return invalid("feature_key", errors.New("feature_key is required"))
 	}
-	if e.FeatureKey == FeatureCMDBCore && (!e.Enabled || e.ValidUntil != nil) {
-		return invalid(ErrCoreNotDeactivatable)
+	if !slices.Contains(FeatureKeys(), e.FeatureKey) {
+		return invalid("feature_key", fmt.Errorf("unknown feature_key %q (allowed: %s)",
+			e.FeatureKey, strings.Join(FeatureKeys(), ", ")))
+	}
+	if e.FeatureKey == FeatureCMDBCore && !e.Enabled {
+		return invalid("enabled", ErrCoreNotDeactivatable)
+	}
+	if e.FeatureKey == FeatureCMDBCore && e.ValidUntil != nil {
+		return invalid("valid_until", ErrCoreNotDeactivatable)
 	}
 	if e.Source == "" {
 		e.Source = "manual"
 	}
 	if !slices.Contains(Sources, e.Source) {
-		return invalid(fmt.Errorf("source must be one of %s", strings.Join(Sources, ", ")))
+		return invalid("source", fmt.Errorf("source must be one of %s", strings.Join(Sources, ", ")))
 	}
 	for k, v := range e.Limits {
+		if !slices.Contains(Quotas, k) {
+			return invalid("limits", fmt.Errorf("unknown limit %q (allowed: %s)", k, strings.Join(Quotas, ", ")))
+		}
 		if v < 0 {
-			return invalid(fmt.Errorf("limit %s must not be negative", k))
+			return invalid("limits", fmt.Errorf("limit %s must not be negative", k))
 		}
 	}
 	return nil
 }
 
 // LimitExceededError is returned when a tenant exceeds a licensed limit.
+// Current counts the whole organization (F-403); HideCurrent keeps count
+// and limit out of the text for a caller who may not read every client and
+// site (F-414).
 type LimitExceededError struct {
-	FeatureKey string
-	Limit      int64
-	Current    int64
+	FeatureKey  string
+	Limit       int64
+	Current     int64
+	HideCurrent bool
 }
 
+// validation: the feature key; count and limit of the organization only for
+// an org-wide caller (F-414: at the refusal the count mostly equals the
+// limit, so a scoped caller gets neither).
 func (e *LimitExceededError) Error() string {
+	if e.HideCurrent {
+		return fmt.Sprintf("entitlement limit for %q exceeded: the limit of the plan is reached", e.FeatureKey)
+	}
 	return fmt.Sprintf("entitlement limit for %q exceeded: %d of %d in use", e.FeatureKey, e.Current, e.Limit)
+}
+
+// countVisible reports whether the caller of ctx may learn the number of
+// resources of the organization a quota counts (F-414): a principal whose
+// client and site scope is org-wide. A scoped principal (also a job with its
+// creator's scope) and a context without a user (invitation, first login,
+// enrollment, collector ingest) get the limit only.
+func countVisible(ctx context.Context) bool {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	return ok && scope.UserID != "" && scope.Clients.IsAll() && scope.Sites.IsAll()
 }
 
 // LimitExceeded marks the error as an entitlement limit violation so callers can
@@ -241,6 +293,7 @@ type FeatureNotEntitledError struct {
 	FeatureKey string
 }
 
+// validation: a fixed text with the feature key.
 func (e *FeatureNotEntitledError) Error() string {
 	return fmt.Sprintf("feature %q is not included in the current plan", e.FeatureKey)
 }
@@ -258,6 +311,7 @@ type LicenseExpiredError struct {
 	ValidUntil time.Time
 }
 
+// validation: a fixed text with the end of the license.
 func (e *LicenseExpiredError) Error() string {
 	return fmt.Sprintf("the discovery license expired at %s; discovery and ingest are stopped",
 		e.ValidUntil.UTC().Format(time.RFC3339))
@@ -361,41 +415,52 @@ func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlem
 	return ent, status == StatusActive, nil
 }
 
-// Provision stores the features of the plan (no add-ons, no quotas) for an
-// organization that has no entitlement rows yet. Since a missing row means
-// not entitled, every organization is provisioned once (at startup and on
-// creation). It reports whether rows were written.
-func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) (bool, error) {
-	stored, err := s.repo.List(ctx, orgID)
-	if err != nil {
-		return false, err
-	}
-	if len(stored) > 0 {
-		return false, nil
-	}
+// Provision stores the features of the plan (no add-ons, no quotas) that
+// the organization has no row for yet (ENT-05, F-210): an organization that
+// holds only some rows, e.g. only cmdb_core from before the plan fallback
+// was removed, gets the rest of its plan. An existing row is never changed,
+// a disabled or expired one included. It runs for every organization at
+// startup; a new organization gets the rows of its plan when it is created.
+// It returns and logs the added feature keys.
+func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) ([]string, error) {
 	plan = normalizePlan(plan)
-	for _, feature := range PlanFeatures(plan) {
+	features := PlanFeatures(plan)
+	ents := make([]Entitlement, 0, len(features))
+	for _, feature := range features {
 		ent := Entitlement{OrganizationID: orgID, FeatureKey: feature, Plan: plan, Enabled: true,
-			Limits: map[string]int64{}, Source: "manual"}
-		if _, err = s.Grant(ctx, ent); err != nil {
-			return false, fmt.Errorf("provision %s for %s: %w", feature, orgID, err)
+			Limits: map[string]int64{}, Source: "manual", UpdatedAt: s.now()}
+		if err := ent.Validate(); err != nil {
+			return nil, fmt.Errorf("provision %s for %s: %w", feature, orgID, err)
 		}
+		ents = append(ents, ent)
 	}
-	return true, nil
+	added, err := s.repo.InsertMissing(ctx, orgID, ents)
+	if err != nil {
+		return nil, fmt.Errorf("provision %s: %w", orgID, err)
+	}
+	if len(added) == 0 {
+		return nil, nil
+	}
+	s.invalidate(ctx, orgID)
+	if slices.Contains(added, FeatureCMDBCore) {
+		s.adoptAfterGrant(ctx, &Entitlement{OrganizationID: orgID, FeatureKey: FeatureCMDBCore})
+	}
+	slog.InfoContext(ctx, "entitlements provisioned", "organization_id", orgID, "plan", string(plan), "features", added)
+	return added, nil
 }
 
-// ProvisionOrganizations provisions every listed organization (id to plan)
-// that has no entitlement rows yet, each in its own tenant context, and
-// returns how many were provisioned.
+// ProvisionOrganizations provisions the missing plan features of every
+// listed organization (id to plan), each in its own tenant context, and
+// returns how many organizations got rows.
 func (s *Service) ProvisionOrganizations(ctx context.Context, plans map[string]Plan) (int, error) {
 	n := 0
 	for orgID, plan := range plans {
 		scope := database.OrgWideScope(orgID, "")
-		done, err := s.Provision(database.ContextWithTenantScope(ctx, &scope), orgID, plan)
+		added, err := s.Provision(database.ContextWithTenantScope(ctx, &scope), orgID, plan)
 		if err != nil {
 			return n, err
 		}
-		if done {
+		if len(added) > 0 {
 			n++
 		}
 	}
@@ -432,7 +497,8 @@ func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error
 
 // AllowCreate enforces a quota (max_cis, max_collectors, max_users,
 // max_api_keys) before another resource is created. current is the number
-// of resources already stored.
+// of resources already stored; the refusal names it only to an org-wide
+// caller (countVisible, F-414).
 func (s *Service) AllowCreate(ctx context.Context, orgID, quota string, current int64) error {
 	feature, ok := QuotaFeature[quota]
 	if !ok {
@@ -453,12 +519,13 @@ func (s *Service) AllowCreate(ctx context.Context, orgID, quota string, current 
 		return err
 	}
 	if limit != nil && current >= *limit {
-		return &LimitExceededError{FeatureKey: quota, Limit: *limit, Current: current}
+		return &LimitExceededError{FeatureKey: quota, Limit: *limit, Current: current, HideCurrent: !countVisible(ctx)}
 	}
 	return nil
 }
 
-// Grant stores (or updates) an entitlement for the organization.
+// Grant stores (or updates) an entitlement for the organization. It joins
+// the transaction of ctx (database.ContextWithTx).
 func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, error) {
 	if ent.OrganizationID == "" {
 		return Entitlement{}, fmt.Errorf("organization is required")
@@ -477,8 +544,13 @@ func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, erro
 		return Entitlement{}, err
 	}
 
-	s.invalidate(ctx, ent.OrganizationID)
-	s.adoptAfterGrant(ctx, &stored)
+	// In a context transaction (the operator's grant with its audit entry,
+	// WP-564) the cache is dropped only after the commit: a reader in
+	// between would otherwise cache the old rows again.
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		s.invalidate(ctx, ent.OrganizationID)
+		s.adoptAfterGrant(ctx, &stored)
+	})
 	return stored, nil
 }
 

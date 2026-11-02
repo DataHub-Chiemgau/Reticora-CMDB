@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -147,6 +148,124 @@ func TestClassifyRecordMapsTypeVendorModelPluginTemplate(t *testing.T) {
 	Default().ClassifyRecord(&snmp)
 	if snmp.Classification.CIType != "firewall" || snmp.Classification.Manufacturer != "Fortinet" || snmp.Attributes["system_template"] != "firewall" {
 		t.Errorf("snmp classification = %+v %v", snmp.Classification, snmp.Attributes)
+	}
+}
+
+// TestMergeByTargetFoldsSweepIntoClassifiedRecord covers WP-417 (DIS-02,
+// F-030): the records of one run are merged per scope and target before the
+// upload. The sweep record of a target that SNMP classified is folded into
+// the SNMP record (its ARP MAC fills the gap) and not uploaded as an
+// unclassified generic_device; a sweep record stays "fallback" only for a
+// target no protocol of its scope classified.
+func TestMergeByTargetFoldsSweepIntoClassifiedRecord(t *testing.T) {
+	now := time.Now()
+	classified := func(rec plugins.DeviceRecord) plugins.DeviceRecord {
+		Default().ClassifyRecord(&rec)
+		return rec
+	}
+	sweep := func(ip, mac string) plugins.DeviceRecord {
+		return classified(plugins.RecordFromResult("sweep", &plugins.Result{CIType: "server", Name: ip, IP: ip, MAC: mac,
+			Attributes: map[string]any{"collectedBy": "sweep", "openPorts": []int{22}, "reachable": true}}, now))
+	}
+	snmp := func(ip, mac, sysObjectID, sysDescr string) plugins.DeviceRecord {
+		return classified(plugins.RecordFromResult("snmp", &plugins.Result{CIType: "network.device", Name: "dev-" + ip, IP: ip, MAC: mac,
+			Attributes: map[string]any{"sysObjectID": sysObjectID, "sysDescr": sysDescr}}, now))
+	}
+	ssh := func(ip, banner string) plugins.DeviceRecord {
+		return classified(plugins.RecordFromResult("ssh", &plugins.Result{CIType: "server", Name: "host-" + ip, IP: ip,
+			Attributes: map[string]any{"sshBanner": banner}}, now))
+	}
+	// A target configured by name: the record names the host, no address.
+	byName := func(name string) plugins.DeviceRecord {
+		return classified(plugins.RecordFromResult("sweep", &plugins.Result{Name: name, IP: name}, now))
+	}
+	catalyst := func(ip, mac string) plugins.DeviceRecord {
+		return snmp(ip, mac, "1.3.6.1.4.1.9.1.2494", "Cisco IOS XE Software, Catalyst L3 Switch Software (CAT9K_IOSXE), C9300-48P")
+	}
+	sshServer := func(target string) plugins.DeviceRecord { return ssh(target, "SSH-2.0-OpenSSH_9.2p1 Debian-2") }
+	inScope := func(scopeID string, rec plugins.DeviceRecord) plugins.DeviceRecord {
+		rec.ScopeID = scopeID
+		return rec
+	}
+	const scopeA, scopeB = "6f0b6f0e-0000-4000-8000-0000000004a1", "6f0b6f0e-0000-4000-8000-0000000004b1"
+	type want struct{ source, ciType, by, mac string }
+	entries := func(recs []plugins.DeviceRecord) map[string][]want {
+		out := map[string][]want{}
+		for _, r := range recs {
+			by, _ := r.Attributes["classified_by"].(string)
+			key := r.TargetIP
+			if key == "" {
+				key = r.Identity.Hostname
+			}
+			if r.ScopeID != "" {
+				key = r.ScopeID[len(r.ScopeID)-3:] + "/" + key
+			}
+			out[key] = append(out[key], want{r.Source, r.Classification.CIType, by, r.Identity.PrimaryMAC})
+		}
+		return out
+	}
+	tests := []struct {
+		name string
+		in   []plugins.DeviceRecord
+		want map[string][]want
+	}{
+		{"SNMP-classified switch: the sweep record is folded, its MAC fills the gap",
+			[]plugins.DeviceRecord{sweep("10.0.0.1", "48:8F:5A:00:00:01"), catalyst("10.0.0.1", "")},
+			map[string][]want{"10.0.0.1": {{"snmp", "switch", StageSNMP, "48:8F:5A:00:00:01"}}}},
+		{"the classified record keeps its own MAC",
+			[]plugins.DeviceRecord{sweep("10.0.0.1", "48:8F:5A:00:00:01"), catalyst("10.0.0.1", "00:1B:21:00:00:01")},
+			map[string][]want{"10.0.0.1": {{"snmp", "switch", StageSNMP, "00:1B:21:00:00:01"}}}},
+		{"banner-classified server: the sweep record is folded",
+			[]plugins.DeviceRecord{sweep("10.0.0.5", ""), sshServer("10.0.0.5")},
+			map[string][]want{"10.0.0.5": {{"ssh", "server", StageBanner, ""}}}},
+		{"sweep only: the sweep record stays the unclassified device",
+			[]plugins.DeviceRecord{sweep("10.0.0.2", "48:8F:5A:00:00:02")},
+			map[string][]want{"10.0.0.2": {{"sweep", GenericDevice, StageFallback, "48:8F:5A:00:00:02"}}}},
+		{"no protocol classified the target: both records stay fallback",
+			[]plugins.DeviceRecord{sweep("10.0.0.3", ""), snmp("10.0.0.3", "", "1.3.6.1.4.1.99999.1", "Acme Widget OS 1.0")},
+			map[string][]want{"10.0.0.3": {{"sweep", GenericDevice, StageFallback, ""}, {"snmp", GenericDevice, StageFallback, ""}}}},
+		{"per target: the sweep record of another target stays",
+			[]plugins.DeviceRecord{sweep("10.0.0.1", ""), sweep("10.0.0.4", ""), catalyst("10.0.0.1", "")},
+			map[string][]want{
+				"10.0.0.1": {{"snmp", "switch", StageSNMP, ""}},
+				"10.0.0.4": {{"sweep", GenericDevice, StageFallback, ""}},
+			}},
+		{"only the sweep record is folded: an unmatched record of another protocol stays",
+			[]plugins.DeviceRecord{sweep("10.0.0.6", ""), catalyst("10.0.0.6", ""), ssh("10.0.0.6", "SSH-2.0-dropbear_2022.83")},
+			map[string][]want{"10.0.0.6": {{"snmp", "switch", StageSNMP, ""}, {"ssh", GenericDevice, StageFallback, ""}}}},
+		{"per scope: a target of two scopes is merged within each scope",
+			[]plugins.DeviceRecord{inScope(scopeA, sweep("10.0.0.7", "")), inScope(scopeB, sweep("10.0.0.7", "")), inScope(scopeB, catalyst("10.0.0.7", ""))},
+			map[string][]want{
+				"4a1/10.0.0.7": {{"sweep", GenericDevice, StageFallback, ""}},
+				"4b1/10.0.0.7": {{"snmp", "switch", StageSNMP, ""}},
+			}},
+		{"targets configured by name merge by their name",
+			[]plugins.DeviceRecord{byName("web01.example.com"), sshServer("web01.example.com")},
+			map[string][]want{"web01.example.com": {{"ssh", "server", StageBanner, ""}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := MergeByTarget(tt.in)
+			got := entries(out)
+			if len(got) != len(tt.want) {
+				t.Fatalf("targets = %v, want %v", got, tt.want)
+			}
+			for target, w := range tt.want {
+				if fmt.Sprint(got[target]) != fmt.Sprint(w) {
+					t.Errorf("%s: records = %v, want %v", target, got[target], w)
+				}
+			}
+			for _, rec := range out {
+				// A target configured by name gets its address before the
+				// upload (deliverableRecords).
+				if rec.TargetIP == "" {
+					continue
+				}
+				if v := rec.Validate(); len(v) > 0 {
+					t.Errorf("record %s of %s breaks the contract: %v", rec.Source, rec.TargetIP, v)
+				}
+			}
+		})
 	}
 }
 

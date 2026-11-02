@@ -7,9 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"sync"
 	"time"
@@ -113,7 +115,7 @@ func NewWebhookProvider(client *http.Client) *WebhookProvider {
 
 // Send implements Provider.
 func (p *WebhookProvider) Send(ctx context.Context, ch *Channel, msg *Message) (*Delivery, error) {
-	url, _ := ch.Config["url"].(string)
+	target, _ := ch.Config["url"].(string)
 	body, err := json.Marshal(map[string]any{
 		"organization_id": ch.OrganizationID, "category": msg.Category, "subject": msg.Subject,
 		"body": msg.Body, "recipients": msg.To, "data": msg.Data,
@@ -121,9 +123,9 @@ func (p *WebhookProvider) Send(ctx context.Context, ch *Channel, msg *Message) (
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, maskURLError(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if secret, _ := ch.Config["secret"].(string); secret != "" {
@@ -133,7 +135,7 @@ func (p *WebhookProvider) Send(ctx context.Context, ch *Channel, msg *Message) (
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, maskURLError(err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
@@ -141,6 +143,17 @@ func (p *WebhookProvider) Send(ctx context.Context, ch *Channel, msg *Message) (
 		return nil, fmt.Errorf("webhook answered %d", resp.StatusCode)
 	}
 	return &Delivery{Recipients: len(msg.To), SentAt: time.Now().UTC()}, nil
+}
+
+// maskURLError masks the channel URL in err: the delivery keeps the error
+// as last_error and the notifier logs it, the token of the URL goes to
+// neither.
+func maskURLError(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		ue.URL = maskURL(ue.URL)
+	}
+	return err
 }
 
 // InboxStore is the inbox with the reads of the notification center.

@@ -1,11 +1,13 @@
 package operator
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -120,56 +123,120 @@ func (h *Handler) authenticate(r *http.Request) (Identity, bool) {
 	return Identity{ID: claims.Subject, Name: claims.Name, Email: claims.Email, Kind: KindOIDC}, true
 }
 
-// statusRecorder captures the response status for the audit.
-type statusRecorder struct {
-	http.ResponseWriter
+// heldResponse holds a response back until its audit entry is written.
+type heldResponse struct {
+	header http.Header
 	status int
+	body   bytes.Buffer
 }
 
-func (s *statusRecorder) WriteHeader(code int) {
-	s.status = code
-	s.ResponseWriter.WriteHeader(code)
+func (h *heldResponse) Header() http.Header { return h.header }
+
+func (h *heldResponse) WriteHeader(code int) {
+	if h.status == 0 {
+		h.status = code
+	}
+}
+
+func (h *heldResponse) Write(b []byte) (int, error) {
+	if h.status == 0 {
+		h.status = http.StatusOK
+	}
+	return h.body.Write(b)
+}
+
+// send writes the held response.
+func (h *heldResponse) send(w http.ResponseWriter) {
+	maps.Copy(w.Header(), h.header)
+	if h.status == 0 {
+		h.status = http.StatusOK
+	}
+	w.WriteHeader(h.status)
+	_, _ = w.Write(h.body.Bytes())
+}
+
+// auditedKey marks a request whose handler wrote its change together with
+// its operator_audit entry (markAudited).
+type auditedKey struct{}
+
+// markAudited tells Middleware that the change of the request and its
+// entry were written atomically (RecordChange, OrgCreator): the request
+// needs no entry of its own, and the response is not held back.
+func markAudited(ctx context.Context) {
+	if done, ok := ctx.Value(auditedKey{}).(*bool); ok {
+		*done = true
+	}
 }
 
 // Middleware admits operators only and records every request in
-// operator_audit, refused ones included.
+// operator_audit, refused ones included. A change is recorded atomically
+// by its handler (markAudited); every other response is held back until
+// its entry is written and becomes a 500 when the entry fails (F-208).
 func (h *Handler) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		op, ok := h.authenticate(r)
 		if !ok {
-			h.record(r.Context(), &AuditEntry{OperatorID: "anonymous", OperatorKind: KindOIDC,
+			// A failed attempt counts against the pre-auth budget of the
+			// IP (AUT-10) even when its entry fails and it is answered 500.
+			middleware.SpendPreAuthSlot(r.Context())
+			if h.record(w, r, &AuditEntry{OperatorID: "anonymous", OperatorKind: KindOIDC,
 				Action: actionFor(r.Method, r.URL.Path), Status: http.StatusUnauthorized,
-				Details: map[string]any{"remote": r.RemoteAddr}})
-			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "operator authentication required")
+				Details: map[string]any{"remote": r.RemoteAddr}}) {
+				api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "operator authentication required")
+			}
 			return
 		}
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), identityKey{}, op)))
-		h.record(r.Context(), &AuditEntry{OperatorID: op.ID, OperatorKind: op.Kind,
-			Action: actionFor(r.Method, r.URL.Path), TargetOrg: targetOrg(r), Status: rec.status,
-			Details: map[string]any{"remote": r.RemoteAddr}})
+		held := &heldResponse{header: w.Header().Clone()}
+		audited := false
+		ctx := context.WithValue(context.WithValue(r.Context(), identityKey{}, op), auditedKey{}, &audited)
+		next.ServeHTTP(held, r.WithContext(ctx))
+		if !audited && !h.record(w, r, &AuditEntry{OperatorID: op.ID, OperatorKind: op.Kind,
+			Action: actionFor(r.Method, r.URL.Path), TargetOrg: targetOrg(r), Status: held.status,
+			Details: map[string]any{"remote": r.RemoteAddr}}) {
+			return
+		}
+		held.send(w)
 	})
 }
 
-// record writes an audit entry; a failure is logged as an error, the
-// response has already been sent.
-func (h *Handler) record(ctx context.Context, e *AuditEntry) {
-	if err := h.audit.Record(context.WithoutCancel(ctx), e); err != nil {
-		slog.Error("operator audit failed", "error", err, "action", e.Action, "operator", e.OperatorID)
+// record writes an audit entry and reports whether it was written. A
+// failure is logged and answered 500 (the response of the request is not
+// sent): no operator action without its entry (F-208).
+func (h *Handler) record(w http.ResponseWriter, r *http.Request, e *AuditEntry) bool {
+	if e.Status == 0 {
+		e.Status = http.StatusOK
 	}
+	err := h.audit.Record(context.WithoutCancel(r.Context()), e)
+	if err == nil {
+		return true
+	}
+	writeAuditFailure(w, e, err)
+	return false
 }
 
-// targetOrg extracts the organization of /admin/orgs/{id}/... requests.
+// writeAuditFailure logs a failed operator_audit write and answers 500
+// with a fixed text.
+func writeAuditFailure(w http.ResponseWriter, e *AuditEntry, err error) {
+	slog.Error("operator audit failed", "error", err, "action", e.Action, "operator", e.OperatorID)
+	api.WriteError(w, http.StatusInternalServerError, "Internal Server Error",
+		"the operator audit entry could not be written; the request was not carried out")
+}
+
+// targetOrg extracts the organization of /admin/orgs/{id}/... requests. An
+// id that is no UUID names none (the action names the path): it would fail
+// the uuid column (SQLSTATE 22P02) and with it the request (500, F-392).
+// The id is lower-cased as the uuid column returns it, so the entry hashes
+// as it is read back (an upper-case id would break the chain).
 func targetOrg(r *http.Request) string {
 	rest, ok := strings.CutPrefix(r.URL.Path, "/api/v1/admin/orgs/")
 	if !ok {
 		return ""
 	}
 	id, _, _ := strings.Cut(rest, "/")
-	if len(id) != 36 {
+	if !api.IsUUID(id) {
 		return ""
 	}
-	return id
+	return strings.ToLower(id)
 }
 
 // newTokenID returns a random token id (jti).

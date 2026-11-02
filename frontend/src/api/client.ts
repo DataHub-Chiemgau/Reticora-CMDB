@@ -1,5 +1,6 @@
 import { clearSession, getSessionToken, refreshSession } from '../auth/session';
 import { useScopeStore } from '../stores/scope';
+import type { components } from './generated/schema';
 
 const API_BASE = '/api/v1';
 
@@ -84,14 +85,18 @@ export interface CICreateRequest {
   discovery_source?: string;
 }
 
+/**
+ * CIUpdateRequest is a JSON merge patch (RFC 7396, CI-04): an absent member
+ * stays, null clears a nullable field.
+ */
 export interface CIUpdateRequest {
   name?: string;
   status?: string;
-  manufacturer?: string;
-  model?: string;
-  serial_number?: string;
-  management_ip?: string;
-  firmware_version?: string;
+  manufacturer?: string | null;
+  model?: string | null;
+  serial_number?: string | null;
+  management_ip?: string | null;
+  firmware_version?: string | null;
   attributes?: Record<string, unknown>;
   discovery_source?: string;
   last_seen_at?: string;
@@ -118,6 +123,12 @@ export interface Relationship {
   /** Target of mounted_in (the rack) and located_in (the location). */
   target_location_id?: string;
 }
+
+/**
+ * A discovery edge removed with force that discovery does not create again
+ * (REL-03): who removed it, why and when (F-273).
+ */
+export type RelationshipSuppression = components['schemas']['RelationshipSuppression'];
 
 /** Verification vocabulary accepted by the relationships API. */
 export const verificationStates = ['unverified', 'verified', 'disputed', 'stale'] as const;
@@ -207,15 +218,29 @@ export interface DiscoveryErrorState {
   target?: string;
 }
 
+/** Discovery plugins a scope can run (DiscoveryScope.plugins in api/openapi.yaml). */
+export type DiscoveryPlugin =
+  'sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas';
+
 export interface DiscoveryScopeInput {
   collector_id: string;
   kind: DiscoveryScopeKind;
   target: string;
   name?: string;
+  site_id?: string;
+  vrf_id?: string;
   schedule?: string;
+  /** Empty: the credentials of the scope's client and the organization-wide ones apply (E-67). */
+  credential_ids?: string[];
   plugins?: string[];
   enabled?: boolean;
 }
+
+/**
+ * DiscoveryScopePatch changes a scope; an empty site_id or vrf_id removes
+ * the site or VRF, credential_ids and plugins replace the lists.
+ */
+export type DiscoveryScopePatch = Partial<Omit<DiscoveryScopeInput, 'collector_id'>>;
 
 export interface CIListParams {
   limit?: number;
@@ -238,13 +263,12 @@ export interface ListParams {
   search?: string;
 }
 
-function mergeHeaders(options?: RequestInit) {
+function mergeHeaders(options: RequestInit | undefined, token: string | null) {
   const headers = new Headers(options?.headers);
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const token = getSessionToken();
   if (token) {
     headers.set('Authorization', ['Bearer', token].join(' '));
   }
@@ -276,8 +300,17 @@ export class ApiError extends Error {
   readonly title?: string;
   readonly detail?: string;
   readonly violations: FieldViolation[];
+  /**
+   * dependencies are the kinds of objects that keep a resource from being
+   * deleted (DependencyProblem of a 409, LOC-11), e.g. `location` or `ci`.
+   */
+  readonly dependencies: string[];
   /** traceId is the request id of the failed request (API-03), for support. */
   readonly traceId?: string;
+  /** conflictFields are the fields a 409 names as changed since the If-Match version (API-07). */
+  readonly conflictFields: string[];
+  /** field is the request field a FieldProblem names (400, 409 or 422 at one input). */
+  readonly field?: string;
 
   constructor(
     status: number,
@@ -286,7 +319,10 @@ export class ApiError extends Error {
       title?: string;
       detail?: string;
       violations?: FieldViolation[];
+      dependencies?: string[];
       traceId?: string;
+      conflictFields?: string[];
+      field?: string;
     } = {},
   ) {
     super(message);
@@ -295,7 +331,10 @@ export class ApiError extends Error {
     this.title = options.title;
     this.detail = options.detail;
     this.violations = options.violations ?? [];
+    this.dependencies = options.dependencies ?? [];
     this.traceId = options.traceId;
+    this.conflictFields = options.conflictFields ?? [];
+    this.field = options.field;
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -326,12 +365,17 @@ export class ApiError extends Error {
       title?: unknown;
       detail?: unknown;
       violations?: unknown;
+      dependencies?: unknown;
       trace_id?: unknown;
+      fields?: unknown;
+      field?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
     const traceId = typeof problem.trace_id === 'string' ? problem.trace_id : undefined;
     const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
+    const field =
+      typeof problem.field === 'string' && problem.field !== '' ? problem.field : undefined;
 
     const violations: FieldViolation[] = Array.isArray(problem.violations)
       ? problem.violations.flatMap((entry) => {
@@ -347,11 +391,23 @@ export class ApiError extends Error {
         })
       : [];
 
+    const dependencies: string[] = Array.isArray(problem.dependencies)
+      ? problem.dependencies.filter(
+          (entry): entry is string => typeof entry === 'string' && entry !== '',
+        )
+      : [];
+    const conflictFields = Array.isArray(problem.fields)
+      ? problem.fields.filter((field): field is string => typeof field === 'string')
+      : [];
+
     return new ApiError(status, detail || title || statusText, {
       title,
       detail,
       violations,
+      dependencies,
       traceId,
+      conflictFields,
+      field,
     });
   }
 }
@@ -359,14 +415,24 @@ export class ApiError extends Error {
 /**
  * SCOPED_LISTS are the list endpoints that filter by client and site; the
  * scope chosen in the layout (UI-01/UI-02) is added to their GET requests
- * unless the caller set the parameter itself.
+ * unless the caller set the parameter itself. They are exactly the GET routes
+ * of the API with the query parameter client_id or site_id (WP-556; checked
+ * against the generated schema in client.test.ts).
  */
-const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
+export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
   '/cis': ['client_id', 'site_id'],
+  '/export/cis': ['client_id'],
   '/topology': ['client_id', 'site_id'],
   '/assets': ['client_id'],
+  '/orders': ['client_id'],
+  '/consumables': ['client_id'],
   '/contacts': ['client_id'],
   '/sites': ['client_id'],
+  '/buildings': ['site_id'],
+  '/vlans': ['site_id'],
+  '/subnets': ['client_id', 'site_id'],
+  '/slas': ['client_id'],
+  '/forms': ['client_id'],
 };
 
 /** withScope adds the selected scope to a GET of a scoped list. */
@@ -389,36 +455,63 @@ export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<
   return fetchURL<T>(`${API_BASE}${withScope(path, options?.method)}`, options);
 }
 
+/** Versioned is a response body with the ETag the server sent along. */
+export interface Versioned<T> {
+  data: T;
+  /** etag is sent back as If-Match with the next change; undefined without one. */
+  etag?: string;
+}
+
+/** fetchAPIVersioned is fetchAPI that also returns the response's ETag. */
+export async function fetchAPIVersioned<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<Versioned<T>> {
+  const res = await fetchResponse(`${API_BASE}${withScope(path, options?.method)}`, options);
+  const data = (res.status === 204 ? undefined : await res.json()) as T;
+  return { data, etag: res.headers.get('ETag') ?? undefined };
+}
+
 async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
-  const request = () =>
-    fetch(url, {
-      ...options,
-      headers: mergeHeaders(options),
-    });
-
-  let res = await request();
-
-  if (res.status === 401) {
-    const refreshed = await refreshSession();
-    if (refreshed) {
-      res = await request();
-    } else {
-      clearSession();
-    }
-  }
-
-  if (!res.ok) {
-    if (res.status === 401) {
-      clearSession();
-    }
-
-    const body: unknown = await res.json().catch(() => null);
-    throw ApiError.fromProblem(res.status, res.statusText, body);
-  }
+  const res = await fetchResponse(url, options);
   if (res.status === 204) {
     return undefined as T;
   }
   return res.json();
+}
+
+/** fetchResponse sends the request with the session and throws ApiError for a failure. */
+async function fetchResponse(url: string, options?: RequestInit): Promise<Response> {
+  const request = (token: string | null) =>
+    fetch(url, {
+      ...options,
+      headers: mergeHeaders(options, token),
+    });
+
+  const token = getSessionToken();
+  let res = await request(token);
+
+  if (res.status === 401) {
+    // One refresh per expiry (F-065): a request whose token another request
+    // has renewed meanwhile retries with the new one; the others share the
+    // single in-flight refresh. A failed refresh has already ended the
+    // session if the server refused the cookie (401/403); after a 429 or a
+    // network error the session stays and the 401 is reported.
+    const current = getSessionToken();
+    const renewed = (current !== null && current !== token) || (await refreshSession());
+    if (renewed) {
+      res = await request(getSessionToken());
+      if (res.status === 401) {
+        clearSession();
+      }
+    }
+  }
+
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => null);
+    throw ApiError.fromProblem(res.status, res.statusText, body);
+  }
+  return res;
 }
 
 /** BFF_PATH is the GraphQL backend-for-frontend of the UI (GQL-01). */
@@ -432,6 +525,10 @@ interface GraphQLResult<T> {
 /**
  * bffQuery runs a read query against the GraphQL BFF with the session of
  * the UI; mutations go through REST (GQL-02). GraphQL errors are thrown.
+ *
+ * The BFF is API-only for now (GQL-01, F-332): no page uses it in phase 1,
+ * every UI read goes through REST; the first aggregate view starts to use
+ * this client. See docs/README.md, section "GraphQL-BFF".
  */
 export async function bffQuery<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   const result = await fetchURL<GraphQLResult<T>>(BFF_PATH, {
@@ -442,6 +539,45 @@ export async function bffQuery<T>(query: string, variables?: Record<string, unkn
     throw new Error(result.errors.map((error) => error.message).join('; '));
   }
   return result.data as T;
+}
+
+/** The largest page a list endpoint answers (API-02, parameter Limit). */
+export const API_MAX_LIMIT = 200;
+
+/**
+ * Reads every page of a paginated list (API-02): the first page with the
+ * maximum limit of 200, then `next_cursor` until the server sends none. A
+ * list without cursor pagination (e.g. collectors, sites) is followed by
+ * offset while `has_more` is set (F-362).
+ * For callers that need the complete set (permission catalogue, role
+ * grants, team members, the module lists of monitoring, document links,
+ * assistant conversations, the collectors of the dashboard and the sites of
+ * the map); a single page would silently cut it short.
+ * `params` are the list's filters, sent with every page.
+ */
+export async function fetchAllPages<T>(path: string, params: object = {}): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const query = new URLSearchParams(buildQuery(params));
+    query.set('limit', String(API_MAX_LIMIT));
+    if (cursor) {
+      query.set('cursor', cursor);
+    } else if (items.length > 0) {
+      query.set('offset', String(items.length));
+    }
+    const page = await fetchAPI<PaginatedResponse<T>>(`${path}?${query.toString()}`);
+    const rows = page.data ?? [];
+    items.push(...rows);
+    cursor = page.next_cursor;
+    if (cursor) {
+      continue;
+    }
+    // Offset paging ends with the last page, an empty page or the total.
+    if (!page.has_more || rows.length === 0 || items.length >= page.total) {
+      return items;
+    }
+  }
 }
 
 function buildQuery(params: object) {
@@ -525,10 +661,6 @@ export const ciApi = {
   relationships(id: string): Promise<PaginatedResponse<Relationship>> {
     return fetchAPI(`/cis/${id}/relationships`);
   },
-
-  exportCIs(format: 'json' | 'csv' = 'json'): string {
-    return `${API_BASE}/export/cis?format=${format}`;
-  },
 };
 
 export const relationshipApi = {
@@ -546,14 +678,37 @@ export const relationshipApi = {
     });
   },
 
-  delete(id: string, force = false): Promise<void> {
-    return fetchAPI(`/relationships/${id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+  /**
+   * A discovery edge is deleted with force and then suppressed (REL-04);
+   * reason is stored with the suppression (F-273).
+   */
+  delete(id: string, force = false, reason?: string): Promise<void> {
+    const query = new URLSearchParams();
+    if (force) query.set('force', 'true');
+    if (reason) query.set('reason', reason);
+    const search = query.toString();
+    return fetchAPI(`/relationships/${id}${search ? `?${search}` : ''}`, { method: 'DELETE' });
+  },
+};
+
+/** Suppressions of removed discovery edges: listed per CI and lifted (F-273). */
+export const relationshipSuppressionApi = {
+  list(ciId: string): Promise<PaginatedResponse<RelationshipSuppression>> {
+    return fetchAPI(`/relationship-suppressions?ci_id=${encodeURIComponent(ciId)}&limit=100`);
+  },
+
+  lift(id: string): Promise<void> {
+    return fetchAPI(`/relationship-suppressions/${id}`, { method: 'DELETE' });
   },
 };
 
 export const collectorApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<Collector>> {
     return fetchAPI(`/collectors${buildQuery(params)}`);
+  },
+  /** Every collector of the organization, page by page (F-362). */
+  listAll(): Promise<Collector[]> {
+    return fetchAllPages('/collectors');
   },
 };
 
@@ -590,7 +745,10 @@ export const discoveryScopeApi = {
   create(input: DiscoveryScopeInput): Promise<DiscoveryScope> {
     return fetchAPI('/discovery-scopes', { method: 'POST', body: JSON.stringify(input) });
   },
-  update(id: string, patch: Partial<DiscoveryScopeInput>): Promise<DiscoveryScope> {
+  get(id: string): Promise<DiscoveryScope> {
+    return fetchAPI(`/discovery-scopes/${id}`);
+  },
+  update(id: string, patch: DiscoveryScopePatch): Promise<DiscoveryScope> {
     return fetchAPI(`/discovery-scopes/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
   },
   delete(id: string): Promise<void> {
@@ -718,17 +876,8 @@ export interface Rack {
   updated_at: string;
 }
 
-export interface RackMount {
-  id: string;
-  organization_id: string;
-  rack_id: string;
-  ci_id: string;
-  position_u: number;
-  height_u: number;
-  face: string;
-  created_at: string;
-  updated_at: string;
-}
+/** A mount of the rack layout: it always names the CI and its type (F-252). */
+export type RackLayoutMount = components['schemas']['RackLayoutMount'];
 
 export interface RackListParams {
   limit?: number;
@@ -747,22 +896,11 @@ export const rackApi = {
   layout(rackId: string): Promise<RackLayout> {
     return fetchAPI(`/racks/${rackId}/layout`);
   },
-  /** Mounts a CI at a position or moves its mount (RCK-02); 409 on a collision. */
-  putMount(
-    rackId: string,
-    ciId: string,
-    body: { position_u: number; height_u?: number; face?: string },
-  ): Promise<RackMount> {
-    return fetchAPI(`/racks/${rackId}/mounts/${ciId}`, {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    });
-  },
 };
 
 export interface RackLayout {
   rack: Rack;
-  mounts: RackMount[];
+  mounts: RackLayoutMount[];
   free: Record<string, number[]>;
 }
 
@@ -945,7 +1083,6 @@ export interface DocumentCreateRequest {
   file_name: string;
   file_size: number;
   mime_type?: string;
-  storage_key: string;
   category?: string;
   tags?: string[];
 }
@@ -989,7 +1126,7 @@ export const documentApi = {
     return fetchAPI(`/documents/${id}/links`, { method: 'POST', body: JSON.stringify(data) });
   },
   getLinks(id: string): Promise<DocumentLink[]> {
-    return fetchAPI(`/documents/${id}/links`);
+    return fetchAllPages(`/documents/${id}/links`);
   },
 };
 
@@ -1269,10 +1406,18 @@ export interface CustomRole {
   name: string;
   description?: string;
   is_system: boolean;
+  /** is_builtin marks the seeded standard roles (RBA-02); only they can be invited (TLC-03). */
+  is_builtin?: boolean;
   permissions: string[];
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * UserStatus is the status PATCH /users/{id} sets: inactive deactivates the
+ * user and revokes the sessions, active reactivates it (TLC-04).
+ */
+export type UserStatus = 'active' | 'inactive';
 
 export interface UserListParams {
   limit?: number;
@@ -1293,10 +1438,14 @@ export const userApi = {
   },
   update(
     id: string,
-    data: { display_name?: string; status?: string; avatar_url?: string },
+    data: { display_name?: string; status?: UserStatus; avatar_url?: string },
   ): Promise<AppUser> {
     return fetchAPI(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
+  /**
+   * delete removes the user (TLC-04); a user owning open objects or still
+   * referenced by records answers 409 and stays.
+   */
   delete(id: string): Promise<void> {
     return fetchAPI(`/users/${id}`, { method: 'DELETE' });
   },
@@ -1322,10 +1471,37 @@ export const teamApi = {
     return fetchAPI(`/teams/${id}`, { method: 'DELETE' });
   },
   listMembers(teamId: string): Promise<TeamMember[]> {
-    return fetchAPI(`/teams/${teamId}/members`);
+    return fetchAllPages(`/teams/${teamId}/members`);
   },
   addMember(teamId: string, data: { user_id: string; role_in_team?: string }): Promise<TeamMember> {
     return fetchAPI(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify(data) });
+  },
+};
+
+export type Invitation = components['schemas']['Invitation'];
+export type InvitationRequest = components['schemas']['InvitationRequest'];
+export type InvitationAcceptance = components['schemas']['InvitationAcceptance'];
+export type AcceptedInvitation = components['schemas']['AcceptedInvitation'];
+
+/**
+ * invitationApi issues, renews and revokes the organization's invitations
+ * (TLC-03, user:manage); accept is public, the token is the credential.
+ */
+export const invitationApi = {
+  list(): Promise<Invitation[]> {
+    return fetchAllPages('/invitations');
+  },
+  issue(data: InvitationRequest): Promise<Invitation> {
+    return fetchAPI('/invitations', { method: 'POST', body: JSON.stringify(data) });
+  },
+  renew(id: string): Promise<Invitation> {
+    return fetchAPI(`/invitations/${id}/renew`, { method: 'POST' });
+  },
+  revoke(id: string): Promise<void> {
+    return fetchAPI(`/invitations/${id}`, { method: 'DELETE' });
+  },
+  accept(data: InvitationAcceptance): Promise<AcceptedInvitation> {
+    return fetchAPI('/invitations/accept', { method: 'POST', body: JSON.stringify(data) });
   },
 };
 
@@ -1411,7 +1587,7 @@ export interface AIAskResponse {
 }
 export const aiApi = {
   conversations(): Promise<AIConversation[]> {
-    return fetchAPI('/ai/conversations');
+    return fetchAllPages('/ai/conversations');
   },
   createConversation(title?: string): Promise<AIConversation> {
     return fetchAPI('/ai/conversations', { method: 'POST', body: JSON.stringify({ title }) });
@@ -1445,10 +1621,10 @@ export interface EffectivePermissionsResponse {
 
 export const permissionApi = {
   list(): Promise<Permission[]> {
-    return fetchAPI('/permissions');
+    return fetchAllPages('/permissions');
   },
   listRole(roleId: string): Promise<RolePermissionGrant[]> {
-    return fetchAPI(`/roles/${roleId}/permissions`);
+    return fetchAllPages(`/roles/${roleId}/permissions`);
   },
   replaceRole(roleId: string, permission_keys: string[]): Promise<RolePermissionGrant[]> {
     return fetchAPI(`/roles/${roleId}/permissions`, {
@@ -1458,6 +1634,15 @@ export const permissionApi = {
   },
   effective(): Promise<EffectivePermissionsResponse> {
     return fetchAPI('/me/permissions');
+  },
+};
+
+/** The claims of the signed-in session (GET /me, AUT-02) with its scopes. */
+export type SessionClaims = components['schemas']['SessionClaims'];
+
+export const sessionApi = {
+  me(): Promise<SessionClaims> {
+    return fetchAPI('/me');
   },
 };
 
@@ -1757,7 +1942,24 @@ export const privacyApi = {
   },
 };
 
+/** Credential metadata; the secret material is never returned. */
+export interface Credential {
+  id: string;
+  organization_id: string;
+  /** Unset: organization-wide. */
+  client_id?: string;
+  name: string;
+  kind: string;
+  scope?: string;
+  key_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export const credentialApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<Credential>> {
+    return fetchAPI(`/credentials${buildQuery(params)}`);
+  },
   rotateKeys(): Promise<{ key_version: number; rotated: number }> {
     return fetchAPI('/credentials/rotate-keys', { method: 'POST' });
   },
@@ -2067,10 +2269,10 @@ export const monitoringApi = {
     return fetchAPI(`/cis/${ciId}/metrics${buildQuery(params)}`);
   },
   queryMetrics(params: MetricQueryParams = {}): Promise<MetricPoint[]> {
-    return fetchAPI(`/monitoring/metrics${buildQuery(params)}`);
+    return fetchAllPages('/monitoring/metrics', params);
   },
   listAlerts(): Promise<AlertRule[]> {
-    return fetchAPI('/monitoring/alerts');
+    return fetchAllPages('/monitoring/alerts');
   },
   createAlert(data: AlertRuleCreateRequest): Promise<AlertRule> {
     return fetchAPI('/monitoring/alerts', { method: 'POST', body: JSON.stringify(data) });
@@ -2082,23 +2284,11 @@ export const monitoringApi = {
 
 // --- Audit (hash chain verification) ---
 
-export interface AuditEntry {
-  id: string;
-  organization_id: string;
-  actor_id?: string;
-  actor_email?: string;
-  action: string;
-  entity_type?: string;
-  entity_id?: string;
-  details?: Record<string, unknown>;
-  seq?: number;
-  source?: 'ui' | 'api' | 'collector' | 'import' | 'system';
-  request_id?: string;
-  correlation_id?: string;
-  hash?: string;
-  previous_hash?: string;
-  created_at: string;
-}
+/**
+ * AuditEntry is the generated OpenAPI type, so the viewer reads exactly the
+ * fields the API returns (timestamp, resource_type, resource_id; F-078).
+ */
+export type AuditEntry = components['schemas']['AuditEntry'];
 
 export interface AuditVerifyResult {
   intact: boolean;
@@ -2169,9 +2359,30 @@ export interface Site {
   updated_at: string;
 }
 
+/** VRF of the organization (TEN-10); every organization has the default VRF. */
+export interface VRF {
+  id: string;
+  organization_id: string;
+  name: string;
+  description?: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const vrfApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<VRF>> {
+    return fetchAPI(`/vrfs${buildQuery(params)}`);
+  },
+};
+
 export const siteApi = {
   list(params: ListParams & { client_id?: string } = {}): Promise<PaginatedResponse<Site>> {
     return fetchAPI(`/sites${buildQuery(params)}`);
+  },
+  /** Every site the caller may read, page by page (F-362). */
+  listAll(): Promise<Site[]> {
+    return fetchAllPages('/sites');
   },
   get(id: string): Promise<Site> {
     return fetchAPI(`/sites/${id}`);
@@ -2221,11 +2432,24 @@ export const roomApi = {
   list(params: ListParams & { building_id?: string } = {}): Promise<PaginatedResponse<Room>> {
     return fetchAPI(`/rooms${buildQuery(params)}`);
   },
-  get(id: string): Promise<Room> {
-    return fetchAPI(`/rooms/${id}`);
+  /** get returns the room with its ETag, the version a layout change names as If-Match. */
+  get(id: string): Promise<Versioned<Room>> {
+    return fetchAPIVersioned(`/rooms/${id}`);
   },
-  updateLayout(id: string, layout: Record<string, RoomLayoutPosition>): Promise<Room> {
-    return fetchAPI(`/rooms/${id}`, { method: 'PATCH', body: JSON.stringify({ layout }) });
+  /**
+   * updateLayout replaces the room's layout. With an ETag the change is sent
+   * with If-Match: a room changed since is refused with 409 (F-342).
+   */
+  updateLayout(
+    id: string,
+    layout: Record<string, RoomLayoutPosition>,
+    etag?: string,
+  ): Promise<Versioned<Room>> {
+    return fetchAPIVersioned(`/rooms/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ layout }),
+      headers: etag ? { 'If-Match': etag } : undefined,
+    });
   },
 };
 
@@ -2320,6 +2544,19 @@ export interface MaintenanceWindow {
   created_at: string;
 }
 
+/** Stored customer notification of a maintenance window (WP-540). */
+export interface MaintenanceNotification {
+  id: string;
+  organization_id: string;
+  maintenance_window_id: string;
+  client_id?: string;
+  channel: string;
+  /** pending until a channel has delivered it; then sent or failed. */
+  status: 'pending' | 'sent' | 'failed' | string;
+  sent_at?: string;
+  created_at: string;
+}
+
 export const maintenanceApi = {
   list(
     params: ListParams & { status?: string } = {},
@@ -2345,9 +2582,13 @@ export const maintenanceApi = {
   notify(id: string): Promise<{
     notified: number;
     queued: number;
-    notifications: { client_id?: string; status: string; sent_at?: string }[];
+    notifications: MaintenanceNotification[];
   }> {
     return fetchAPI(`/maintenance-windows/${id}/notify`, { method: 'POST', body: '{}' });
+  },
+  /** notifications lists the stored notifications of a window (one per client and channel). */
+  notifications(id: string): Promise<{ data: MaintenanceNotification[] }> {
+    return fetchAPI(`/maintenance-windows/${id}/notifications`);
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/maintenance-windows/${id}`, { method: 'DELETE' });
@@ -2517,15 +2758,6 @@ export interface EndpointAgent {
 export const agentApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<EndpointAgent>> {
     return fetchAPI(`/agents${buildQuery(params)}`);
-  },
-  enroll(data: {
-    agent_id: string;
-    hostname: string;
-    version?: string;
-    os?: string;
-    arch?: string;
-  }): Promise<EndpointAgent> {
-    return fetchAPI('/agents/enroll', { method: 'POST', body: JSON.stringify(data) });
   },
   updatePolicy(id: string, data: Partial<AgentPolicy>): Promise<EndpointAgent> {
     return fetchAPI(`/agents/${id}/policy`, { method: 'PATCH', body: JSON.stringify(data) });

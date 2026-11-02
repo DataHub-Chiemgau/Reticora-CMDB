@@ -3,6 +3,11 @@ import { screen } from '@testing-library/react';
 import { MonitoringPage } from './MonitoringPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
+// A cursor page of the list contract (API-02): {data, next_cursor}.
+function page(data: unknown[]) {
+  return { data, total: data.length, limit: 200, offset: 0, has_more: false };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -11,7 +16,7 @@ afterEach(() => {
 describe('MonitoringPage', () => {
   it('renders alert rules', async () => {
     stubFetchRoutes({
-      '/monitoring/alerts': [
+      '/monitoring/alerts': page([
         {
           id: 'rule-1',
           org_id: 'org-1',
@@ -23,7 +28,7 @@ describe('MonitoringPage', () => {
           severity: 'critical',
           enabled: true,
         },
-      ],
+      ]),
     });
 
     renderWithProviders(<MonitoringPage />, { route: '/monitoring' });
@@ -33,7 +38,7 @@ describe('MonitoringPage', () => {
   });
 
   it('shows the empty state when no alert rules exist', async () => {
-    stubFetchRoutes({ '/monitoring/alerts': [] });
+    stubFetchRoutes({ '/monitoring/alerts': page([]) });
 
     renderWithProviders(<MonitoringPage />, { route: '/monitoring' });
 

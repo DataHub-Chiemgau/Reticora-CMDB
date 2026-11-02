@@ -2,12 +2,24 @@ package movement
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
+
+var (
+	// ErrItemNotFound: the quantity item is unknown, of another organization
+	// or outside the caller's scope; all answer 404 alike (TEN-04).
+	ErrItemNotFound = errors.New("inventory item not found")
+	// ErrAssetNotFound: the asset of a movement is unknown, of another
+	// organization or outside the caller's scope (404, TEN-04).
+	ErrAssetNotFound = errors.New("asset not found")
+	// ErrConflict: the organization has an item with this SKU already (409).
+	ErrConflict = errors.New("an item with this SKU already exists")
 )
 
 // Repository defines persistence for movements and quantity items.
@@ -136,7 +148,7 @@ func (r *MemoryRepository) GetItem(_ context.Context, orgID, id string) (*Quanti
 	defer r.mu.RUnlock()
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrItemNotFound
 	}
 	out := *item
 	return &out, nil
@@ -147,7 +159,7 @@ func (r *MemoryRepository) CreateItem(_ context.Context, item *QuantityItem) err
 	defer r.mu.Unlock()
 	for _, existing := range r.items {
 		if existing.OrganizationID == item.OrganizationID && item.SKU != "" && existing.SKU == item.SKU {
-			return fmt.Errorf("an item with this SKU already exists")
+			return ErrConflict
 		}
 	}
 	item.ID = r.nextID()
@@ -167,7 +179,7 @@ func (r *MemoryRepository) UpdateItem(_ context.Context, orgID, id string, req U
 	defer r.mu.Unlock()
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrItemNotFound
 	}
 	if req.Name != nil {
 		item.Name = *req.Name
@@ -200,7 +212,7 @@ func (r *MemoryRepository) DeleteItem(_ context.Context, orgID, id string) error
 	defer r.mu.Unlock()
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID {
-		return fmt.Errorf("not found")
+		return ErrItemNotFound
 	}
 	delete(r.items, id)
 	return nil

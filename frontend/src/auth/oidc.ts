@@ -13,6 +13,22 @@ export class InsecureContextError extends Error {
   }
 }
 
+/**
+ * AuthCallbackError is a refused POST /auth/callback: the HTTP status and
+ * the problem type, which the callback page maps to a localized text
+ * (F-197); the message is the problem's detail.
+ */
+export class AuthCallbackError extends Error {
+  constructor(
+    readonly status: number,
+    readonly problemType: string | undefined,
+    detail: string,
+  ) {
+    super(detail);
+    this.name = 'AuthCallbackError';
+  }
+}
+
 export interface AuthConfig {
   issuer: string;
   client_id: string;
@@ -178,8 +194,15 @@ export async function completeAuthorizationCodeFlow(search: string) {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(payload.detail || response.statusText);
+    const payload = (await response.json().catch(() => ({ detail: response.statusText }))) as {
+      type?: string;
+      detail?: string;
+    };
+    throw new AuthCallbackError(
+      response.status,
+      payload.type,
+      payload.detail || response.statusText,
+    );
   }
 
   const payload = (await response.json()) as CallbackResponse;

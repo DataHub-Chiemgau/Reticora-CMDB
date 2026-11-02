@@ -15,6 +15,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { ScrollRegion } from '../components/ScrollRegion';
 
 const severityVariants = {
   critical: 'danger',
@@ -185,7 +186,7 @@ export function MonitoringPage() {
 
       <Card title={`${t('monitoring.alertRules')} (${alerts.data?.length ?? 0})`}>
         {alerts.data?.length ? (
-          <div className="overflow-x-auto">
+          <ScrollRegion label={t('monitoring.alertRules')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -224,7 +225,7 @@ export function MonitoringPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </ScrollRegion>
         ) : (
           <EmptyState title={t('monitoring.noAlerts')} description={t('monitoring.noAlertsHint')} />
         )}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/go-chi/chi/v5"
@@ -204,6 +205,31 @@ func TestListJobsTenantIsolation(t *testing.T) {
 	}
 }
 
+// TestJobOutsideTheCreatorsScope covers the memory repository's mirror of
+// ownJob (WP-409): the creator reads and lists a job only while its scope
+// covers the job's snapshot.
+func TestJobOutsideTheCreatorsScope(t *testing.T) {
+	const client1, client2 = "00000000-0000-4000-8000-0000000000c1", "00000000-0000-4000-8000-0000000000c2"
+	jobs, _, _, mux := newJobEnv(t, ci.NewMemoryRepository())
+	job := &Job{Format: "json", InitiatedBy: "user-1", Scope: &JobScope{Clients: []string{client1}}}
+	if err := jobs.CreateJob(context.Background(), "org-1", job); err != nil {
+		t.Fatal(err)
+	}
+	for client, want := range map[string]int{client1: http.StatusOK, client2: http.StatusNotFound} {
+		scope := database.OrgWideScope("org-1", "user-1")
+		scope.Clients = database.ScopeIDs(client)
+		for path, ok := range map[string]string{"/api/v1/export/jobs/" + job.ID: job.ID, "/api/v1/export/jobs": job.ID} {
+			req := tenantCtx(httptest.NewRequest("GET", path, nil))
+			req = req.WithContext(database.ContextWithTenantScope(req.Context(), &scope))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if listed := strings.Contains(w.Body.String(), ok); listed != (want == http.StatusOK) || (path != "/api/v1/export/jobs" && w.Code != want) {
+				t.Errorf("GET %s with client scope %s: %d, job shown %v; want %d", path, client, w.Code, listed, want)
+			}
+		}
+	}
+}
+
 func TestGetJobNotFoundOtherTenant(t *testing.T) {
 	cis := ci.NewMemoryRepository()
 	jobs, _, _, mux := newJobEnv(t, cis)
@@ -286,22 +312,13 @@ func (failingCIRepo) List(context.Context, string, ci.FilterParams, api.Paginati
 
 var errBoom = errors.New("boom")
 
-// eventRecorder records emitted events.
-type eventRecorder struct{ got []events.Event }
-
-func (e *eventRecorder) Emit(_ context.Context, ev *events.Event) error {
-	e.got = append(e.got, *ev)
-	return nil
-}
-
 // TestCompletedExportIsReported covers NTF-05 (WP-140): a completed export
-// reports export.completed for its initiator.
+// reports export.completed for its initiator, recorded with the completion
+// (WP-550).
 func TestCompletedExportIsReported(t *testing.T) {
 	cis := ci.NewMemoryRepository()
 	seedCIs(t, cis, "org-1", 2)
-	_, worker, _, mux := newJobEnv(t, cis)
-	rec := &eventRecorder{}
-	worker.Events = rec
+	repo, worker, _, mux := newJobEnv(t, cis)
 	req := tenantCtx(httptest.NewRequest("POST", "/api/v1/export/jobs", strings.NewReader(`{"format":"json"}`)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -311,10 +328,11 @@ func TestCompletedExportIsReported(t *testing.T) {
 	if !worker.ProcessOne(context.Background()) {
 		t.Fatal("no job processed")
 	}
-	if len(rec.got) != 1 || rec.got[0].Type != events.ExportCompleted || rec.got[0].OrgID != "org-1" {
-		t.Fatalf("events: %+v", rec.got)
+	got := repo.outbox
+	if len(got) != 1 || got[0].Type != events.ExportCompleted || got[0].OrgID != "org-1" {
+		t.Fatalf("events: %+v", got)
 	}
-	data := rec.got[0].Data.(map[string]any)
+	data := got[0].Data.(map[string]any)
 	if data["format"] != "json" || data["row_count"] != 2 || data["initiated_by"] == "" {
 		t.Errorf("data: %v", data)
 	}

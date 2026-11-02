@@ -56,6 +56,24 @@ type Rule struct {
 	Values  []any    `json:"values,omitempty"`
 }
 
+// MarshalJSON writes the rule in the form of api/rules.schema.json: all
+// always carries its rules (also none) and nothing else. The value
+// receiver makes json.Marshal use it for values as well as pointers.
+func (r Rule) MarshalJSON() ([]byte, error) { //nolint:gocritic // see above
+	type plain Rule
+	if r.Op != OpAll {
+		return json.Marshal(plain(r))
+	}
+	all := struct {
+		Op    string `json:"op"`
+		Rules []Rule `json:"rules"`
+	}{r.Op, r.Rules}
+	if all.Rules == nil {
+		all.Rules = []Rule{}
+	}
+	return json.Marshal(all)
+}
+
 // Violation is one failed rule.
 type Violation struct {
 	Code    string `json:"code"`
@@ -82,6 +100,7 @@ func Parse(raw []byte) (Rule, error) {
 var unsupported = regexp.MustCompile(`\(\?<?[=!]|\\[1-9]`)
 
 // Validate checks a rule structurally.
+// validation: fixed texts naming the operator and the property that fail.
 func (r *Rule) Validate() error {
 	switch r.Op {
 	case OpAll:
@@ -233,7 +252,7 @@ func check(r *Rule, value any) *Violation {
 		}
 	case OpEnum:
 		for _, allowed := range r.Values {
-			if equal(allowed, value) {
+			if Equal(allowed, value) {
 				return nil
 			}
 		}
@@ -270,8 +289,9 @@ func number(v any) (float64, bool) {
 	return 0, false
 }
 
-// equal compares strings, numbers and booleans by type and value.
-func equal(a, b any) bool {
+// Equal compares strings, numbers and booleans by type and value, as enum
+// does.
+func Equal(a, b any) bool {
 	if fa, ok := number(a); ok {
 		fb, ok := number(b)
 		return ok && fa == fb

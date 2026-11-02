@@ -58,7 +58,9 @@ func catalogueKeys() []string {
 // TestCatalogueHoldsTheRBA01Keys covers WP-068 (RBA-01): the Go catalogue
 // and the identity vocabulary contain every RBA-01 key under its exact name;
 // location:* replaces site:*, and the near-duplicates that RBA-01 keys
-// replace are gone.
+// replace are gone (ci_type:manage next to citype:manage since WP-363), as
+// are the keys that gated no route (F-199; the route guard is
+// server.TestRBA01KeysGateTheirActions).
 func TestCatalogueHoldsTheRBA01Keys(t *testing.T) {
 	keys := rba01Keys(t)
 	if len(keys) != 26 {
@@ -78,7 +80,9 @@ func TestCatalogueHoldsTheRBA01Keys(t *testing.T) {
 		}
 	}
 	for _, k := range catalogue {
-		if strings.HasPrefix(k, "site:") || k == "discovery:write" || k == "reconciliation:resolve" {
+		if strings.HasPrefix(k, "site:") || k == "discovery:write" || k == "reconciliation:resolve" ||
+			slices.Contains([]string{"ci_type:manage", "credential:decrypt", "asset:assign", "credential:write",
+				"permission:write", "role:write", "user:write", "webhook:write"}, k) {
 			t.Errorf("catalogue still holds the replaced key %s", k)
 		}
 	}

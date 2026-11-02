@@ -35,6 +35,35 @@ Without a match the record becomes `generic_device` with
 opens an `unclassified_device` review. Profiles without `ciType` carry
 collection data only (OIDs, SSH commands, Redfish endpoints).
 
+## System template (DIS-02)
+
+`systemTemplate` names the system template of the device: the template of
+the type catalog (`backend/internal/citype/templates.go`) whose attributes
+describe the device. The profile names are kept short and readable; the
+server maps them at ingest (`backend/internal/discovery/system_template.go`)
+and stores the catalog key as attribute `system_template` of the CI:
+
+| `systemTemplate` (profile) | Catalog template key |
+|---|---|
+| `server-bmc`, `windows-server`, `linux-server` | `physical_server` (its `server_kind` covers hardware and VMs; the OS profiles cannot tell them apart) |
+| `network-switch` | `switch` |
+| `router` | `router` |
+| `firewall` | `firewall` |
+| `access-point` | `access_point` |
+| `ups` | `ups` |
+| `pdu` | `pdu` |
+| `hypervisor` | `hypervisor` |
+| `storage-array`, `nas` | `storage` |
+
+A value that already is a catalog key (e.g. `printer` in a profile from
+`RETICORA_PROFILES_DIR`) is stored as it is. Any other value is logged as
+`discovery.profile.unknown_template` and stored as no attribute; CI type and
+classification are not affected. A new value in `data/` needs a row in the
+mapping: `TestProfileSystemTemplatesMapToCatalog` (backend) reads every file
+here and fails for a value without a catalog template.
+
+## Profile list (CH30)
+
 `catalog` names the entry of the confirmed CH30 profile list (E-21) a
 profile covers; `TestProfileListCoversCH30` checks the list,
 `TestEmbeddedProfileData` validates every shipped file.

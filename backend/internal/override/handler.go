@@ -49,6 +49,7 @@ func (h *Handler) dispatch(r *http.Request, orgID, event string, payload any) {
 
 // ListForCI handles GET /api/v1/cis/{id}/fields — the provenance view of
 // every tracked field with discovered/override/effective values (spec §13).
+// A CI that is unknown, not visible or soft-deleted is 404 (F-422).
 func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -56,6 +57,10 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.repo.ListForCI(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if errors.Is(err, ErrNotFound) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+		return
+	}
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -63,11 +68,30 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
 
-// SetOverride handles PUT /api/v1/cis/{id}/fields/{name}/override
+// refuseReservedName answers 400 with the field "name" when the path names
+// a reserved attribute namespace (GLO-13, E-23) and reports whether it did.
+func refuseReservedName(w http.ResponseWriter, r *http.Request) bool {
+	if !IsReservedName(chi.URLParam(r, "name")) {
+		return false
+	}
+	writeReservedName(w)
+	return true
+}
+
+func writeReservedName(w http.ResponseWriter) {
+	api.WriteFieldError(w, &api.FieldError{Field: "name",
+		Message: "reserved attribute namespace (_overrides, _observed, _provenance, _instance), not a field (GLO-13)"})
+}
+
+// SetOverride handles PUT /api/v1/cis/{id}/fields/{name}/override. A
+// reserved namespace as name is 400 (GLO-13).
 func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if refuseReservedName(w, r) {
 		return
 	}
 	var req SetOverrideRequest
@@ -98,29 +122,53 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", err.Error())
 			return
 		}
-		if api.WriteDBError(w, err) {
+		if errors.Is(err, ErrReservedName) {
+			writeReservedName(w)
 			return
 		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "override.changed", fv)
-	api.WriteJSON(w, http.StatusOK, fv)
+	writeOverride(w, fv)
 }
 
-// ClearOverride handles DELETE /api/v1/cis/{id}/fields/{name}/override
+// ClearOverride handles DELETE /api/v1/cis/{id}/fields/{name}/override. An
+// unknown CI or field is 404, a reserved namespace as name 400 (GLO-13),
+// any other failure goes through api.WriteRepoError (F-232).
 func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	if refuseReservedName(w, r) {
+		return
+	}
 	fv, err := h.repo.ClearOverride(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), chi.URLParam(r, "name"))
-	if err != nil {
+	if errors.Is(err, ErrNotFound) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "field value not found")
 		return
 	}
+	if errors.Is(err, ErrReservedName) {
+		writeReservedName(w)
+		return
+	}
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
 	h.dispatch(r, t.OrganizationID, "override.changed", fv)
+	writeOverride(w, fv)
+}
+
+// writeOverride answers an override change with the field value and the
+// CI's new version as ETag (API-07): the next PATCH of the CI sends it as
+// If-Match.
+func writeOverride(w http.ResponseWriter, fv *FieldValue) {
+	if fv.CIVersion > 0 {
+		w.Header().Set("ETag", api.ETag(fv.CIVersion))
+	}
 	api.WriteJSON(w, http.StatusOK, fv)
 }
 
@@ -171,10 +219,23 @@ func (h *Handler) UpsertPolicy(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if len(policy.Priorities) == 0 {
+		api.WriteFieldError(w, &api.FieldError{Field: "priorities", Message: "priorities must not be empty"})
+		return
+	}
+	// PostgreSQL stores no NUL in text or jsonb; reject it before SQL (F-047).
+	if err := api.RejectNUL("name", policy.Name); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if err := api.RejectNUL("priorities", policy.Priorities...); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	policy.OrganizationID = t.OrganizationID
 	policy.IsDefault = true
 	if err := h.repo.UpsertPolicy(r.Context(), &policy); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "reconciliation.policy_changed", policy)

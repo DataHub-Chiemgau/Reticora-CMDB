@@ -17,8 +17,10 @@ import (
 // transaction) it returns resolved = true.
 type Effect func(ctx context.Context, item *Item, res *Resolution) (resolved bool, err error)
 
-// Notifier is told about every newly opened item (NTF-05). The notification
-// module attaches here once it exists (WP-140).
+// Notifier is told about every newly opened item. It is an in-process hook
+// only: review.created (NTF-05, EVT-01) is written by the repository in the
+// transaction that inserts the item (PGRepository.CreateReviewItem, WP-549),
+// so a notifier must not write the event a second time.
 type Notifier interface {
 	ReviewOpened(ctx context.Context, item *Item)
 }
@@ -60,7 +62,8 @@ func (s *Service) WithNotifier(n Notifier) *Service {
 }
 
 // Open opens an item; an open item of the same object and type is reused
-// (REC-08). It reports whether a new item was opened.
+// (REC-08). It reports whether a new item was opened; the PostgreSQL
+// repository has then written review.created with it.
 func (s *Service) Open(ctx context.Context, item *Item) (bool, error) {
 	if err := s.repo.CreateReviewItem(ctx, item); err != nil {
 		return false, err
@@ -100,6 +103,92 @@ func (s *Service) OpenUnlessDismissed(ctx context.Context, item *Item, valueKey 
 	return s.Open(ctx, item)
 }
 
+// OpenUnlessSettled opens an item like OpenUnlessDismissed, but not while
+// the latest accepted item of the same object and type still holds: holds
+// reports whether the outcome of that acceptance is still in place (F-382;
+// for unknown_relationship: the accepted edge exists, or a user deleted it
+// and its suppression keeps it away). Without an accepted item, or when it
+// no longer holds, the dismissal rule decides. It reports whether a new
+// item was opened.
+func (s *Service) OpenUnlessSettled(ctx context.Context, item *Item, valueKey string,
+	holds func(ctx context.Context, accepted *Item) (bool, error)) (bool, error) {
+	if item.ObjectKey != "" && holds != nil {
+		resolved, _, err := s.repo.ListReviewItems(ctx, item.OrganizationID,
+			Filter{Kind: item.Kind, ObjectKey: item.ObjectKey, Status: StatusResolved}, api.PaginationParams{Limit: 1})
+		if err != nil {
+			return false, err
+		}
+		if len(resolved) > 0 && resolved[0].Action == ActionAccept {
+			held, err := holds(ctx, &resolved[0])
+			if err != nil {
+				return false, err
+			}
+			if held {
+				return false, nil
+			}
+		}
+	}
+	return s.OpenUnlessDismissed(ctx, item, valueKey)
+}
+
+// OverrideConflict is a value an automation source reported for a field
+// under a manual override (REC-12).
+type OverrideConflict struct {
+	OrganizationID string
+	CIID           string
+	Field          string
+	// Value is the reported value, Source its source and Rank the REC-03
+	// rank of the source.
+	Value  any
+	Source string
+	Rank   int
+	// Previous is the value reported for the field before this report (the
+	// CI's _observed as read before the report was recorded); HasPrevious
+	// is false when none is known.
+	Previous    any
+	HasPrevious bool
+}
+
+// OpenOverrideConflict opens the override_conflict item of a field for
+// every automation source, discovery, workflow and agent alike (REC-12): one
+// open item per CI and field, the payload carries the source, its rank and
+// the reported value. A dismissal suppresses its value only until the source
+// reports another one (F-248): no item is opened when the newest item of the
+// field was dismissed with this value and the report before this one had
+// the same value; after another value in between (or an accepted item) the
+// value opens a new item. Inside a transaction it runs under a savepoint, so
+// a failed item leaves the caller's transaction usable. It reports whether a
+// new item was opened.
+func (s *Service) OpenOverrideConflict(ctx context.Context, c *OverrideConflict) (bool, error) {
+	item := &Item{
+		OrganizationID: c.OrganizationID,
+		Kind:           KindOverrideConflict,
+		Status:         StatusOpen,
+		Payload: map[string]any{"ci_id": c.CIID, "field": c.Field, "observed_value": c.Value,
+			"source": c.Source, "rank": c.Rank},
+		CandidateCIIDs: []string{c.CIID},
+		ObjectKey:      "ci:" + c.CIID + "/" + c.Field,
+	}
+	var opened bool
+	err := database.Savepoint(ctx, func(ctx context.Context) error {
+		newest, _, err := s.repo.ListReviewItems(ctx, item.OrganizationID,
+			Filter{Kind: item.Kind, ObjectKey: item.ObjectKey}, api.PaginationParams{Limit: 1})
+		if err != nil {
+			return err
+		}
+		if len(newest) > 0 && newest[0].Status == StatusDismissed && sameValue(newest[0].Payload["observed_value"], c.Value) &&
+			(!c.HasPrevious || sameValue(c.Previous, c.Value)) {
+			return nil
+		}
+		opened, err = s.Open(ctx, item)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return opened, nil
+}
+
 func sameValue(a, b any) bool {
 	ja, errA := json.Marshal(a)
 	jb, errB := json.Marshal(b)
@@ -124,11 +213,16 @@ func (s *Service) Get(ctx context.Context, orgID, id string) (*Item, error) {
 var legacyActions = map[string]string{"create": ActionNew}
 
 // Resolve resolves an open item with one of the actions its type allows
-// (REC-08) and the effect registered for the type.
+// (REC-08) and the effect registered for the type. An item is resolved
+// exactly once (F-404): with a Locker repository the item is locked, its
+// status checked again, the effect carried out and the resolution written
+// in one transaction, so a concurrent resolution of the item waits for it
+// and then gets ErrAlreadyResolved (409) without running its effect, and a
+// failed effect leaves neither its writes nor a resolution behind.
 func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution) (*Item, error) {
-	item, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return nil, err
+	item, getErr := s.Get(ctx, orgID, id)
+	if getErr != nil {
+		return nil, getErr
 	}
 	if item.Status != StatusOpen {
 		return nil, ErrAlreadyResolved
@@ -148,45 +242,103 @@ func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution
 	if !ok && res.Action != ActionDismiss {
 		return nil, &Error{Status: http.StatusUnprocessableEntity, Message: "no " + res.Action + " is available for " + item.Kind + " items yet"}
 	}
-	resolved := false
-	if ok {
-		if resolved, err = s.runEffect(ctx, effect, item, res); err != nil {
-			return nil, err
+	var out *Item
+	resolved, tracked := false, false
+	err := s.inTx(ctx, orgID, func(ctx context.Context) error {
+		locked, err := s.lock(ctx, orgID, id)
+		if err != nil {
+			return err
 		}
+		if locked.Status != StatusOpen {
+			return ErrAlreadyResolved
+		}
+		item = locked
+		if s.jobs != nil && res.Action == ActionMerge {
+			err = s.trackMerge(ctx, item, res)
+			if err != nil {
+				return err
+			}
+			tracked = true
+		}
+		if ok {
+			if resolved, err = effect(ctx, item, res); err != nil {
+				return err
+			}
+		}
+		if res.Note == "" {
+			res.Note = res.Action
+		}
+		if resolved {
+			out, err = s.repo.GetReviewItem(ctx, orgID, id)
+			return err
+		}
+		out, err = s.repo.ResolveReviewItem(ctx, orgID, id, res)
+		return err
+	})
+	if tracked {
+		s.finishMerge(ctx, item, err)
 	}
-	if res.Note == "" {
-		res.Note = res.Action
-	}
-	if resolved {
-		return s.Get(ctx, orgID, id)
-	}
-	out, err := s.repo.ResolveReviewItem(ctx, orgID, id, res)
 	if err != nil {
 		return nil, err
 	}
-	slog.InfoContext(ctx, "review item resolved", "event", "review.resolved", "organization_id", orgID,
-		"review_item_id", id, "kind", item.Kind, "action", res.Action)
+	if !resolved {
+		slog.InfoContext(ctx, "review item resolved", "event", "review.resolved", "organization_id", orgID,
+			"review_item_id", id, "kind", item.Kind, "action", res.Action)
+	}
 	return out, nil
 }
 
-// runEffect runs the effect of a resolution; a merge runs as a job whose
-// status follows the effect (JOB-04).
-func (s *Service) runEffect(ctx context.Context, effect Effect, item *Item, res *Resolution) (bool, error) {
-	if s.jobs == nil || res.Action != ActionMerge {
-		return effect(ctx, item, res)
+// inTx runs fn in one transaction of a Locker repository, else as it is.
+func (s *Service) inTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	if locker, ok := s.repo.(Locker); ok {
+		return locker.RunInTx(ctx, orgID, fn)
 	}
-	actor := res.ResolvedBy
-	if err := s.jobs.Track(ctx, item.OrganizationID, MergeJobKind, "review_item", item.ID, actor); err != nil {
-		return false, err
+	return fn(ctx)
+}
+
+// lock returns the item locked until the end of the context transaction
+// (Locker), else as it stands.
+func (s *Service) lock(ctx context.Context, orgID, id string) (*Item, error) {
+	locker, ok := s.repo.(Locker)
+	if !ok {
+		return s.Get(ctx, orgID, id)
 	}
-	_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusRunning, "")
-	resolved, err := effect(ctx, item, res)
+	return locker.LockReviewItem(ctx, orgID, id)
+}
+
+// A merge resolution runs as a job whose status follows it (JOB-04). The
+// merge runs in the request and the review.merge job mirrors it (E-89,
+// transitional rule: option 1); the merge of a probable_duplicate item is
+// the ci.merge job of the CI-12 merge, whose status the review.merge job
+// takes. There is one job per item: a retry after a failed merge runs that
+// job again, failed → running with one more attempt and without the old
+// error, and it ends succeeded or failed with the retry (F-330). The job is
+// written outside the transaction of the resolution, so that a failed
+// merge, whose writes roll back, leaves its failed job. It starts once the
+// item is locked, while the transaction holds nothing else (the loser of a
+// concurrent resolution never touches it, F-404), and ends once the
+// transaction has ended.
+
+// trackMerge starts the review.merge job of item.
+func (s *Service) trackMerge(ctx context.Context, item *Item, res *Resolution) error {
+	jobCtx := database.WithoutTx(ctx)
+	if err := s.jobs.Track(jobCtx, item.OrganizationID, MergeJobKind, "review_item", item.ID, res.ResolvedBy); err != nil {
+		return err
+	}
+	_ = s.jobs.Mirror(jobCtx, item.OrganizationID, "review_item", item.ID, jobs.StatusRunning, "")
+	return nil
+}
+
+// finishMerge ends the review.merge job of item with the outcome err of the
+// resolution: the job shows a refusal as it is, any other error sanitized;
+// the raw error goes to the log (F-372).
+func (s *Service) finishMerge(ctx context.Context, item *Item, err error) {
+	jobCtx := database.WithoutTx(ctx)
 	if err != nil {
-		_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusFailed, err.Error())
-		return false, err
+		_ = jobs.MirrorFailed(jobCtx, s.jobs, item.OrganizationID, "review_item", item.ID, err)
+		return
 	}
-	_ = s.jobs.Mirror(ctx, item.OrganizationID, "review_item", item.ID, jobs.StatusSucceeded, "")
-	return resolved, nil
+	_ = s.jobs.Mirror(jobCtx, item.OrganizationID, "review_item", item.ID, jobs.StatusSucceeded, "")
 }
 
 func joinActions(actions []string) string {

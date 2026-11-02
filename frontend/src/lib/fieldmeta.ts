@@ -228,43 +228,61 @@ export function ruleOf(def: FieldDefinition, withRequired: boolean): Rule {
 }
 
 /**
- * validateValue checks a value against its definition. Returns an error
- * message or null. Empty values pass unless the field is required.
+ * A validation message as a catalog key (form.validation.field.*) with its
+ * parameters; the form translates it into the UI language (GLO-10, F-343).
+ */
+export interface FieldMessage {
+  key: string;
+  params: Record<string, string | number>;
+}
+
+/** A field error: a message to translate, or a server text shown as sent. */
+export type FieldError = FieldMessage | string;
+
+function message(
+  key: string,
+  label: string,
+  params: Record<string, string | number> = {},
+): FieldMessage {
+  return { key: `form.validation.field.${key}`, params: { label, ...params } };
+}
+
+/**
+ * validateValue checks a value against its definition. Returns the message
+ * of the first error or null. Empty values pass unless the field is required.
  */
 export function validateValue(
   def: FieldDefinition,
   value: unknown,
   state?: FieldState,
-): string | null {
+): FieldMessage | null {
+  const label = def.label || def.name;
   const required = state?.required ?? !!def.required;
   if (isEmpty(value)) {
-    return required ? `${def.label || def.name} is required` : null;
+    return required ? message('required', label) : null;
   }
   const t = def.data_type;
   switch (t) {
     case 'integer':
-      if (typeof value !== 'number' || !Number.isInteger(value))
-        return `${def.label || def.name} must be an integer`;
+      if (typeof value !== 'number' || !Number.isInteger(value)) return message('integer', label);
       break;
     case 'decimal':
     case 'number':
-      if (typeof value !== 'number' || Number.isNaN(value))
-        return `${def.label || def.name} must be a number`;
+      if (typeof value !== 'number' || Number.isNaN(value)) return message('number', label);
       break;
     case 'boolean':
-      if (typeof value !== 'boolean') return `${def.label || def.name} must be a boolean`;
+      if (typeof value !== 'boolean') return message('boolean', label);
       break;
     case 'date': {
       // A real calendar day, like Go's time.Parse("2006-01-02").
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
       const d = m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))) : null;
       if (!m || !d || d.getUTCMonth() !== Number(m[2]) - 1 || d.getUTCDate() !== Number(m[3]))
-        return `${def.label || def.name} must be YYYY-MM-DD`;
+        return message('date', label);
       break;
     }
     case 'datetime':
-      if (Number.isNaN(Date.parse(String(value))))
-        return `${def.label || def.name} must be a datetime`;
+      if (Number.isNaN(Date.parse(String(value)))) return message('datetime', label);
       break;
     case 'ip': {
       const s = String(value);
@@ -278,28 +296,27 @@ export function validateValue(
           v6 = false;
         }
       }
-      if (!v4 && !v6) return `${def.label || def.name} must be an IP address`;
+      if (!v4 && !v6) return message('ip', label);
       break;
     }
     case 'mac':
       if (!/^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$/.test(String(value)))
-        return `${def.label || def.name} must be a MAC address`;
+        return message('mac', label);
       break;
     case 'url':
       try {
         const u = new URL(String(value));
         if (!u.protocol || !u.host) throw new Error();
       } catch {
-        return `${def.label || def.name} must be a valid URL`;
+        return message('url', label);
       }
       break;
     case 'email':
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value)))
-        return `${def.label || def.name} must be a valid email`;
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value))) return message('email', label);
       break;
     case 'text':
     case 'string':
-      if (/[\r\n]/.test(String(value))) return `${def.label || def.name} must be a single line`;
+      if (/[\r\n]/.test(String(value))) return message('singleLine', label);
       break;
     case 'uuid':
       if (
@@ -307,27 +324,39 @@ export function validateValue(
           String(value),
         )
       )
-        return `${def.label || def.name} must be a UUID`;
+        return message('uuid', label);
       break;
   }
-  // Required, allowed values, pattern and ranges: the shared rule AST.
-  const label = def.label || def.name;
+  // Allowed values, pattern and ranges: the shared rule AST, rule by rule so
+  // a range message knows whether it bounds the value or the length.
   const rule = ruleOf(def, false);
-  const [violation] = evaluateRule(rule, value);
-  if (!violation) return null;
-  switch (violation.code) {
-    case 'enum': {
-      const bad = Array.isArray(value)
-        ? value.find((item) => evaluateRule(rule, [item]).length > 0)
-        : value;
-      return `${label}: ${String(bad)} is not an allowed value`;
+  for (const child of rule.op === 'all' ? rule.rules : [rule]) {
+    const [violation] = evaluateRule(child, value);
+    if (!violation) continue;
+    const ofLength = child.op === 'range' && child.of === 'length';
+    switch (violation.code) {
+      case 'enum': {
+        const bad = Array.isArray(value)
+          ? value.find((item) => evaluateRule(child, [item]).length > 0)
+          : value;
+        return message('notAllowed', label, { value: String(bad) });
+      }
+      case 'pattern':
+        return message('pattern', label);
+      case 'range.min':
+        return child.op === 'range' && child.min !== undefined
+          ? message(ofLength ? 'minLength' : 'min', label, { limit: child.min })
+          : message('invalid', label);
+      case 'range.max':
+        return child.op === 'range' && child.max !== undefined
+          ? message(ofLength ? 'maxLength' : 'max', label, { limit: child.max })
+          : message('invalid', label);
+      case 'pattern.type':
+      case 'range.type':
+        return message(ofLength || child.op === 'pattern' ? 'textExpected' : 'number', label);
+      default:
+        return message('invalid', label);
     }
-    case 'pattern':
-      return `${label} has an invalid format`;
-    case 'range.min':
-    case 'range.max':
-      return `${label} ${violation.message}`;
-    default:
-      return `${label}: ${violation.message}`;
   }
+  return null;
 }

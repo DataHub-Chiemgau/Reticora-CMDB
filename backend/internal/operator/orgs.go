@@ -79,6 +79,8 @@ func (h *Handler) CreateOrg(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		api.WriteRepoError(w, err)
 	default:
+		// The creation wrote its org.create entry in its transaction.
+		markAudited(r.Context())
 		api.WriteJSON(w, http.StatusCreated, created)
 	}
 }

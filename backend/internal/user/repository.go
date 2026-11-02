@@ -1,14 +1,19 @@
 package user
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/jackc/pgx/v5"
 )
 
 // ErrUserOwnsOpenObjects rejects deleting a user that still owns open
@@ -19,18 +24,69 @@ var ErrUserOwnsOpenObjects = errors.New("user owns open objects; hand them over 
 // reference; deactivate or anonymize the user instead (TLC-04).
 var ErrUserReferenced = errors.New("user is referenced by existing records; deactivate or anonymize instead")
 
+// ErrNotFound: the team, team member or role is not one of the organization
+// or lies outside the caller's scope; both answer the same 404 (API-03,
+// TEN-04). The repositories wrap it with the object (errTeamNotFound,
+// errRoleNotFound, errMemberNotFound).
+var ErrNotFound = errors.New("not found")
+
+// ErrConflict: the user is a member of the team already (409; PostgreSQL
+// reports the unique violation, 23505).
+var ErrConflict = errors.New("the user is a member of the team already")
+
+// ErrSystemRole: system roles are neither changed nor deleted.
+var ErrSystemRole = errors.New("system roles cannot be changed or deleted")
+
+var errMemberNotFound = fmt.Errorf("team member %w", ErrNotFound)
+
+// DeactivationHook runs inside the transaction of a deactivation,
+// anonymization or deletion, after the user was found and locked in the
+// organization and before the commit; an error rolls the change back. The handler revokes the
+// sessions here, so a request for an unknown user or a user of another
+// organization never touches the blacklist (TLC-04, TEN-04). The memory
+// repository passes a nil transaction.
+type DeactivationHook func(ctx context.Context, tx pgx.Tx) error
+
+// QuotaGuard enforces a licensed quota before a resource is created
+// (ENT-03): current is the number of resources the organization holds; over
+// the limit it returns an error with LimitExceeded (403 entitlement-limit).
+// The entitlement service implements it.
+type QuotaGuard interface {
+	AllowCreate(ctx context.Context, orgID, quota string, current int64) error
+}
+
+// quotaRefused reports whether err is a refusal of the quota guard (an
+// exhausted quota or a feature outside the plan).
+func quotaRefused(err error) bool {
+	var refusal interface{ LimitExceeded() bool }
+	return errors.As(err, &refusal) && refusal.LimitExceeded()
+}
+
 // Repository defines persistence operations for users, teams, and roles.
 type Repository interface {
 	// Users
 	ListUsers(ctx context.Context, orgID, search string, page api.PaginationParams) ([]User, int, error)
 	GetUser(ctx context.Context, orgID, id string) (*User, error)
 	CreateUser(ctx context.Context, u *User) error
+	// CountActiveUsers counts the active users of the organization, the
+	// stock max_users is checked against (ENT-03).
+	CountActiveUsers(ctx context.Context, orgID string) (int64, error)
 	UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error)
+	// UpdateUserTx is UpdateUser that calls onDeactivate (may be nil) when
+	// the request sets a non-active status on a user of the organization.
+	UpdateUserTx(ctx context.Context, orgID, id string, req UpdateUserRequest, onDeactivate DeactivationHook) (*User, error)
 	DeleteUser(ctx context.Context, orgID, id string) error
+	// DeleteUserTx is DeleteUser that ends the access of the user like a
+	// deactivation and calls onDelete (may be nil) once the user of the
+	// organization is deleted, before the commit.
+	DeleteUserTx(ctx context.Context, orgID, id string, onDelete DeactivationHook) error
 	// AnonymizeUser replaces all personal data with surrogate values and
 	// deactivates the account, keeping the row for referential integrity and
 	// the audit chain (GDPR right to erasure).
 	AnonymizeUser(ctx context.Context, orgID, id string) (*User, error)
+	// AnonymizeUserTx is AnonymizeUser that calls onDeactivate (may be nil)
+	// once the user of the organization is locked.
+	AnonymizeUserTx(ctx context.Context, orgID, id string, onDeactivate DeactivationHook) (*User, error)
 
 	// Teams
 	ListTeams(ctx context.Context, orgID, search string, page api.PaginationParams) ([]Team, int, error)
@@ -46,9 +102,22 @@ type Repository interface {
 	ListRoles(ctx context.Context, orgID string, page api.PaginationParams) ([]CustomRole, int, error)
 	GetRole(ctx context.Context, orgID, id string) (*CustomRole, error)
 	CreateRole(ctx context.Context, r *CustomRole) error
-	UpdateRole(ctx context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error)
-	DeleteRole(ctx context.Context, orgID, id string) error
-	AssignRole(ctx context.Context, orgID string, a *UserRoleAssignment) error
+	// UpdateRole changes a custom role; permissions it adds must be held by
+	// caller organization-wide (RoleWideningError).
+	UpdateRole(ctx context.Context, orgID, id string, caller *identity.Principal, req UpdateRoleRequest) (*CustomRole, error)
+	// DeleteRole deletes a custom role with its assignments; caller must be
+	// able to revoke each of them (permission.RoleNarrowingError).
+	DeleteRole(ctx context.Context, orgID, id string, caller *identity.Principal) error
+	// AssignRole stores the assignment if the role fits the scope and caller
+	// holds role:manage and the role's permissions in a scope covering it
+	// (grant ceiling, GrantCeilingError).
+	AssignRole(ctx context.Context, orgID string, caller *identity.Principal, a *UserRoleAssignment) error
+	// RevokeRoleAssignment deletes the standard or custom role assignment id
+	// of the organization if caller holds role:manage and the role's
+	// permissions in a scope covering the assignment's scope (the grant
+	// ceiling of AssignRole, GrantCeilingError); an unknown id or one of
+	// another organization is errAssignmentNotFound.
+	RevokeRoleAssignment(ctx context.Context, orgID string, caller *identity.Principal, id string) error
 	ListUserRoles(ctx context.Context, orgID, userID string) ([]UserRoleAssignment, error)
 }
 
@@ -84,9 +153,12 @@ func (r *MemoryRepository) AgeForTesting(id string, age time.Duration) {
 	}
 }
 
-func (r *MemoryRepository) nextIDStr(prefix string) string {
+// nextIDStr returns a new id in UUID form like the PostgreSQL ids, which
+// the handlers check before the repository (api.ParseUUIDParam); the
+// counter is shared by all kinds, so prefix only documents the caller.
+func (r *MemoryRepository) nextIDStr(_ string) string {
 	r.nextID++
-	return fmt.Sprintf("%s-%d", prefix, r.nextID)
+	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID)
 }
 
 // --- Users ---
@@ -130,6 +202,19 @@ func (r *MemoryRepository) GetUser(_ context.Context, orgID, id string) (*User, 
 	return u, nil
 }
 
+// CountActiveUsers implements Repository.
+func (r *MemoryRepository) CountActiveUsers(_ context.Context, orgID string) (int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var n int64
+	for _, u := range r.users {
+		if u.OrganizationID == orgID && statusIsActive(u.Status) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (r *MemoryRepository) CreateUser(_ context.Context, u *User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -142,13 +227,22 @@ func (r *MemoryRepository) CreateUser(_ context.Context, u *User) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateUser(_ context.Context, orgID, id string, req UpdateUserRequest) (*User, error) {
+func (r *MemoryRepository) UpdateUser(ctx context.Context, orgID, id string, req UpdateUserRequest) (*User, error) {
+	return r.UpdateUserTx(ctx, orgID, id, req, nil)
+}
+
+func (r *MemoryRepository) UpdateUserTx(ctx context.Context, orgID, id string, req UpdateUserRequest, onDeactivate DeactivationHook) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	u, ok := r.users[id]
 	if !ok || u.OrganizationID != orgID {
 		return nil, fmt.Errorf("user not found")
+	}
+	if req.Status != nil && !statusIsActive(*req.Status) && onDeactivate != nil {
+		if err := onDeactivate(ctx, nil); err != nil {
+			return nil, err
+		}
 	}
 	if req.DisplayName != nil {
 		u.DisplayName = *req.DisplayName
@@ -163,7 +257,11 @@ func (r *MemoryRepository) UpdateUser(_ context.Context, orgID, id string, req U
 	return u, nil
 }
 
-func (r *MemoryRepository) DeleteUser(_ context.Context, orgID, id string) error {
+func (r *MemoryRepository) DeleteUser(ctx context.Context, orgID, id string) error {
+	return r.DeleteUserTx(ctx, orgID, id, nil)
+}
+
+func (r *MemoryRepository) DeleteUserTx(ctx context.Context, orgID, id string, onDelete DeactivationHook) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -171,17 +269,31 @@ func (r *MemoryRepository) DeleteUser(_ context.Context, orgID, id string) error
 	if !ok || u.OrganizationID != orgID {
 		return fmt.Errorf("user not found")
 	}
+	if onDelete != nil {
+		if err := onDelete(ctx, nil); err != nil {
+			return err
+		}
+	}
 	delete(r.users, id)
 	return nil
 }
 
-func (r *MemoryRepository) AnonymizeUser(_ context.Context, orgID, id string) (*User, error) {
+func (r *MemoryRepository) AnonymizeUser(ctx context.Context, orgID, id string) (*User, error) {
+	return r.AnonymizeUserTx(ctx, orgID, id, nil)
+}
+
+func (r *MemoryRepository) AnonymizeUserTx(ctx context.Context, orgID, id string, onDeactivate DeactivationHook) (*User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	u, ok := r.users[id]
 	if !ok || u.OrganizationID != orgID {
 		return nil, fmt.Errorf("user not found")
+	}
+	if onDeactivate != nil {
+		if err := onDeactivate(ctx, nil); err != nil {
+			return nil, err
+		}
 	}
 	u.Email = SurrogateEmail(id)
 	u.DisplayName = SurrogateDisplayName(id)
@@ -228,7 +340,7 @@ func (r *MemoryRepository) GetTeam(_ context.Context, orgID, id string) (*Team, 
 
 	t, ok := r.teams[id]
 	if !ok || t.OrganizationID != orgID {
-		return nil, fmt.Errorf("team not found")
+		return nil, errTeamNotFound
 	}
 	return t, nil
 }
@@ -251,7 +363,7 @@ func (r *MemoryRepository) UpdateTeam(_ context.Context, orgID, id string, req U
 
 	t, ok := r.teams[id]
 	if !ok || t.OrganizationID != orgID {
-		return nil, fmt.Errorf("team not found")
+		return nil, errTeamNotFound
 	}
 	if req.Name != nil {
 		t.Name = *req.Name
@@ -272,7 +384,7 @@ func (r *MemoryRepository) DeleteTeam(_ context.Context, orgID, id string) error
 
 	t, ok := r.teams[id]
 	if !ok || t.OrganizationID != orgID {
-		return fmt.Errorf("team not found")
+		return errTeamNotFound
 	}
 	delete(r.teams, id)
 	// Remove team members
@@ -290,7 +402,12 @@ func (r *MemoryRepository) AddTeamMember(_ context.Context, orgID string, m *Tea
 
 	t, ok := r.teams[m.TeamID]
 	if !ok || t.OrganizationID != orgID {
-		return fmt.Errorf("team not found")
+		return errTeamNotFound
+	}
+	for _, existing := range r.members {
+		if existing.TeamID == m.TeamID && existing.UserID == m.UserID {
+			return ErrConflict
+		}
 	}
 
 	m.ID = r.nextIDStr("member")
@@ -306,7 +423,7 @@ func (r *MemoryRepository) RemoveTeamMember(_ context.Context, orgID, teamID, us
 
 	t, ok := r.teams[teamID]
 	if !ok || t.OrganizationID != orgID {
-		return fmt.Errorf("team not found")
+		return errTeamNotFound
 	}
 
 	for mid, m := range r.members {
@@ -316,7 +433,7 @@ func (r *MemoryRepository) RemoveTeamMember(_ context.Context, orgID, teamID, us
 			return nil
 		}
 	}
-	return fmt.Errorf("member not found")
+	return errMemberNotFound
 }
 
 func (r *MemoryRepository) ListTeamMembers(_ context.Context, orgID, teamID string) ([]TeamMember, error) {
@@ -325,7 +442,7 @@ func (r *MemoryRepository) ListTeamMembers(_ context.Context, orgID, teamID stri
 
 	t, ok := r.teams[teamID]
 	if !ok || t.OrganizationID != orgID {
-		return nil, fmt.Errorf("team not found")
+		return nil, errTeamNotFound
 	}
 
 	var result []TeamMember
@@ -334,6 +451,11 @@ func (r *MemoryRepository) ListTeamMembers(_ context.Context, orgID, teamID stri
 			result = append(result, *m)
 		}
 	}
+	// The order of the PostgreSQL repository: the list is paged by offset
+	// (API-02).
+	slices.SortFunc(result, func(a, b TeamMember) int {
+		return cmp.Or(a.JoinedAt.Compare(b.JoinedAt), cmp.Compare(a.ID, b.ID))
+	})
 	return result, nil
 }
 
@@ -369,7 +491,7 @@ func (r *MemoryRepository) GetRole(_ context.Context, orgID, id string) (*Custom
 
 	role, ok := r.roles[id]
 	if !ok || role.OrganizationID != orgID {
-		return nil, fmt.Errorf("role not found")
+		return nil, errRoleNotFound
 	}
 	return role, nil
 }
@@ -386,16 +508,26 @@ func (r *MemoryRepository) CreateRole(_ context.Context, role *CustomRole) error
 	return nil
 }
 
-func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, req UpdateRoleRequest) (*CustomRole, error) {
+func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, caller *identity.Principal, req UpdateRoleRequest) (*CustomRole, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	role, ok := r.roles[id]
 	if !ok || role.OrganizationID != orgID {
-		return nil, fmt.Errorf("role not found")
+		return nil, errRoleNotFound
 	}
 	if role.IsSystem {
-		return nil, fmt.Errorf("cannot modify system role")
+		return nil, ErrSystemRole
+	}
+	if req.Permissions != nil {
+		if err := checkRoleWidening(caller, role.Permissions, req.Permissions); err != nil {
+			return nil, err
+		}
+		if slices.ContainsFunc(role.Permissions, func(key string) bool { return !slices.Contains(req.Permissions, key) }) {
+			if err := r.checkRoleNarrowing(caller, role, false); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if req.Name != nil {
 		role.Name = *req.Name
@@ -410,44 +542,107 @@ func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, req U
 	return role, nil
 }
 
-func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string) error {
+func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string, caller *identity.Principal) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	role, ok := r.roles[id]
 	if !ok || role.OrganizationID != orgID {
-		return fmt.Errorf("role not found")
+		return errRoleNotFound
 	}
 	if role.IsSystem {
-		return fmt.Errorf("cannot delete system role")
+		return ErrSystemRole
+	}
+	if err := r.checkRoleNarrowing(caller, role, true); err != nil {
+		return err
 	}
 	delete(r.roles, id)
+	for aid, a := range r.assignments {
+		if a.CustomRoleID == id {
+			delete(r.assignments, aid)
+		}
+	}
 	return nil
 }
 
-func (r *MemoryRepository) AssignRole(_ context.Context, orgID string, a *UserRoleAssignment) error {
+// checkRoleNarrowing is permission.CheckRoleNarrowing over the assignments
+// of the memory repository: caller must pass the revocation ceiling of each
+// assignment of role. The memory repository knows no sites: a site scope
+// needs the role's permissions in all clients (fail-closed).
+func (r *MemoryRepository) checkRoleNarrowing(caller *identity.Principal, role *CustomRole, deletion bool) error {
+	var missing []identity.Permission
+	for _, a := range r.assignments {
+		if a.CustomRoleID != role.ID && a.RoleID != role.ID {
+			continue
+		}
+		var ceiling *GrantCeilingError
+		if err := grantCeiling(caller, identity.PermRoleManage, toPermissions(role.Permissions), a.ScopeType, a.ScopeID, ""); errors.As(err, &ceiling) {
+			for _, perm := range ceiling.Missing {
+				if !slices.Contains(missing, perm) {
+					missing = append(missing, perm)
+				}
+			}
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return &permission.RoleNarrowingError{Missing: missing, Deletion: deletion}
+	}
+	return nil
+}
+
+// AssignRole implements Repository with the scope validation and the grant
+// ceiling of the PostgreSQL repository. The memory repository knows no sites:
+// a site scope needs the role's permissions in all clients (fail-closed).
+func (r *MemoryRepository) AssignRole(_ context.Context, orgID string, caller *identity.Principal, a *UserRoleAssignment) error {
+	if a.ScopeType == "" {
+		a.ScopeType = "organization"
+	}
+	if err := validateAssignmentScope(a); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	roleID := a.CustomRoleID
 	if a.RoleID != "" {
-		role, ok := r.roles[a.RoleID]
-		if !ok || role.OrganizationID != orgID {
-			return fmt.Errorf("role not found")
-		}
-		a.ID = r.nextIDStr("assign")
-		a.GrantedAt = time.Now().UTC()
-		r.assignments[a.ID] = a
-		return nil
+		roleID = a.RoleID
 	}
-
-	// Verify role exists
-	role, ok := r.roles[a.CustomRoleID]
+	role, ok := r.roles[roleID]
 	if !ok || role.OrganizationID != orgID {
-		return fmt.Errorf("role not found")
+		return errRoleNotFound
+	}
+	if err := grantCeiling(caller, identity.PermRoleManage, toPermissions(role.Permissions), a.ScopeType, a.ScopeID, ""); err != nil {
+		return err
 	}
 
 	a.ID = r.nextIDStr("assign")
 	a.GrantedAt = time.Now().UTC()
 	r.assignments[a.ID] = a
+	return nil
+}
+
+// RevokeRoleAssignment implements Repository with the grant ceiling of
+// AssignRole; like there, a site scope needs the role's permissions in all
+// clients.
+func (r *MemoryRepository) RevokeRoleAssignment(_ context.Context, orgID string, caller *identity.Principal, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.assignments[id]
+	if !ok {
+		return errAssignmentNotFound
+	}
+	roleID := a.CustomRoleID
+	if a.RoleID != "" {
+		roleID = a.RoleID
+	}
+	role, ok := r.roles[roleID]
+	if !ok || role.OrganizationID != orgID {
+		return errAssignmentNotFound
+	}
+	if err := grantCeiling(caller, identity.PermRoleManage, toPermissions(role.Permissions), a.ScopeType, a.ScopeID, ""); err != nil {
+		return revocationCeiling(err)
+	}
+	delete(r.assignments, id)
 	return nil
 }
 
@@ -461,5 +656,10 @@ func (r *MemoryRepository) ListUserRoles(_ context.Context, orgID, userID string
 			result = append(result, *a)
 		}
 	}
+	// The order of the PostgreSQL repository: the list is paged by offset
+	// (API-02).
+	slices.SortFunc(result, func(a, b UserRoleAssignment) int {
+		return cmp.Or(b.GrantedAt.Compare(a.GrantedAt), cmp.Compare(b.ID, a.ID))
+	})
 	return result, nil
 }

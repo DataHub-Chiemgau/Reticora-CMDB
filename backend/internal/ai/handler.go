@@ -2,6 +2,7 @@ package ai
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -14,10 +15,22 @@ type Handler struct {
 	repo      Repository
 	provider  Provider
 	retriever *Retriever
+	consent   Consent
 }
+
+// ProblemAIOptInRequired: the organization has not opted in to external AI
+// processing or does not hold the ai add-on (AI-02).
+const ProblemAIOptInRequired = "https://reticora.io/problems/ai-opt-in-required"
 
 func NewHandler(repo Repository, provider Provider, retriever *Retriever) *Handler {
 	return &Handler{repo: repo, provider: provider, retriever: retriever}
+}
+
+// WithConsent attaches the per-organization consent of Ask (AI-02). Without
+// one, Ask refuses every organization (fail-closed).
+func (h *Handler) WithConsent(consent Consent) *Handler {
+	h.consent = consent
+	return h
 }
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/ai/conversations", h.ListConversations)
@@ -30,12 +43,17 @@ func (h *Handler) ListConversations(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	items, err := h.repo.ListConversations(r.Context(), t.OrganizationID, t.UserID)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, items)
+	api.WriteJSON(w, http.StatusOK, api.Page(items, page))
 }
 func (h *Handler) CreateConversation(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
@@ -65,6 +83,14 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	// The question and the CI context leave the installation only with the
+	// organization's opt-in and the ai add-on (AI-02): without them no
+	// conversation is created, nothing is retrieved or sent to the provider.
+	if h.consent == nil || !h.consent.AllowsExternalAI(r.Context(), t.OrganizationID) {
+		api.WriteProblem(w, http.StatusForbidden, ProblemAIOptInRequired, "Forbidden",
+			"the organization has not opted in to external AI processing or does not hold the ai add-on")
 		return
 	}
 	var req AskRequest
@@ -106,7 +132,10 @@ func (h *Handler) Ask(w http.ResponseWriter, r *http.Request) {
 		prompt := buildPrompt(req.Question, chunks)
 		answer, pt, ct, err = h.provider.Chat([]Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: prompt}})
 		if err != nil {
-			api.WriteError(w, http.StatusBadGateway, "AI provider error", err.Error())
+			// The provider's error can name its endpoint and echo its
+			// response; it goes to the log only (API-03).
+			slog.WarnContext(r.Context(), "ai: provider request failed", "error", err)
+			api.WriteError(w, http.StatusBadGateway, "AI provider error", "the AI provider did not answer")
 			return
 		}
 	}

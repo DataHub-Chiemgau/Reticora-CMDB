@@ -3,7 +3,10 @@ package reviews
 import (
 	"errors"
 	"net/http"
+	"net/url"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -35,15 +38,23 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/discovery/review-items/{id}/resolve", deprecated("/api/v1/review-items/{id}/resolve", h.Resolve))
 }
 
+// deprecated marks a legacy path; the successor link names the item of the
+// request, not the template (F-219).
 func deprecated(successor string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Deprecation", legacyDeprecation)
-		w.Header().Set("Link", "<"+successor+`>; rel="successor-version"`)
+		link := successor
+		if id, err := url.PathUnescape(chi.URLParam(r, "id")); err == nil && id != "" {
+			link = strings.ReplaceAll(link, "{id}", url.PathEscape(id))
+		}
+		w.Header().Set("Link", "<"+link+`>; rel="successor-version"`)
 		next(w, r)
 	}
 }
 
-// List handles GET /api/v1/review-items.
+// List handles GET /api/v1/review-items and its deprecated alias. A status
+// or kind outside the documented enums is 400 with the field (API-01,
+// F-426), as rel_type of /relationships, not an empty list.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -52,6 +63,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	filter := Filter{Status: q.Get("status"), Kind: q.Get("kind")}
+	if filter.Status != "" && !slices.Contains(Statuses, filter.Status) {
+		api.WriteFieldError(w, &api.FieldError{Field: "status", Message: "must be one of " + strings.Join(Statuses, ", ")})
+		return
+	}
+	if filter.Kind != "" && !slices.Contains(Kinds, filter.Kind) {
+		api.WriteFieldError(w, &api.FieldError{Field: "kind", Message: "must be a review type: " + strings.Join(Kinds, ", ")})
+		return
+	}
 	if v := q.Get("escalated"); v != "" {
 		escalated, err := strconv.ParseBool(v)
 		if err != nil {
@@ -93,15 +112,14 @@ func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	var body Resolution
+	var body ResolveRequest
 	if err := api.ReadJSON(r, &body); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if body.ResolvedBy == "" {
-		body.ResolvedBy = t.UserID
-	}
-	item, err := h.svc.Resolve(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &body)
+	// The resolver is always the principal of the request (F-091).
+	res := Resolution{Action: body.Action, CIID: body.CIID, CITypeID: body.CITypeID, Note: body.Note, ResolvedBy: t.UserID}
+	item, err := h.svc.Resolve(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &res)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -116,11 +134,19 @@ func writeError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 	case errors.Is(err, ErrAlreadyResolved):
 		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+	case errors.As(err, &refused) && refused.Field != "":
+		api.WriteFieldError(w, &api.FieldError{Field: refused.Field, Message: refused.Message, Status: refused.Status})
 	case errors.As(err, &refused) && refused.Problem != "":
 		api.WriteProblem(w, refused.Status, refused.Problem, http.StatusText(refused.Status), refused.Message)
 	case errors.As(err, &refused):
 		api.WriteError(w, refused.Status, http.StatusText(refused.Status), refused.Message)
 	default:
+		// A refusal of the effect as the resource it writes reports it
+		// (e.g. the scope of a scope_suggested item: 409 on target, 422 on
+		// collector_id, as POST /discovery-scopes answers, F-405).
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		var typed api.TypedProblem
 		if errors.As(err, &typed) && typed.ProblemType() != "" {
 			api.WriteTypedProblem(w, http.StatusForbidden, err)

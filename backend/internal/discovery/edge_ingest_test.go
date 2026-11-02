@@ -1,14 +1,24 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 )
 
 type fakeLicense struct{ state, problem string }
@@ -28,12 +38,16 @@ func TestEdgeIngest(t *testing.T) {
 	cis := ci.NewMemoryRepository()
 	h := NewHandler(repo, cis)
 	ctx := context.Background()
+	col := &Collector{OrganizationID: "org-1", Name: "edge"}
+	if err := repo.RegisterCollector(ctx, col); err != nil {
+		t.Fatal(err)
+	}
 	body, err := json.Marshal(ingestBody{Records: []DeviceRecord{consumerRecord("m1", time.Now().UTC().Add(-time.Hour))}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	reply := h.EdgeIngest(ctx, "org-1", "col-1", body)
+	reply := h.EdgeIngest(ctx, "org-1", col.ID, body)
 	if reply.Status != http.StatusAccepted || reply.Result == nil || reply.Result.Created != 1 || reply.LicenseStatus != LicenseActive {
 		t.Fatalf("ingest: %+v", reply)
 	}
@@ -45,20 +59,20 @@ func TestEdgeIngest(t *testing.T) {
 		t.Errorf("records reached another organization: %d", len(other))
 	}
 
-	if reply = h.EdgeIngest(ctx, "org-1", "col-1", []byte(`{"records":[]}`)); reply.Status != http.StatusBadRequest {
+	if reply = h.EdgeIngest(ctx, "org-1", col.ID, []byte(`{"records":[]}`)); reply.Status != http.StatusBadRequest {
 		t.Errorf("empty batch: %+v", reply)
 	}
-	if reply = h.EdgeIngest(ctx, "org-1", "col-1", []byte(`not json`)); reply.Status != http.StatusBadRequest {
+	if reply = h.EdgeIngest(ctx, "org-1", col.ID, []byte(`not json`)); reply.Status != http.StatusBadRequest {
 		t.Errorf("invalid body: %+v", reply)
 	}
 
 	h.WithEdgeLicense(fakeLicense{state: LicenseExpired, problem: api.ProblemLicenseExpired})
-	if reply = h.EdgeIngest(ctx, "org-1", "col-1", body); reply.Status != http.StatusForbidden ||
+	if reply = h.EdgeIngest(ctx, "org-1", col.ID, body); reply.Status != http.StatusForbidden ||
 		reply.Type != api.ProblemLicenseExpired || reply.LicenseStatus != LicenseExpired {
 		t.Errorf("expired license: %+v", reply)
 	}
 	h.WithEdgeLicense(fakeLicense{state: LicenseNotEntitled, problem: api.ProblemFeatureNotEntitled})
-	if reply = h.EdgeIngest(ctx, "org-1", "col-1", body); reply.Status != http.StatusForbidden || reply.Type != api.ProblemFeatureNotEntitled {
+	if reply = h.EdgeIngest(ctx, "org-1", col.ID, body); reply.Status != http.StatusForbidden || reply.Type != api.ProblemFeatureNotEntitled {
 		t.Errorf("not entitled: %+v", reply)
 	}
 }
@@ -85,10 +99,247 @@ func TestEdgeHeartbeat(t *testing.T) {
 	}
 }
 
+// spoolMetrics reads the collector loss and backpressure counters.
+func spoolMetrics() (messages, samples, backpressure float64) {
+	return testutil.ToFloat64(collectorSpoolDropped.WithLabelValues(DroppedKindMessages)),
+		testutil.ToFloat64(collectorSpoolDropped.WithLabelValues(DroppedKindSamples)),
+		testutil.ToFloat64(collectorSpoolBackpressure)
+}
+
+// TestHeartbeatSpoolLossMetrics covers F-234 (NFR-04, OPS-06): the losses
+// and the backpressure a collector reports with its heartbeat raise
+// reticora_collector_spool_dropped_total (by kind) and
+// reticora_collector_spool_backpressure_total, over the edge (NATS) and
+// over HTTP alike; a refused heartbeat (unknown collector) counts nothing.
+func TestHeartbeatSpoolLossMetrics(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(repo, ci.NewMemoryRepository())
+	ctx := context.Background()
+	c := &Collector{OrganizationID: "org-1", Name: "lossy"}
+	if err := repo.RegisterCollector(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+
+	report := []byte(`{"spool":{"messages":2,"dropped_messages":3,"dropped_bytes":300,"dropped_samples":5,"backpressure":true}}`)
+	for _, transport := range []string{"edge", "http"} {
+		messages, samples, backpressure := spoolMetrics()
+		switch transport {
+		case "edge":
+			if reply := h.EdgeHeartbeat(ctx, "org-1", c.ID, report); reply.Status != http.StatusNoContent {
+				t.Fatalf("edge heartbeat: %+v", reply)
+			}
+		case "http":
+			req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/collectors/"+c.ID+"/heartbeat", bytes.NewReader(report)))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != http.StatusNoContent {
+				t.Fatalf("http heartbeat: %d %s", w.Code, w.Body.String())
+			}
+		}
+		m, s, b := spoolMetrics()
+		if m-messages != 3 || s-samples != 5 || b-backpressure != 1 {
+			t.Fatalf("%s: metrics rose by messages %v, samples %v, backpressure %v; want 3, 5, 1",
+				transport, m-messages, s-samples, b-backpressure)
+		}
+	}
+
+	// Nothing to report, a refused heartbeat and negative values count
+	// nothing.
+	messages, samples, backpressure := spoolMetrics()
+	h.EdgeHeartbeat(ctx, "org-1", c.ID, []byte(`{"spool":{"messages":2}}`))
+	h.EdgeHeartbeat(ctx, "org-1", "unknown", report)
+	h.EdgeHeartbeat(ctx, "org-1", c.ID, []byte(`{"spool":{"dropped_messages":-4,"dropped_samples":-1}}`))
+	if m, s, b := spoolMetrics(); m != messages || s != samples || b != backpressure {
+		t.Fatalf("metrics changed without a loss: %v/%v/%v -> %v/%v/%v", messages, samples, backpressure, m, s, b)
+	}
+}
+
+// scopeRecorder resolves every target to ci-<target> and records the
+// tenant scope the samples were assigned in.
+type scopeRecorder struct {
+	mu     sync.Mutex
+	scopes []database.TenantScope
+}
+
+func (s *scopeRecorder) ResolveCI(ctx context.Context, _, address string) (string, bool) {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok {
+		return "", false
+	}
+	s.mu.Lock()
+	s.scopes = append(s.scopes, scope)
+	s.mu.Unlock()
+	if address == "192.0.2.99" {
+		return "", false
+	}
+	return "ci-" + address, true
+}
+
+func (s *scopeRecorder) last() database.TenantScope {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scopes[len(s.scopes)-1]
+}
+
+// metricsReply is the answer to .metrics as the collector reads it.
+type metricsReply struct {
+	Status     int    `json:"status"`
+	Type       string `json:"type"`
+	Error      string `json:"error"`
+	Ingested   *int   `json:"ingested"`
+	Unassigned *int   `json:"unassigned"`
+}
+
+// accepted reports whether the reply is 202 with the counts.
+func (r metricsReply) accepted(ingested, unassigned int) bool {
+	return r.Status == http.StatusAccepted && r.Ingested != nil && *r.Ingested == ingested &&
+		r.Unassigned != nil && *r.Unassigned == unassigned
+}
+
+// asMetricsReply returns reply as it travels on the edge.
+func asMetricsReply(t *testing.T, reply EdgeReply) (metricsReply, string) {
+	t.Helper()
+	raw, err := json.Marshal(reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out metricsReply
+	if err = json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out, string(raw)
+}
+
+type fakeFeatures map[string]entitlement.Status
+
+func (f fakeFeatures) Status(_ context.Context, orgID, _ string) (entitlement.Entitlement, entitlement.Status, error) {
+	status, ok := f[orgID]
+	if !ok {
+		status = entitlement.StatusNotEntitled
+	}
+	return entitlement.Entitlement{}, status, nil
+}
+
+// TestEdgeMetrics covers the collector side of F-046 on the server: the
+// samples a collector sends on .metrics run through the ingest of
+// POST /monitoring/metrics for the organization of the subject (202 with
+// ingested and unassigned), in the scope of the collector: its client and
+// site, org-wide for a collector without them. Without the monitoring
+// entitlement the answer is 403 with the problem type of the entitlement
+// middleware; an invalid body is 400; an unknown or disabled collector is
+// refused and nothing is stored.
+func TestEdgeMetrics(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	register := func(name, client, site string) *Collector {
+		c := &Collector{OrganizationID: "org-1", ClientID: client, SiteID: site, Name: name, Status: CollectorActive}
+		if err := repo.RegisterCollector(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	orgWide := register("org-wide", "", "")
+	client1 := register("client-1", "client-1", "")
+	site1 := register("site-1", "client-1", "site-1")
+	store := monitoring.NewMemoryMetricStore()
+	resolver := &scopeRecorder{}
+	h := NewHandler(repo, ci.NewMemoryRepository())
+	if _, ok := h.edgeHandlers()[MetricsSuffix]; ok {
+		t.Fatal(".metrics is served without a metrics ingest")
+	}
+	h.WithEdgeMetrics(monitoring.NewHandler(store).WithCIResolver(resolver), fakeFeatures{"org-1": entitlement.StatusActive})
+	if _, ok := h.edgeHandlers()[MetricsSuffix]; !ok {
+		t.Fatal(".metrics is not served")
+	}
+	body := []byte(`[{"name":"sweep_reachable","value":1,"labels":{"target":"192.0.2.10","kind":"sweep"}},` +
+		`{"name":"sweep_reachable","value":0,"labels":{"target":"192.0.2.99","kind":"sweep"}}]`)
+	stored := func(orgID string) int {
+		points, err := store.Query(ctx, monitoring.MetricQuery{OrgID: orgID, CIID: "ci-192.0.2.10", Name: "sweep_reachable"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(points)
+	}
+
+	scopes := []struct {
+		col           *Collector
+		client, sites string
+	}{
+		{orgWide, "all", "all"},
+		{client1, "client-1", "all"},
+		{site1, "client-1", "site-1"},
+	}
+	describe := func(s database.ScopeSet) string {
+		if s.IsAll() {
+			return "all"
+		}
+		return strings.Join(s.IDs(), ",")
+	}
+	for i, tc := range scopes {
+		reply, raw := asMetricsReply(t, h.EdgeMetrics(systemContext(ctx, "org-1"), "org-1", tc.col.ID, body))
+		if !reply.accepted(1, 1) {
+			t.Fatalf("%s: reply %s, want 202 with ingested 1 and unassigned 1", tc.col.Name, raw)
+		}
+		scope := resolver.last()
+		if scope.OrgID != "org-1" || describe(scope.Clients) != tc.client || describe(scope.Sites) != tc.sites {
+			t.Errorf("%s: assigned in org %s, clients %s, sites %s; want the collector's scope (clients %s, sites %s)",
+				tc.col.Name, scope.OrgID, describe(scope.Clients), describe(scope.Sites), tc.client, tc.sites)
+		}
+		if n := stored("org-1"); n != i+1 {
+			t.Errorf("%s: %d stored samples of org-1, want %d", tc.col.Name, n, i+1)
+		}
+	}
+	if n := stored("org-2"); n != 0 {
+		t.Errorf("samples reached another organization: %d", n)
+	}
+
+	// Only unassigned samples: 202 with both counts in the reply.
+	reply, raw := asMetricsReply(t, h.EdgeMetrics(ctx, "org-1", orgWide.ID, []byte(`[{"name":"sweep_reachable","value":1,"labels":{"target":"192.0.2.99"}}]`)))
+	if !reply.accepted(0, 1) || !strings.Contains(raw, `"ingested":0`) {
+		t.Errorf("unassigned only: %s", raw)
+	}
+	for _, bad := range []string{`not json`, `[]`, `[{"value":1}]`} {
+		if reply, raw = asMetricsReply(t, h.EdgeMetrics(ctx, "org-1", orgWide.ID, []byte(bad))); reply.Status != http.StatusBadRequest {
+			t.Errorf("body %s: %s, want 400", bad, raw)
+		}
+	}
+
+	// The monitoring entitlement as on POST /monitoring/metrics.
+	h.WithEdgeMetrics(monitoring.NewHandler(store).WithCIResolver(resolver), fakeFeatures{})
+	before := stored("org-1")
+	if reply, raw = asMetricsReply(t, h.EdgeMetrics(ctx, "org-1", orgWide.ID, body)); reply.Status != http.StatusForbidden || reply.Type != api.ProblemFeatureNotEntitled {
+		t.Errorf("not entitled: %s, want 403 with %s", raw, api.ProblemFeatureNotEntitled)
+	}
+	if n := stored("org-1"); n != before {
+		t.Errorf("not entitled: %d samples stored", n-before)
+	}
+
+	// Unknown and disabled collectors (COL-04).
+	h.WithEdgeMetrics(monitoring.NewHandler(store).WithCIResolver(resolver), nil)
+	disabled := CollectorDisabled
+	if _, err := repo.UpdateCollector(ctx, "org-1", client1.ID, &CollectorPatch{Status: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	if reply, raw = asMetricsReply(t, h.EdgeMetrics(ctx, "org-1", client1.ID, body)); reply.Status != http.StatusForbidden {
+		t.Errorf("disabled collector: %s, want 403", raw)
+	}
+	if reply, raw = asMetricsReply(t, h.EdgeMetrics(ctx, "org-2", orgWide.ID, body)); reply.Status != http.StatusNotFound {
+		t.Errorf("collector of another organization: %s, want 404", raw)
+	}
+	if n := stored("org-1"); n != before {
+		t.Errorf("refused collectors stored %d samples", n-before)
+	}
+}
+
 func TestEdgeSubjects(t *testing.T) {
 	org, col := "6f0b6f0e-0000-4000-8000-000000000001", "6f0b6f0e-0000-4000-8000-000000000002"
 	if o, c, ok := subjectCollector("collector."+org+"."+col+IngestSuffix, IngestSuffix); !ok || o != org || c != col {
 		t.Errorf("ingest subject: %s %s %v", o, c, ok)
+	}
+	if o, c, ok := subjectCollector("collector."+org+"."+col+MetricsSuffix, MetricsSuffix); !ok || o != org || c != col {
+		t.Errorf("metrics subject: %s %s %v", o, c, ok)
 	}
 	if _, _, ok := subjectCollector("collector.x.y"+IngestSuffix, IngestSuffix); ok {
 		t.Error("non-UUID subject accepted")

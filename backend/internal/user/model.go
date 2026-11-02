@@ -73,7 +73,9 @@ type CustomRole struct {
 }
 
 // UserRoleAssignment represents a user's role assignment. Exactly one of
-// CustomRoleID (custom role) or RoleID (standard/builtin role) is set.
+// CustomRoleID (custom role) or RoleID (standard/builtin role) is set. ID
+// names the row of role_assignment (standard role) or user_custom_role
+// (custom role); DELETE /role-assignments/{id} revokes either.
 type UserRoleAssignment struct {
 	ID           string    `json:"id"`
 	UserID       string    `json:"user_id"`
@@ -84,6 +86,14 @@ type UserRoleAssignment struct {
 	GrantedAt    time.Time `json:"granted_at"`
 	GrantedBy    string    `json:"granted_by,omitempty"`
 }
+
+// ActionRoleAssignmentRevoked is the audit action of a revoked role
+// assignment (DELETE /role-assignments/{id}, AUT-02, API-05).
+const ActionRoleAssignmentRevoked = "role_assignment.revoked"
+
+// ActionLoginRefused is the audit action of a login refused because the
+// user holds no role (F-364): no session, no role assigned.
+const ActionLoginRefused = "user.login_refused"
 
 // CreateUserRequest is the payload for creating a user.
 type CreateUserRequest struct {

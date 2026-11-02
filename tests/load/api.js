@@ -2,38 +2,66 @@
 // Each request type is its own scenario; the thresholds are the p95 budgets
 // of NFR-02, so a missed budget fails the run. OBJECTS is the size the
 // demo organization was seeded with (cmd/seed -objects, default 10000).
+// The search budget is measured at the global search the UI uses
+// (global_search, GET /search over the index the workflow rebuilds after
+// the seed), next to the name filter of the CI list (list_name_filter), a
+// filter on a searchable JSONB attribute (attr_filter, the seed's
+// cost_center) and the relationships of a CI (relationships; WP-437,
+// F-116).
+//
+// No request may fail (F-388): http_req_failed is 0 in the run and in every
+// scenario, every bulk job succeeds (bulk_jobs_succeeded, the checks of
+// the scenario bulk), and bulk_500_duration records only bulk jobs that
+// succeeded; a refused bulk request (a few ms) never counts as a fast bulk.
+// Every failed request is logged with its status (lib.js failed).
 //
 //   k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat key) tests/load/api.js
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Trend } from 'k6/metrics';
-import { BASE_URL, firstID, get, params, post } from './lib.js';
+import { Counter, Trend } from 'k6/metrics';
+import { BASE_URL, failed, firstID, get, params, post } from './lib.js';
 
 const DURATION = __ENV.DURATION || '1m';
 const VUS = Number(__ENV.VUS || 5);
 const OBJECTS = Number(__ENV.OBJECTS || 10000);
+// The searchable attribute of the seed and its number of values
+// (cmd/seed AttributeKey, CostCenters): CI i holds CC-<i mod 50 + 1>.
+const ATTR_KEY = __ENV.ATTR_KEY || 'cost_center';
+const ATTR_VALUES = Number(__ENV.ATTR_VALUES || 50);
 
 // The bulk of 500 ids runs as a job; its duration is the time until the
-// job finished.
+// job succeeded. BULK_JOBS jobs run one after the other, each must succeed.
+const BULK_JOBS = 3;
 const bulkDuration = new Trend('bulk_500_duration', true);
+const bulkSucceeded = new Counter('bulk_jobs_succeeded');
 
 const reads = (exec) => ({ executor: 'constant-vus', exec, vus: VUS, duration: DURATION });
 
+const scenarios = {
+  list: reads('list'),
+  list_name_filter: reads('listNameFilter'),
+  detail: reads('detail'),
+  filter: reads('filter'),
+  rack: reads('rack'),
+  // The scenarios of WP-437 join the mixed load with two VUs each: the
+  // concurrent load of the run grows by about a fifth (32 to 38 VUs).
+  global_search: { ...reads('globalSearch'), vus: 2 },
+  attr_filter: { ...reads('attrFilter'), vus: 2 },
+  relationships: { ...reads('relationships'), vus: 2 },
+  topology: { ...reads('topology'), vus: 2 },
+  impact: { ...reads('impact'), vus: 2 },
+  impact_full: { ...reads('impactFull'), vus: 2 },
+  bulk: { executor: 'per-vu-iterations', exec: 'bulk', vus: 1, iterations: BULK_JOBS, maxDuration: '10m' },
+};
+
 export const options = {
-  scenarios: {
-    list: reads('list'),
-    search: reads('search'),
-    detail: reads('detail'),
-    filter: reads('filter'),
-    rack: reads('rack'),
-    topology: { ...reads('topology'), vus: 2 },
-    impact: { ...reads('impact'), vus: 2 },
-    impact_full: { ...reads('impactFull'), vus: 2 },
-    bulk: { executor: 'per-vu-iterations', exec: 'bulk', vus: 1, iterations: 3, maxDuration: '10m' },
-  },
+  scenarios,
   thresholds: {
     'http_req_duration{name:list}': ['p(95)<500'],
-    'http_req_duration{name:search}': ['p(95)<500'],
+    'http_req_duration{name:list_name_filter}': ['p(95)<500'],
+    'http_req_duration{name:global_search}': ['p(95)<500'],
+    'http_req_duration{name:attr_filter}': ['p(95)<500'],
+    'http_req_duration{name:relationships}': ['p(95)<500'],
     'http_req_duration{name:detail}': ['p(95)<300'],
     'http_req_duration{name:filter}': ['p(95)<500'],
     'http_req_duration{name:rack}': ['p(95)<300'],
@@ -41,6 +69,14 @@ export const options = {
     'http_req_duration{name:impact}': ['p(95)<2000'],
     'http_req_duration{name:impact_full}': ['p(95)<2000'],
     bulk_500_duration: ['p(95)<30000'],
+    // F-388: every bulk job succeeds (a submetric without samples is not
+    // evaluated, so the counter also catches bulk jobs that never ran).
+    bulk_jobs_succeeded: [`count==${BULK_JOBS}`],
+    'checks{scenario:bulk}': ['rate==1'],
+    // F-388: no failed request in the run (setup included) and in every
+    // scenario.
+    http_req_failed: ['rate==0'],
+    ...Object.fromEntries(Object.keys(scenarios).map((s) => [`http_req_failed{scenario:${s}}`, ['rate==0']])),
     checks: ['rate>0.99'],
   },
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'max', 'count'],
@@ -52,6 +88,13 @@ export function setup() {
     const page = get(`/cis?limit=200&offset=${offset}&sort_by=name`, 'setup').json('data');
     ids.push(...page.map((c) => c.id));
   }
+  // The relationships are asked for 500 CIs from five pages spread over
+  // the organization; the hubs (the PDUs) are among them at their share.
+  const spread = [];
+  for (let k = 0; k < 5; k++) {
+    const offset = Math.floor((k * OBJECTS) / 5);
+    spread.push(...get(`/cis?limit=100&offset=${offset}&sort_by=name`, 'setup').json('data').map((c) => c.id));
+  }
   const racks = get('/racks?limit=1', 'setup').json('data');
   return {
     // sw-00001 is the core switch of the seed: about half of the CIs hang
@@ -61,6 +104,7 @@ export function setup() {
     server: firstID('search=srv-04242'),
     rack: racks[0].id,
     bulk: ids.slice(0, 500),
+    spread,
   };
 }
 
@@ -71,8 +115,36 @@ export function list() {
   sleep(0.2);
 }
 
-export function search() {
-  get(`/cis?limit=50&search=srv-${pick(9000)}`, 'search');
+// listNameFilter is the name filter of the CI list (name ILIKE), formerly
+// the scenario search.
+export function listNameFilter() {
+  get(`/cis?limit=50&search=srv-${pick(9000)}`, 'list_name_filter');
+  sleep(0.2);
+}
+
+// globalSearch searches a server by its name as the command palette of the
+// UI does (GET /search, five hits).
+export function globalSearch() {
+  const name = `srv-${pick(9000)}`;
+  const res = get(`/search?q=${name}&limit=5`, 'global_search');
+  check(res, { 'global search finds the CI': (r) => r.status === 200 && (r.json('data') || []).some((h) => h.title === name) });
+  sleep(0.2);
+}
+
+// attrFilter filters the CI list on a value of the searchable attribute
+// (200 CIs per value in the NFR-10 seed).
+export function attrFilter() {
+  const value = `CC-${String((Math.floor(Math.random() * OBJECTS) + 1) % ATTR_VALUES + 1).padStart(3, '0')}`;
+  const res = get(`/cis?limit=50&filter[attributes.${ATTR_KEY}]=${value}`, 'attr_filter');
+  check(res, { 'attribute filter finds CIs': (r) => r.status === 200 && (r.json('data') || []).length > 0 });
+  sleep(0.2);
+}
+
+// relationships lists the relationships of a CI as its detail view does.
+export function relationships(data) {
+  const id = data.spread[Math.floor(Math.random() * data.spread.length)];
+  const res = get(`/cis/${id}/relationships`, 'relationships');
+  check(res, { 'relationships of the CI': (r) => r.status === 200 && (r.json('data') || []).length > 0 });
   sleep(0.2);
 }
 
@@ -129,20 +201,30 @@ export function impactFull(data) {
   sleep(1);
 }
 
+// bulk sets the status of 500 CIs (202, a job) and waits until the job
+// ended. Only a job that succeeded adds its duration and counts in
+// bulk_jobs_succeeded; a refused request, a job that failed or one still
+// running after the wait fails the check "bulk job succeeded" (F-388).
 export function bulk(data) {
   const status = __ITER % 2 === 0 ? 'maintenance' : 'active';
   const start = Date.now();
   const res = post('/cis/bulk', { ids: data.bulk, status }, 'bulk');
+  let state = `HTTP ${res.status}`;
   if (res.status === 202) {
     const job = res.json('job_id');
     for (let i = 0; i < 300; i++) {
-      const state = http.get(`${BASE_URL}/api/v1/jobs/${job}`, params('bulk-poll')).json('status');
+      const poll = failed(http.get(`${BASE_URL}/api/v1/jobs/${job}`, params('bulk-poll')), 'bulk-poll');
+      state = poll.status === 200 ? poll.json('status') : `HTTP ${poll.status}`;
       if (!['queued', 'running'].includes(state)) {
-        check(state, { 'bulk job succeeded': (s) => s === 'succeeded' });
         break;
       }
       sleep(0.1);
     }
   }
-  bulkDuration.add(Date.now() - start);
+  if (check(state, { 'bulk job succeeded': (s) => s === 'succeeded' })) {
+    bulkDuration.add(Date.now() - start);
+    bulkSucceeded.add(1);
+  } else {
+    console.warn(`bulk job ${__ITER + 1} of ${BULK_JOBS} did not succeed: ${state}`);
+  }
 }

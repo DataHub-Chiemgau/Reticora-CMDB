@@ -27,9 +27,6 @@ type Consumer interface {
 const (
 	DefaultBatch    = 100
 	DefaultInterval = time.Second
-	// KeepPublished is how long published rows stay in the outbox; the
-	// stream keeps the events as long (EVT-01).
-	KeepPublished = StreamMaxAge
 	// publisherLockKey namespaces the per-organization publisher lock.
 	publisherLockKey = 1165389429
 )
@@ -45,8 +42,18 @@ type Publisher struct {
 	consumers []Consumer
 	Batch     int
 	Interval  time.Duration
-	now       func() time.Time
+	// MaxAge and MaxBytes are the retention of the stream (EVT-01,
+	// RETICORA_EVENTS_MAX_AGE, RETICORA_EVENTS_MAX_BYTES); published outbox
+	// rows keep their data as long as the stream keeps the events
+	// (KeepPublished).
+	MaxAge   time.Duration
+	MaxBytes int64
+	now      func() time.Time
 }
+
+// KeepPublished is how long published rows keep their data in the outbox:
+// as long as the stream keeps the events (MaxAge).
+func (p *Publisher) KeepPublished() time.Duration { return p.MaxAge }
 
 // WithClock replaces the clock (tests).
 func (p *Publisher) WithClock(now func() time.Time) *Publisher {
@@ -58,17 +65,18 @@ func (p *Publisher) WithClock(now func() time.Time) *Publisher {
 // consumers still receive the events).
 func NewPublisher(pool *pgxpool.Pool, js jetstream.JetStream, consumers ...Consumer) *Publisher {
 	return &Publisher{pool: pool, js: js, consumers: consumers, Batch: DefaultBatch, Interval: DefaultInterval,
-		now: func() time.Time { return time.Now().UTC() }}
+		MaxAge: StreamMaxAge, MaxBytes: StreamMaxBytes, now: func() time.Time { return time.Now().UTC() }}
 }
 
-// Setup creates or updates the stream RETICORA_EVENTS.
+// Setup creates or updates the stream RETICORA_EVENTS with the retention
+// MaxAge and MaxBytes.
 func (p *Publisher) Setup(ctx context.Context) error {
 	if p.js == nil {
 		return nil
 	}
 	_, err := p.js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name: StreamName, Subjects: []string{SubjectPrefix + ">"}, Storage: jetstream.FileStorage,
-		MaxAge: StreamMaxAge, MaxBytes: StreamMaxBytes, Duplicates: 10 * time.Minute,
+		MaxAge: p.MaxAge, MaxBytes: p.MaxBytes, Duplicates: 10 * time.Minute,
 	})
 	if err != nil {
 		return fmt.Errorf("ensure stream %s: %w", StreamName, err)
@@ -201,12 +209,15 @@ func (p *Publisher) deliver(ctx context.Context, env, revealed *Envelope) error 
 	return nil
 }
 
-// Cleanup removes the rows published longer than KeepPublished ago.
+// Cleanup removes the rows published longer than KeepPublished ago. The
+// newest row of the organization and of each entity stays as the anchor
+// the numbering continues from (sequence, entity_seq), without its data:
+// no event data outlives the retention (NFR-06).
 func (p *Publisher) Cleanup(ctx context.Context) error {
+	cutoff := p.now().Add(-p.KeepPublished())
 	var orgs []string
 	err := database.WithSystem(ctx, p.pool, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT DISTINCT organization_id::text FROM event_outbox WHERE published_at < $1`,
-			p.now().Add(-KeepPublished))
+		rows, err := tx.Query(ctx, `SELECT DISTINCT organization_id::text FROM event_outbox WHERE published_at < $1`, cutoff)
 		if err != nil {
 			return err
 		}
@@ -224,7 +235,13 @@ func (p *Publisher) Cleanup(ctx context.Context) error {
 			_, err := tx.Exec(ctx, `DELETE FROM event_outbox o WHERE organization_id = $1 AND published_at < $2
 				AND sequence < (SELECT max(sequence) FROM event_outbox WHERE organization_id = $1)
 				AND (entity_id IS NULL OR entity_seq < (SELECT max(entity_seq) FROM event_outbox e
-					WHERE e.organization_id = $1 AND e.entity_id = o.entity_id))`, org, p.now().Add(-KeepPublished))
+					WHERE e.organization_id = $1 AND e.entity_id = o.entity_id))`, org, cutoff)
+			if err != nil {
+				return err
+			}
+			// The anchors keep only their numbers.
+			_, err = tx.Exec(ctx, `UPDATE event_outbox SET data = '{}'::jsonb
+				WHERE organization_id = $1 AND published_at < $2 AND data <> '{}'::jsonb`, org, cutoff)
 			return err
 		}); err != nil {
 			return err

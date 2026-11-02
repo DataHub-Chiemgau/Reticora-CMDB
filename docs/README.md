@@ -6,7 +6,7 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 
 ### Technology Stack
 
-- **Backend**: Go 1.26.9+, chi v5 router, pgx v5 (hand-written SQL)
+- **Backend**: Go 1.26.10+, chi v5 router, pgx v5 (hand-written SQL)
 - **Frontend**: React 18, TypeScript, Vite, TanStack Query v5, Zustand, React Router v6
 - **Database**: PostgreSQL 16 with Row-Level Security
 - **Messaging**: NATS JetStream
@@ -21,6 +21,14 @@ minimum for the central cloud is 4 vCPU, 8 GB RAM and 100 GB SSD for up to
 10,000 objects; the sizing table up to 50,000 objects is in
 [ops/sizing.md](ops/sizing.md). Installation problems:
 [troubleshooting-installation.md](troubleshooting-installation.md).
+
+By default the installers install the signed release artifacts of the newest
+release (or `--ref`/`--release v<version>`), verified with cosign before
+anything runs (TEC-15, E-69 Option 1). A development checkout is installed
+with `./install.sh --cloud --build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`):
+built locally, not signature-verified; only then is a ref that is no release
+tag accepted. Default, switch and error messages:
+[troubleshooting-installation.md, section 9](troubleshooting-installation.md#9-signature-verification).
 
 ### Monorepo Structure
 
@@ -61,20 +69,19 @@ The hierarchy is: Organization → Client → Site → Building → Room → Rac
 
 > **Deployment requirement — non-privileged database role.** RLS is bypassed for
 > superusers and roles with `BYPASSRLS`. The server must therefore connect with a
-> dedicated role created with `NOSUPERUSER NOBYPASSRLS`, e.g.:
+> dedicated login created with `NOSUPERUSER NOBYPASSRLS` that is a member of the
+> application role `reticora_app` (created by the migrations) and of no other
+> role, e.g.:
 >
 > ```sql
-> CREATE ROLE reticora_app LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS;
-> GRANT CONNECT ON DATABASE reticora TO reticora_app;
-> GRANT USAGE ON SCHEMA public TO reticora_app;
-> GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO reticora_app;
-> GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO reticora_app;
-> ALTER DEFAULT PRIVILEGES IN SCHEMA public
->   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO reticora_app;
+> CREATE ROLE reticora_runtime LOGIN PASSWORD '…' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+> GRANT reticora_app TO reticora_runtime;
 > ```
 >
-> The `docker-compose.yml` development database uses the superuser for
-> convenience; never point a real deployment at a superuser DSN. The
+> The server refuses to start with a superuser or `BYPASSRLS` login, or with a
+> login that reaches such a role (see `RETICORA_DATABASE_URL` below); the
+> superuser of the `docker-compose.yml` development database is for migrations
+> and the seed only. The
 > `metric_sample` hypertable is the documented exception: TimescaleDB does not
 > support RLS on hypertables with columnstore, so metrics isolation is enforced
 > at the repository layer (every query carries `organization_id`).
@@ -237,9 +244,11 @@ RS256 session token. The verifier is mandatory and the returned ID token is
 signature-verified against the provider's JWKS with issuer, audience, expiry
 and issued-at checks. The session token follows AUT-02: it lives 15 minutes,
 carries `sub`, `org`, `scopes`, `cls`/`sts`/`tms` (client, site and team scope;
-`null` = whole organization), `name`, `email`, `jti`, `iat` and `exp`, and its
-header names the signing key in `kid` (RFC 7638 thumbprint). Every subsequent
-request carries that token as a bearer token in the `Authorization` header.
+`null` = whole organization), `name`, `email`, `sid` (the session: the refresh
+family of the login, kept by every refresh and counted by the per-session rate
+limit), `jti`, `iat` and `exp`, and its header names the signing key in `kid`
+(RFC 7638 thumbprint). Every subsequent request carries that token as a bearer
+token in the `Authorization` header.
 The refresh token is never visible to JavaScript: the callback sets it as the
 HttpOnly, Secure, SameSite=Strict cookie `reticora_refresh` (path
 `/api/v1/auth`), and the client calls `POST /api/v1/auth/refresh` once on a
@@ -323,8 +332,9 @@ containment rows into `parent_ci_id` and moved the structural rows to
 `migration_quarantine`.
 `ci.lifecycle_state` (software lifecycle) exists only for CI types with a
 lifecycle model and must be a state of it (trigger; a transition of a CI
-without a model is 422). `ci.health` is read-only: after every alert
-evaluation `ci_refresh_health` sets critical or warning when the latest
+without a model is 422 with the field `to_state`). `ci.health` is
+read-only: every minute the worker `health` (also without the module
+alerting) runs `ci_refresh_health`, which sets critical or warning when the latest
 sample of a metric breaches an enabled rule of that severity, ok for samples
 without a breach and unknown without a sample in the last 15 minutes
 (migration 0090; health findings are not G1 scope, E-36).
@@ -354,9 +364,14 @@ entitlements are cached per organization for 60 seconds in the shared cache
 (Redis), so a change on one instance invalidates every instance (ENT-03). The
 middleware maps route prefixes to features (export, ingest including the
 `/api/v1/discovery/ingest` alias, topology, ...) and answers with 403
-`feature-not-entitled`; GraphQL fields check their feature as well. Quotas are
+`feature-not-entitled`; GraphQL fields check their feature as well (the
+route→feature mapping of the phase-1 features is the table below). Quotas are
 enforced in the domain service (`ci.Service.Create`) and answer with 403
-`entitlement-limit`. After `valid_until` only discovery stops (CH21): ingest
+`entitlement-limit`; `max_cis` counts the active CIs of the whole
+organization, also those outside the writer's client and site scope
+(`ci_active_count()`, migration 000186), and holds on every write
+that makes a CI active: the restore, the unmerge, and of a review item `new`
+and the merge of a `resurrected_device` item (the item stays open). After `valid_until` only discovery stops (CH21): ingest
 and new scans answer 403 `license-expired` (counter
 `reticora_ingest_refused_license_expired_total`), reading, editing, export and
 every other feature stay available; the heartbeat response carries
@@ -370,7 +385,27 @@ no data: only new CIs are blocked (REST) or held (ingest). Repository errors
 deny access (fail-closed). The tenant API is read-only (`GET
 /api/v1/entitlements`); entitlements are written by the operator only,
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
-in `operator_audit` with the previous and the new state (ENT-04, E-12).
+in `operator_audit` with the previous and the new state, in the same
+transaction: without its entry the change is rolled back (500) (ENT-04,
+E-12). Only the feature keys of ENT-02, the module keys and the add-ons and
+the quotas `max_cis`, `max_collectors`, `max_users`, `max_api_keys` are
+accepted; any other key is 422 with the field.
+
+Route→feature mapping of the phase-1 features (ENT-02, ENT-05;
+`gatedRoutes`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
+checks in the handlers where the middleware cannot see the object; F-400).
+Not entitled is 403 `feature-not-entitled`; an expired discovery license
+stops only ingest and new scans (CH21):
+
+| Feature | REST (middleware) | In the handler / GraphQL / NATS |
+|---------|-------------------|---------------------------------|
+| discovery | `/api/v1/ingest*`, `/api/v1/discovery/*` (except the review alias), `/api/v1/discovery-scopes*`, `/api/v1/collectors*` (except `/collectors/enroll`), `/api/v1/credentials*` | resolving a `scope_suggested` review item (accept and dismiss) on `/review-items/{id}/resolve` and its alias; the collectors' edge ingest and their scope channel: without discovery `scopes.request`, `scopes.result`, `subnets.report`, `jobs.request` and `jobs.status` are refused, after expiry `scopes.result` and `subnets.report` |
+| rack_view | `/api/v1/racks*`, `/api/v1/mounts*`, `/api/v1/rack-mounts*` | `POST /api/v1/locations` with kind `rack`, `PATCH`/`DELETE /api/v1/locations/{id}` of a rack node; GraphQL `rackLayout` |
+| topology | `/api/v1/topology*`, `/api/v1/impact*`, `/api/v1/cis/{id}/dependencies`, `/api/v1/cis/{id}/blast-radius` | GraphQL `topology` |
+| export_csv | `/api/v1/export*`, `/api/v1/exports*` | — |
+| webhooks | `/api/v1/webhooks*` | — |
+| api_access | `/api/v1/api-keys*` | every request authenticated with `X-API-Key` |
+| cmdb_core (always) | everything else, among it the location tree (`GET /api/v1/locations*`, rack nodes with their names included, and writes of the other nodes) and the review queue (`/api/v1/review-items*`, the deprecated `/api/v1/discovery/review-items*`, GraphQL `reviewInbox`; CI merges open review items as well) | — |
 Attribute rules use the JSON rule AST of `api/rules.schema.json` (MET-45,
 phase 1: required, pattern, range, enum, combined with all).
 `backend/internal/rules` evaluates them bindingly, `frontend/src/rules` for
@@ -379,18 +414,36 @@ form previews; both run the cases of `api/rules.conformance.json`.
 Users join an organization by invitation (`/api/v1/invitations`, TLC-03,
 `user:manage`): an invitation names the address, a role and its scope
 (org, client or site within the issuer's own scope), is valid for seven
-days and stores only the hash of its token, which the response shows once.
+days and stores only the hash of its token, which the invitee receives by
+mail as link (NTF-05).
 `POST /api/v1/invitations/accept` (public, pre-auth limit) consumes it
-atomically and once and creates the user with that role; with the Keycloak
-admin client the accepting person's password creates the IdP account.
+atomically and once and creates the user with that role. With the Keycloak
+admin client, which the server wires for invitations only together with the
+central SMTP server (`RETICORA_SMTP_HOST`), the accepting person's password
+creates a verified IdP account of the address; the token therefore reaches
+the invited mailbox only. Issue and renewal send the invitation mail
+straight to the invited address over the central SMTP server, in their
+transaction and never over a notification channel of the organization (an
+organization's own SMTP server could pass the link to its administrators;
+organizations without an e-mail channel, like the default organization of
+an installation, get it as well); neither their response nor
+`invitation.created` carries the token or the link. When the SMTP server
+does not take the mail, nothing is stored or renewed and the API answers
+503 ("the invitation e-mail could not be sent"). Without that client the
+response shows the token once, the organization's e-mail channels mail the
+link of `invitation.created`, and the invitee signs in with an existing IdP
+account of the address, which the first login links.
 Expired invitations are renewed with a new token; pending ones can be
 revoked. Every step is audited.
 Operators create organizations with plan and limits through
 `POST /api/v1/admin/orgs` (TLC-02): the same creation chain as the
 self-signup (slug, default VRF, first org_admin, entitlements of the plan
 with the given limits), atomically with an `org.create` entry in
-`operator_audit`; with the Keycloak admin client the first org_admin is
-invited by the IdP's mail to set a password.
+`operator_audit`; with the Keycloak admin client and the central SMTP
+server (`RETICORA_SMTP_HOST`, whose settings the installer also gives the
+realm) the first org_admin is invited by the IdP's mail to set a password
+(`admin_invited`), otherwise the organization is created without an IdP
+account.
 Plan matrix (ENT-06):
 
 | Plan | Features |
@@ -410,7 +463,12 @@ when it is stored in the limits of a row.
 leaving them as ad-hoc JSON strings. `permission` is the global catalogue,
 `role_permission` grants catalogue entries to tenant roles, and the effective
 permissions endpoint also folds in existing custom-role JSON grants so old data
-continues to work while new code can validate against the catalogue. SLA policy
+continues to work while new code can validate against the catalogue. A
+standard role grants its `role_permission` rows and its seed keys
+(`role.permissions`, the RBA-02 matrix); `PUT /api/v1/roles/{id}/permissions`
+may add keys but answers 409 (`standard-role-permissions`) when a seed key is
+left out, and the role's permission list, that response and the route audit
+show the union (F-398, WP-669). Narrower roles are custom roles. SLA policy
 rows define priority-based response and resolution targets, while `ticket_sla`
 stores the applied policy and clock outcomes. Ticket creation, first visible
 response and resolution transitions update that state so breach listings are
@@ -593,7 +651,19 @@ troubleshooting (yellow status, disk watermark, unreachable backend).
 client-certificate material is available — from `RETICORA_TLS_CLIENT_CERT`/
 `RETICORA_TLS_CLIENT_KEY` (or the `_FILE` variants), or from the enrollment
 keystore at `RETICORA_CREDENTIALS_PATH` (default
-`/var/lib/reticora-collector/credentials.json`). The mTLS HTTP client is built
+`/var/lib/reticora-collector/credentials.json`). `install-vm.sh` writes that
+path into `collector.env` and puts the command of the Discovery page's enroll
+instruction on PATH as `/usr/local/bin/reticora-collector`, the command its
+systemd unit starts; the image ships the binary under the same name as its
+entrypoint. `reticora-collector enroll --server <url> --code <code>` thus
+stores the identity where the service reads it. Unattended deployments
+(containers, automation) set `RETICORA_ENROLL_TOKEN` (the one-time code) and
+`RETICORA_CLOUD_URL` (the server URL) instead (COL-04): without a keystore the
+first start enrolls with a locally generated key and a CSR, stores the identity
+(mode `600`) and starts normally; with a keystore it does not enroll again.
+Only one of the two variables set, a damaged keystore or a refused code end the
+start with exit code `1` and the cause in the log; the token is never logged
+(details in `deploy/README.md`, "Enrollment"). The mTLS HTTP client is built
 by `edgecore/transport.NewMTLS` (TLS 1.3 minimum). Without certificate
 material the collector logs a warning and falls back to plain HTTPS/HTTP so
 local development keeps working. Discovery results are uploaded as
@@ -646,13 +716,45 @@ delayed alert is usually worse than a lost one. Trap storms are bounded by a
 64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
 varbinds are skipped, never fatal.
 
-**Metric polling (Epic E):** when `RETICORA_METRICS_INTERVAL` is set (e.g.
-`1m`), the collector polls numeric SNMP OIDs on every scan target and uploads
-the samples to the monitoring ingest. The OID list comes from
-`RETICORA_SNMP_POLL_METRICS` (`name=oid,name=oid`, …); when unset, the IF-MIB
-counters of ifIndex 1 (`if_in_octets`, `if_out_octets`, `if_oper_status`)
-are polled. Unreachable targets and non-numeric values are skipped so one
-failing device never stalls a cycle.
+**Metric polling (Epic E, MON-02):** the collector polls base metrics over
+SNMP and uploads them to the monitoring ingest (labels `collector_id` and
+`kind` are added on upload):
+
+- *Interface counters (standard poll, `kind=snmp_poll`):* on by default every
+  300 s on every scan target (`RETICORA_SCAN_SUBNETS`), 16 targets at a time.
+  `RETICORA_METRICS_INTERVAL` sets the interval (e.g. `1m`), `0` turns the
+  poll off. Per interface — at most 256 per device, the first by ifIndex —
+  `if_in_octets` and `if_out_octets` (64-bit `ifHCInOctets`/`ifHCOutOctets`
+  of the ifXTable; without ifXTable the 32-bit ifTable counters) and
+  `if_oper_status` (1 up, 2 down, …), labelled `target`, `ifIndex` and
+  `ifName` when the device reports it. `RETICORA_SNMP_POLL_METRICS`
+  (`name=oid,name=oid`, …) replaces the standard poll with one GET of the
+  listed OIDs.
+- *Power readings (`kind=power`):* after every discovery pass with the
+  `power` protocol, per power device found, labelled `target` and
+  `device=ups|pdu`. A UPS gives the UPS-MIB values `ups_battery_status`,
+  `ups_battery_runtime_seconds`, `ups_battery_charge_percent` and
+  `ups_output_load_percent`. A PDU gives `pdu_current_amps` and, where the
+  device reports it, `pdu_active_power_watts` from the metering table of its
+  vendor family, which the probe recognises by the outlet table: APC Rack
+  PDU 2 (rPDU2PhaseStatusTable, current and power per `phase`, plus
+  `module`), APC Rack PDU/MasterSwitch (rPDULoadStatusTable, current per
+  `phase`; bank rows are left out) and Raritan PX2/PX3 (PDU2-MIB inlet
+  sensors, current and active power per `inlet`). PDUs of other vendors give
+  no readings.
+
+Values a device does not answer (noSuchObject) or answers non-numerically are
+skipped, an unreachable target is skipped for the cycle, so one failing
+device never stalls it. SNMP load of the interface poll per device and
+interval: one GETBULK walk (max-repetitions 50) per column — ifOperStatus,
+ifName, ifHCInOctets, ifHCOutOctets — that is `ceil((n+1)/50)` requests per
+column for n interfaces, at most 6 at the 256-interface cap: up to 24 GETBULK
+requests of up to 50 varbinds each every 300 s (a device without ifXTable:
+two more 32-bit counter walks, the ifXTable walks end after one request
+each). A silent host costs one timeout (5 s) per cycle. The power poll adds
+one GET of four OIDs per UPS or one walk of two to four short columns per
+PDU per discovery pass; the probe asks every SNMP-answering host one GETNEXT
+for the outlet tables.
 
 **Alert evaluation (Epic E):** the server evaluates enabled alert rules once
 per minute against the metric store (`monitoring.Evaluator`). A rule fires
@@ -698,6 +800,34 @@ by `POST /api/v1/search/reindex`, which rebuilds the tenant's search index
 - `server` — Main API server (HTTP + GraphQL BFF).
 - `collector` — On-premise discovery collector.
 - `agent` — Endpoint agent for server/client telemetry.
+
+#### GraphQL-BFF
+
+`POST /bff/graphql` (`backend/internal/graphqlbff`, GQL-01/GQL-02) is a
+read-only GraphQL backend-for-frontend: it answers session principals only
+(API keys and service tokens use the REST API), is not part of the public
+REST contract, and every resolver checks its read permission and
+entitlement and reads through the tenant-scoped repositories (RLS).
+
+**API-only for now (GQL-01, F-332):** in phase 1 no page of the web UI uses
+the BFF; every UI read goes through the REST API. The client
+`bffQuery` (`frontend/src/api/client.ts`) is the prepared entry point and
+stays covered by `client.test.ts`. The UI starts to use the BFF with its
+first aggregate view (e.g. the CI detail with relationships and topology,
+phase 2); until then the BFF serves API clients with a session.
+
+**Limits (SEC-10, E-16 provisional):** depth 10, a complexity budget of
+5,000 and a deadline of 10 s per request. A list costs its selection times
+the size it may reach: `cis`, `searchEverything`, `reviewInbox` and `jobs`
+their page (`first`, default 50, at most 100), `relationships` its page
+(at most 100), `rackLayout` 100.
+`topology` costs its selection per node it may hold (F-333): without a root
+2,000 (`MaxTopologyNodes`), from a root the CIs a walk of `depth` hops
+reaches at 10 edges per CI (the NFR-01 volumes: 100,000 relationships for
+10,000 objects), i.e. 11 at depth 1, 111 at the default depth 2, 1,111 at
+depth 3 and 2,000 from depth 4. A topology without a root therefore selects
+about one field per node or edge (`{ topology { nodes { id } } }`); larger
+selections need a root or the REST endpoint `GET /api/v1/topology`.
 
 ### Frontend Tech-Stack
 
@@ -778,6 +908,27 @@ on generation order; CI runs `npm run generate:api:check`, which regenerates
 them and fails on any diff. Regenerate with `make generate-api-client` (or
 `npm run generate:api`) after every specification change.
 
+**Browser-Unterstützung (UI-18, NFR-07):** Supported are the current and the
+previous version of Chrome, Edge, Firefox and Safari, plus mobile Chrome and
+Safari (E-88). The evidence is automated, without an external browser grid:
+
+| Job | Versions | Projects | Artifacts |
+|-----|----------|----------|-----------|
+| `e2e` (`ci.yml`, every push and PR) | current: the builds of the `@playwright/test` in `frontend/package.json` | `chromium`, `edge` (installed Microsoft Edge), `firefox`, `webkit`, `mobile-chrome` (Pixel 7), `mobile-safari` (iPhone 14) | `playwright-report-<project>`, also when green, kept 30 days |
+| `e2e-prev` (`e2e-prev.yml`, nightly and manual) | previous: `frontend/e2e-prev` pins the previous minor of `@playwright/test` (Chromium, Firefox, WebKit n-1); Chrome n-1 from Chrome for Testing | `chromium`, `chrome-prev`, `firefox`, `webkit`, `mobile-chrome`, `mobile-safari` | `e2e-prev-report-<project>`, kept 30 days |
+
+Both jobs run the same specs of `frontend/e2e/` (smoke, the axe WCAG 2.1 AA
+check `a11y.spec.ts`, keyboard and the core flows against the strict,
+contract-checked mock backend); no test is skipped per browser. Limitations:
+Edge n-1 is approximated by Chromium n-1 and Safari n-1 by WebKit n-1, since
+no previous Edge or Safari build is available on the Linux runners; the
+mobile projects are the desktop engines with a device profile (viewport,
+touch, user agent), so `mobile-safari` is WebKit, not iOS Safari. A local run
+of `e2e-prev`: `cd frontend/e2e-prev && npm ci && npx playwright install`,
+serve a build on port 4173, then
+`CI=1 npx playwright test --config playwright.prev.config.ts --project=<name>`
+(`chrome-prev` needs `PW_CHROME_PREV_EXECUTABLE`).
+
 **Production serving:** The built SPA is served via Nginx (`nginx.conf`) in a Docker container with proper SPA fallback routing. For HTTPS, `install-cloud.sh` can provision a free Let's Encrypt certificate automatically (nginx + Certbot, ACME http-01 challenge): when a public domain is entered, it writes `RETICORA_TLS_DOMAIN` into `.env`, bootstraps a self-signed certificate, issues the real one via the `certbot` compose service and reloads nginx. The TLS configuration lives in `deploy/docker-compose/nginx-tls.conf.template` (rendered by the nginx entrypoint into `/etc/nginx/conf.d/reticora-tls.conf`, included by the image's `nginx.conf`); with TLS enabled the UI is served at `https://<domain>` on port 443 and port 80 handles the ACME challenge plus the HTTP→HTTPS redirect. Certificates are stored under `deploy/docker-compose/letsencrypt/` and renewed automatically.
 
 ### Deployment
@@ -821,7 +972,7 @@ counts and verifies the audit hash chain with the `audit-verify` binary.
 
 | Service | Image | Purpose |
 |---------|-------|---------|
-| PostgreSQL + TimescaleDB | timescale/timescaledb:latest-pg16 | Primary database with time-series |
+| PostgreSQL + TimescaleDB | timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 | Primary database with time-series |
 | NATS | nats:2.10-alpine | Event bus (JetStream) |
 | Redis | redis:7-alpine | Cache, sessions, rate-limiting |
 | MinIO (Silo build) | pgsty/minio:RELEASE.2026-08-04T00-00-00Z | S3-compatible object storage; `minio/minio` is no longer published |
@@ -863,7 +1014,14 @@ empty endpoint the providers stay no-op.
 
 The server is configured via environment variables:
 - `RETICORA_PORT` — HTTP listen port (default 8080).
-- `RETICORA_DATABASE_URL` — PostgreSQL connection string.
+- `RETICORA_DATABASE_URL` — PostgreSQL connection string of the runtime login
+  (the installer creates `reticora_runtime`). The login itself must be
+  `NOSUPERUSER NOBYPASSRLS` and must not reach a `SUPERUSER` or `BYPASSRLS`
+  role, inherited or by `SET ROLE`; make it a member of `reticora_app` only.
+  A `RESET ROLE` would otherwise undo the role switch below, so the server
+  **refuses to start** with a role-contract error naming the session user
+  (TEN-03, F-057). The migration/admin login (for example the bootstrap
+  superuser) is for migrations, seed and backups only.
 - `RETICORA_DB_APP_ROLE` — database role every pooled connection switches into
   (default `reticora_app`, created by migration `000056`). Row Level Security is
   bypassed for superusers, `BYPASSRLS` roles and — without `FORCE ROW LEVEL
@@ -871,15 +1029,17 @@ The server is configured via environment variables:
   serving any request and **refuses to start** if the effective role can still
   bypass RLS. Set this only when the login role is already restricted; setting it
   to an empty value disables the role switch but not the startup check.
-- `RETICORA_NATS_URL` — NATS server URL.
+- `RETICORA_NATS_URL` — NATS server URL. Required with `RETICORA_ENVIRONMENT=production`: the server refuses to start without it, because only the NATS ingest queue takes the identity locks that keep several instances from duplicating devices with a weak identity (F-282). Development and staging start without it (ingest in the request, without identity locks) and log a configuration warning. See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
 - `RETICORA_INGEST_LANES` — parallel ingest lanes per organization (default `4`, `1`–`16`, the same on every instance; `1` is the serial ingest of the releases before WP-334). See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
 - `RETICORA_REDIS_URL` — Redis connection string.
-- `RETICORA_ENVIRONMENT` — Environment name (development/staging/production).
+- `RETICORA_ENVIRONMENT` — Environment name (development/staging/production). The collector reads the same variable: it accepts `RETICORA_SIMULATE=true` (simulated device fleet, SIM-02) only with `development` or `test` (case-insensitive) and exits with code 1 and `collector.simulate.refused` for any other value, including an unset or empty one (F-276).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
-- `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `POST /api/v1/signup` answers 503.
+- `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `GET /api/v1/signup/challenge` and `POST /api/v1/signup` answer 503. The value must be an absolute http or https URL with a host and without user info, otherwise the start check fails; a doubled leading slash in the path is collapsed, so a base URL ending in `/` still gives `/onboarding`; development defaults to `http://localhost:5173/onboarding`. Docker Compose derives the page as `<RETICORA_PUBLIC_BASE_URL>/onboarding` (a value in `.env` wins) and forwards the admin client, the SMTP settings, the captcha key, the domain lists and the trial settings from `.env`; `install-cloud.sh` creates the admin client (`reticora-server-admin`) and the captcha key and asks for the SMTP server (see "Creating organizations" below).
+- `RETICORA_KEYCLOAK_INTERNAL_URL` — optional base URL (`http(s)://host[:port]`) under which the server reaches Keycloak directly; the Keycloak admin client (signup, invitations, MFA binding) then sends its requests there with the public issuer host in `Host`/`X-Forwarded-*`, because the public reverse proxy does not expose `/admin/`. The compose stack sets `http://keycloak:8080`; empty means the issuer host.
+- `RETICORA_INVITATION_ACCEPT_URL` — page the link of the invitation mail opens; the token is appended as `?token=` (TLC-03, NTF-05). An absolute `http` or `https` URL (`http` is accepted in production for the HTTP default path); development defaults to `http://localhost:5173/invitations/accept`, Docker Compose derives it from `RETICORA_PUBLIC_BASE_URL`. Without it `POST /api/v1/invitations` and `/invitations/{id}/renew` answer 503. The mail goes over the organization's e-mail channels only; webhook deliveries of `invitation.created` leave out the link.
 - `RETICORA_MASTER_KEY_PREVIOUS` — master keys being rotated out (comma-separated, SEC-06): their data keys stay readable until the nightly `rotation.master_key` run has rewrapped them with `RETICORA_MASTER_KEY`; then remove them (see [`docs/ops/workers.md`](ops/workers.md)).
-- `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT` (587), `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD`, `RETICORA_SMTP_FROM`, `RETICORA_SMTP_TLS` (`starttls` default, `tls`, `none`) — the central SMTP server of the installation (TEC-13): verification e-mails of the self-signup and the `central_smtp` notification channels, which send with the organization as sender name; DKIM and SPF are set up for the sender domain at the relay. Organizations of dedicated, on-premises and air-gapped installations configure their own server as an `smtp` channel; its credentials are stored encrypted (NTF-01).
-- `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP and hour (shared cache) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).
+- `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT` (587), `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD`, `RETICORA_SMTP_FROM`, `RETICORA_SMTP_TLS` (`starttls` default, `tls`, `none`; a user name needs `starttls` or `tls`, Go `net/smtp` sends no login unencrypted to a host other than `localhost`) — the central SMTP server of the installation (TEC-13): verification e-mails of the self-signup and the `central_smtp` notification channels, which send with the organization as sender name; DKIM and SPF are set up for the sender domain at the relay. Organizations of dedicated, on-premises and air-gapped installations configure their own server as an `smtp` channel; its credentials are stored encrypted (NTF-01).
+- `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP in any hour (sliding window in the shared cache, so it holds across replicas; Retry-After names the time until the oldest of them leaves the hour) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).
 - `RETICORA_SIGNUP_BLOCKED_DOMAINS`, `RETICORA_SIGNUP_ALLOWED_DOMAINS` — comma-separated operator entries that extend the disposable-domain blocklist and allowlist; a domain covers its subdomains, the allowlist wins.
 - `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS` — trial of a self-signed-up organization (ENT-07, defaults `standard`, `30`, `100`); features the `essential` plan lacks expire at the trial's end.
 - `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).
@@ -887,14 +1047,16 @@ The server is configured via environment variables:
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
 - `RETICORA_AIR_GAPPED` — `true` disables every external AI call (air-gapped profile, AI-02; default `false`).
-- `RETICORA_OFFLINE_DETECTOR_ENABLED` — the CI offline detector (scheduler run `ci.offline_detector`, every 5 min; REC-09, LCY-05): an observable, discovered CI (not `is_manual`, source not manual/import) whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` with the event `ci.offline`, and `active` again with `ci.online` once seen; without a scope the organization's `settings.discovery.sweep_interval` (default 24 h) applies. Default `true`.
+- `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` — the CI offline detector, worker `offline_detector` (scheduler run `ci.offline_detector`, every 5 min; REC-09, LCY-05): an observable, discovered CI (not `is_manual`, source not manual/import) whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` with the event `ci.offline`, and `active` again with `ci.online` once seen; without a scope the organization's `settings.discovery.sweep_interval` (default 24 h) applies. The run changes a CI only as it read it (same status and `last_seen_at`, no other writer holding the row); a sighting the ingest writes during the run keeps the CI active, and a CI it set unknown before the sighting reached it is active again with `ci.online` (F-412). Each change is part of the CI's history and the audit log in the transaction of the change: a change set `status_changed` (source `system`, comment `ci.offline_detector`, the version stays) and the audit entry `ci.status_changed` (actor type `system`, `changes.job` `ci.offline_detector`; F-413). Default `true`. The former `RETICORA_OFFLINE_DETECTOR_ENABLED` still applies without it and is logged as deprecated (docs/ops/workers.md).
 - `RETICORA_MODULES` — the late modules (phase tag P2 and later or add-on [A]; API-06, RBA-05) this release serves (WP-214, E-03). Empty (default) switches them all off: their routes are not registered (404), their workers and system jobs do not start (alert evaluator, reservation sweeper) and the UI hides their navigation (`GET /api/v1/modules`). `all` switches every module on; otherwise a comma list of `inventory`, `documents`, `stocktake`, `ticketing` (P2), `maintenance`, `workflows`, `compliance`, `findings`, `alerting` (P3), `keys`, `trainings`, `desks`, `disposal`, `agents` (P4), `iga`, `ai` (add-ons, still gated by their entitlement). An unknown key stops the start. Their operations carry `x-phase` in `api/openapi.yaml`.
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
+- `RETICORA_S3_PUBLIC_URL` — base URL under which browsers reach the object store for signed downloads of exports and documents (`download_url`). The signature stays the one over `RETICORA_S3_ENDPOINT`; the URL names this base instead. The compose stack sets `<RETICORA_PUBLIC_BASE_URL>/objects`, which the frontend nginx forwards read-only (GET of the buckets `exports` and `reticora-documents`, `Host` of the internal endpoint) to MinIO (`frontend/objects-proxy.conf`). Empty keeps the internal endpoint in the URL, which a browser can only use if it resolves that name; from an HTTPS page an `http://` URL is blocked as mixed content (F-376). Other deployments point it at a reverse-proxy path that forwards the same way.
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
 - `RETICORA_OTEL_ENDPOINT` — OTLP HTTP collector endpoint for traces/metrics; empty (default) keeps no-op telemetry.
 - `RETICORA_METRICS_TENANT_LABEL` — set to `true` to add the `organization_id` label to HTTP request metrics (default `false`; multiplies series by tenant count).
-- `RETICORA_EGRESS_ALLOW_PRIVATE` — set to `true` to let webhooks and IGA connectors reach private, loopback and link-local destinations (on-premises installations; default `false`). Cloud metadata endpoints stay blocked; DNS pinning and the 3-redirect limit always apply (SEC-08).
-- `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh`, `/collectors/enroll`, `/signup`, `/signup/verify` and `/invitations/accept` and every failed authentication count; once spent, the IP gets 429 until the minute is over.
+- `RETICORA_PPROF_ADDR` — loopback address (e.g. `127.0.0.1:6060`) of a separate listener with the Go profiles of the server (`/debug/pprof/`, CPU profile `/debug/pprof/profile?seconds=N`; no command line), for load runs (`load.yml`, WP-438). Empty (default) starts no listener; the server refuses to start with a non-loopback address, outside `RETICORA_ENVIRONMENT=development` and together with `RETICORA_EGRESS_ALLOW_PRIVATE=true`. The API never serves the profiles.
+- `RETICORA_EGRESS_ALLOW_PRIVATE` — set to `true` to let webhooks, IGA connectors and organizations' own SMTP servers reach private, loopback and link-local destinations, SMTP servers also on ports other than 25, 465 and 587 (dedicated, on-premises and air-gapped installations with an internal relay; default `false`). Cloud metadata endpoints stay blocked; DNS pinning and the 3-redirect limit always apply (SEC-08, [`docs/ops/workers.md`](ops/workers.md#destinations-of-the-notifier-sec-08)).
+- `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh`, `/collectors/enroll`, `/signup`, `/signup/verify` and `/invitations/accept` and every failed authentication count (`/auth/refresh` only when it fails); once spent, the IP gets 429 until the minute is over. Concurrent requests with valid credentials do not spend it: a credential check holds a unit only until it succeeds, and a request that finds every unit held by checks in flight waits for one (at most 2.5 s) instead of getting 429 (F-387). Per server instance at most twice this budget of requests of one IP and 256 of all IPs wait; further requests get 429 at once. The budget belongs to fixed UTC-minute windows: checks admitted at the end of a minute keep their units, so right after the minute changes up to twice the budget can run at once, and two adjacent minutes together admit up to twice the budget of failed attempts.
 - `RETICORA_RATE_LIMIT_RPM` — requests per minute per API key or session (default `600`, API-04).
 - `RETICORA_RATE_LIMIT_ORG_RPM` — requests per minute of all credentials of an organization together (default `6000`, API-04; must not be below `RETICORA_RATE_LIMIT_RPM`). Responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; a 429 adds `Retry-After`.
 - `RETICORA_WORKER_<NAME>_ENABLED` — operator switch per background worker (OPS-02, default `true`): `WEBHOOK_DISPATCHER`, `EXPORT`, `INGEST`, `MONITORING`, `SCHEDULER`, `JOBS`, `EVENTS`, `NOTIFIER`. A disabled worker is not started in that process; see [`docs/ops/workers.md`](ops/workers.md).
@@ -908,7 +1070,7 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 **Backend job:**
 
 1. Checkout code.
-2. Setup Go 1.26.9.
+2. Setup Go 1.26.10.
 3. `go mod download` — Fetch dependencies.
 4. `go build ./...` — Compile all packages.
 5. `go test -race -coverprofile=coverage.out ./...` — Run tests with race detector and coverage.
@@ -929,12 +1091,19 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 A version tag `v*` starts the release workflow. Tools follow E-31.
 
 1. It builds the edge binaries `reticora-collector` and `reticora-agent` for linux/amd64 and linux/arm64.
-2. It builds the images `reticora-server`, `reticora-collector` and `reticora-frontend` and pushes them to `ghcr.io/datahub-chiemgau`.
+2. It builds the images `reticora-server`, `reticora-collector`, `reticora-frontend` and `reticora-postgres` and pushes them to `ghcr.io/datahub-chiemgau`.
+   - `reticora-postgres` is TimescaleDB with pgBackRest (`deploy/docker-compose/postgres/Dockerfile`). Its base is pinned by version and digest (the same TimescaleDB reference as CI and the dev stack, E-96), its Go helpers `gosu` and `timescaledb-tune` are rebuilt with the repository's Go toolchain, and the pgBackRest tarball is checked by sha256.
+   - Before the push, Trivy scans each image with the threshold of the CI job `image-scan`: Critical/High findings with an available fix block. Exceptions follow `security/scan-exceptions.txt`, see [security/abhaengigkeitsscans.md](security/abhaengigkeitsscans.md).
 3. Syft generates an SPDX SBOM for every binary and every image, plus one for the source tree.
 4. Everything is signed keyless with cosign: a Fulcio certificate for the identity of the release workflow and an entry in the Rekor log.
    - Binaries and SBOMs get a Sigstore bundle (`<file>.sigstore.json`).
    - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`).
-5. The workflow verifies its own signatures. It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
+5. The workflow verifies its own signatures with the real cosign before anything is published (WP-545):
+   - For linux/amd64 and linux/arm64, `edgecore/update/cosign_real_test.go` (build tag `cosignreal`) runs the updater's `CosignVerifier` against the collector and its bundle: the signed binary passes with the pinned release identity; the binary changed by one byte, the bundle of another artifact and another identity are refused. A failing or skipped test stops the release.
+   - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` and `cosign verify-attestation --type spdxjson`. The release is published only after all four images passed.
+   - It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
+
+Release candidate of gate G1 (WP-595, `docs/security/review-g1.md`, section „Läufe auf dem Release-Kandidaten“): tag `v1.0.0-rc.<n>`, release run RC run pending (WP-595): pre-release with SBOMs, Sigstore bundles, image signatures, SBOM attestations and the `cosign_real` test.
 
 Mandatory signature check in the updater (`edgecore/update`):
 
@@ -946,24 +1115,50 @@ Mandatory signature check in the updater (`edgecore/update`):
   - no verifier is configured.
 - `CosignVerifier` calls `cosign verify-blob --bundle`. It pins the signer to `release.yml` of this repository on a `v*` tag, with the GitHub Actions OIDC issuer.
 
-Check a signature by hand:
+Check a release by hand (operators, before an installation or an air-gapped transfer). Every command must exit 0 (`verify-blob` prints `Verified OK`, `verify` the verified signature payload); any other result means the file or image is not the one the release workflow signed. The signer is the release workflow of this repository on a version tag:
 
 ```bash
-cosign verify-blob --bundle reticora-collector-linux-amd64.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v.+$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  reticora-collector-linux-amd64
-cosign verify ghcr.io/datahub-chiemgau/reticora-server:<tag> \
-  --certificate-identity-regexp '…release\.yml@refs/tags/v.+$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+VERSION=v1.2.3   # the release tag
+IDENTITY='^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v.+$'
+ISSUER=https://token.actions.githubusercontent.com
 ```
+
+Binaries, their SBOMs and the release manifest (files of the GitHub release, each with its `<file>.sigstore.json`), here for `reticora-collector` and `reticora-agent` on both architectures:
+
+```bash
+for file in reticora-collector-linux-amd64 reticora-collector-linux-arm64 \
+    reticora-agent-linux-amd64 reticora-agent-linux-arm64 SHA256SUMS; do
+  cosign verify-blob --bundle "$file.sigstore.json" \
+    --certificate-identity-regexp "$IDENTITY" \
+    --certificate-oidc-issuer "$ISSUER" \
+    "$file"
+done
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+The same `verify-blob` call checks an SBOM (`<binary>.spdx.json`, `reticora-source.spdx.json`) and the source tarball (`reticora-source-<tag>.tar.gz`).
+
+Images: the signature (`cosign verify`) and the SPDX SBOM attestation (`cosign verify-attestation --type spdxjson`) of all four images `reticora-server`, `reticora-collector`, `reticora-frontend` and `reticora-postgres`:
+
+```bash
+for image in reticora-server reticora-collector reticora-frontend reticora-postgres; do
+  cosign verify "ghcr.io/datahub-chiemgau/$image:$VERSION" \
+    --certificate-identity-regexp "$IDENTITY" \
+    --certificate-oidc-issuer "$ISSUER"
+  cosign verify-attestation --type spdxjson "ghcr.io/datahub-chiemgau/$image:$VERSION" \
+    --certificate-identity-regexp "$IDENTITY" \
+    --certificate-oidc-issuer "$ISSUER" > /dev/null
+done
+```
+
+`cosign verify` prints the image digest (`docker-manifest-digest`); pin that digest (`ghcr.io/datahub-chiemgau/<image>@sha256:…`) instead of the tag, as the installers do in release mode. Without `> /dev/null`, `verify-attestation` prints the attestation; the SBOM is the `predicate` of the in-toto statement in its base64 `payload`.
 
 **Planned additions:**
 
 - Kubernetes deployment via GitOps (ArgoCD or Flux).
 - Database migration validation in CI.
 - Integration tests against docker-compose services.
-- Security scanning (Trivy, CodeQL).
+- Static code analysis (CodeQL); dependency and container scans run in CI (`govulncheck`, `npm-audit`, `image-scan`).
 - Dependency update automation (Dependabot/Renovate).
 
 ### Getting Started
@@ -973,6 +1168,62 @@ installation fails or misbehaves, see
 [troubleshooting-installation.md](troubleshooting-installation.md) for the
 known failure modes (container health, Keycloak/login, TLS, idempotent
 re-runs) and their fixes.
+
+### Creating organizations (tenants)
+
+`install-cloud.sh` creates one organization, the default organization with
+the initial administrator (`RETICORA_INITIAL_ADMIN_EMAIL`, org_admin of that
+organization, not a platform operator). Further organizations come from two
+places:
+
+- **Self-signup (TLC-01):** `<RETICORA_PUBLIC_BASE_URL>/onboarding` ("Create
+  account" on the login page). The visitor enters organization, e-mail
+  address and name (the browser solves a proof-of-work challenge); the server
+  sends a verification e-mail whose link (`/onboarding?token=…`), after the
+  password is set, creates the organization (trial
+  plan `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS`)
+  and its first org_admin with the chosen password (realm policy: 12
+  characters, upper and lower case, digit, special character) and OTP at the
+  first login. Open the page logged out or in a private window and the
+  verification link in a new tab; a signed-in session or its Keycloak SSO
+  session hides the steps. The e-mail verification is mandatory, so
+  self-signup needs the central SMTP server: without `RETICORA_SMTP_HOST`
+  the server answers `GET /api/v1/signup/challenge` with 503 ("self-signup is
+  not available") and the installer's summary says
+  `Self-signup disabled: no SMTP configured`. Keycloak's own registration
+  stays off; it would create accounts without an organization.
+- **Operators (SEC-07):** `POST /api/v1/admin/orgs` with an operator session
+  of a member of the Keycloak group `operators` (OTP; login flow in
+  [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Operators").
+  The installer's administrator is not an operator; add an account to the
+  group first. With `RETICORA_SMTP_HOST` the first administrator of the
+  organization gets an invitation e-mail from Keycloak over the realm's SMTP
+  server (`admin_invited: true`). Without it the organization is created
+  without an IdP account (`admin_invited: false`): create the account in
+  Keycloak by hand (same e-mail address, user attribute `organization_id` =
+  the `id` of the response, realm role `org_admin`, group `reticora-admin`;
+  [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Manual
+  import", step 5); it is linked at the first login. There is no UI for it.
+
+**Outgoing e-mail (SMTP):** the installer asks for the relay at "Outgoing
+e-mail (SMTP)" — host, TLS mode (`starttls` on 587, `tls` on 465, `none`),
+port, user name and password (optional, not asked with `none`), sender (`address` or
+`Name <address>`, checked like the server's Go `net/mail`: no `,` `;` `:`
+`@` `[` `]` `(` `)` `<` `>` in the name) — or takes `RETICORA_SMTP_HOST`,
+`RETICORA_SMTP_PORT`, `RETICORA_SMTP_TLS`, `RETICORA_SMTP_USERNAME`,
+`RETICORA_SMTP_PASSWORD` and `RETICORA_SMTP_FROM` from the environment,
+otherwise from `.env`, in a non-interactive run; an empty host keeps e-mail
+off. Without `RETICORA_SMTP_PORT` the port follows the TLS mode (465 for
+`tls`, 587 otherwise) unless `.env` holds a port other than the previous
+mode's default. It checks the relay
+over TCP before the start (with a host, `/readyz` depends on it), writes the
+settings to `.env` (mode `0600`), from where Docker Compose forwards them to
+the server, and sets the same server for the Keycloak realm. The relay
+sends the verification mails of the self-signup, invitations and the
+notification mails of the `central_smtp` channels; set up SPF/DKIM for the
+sender domain there. See
+[troubleshooting-installation.md](troubleshooting-installation.md),
+"Self-signup answers 503".
 
 ### Installer hardening (Epic A)
 

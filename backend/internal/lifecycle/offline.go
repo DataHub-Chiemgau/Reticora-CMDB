@@ -2,17 +2,19 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/scopeinterval"
 )
 
 // Offline detector (REC-09, LCY-05): an observable CI that discovery did
@@ -21,8 +23,9 @@ import (
 // Only CIs with is_manual = false, discovery_source not manual/import and a
 // type with is_observable = true are checked. The scope interval is the
 // sweep schedule of the discovery scopes covering the CI's management
-// address (the shortest); without a scope the organization's sweep
-// interval (settings.discovery.sweep_interval, default 24 h) applies.
+// address (the shortest, see scopeinterval: a cron scope counts with the
+// gap between its runs); without a scope the organization's sweep interval
+// (settings.discovery.sweep_interval, default 24 h) applies.
 
 // OfflineDetectorKind is the scheduler kind of the run.
 const OfflineDetectorKind = "ci.offline_detector"
@@ -32,7 +35,7 @@ const OfflineDetectorKind = "ci.offline_detector"
 const OfflineFactor = 3
 
 // defaultSweep is the scope interval without scope or setting (DIS-10).
-const defaultSweep = 24 * time.Hour
+const defaultSweep = scopeinterval.Default
 
 // OfflineDetector is the scheduler run.
 type OfflineDetector struct {
@@ -64,7 +67,9 @@ type OfflineChanges struct {
 	Offline, Online int
 }
 
-// Run checks every organization.
+// Run checks every organization. A failing organization does not stop the
+// others (F-108): Run returns the errors joined at the end, the totals
+// count the organizations that succeeded.
 func (d *OfflineDetector) Run(ctx context.Context) (OfflineChanges, error) {
 	var total OfflineChanges
 	var orgs []string
@@ -79,15 +84,60 @@ func (d *OfflineDetector) Run(ctx context.Context) (OfflineChanges, error) {
 	if err != nil {
 		return total, fmt.Errorf("list organizations: %w", err)
 	}
+	var errs []error
 	for _, org := range orgs {
+		if ctx.Err() != nil {
+			errs = append(errs, ctx.Err())
+			break
+		}
 		c, oerr := d.RunOrg(ctx, org)
 		if oerr != nil {
-			return total, fmt.Errorf("organization %s: %w", org, oerr)
+			errs = append(errs, fmt.Errorf("organization %s: %w", org, oerr))
+			continue
 		}
 		total.Offline += c.Offline
 		total.Online += c.Online
 	}
-	return total, nil
+	return total, errors.Join(errs...)
+}
+
+// The inet casts of discovery_scope.target sit behind a guard (F-108): a
+// target PostgreSQL cannot read – an IPv6 zone (fe80::1%eth0), which the API
+// accepted before WP-383, or another malformed row – would otherwise fail
+// the query of the whole organization (22P02). Such a scope is skipped and
+// reported once per run. The casts are inside CASE because PostgreSQL does
+// not order the operands of AND. relationship.Cleanup uses the same guard.
+const (
+	cidrTargetValid  = `strpos(s.target, '%') = 0 AND pg_input_is_valid(s.target, 'inet')`
+	rangeTargetValid = `s.target ~ '^[^-%/]+-[^-%/]+$' AND pg_input_is_valid(split_part(s.target, '-', 1), 'inet')
+		AND pg_input_is_valid(split_part(s.target, '-', 2), 'inet')`
+)
+
+// reportInvalidScopes logs the enabled scopes of the organization whose
+// target the guard skips (discovery.scope.invalid_target).
+func reportInvalidScopes(ctx context.Context, tx pgx.Tx, orgID string) error {
+	rows, err := tx.Query(ctx, `SELECT s.id::text, s.kind FROM discovery_scope s
+		WHERE s.organization_id = $1 AND s.enabled AND NOT CASE s.kind
+			WHEN 'cidr' THEN `+cidrTargetValid+`
+			WHEN 'range' THEN `+rangeTargetValid+`
+			ELSE strpos(s.target, '%') = 0 END
+		ORDER BY s.id`, orgID)
+	if err != nil {
+		return fmt.Errorf("discovery scopes: %w", err)
+	}
+	invalid, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) ([2]string, error) {
+		var v [2]string
+		scanErr := r.Scan(&v[0], &v[1])
+		return v, scanErr
+	})
+	if err != nil {
+		return fmt.Errorf("discovery scopes: %w", err)
+	}
+	for _, v := range invalid {
+		slog.Warn("discovery scope skipped: invalid target", "event", "discovery.scope.invalid_target",
+			"job", OfflineDetectorKind, "organization_id", orgID, "scope_id", v[0], "kind", v[1])
+	}
+	return nil
 }
 
 // observedCI is a CI the detector considers.
@@ -95,29 +145,7 @@ type observedCI struct {
 	id, name, client, site, status string
 	lastSeen                       time.Time
 	schedules                      []string
-	runGaps                        []float64
-}
-
-// scopeInterval returns the interval of the shortest covering scope.
-func (c *observedCI) scopeInterval(fallback time.Duration) time.Duration {
-	best := time.Duration(0)
-	for i, s := range c.schedules {
-		d, err := time.ParseDuration(strings.TrimSpace(s))
-		if err != nil {
-			// A cron schedule: the gap between the last and the next run.
-			d = defaultSweep
-			if i < len(c.runGaps) && c.runGaps[i] > 0 {
-				d = time.Duration(c.runGaps[i] * float64(time.Second))
-			}
-		}
-		if best == 0 || d < best {
-			best = d
-		}
-	}
-	if best == 0 {
-		return fallback
-	}
-	return best
+	lastRuns, nextRuns             []*time.Time
 }
 
 // RunOrg checks the CIs of one organization.
@@ -135,17 +163,22 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 		if v, perr := time.ParseDuration(sweep); perr == nil && v >= 5*time.Minute {
 			fallback = v
 		}
+		if err := reportInvalidScopes(ctx, tx, orgID); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `
 			SELECT c.id::text, c.name, COALESCE(c.client_id::text, ''), COALESCE(c.site_id::text, ''), c.status, c.last_seen_at,
-				COALESCE(array_agg(s.schedule) FILTER (WHERE s.id IS NOT NULL), '{}'),
-				COALESCE(array_agg(COALESCE(EXTRACT(EPOCH FROM s.next_run_at - s.last_run_at), 0)::float8) FILTER (WHERE s.id IS NOT NULL), '{}')
+				COALESCE(array_agg(s.schedule ORDER BY s.id) FILTER (WHERE s.id IS NOT NULL), '{}'),
+				COALESCE(array_agg(s.last_run_at ORDER BY s.id) FILTER (WHERE s.id IS NOT NULL), '{}'),
+				COALESCE(array_agg(s.next_run_at ORDER BY s.id) FILTER (WHERE s.id IS NOT NULL), '{}')
 			FROM ci c
 			JOIN ci_type t ON t.id = c.ci_type_id AND t.is_observable
 			LEFT JOIN discovery_scope s ON s.organization_id = c.organization_id AND s.enabled AND (
-				(s.kind = 'cidr' AND c.management_ip <<= s.target::inet)
-				OR (s.kind = 'host' AND (host(c.management_ip) = s.target OR c.hostname_lc = s.target OR c.fqdn_lc = s.target))
-				OR (s.kind = 'range' AND family(c.management_ip) = family(split_part(s.target, '-', 1)::inet)
-					AND host(c.management_ip)::inet BETWEEN split_part(s.target, '-', 1)::inet AND split_part(s.target, '-', 2)::inet))
+				(s.kind = 'cidr' AND CASE WHEN `+cidrTargetValid+` THEN c.management_ip <<= s.target::inet ELSE false END)
+				OR (s.kind = 'host' AND strpos(s.target, '%') = 0
+					AND (host(c.management_ip) = s.target OR c.hostname_lc = s.target OR c.fqdn_lc = s.target))
+				OR (s.kind = 'range' AND CASE WHEN `+rangeTargetValid+` THEN family(c.management_ip) = family(split_part(s.target, '-', 1)::inet)
+					AND host(c.management_ip)::inet BETWEEN split_part(s.target, '-', 1)::inet AND split_part(s.target, '-', 2)::inet ELSE false END))
 			WHERE c.organization_id = $1 AND c.deleted_at IS NULL AND NOT c.is_manual
 			  AND c.discovery_source IS NOT NULL AND c.discovery_source NOT IN ('manual', 'import')
 			  AND c.last_seen_at IS NOT NULL AND c.status IN ('active', 'unknown')
@@ -155,16 +188,17 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 		}
 		cis, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (observedCI, error) {
 			var o observedCI
-			scanErr := r.Scan(&o.id, &o.name, &o.client, &o.site, &o.status, &o.lastSeen, &o.schedules, &o.runGaps)
+			scanErr := r.Scan(&o.id, &o.name, &o.client, &o.site, &o.status, &o.lastSeen, &o.schedules, &o.lastRuns, &o.nextRuns)
 			return o, scanErr
 		})
 		if err != nil {
 			return fmt.Errorf("observable CIs: %w", err)
 		}
-		outbox := events.NewOutbox()
+		var entries []audit.Entry
+		var es []*events.Event
 		for i := range cis {
 			ci := &cis[i]
-			interval := ci.scopeInterval(fallback)
+			interval := scopeinterval.Shortest(scopeinterval.Scopes(ci.schedules, ci.lastRuns, ci.nextRuns), fallback, now)
 			offline := now.Sub(ci.lastSeen) > OfflineFactor*interval
 			next, eventType := "", ""
 			switch {
@@ -175,14 +209,24 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 			default:
 				continue
 			}
-			if _, err = tx.Exec(ctx, `UPDATE ci SET status = $3 WHERE id = $1 AND organization_id = $2`, ci.id, orgID, next); err != nil {
-				return fmt.Errorf("set CI %s %s: %w", ci.id, next, err)
+			version, changed, setErr := setStatus(ctx, tx, orgID, ci, next)
+			if setErr != nil {
+				return setErr
 			}
-			if _, err = outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: eventType, EntityID: ci.id,
+			if !changed {
+				continue
+			}
+			lastSeen := ci.lastSeen.UTC().Format(time.RFC3339)
+			if recErr := recordStatusChange(ctx, tx, orgID, ci, next, version); recErr != nil {
+				return recErr
+			}
+			entries = append(entries, audit.Entry{OrganizationID: orgID, ActorType: "system", Action: "ci.status_changed",
+				ResourceType: "ci", ResourceID: ci.id, Source: audit.SourceSystem,
+				Changes: map[string]any{"fields": []map[string]any{{"field": "status", "old_value": ci.status, "new_value": next}},
+					"job": OfflineDetectorKind, "last_seen_at": lastSeen, "scope_interval": interval.String()}})
+			es = append(es, &events.Event{OrgID: orgID, Type: eventType, EntityID: ci.id,
 				Data: map[string]any{"id": ci.id, "name": ci.name, "client_id": ci.client, "site_id": ci.site, "status": next,
-					"last_seen_at": ci.lastSeen.UTC().Format(time.RFC3339), "scope_interval": interval.String()}}); err != nil {
-				return err
-			}
+					"last_seen_at": lastSeen, "scope_interval": interval.String()}})
 			if eventType == events.CIOffline {
 				c.Offline++
 				slog.Warn("CI offline", "event", events.CIOffline, "organization_id", orgID, "ci_id", ci.id, "last_seen_at", ci.lastSeen,
@@ -192,7 +236,62 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 				slog.Info("CI online again", "event", events.CIOnline, "organization_id", orgID, "ci_id", ci.id)
 			}
 		}
+		if len(es) == 0 {
+			return nil
+		}
+		// The audit entries and the events after the status changes: the
+		// chain lock (AUD-01) and the outbox lock of the organization are
+		// held from the first entry or event to the commit. The run takes
+		// them last and in the order of the ingest (ci: audit, then event,
+		// both before its commit), so it never holds one while it changes
+		// rows, and a run and an ingest never wait for each other in a
+		// cycle.
+		if _, err = audit.NewPGRecorder().RecordMany(ctx, tx, entries); err != nil {
+			return fmt.Errorf("audit status changes: %w", err)
+		}
+		if _, err = events.NewOutbox().AppendMany(ctx, tx, es); err != nil {
+			return fmt.Errorf("events of the status changes: %w", err)
+		}
 		return nil
 	})
 	return c, err
+}
+
+// setStatus sets the status of ci to next if the row is still as the run
+// read it (F-412): same status, same last_seen_at, not deleted, and not
+// locked by another writer. A sighting the ingest committed after the read,
+// or one it is writing (its row lock), and a status a person or another
+// job set in between leave the row as it is; the run then changes nothing
+// and raises no event, the next run decides on the new state. The version
+// stays, as for the ingest's status change (a system write below rank 92,
+// API-07); it is returned for the change row.
+func setStatus(ctx context.Context, tx pgx.Tx, orgID string, ci *observedCI, next string) (version int64, changed bool, err error) {
+	err = tx.QueryRow(ctx, `
+		UPDATE ci SET status = $3
+		WHERE id = (SELECT c.id FROM ci c WHERE c.id = $1 AND c.organization_id = $2 AND c.deleted_at IS NULL
+			AND c.status = $4 AND c.last_seen_at = $5 FOR UPDATE SKIP LOCKED)
+		RETURNING version`, ci.id, orgID, next, ci.status, ci.lastSeen).Scan(&version)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return 0, false, nil
+	case err != nil:
+		return 0, false, fmt.Errorf("set CI %s %s: %w", ci.id, next, err)
+	}
+	return version, true, nil
+}
+
+// recordStatusChange writes the status change of ci into its history
+// (AUD-03, F-413) as the ingest records its status change: one change set
+// of kind status_changed with the field status and the CI version, source
+// system and no actor; the comment names the job.
+func recordStatusChange(ctx context.Context, tx pgx.Tx, orgID string, ci *observedCI, next string, version int64) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ci_change (organization_id, ci_id, change_type, field_name, old_value, new_value, comment,
+			ci_version, change_kind, change_set_id, source)
+		VALUES ($1, $2, 'status_change', 'status', to_jsonb($3::text), to_jsonb($4::text), $5,
+			$6, 'status_changed', gen_random_uuid(), 'system')`,
+		orgID, ci.id, ci.status, next, OfflineDetectorKind, version); err != nil {
+		return fmt.Errorf("record status change of CI %s: %w", ci.id, err)
+	}
+	return nil
 }

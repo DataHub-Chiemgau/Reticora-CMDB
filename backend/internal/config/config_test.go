@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -37,7 +38,8 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
-		"RETICORA_INGEST_LANES",
+		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
+		"RETICORA_EVENTS_MAX_BYTES",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -56,6 +58,7 @@ var productionEnv = map[string]string{
 	"RETICORA_REDIS_URL":       "redis://redis:6379",
 	"RETICORA_MASTER_KEY":      "key",
 	"RETICORA_OIDC_ISSUER_URL": "https://id.example/realms/reticora",
+	"RETICORA_NATS_URL":        "nats://nats:4222",
 }
 
 func TestValidateDevelopmentDefaults(t *testing.T) {
@@ -95,8 +98,47 @@ func TestValidateProductionComplete(t *testing.T) {
 	if cfg.S3Configured() || cfg.S3AccessKey != "" || cfg.S3SecretKey != "" {
 		t.Fatal("production must not use the development object storage defaults")
 	}
-	if cfg.IsSet("RETICORA_NATS_URL") {
-		t.Fatal("NATS was not configured")
+	if !cfg.IsSet("RETICORA_NATS_URL") || strings.Contains(strings.Join(cfg.Warnings(), "\n"), "RETICORA_NATS_URL") {
+		t.Fatalf("production with NATS: set %v, warnings %v", cfg.IsSet("RETICORA_NATS_URL"), cfg.Warnings())
+	}
+}
+
+// TestValidateProductionRequiresNATS covers F-282 (ABN-03): the identity
+// locks of the ingest exist only on the NATS queue path, so production
+// without RETICORA_NATS_URL does not start and names the operating guide;
+// development and staging start without it but warn.
+func TestValidateProductionRequiresNATS(t *testing.T) {
+	clearEnv(t)
+	setAll(t, productionEnv)
+	t.Setenv("RETICORA_NATS_URL", "")
+	cfg := Load()
+	err := cfg.Validate(false)
+	if err == nil || !strings.Contains(err.Error(), "RETICORA_ENVIRONMENT=production requires RETICORA_NATS_URL") ||
+		!strings.Contains(err.Error(), "docs/betrieb/ingest-spuren.md") {
+		t.Fatalf("production without RETICORA_NATS_URL: err = %v, want a start error naming docs/betrieb/ingest-spuren.md", err)
+	}
+	for _, env := range []string{EnvDevelopment, EnvStaging} {
+		clearEnv(t)
+		setAll(t, productionEnv)
+		t.Setenv("RETICORA_NATS_URL", "")
+		t.Setenv("RETICORA_ENVIRONMENT", env)
+		cfg := Load()
+		if err := cfg.Validate(false); err != nil {
+			t.Errorf("%s without RETICORA_NATS_URL: %v, want a start with a warning", env, err)
+		}
+		warnings := strings.Join(cfg.Warnings(), "\n")
+		if !strings.Contains(warnings, "RETICORA_NATS_URL is not set") || !strings.Contains(warnings, "docs/betrieb/ingest-spuren.md") {
+			t.Errorf("%s without RETICORA_NATS_URL: warnings %q, want the identity-lock warning", env, warnings)
+		}
+		t.Setenv("RETICORA_NATS_URL", "nats://nats:4222")
+		if warnings := strings.Join(Load().Warnings(), "\n"); strings.Contains(warnings, "RETICORA_NATS_URL") {
+			t.Errorf("%s with RETICORA_NATS_URL: warnings %q", env, warnings)
+		}
+	}
+	// The unset development defaults (no RETICORA_* variable) warn as well.
+	clearEnv(t)
+	if warnings := strings.Join(Load().Warnings(), "\n"); !strings.Contains(warnings, "RETICORA_NATS_URL is not set") {
+		t.Errorf("development defaults: warnings %q, want the identity-lock warning", warnings)
 	}
 }
 
@@ -131,6 +173,9 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"smtp without sender", map[string]string{"RETICORA_SMTP_HOST": "mail.example"}, false, "RETICORA_SMTP_FROM is required"},
 		{"smtp with an unknown tls mode", map[string]string{"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_FROM": "noreply@example.org",
 			"RETICORA_SMTP_TLS": "ssl"}, false, "RETICORA_SMTP_TLS"},
+		{"smtp login without tls", map[string]string{"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_FROM": "noreply@example.org",
+			"RETICORA_SMTP_TLS": "none", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"}, false,
+			"RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls"},
 		{"audit retention below NFR-06", map[string]string{"RETICORA_RETENTION_AUDIT_YEARS": "9"}, false, "RETICORA_RETENTION_AUDIT_YEARS must be at least 10"},
 		{"history retention below NFR-06", map[string]string{"RETICORA_RETENTION_HISTORY_DAYS": "30"}, false, "RETICORA_RETENTION_HISTORY_DAYS must be at least 1095"},
 		{"soft-delete retention below NFR-06", map[string]string{"RETICORA_RETENTION_SOFT_DELETE_DAYS": "7"}, false, "at least 90"},
@@ -152,6 +197,130 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 	}
 }
 
+// TestValidateSMTPWithoutTLS covers TEC-13: TLS mode none is valid without a
+// login (the mailpit of the E2E overlay, frontend/e2e/fixtures) and with a
+// login to a relay on the same host, which Go's net/smtp authenticates
+// unencrypted; a login to another host is refused (see
+// TestValidateRejectsInvalidSettings), as notify.SMTPConfig does.
+func TestValidateSMTPWithoutTLS(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"E2E mailpit": {"RETICORA_SMTP_HOST": "mailpit", "RETICORA_SMTP_PORT": "1025", "RETICORA_SMTP_TLS": "none",
+			"RETICORA_SMTP_FROM": "Reticora <noreply@reticora-e2e.de>", "RETICORA_SMTP_USERNAME": "", "RETICORA_SMTP_PASSWORD": ""},
+		"login to localhost": {"RETICORA_SMTP_HOST": "localhost", "RETICORA_SMTP_PORT": "25", "RETICORA_SMTP_TLS": "none",
+			"RETICORA_SMTP_FROM": "noreply@example.org", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"},
+		"login over starttls": {"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_TLS": "starttls",
+			"RETICORA_SMTP_FROM": "noreply@example.org", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			setAll(t, env)
+			if err := Load().Validate(true); err != nil {
+				t.Fatalf("Validate() = %v", err)
+			}
+		})
+	}
+}
+
+// TestInvitationAcceptURL covers WP-421 (TLC-03, NTF-05, F-041): the link
+// of the invitation mail. Development defaults to the Vite accept page;
+// outside development there is no default (issue and renew answer 503).
+// http is valid in production, the HTTP default path of the installer runs
+// production on http://<host>; a doubled slash after the host (base URL with
+// a trailing slash) is collapsed. A URL without host, a relative URL,
+// another scheme and user info fail the start check.
+func TestInvitationAcceptURL(t *testing.T) {
+	clearEnv(t)
+	if cfg := Load(); cfg.InvitationAcceptURL != "http://localhost:5173/invitations/accept" || cfg.Validate(true) != nil {
+		t.Errorf("development default: %q, %v", cfg.InvitationAcceptURL, cfg.Validate(true))
+	}
+	setAll(t, productionEnv)
+	if cfg := Load(); cfg.InvitationAcceptURL != "" || cfg.Validate(false) != nil {
+		t.Errorf("production without accept URL: %q, %v; want none and a valid configuration", cfg.InvitationAcceptURL, cfg.Validate(false))
+	}
+	for _, c := range []struct{ in, want string }{
+		{"http://192.0.2.10/invitations/accept", "http://192.0.2.10/invitations/accept"},
+		{"http://192.0.2.10:3000/invitations/accept", "http://192.0.2.10:3000/invitations/accept"},
+		{"https://cmdb.example.com/invitations/accept", "https://cmdb.example.com/invitations/accept"},
+		{"https://cmdb.example.com//invitations/accept", "https://cmdb.example.com/invitations/accept"},
+	} {
+		t.Setenv("RETICORA_INVITATION_ACCEPT_URL", c.in)
+		cfg := Load()
+		if err := cfg.Validate(false); err != nil || cfg.InvitationAcceptURL != c.want {
+			t.Errorf("production with %q: %q, %v; want %q and a valid configuration", c.in, cfg.InvitationAcceptURL, err, c.want)
+		}
+	}
+	for _, env := range []string{EnvProduction, EnvDevelopment} {
+		t.Setenv("RETICORA_ENVIRONMENT", env)
+		for _, bad := range []string{"https:///invitations/accept", "/invitations/accept", "invitations/accept",
+			"ftp://cmdb.example.com/invitations/accept", "https://user:secret@cmdb.example.com/invitations/accept"} {
+			t.Setenv("RETICORA_INVITATION_ACCEPT_URL", bad)
+			err := Load().Validate(false)
+			if err == nil || !strings.Contains(err.Error(), "RETICORA_INVITATION_ACCEPT_URL") {
+				t.Errorf("%s with %q: %v, want an error naming RETICORA_INVITATION_ACCEPT_URL", env, bad, err)
+			} else if strings.Contains(err.Error(), "secret") {
+				t.Errorf("the start check repeats the value: %v", err)
+			}
+		}
+	}
+}
+
+// TestSignupVerifyURL covers the link of the self-signup verification mail
+// (TLC-01) with the rules of the invitation link: development defaults to
+// the Vite onboarding page; outside development there is no default (signup
+// answers 503 until it is set). Compose derives the URL from
+// RETICORA_PUBLIC_BASE_URL, so a base URL with a trailing slash must not
+// give https://host//onboarding?token=…; the doubled slash is collapsed. A
+// URL without host, a relative URL, another scheme and user info fail the
+// start check, which does not repeat the value.
+func TestSignupVerifyURL(t *testing.T) {
+	clearEnv(t)
+	if cfg := Load(); cfg.SignupVerifyURL != "http://localhost:5173/onboarding" || cfg.Validate(true) != nil {
+		t.Errorf("development default: %q, %v", cfg.SignupVerifyURL, cfg.Validate(true))
+	}
+	setAll(t, productionEnv)
+	if cfg := Load(); cfg.SignupVerifyURL != "" || cfg.Validate(false) != nil {
+		t.Errorf("production without verify URL: %q, %v; want none and a valid configuration", cfg.SignupVerifyURL, cfg.Validate(false))
+	}
+	for _, c := range []struct{ in, want string }{
+		{"http://192.0.2.10/onboarding", "http://192.0.2.10/onboarding"},
+		{"http://192.0.2.10:3000/onboarding", "http://192.0.2.10:3000/onboarding"},
+		{"https://cmdb.example.com/onboarding", "https://cmdb.example.com/onboarding"},
+		{"https://cmdb.example.com//onboarding", "https://cmdb.example.com/onboarding"},
+		{"https://cmdb.example.com///onboarding", "https://cmdb.example.com/onboarding"},
+		{"http://192.0.2.10:3000//onboarding", "http://192.0.2.10:3000/onboarding"},
+	} {
+		t.Run(c.in, func(t *testing.T) {
+			t.Setenv("RETICORA_SIGNUP_VERIFY_URL", c.in)
+			cfg := Load()
+			if err := cfg.Validate(false); err != nil || cfg.SignupVerifyURL != c.want {
+				t.Errorf("production with %q: %q, %v; want %q and a valid configuration", c.in, cfg.SignupVerifyURL, err, c.want)
+			}
+		})
+	}
+	t.Run("development keeps an explicit URL", func(t *testing.T) {
+		t.Setenv("RETICORA_ENVIRONMENT", EnvDevelopment)
+		t.Setenv("RETICORA_SIGNUP_VERIFY_URL", "http://localhost:3000//onboarding")
+		if cfg := Load(); cfg.SignupVerifyURL != "http://localhost:3000/onboarding" {
+			t.Errorf("development with an explicit URL: %q", cfg.SignupVerifyURL)
+		}
+	})
+	for _, env := range []string{EnvProduction, EnvDevelopment} {
+		for _, bad := range []string{"https:///onboarding", "/onboarding", "onboarding",
+			"ftp://cmdb.example.com/onboarding", "https://user:secret@cmdb.example.com/onboarding"} {
+			t.Run(env+" "+bad, func(t *testing.T) {
+				t.Setenv("RETICORA_ENVIRONMENT", env)
+				t.Setenv("RETICORA_SIGNUP_VERIFY_URL", bad)
+				err := Load().Validate(false)
+				if err == nil || !strings.Contains(err.Error(), "RETICORA_SIGNUP_VERIFY_URL") {
+					t.Errorf("%s with %q: %v, want an error naming RETICORA_SIGNUP_VERIFY_URL", env, bad, err)
+				} else if strings.Contains(err.Error(), "secret") {
+					t.Errorf("the start check repeats the value: %v", err)
+				}
+			})
+		}
+	}
+}
+
 // TestIngestLanesSetting covers WP-334 (NFR-03, E-56): four ingest lanes by
 // default, one (the serial processing) and sixteen are accepted.
 func TestIngestLanesSetting(t *testing.T) {
@@ -164,6 +333,61 @@ func TestIngestLanesSetting(t *testing.T) {
 		if cfg := Load(); cfg.Validate(true) != nil || cfg.IngestLanes != map[string]int{"1": 1, "16": 16}[v] {
 			t.Errorf("RETICORA_INGEST_LANES=%s: %d, %v", v, cfg.IngestLanes, cfg.Validate(true))
 		}
+	}
+}
+
+// TestEventsStreamRetentionSetting covers WP-548 (EVT-01, NFR-06, F-321):
+// RETICORA_EVENTS_MAX_AGE (Go duration or whole days) and
+// RETICORA_EVENTS_MAX_BYTES configure the retention of the stream
+// RETICORA_EVENTS, by default 30 days and 10 GB. An age below 30 days, a
+// size that is not positive and unparsable values fail the start check.
+func TestEventsStreamRetentionSetting(t *testing.T) {
+	clearEnv(t)
+	cfg := Load()
+	if cfg.EventsMaxAge != 30*24*time.Hour || cfg.EventsMaxBytes != 10<<30 || cfg.Validate(true) != nil {
+		t.Fatalf("defaults: %v, %d bytes, %v; want 30 days and 10 GB", cfg.EventsMaxAge, cfg.EventsMaxBytes, cfg.Validate(true))
+	}
+	for _, c := range []struct {
+		age, bytes string
+		wantAge    time.Duration
+		wantBytes  int64
+	}{
+		{"30d", "", 30 * 24 * time.Hour, 10 << 30},
+		{"720h", "1073741824", 30 * 24 * time.Hour, 1 << 30},
+		{"90d", "53687091200", 90 * 24 * time.Hour, 50 << 30},
+		{"2160h30m", "1", 2160*time.Hour + 30*time.Minute, 1},
+	} {
+		t.Setenv("RETICORA_EVENTS_MAX_AGE", c.age)
+		t.Setenv("RETICORA_EVENTS_MAX_BYTES", c.bytes)
+		cfg := Load()
+		if err := cfg.Validate(true); err != nil || cfg.EventsMaxAge != c.wantAge || cfg.EventsMaxBytes != c.wantBytes {
+			t.Errorf("RETICORA_EVENTS_MAX_AGE=%q RETICORA_EVENTS_MAX_BYTES=%q: %v, %d, %v; want %v, %d",
+				c.age, c.bytes, cfg.EventsMaxAge, cfg.EventsMaxBytes, err, c.wantAge, c.wantBytes)
+		}
+	}
+	for _, c := range []struct{ age, bytes, want string }{
+		{"29d", "", "RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06)"},
+		{"719h59m", "", "RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06)"},
+		{"0", "", "RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06)"},
+		{"-720h", "", "RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06)"},
+		{"thirty days", "", "RETICORA_EVENTS_MAX_AGE has an invalid value"},
+		{"-30d", "", "RETICORA_EVENTS_MAX_AGE has an invalid value"},
+		{"", "0", "RETICORA_EVENTS_MAX_BYTES must be positive"},
+		{"", "-1", "RETICORA_EVENTS_MAX_BYTES must be positive"},
+		{"", "10GB", "RETICORA_EVENTS_MAX_BYTES has an invalid value"},
+	} {
+		t.Setenv("RETICORA_EVENTS_MAX_AGE", c.age)
+		t.Setenv("RETICORA_EVENTS_MAX_BYTES", c.bytes)
+		if err := Load().Validate(true); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("RETICORA_EVENTS_MAX_AGE=%q RETICORA_EVENTS_MAX_BYTES=%q: %v, want an error containing %q", c.age, c.bytes, err, c.want)
+		}
+	}
+	// The start check is the same outside development.
+	setAll(t, productionEnv)
+	t.Setenv("RETICORA_EVENTS_MAX_AGE", "7d")
+	t.Setenv("RETICORA_EVENTS_MAX_BYTES", "")
+	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), "RETICORA_EVENTS_MAX_AGE must be at least 30d") {
+		t.Errorf("production with 7 days: %v", err)
 	}
 }
 
@@ -225,6 +449,115 @@ func TestWorkerSwitches(t *testing.T) {
 	}
 }
 
+// TestOfflineDetectorSwitch covers WP-447 (OPS-02, F-289): the offline
+// detector is the registered worker offline_detector, switched by
+// RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED; off, its job ci.offline_detector
+// is not registered (cmd/server TestOfflineDetectorRunsUnderItsWorkerSwitch).
+// The former RETICORA_OFFLINE_DETECTOR_ENABLED still switches it while the
+// convention's switch is not set and is reported as deprecated; next to it
+// it is ignored. A set RETICORA_WORKER_*_ENABLED that switches no registered
+// worker is reported, not refused.
+func TestOfflineDetectorSwitch(t *testing.T) {
+	clearEnv(t)
+	key := WorkerEnvKey(WorkerOfflineDetector)
+	if key != "RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED" || !IsWorker(WorkerOfflineDetector) {
+		t.Fatalf("offline detector: switch %s, registered %v", key, IsWorker(WorkerOfflineDetector))
+	}
+	for _, tc := range []struct {
+		name, convention, alias string
+		enabled                 bool
+		warning                 string
+	}{
+		{"default", "", "", true, ""},
+		{"convention off", "false", "", false, ""},
+		{"convention on", "true", "", true, ""},
+		{"alias off", "", "false", false, OfflineDetectorAlias + " is deprecated: use " + key},
+		{"alias on", "", "1", true, OfflineDetectorAlias + " is deprecated: use " + key},
+		{"convention on, alias off", "true", "false", true, OfflineDetectorAlias + " is deprecated and ignored: " + key + " is set"},
+		{"convention off, alias on", "false", "true", false, OfflineDetectorAlias + " is deprecated and ignored: " + key + " is set"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(key, tc.convention)
+			t.Setenv(OfflineDetectorAlias, tc.alias)
+			cfg := Load()
+			if cfg.WorkerEnabled(WorkerOfflineDetector) != tc.enabled {
+				t.Errorf("offline detector enabled: %v, want %v", cfg.WorkerEnabled(WorkerOfflineDetector), tc.enabled)
+			}
+			if got := strings.Join(cfg.Warnings(), "\n"); tc.warning == "" && strings.Contains(got, OfflineDetectorAlias) ||
+				tc.warning != "" && !strings.Contains(got, tc.warning) {
+				t.Errorf("warnings %q, want %q", got, tc.warning)
+			}
+			if err := cfg.Validate(false); err != nil {
+				t.Errorf("start check: %v", err)
+			}
+		})
+	}
+
+	t.Setenv(key, "")
+	t.Setenv(OfflineDetectorAlias, "")
+	t.Setenv("RETICORA_WORKER_FOO_ENABLED", "false")
+	t.Setenv("RETICORA_WORKER_Export_ENABLED", "false")
+	t.Setenv("RETICORA_WORKER_BAR_ENABLED", "")
+	t.Setenv(WorkerEnvKey(WorkerNotifier), "false")
+	cfg := Load()
+	warnings := strings.Join(cfg.Warnings(), "\n")
+	for _, unknown := range []string{"RETICORA_WORKER_FOO_ENABLED", "RETICORA_WORKER_Export_ENABLED"} {
+		if !strings.Contains(warnings, unknown+" switches no registered worker and is ignored") {
+			t.Errorf("unknown switch %s: no warning in %q", unknown, warnings)
+		}
+	}
+	for _, quiet := range []string{"RETICORA_WORKER_BAR_ENABLED", WorkerEnvKey(WorkerNotifier)} {
+		if strings.Contains(warnings, quiet) {
+			t.Errorf("%s reported: %q", quiet, warnings)
+		}
+	}
+	if !cfg.WorkerEnabled(WorkerExport) || cfg.WorkerEnabled(WorkerNotifier) {
+		t.Errorf("export %v (the misspelt switch must not apply), notifier %v", cfg.WorkerEnabled(WorkerExport), cfg.WorkerEnabled(WorkerNotifier))
+	}
+	if err := cfg.Validate(false); err != nil {
+		t.Errorf("an unknown switch is a warning, not a start error: %v", err)
+	}
+}
+
+// TestDefaultOrgAdminRoleRequiresAdminClient covers WP-367 (AUT-09, E-65
+// option 1): outside development the default role org_admin needs the
+// Keycloak admin client that binds a new org_admin to MFA; the start check
+// names both settings. With the client, with another default role and in
+// development the configuration starts.
+func TestDefaultOrgAdminRoleRequiresAdminClient(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", "")
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", "")
+	t.Setenv("RETICORA_DEFAULT_PROVISION_ROLE", "org_admin")
+	if err := Load().Validate(false); err != nil {
+		t.Errorf("development with default role org_admin without admin client: %v", err)
+	}
+	for _, env := range []string{EnvStaging, EnvProduction} {
+		setAll(t, productionEnv)
+		t.Setenv("RETICORA_ENVIRONMENT", env)
+		err := Load().Validate(false)
+		if err == nil || !strings.Contains(err.Error(), "RETICORA_DEFAULT_PROVISION_ROLE") || !strings.Contains(err.Error(), "RETICORA_KEYCLOAK_ADMIN_CLIENT_ID") {
+			t.Errorf("%s with default role org_admin without admin client: %v, want an error naming both settings", env, err)
+		}
+	}
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", "reticora-admin-client")
+	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), "RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET") {
+		t.Errorf("admin client without secret: %v, want an error", err)
+	}
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", "secret")
+	if err := Load().Validate(false); err != nil {
+		t.Errorf("default role org_admin with admin client: %v", err)
+	}
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_ID", "")
+	t.Setenv("RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET", "")
+	for _, role := range []string{"viewer", ""} {
+		t.Setenv("RETICORA_DEFAULT_PROVISION_ROLE", role)
+		if err := Load().Validate(false); err != nil {
+			t.Errorf("default role %q without admin client: %v", role, err)
+		}
+	}
+}
+
 // TestDevAuthOnlyInDevelopment covers WP-110 (AUT-03): the start check
 // refuses RETICORA_ALLOW_INSECURE_DEV_AUTH outside development.
 func TestDevAuthOnlyInDevelopment(t *testing.T) {
@@ -244,5 +577,105 @@ func TestDevAuthOnlyInDevelopment(t *testing.T) {
 	t.Setenv("RETICORA_ALLOW_INSECURE_DEV_AUTH", "false")
 	if err := Load().Validate(false); err != nil {
 		t.Errorf("production without the dev login: %v", err)
+	}
+}
+
+// TestOpsAlertBridgeSettings covers WP-448 (OPS-05, E-75): the Alertmanager
+// bridge starts with a token of at least 32 characters and the UUID of the
+// operator organization; an organization without token, an organization
+// that is no UUID, a short token and the break-glass token as alert token
+// fail the start check. A token without organization leaves the bridge off
+// (404) and is reported.
+func TestOpsAlertBridgeSettings(t *testing.T) {
+	const token = "ops-alert-token-with-at-least-32-chars"
+	const org = "6f1c2d3e-4b5a-4c6d-8e7f-0a1b2c3d4e5f"
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want string // empty: valid
+	}{
+		"bridge off":             {map[string]string{}, ""},
+		"token and organization": {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token, "RETICORA_OPS_ALERT_ORG_ID": org}, ""},
+		// Values from secret files end with a line break; Alertmanager
+		// sends the token of its credentials file without it.
+		"values from secret files": {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token + "\n", "RETICORA_OPS_ALERT_ORG_ID": " " + org + "\n"}, ""},
+		"token only (bridge off)":  {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token}, ""},
+		"padded short token":       {map[string]string{"RETICORA_OPS_ALERT_TOKEN": "  short" + strings.Repeat(" ", 30), "RETICORA_OPS_ALERT_ORG_ID": org}, "at least 32 characters"},
+		"organization only":        {map[string]string{"RETICORA_OPS_ALERT_ORG_ID": org}, "RETICORA_OPS_ALERT_ORG_ID requires RETICORA_OPS_ALERT_TOKEN"},
+		"organization is no UUID":  {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token, "RETICORA_OPS_ALERT_ORG_ID": "operators"}, "must be the UUID"},
+		"short token":              {map[string]string{"RETICORA_OPS_ALERT_TOKEN": "short", "RETICORA_OPS_ALERT_ORG_ID": org}, "at least 32 characters"},
+		"break-glass token reused": {map[string]string{"RETICORA_OPS_ALERT_TOKEN": token, "RETICORA_OPERATOR_TOKEN": token,
+			"RETICORA_OPS_ALERT_ORG_ID": org}, "must differ from RETICORA_OPERATOR_TOKEN"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			for _, key := range []string{"RETICORA_OPS_ALERT_TOKEN", "RETICORA_OPS_ALERT_ORG_ID", "RETICORA_OPERATOR_TOKEN"} {
+				t.Setenv(key, "")
+			}
+			setAll(t, tc.env)
+			cfg := Load()
+			err := cfg.Validate(false)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("Validate() = %v, want nil", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
+			}
+			if tc.want == "" && tc.env["RETICORA_OPS_ALERT_ORG_ID"] != "" && (cfg.OpsAlertToken != token || cfg.OpsAlertOrgID != org) {
+				t.Errorf("loaded token %q, organization %q", cfg.OpsAlertToken, cfg.OpsAlertOrgID)
+			}
+			warned := false
+			for _, w := range cfg.Warnings() {
+				warned = warned || strings.Contains(w, "RETICORA_OPS_ALERT_TOKEN is set without RETICORA_OPS_ALERT_ORG_ID")
+			}
+			if want := name == "token only (bridge off)"; warned != want {
+				t.Errorf("warning about the token without organization: %v, want %v (%v)", warned, want, cfg.Warnings())
+			}
+		})
+	}
+}
+
+// TestPprofAddrSetting covers WP-438 (NFR-02): the profiling listener is off
+// by default and starts only on a loopback IP with a port, only in
+// development and not together with RETICORA_EGRESS_ALLOW_PRIVATE, which
+// lets webhooks reach loopback addresses.
+func TestPprofAddrSetting(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want string // empty: valid
+	}{
+		"off by default":            {map[string]string{}, ""},
+		"IPv4 loopback":             {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060"}, ""},
+		"IPv6 loopback":             {map[string]string{"RETICORA_PPROF_ADDR": "[::1]:6060"}, ""},
+		"all interfaces":            {map[string]string{"RETICORA_PPROF_ADDR": ":6060"}, "must be a loopback IP"},
+		"unspecified address":       {map[string]string{"RETICORA_PPROF_ADDR": "0.0.0.0:6060"}, "must be a loopback IP"},
+		"private address":           {map[string]string{"RETICORA_PPROF_ADDR": "10.0.0.5:6060"}, "must be a loopback IP"},
+		"host name":                 {map[string]string{"RETICORA_PPROF_ADDR": "localhost:6060"}, "must be a loopback IP"},
+		"no port":                   {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1"}, "must be a loopback IP"},
+		"port 0":                    {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:0"}, "must be a loopback IP"},
+		"port out of range":         {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:70000"}, "must be a loopback IP"},
+		"staging":                   {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_ENVIRONMENT": EnvStaging}, "only allowed with RETICORA_ENVIRONMENT=development"},
+		"production":                {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_ENVIRONMENT": EnvProduction}, "only allowed with RETICORA_ENVIRONMENT=development"},
+		"egress to private targets": {map[string]string{"RETICORA_PPROF_ADDR": "127.0.0.1:6060", "RETICORA_EGRESS_ALLOW_PRIVATE": "true"}, "must not be combined with RETICORA_EGRESS_ALLOW_PRIVATE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("RETICORA_PPROF_ADDR", "")
+			t.Setenv("RETICORA_EGRESS_ALLOW_PRIVATE", "")
+			if env := tc.env["RETICORA_ENVIRONMENT"]; env != "" && env != EnvDevelopment {
+				setAll(t, productionEnv)
+			}
+			setAll(t, tc.env)
+			cfg := Load()
+			if cfg.PprofAddr != tc.env["RETICORA_PPROF_ADDR"] {
+				t.Errorf("PprofAddr %q, want %q", cfg.PprofAddr, tc.env["RETICORA_PPROF_ADDR"])
+			}
+			err := cfg.Validate(false)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("Validate() = %v, want nil", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
+			}
+		})
 	}
 }

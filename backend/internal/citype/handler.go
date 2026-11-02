@@ -90,7 +90,9 @@ func writeAttributeError(w http.ResponseWriter, err error) {
 }
 
 // ListAttributeDefinitions handles GET /api/v1/attribute-definitions
-// (?ci_type_id=, ?scope=type|global).
+// (?ci_type_id=, ?scope=type|global): a page newest first on (created_at,
+// id) with limit (default 50, at most 200) and the signed cursor of API-02
+// (F-215).
 func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
@@ -100,14 +102,20 @@ func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
-	items, err := store.ListAttributeDefinitions(r.Context(), t.OrganizationID,
-		AttributeFilter{CITypeID: q.Get("ci_type_id"), Scope: q.Get("scope")})
+	items, total, err := store.ListAttributeDefinitionPage(r.Context(), t.OrganizationID,
+		AttributeFilter{CITypeID: q.Get("ci_type_id"), Scope: q.Get("scope")}, page)
 	if err != nil {
 		writeAttributeError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[AttributeDefinition]{Data: items, Total: len(items), Limit: len(items)})
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(items, total, page, func(d *AttributeDefinition) (time.Time, string) {
+		return d.CreatedAt, d.ID
+	}))
 }
 
 // GetAttributeDefinition handles GET /api/v1/attribute-definitions/{id}.
@@ -149,7 +157,10 @@ func (h *Handler) CreateAttributeDefinition(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	d := &AttributeDefinition{CITypeID: req.CITypeID, Key: req.Key, UniqueScope: "org", Inheritable: true}
-	req.apply(d)
+	if err := req.apply(d); err != nil {
+		writeAttributeError(w, err)
+		return
+	}
 	if err := store.CreateAttributeDefinition(r.Context(), t.OrganizationID, d); err != nil {
 		writeAttributeError(w, err)
 		return
@@ -318,10 +329,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Fields:                   req.Fields,
 	}
 	if err := h.repo.Create(r.Context(), typ); err != nil {
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeTypeError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.created", typ)
@@ -369,10 +377,7 @@ func (h *Handler) Clone(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
 			return
 		}
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeTypeError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.created", item)
@@ -448,12 +453,13 @@ func (h *Handler) UpsertField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeFieldDefinitionError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", f)
@@ -500,12 +506,13 @@ func (h *Handler) UpsertGlobalField(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Scope = "global"
+	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, "", req)
 	if err != nil {
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeFieldDefinitionError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", f)
@@ -553,12 +560,13 @@ func (h *Handler) UpsertInstanceField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	f, err := h.repo.UpsertInstanceField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		if api.WriteDBError(w, err) {
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		writeFieldDefinitionError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", f)
@@ -575,10 +583,40 @@ func (h *Handler) DeleteInstanceField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "instance field definition not found")
 		return
 	}
-	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", map[string]string{"name": chi.URLParam(r, "name")})
+	// The CI scopes the event for bound webhook subscriptions (RBA-08).
+	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", map[string]string{"ci_id": chi.URLParam(r, "id"), "name": chi.URLParam(r, "name")})
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// validateField checks a field of a CI type.
+// validation: the texts of fieldmeta.ValidateDefinition.
 func validateField(f Field) error {
 	return fieldmeta.ValidateDefinition(f.Definition())
+}
+
+// writeTypeError reports a failed create or clone of a CI type: a taken key
+// or name is 409 (in memory ErrConflict, in PostgreSQL 23505), every other
+// repository error goes through api.WriteRepoError, so no SQLSTATE,
+// constraint or driver text reaches the client (F-047).
+func writeTypeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrConflict) {
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+		return
+	}
+	api.WriteRepoError(w, err)
+}
+
+// writeFieldDefinitionError reports a failed field upsert after the handler
+// validated the definition: field errors of the attribute definition with
+// their field, an unknown type or CI 404, everything else through
+// api.WriteRepoError (F-047).
+func writeFieldDefinitionError(w http.ResponseWriter, err error) {
+	if api.WriteFieldError(w, err) {
+		return
+	}
+	if err.Error() == "not found" {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type or ci not found")
+		return
+	}
+	api.WriteRepoError(w, err)
 }

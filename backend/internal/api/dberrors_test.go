@@ -1,8 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,6 +49,11 @@ func TestWriteRepoErrorSanitizesPostgresErrors(t *testing.T) {
 			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
+			name:       "ErrNotFound becomes not found",
+			err:        fmt.Errorf("collector secret_internal_table: %w", ErrNotFound),
+			wantStatus: http.StatusNotFound,
+		},
+		{
 			name:       "unknown error becomes a generic internal error",
 			err:        errors.New(`pq: relation "secret_internal_table" does not exist`),
 			wantStatus: http.StatusInternalServerError,
@@ -76,6 +85,114 @@ func TestWriteRepoErrorSanitizesPostgresErrors(t *testing.T) {
 			}
 			if _, ok := problem["title"]; !ok {
 				t.Fatalf("RFC 7807 response must carry a title: %s", body)
+			}
+		})
+	}
+}
+
+// TestWriteRepoErrorWritesFieldErrors covers WP-694 (API-03, F-423): a
+// field error of the validation or the repository that reaches
+// WriteRepoError, also wrapped, is its field problem instead of 500: the
+// status it names (400 without one), 409 for a conflict, with the field;
+// the text of an error wrapping it is not written.
+func TestWriteRepoErrorWritesFieldErrors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+		field  string
+	}{
+		"field error with 422": {fmt.Errorf("update collector secret_internal_table: %w",
+			&FieldError{Field: "site_id", Message: "site not found", Status: http.StatusUnprocessableEntity}), http.StatusUnprocessableEntity, "site_id"},
+		"field error without status": {&FieldError{Field: "name", Message: "name must not be empty"}, http.StatusBadRequest, "name"},
+		"conflict":                   {fmt.Errorf("register: %w", &ConflictError{Field: "name", Message: "taken"}), http.StatusConflict, "name"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			WriteRepoError(w, tc.err)
+			var problem struct {
+				Field  string `json:"field"`
+				Detail string `json:"detail"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("response is not JSON: %v (%s)", err, w.Body.String())
+			}
+			if w.Code != tc.status || problem.Field != tc.field {
+				t.Fatalf("status %d field %q (%s), want %d on %s", w.Code, problem.Field, w.Body.String(), tc.status, tc.field)
+			}
+			if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+				t.Errorf("Content-Type %q, want application/problem+json", ct)
+			}
+			if strings.Contains(w.Body.String(), "secret_internal_table") {
+				t.Errorf("answer names the wrapping error: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+// TestWriteRepoErrorUnavailableDependency covers WP-449 (OPS-06, F-136): a
+// dependency that is unreachable before anything was stored (ErrUnavailable,
+// e.g. the ingest queue while NATS is down, or a database connection that
+// could not be established) is refused visibly with 503 and Retry-After, so
+// the client keeps its data and sends it again; the answer names no
+// internals. A connection lost during a statement stays 500: the write may
+// have committed.
+func TestWriteRepoErrorUnavailableDependency(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := l.Addr().String()
+	_ = l.Close()
+	_, connectErr := pgconn.Connect(context.Background(), "postgres://reticora_runtime:secret@"+closed+"/reticora?sslmode=disable&connect_timeout=2")
+	var typed *pgconn.ConnectError
+	if !errors.As(connectErr, &typed) {
+		t.Fatalf("connecting to a closed port: %T %v, want *pgconn.ConnectError", connectErr, connectErr)
+	}
+
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+	}{
+		"ingest queue down":         {fmt.Errorf("%w: ingest queue reconnecting", ErrUnavailable), http.StatusServiceUnavailable},
+		"publish failed":            {fmt.Errorf("%w: publish ingest message: %w", ErrUnavailable, errors.New("nats: timeout")), http.StatusServiceUnavailable},
+		"database unreachable":      {fmt.Errorf("begin tenant transaction: %w", connectErr), http.StatusServiceUnavailable},
+		"connection lost mid-query": {fmt.Errorf("insert ci: %w", io.ErrUnexpectedEOF), http.StatusInternalServerError},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			WriteRepoError(w, tc.err)
+			if w.Code != tc.status {
+				t.Fatalf("status %d (%s), want %d", w.Code, w.Body.String(), tc.status)
+			}
+			if tc.status == http.StatusServiceUnavailable && w.Header().Get("Retry-After") != UnavailableRetryAfter {
+				t.Errorf("Retry-After %q, want %q", w.Header().Get("Retry-After"), UnavailableRetryAfter)
+			}
+			for _, leak := range []string{"nats", "ingest queue", "reticora_runtime", closed, "connect", "dial"} {
+				if strings.Contains(w.Body.String(), leak) {
+					t.Errorf("answer names %q: %s", leak, w.Body.String())
+				}
+			}
+		})
+	}
+}
+
+// TestClassifyDBErrorInvalidCharacters guards F-047: a NUL byte in a text
+// value (22021) or in jsonb (22P05) is a client error, not a generic 500 or
+// a 409 carrying the driver text.
+func TestClassifyDBErrorInvalidCharacters(t *testing.T) {
+	for _, code := range []string{"22021", "22P05"} {
+		t.Run(code, func(t *testing.T) {
+			err := &pgconn.PgError{Code: code, Message: `invalid byte sequence for encoding "UTF8": 0x00`}
+			status, title, detail, ok := ClassifyDBError(fmt.Errorf("create ci type: %w", err))
+			if !ok || status != http.StatusBadRequest || title != "Bad Request" ||
+				detail != "a field value has an invalid format or is out of range" {
+				t.Fatalf("ClassifyDBError(%s) = %d %q %q %v, want 400 with the fixed detail", code, status, title, detail, ok)
+			}
+			w := httptest.NewRecorder()
+			WriteRepoError(w, err)
+			if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), "invalid byte sequence") ||
+				strings.Contains(w.Body.String(), "UTF8") {
+				t.Fatalf("WriteRepoError: %d %s", w.Code, w.Body.String())
 			}
 		})
 	}

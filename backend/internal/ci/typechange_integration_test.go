@@ -20,7 +20,7 @@ import (
 // TestTypeChangeAgainstPostgres covers CI-11 (WP-172) against PostgreSQL:
 // discovery raises generic_device to a specific type and is refused a
 // specific-to-specific change; the manual change through POST /cis/{id}/type
-// keeps the CI row and its asset link, records ci_change type_change and
+// keeps the CI row and its asset link, records ci_change type_changed and
 // the ci.type_changed audit entry and reports missing required attributes
 // of the target type as findings.
 //
@@ -77,7 +77,7 @@ func TestTypeChangeAgainstPostgres(t *testing.T) {
 
 	var changes, audits int
 	if err = f.Admin.QueryRow(bg, `SELECT
-		(SELECT count(*) FROM ci_change WHERE ci_id = $1 AND change_type = 'type_change' AND field_name = 'ci_type_id'),
+		(SELECT count(*) FROM ci_change WHERE ci_id = $1 AND change_type = 'type_changed' AND change_kind = 'type_changed' AND field_name = 'ci_type_id'),
 		(SELECT count(*) FROM audit_log WHERE organization_id = $2 AND action = 'ci.type_changed' AND resource_id = $1)`,
 		id, f.OrgA).Scan(&changes, &audits); err != nil {
 		t.Fatal(err)

@@ -18,6 +18,8 @@ func TestTopologyTraversalRecursiveCTE(t *testing.T) {
 		orgA   = "a0000000-0000-4000-8000-0000000000d1"
 		orgB   = "b0000000-0000-4000-8000-0000000000d2"
 		ciType = "c1000000-0000-4000-8000-0000000000d1"
+		// The CI of org B has a type of its own organization (WP-396).
+		ciTypeB = "c1000000-0000-4000-8000-0000000000d2"
 	)
 
 	seed := openAdmin(t, dsn)
@@ -39,7 +41,7 @@ func TestTopologyTraversalRecursiveCTE(t *testing.T) {
 		t.Fatalf("seed orgs: %v", err)
 	}
 	if _, err := seed.ExecContext(ctx, `INSERT INTO ci_type (id, organization_id, name) VALUES
-		($1, $2, 'Server') ON CONFLICT (id) DO NOTHING`, ciType, orgA); err != nil {
+		($1, $2, 'Server'), ($3, $4, 'Server') ON CONFLICT (id) DO NOTHING`, ciType, orgA, ciTypeB, orgB); err != nil {
 		t.Fatalf("seed ci_type: %v", err)
 	}
 
@@ -54,7 +56,7 @@ func TestTopologyTraversalRecursiveCTE(t *testing.T) {
 	}
 	var foreignID string
 	if err := seed.QueryRowContext(ctx, `INSERT INTO ci (organization_id, ci_type_id, name)
-		VALUES ($1, $2, 'trav-foreign') RETURNING id::text`, orgB, ciType).Scan(&foreignID); err != nil {
+		VALUES ($1, $2, 'trav-foreign') RETURNING id::text`, orgB, ciTypeB).Scan(&foreignID); err != nil {
 		t.Fatalf("seed foreign ci: %v", err)
 	}
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -67,6 +69,16 @@ type AlertRule struct {
 	PendingSince *time.Time `json:"pending_since,omitempty"`
 	LastFiredAt  *time.Time `json:"last_fired_at,omitempty"`
 }
+
+// MaxAlertDuration bounds the duration of an alert rule: the condition must
+// hold that long before the rule fires, and metric samples are kept 400 days
+// (MON-01), so a longer duration could never be observed. A duration outside
+// 0..MaxAlertDuration is a 422 field error (it would overflow the interval
+// read back from PostgreSQL, F-047).
+const MaxAlertDuration = 400 * 24 * time.Hour
+
+// ErrAlertRuleExists: a rule with the given id exists already (409).
+var ErrAlertRuleExists = errors.New("alert rule already exists")
 
 // AlertEvent describes a fired alert.
 type AlertEvent struct {
@@ -155,6 +167,9 @@ func (r *AlertRule) UnmarshalJSON(data []byte) error {
 		}
 		duration = parsed
 	case float64:
+		if value < 0 || value > float64(MaxAlertDuration) {
+			return durationRangeError()
+		}
 		duration = time.Duration(value)
 	default:
 		return errors.New("duration must be a string or number")
@@ -201,8 +216,13 @@ func (m *AlertManager) ListRules(_ context.Context, orgID string) ([]AlertRule, 
 		}
 		result = append(result, rule)
 	}
+	// Name, then id, like PGAlertStore: the offset pages of
+	// GET /monitoring/alerts need a stable order (API-02).
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].Name < result[j].Name
+		if result[i].Name != result[j].Name {
+			return result[i].Name < result[j].Name
+		}
+		return result[i].ID < result[j].ID
 	})
 	return result, nil
 }
@@ -217,7 +237,7 @@ func (m *AlertManager) CreateRule(_ context.Context, rule AlertRule) (AlertRule,
 	}
 	for _, existing := range m.rules {
 		if existing.ID == rule.ID && existing.OrgID == rule.OrgID {
-			return AlertRule{}, fmt.Errorf("alert rule %q already exists", rule.ID)
+			return AlertRule{}, ErrAlertRuleExists
 		}
 	}
 	m.rules = append(m.rules, rule)
@@ -389,7 +409,9 @@ func (s *MemoryMetricStore) Query(ctx context.Context, q MetricQuery) ([]MetricP
 		points = append(points, MetricPoint{Timestamp: metric.Timestamp.UTC(), Value: metric.Value})
 	}
 
-	sort.Slice(points, func(i, j int) bool {
+	// Stable, so samples of the same instant keep their order across the
+	// offset pages of GET /monitoring/metrics (API-02).
+	sort.SliceStable(points, func(i, j int) bool {
 		return points[i].Timestamp.Before(points[j].Timestamp)
 	})
 	if q.Step <= 0 {
@@ -453,6 +475,13 @@ type MetricNamer interface {
 	MetricNames(ctx context.Context, orgID, ciID string, since time.Time) ([]string, error)
 }
 
+// CIVisibility reports whether a CI exists and is visible under the
+// request's scope; stores that know the CIs implement it, and
+// GET /cis/{id}/metrics answers 404 for the others (TEN-06).
+type CIVisibility interface {
+	CIVisible(ctx context.Context, orgID, ciID string) (bool, error)
+}
+
 // WithCIResolver assigns samples without ci_id by their target label.
 func (h *Handler) WithCIResolver(r CIResolver) *Handler {
 	h.cis = r
@@ -495,13 +524,18 @@ func (h *Handler) QueryMetrics(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 
 	points, err := h.store.Query(r.Context(), query)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, points)
+	api.WriteJSON(w, http.StatusOK, api.Page(points, page))
 }
 
 // IngestMetrics handles POST /api/v1/monitoring/metrics.
@@ -511,14 +545,73 @@ func (h *Handler) IngestMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metrics, err := decodeMetrics(r.Body)
+	data, err := readMetricsBody(r.Body)
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if len(metrics) == 0 {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "at least one metric is required")
+	result, err := h.IngestPayload(r.Context(), orgID, data)
+	var invalid *InvalidMetricsError
+	var unknown *UnknownCIError
+	switch {
+	case errors.As(err, &invalid):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", invalid.Error())
 		return
+	case errors.As(err, &unknown):
+		// All or nothing: one sample naming a CI the caller does not see
+		// refuses the batch, like GET /cis/{id}/metrics (404, F-394).
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_id", Message: unknown.Error(), Status: http.StatusNotFound})
+		return
+	case err != nil:
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusAccepted, map[string]any{"ingested": result.Ingested, "unassigned": result.Unassigned})
+}
+
+// InvalidMetricsError is an ingest body that is refused with 400: no
+// metric, a metric without a name or no metric JSON.
+type InvalidMetricsError struct{ Detail string }
+
+// validation: the fixed texts of decodeMetrics and IngestPayload.
+func (e *InvalidMetricsError) Error() string { return e.Detail }
+
+// UnknownCIError is an ingest sample whose ci_id names no CI the caller
+// sees: unknown, of another organization or outside its client/site scope,
+// which the caller must not tell apart (TEN-06). The whole batch is refused,
+// nothing is stored; POST /monitoring/metrics answers 404 naming the field
+// and the ci_id the caller sent (F-394). It is an api.ErrNotFound.
+type UnknownCIError struct{ CIID string }
+
+// validation: the fixed text with the ci_id of the request body.
+func (e *UnknownCIError) Error() string { return "ci " + e.CIID + " not found" }
+
+// Unwrap makes the error an api.ErrNotFound for api.WriteRepoError.
+func (e *UnknownCIError) Unwrap() error { return api.ErrNotFound }
+
+// IngestResult counts the samples of an ingest (MON-02): those stored with
+// their CI and those without a CI, which are not stored.
+type IngestResult struct {
+	Ingested   int `json:"ingested"`
+	Unassigned int `json:"unassigned"`
+}
+
+// IngestPayload stores the metrics of an ingest body for the organization;
+// POST /api/v1/monitoring/metrics and the collectors' edge subject .metrics
+// share it (MON-02). Collector samples carry the polled address, not the
+// CI: they are assigned by it among the CIs the scope of ctx sees, so a
+// client- or site-scoped caller assigns only to its own CIs. A sample
+// without a CI is not stored (metric_sample.ci_id is required) and counted
+// as unassigned. A body without valid metrics is an *InvalidMetricsError; a
+// sample naming a CI the scope does not see refuses the whole body with an
+// *UnknownCIError (nothing stored).
+func (h *Handler) IngestPayload(ctx context.Context, orgID string, data []byte) (IngestResult, error) {
+	metrics, err := decodeMetrics(data)
+	if err != nil {
+		return IngestResult{}, &InvalidMetricsError{Detail: err.Error()}
+	}
+	if len(metrics) == 0 {
+		return IngestResult{}, &InvalidMetricsError{Detail: "at least one metric is required"}
 	}
 
 	now := time.Now().UTC()
@@ -532,22 +625,17 @@ func (h *Handler) IngestMetrics(w http.ResponseWriter, r *http.Request) {
 			metrics[i].Labels = make(map[string]string)
 		}
 		if strings.TrimSpace(metrics[i].Name) == "" {
-			api.WriteError(w, http.StatusBadRequest, "Bad Request", "metric name is required")
-			return
+			return IngestResult{}, &InvalidMetricsError{Detail: "metric name is required"}
 		}
 	}
 
-	// Collector samples carry the polled address, not the CI: assign them
-	// by it; a sample without a CI is not stored (metric_sample.ci_id is
-	// required) and counted as unassigned (MON-02).
-	assigned, unassigned := h.assignCIs(r.Context(), orgID, metrics)
+	assigned, unassigned := h.assignCIs(ctx, orgID, metrics)
 	if len(assigned) > 0 {
-		if err := h.store.Ingest(r.Context(), assigned); err != nil {
-			api.WriteRepoError(w, err)
-			return
+		if err := h.store.Ingest(ctx, assigned); err != nil {
+			return IngestResult{}, err
 		}
 	}
-	api.WriteJSON(w, http.StatusAccepted, map[string]any{"ingested": len(assigned), "unassigned": unassigned})
+	return IngestResult{Ingested: len(assigned), Unassigned: unassigned}, nil
 }
 
 // ListAlerts handles GET /api/v1/monitoring/alerts.
@@ -556,12 +644,17 @@ func (h *Handler) ListAlerts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	rules, err := h.alerts.ListRules(r.Context(), orgID)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, rules)
+	api.WriteJSON(w, http.StatusOK, api.Page(rules, page))
 }
 
 // CreateAlert handles POST /api/v1/monitoring/alerts.
@@ -573,18 +666,21 @@ func (h *Handler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 
 	var rule AlertRule
 	if err := decodeJSON(r.Body, &rule); err != nil {
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
 	if err := validateAlertRule(&rule); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		api.WriteFieldError(w, err)
 		return
 	}
 	rule.OrgID = orgID
 
 	created, err := h.alerts.CreateRule(r.Context(), rule)
 	if err != nil {
-		api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+		writeAlertError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, created)
@@ -620,8 +716,19 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.Duration != nil {
-		if _, err := time.ParseDuration(*req.Duration); err != nil {
+		d, err := time.ParseDuration(*req.Duration)
+		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid duration: "+err.Error())
+			return
+		}
+		if err := checkAlertDuration(d); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	if req.Name != nil {
+		if err := api.RejectNUL("name", *req.Name); err != nil {
+			api.WriteFieldError(w, err)
 			return
 		}
 	}
@@ -632,7 +739,7 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "alert rule not found")
 			return
 		}
-		api.WriteRepoError(w, err)
+		writeAlertError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, rule)
@@ -665,6 +772,8 @@ func requireOrgID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return orgID, true
 }
 
+// metricQueryFromRequest reads the metric query parameters.
+// validation: fixed texts naming the parameter.
 func metricQueryFromRequest(r *http.Request, orgID string) (MetricQuery, error) {
 	query := MetricQuery{
 		OrgID: orgID,
@@ -706,12 +815,16 @@ func parseRequestTime(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid timestamp %q", value)
 }
 
-func decodeMetrics(body io.ReadCloser) ([]Metric, error) {
+// readMetricsBody reads an ingest body.
+// validation: the read error of the body, like api.ReadJSON.
+func readMetricsBody(body io.ReadCloser) ([]byte, error) {
 	defer body.Close()
-	data, err := io.ReadAll(body)
-	if err != nil {
-		return nil, err
-	}
+	return io.ReadAll(body)
+}
+
+// decodeMetrics reads the metrics of an ingest body.
+// validation: fixed texts.
+func decodeMetrics(data []byte) ([]Metric, error) {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return nil, errors.New("request body is required")
 	}
@@ -739,6 +852,8 @@ func decodeMetrics(body io.ReadCloser) ([]Metric, error) {
 	return nil, errors.New("unable to decode metrics payload")
 }
 
+// decodeJSON decodes a single JSON object from body.
+// validation: the decode errors of the body, as api.ReadJSON.
 func decodeJSON(body io.ReadCloser, dest any) error {
 	defer body.Close()
 	dec := json.NewDecoder(body)
@@ -752,17 +867,26 @@ func decodeJSON(body io.ReadCloser, dest any) error {
 	return nil
 }
 
+// validateAlertRule checks a new rule before it is stored: a 400 field error
+// for a missing or NUL-carrying text and an unknown condition or severity,
+// 422 for a duration out of range (API-03, F-047).
 func validateAlertRule(rule *AlertRule) error {
 	if strings.TrimSpace(rule.Name) == "" {
-		return errors.New("name is required")
+		return &api.FieldError{Field: "name", Message: "is required"}
 	}
 	if strings.TrimSpace(rule.MetricName) == "" {
-		return errors.New("metric_name is required")
+		return &api.FieldError{Field: "metric_name", Message: "is required"}
+	}
+	if err := api.RejectNUL("name", rule.Name); err != nil {
+		return err
+	}
+	if err := api.RejectNUL("metric_name", rule.MetricName); err != nil {
+		return err
 	}
 	switch rule.Condition {
 	case "gt", "lt", "eq":
 	default:
-		return errors.New("condition must be one of gt, lt or eq")
+		return &api.FieldError{Field: "condition", Message: "must be one of gt, lt or eq"}
 	}
 	if rule.Severity == "" {
 		rule.Severity = "warning"
@@ -770,9 +894,34 @@ func validateAlertRule(rule *AlertRule) error {
 	switch rule.Severity {
 	case "critical", "warning", "info":
 	default:
-		return errors.New("severity must be one of critical, warning or info")
+		return &api.FieldError{Field: "severity", Message: "must be one of critical, warning or info"}
+	}
+	return checkAlertDuration(rule.Duration)
+}
+
+// checkAlertDuration refuses a duration outside 0..MaxAlertDuration (422).
+func checkAlertDuration(d time.Duration) error {
+	if d < 0 || d > MaxAlertDuration {
+		return durationRangeError()
 	}
 	return nil
+}
+
+func durationRangeError() error {
+	return &api.FieldError{Field: "duration", Message: "must be between 0s and " + MaxAlertDuration.String(),
+		Status: http.StatusUnprocessableEntity}
+}
+
+// writeAlertError answers a failed alert rule write: a taken id is 409;
+// store errors go through api.WriteRepoError, so no driver or SQLSTATE text
+// reaches the client (F-047), the log keeps it.
+func writeAlertError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, ErrAlertRuleExists) {
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrAlertRuleExists.Error())
+		return
+	}
+	slog.WarnContext(r.Context(), "alert rule write failed", "error", err)
+	api.WriteRepoError(w, err)
 }
 
 func cloneLabels(labels map[string]string) map[string]string {
@@ -793,6 +942,25 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// CIAddressResolver assigns collector metric samples to the CI whose
+// management IP the collector polled (MON-02). The CIs are read in the
+// scope of ctx: on the edge that of the collector, so a collector of a
+// client or a site finds only the CIs of its client or site (an org-wide
+// one those of the organization); an address two visible CIs share
+// assigns nothing.
+type CIAddressResolver struct{ CIs ci.Repository }
+
+// ResolveCI implements CIResolver.
+func (a CIAddressResolver) ResolveCI(ctx context.Context, orgID, address string) (ciID string, ok bool) {
+	items, _, err := a.CIs.List(ctx, orgID, ci.FilterParams{Filters: []api.Filter{
+		{Field: "management_ip", Op: api.OpExact, Kind: api.KindText, Values: []string{address}},
+	}}, api.PaginationParams{Limit: 2})
+	if err != nil || len(items) != 1 {
+		return "", false
+	}
+	return items[0].ID, true
 }
 
 // assignCIs fills the ci_id of samples from their target label and returns
@@ -832,9 +1000,14 @@ const defaultCIMetricsWindow = 24 * time.Hour
 
 // CIMetrics handles GET /api/v1/cis/{id}/metrics?name=&from=&to=&step=
 // (MON-02): the series of one CI, all its metrics or the named one; the
-// detail view draws them as lines.
+// detail view draws them as lines. A CI outside the caller's scope or
+// unknown answers 404, a malformed id 400 (F-167).
 func (h *Handler) CIMetrics(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := requireOrgID(w, r)
+	if !ok {
+		return
+	}
+	ciID, ok := api.ParseUUIDParam(w, r, "id", "")
 	if !ok {
 		return
 	}
@@ -843,7 +1016,18 @@ func (h *Handler) CIMetrics(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	query.CIID = chi.URLParam(r, "id")
+	query.CIID = ciID
+	if v, ok := h.store.(CIVisibility); ok {
+		visible, verr := v.CIVisible(r.Context(), orgID, query.CIID)
+		if verr != nil {
+			api.WriteRepoError(w, verr)
+			return
+		}
+		if !visible {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+			return
+		}
+	}
 	if query.From.IsZero() {
 		query.From = time.Now().UTC().Add(-defaultCIMetricsWindow)
 	}

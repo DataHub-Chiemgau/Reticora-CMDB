@@ -17,8 +17,11 @@ import (
 //     derives the site from it.
 //   - An org-wide principal sees both clients' branches; a client-scoped
 //     principal only its client's site, location nodes, CI and asset; a
-//     site-scoped principal only its site's CI; organization B sees none.
-//   - Assets are scoped by client (they carry no site scope column).
+//     site-scoped principal (a role at the site, resolved from its role
+//     assignment, WP-390) only its site, location nodes and CI and nothing of
+//     the other client; organization B sees none.
+//   - Assets carry the site of their location (WP-392); their site scope
+//     within one client is TestSiteGrantConfinedToClientAndSite.
 //   - Resellers above the organization are [P4] and not modelled.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
@@ -87,11 +90,6 @@ func TestHierarchyScopeOnPostgreSQL(t *testing.T) {
 		}
 		return v
 	}
-	siteCtx := func(siteID string) context.Context {
-		scope := database.OrgWideScope(f.OrgA, f.User)
-		scope.Sites = database.ScopeIDs(siteID)
-		return database.ContextWithTenantScope(bg, &scope)
-	}
 
 	for _, tc := range []struct {
 		name  string
@@ -102,8 +100,10 @@ func TestHierarchyScopeOnPostgreSQL(t *testing.T) {
 		{"organization-wide", f.OrgCtx(f.OrgA), f.OrgA, visible{true, true, true, true, true, true}},
 		{"client 1", f.ClientCtx(f.Client1), f.OrgA, visible{site1: true, room1: true, ci1: true}},
 		{"client 2", f.ClientCtx(f.Client2), f.OrgA, visible{site2: true, room2: true, asset2: true}},
-		{"site 1", siteCtx(site1), f.OrgA, visible{site1: true, room1: true, ci1: true, asset2: true}},
-		{"site 2", siteCtx(site2), f.OrgA, visible{site2: true, room2: true, asset2: true}},
+		// A site principal is confined to the client of its site (F-014):
+		// the asset of client 2 is not visible at site 1.
+		{"site 1", viewerAtSites(t, f, "hier-109-site1", site1), f.OrgA, visible{site1: true, room1: true, ci1: true}},
+		{"site 2", viewerAtSites(t, f, "hier-109-site2", site2), f.OrgA, visible{site2: true, room2: true, asset2: true}},
 		{"organization B", f.OrgCtx(f.OrgB), f.OrgB, visible{}},
 	} {
 		if got := see(tc.ctx, tc.org); got != tc.wants {

@@ -28,6 +28,12 @@ func (g grantAll) HasPermission(_ context.Context, _, _, key string) (bool, erro
 	return g.keys[key], nil
 }
 
+// optInAll reports every organization as opted in and holding the ai add-on.
+type optInAll struct{}
+
+func (optInAll) AIOptIn(context.Context, string) (bool, error)  { return true, nil }
+func (optInAll) IsEnabled(context.Context, string, string) bool { return true }
+
 // countingProvider records every chat call.
 type countingProvider struct{ calls *int }
 
@@ -91,7 +97,10 @@ func TestRAGChunksFollowSourceScope(t *testing.T) {
 	provider := countingProvider{calls: &calls}
 	retriever := ai.NewRetriever(repo, searchRepo, grantAll{keys: map[string]bool{"ci:read": true}}, provider)
 	mux := chi.NewRouter()
-	ai.NewHandler(repo, provider, retriever).RegisterRoutes(mux)
+	// The organization consents to external AI processing (AI-02); this test
+	// is about the client scope of the chunks.
+	consent := ai.OrgConsent{OptIn: optInAll{}, Entitlements: optInAll{}}
+	ai.NewHandler(repo, provider, retriever.WithConsent(consent)).WithConsent(consent).RegisterRoutes(mux)
 	ask := func(question string) ai.AskResponse {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/ai/ask", bytes.NewBufferString(`{"question":"`+question+`"}`))

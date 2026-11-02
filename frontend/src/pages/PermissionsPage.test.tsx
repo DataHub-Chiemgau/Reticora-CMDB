@@ -17,7 +17,13 @@ describe('PermissionsPage', () => {
   it('renders the catalogue and highlights effective permissions', async () => {
     stubFetchRoutes({
       '/me/permissions': { user_id: 'user-1', permissions: ['ci:read'] },
-      '/permissions': [permission('ci:read'), permission('ticket:write')],
+      '/permissions': {
+        data: [permission('ci:read'), permission('ticket:write')],
+        total: 2,
+        limit: 200,
+        offset: 0,
+        has_more: false,
+      },
     });
 
     renderWithProviders(<PermissionsPage />, { route: '/permissions' });

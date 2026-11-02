@@ -2,6 +2,7 @@ package ticket
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
+
+// ErrNotFound: the ticket is unknown, of another organization or outside the
+// caller's scope; all answer 404 alike (TEN-04).
+var ErrNotFound = errors.New("ticket not found")
 
 // Repository defines persistence operations for tickets.
 type Repository interface {
@@ -124,7 +129,7 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Ticket
 
 	t, ok := r.tickets[id]
 	if !ok || t.OrganizationID != orgID {
-		return nil, fmt.Errorf("ticket not found")
+		return nil, ErrNotFound
 	}
 	return t, nil
 }
@@ -135,7 +140,8 @@ func (r *MemoryRepository) Create(_ context.Context, t *Ticket) error {
 
 	r.nextID++
 	r.nextNumber++
-	t.ID = fmt.Sprintf("ticket-%d", r.nextID)
+	// UUID form, as the handlers accept only UUID ids (API-03).
+	t.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID)
 	t.TicketNumber = r.nextNumber
 	now := time.Now().UTC()
 	t.CreatedAt = now
@@ -150,7 +156,7 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 
 	t, ok := r.tickets[id]
 	if !ok || t.OrganizationID != orgID {
-		return nil, fmt.Errorf("ticket not found")
+		return nil, ErrNotFound
 	}
 
 	if req.Title != nil {
@@ -202,7 +208,7 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 
 	t, ok := r.tickets[id]
 	if !ok || t.OrganizationID != orgID {
-		return fmt.Errorf("ticket not found")
+		return ErrNotFound
 	}
 	delete(r.tickets, id)
 	// Remove associated comments
@@ -221,7 +227,7 @@ func (r *MemoryRepository) AddComment(_ context.Context, c *Comment) error {
 	// Verify ticket exists
 	t, ok := r.tickets[c.TicketID]
 	if !ok || t.OrganizationID != c.OrganizationID {
-		return fmt.Errorf("ticket not found")
+		return ErrNotFound
 	}
 
 	r.nextCmtID++

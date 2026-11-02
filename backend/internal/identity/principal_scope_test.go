@@ -16,8 +16,20 @@ const (
 	scopeClientA = "aaaaaaaa-0000-4000-8000-000000000001"
 	scopeClientB = "bbbbbbbb-0000-4000-8000-000000000002"
 	scopeSiteA   = "cccccccc-0000-4000-8000-000000000003"
+	scopeSiteB   = "dddddddd-0000-4000-8000-000000000004"
+	scopeTeam1   = "eeeeeeee-0000-4000-8000-000000000005"
+	scopeTeam2   = "ffffffff-0000-4000-8000-000000000006"
 )
 
+// TestResolveAccessUnitesScopesPerDimension pins RBA-03 "scopes = union of
+// the scope sets per dimension" and the combination of mixed grants after
+// E-70 option 1 (transition rule, WP-391): the dimensions are united
+// separately and intersect in the RLS, they are not united as rectangles per
+// grant. A client grant C1 beside a site grant S1 of C1 therefore sees C1 at
+// S1 and without site only, not C1 at other sites (F-181 accepted as
+// specified); a site grant of another client adds its client, the sites stay
+// narrowed. Team grants restrict the team dimension only and intersect with
+// the other grants likewise (E-11).
 func TestResolveAccessUnitesScopesPerDimension(t *testing.T) {
 	all := ScopeSet{All: true}
 	tests := []struct {
@@ -60,6 +72,77 @@ func TestResolveAccessUnitesScopesPerDimension(t *testing.T) {
 			},
 			want: Scope{Clients: ScopeSet{IDs: []string{scopeClientA}}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: all},
 		},
+		{
+			name: "E-70 option 1: a site grant narrows the sites of a client grant of its client",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}},
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}},
+			},
+			want: Scope{Clients: ScopeSet{IDs: []string{scopeClientA}}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: all},
+		},
+		{
+			name: "E-70 option 1: a site grant of another client adds the client, the sites stay narrowed",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}},
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientB}, Sites: []string{scopeSiteB}},
+			},
+			want: Scope{Clients: ScopeSet{IDs: []string{scopeClientA, scopeClientB}}, Sites: ScopeSet{IDs: []string{scopeSiteB}}, Teams: all},
+		},
+		{
+			name:   "team grant restricts teams only (E-11)",
+			grants: []Grant{{Permissions: []Permission{PermCIRead}, Teams: []string{scopeTeam1}}},
+			want:   Scope{Clients: all, Sites: all, Teams: ScopeSet{IDs: []string{scopeTeam1}}},
+		},
+		{
+			name: "team grants are united",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Teams: []string{scopeTeam2}},
+				{Permissions: []Permission{PermCIWrite}, Teams: []string{strings.ToUpper(scopeTeam1)}},
+			},
+			want: Scope{Clients: all, Sites: all, Teams: ScopeSet{IDs: []string{scopeTeam1, scopeTeam2}}},
+		},
+		{
+			name: "E-70 option 1: a team grant narrows the teams of a client grant (E-11 intersection)",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}},
+				{Permissions: []Permission{PermCIRead}, Teams: []string{scopeTeam1}},
+			},
+			want: Scope{Clients: ScopeSet{IDs: []string{scopeClientA}}, Sites: all, Teams: ScopeSet{IDs: []string{scopeTeam1}}},
+		},
+		{
+			name: "an org-wide grant sets every dimension to all beside a team grant",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Teams: []string{scopeTeam1}},
+				OrgWideGrant([]Permission{PermCIRead}),
+			},
+			want: Scope{Clients: all, Sites: all, Teams: all},
+		},
+		{
+			name:   "site grant is confined to the client of its site (WP-390)",
+			grants: []Grant{{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}}},
+			want:   Scope{Clients: ScopeSet{IDs: []string{scopeClientA}}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: all},
+		},
+		{
+			name: "site grants of two clients unite clients and sites",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}},
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientB}, Sites: []string{scopeSiteB}},
+			},
+			want: Scope{Clients: ScopeSet{IDs: []string{scopeClientA, scopeClientB}}, Sites: ScopeSet{IDs: []string{scopeSiteA, scopeSiteB}}, Teams: all},
+		},
+		{
+			name:   "sites without clients restrict the clients to none (E-08)",
+			grants: []Grant{{Permissions: []Permission{PermCIRead}, Sites: []string{scopeSiteA}}},
+			want:   Scope{Clients: ScopeSet{}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: all},
+		},
+		{
+			name: "an org-wide grant sets every dimension to all beside a site grant",
+			grants: []Grant{
+				{Permissions: []Permission{PermCIRead}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}},
+				OrgWideGrant([]Permission{PermCIRead}),
+			},
+			want: Scope{Clients: all, Sites: all, Teams: all},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,6 +151,75 @@ func TestResolveAccessUnitesScopesPerDimension(t *testing.T) {
 				t.Fatalf("scope = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestResolveAccessSiteGrantScopesEveryPermission covers WP-390 (RBA-03,
+// TEN-09, F-014): every permission of a site grant is valid in the client and
+// site of the grant only, also as the narrower scope beside an org-wide grant;
+// a grant with sites but without clients holds its permissions in no client,
+// so its legacy client scope is NoScopeID.
+func TestResolveAccessSiteGrantScopesEveryPermission(t *testing.T) {
+	site := Scope{Clients: ScopeSet{IDs: []string{scopeClientA}}, Sites: ScopeSet{IDs: []string{scopeSiteA}}, Teams: ScopeSet{All: true}}
+	siteGrant := Grant{Permissions: []Permission{PermCIRead, PermCIWrite}, Clients: []string{scopeClientA}, Sites: []string{scopeSiteA}}
+
+	access := ResolveAccess([]Grant{siteGrant})
+	if !access.Scope.equal(&site) || access.Scope.LegacyClientScope() != scopeClientA {
+		t.Fatalf("scope = %+v (legacy %q), want client A at site A", access.Scope, access.Scope.LegacyClientScope())
+	}
+	p := Principal{Scope: &access.Scope, PermissionScopes: access.PermissionScopes, Permissions: access.Permissions}
+	for _, perm := range []Permission{PermCIRead, PermCIWrite} {
+		if s, ok := p.ScopeFor(perm); !ok || !s.equal(&site) {
+			t.Errorf("%s scope = %+v %v, want client A at site A", perm, s, ok)
+		}
+	}
+
+	mixed := ResolveAccess([]Grant{OrgWideGrant([]Permission{PermCIRead}), siteGrant})
+	if !mixed.Scope.OrgWide() {
+		t.Fatalf("union scope beside an org-wide grant = %+v, want org-wide", mixed.Scope)
+	}
+	if s, ok := mixed.PermissionScopes[PermCIWrite]; !ok || !s.equal(&site) {
+		t.Errorf("ci:write scope = %+v %v, want client A at site A", s, ok)
+	}
+	if _, ok := mixed.PermissionScopes[PermCIRead]; ok {
+		t.Errorf("ci:read is org-wide and needs no narrower scope: %+v", mixed.PermissionScopes)
+	}
+
+	unmapped := ResolveAccess([]Grant{{Permissions: []Permission{PermCIRead}, Sites: []string{scopeSiteA}}})
+	if unmapped.Scope.Clients.All || len(unmapped.Scope.Clients.IDs) != 0 || unmapped.Scope.LegacyClientScope() != NoScopeID {
+		t.Fatalf("sites without clients: clients = %+v (legacy %q), want none", unmapped.Scope.Clients, unmapped.Scope.LegacyClientScope())
+	}
+}
+
+// TestResolveAccessTeamGrant covers WP-391 (RBA-03, E-11, F-049): a team
+// grant is not org-wide, holds its permissions in its team only (also as the
+// narrower scope beside an org-wide grant) and leaves the client dimension
+// unrestricted, so its legacy client scope is all clients.
+func TestResolveAccessTeamGrant(t *testing.T) {
+	team := Scope{Clients: ScopeSet{All: true}, Sites: ScopeSet{All: true}, Teams: ScopeSet{IDs: []string{scopeTeam1}}}
+	teamGrant := Grant{Permissions: []Permission{PermCIRead, PermCIWrite}, Teams: []string{scopeTeam1}}
+
+	access := ResolveAccess([]Grant{teamGrant})
+	if !access.Scope.equal(&team) || access.Scope.OrgWide() || access.Scope.LegacyClientScope() != "" {
+		t.Fatalf("scope = %+v (org-wide %v, legacy %q), want team 1 in all clients and sites",
+			access.Scope, access.Scope.OrgWide(), access.Scope.LegacyClientScope())
+	}
+	p := Principal{Scope: &access.Scope, PermissionScopes: access.PermissionScopes, Permissions: access.Permissions}
+	for _, perm := range []Permission{PermCIRead, PermCIWrite} {
+		if s, ok := p.ScopeFor(perm); !ok || !s.equal(&team) {
+			t.Errorf("%s scope = %+v %v, want team 1", perm, s, ok)
+		}
+	}
+
+	mixed := ResolveAccess([]Grant{OrgWideGrant([]Permission{PermCIRead}), teamGrant})
+	if !mixed.Scope.OrgWide() {
+		t.Fatalf("union scope beside an org-wide grant = %+v, want org-wide", mixed.Scope)
+	}
+	if s, ok := mixed.PermissionScopes[PermCIWrite]; !ok || !s.equal(&team) {
+		t.Errorf("ci:write scope = %+v %v, want team 1", s, ok)
+	}
+	if _, ok := mixed.PermissionScopes[PermCIRead]; ok {
+		t.Errorf("ci:read is org-wide and needs no narrower scope: %+v", mixed.PermissionScopes)
 	}
 }
 

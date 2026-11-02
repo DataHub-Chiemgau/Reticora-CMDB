@@ -82,67 +82,76 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 		ports = DefaultPorts
 	}
 
-	sem := make(chan struct{}, p.effectiveConcurrency())
 	var mu sync.Mutex
 	results := []plugins.Result{}
 	found := map[string]bool{}
 	icmpOff := false
 
-	var wg sync.WaitGroup
-	for _, target := range targets {
-		if ctx.Err() != nil {
-			break
+	probe := func(t string) {
+		method, openPort := "", 0
+		var rtt time.Duration
+		if p.Pinger != nil {
+			d, err := p.Pinger.Ping(ctx, t, timeout)
+			if err == nil {
+				method, rtt = "icmp", d
+			} else if errors.Is(err, ErrNoICMP) {
+				mu.Lock()
+				icmpOff = true
+				mu.Unlock()
+			}
 		}
-		wg.Add(1)
-		go func(t string) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
+		for _, port := range ports {
+			if ctx.Err() != nil {
 				return
 			}
-			defer func() { <-sem }()
-
-			method, openPort := "", 0
-			var rtt time.Duration
-			if p.Pinger != nil {
-				d, err := p.Pinger.Ping(ctx, t, timeout)
-				if err == nil {
-					method, rtt = "icmp", d
-				} else if errors.Is(err, ErrNoICMP) {
-					mu.Lock()
-					icmpOff = true
-					mu.Unlock()
+			start := time.Now()
+			var d net.Dialer
+			dctx, cancel := context.WithTimeout(ctx, timeout)
+			conn, err := d.DialContext(dctx, "tcp", net.JoinHostPort(t, fmt.Sprintf("%d", port)))
+			cancel()
+			if err == nil {
+				conn.Close()
+				openPort = port
+				if method == "" {
+					method, rtt = "tcp", time.Since(start)
 				}
+				break
 			}
-			for _, port := range ports {
-				if ctx.Err() != nil {
-					return
-				}
-				start := time.Now()
-				var d net.Dialer
-				dctx, cancel := context.WithTimeout(ctx, timeout)
-				conn, err := d.DialContext(dctx, "tcp", net.JoinHostPort(t, fmt.Sprintf("%d", port)))
-				cancel()
-				if err == nil {
-					conn.Close()
-					openPort = port
-					if method == "" {
-						method, rtt = "tcp", time.Since(start)
-					}
-					break
-				}
-			}
-			if method == "" {
-				return
-			}
-			result := sweepResult(t, method, openPort, rtt)
-			mu.Lock()
-			results = append(results, result)
-			found[t] = true
-			mu.Unlock()
-		}(target)
+		}
+		if method == "" {
+			return
+		}
+		result := sweepResult(t, method, openPort, rtt)
+		mu.Lock()
+		results = append(results, result)
+		found[t] = true
+		mu.Unlock()
 	}
+
+	// A fixed pool of workers takes the targets one by one, so a large
+	// scope never holds more than MaxConcurrency probe goroutines (F-262,
+	// F-384).
+	jobs := make(chan string)
+	var wg sync.WaitGroup
+	workers := min(p.effectiveConcurrency(), len(targets))
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for t := range jobs {
+				probe(t)
+			}
+		}()
+	}
+feed:
+	for _, target := range targets {
+		select {
+		case jobs <- target:
+		case <-ctx.Done():
+			break feed
+		}
+	}
+	close(jobs)
 	wg.Wait()
 	if icmpOff {
 		slog.Warn("sweep: ICMP unavailable, using TCP and ARP only", "error", ErrNoICMP)
@@ -210,6 +219,11 @@ func reverseName(ip string) string {
 }
 
 // Collect implements plugins.Plugin: the DeviceRecord of target (DIS-03).
+// The record tells that the target answered (open ports, PTR name; the ARP
+// MAC comes with the probe hit) and carries no evidence for the
+// classification chain: the collector folds it into the record of a
+// protocol that classified the target and uploads it as generic_device
+// only when no protocol did (profiles.MergeByTarget, DIS-02).
 func (p *Plugin) Collect(ctx context.Context, target string, creds map[string]string) (*plugins.DeviceRecord, error) {
 	observedAt := time.Now()
 	res, err := p.collect(ctx, target, creds)

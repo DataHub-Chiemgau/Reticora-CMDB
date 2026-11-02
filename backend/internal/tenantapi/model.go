@@ -2,10 +2,15 @@
 // clients, sites, buildings, and rooms.
 package tenantapi
 
-import "time"
+import (
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+)
 
 // Organization is the tenant itself (LOC-01): name, unique slug, plan,
-// settings, IANA time zone, ISO 4217 currency and BCP 47 locale.
+// settings, IANA time zone, ISO 4217 currency and BCP 47 locale, and the
+// organization's consent to external AI processing (AI-02).
 type Organization struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`
@@ -15,19 +20,23 @@ type Organization struct {
 	Timezone  string         `json:"timezone"`
 	Currency  string         `json:"currency"`
 	Locale    string         `json:"locale"`
+	AIOptIn   bool           `json:"ai_opt_in"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // UpdateOrganizationRequest is the payload of PATCH /api/v1/org. Slug and
 // plan are not changed here: the slug identifies the tenant, the plan is
-// set by the operator (ENT-04).
+// set by the operator (ENT-04). AIOptIn is the organization's AI opt-in
+// (AI-02): only an org-wide holder of user:manage changes it (the handler
+// checks), and the change is audited.
 type UpdateOrganizationRequest struct {
 	Name     *string        `json:"name,omitempty"`
 	Settings map[string]any `json:"settings,omitempty"`
 	Timezone *string        `json:"timezone,omitempty"`
 	Currency *string        `json:"currency,omitempty"`
 	Locale   *string        `json:"locale,omitempty"`
+	AIOptIn  *bool          `json:"ai_opt_in,omitempty"`
 }
 
 // Client represents a tenant's customer (mandant sub-scope, LOC-02): the
@@ -132,7 +141,9 @@ type UpdateBuildingRequest struct {
 	FloorplanObjectKey *string `json:"floorplan_object_key,omitempty"`
 }
 
-// Room represents a room within a building.
+// Room represents a room within a building. Layout holds only the
+// positions of CIs the caller sees, not deleted and located in the room
+// (F-427).
 type Room struct {
 	ID             string                    `json:"id"`
 	OrganizationID string                    `json:"organization_id"`
@@ -158,11 +169,30 @@ type UpdateRoomRequest struct {
 	Name     *string `json:"name,omitempty"`
 	Floor    *int    `json:"floor,omitempty"`
 	RoomType *string `json:"room_type,omitempty"`
-	// Layout replaces the room's floor-plan object positions
-	// (object_id → {x, y} normalized 0..1). Nil leaves the layout untouched;
-	// an empty object clears it.
+	// Layout replaces the room's floor-plan object positions the caller sees
+	// (CI id → {x, y} normalized 0..1). Nil leaves the layout untouched; an
+	// empty object clears the visible positions. Every key is a CI of the
+	// organization the caller sees, not deleted and located in the room, x
+	// and y lie in 0..1 (422 otherwise, F-341, F-427). Stored positions of
+	// CIs the caller does not see are kept.
 	Layout map[string]LayoutPosition `json:"layout,omitempty"`
+	// IfMatch is the updated_at the editor last read (If-Match, F-342); nil
+	// when the request carries none or "*". A room changed since is 409.
+	IfMatch *time.Time `json:"-"`
 }
+
+// RoomETag is the entity tag of a room: its updated_at in microseconds,
+// the precision PostgreSQL stores (F-342; rooms have no version column).
+func RoomETag(rm *Room) string { return api.ETag(rm.UpdatedAt.UnixMicro()) }
+
+// sameRoomVersion compares updated_at at the precision of the entity tag.
+func sameRoomVersion(updatedAt, ifMatch time.Time) bool {
+	return updatedAt.UnixMicro() == ifMatch.UnixMicro()
+}
+
+// errRoomChanged refuses a PATCH whose If-Match is no longer the room's
+// version: another editor saved in between (409, F-342).
+var errRoomChanged = &ConflictError{Field: "If-Match", Message: "the room was changed since the If-Match version; reload it"}
 
 // LayoutPosition is one object's normalized position on the room floor plan.
 type LayoutPosition struct {

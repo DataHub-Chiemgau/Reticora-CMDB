@@ -185,12 +185,6 @@ func ciFilter(f *generated.CIFilter) ci.FilterParams {
 	if f == nil {
 		return out
 	}
-	value := func(p *string) string {
-		if p == nil {
-			return ""
-		}
-		return strings.TrimSpace(*p)
-	}
 	out.Status, out.TypeID, out.ClientID, out.SiteID, out.Search =
 		value(f.Status), value(f.TypeID), value(f.ClientID), value(f.SiteID), value(f.Search)
 	return out
@@ -251,9 +245,12 @@ func (q *queryResolver) Topology(ctx context.Context, rootCiID *string, depth *i
 	if q.sources.Topology == nil {
 		return nil, errUnavailable
 	}
-	d := topology.ParseDepth("")
+	d := topology.DefaultDepth
 	if depth != nil {
-		d = topology.ParseDepth(strconv.Itoa(*depth))
+		// A depth below 1 is bad input as on GET /topology (F-255).
+		if d, err = topology.ParseDepth(strconv.Itoa(*depth)); err != nil {
+			return nil, gqlError(codeBadInput, err.Error())
+		}
 	}
 	graph, err := q.sources.Topology.Graph(ctx, orgID, value(rootCiID), d, &ci.FilterParams{TypeID: value(ciTypeID), SiteID: value(siteID)})
 	if err != nil {
@@ -272,7 +269,8 @@ func (q *queryResolver) Topology(ctx context.Context, rootCiID *string, depth *i
 }
 
 func (q *queryResolver) RackLayout(ctx context.Context, rackID string) (*generated.RackLayout, error) {
-	orgID, err := q.authorize(ctx, identity.PermRackRead, FeatureCMDBCore)
+	// Racks are the rack_view feature, not the core (ENT-05, F-070).
+	orgID, err := q.authorize(ctx, identity.PermRackRead, entitlement.FeatureRackView)
 	if err != nil {
 		return nil, err
 	}
@@ -325,6 +323,10 @@ func (q *queryResolver) SearchEverything(ctx context.Context, text string, types
 	return out, nil
 }
 
+// ReviewInbox reads the review queue. The queue is cmdb_core, as REST
+// /api/v1/review-items and its deprecated /api/v1/discovery/review-items
+// alias (F-400): CI merges open items too; only resolving a scope_suggested
+// item needs the discovery feature.
 func (q *queryResolver) ReviewInbox(ctx context.Context, status, kind *string, first *int) ([]*reviews.Item, error) {
 	orgID, err := q.authorize(ctx, identity.PermDiscoveryRead, FeatureCMDBCore)
 	if err != nil {
@@ -373,6 +375,10 @@ func (j *jobResolver) Status(_ context.Context, obj *jobs.Job) (string, error) {
 }
 
 func (m *rackMountResolver) Ci(ctx context.Context, obj *rack.RackMount) (*ci.Item, error) {
+	// A rack field: it checks rack_view like rackLayout (F-070).
+	if _, err := m.authorize(ctx, identity.PermRackRead, entitlement.FeatureRackView); err != nil {
+		return nil, err
+	}
 	return m.loadCI(ctx, obj.CIID)
 }
 

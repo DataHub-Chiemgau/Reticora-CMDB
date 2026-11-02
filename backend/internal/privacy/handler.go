@@ -66,7 +66,11 @@ func (h *Handler) PutRetention(w http.ResponseWriter, r *http.Request) {
 	}
 	policy, err := h.svc.Configure(r.Context(), orgID, req)
 	if err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		// Field errors name the rule; repository errors never reach the
+		// client as text (F-047).
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, policy)
@@ -84,8 +88,12 @@ func (h *Handler) RunErasure(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no retention policy configured")
 		return
 	}
+	if errors.Is(err, ErrKeepsForever) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", ErrKeepsForever.Error())
+		return
+	}
 	if err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, summary)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -17,6 +19,10 @@ import (
 )
 
 type claimsContextKey struct{}
+
+// errAuthUnavailable: the credential could not be checked because its
+// store is unreachable (identity.ErrAPIKeyUnavailable); answered with 503.
+var errAuthUnavailable = errors.New("authentication unavailable")
 
 // Claims contains the subset of JWT claims used by the development auth flow.
 type Claims struct {
@@ -34,6 +40,9 @@ type Claims struct {
 	IssuedAt         int64                                  `json:"iat,omitempty"`
 	// TokenID is the jti of a session token.
 	TokenID string `json:"jti,omitempty"`
+	// SessionID is the sid of a session token: the refresh family that
+	// every access token of the session carries.
+	SessionID string `json:"sid,omitempty"`
 }
 
 // SessionVerifier verifies the signature of session tokens issued by the
@@ -94,11 +103,22 @@ func AuthMiddlewareWithAPIKeys(verifier SessionVerifier, apiKeys APIKeyAuthentic
 			}
 
 			principal, claims, err := authenticateRequest(r, verifier, apiKeys)
+			if errors.Is(err, errAuthUnavailable) {
+				// The key store is unreachable: the request is refused
+				// visibly and may be repeated, it is not a failed
+				// authentication (OPS-06; not counted by the pre-auth limit).
+				slog.WarnContext(r.Context(), "API key verification unavailable", "error", err)
+				api.WriteUnavailable(w, "authentication is temporarily unavailable, try again later")
+				return
+			}
 			if err != nil {
 				api.WriteError(w, http.StatusUnauthorized, "Unauthorized", err.Error())
 				return
 			}
 
+			// A valid credential is no failed attempt: its pre-auth unit is
+			// given back before the handler runs (AUT-10).
+			releasePreAuthSlot(r.Context())
 			ctx := identity.WithPrincipal(r.Context(), principal)
 			ctx = identity.WithPermissions(ctx, principal.Permissions)
 			ctx = context.WithValue(ctx, claimsContextKey{}, claims)
@@ -117,12 +137,16 @@ func devAuthEnvironment() bool {
 // authenticateRequest resolves the caller's credentials. An X-API-Key header
 // takes precedence over a bearer token so service tokens keep working for
 // clients that forward both.
+// validation: fixed texts; verifier and key store errors are not passed on.
 func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIKeyAuthenticator) (identity.Principal, Claims, error) {
 	if apiKey := strings.TrimSpace(r.Header.Get("X-API-Key")); apiKey != "" {
 		if apiKeys == nil {
 			return identity.Principal{}, Claims{}, fmt.Errorf("API key authentication is not configured")
 		}
 		info, err := apiKeys.Validate(r.Context(), apiKey)
+		if errors.Is(err, identity.ErrAPIKeyUnavailable) {
+			return identity.Principal{}, Claims{}, fmt.Errorf("%w: %w", errAuthUnavailable, err)
+		}
 		if err != nil || info == nil {
 			return identity.Principal{}, Claims{}, fmt.Errorf("invalid API key")
 		}
@@ -167,7 +191,13 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		Permissions:      claims.Permissions,
 		Type:             identity.PrincipalTypeUser,
 	}
-	if claims.TokenID != "" {
+	// The session budget of API-04 counts the session (sid), which every
+	// refresh keeps; tokens issued without sid (until they expire, at most
+	// 15 minutes) are counted by their token id.
+	switch {
+	case claims.SessionID != "":
+		principal.Credential = "session:" + claims.SessionID
+	case claims.TokenID != "":
 		principal.Credential = "session:" + claims.TokenID
 	}
 	if principal.Scope != nil {
@@ -218,6 +248,7 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 		IssuedAt:         sessionClaims.IssuedAt.Unix(),
 		ExpiresAt:        sessionClaims.ExpiresAt.Unix(),
 		TokenID:          sessionClaims.ID,
+		SessionID:        sessionClaims.SessionID,
 	}, nil
 }
 

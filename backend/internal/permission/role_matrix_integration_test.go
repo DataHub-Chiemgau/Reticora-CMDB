@@ -2,6 +2,7 @@ package permission_test
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -13,10 +14,12 @@ import (
 
 // rba02 is the RBA-02 matrix of the catalogue text with its exact keys
 // (RBA-01 names since migration 000081), plus the module keys that WP-046
-// assigned to the rows they stand for (rack:read with location:read, the
-// credential keys with credential:manage, ci_type:manage with citype:manage,
-// permission:write with role:manage). "C" marks a right the client
-// technician holds only in its client scope.
+// assigned to the rows they stand for (rack:read with location:read,
+// credential:read with credential:manage). The near-duplicate ci_type:manage
+// and the keys that gate no route (credential:decrypt, credential:write,
+// permission:write and others) are retired since migration 000147 (WP-363)
+// and held by no role (retiredKeys).
+// "C" marks a right the client technician holds only in its client scope.
 var rba02 = []struct {
 	keys                                    []string
 	orgAdmin, engineer, viewer, clientTechn string
@@ -26,9 +29,15 @@ var rba02 = []struct {
 	{[]string{"ci:delete", "location:write"}, "✓", "✓", "–", "–"},
 	{[]string{"review:resolve"}, "✓", "✓", "–", "C"},
 	{[]string{"export:run", "job:read"}, "✓", "✓", "–", "C"},
-	{[]string{"discovery:manage", "collector:manage", "vrf:manage", "credential:read", "credential:write", "credential:manage", "credential:decrypt"}, "✓", "✓", "–", "–"},
-	{[]string{"citype:manage", "ci_type:manage", "webhook:manage", "notification:manage"}, "✓", "–", "–", "–"},
-	{[]string{"user:manage", "team:manage", "role:manage", "permission:write", "entitlement:manage", "audit:read", "apikey:manage"}, "✓", "–", "–", "–"},
+	{[]string{"discovery:manage", "collector:manage", "vrf:manage", "credential:read", "credential:manage"}, "✓", "✓", "–", "–"},
+	{[]string{"citype:manage", "webhook:manage", "notification:manage"}, "✓", "–", "–", "–"},
+	{[]string{"user:manage", "team:manage", "role:manage", "entitlement:manage", "audit:read", "apikey:manage"}, "✓", "–", "–", "–"},
+}
+
+// retiredKeys are the catalogue keys migration 000147 removed (WP-363).
+var retiredKeys = []string{
+	"asset:assign", "ci_type:manage", "credential:decrypt", "credential:write",
+	"permission:write", "role:write", "user:write", "webhook:write",
 }
 
 // TestStandardRolesMatchTheRoleMatrix covers WP-046 (RBA-02): the roles the
@@ -103,6 +112,29 @@ func TestStandardRolesMatchTheRoleMatrix(t *testing.T) {
 			}
 		}
 	}
+	// No standard role holds a retired key, neither in the catalogue nor in
+	// role_permission or role.permissions (the seed query above only sees
+	// catalogue keys).
+	var retired []string
+	if err = f.Admin.QueryRow(bg, `
+		SELECT COALESCE(array_agg(DISTINCT k ORDER BY k), '{}') FROM (
+			SELECT key AS k FROM permission
+			UNION ALL SELECT rp.permission_key FROM role_permission rp JOIN role ro ON ro.id = rp.role_id WHERE ro.organization_id = $1
+			UNION ALL SELECT jsonb_array_elements_text(ro.permissions) FROM role ro WHERE ro.organization_id = $1
+		) keys WHERE k = ANY ($2)`, f.OrgA, retiredKeys).Scan(&retired); err != nil {
+		t.Fatalf("read retired keys: %v", err)
+	}
+	if len(retired) != 0 {
+		t.Errorf("retired keys still granted or catalogued: %v", retired)
+	}
+	for _, role := range permission.StandardRoles {
+		for _, key := range role.Permissions {
+			if slices.Contains(retiredKeys, key) {
+				t.Errorf("StandardRoles: %s holds the retired key %s", role.Name, key)
+			}
+		}
+	}
+
 	for _, key := range seeded["viewer"] {
 		if strings.HasPrefix(key, "credential:") {
 			t.Errorf("viewer holds %s", key)

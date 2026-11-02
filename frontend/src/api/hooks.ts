@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import {
   ciApi,
   relationshipApi,
+  relationshipSuppressionApi,
   collectorApi,
   discoveryScopeApi,
   scopeSuggestionApi,
@@ -17,6 +18,7 @@ import {
   userApi,
   teamApi,
   roleApi,
+  invitationApi,
   permissionApi,
   slaApi,
   formApi,
@@ -31,9 +33,11 @@ import {
   auditApi,
   privacyApi,
   credentialApi,
+  vrfApi,
 } from '../api/client';
 import type {
   DiscoveryScopeInput,
+  DiscoveryScopePatch,
   CICreateRequest,
   CIListParams,
   CIUpdateRequest,
@@ -53,6 +57,11 @@ import type {
   TicketUpdateRequest,
   TicketListParams,
   UserListParams,
+  UserStatus,
+  AppUser,
+  PaginatedResponse,
+  InvitationRequest,
+  InvitationAcceptance,
   TopologyParams,
   RackListParams,
   SLAListParams,
@@ -103,11 +112,22 @@ function useRelationshipInvalidation(ciId: string) {
   };
 }
 
-export function useCreateRelationship(ciId: string) {
+/**
+ * onCreated runs after every successful create. It belongs to the hook: the
+ * callbacks passed to mutate run only for the latest call, so a later call
+ * would swallow the success of an earlier one (F-314).
+ */
+export function useCreateRelationship(
+  ciId: string,
+  { onCreated }: { onCreated?: () => void } = {},
+) {
   const invalidate = useRelationshipInvalidation(ciId);
   return useMutation({
     mutationFn: (data: RelationshipCreateRequest) => relationshipApi.create(data),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      onCreated?.();
+    },
   });
 }
 
@@ -122,13 +142,38 @@ export function useUpdateRelationship(ciId: string) {
 
 export function useDeleteRelationship(ciId: string) {
   const invalidate = useRelationshipInvalidation(ciId);
+  const queryClient = useQueryClient();
   return useMutation({
-    // A discovery edge is deleted with force and then suppressed (REL-04).
-    mutationFn: (arg: string | { id: string; force?: boolean }) =>
+    // A discovery edge is deleted with force and then suppressed with the
+    // reason of the confirmation (REL-04, F-273).
+    mutationFn: (arg: string | { id: string; force?: boolean; reason?: string }) =>
       typeof arg === 'string'
         ? relationshipApi.delete(arg)
-        : relationshipApi.delete(arg.id, arg.force ?? false),
-    onSuccess: invalidate,
+        : relationshipApi.delete(arg.id, arg.force ?? false, arg.reason),
+    onSuccess: () => {
+      invalidate();
+      void queryClient.invalidateQueries({ queryKey: ['relationship-suppressions', ciId] });
+    },
+  });
+}
+
+/** The suppressions of a CI's removed discovery edges (F-273); enabled when shown. */
+export function useRelationshipSuppressions(ciId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['relationship-suppressions', ciId],
+    queryFn: () => relationshipSuppressionApi.list(ciId),
+    enabled: !!ciId && enabled,
+  });
+}
+
+/** Lifting a suppression lets the next discovery cycle create the edge again (F-273). */
+export function useLiftSuppression(ciId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => relationshipSuppressionApi.lift(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['relationship-suppressions', ciId] });
+    },
   });
 }
 
@@ -136,6 +181,14 @@ export function useCollectors(params: ListParams = {}) {
   return useQuery({
     queryKey: ['collectors', params],
     queryFn: () => collectorApi.list(params),
+  });
+}
+
+/** Every collector of the organization, not only the first page (F-362). */
+export function useAllCollectors() {
+  return useQuery({
+    queryKey: ['collectors', 'all'],
+    queryFn: () => collectorApi.listAll(),
   });
 }
 
@@ -156,7 +209,7 @@ export function useDiscoveryScopeMutations(collectorId: string) {
       onSuccess: invalidate,
     }),
     update: useMutation({
-      mutationFn: ({ id, patch }: { id: string; patch: Partial<DiscoveryScopeInput> }) =>
+      mutationFn: ({ id, patch }: { id: string; patch: DiscoveryScopePatch }) =>
         discoveryScopeApi.update(id, patch),
       onSuccess: invalidate,
     }),
@@ -165,6 +218,25 @@ export function useDiscoveryScopeMutations(collectorId: string) {
       onSuccess: invalidate,
     }),
   };
+}
+
+/** The credentials (metadata only) a scope form offers; needs credential:read. */
+export function useCredentials(enabled = true) {
+  return useQuery({
+    queryKey: ['credentials', 'options'],
+    queryFn: () => credentialApi.list({ limit: 200 }),
+    enabled,
+    retry: false,
+  });
+}
+
+/** The VRFs of the organization, the default first (TEN-10). */
+export function useVrfs(enabled = true) {
+  return useQuery({
+    queryKey: ['vrfs', 'options'],
+    queryFn: () => vrfApi.list({ limit: 200 }),
+    enabled,
+  });
 }
 
 export function useScopeSuggestions() {
@@ -211,6 +283,14 @@ export function useCIImpact(id: string, relType?: string) {
   });
 }
 
+/** The most CIs one joint impact analysis takes (GET /impact?ci_ids=, 422 beyond). */
+export const MAX_IMPACT_CIS = 100;
+
+/**
+ * useImpactMany runs the joint impact analysis of the failed CIs (IMP-05).
+ * Its error is the page's answer when the analysis fails: there is no
+ * client-side replacement (F-326).
+ */
 export function useImpactMany(ids: string[], relType?: string) {
   return useQuery({
     queryKey: ['topology-impact-many', ids, relType],
@@ -247,9 +327,9 @@ export function useRackLayout(rackId: string) {
 }
 
 /**
- * Resolves the CIs referenced by rack mounts by id. A rack holds at most a few
- * dozen mounts, so the CIs are fetched individually instead of relying on a
- * single CI page, which would leave every CI beyond the page limit unnamed.
+ * Resolves a few CIs by id (the candidates of a review item), one request per
+ * CI. The rack page does not use it: its layout names the mounted CIs
+ * (RCK-02, F-252).
  */
 export function useMountedCIs(ciIds: string[]) {
   const uniqueIds = Array.from(new Set(ciIds));
@@ -533,6 +613,34 @@ export function useUserList(params: UserListParams) {
   });
 }
 
+/**
+ * useSetUserStatus deactivates or reactivates a user (TLC-04). The answer
+ * replaces the user in every cached list at once, so the status badge
+ * follows the server's answer; the lists are refetched afterwards.
+ */
+export function useSetUserStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: UserStatus }) =>
+      userApi.update(id, { status }),
+    onSuccess: (user) => {
+      queryClient.setQueriesData<PaginatedResponse<AppUser>>({ queryKey: ['users'] }, (list) =>
+        list ? { ...list, data: list.data.map((u) => (u.id === user.id ? user : u)) } : list,
+      );
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+  });
+}
+
+/** useDeleteUser deletes a user; a 409 (open objects, references) leaves the lists as they are. */
+export function useDeleteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => userApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+  });
+}
+
 export function useTeamList(params: UserListParams) {
   return useQuery({
     queryKey: ['teams', params],
@@ -544,6 +652,48 @@ export function useRoleList(params: ListParams = {}) {
   return useQuery({
     queryKey: ['roles', params],
     queryFn: () => roleApi.list(params),
+  });
+}
+
+// --- Invitations (TLC-03) ---
+
+/** useInvitations lists the organization's invitations; enabled only for user:manage holders. */
+export function useInvitations(enabled = true) {
+  return useQuery({
+    queryKey: ['invitations'],
+    queryFn: () => invitationApi.list(),
+    enabled,
+  });
+}
+
+export function useIssueInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: InvitationRequest) => invitationApi.issue(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+export function useRenewInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => invitationApi.renew(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+export function useRevokeInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => invitationApi.revoke(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invitations'] }),
+  });
+}
+
+/** useAcceptInvitation is the public acceptance; it touches no cached list. */
+export function useAcceptInvitation() {
+  return useMutation({
+    mutationFn: (data: InvitationAcceptance) => invitationApi.accept(data),
   });
 }
 
@@ -561,6 +711,21 @@ export function useEffectivePermissions() {
     queryKey: ['me-permissions'],
     queryFn: () => permissionApi.effective(),
   });
+}
+
+/**
+ * useHasPermission tells whether the signed-in user holds a permission in the
+ * effective rights of /me/permissions. It fails closed: while the rights load
+ * or when they cannot be read, the permission counts as missing, so a page
+ * offers an action only once the server confirmed the right. The server still
+ * decides every request; this only keeps refused actions out of the UI.
+ * The result is undefined while the rights load, so a page can tell a
+ * missing right from one not yet known.
+ */
+export function useHasPermission(permission: string): boolean | undefined {
+  const effective = useEffectivePermissions();
+  if (effective.isPending) return undefined;
+  return effective.data?.permissions?.includes(permission) ?? false;
 }
 
 export function useSLAList(params: SLAListParams = {}) {

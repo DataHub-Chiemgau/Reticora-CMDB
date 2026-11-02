@@ -17,6 +17,7 @@ COPY nginx.conf /etc/nginx/nginx.conf
 # Shared proxy settings for the Keycloak locations, included by the server
 # blocks in nginx.conf and in the compose-mounted TLS template.
 COPY keycloak-proxy.conf /etc/nginx/reticora-keycloak-proxy.conf
+COPY objects-proxy.conf /etc/nginx/reticora-objects-proxy.conf
 
 # When TLS is enabled, the nginx image entrypoint renders the compose-mounted
 # /etc/nginx/templates/reticora-tls.conf.template into /etc/nginx/conf.d/
@@ -32,5 +33,8 @@ RUN apk --no-cache upgrade \
 # The image entrypoint renders every mounted template unconditionally; this
 # hook drops the rendered TLS server block again when no domain is set.
 COPY --chmod=0755 docker-entrypoint.d/25-reticora-tls-optional.sh /docker-entrypoint.d/
+# With a domain, this hook starts a loop that reloads nginx (after nginx -t)
+# when certbot has renewed live/<domain>/fullchain.pem (WP-440, F-139).
+COPY --chmod=0755 docker-entrypoint.d/30-reticora-cert-reload.sh /docker-entrypoint.d/
 
 EXPOSE 80

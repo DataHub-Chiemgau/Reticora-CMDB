@@ -21,6 +21,7 @@ type ValidationError struct {
 func (e ValidationError) Error() string { return "form submission failed schema validation" }
 
 // Validate checks a deliberately focused subset of JSON Schema used by forms.
+// validation: a ValidationError with the fields of the schema.
 func Validate(schema JSONMap, value any) error {
 	var fields []FieldError
 	validateValue(schema, value, "$", &fields)

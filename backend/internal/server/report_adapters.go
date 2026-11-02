@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -149,8 +148,16 @@ func (a overrideProvenance) Decide(ctx context.Context, w *override.Write) overr
 }
 
 // edgeLicense adapts the entitlement service to the discovery license check
-// of the collectors' edge data path.
+// of the collectors' edge data path, of their scope channel and of the
+// resolution of scope_suggested items (F-400).
 type edgeLicense struct{ svc *entitlement.Service }
+
+// DiscoveryLicense returns the discovery license check of svc for
+// discovery.Handler.WithEdgeLicense; the scope channel worker of
+// cmd/server uses it as the router does.
+func DiscoveryLicense(svc *entitlement.Service) discovery.EdgeLicense {
+	return edgeLicense{svc: svc}
+}
 
 func (l edgeLicense) DiscoveryLicense(ctx context.Context, orgID string) (state, problemType string, err error) {
 	ent, status, err := l.svc.Status(ctx, orgID, entitlement.FeatureDiscovery)
@@ -238,18 +245,4 @@ func bffSources(repos *Repositories, topo *topology.Handler, jobSource graphqlbf
 		sources.Reviews = reviewSource
 	}
 	return sources
-}
-
-// ciAddressResolver assigns collector metric samples to the CI whose
-// management IP the collector polled (MON-02).
-type ciAddressResolver struct{ repo ci.Repository }
-
-func (a ciAddressResolver) ResolveCI(ctx context.Context, orgID, address string) (ciID string, ok bool) {
-	items, _, err := a.repo.List(ctx, orgID, ci.FilterParams{Filters: []api.Filter{
-		{Field: "management_ip", Op: api.OpExact, Kind: api.KindText, Values: []string{address}},
-	}}, api.PaginationParams{Limit: 2})
-	if err != nil || len(items) != 1 {
-		return "", false
-	}
-	return items[0].ID, true
 }

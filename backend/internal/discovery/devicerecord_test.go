@@ -244,7 +244,7 @@ func TestUnclassifiedDeviceBecomesGenericDeviceWithReview(t *testing.T) {
 	ctx := discoveryTenantCtx(httptest.NewRequest(http.MethodGet, "/", http.NoBody)).Context()
 
 	unknown := plugins.RecordFromResult("sweep", &plugins.Result{CIType: "generic_device", Name: "10.0.0.9", IP: "10.0.0.9",
-		MAC: "aa:bb:cc:00:00:09", Attributes: map[string]any{"classified_by": "fallback"}}, time.Now())
+		MAC: "00:1b:21:00:00:09", Attributes: map[string]any{"classified_by": "fallback"}}, time.Now())
 	known := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "switch", Name: "sw-1", IP: "10.0.0.1",
 		Attributes: map[string]any{"classified_by": "snmp", "profile": "cisco-catalyst-9000-snmp"}}, time.Now())
 	if _, err := h.processItems(ctx, "org-1", []IngestItem{itemFromRecord(&unknown), itemFromRecord(&known)}); err != nil {
@@ -261,11 +261,15 @@ func TestUnclassifiedDeviceBecomesGenericDeviceWithReview(t *testing.T) {
 	if !types["generic_device"] || !types["switch"] {
 		t.Errorf("CI types = %v, want generic_device and switch", types)
 	}
-	// A second sighting opens no second review.
+	// A second sighting of the device (its MAC identifies it, WP-417: the
+	// review is one per CI) opens no second review.
 	again := unknown
 	again.RecordID = plugins.NewRecordID()
 	if _, err = h.processItems(ctx, "org-1", []IngestItem{itemFromRecord(&again)}); err != nil {
 		t.Fatal(err)
+	}
+	if items, _, err = ciRepo.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10}); err != nil || len(items) != 2 {
+		t.Fatalf("CIs after the second sighting: %d, %v; want the same two", len(items), err)
 	}
 	reviews, _, err := discoveryRepo.ListReviewItems(ctx, "org-1", ReviewFilter{}, api.PaginationParams{Limit: 10})
 	if err != nil {

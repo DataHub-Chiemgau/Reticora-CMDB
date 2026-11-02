@@ -56,6 +56,46 @@ func TestReviewItemFromConflict(t *testing.T) {
 	}
 }
 
+// TestUnclassifiedReviewIsAboutTheResolvedCI covers WP-417 (DIS-02, F-030):
+// the unclassified_device item is about the CI the record resolved to – its
+// object, candidate, client and site – and exists only while that CI is a
+// generic_device.
+func TestUnclassifiedReviewIsAboutTheResolvedCI(t *testing.T) {
+	ic := &IdentityContext{GenericDeviceTypeID: "type-generic"}
+	// An org-wide record of a scope site; the CI belongs to client 2.
+	record := IngestItem{CITypeName: "type-generic", Name: "10.0.0.9", ManagementIP: "10.0.0.9", SiteID: "site-of-scope",
+		Attributes: map[string]any{"classified_by": "fallback"}}
+	device := &ci.Item{ID: "ci-9", CITypeID: "type-generic", ClientID: "client-2", SiteID: "site-2"}
+
+	item := unclassifiedReview("org-1", &record, device, ic)
+	if item == nil {
+		t.Fatal("no item for a generic_device CI")
+	}
+	if item.Kind != ReviewKindUnclassifiedDevice || item.Status != ReviewStatusOpen || item.OrganizationID != "org-1" ||
+		item.ObjectKey != "ci:ci-9" || len(item.CandidateCIIDs) != 1 || item.CandidateCIIDs[0] != "ci-9" {
+		t.Errorf("item = %+v, want an open unclassified_device item about ci-9", item)
+	}
+	if item.ClientID != "client-2" || item.SiteID != "site-2" {
+		t.Errorf("client/site = %q/%q, want those of the CI (client-2/site-2)", item.ClientID, item.SiteID)
+	}
+	if item.Payload["reason"] != ReasonNoProfileMatch || item.Payload["ci_id"] != "ci-9" || item.Payload["management_ip"] != "10.0.0.9" {
+		t.Errorf("payload = %v", item.Payload)
+	}
+
+	for name, tc := range map[string]struct {
+		device *ci.Item
+		ic     *IdentityContext
+	}{
+		"CI classified by another protocol": {&ci.Item{ID: "ci-9", CITypeID: "type-switch"}, ic},
+		"no identity context":               {device, nil},
+		"generic_device type unknown":       {device, &IdentityContext{}},
+	} {
+		if got := unclassifiedReview("org-1", &record, tc.device, tc.ic); got != nil {
+			t.Errorf("%s: item %+v, want none", name, got)
+		}
+	}
+}
+
 func TestBulkIngestPersistsReviewItems(t *testing.T) {
 	ciRepo := ci.NewMemoryRepository()
 	// Two existing CIs sharing a serial number → ambiguous match.
@@ -138,29 +178,83 @@ func TestResolveReviewItemMerge(t *testing.T) {
 	}
 }
 
+// TestResolveReviewItemCreate: new creates the CI with the UUID of the type
+// the item recorded, its name resolved as the ingest resolves it, or of the
+// type the resolution names (ci_type_id); without a type that resolves it
+// is 422 naming ci_type_id and the item stays open (WP-528, UI-16, F-176).
 func TestResolveReviewItemCreate(t *testing.T) {
+	const serverType = "0b6a2c1e-5f1d-4e43-9a51-2d8c0e7b5280"
+	const chosenType = "6f4e1d2c-3b5a-4c79-8e01-a2b3c4d5e6f7"
 	ciRepo := ci.NewMemoryRepository()
 	repo := NewMemoryRepository()
-	repo.SeedCIType("server", "server")
+	repo.SeedCIType("server", serverType)
 	h := NewHandler(repo, ciRepo)
 	mux := newTestRouter(h)
-
-	item := &ReviewItem{
-		OrganizationID: "org-1",
-		Kind:           ReviewKindAmbiguousIdentity,
-		Status:         ReviewStatusOpen,
-		CandidateCIIDs: []string{"ci-a"},
-		Payload:        map[string]any{"name": "brand-new", "ci_type_name": "server"},
+	open := func(name, typeName string) *ReviewItem {
+		t.Helper()
+		item := &ReviewItem{
+			OrganizationID: "org-1",
+			Kind:           ReviewKindAmbiguousIdentity,
+			Status:         ReviewStatusOpen,
+			CandidateCIIDs: []string{"ci-a"},
+			// An org-wide sighting: the payload keeps the record's client
+			// (WP-369).
+			Payload: map[string]any{"name": name, "ci_type_name": typeName, "client_id": ""},
+		}
+		if err := repo.CreateReviewItem(context.Background(), item); err != nil {
+			t.Fatal(err)
+		}
+		return item
 	}
-	repo.CreateReviewItem(context.Background(), item)
+	created := func(name string) *ci.Item {
+		t.Helper()
+		items, _, _ := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
+		for i := range items {
+			if items[i].Name == name {
+				return &items[i]
+			}
+		}
+		return nil
+	}
 
+	item := open("brand-new", "server")
 	resp := doJSON(t, mux, "POST", "/api/v1/discovery/review-items/"+item.ID+"/resolve", `{"action":"create"}`)
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
 	}
-	items, _, _ := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
-	if len(items) != 1 || items[0].Name != "brand-new" {
-		t.Fatalf("expected new CI created, got %+v", items)
+	if c := created("brand-new"); c == nil || c.CITypeID != serverType || !isUUID(c.CITypeID) {
+		t.Fatalf("expected new CI of type %s (a UUID, not the type name), got %+v", serverType, c)
+	}
+
+	// A type that resolves to nothing: 422 naming ci_type_id, no CI.
+	unknown := open("of-unknown-type", "pv-unknown-type")
+	resp = doJSON(t, mux, "POST", "/api/v1/review-items/"+unknown.ID+"/resolve", `{"action":"new"}`)
+	var problem struct {
+		Field  string `json:"field"`
+		Detail string `json:"detail"`
+	}
+	_ = json.Unmarshal(resp.Body.Bytes(), &problem)
+	if resp.Code != http.StatusUnprocessableEntity || problem.Field != "ci_type_id" || problem.Detail != "ci_type_id: choose a CI type for the new CI" {
+		t.Fatalf("new without a resolvable type: %d %s, want 422 with field ci_type_id", resp.Code, resp.Body.String())
+	}
+	if c := created("of-unknown-type"); c != nil {
+		t.Fatalf("CI created without a type: %+v", c)
+	}
+	if got, _ := repo.GetReviewItem(context.Background(), "org-1", unknown.ID); got == nil || got.Status != ReviewStatusOpen {
+		t.Fatalf("item after the refused new: %+v, want open", got)
+	}
+	// A ci_type_id that is no UUID is refused the same way.
+	resp = doJSON(t, mux, "POST", "/api/v1/review-items/"+unknown.ID+"/resolve", `{"action":"new","ci_type_id":"server"}`)
+	if resp.Code != http.StatusUnprocessableEntity || !bytes.Contains(resp.Body.Bytes(), []byte(`"field":"ci_type_id"`)) {
+		t.Fatalf("new with ci_type_id server: %d %s, want 422 with field ci_type_id", resp.Code, resp.Body.String())
+	}
+	// The chosen type takes precedence over the recorded name.
+	resp = doJSON(t, mux, "POST", "/api/v1/review-items/"+unknown.ID+"/resolve", `{"action":"new","ci_type_id":"`+chosenType+`"}`)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("new with ci_type_id: %d %s", resp.Code, resp.Body.String())
+	}
+	if c := created("of-unknown-type"); c == nil || c.CITypeID != chosenType {
+		t.Fatalf("expected new CI of the chosen type %s, got %+v", chosenType, c)
 	}
 }
 

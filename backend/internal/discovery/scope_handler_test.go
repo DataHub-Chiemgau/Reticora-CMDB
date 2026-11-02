@@ -4,11 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // TestScopeREST covers the discovery-scopes resource (DIS-09, API-05):
@@ -89,5 +96,282 @@ func TestDiscoveryIntervalsFromSettings(t *testing.T) {
 	repo.SetOrgSettings("org-1", map[string]any{"discovery": map[string]any{"poll_interval": "20m"}})
 	if iv, _ := repo.DiscoveryIntervals(context.Background(), "org-1"); iv.Poll != "20m0s" {
 		t.Errorf("memory intervals = %+v", iv)
+	}
+}
+
+// TestScopeChannelCarriesRunStateAndTimezone covers WP-495 (DIS-10, F-109,
+// F-266, E-84 option A): scopes.request hands the collector each scope's
+// last_run_at and next_run_at as the server holds them (absent before the
+// first run) and the organization's time zone, so a (re)started collector
+// schedules the sweeps from them and evaluates cron in that zone.
+func TestScopeChannelCarriesRunStateAndTimezone(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	col := &Collector{OrganizationID: "org-1", Name: "col", Status: CollectorActive, Config: map[string]any{}}
+	if err := repo.RegisterCollector(ctx, col); err != nil {
+		t.Fatal(err)
+	}
+	ran := NewScope("org-1", &ScopeInput{CollectorID: col.ID, Kind: ScopeKindHost, Target: "192.0.2.21", Schedule: "0 2 * * *"})
+	fresh := NewScope("org-1", &ScopeInput{CollectorID: col.ID, Kind: ScopeKindHost, Target: "192.0.2.22"})
+	for _, s := range []*Scope{ran, fresh} {
+		if err := repo.CreateScope(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewHandler(repo, nil)
+	if err := h.RecordCollectorScopeRun(ctx, "org-1", col.ID, &ScopeResultReport{ScopeID: ran.ID,
+		At: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), NextRun: time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC),
+		Result: map[string]any{"records": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	request := func() map[string]map[string]any {
+		t.Helper()
+		resp := h.scopeHandlers()[ScopesRequestSuffix](ctx, "org-1", col.ID, []byte(`{}`))
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Scopes []map[string]any `json:"scopes"`
+			Error  string           `json:"error"`
+		}
+		if err = json.Unmarshal(raw, &body); err != nil || body.Error != "" {
+			t.Fatalf("scopes.request = %s (%v)", raw, err)
+		}
+		out := map[string]map[string]any{}
+		for _, s := range body.Scopes {
+			id, _ := s["id"].(string)
+			out[id] = s
+		}
+		return out
+	}
+
+	got := request()
+	if s := got[ran.ID]; s["last_run_at"] != "2026-10-15T00:00:00Z" || s["next_run_at"] != "2026-10-16T00:00:00Z" || s["timezone"] != "UTC" {
+		t.Errorf("scope that ran: %v, want last_run_at, next_run_at and timezone UTC (the default)", s)
+	}
+	// A new scope is due at its creation (next_run_at = created), it has no
+	// last run.
+	if s := got[fresh.ID]; s == nil || s["timezone"] != "UTC" || s["next_run_at"] != fresh.NextRunAt {
+		t.Errorf("scope that never ran: %v, want next_run_at %s (its creation)", s, fresh.NextRunAt)
+	} else if _, has := s["last_run_at"]; has {
+		t.Errorf("scope that never ran carries last_run_at: %v", s)
+	}
+	repo.SetOrgTimezone("org-1", "Europe/Berlin")
+	for id, s := range request() {
+		if s["timezone"] != "Europe/Berlin" {
+			t.Errorf("scope %s: timezone %v, want the organization's Europe/Berlin", id, s["timezone"])
+		}
+	}
+}
+
+// TestScopeChannelLogsCollectorWithoutScopes covers the feedback for a
+// collector that received no enabled scope (DIS-09, INS-06): the empty list
+// tells it to discover nothing, so the server logs
+// discovery.collector.no_scopes at INFO with the collector and the hint to
+// accept a suggested subnet or create a scope, once per collector while it
+// has none (not on every 15-minute refresh), and again once it lost its
+// last enabled scope.
+func TestScopeChannelLogsCollectorWithoutScopes(t *testing.T) {
+	ctx := context.Background()
+	// The logged set is per process and MemoryRepository hands out the same
+	// sequential collector IDs in every run: start empty and leave it empty,
+	// so neither -count=N nor another test's scopes.request skews the count.
+	collectorsWithoutScopes.Clear()
+	t.Cleanup(collectorsWithoutScopes.Clear)
+	logs := &bytes.Buffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	events := func(collectorID string) []map[string]any {
+		t.Helper()
+		var out []map[string]any
+		for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+			var rec map[string]any
+			if json.Unmarshal([]byte(line), &rec) == nil && rec["event"] == "discovery.collector.no_scopes" && rec["collector_id"] == collectorID {
+				out = append(out, rec)
+			}
+		}
+		return out
+	}
+	repo := NewMemoryRepository()
+	h := NewHandler(repo, nil)
+	register := func() *Collector {
+		t.Helper()
+		col := &Collector{OrganizationID: "org-1", Name: "col", Status: CollectorActive, Config: map[string]any{}}
+		if err := repo.RegisterCollector(ctx, col); err != nil {
+			t.Fatal(err)
+		}
+		return col
+	}
+	request := func(collectorID string) int {
+		t.Helper()
+		raw, err := json.Marshal(h.scopeHandlers()[ScopesRequestSuffix](ctx, "org-1", collectorID, []byte(`{}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Scopes []map[string]any `json:"scopes"`
+			Error  string           `json:"error"`
+		}
+		if err = json.Unmarshal(raw, &body); err != nil || body.Error != "" || body.Scopes == nil {
+			t.Fatalf("scopes.request = %s (%v), want a list without error", raw, err)
+		}
+		return len(body.Scopes)
+	}
+
+	col, other := register(), register()
+	for range 3 {
+		if n := request(col.ID); n != 0 {
+			t.Fatalf("scopes of a new collector = %d, want 0", n)
+		}
+	}
+	got := events(col.ID)
+	if len(got) != 1 {
+		t.Fatalf("%d discovery.collector.no_scopes events for three requests, want 1: %s", len(got), logs.String())
+	}
+	hint, _ := got[0]["hint"].(string)
+	if got[0]["level"] != "INFO" || got[0]["organization_id"] != "org-1" ||
+		!strings.Contains(hint, "accept a subnet") || !strings.Contains(hint, "create a scope") {
+		t.Errorf("event = %v, want INFO with organization, collector and the hint", got[0])
+	}
+	// Per collector: another collector without scopes is logged as well.
+	request(other.ID)
+	if n := len(events(other.ID)); n != 1 {
+		t.Errorf("%d events for a second collector without scopes, want 1", n)
+	}
+
+	// With an enabled scope nothing is logged; after its last enabled scope
+	// was switched off the collector is logged again, once.
+	s := NewScope("org-1", &ScopeInput{CollectorID: col.ID, Kind: ScopeKindCIDR, Target: "192.0.2.0/24"})
+	if err := repo.CreateScope(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if n := request(col.ID); n != 1 || len(events(col.ID)) != 1 {
+		t.Fatalf("with a scope: %d scopes, %d events; want 1 scope and no new event", n, len(events(col.ID)))
+	}
+	off := false
+	if _, err := repo.UpdateScope(ctx, "org-1", s.ID, &ScopePatch{Enabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	request(col.ID)
+	request(col.ID)
+	if n := len(events(col.ID)); n != 2 {
+		t.Errorf("%d events after the last scope was switched off, want 2 (one more)", n)
+	}
+}
+
+// TestScopeTargetWithoutZone covers WP-383 (DIS-09, API-05; F-108): a host
+// or range target with an IPv6 zone (fe80::1%eth0) is refused with 422 on
+// the field target, on create and on change, because PostgreSQL inet cannot
+// evaluate it; the same addresses without zone are accepted, and CIDR
+// targets behave as before (a prefix with zone was never one).
+func TestScopeTargetWithoutZone(t *testing.T) {
+	for _, tc := range []struct {
+		kind, target, want string
+	}{
+		{ScopeKindHost, "fe80::1%eth0", ""},
+		{ScopeKindHost, " FE80::1%25 ", ""},
+		{ScopeKindRange, "fe80::1%eth0-fe80::5%eth0", ""},
+		{ScopeKindRange, "fe80::1%eth0-fe80::5", ""},
+		{ScopeKindRange, "fe80::1 - fe80::5%eth0", ""},
+		{ScopeKindCIDR, "fe80::%eth0/64", ""},
+		{ScopeKindHost, "FE80::1", "fe80::1"},
+		{ScopeKindHost, "10.0.0.1", "10.0.0.1"},
+		{ScopeKindRange, "fe80::1 - fe80::5", "fe80::1-fe80::5"},
+		{ScopeKindCIDR, "fe80::1/112", "fe80::/112"},
+		{ScopeKindCIDR, "10.0.0.7/24", "10.0.0.0/24"},
+	} {
+		got, err := NormalizeScopeTarget(tc.kind, tc.target)
+		if tc.want != "" {
+			if err != nil || got != tc.want {
+				t.Errorf("NormalizeScopeTarget(%s, %q) = %q, %v; want %q", tc.kind, tc.target, got, err, tc.want)
+			}
+			continue
+		}
+		var fe *api.FieldError
+		if !errors.As(err, &fe) || fe.Field != "target" || fe.Status != http.StatusUnprocessableEntity {
+			t.Errorf("NormalizeScopeTarget(%s, %q) = %q, %v; want a 422 error on target", tc.kind, tc.target, got, err)
+		}
+	}
+	// CIDR keeps its message: a zone never parsed as a prefix.
+	var fe *api.FieldError
+	if _, err := NormalizeScopeTarget(ScopeKindCIDR, "fe80::%eth0/112"); !errors.As(err, &fe) || fe.Message != "not a CIDR" {
+		t.Errorf("cidr with zone: %v, want the unchanged \"not a CIDR\"", err)
+	}
+
+	repo := NewMemoryRepository()
+	col := &Collector{OrganizationID: "org-1", Name: "col", Config: map[string]any{}}
+	if err := repo.RegisterCollector(context.Background(), col); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	NewHandler(repo, nil).RegisterRoutes(mux)
+	call := func(method, path string, body any) (int, map[string]any) {
+		t.Helper()
+		var buf bytes.Buffer
+		_ = json.NewEncoder(&buf).Encode(body)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, discoveryTenantCtx(httptest.NewRequest(method, path, &buf)))
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	for _, body := range []map[string]any{
+		{"collector_id": col.ID, "kind": "host", "target": "fe80::1%eth0"},
+		{"collector_id": col.ID, "kind": "range", "target": "fe80::1%eth0-fe80::5%eth0"},
+	} {
+		if code, out := call(http.MethodPost, "/api/v1/discovery-scopes", body); code != http.StatusUnprocessableEntity || out["field"] != "target" {
+			t.Errorf("POST %v = %d %v, want 422 on target", body, code, out)
+		}
+	}
+	code, created := call(http.MethodPost, "/api/v1/discovery-scopes", map[string]any{"collector_id": col.ID, "kind": "host", "target": "fe80::1"})
+	if code != http.StatusCreated || created["target"] != "fe80::1" {
+		t.Fatalf("POST host fe80::1 = %d %v", code, created)
+	}
+	id, _ := created["id"].(string)
+	if code, out := call(http.MethodPatch, "/api/v1/discovery-scopes/"+id, map[string]any{"target": "fe80::1%eth0"}); code != http.StatusUnprocessableEntity || out["field"] != "target" {
+		t.Errorf("PATCH target with zone = %d %v, want 422 on target", code, out)
+	}
+	if code, out := call(http.MethodPatch, "/api/v1/discovery-scopes/"+id, map[string]any{"kind": "range", "target": "fe80::1-fe80::5%eth0"}); code != http.StatusUnprocessableEntity || out["field"] != "target" {
+		t.Errorf("PATCH range with zone = %d %v, want 422 on target", code, out)
+	}
+	if s, err := repo.GetScope(context.Background(), "org-1", id); err != nil || s.Kind != ScopeKindHost || s.Target != "fe80::1" {
+		t.Errorf("scope after the refused changes = %+v, %v", s, err)
+	}
+}
+
+// TestScopeLimitContract: the largest scope the API accepts is the one the
+// collector expands completely (collector/collectorcmd/testdata/
+// scope-limits.json, checked against maxScopeAddresses by the collector's
+// test; WP-494, F-106).
+func TestScopeLimitContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../collector/collectorcmd/testdata/scope-limits.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var limits struct {
+		MaxScopeAddresses int `json:"max_scope_addresses"`
+	}
+	if err := json.Unmarshal(raw, &limits); err != nil {
+		t.Fatal(err)
+	}
+	if limits.MaxScopeAddresses != MaxScopeAddresses {
+		t.Fatalf("MaxScopeAddresses = %d, scope-limits.json = %d: the collector would cut scopes the API accepts",
+			MaxScopeAddresses, limits.MaxScopeAddresses)
+	}
+	// The API accepts a /16 and a range of exactly the limit, nothing larger.
+	for _, tc := range []struct {
+		kind, target string
+		ok           bool
+	}{
+		{ScopeKindCIDR, "10.0.0.0/16", true},
+		{ScopeKindRange, "10.0.0.0-10.0.255.255", true},
+		{ScopeKindCIDR, "10.0.0.0/15", false},
+		{ScopeKindRange, "10.0.0.0-10.1.0.0", false},
+	} {
+		if _, err := NormalizeScopeTarget(tc.kind, tc.target); (err == nil) != tc.ok {
+			t.Errorf("NormalizeScopeTarget(%s, %s) = %v, want accepted %v", tc.kind, tc.target, err, tc.ok)
+		}
 	}
 }

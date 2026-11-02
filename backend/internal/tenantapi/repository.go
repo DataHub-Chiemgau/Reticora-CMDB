@@ -141,6 +141,9 @@ func (r *MemoryRepository) UpdateOrganization(_ context.Context, orgID string, r
 	if req.Locale != nil {
 		o.Locale = *req.Locale
 	}
+	if req.AIOptIn != nil {
+		o.AIOptIn = *req.AIOptIn
+	}
 	o.UpdatedAt = time.Now().UTC()
 	cp := *o
 	return &cp, nil
@@ -509,6 +512,9 @@ func (r *MemoryRepository) UpdateRoom(_ context.Context, orgID, id string, req U
 	if !ok || rm.OrganizationID != orgID {
 		return nil, fmt.Errorf("not found")
 	}
+	if req.IfMatch != nil && !sameRoomVersion(rm.UpdatedAt, *req.IfMatch) {
+		return nil, errRoomChanged
+	}
 	if req.Name != nil {
 		if err := r.roomConflict(rm.BuildingID, id, *req.Name); err != nil {
 			return nil, err
@@ -520,6 +526,9 @@ func (r *MemoryRepository) UpdateRoom(_ context.Context, orgID, id string, req U
 	}
 	if req.RoomType != nil {
 		rm.RoomType = *req.RoomType
+	}
+	if req.Layout != nil {
+		rm.Layout = req.Layout
 	}
 	rm.UpdatedAt = time.Now().UTC()
 	cp := *rm

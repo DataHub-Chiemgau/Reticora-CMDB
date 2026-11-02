@@ -32,6 +32,10 @@ type Assignment struct {
 	ReturnSignature   *Signature `json:"return_signature,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+
+	// checkoutSigner and returnSigner are the vault surrogates of the
+	// signer names the table keeps (SEC-05); the API shows the names.
+	checkoutSigner, returnSigner string
 }
 
 // CreateRequest is the payload for creating an assignment.

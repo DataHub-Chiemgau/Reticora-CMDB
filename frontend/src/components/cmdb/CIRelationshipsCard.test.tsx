@@ -4,12 +4,21 @@
  * The backend has long exposed POST/DELETE and now PATCH for relationship
  * verification metadata, but the CI detail page rendered a read-only list, so
  * a discovered edge could never be confirmed or disputed and manual edges
- * could not be created. These tests pin the verify/delete wiring.
+ * could not be created. These tests pin the verify/delete wiring and the
+ * create dialog: a double click creates one edge and closes the dialog
+ * (F-314), an invisible or unknown endpoint is reported at the CI ID field in
+ * the UI language (F-145). With a chosen client or site the card lists only
+ * edges to CIs in that scope and names the hidden ones (E-87, F-169).
+ * "Entfernen und unterdrücken" deletes nothing without a confirmation with
+ * a reason; the suppressions of the CI are listed with reason and actor and
+ * can be lifted (F-273). The create dialog offers no structural type,
+ * which the server refuses with 422 (F-242).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '../../test/utils';
 import { CIRelationshipsCard, verificationBadgeVariant } from './CIRelationshipsCard';
+import { useScopeStore } from '../../stores/scope';
 
 const CI_ID = '11111111-1111-1111-1111-111111111111';
 const OTHER_ID = '22222222-2222-2222-2222-222222222222';
@@ -97,7 +106,7 @@ describe('CIRelationshipsCard', () => {
     expect(screen.queryByRole('button', { name: /bestätigen|verify/i })).toBeNull();
   });
 
-  it('removes a discovery edge with force so it stays suppressed (REL-04)', async () => {
+  it('removes a discovery edge only after confirmation with a reason, with force and the reason (REL-04, F-273)', async () => {
     const fetchMock = vi
       .fn()
       .mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -105,16 +114,153 @@ describe('CIRelationshipsCard', () => {
         return json(relationshipList('unverified'));
       });
     vi.stubGlobal('fetch', fetchMock);
+    const deletes = () => fetchMock.mock.calls.filter((call) => call[1]?.method === 'DELETE');
 
     renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
 
-    const deleteButton = await screen.findByRole('button', { name: /unterdrücken|suppress/i });
-    fireEvent.click(deleteButton);
+    // Without confirmation nothing is deleted: the button opens the dialog,
+    // whose confirmation needs a reason, and cancelling deletes nothing.
+    fireEvent.click(await screen.findByRole('button', { name: 'Entfernen und unterdrücken' }));
+    let dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent(
+      `Die Discovery-Kante depends_on zu ${OTHER_ID} wird entfernt.`,
+    );
+    const confirm = within(dialog).getByRole('button', { name: 'Entfernen und unterdrücken' });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText('Grund'), { target: { value: '   ' } });
+    expect(confirm).toBeDisabled();
+    fireEvent.submit(confirm.closest('form')!);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abbrechen' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(deletes()).toHaveLength(0);
+
+    // With confirmation and a reason the edge is deleted with force and
+    // the trimmed reason; the dialog closes.
+    fireEvent.click(screen.getByRole('button', { name: 'Entfernen und unterdrücken' }));
+    dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText('Grund')).toHaveValue('');
+    fireEvent.change(within(dialog).getByLabelText('Grund'), {
+      target: { value: '  Falscher Nachbar & Altlast  ' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Entfernen und unterdrücken' }));
+
+    await waitFor(() => expect(deletes()).toHaveLength(1));
+    const url = new URL(String(deletes()[0]?.[0]), 'http://localhost');
+    expect(url.pathname).toBe('/api/v1/relationships/rel-1');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      force: 'true',
+      reason: 'Falscher Nachbar & Altlast',
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('names a refused reason in the dialog and keeps it open (F-273)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          return json(
+            {
+              type: 'https://reticora.io/problems/422',
+              title: 'Unprocessable Entity',
+              status: 422,
+              detail: 'reason: too long',
+              violations: [{ field: 'reason', detail: 'too long' }],
+            },
+            422,
+          );
+        }
+        return json(relationshipList('unverified'));
+      }),
+    );
+
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Entfernen und unterdrücken' }));
+    const dialog = await screen.findByRole('dialog');
+    const input = within(dialog).getByLabelText('Grund');
+    fireEvent.change(input, { target: { value: 'zu lang' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Entfernen und unterdrücken' }));
+
+    await waitFor(() => expect(input).toHaveAttribute('aria-invalid', 'true'));
+    expect(input).toHaveAccessibleDescription('Der Grund hat höchstens 1000 Zeichen.');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('deletes a manual edge without force and without a dialog', async () => {
+    const list = relationshipList('verified');
+    list.data[0]!.source = 'manual';
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'DELETE') return new Response(null, { status: 204 });
+        return json(list);
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Löschen' }));
 
     await waitFor(() => {
       const del = fetchMock.mock.calls.find((call) => call[1]?.method === 'DELETE');
-      expect(del?.[0]).toBe('/api/v1/relationships/rel-1?force=true');
+      expect(del?.[0]).toBe('/api/v1/relationships/rel-1');
     });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('lists the suppressions of the CI with reason and actor and lifts one (F-273)', async () => {
+    const ACTOR = '44444444-4444-4444-4444-444444444444';
+    let lifted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/v1/relationship-suppressions/sup-1' && init?.method === 'DELETE') {
+        lifted = true;
+        return new Response(null, { status: 204 });
+      }
+      if (url.pathname === '/api/v1/relationship-suppressions') {
+        const data = lifted
+          ? []
+          : [
+              {
+                id: 'sup-1',
+                organization_id: 'org-1',
+                source_ci_id: CI_ID,
+                target_ci_id: OTHER_ID,
+                rel_type: 'connected_to',
+                reason: 'Falscher Nachbar',
+                created_by: ACTOR,
+                created_at: '2026-01-01T00:00:00Z',
+              },
+            ];
+        return json({ data, total: data.length, limit: 100, offset: 0, has_more: false });
+      }
+      return json(relationshipList('verified'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+    await screen.findByText('depends_on');
+    // The list is read only when shown.
+    expect(
+      fetchMock.mock.calls.some((call) => String(call[0]).includes('relationship-suppressions')),
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unterdrückte Beziehungen anzeigen' }));
+    const list = await screen.findByRole('list', { name: 'Unterdrückte Beziehungen' });
+    const listCall = fetchMock.mock.calls.find((call) =>
+      String(call[0]).startsWith('/api/v1/relationship-suppressions'),
+    );
+    expect(new URL(String(listCall?.[0]), 'http://localhost').searchParams.get('ci_id')).toBe(
+      CI_ID,
+    );
+    const item = within(list).getByRole('listitem');
+    expect(item).toHaveTextContent('connected_to');
+    expect(item).toHaveTextContent(OTHER_ID);
+    expect(item).toHaveTextContent('Grund: Falscher Nachbar');
+    expect(item).toHaveTextContent(`Unterdrückt von ${ACTOR}`);
+
+    fireEvent.click(within(item).getByRole('button', { name: 'Aufheben' }));
+    await waitFor(() => expect(lifted).toBe(true));
+    expect(await screen.findByText('Keine unterdrückten Beziehungen.')).toBeInTheDocument();
   });
 
   it('surfaces a rejected mutation instead of failing silently', async () => {
@@ -135,5 +281,339 @@ describe('CIRelationshipsCard', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent('invalid verification_state');
     });
+  });
+});
+
+describe('CIRelationshipsCard location edges (F-237)', () => {
+  it('names a located_in target by its path in the location tree, not by its id', async () => {
+    const node = (id: string, name: string, parent: string | null, children: unknown[] = []) => ({
+      id,
+      organization_id: 'org-1',
+      kind: 'site',
+      name,
+      parent_id: parent,
+      children,
+    });
+    const tree = [
+      node('loc-site', 'HQ', null, [
+        node('loc-room', 'Raum 1', 'loc-site', [node('loc-rack', 'Rack A', 'loc-room')]),
+      ]),
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), 'http://localhost');
+        if (url.pathname === '/api/v1/locations/tree') return json({ data: tree });
+        return json({
+          data: [
+            {
+              id: 'rel-loc',
+              organization_id: 'org-1',
+              source_ci_id: CI_ID,
+              target_ci_id: '',
+              target_location_id: 'loc-rack',
+              rel_type: 'located_in',
+              attributes: {},
+              source: 'projection',
+              projected: true,
+              verification_state: 'verified',
+              created_at: '2026-01-01T00:00:00Z',
+              updated_at: '2026-01-01T00:00:00Z',
+            },
+          ],
+          total: 1,
+          limit: 50,
+          offset: 0,
+          has_more: false,
+        });
+      }),
+    );
+
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+
+    expect(await screen.findByText('HQ › Raum 1 › Rack A')).toBeInTheDocument();
+    expect(screen.queryByText('loc-rack')).not.toBeInTheDocument();
+  });
+});
+
+describe('CIRelationshipsCard create dialog', () => {
+  const emptyList = { data: [], total: 0, limit: 50, offset: 0, has_more: false };
+
+  /** Opens the create dialog and enters OTHER_ID as the other end. */
+  async function openCreateDialog(direction?: 'outgoing' | 'incoming') {
+    fireEvent.click(await screen.findByRole('button', { name: /Beziehung hinzufügen/ }));
+    const dialog = await screen.findByRole('dialog');
+    if (direction) {
+      fireEvent.change(within(dialog).getByLabelText('Richtung'), {
+        target: { value: direction },
+      });
+    }
+    fireEvent.change(within(dialog).getByLabelText('CI-ID der Gegenstelle'), {
+      target: { value: OTHER_ID },
+    });
+    return dialog;
+  }
+
+  function posts(fetchMock: ReturnType<typeof vi.fn>) {
+    return fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST');
+  }
+
+  it('offers only storable relationship types, no structural ones (F-242)', async () => {
+    // contains, mounted_in and located_in (and their inverses) are
+    // projected from parent, rack mount and location (DB-05); the server
+    // refuses them with 422, so the form must not offer them.
+    const fetchMock = vi.fn(async () => json(emptyList));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+    const dialog = await openCreateDialog();
+    const typeSelect = within(dialog).getByLabelText('Beziehungstyp') as HTMLSelectElement;
+    const offered = Array.from(typeSelect.options).map((option) => option.value);
+
+    const structural = [
+      'contains',
+      'contained_by',
+      'parent_of',
+      'child_of',
+      'mounted_in',
+      'located_in',
+    ];
+    expect(offered.filter((value) => structural.includes(value))).toEqual([]);
+    expect(offered).toEqual([
+      'connected_to',
+      'hosted_on',
+      'depends_on',
+      'member_of',
+      'powers',
+      'powered_by',
+      'runs_on',
+      'uplink_to',
+      'managed_by',
+      'uses',
+    ]);
+    expect(typeSelect).toHaveValue('connected_to');
+  });
+
+  it('creates the edge once on a double click and closes the dialog (F-314)', async () => {
+    // The server stores the first create; a repeat is refused as a
+    // conflict, as the unique edge key does on the real stack.
+    let created = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        created++;
+        if (created > 1) {
+          return json(
+            {
+              type: 'https://reticora.io/problems/409',
+              title: 'Conflict',
+              status: 409,
+              detail: 'a record with the same unique value already exists',
+            },
+            409,
+          );
+        }
+        return json({ id: 'rel-new', source_ci_id: CI_ID, target_ci_id: OTHER_ID }, 201);
+      }
+      return json(emptyList);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+    const dialog = await openCreateDialog();
+    const submit = within(dialog).getByRole('button', { name: 'Anlegen' });
+    // Both clicks land before React renders the pending state that disables
+    // the button: the worst case of a real double click.
+    act(() => {
+      submit.click();
+      submit.click();
+    });
+
+    // Settled: the dialog closed, or it reports an error.
+    await waitFor(() => {
+      const open = screen.queryByRole('dialog');
+      expect(open === null || within(open).queryByRole('alert') !== null).toBe(true);
+    });
+    const open = screen.queryByRole('dialog');
+    expect({
+      posts: posts(fetchMock).length,
+      dialogOpen: open !== null,
+      error: open ? (within(open).queryByRole('alert')?.textContent ?? null) : null,
+    }).toEqual({ posts: 1, dialogOpen: false, error: null });
+    expect(JSON.parse(posts(fetchMock)[0]?.[1]?.body as string)).toMatchObject({
+      source_ci_id: CI_ID,
+      target_ci_id: OTHER_ID,
+      source: 'manual',
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it.each([
+    ['outgoing', 'target_ci_id', { source_ci_id: CI_ID, target_ci_id: OTHER_ID }],
+    ['incoming', 'source_ci_id', { source_ci_id: OTHER_ID, target_ci_id: CI_ID }],
+  ] as const)(
+    'shows a 422 on %s %s at the CI ID field in the UI language (F-145)',
+    async (direction, field, ends) => {
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          return json(
+            {
+              type: 'https://reticora.io/problems/422',
+              title: 'Unprocessable Entity',
+              status: 422,
+              detail: `${field}: ${field === 'target_ci_id' ? 'target' : 'source'} CI not found`,
+              violations: [
+                {
+                  field,
+                  detail: `${field === 'target_ci_id' ? 'target' : 'source'} CI not found`,
+                },
+              ],
+            },
+            422,
+          );
+        }
+        return json(emptyList);
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+      const dialog = await openCreateDialog(direction);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Anlegen' }));
+
+      const input = within(dialog).getByLabelText('CI-ID der Gegenstelle');
+      await waitFor(() => expect(input).toHaveAttribute('aria-invalid', 'true'));
+      expect(input).toHaveAccessibleDescription('Kein CI mit dieser ID gefunden.');
+      expect(input).toHaveValue(OTHER_ID);
+      // The server's English detail is not shown, neither in the dialog nor
+      // on the card.
+      expect(document.body).not.toHaveTextContent(/CI not found/);
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(posts(fetchMock)).toHaveLength(1);
+      expect(JSON.parse(posts(fetchMock)[0]?.[1]?.body as string)).toMatchObject(ends);
+    },
+  );
+});
+
+describe('CIRelationshipsCard under a chosen scope (E-87)', () => {
+  const CLIENT_A = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const CLIENT_B = 'aaaaaaaa-0000-4000-8000-000000000002';
+  const SITE_A1 = 'bbbbbbbb-0000-4000-8000-000000000001';
+  const SITE_A2 = 'bbbbbbbb-0000-4000-8000-000000000002';
+  const IN_A = '33333333-3333-3333-3333-333333333331';
+  const IN_A2 = '33333333-3333-3333-3333-333333333332';
+  const IN_B = '33333333-3333-3333-3333-333333333333';
+  const IN_B2 = '33333333-3333-3333-3333-333333333334';
+  const UNREADABLE = '33333333-3333-3333-3333-333333333335';
+
+  const others: Record<string, { client_id?: string; site_id?: string }> = {
+    [IN_A]: { client_id: CLIENT_A, site_id: SITE_A1 },
+    [IN_A2]: { client_id: CLIENT_A, site_id: SITE_A2 },
+    [IN_B]: { client_id: CLIENT_B },
+    [IN_B2]: { client_id: CLIENT_B },
+  };
+
+  function edge(id: string, source: string, target: string, extra: object = {}) {
+    return {
+      id,
+      organization_id: 'org-1',
+      source_ci_id: source,
+      target_ci_id: target,
+      rel_type: 'depends_on',
+      attributes: {},
+      source: 'manual',
+      verification_state: 'verified',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      ...extra,
+    };
+  }
+
+  const edges = [
+    edge('rel-a', CI_ID, IN_A),
+    edge('rel-a2', IN_A2, CI_ID),
+    edge('rel-b', CI_ID, IN_B),
+    edge('rel-b2', IN_B2, CI_ID),
+    edge('rel-x', CI_ID, UNREADABLE),
+    edge('rel-loc', CI_ID, '', { target_location_id: 'loc-1', projected: true }),
+  ];
+
+  function stubServer() {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === `/api/v1/cis/${CI_ID}/relationships`)
+        return json({ data: edges, total: edges.length, limit: 50, offset: 0, has_more: false });
+      const id = url.pathname.replace('/api/v1/cis/', '');
+      const other = others[id];
+      if (other)
+        return json({
+          id,
+          organization_id: 'org-1',
+          ci_type_id: 'server',
+          name: id,
+          status: 'active',
+          attributes: {},
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+          ...other,
+        });
+      return json({ detail: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const listedIds = () =>
+    screen.queryAllByRole('link').map((link) => link.getAttribute('href')?.replace('/cmdb/', ''));
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    useScopeStore.getState().reset();
+  });
+  afterEach(() => useScopeStore.getState().reset());
+
+  it('lists only edges to CIs of the chosen client and names the hidden ones', async () => {
+    stubServer();
+    useScopeStore.setState({ clientId: CLIENT_A, siteId: '' });
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+
+    expect(await screen.findByText('2 außerhalb des Bereichs ausgeblendet')).toBeInTheDocument();
+    // Both directions count; an edge to a location and one whose other CI
+    // cannot be read are not known to lie outside and stay listed.
+    expect(listedIds().sort()).toEqual([IN_A, IN_A2, UNREADABLE].sort());
+    expect(screen.getByText('loc-1')).toBeInTheDocument();
+    expect(screen.queryByText('Außerhalb des Bereichs')).toBeNull();
+
+    // The toggle shows all edges and marks the outside ones.
+    fireEvent.click(screen.getByRole('button', { name: 'Alle anzeigen' }));
+    expect(listedIds().sort()).toEqual([IN_A, IN_A2, IN_B, IN_B2, UNREADABLE].sort());
+    expect(screen.getAllByText('Außerhalb des Bereichs')).toHaveLength(2);
+    expect(screen.getByText('2 außerhalb des Bereichs ausgeblendet')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nur Bereich anzeigen' }));
+    expect(listedIds()).not.toContain(IN_B);
+  });
+
+  it('narrows to the chosen site as well', async () => {
+    stubServer();
+    useScopeStore.setState({ clientId: CLIENT_A, siteId: SITE_A1 });
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+
+    expect(await screen.findByText('3 außerhalb des Bereichs ausgeblendet')).toBeInTheDocument();
+    expect(listedIds().sort()).toEqual([IN_A, UNREADABLE].sort());
+  });
+
+  it('lists every edge and reads no CI without a selection', async () => {
+    const fetchMock = stubServer();
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+
+    await waitFor(() => expect(listedIds()).toHaveLength(5));
+    expect(screen.queryByText(/außerhalb des Bereichs/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Alle anzeigen' })).toBeNull();
+    // The location edge reads the location tree for its name (F-237), no CI.
+    expect(
+      fetchMock.mock.calls
+        .map((call) => String(call[0]))
+        .filter((u) => u.startsWith('/api/v1/cis')),
+    ).toEqual([`/api/v1/cis/${CI_ID}/relationships`]);
   });
 });

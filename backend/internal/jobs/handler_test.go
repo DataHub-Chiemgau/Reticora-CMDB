@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,9 +12,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -44,9 +47,19 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	return f
 }
 
-// call runs a request as user with the given permissions.
+// call runs a request as an org-wide user with the given permissions.
 func (f *apiFixture) call(method, path, user string, perms ...identity.Permission) *httptest.ResponseRecorder {
+	scope := database.OrgWideScope("org-1", user)
+	return f.callIn(&scope, method, path, user, perms...)
+}
+
+// callIn runs a request as user with the tenant scope (nil: none) and the
+// given permissions.
+func (f *apiFixture) callIn(scope *database.TenantScope, method, path, user string, perms ...identity.Permission) *httptest.ResponseRecorder {
 	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1", UserID: user})
+	if scope != nil {
+		ctx = database.ContextWithTenantScope(ctx, scope)
+	}
 	ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: "org-1",
 		Permissions: append([]identity.Permission{identity.PermJobRead}, perms...)})
 	w := httptest.NewRecorder()
@@ -152,11 +165,210 @@ func TestJobAPIRevert(t *testing.T) {
 	if w := f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", "bob"); w.Code != http.StatusForbidden {
 		t.Errorf("stranger: %d", w.Code)
 	}
-	if w := f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", "bob", identity.PermCIDelete); w.Code != http.StatusOK {
+	if w := f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", "bob", identity.PermCIDelete); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"reverted":true`) || !strings.Contains(w.Body.String(), `"reverted_by":"bob"`) ||
+		!strings.Contains(w.Body.String(), `"reverted_at":"`) {
 		t.Errorf("revert: %d %s", w.Code, w.Body.String())
 	}
 	if len(f.reverted) != 1 || f.reverted[0] != merge.ID {
 		t.Errorf("reverted %v", f.reverted)
+	}
+	// The job records the revert (F-329, WP-553) ...
+	var got struct {
+		Status     Status     `json:"status"`
+		RevertedAt *time.Time `json:"reverted_at"`
+		RevertedBy string     `json:"reverted_by"`
+	}
+	w := f.call("GET", "/api/v1/jobs/"+merge.ID, "alice")
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK ||
+		got.RevertedAt == nil || got.RevertedBy != "bob" || got.Status != StatusSucceeded {
+		t.Errorf("reverted job: %d %s", w.Code, w.Body.String())
+	}
+	// ... and a second revert, by its creator too, is 409 "already
+	// reverted" without running the reverter again.
+	for _, who := range []string{"alice", "bob"} {
+		w = f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", who, identity.PermCIDelete)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "already reverted") {
+			t.Errorf("second revert by %s: %d %s", who, w.Code, w.Body.String())
+		}
+	}
+	if len(f.reverted) != 1 {
+		t.Errorf("the reverter ran again: %v", f.reverted)
+	}
+	// A job that was not reverted carries neither field.
+	if w = f.call("GET", "/api/v1/jobs/"+bulk.ID, "alice"); strings.Contains(w.Body.String(), "reverted_") {
+		t.Errorf("job without revert: %s", w.Body.String())
+	}
+}
+
+// TestJobAPIRevertErrors covers API-03 (WP-408): a reverter's refusal is
+// 409 with its domain text; any other error of a reverter is a repository
+// error and answers sanitized, without its text.
+func TestJobAPIRevertErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		err    error
+		status int
+		detail string
+	}{
+		{"refusal", &RevertRefusedError{Reason: errors.New("the merge snapshot has expired")},
+			http.StatusConflict, "the merge snapshot has expired"},
+		{"database error", fmt.Errorf("unmerge: %w", &pgconn.PgError{Code: "42501",
+			Message: `new row violates row-level security policy for table "ci_merge"`}),
+			http.StatusForbidden, "the operation is not permitted"},
+		{"other error", errors.New("unmerge: failed to connect to `host=10.0.0.5 user=reticora`"),
+			http.StatusInternalServerError, "the request could not be completed"},
+	} {
+		svc := NewService(NewMemoryRepository())
+		svc.Register(Kind{Name: "ci.merge", MaxAttempts: 1})
+		f := &apiFixture{svc: svc, mux: chi.NewRouter()}
+		NewAPIHandler(svc).WithKind("ci.merge", identity.PermCIDelete, func(context.Context, *Job) error {
+			return tc.err
+		}).RegisterRoutes(f.mux)
+		job := f.enqueue(t, "ci.merge", "alice", "")
+		f.finish(t, job, nil)
+
+		w := f.call("POST", "/api/v1/jobs/"+job.ID+"/revert", "alice")
+		body := w.Body.String()
+		if w.Code != tc.status || !strings.Contains(body, tc.detail) {
+			t.Errorf("%s: %d %s, want %d with %q", tc.name, w.Code, body, tc.status, tc.detail)
+		}
+		for _, leak := range []string{"ci_merge", "row-level security", "10.0.0.5", "unmerge"} {
+			if strings.Contains(body, leak) {
+				t.Errorf("%s: body %s contains %q", tc.name, body, leak)
+			}
+		}
+	}
+}
+
+// TestJobAPIHidesJobsOutsideTheScope covers F-163 (TEN-09, WP-404) on the
+// handler: a job whose scope snapshot lies outside the caller's scope is
+// 404 on every route, before the 403 of mayControl and the 409 of a
+// finished or not revertible job, also for a holder of the kind's
+// permission; a job without snapshot is the whole organization's, and a
+// request without tenant scope sees no job. The memory repository has no
+// row level security, so the handler's own check answers here.
+func TestJobAPIHidesJobsOutsideTheScope(t *testing.T) {
+	f := newAPIFixture(t)
+	scoped := func(user, client string) *database.TenantScope {
+		s := database.OrgWideScope("org-1", user)
+		s.Clients = database.ScopeIDs(client)
+		return &s
+	}
+	client1 := scoped("alice", "c1000000-0000-4000-8000-000000000001")
+	client2 := scoped("bob", "c2000000-0000-4000-8000-000000000002")
+	orgWide := database.OrgWideScope("org-1", "carol")
+	ctx1 := database.ContextWithTenantScope(context.Background(), client1)
+	bulk, _, err := f.svc.Enqueue(ctx1, "org-1", "ci.bulk", nil, EnqueueOptions{CreatedBy: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merge, _, err := f.svc.Enqueue(ctx1, "org-1", "ci.merge", nil, EnqueueOptions{CreatedBy: "alice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.finish(t, merge, nil)
+	system := f.enqueue(t, "system.index", "", "")
+	if bulk.Scope == nil || len(bulk.Scope.Clients) != 1 || bulk.Scope.Sites != nil || bulk.Scope.Teams != nil || system.Scope != nil {
+		t.Fatalf("scope snapshots: bulk %+v, system %+v", bulk.Scope, system.Scope)
+	}
+
+	all := []identity.Permission{identity.PermCIWrite, identity.PermCIDelete}
+	for _, c := range []struct {
+		name  string
+		scope *database.TenantScope
+		user  string
+		id    string
+	}{
+		{"client 2, bulk job of client 1", client2, "bob", bulk.ID},
+		{"client 2, merge job of client 1", client2, "bob", merge.ID},
+		{"client 1, system job", client1, "alice", system.ID},
+		{"no tenant scope, bulk job", nil, "alice", bulk.ID},
+	} {
+		for _, req := range []struct{ method, path string }{
+			{"GET", "/api/v1/jobs/" + c.id},
+			{"GET", "/api/v1/jobs/" + c.id + "/result"},
+			{"DELETE", "/api/v1/jobs/" + c.id},
+			{"POST", "/api/v1/jobs/" + c.id + "/revert"},
+		} {
+			if w := f.callIn(c.scope, req.method, req.path, c.user, all...); w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), c.id) {
+				t.Errorf("%s: %s %s = %d %s, want 404", c.name, req.method, req.path, w.Code, w.Body.String())
+			}
+		}
+	}
+	if j, _ := f.svc.Get(context.Background(), "org-1", bulk.ID); j.Status != StatusQueued {
+		t.Errorf("the bulk job is %s after the refused cancels, want queued", j.Status)
+	}
+	for _, c := range []struct {
+		name  string
+		scope *database.TenantScope
+		user  string
+		ids   []string
+	}{
+		{"creator, client 1", client1, "alice", []string{bulk.ID, merge.ID}},
+		{"org-wide", &orgWide, "carol", []string{bulk.ID, merge.ID, system.ID}},
+	} {
+		for _, id := range c.ids {
+			if w := f.callIn(c.scope, "GET", "/api/v1/jobs/"+id, c.user); w.Code != http.StatusOK {
+				t.Errorf("%s: GET /jobs/%s = %d, want 200", c.name, id, w.Code)
+			}
+		}
+	}
+	// Visible jobs keep the order 403 before the cancel, 409 before 403 on
+	// a revert the kind does not define.
+	if w := f.callIn(&orgWide, "DELETE", "/api/v1/jobs/"+bulk.ID, "carol"); w.Code != http.StatusForbidden {
+		t.Errorf("org-wide stranger cancels: %d, want 403", w.Code)
+	}
+	if w := f.callIn(&orgWide, "POST", "/api/v1/jobs/"+bulk.ID+"/revert", "carol"); w.Code != http.StatusConflict {
+		t.Errorf("org-wide stranger reverts a bulk job: %d, want 409", w.Code)
+	}
+	if w := f.callIn(client1, "DELETE", "/api/v1/jobs/"+bulk.ID, "alice"); w.Code != http.StatusOK {
+		t.Errorf("creator cancels: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestJobVisibleTo pins the rule of job_isolation (migration 000154) in
+// Job.VisibleTo per dimension: org-wide callers see every snapshot, a
+// restricted caller only a snapshot completely in its scope (an empty one
+// included), never a dimension that is org-wide in the snapshot; export
+// jobs only their creator.
+func TestJobVisibleTo(t *testing.T) {
+	const c1, c2, s1 = "c1000000-0000-4000-8000-000000000001", "c2000000-0000-4000-8000-000000000002", "51000000-0000-4000-8000-000000000001"
+	scope := func(clients, sites []string) *database.TenantScope {
+		s := database.OrgWideScope("org-1", "alice")
+		if clients != nil {
+			s.Clients = database.ScopeIDs(clients...)
+		}
+		if sites != nil {
+			s.Sites = database.ScopeIDs(sites...)
+		}
+		return &s
+	}
+	job := func(snapshot *Scope) *Job { return &Job{OrganizationID: "org-1", Kind: "ci.bulk", Scope: snapshot} }
+	for _, c := range []struct {
+		name   string
+		job    *Job
+		caller *database.TenantScope
+		want   bool
+	}{
+		{"org-wide caller, no snapshot", job(nil), scope(nil, nil), true},
+		{"client caller, no snapshot", job(nil), scope([]string{c1}, nil), false},
+		{"client caller, own client", job(&Scope{Clients: []string{c1}}), scope([]string{c1}, nil), true},
+		{"client caller, upper-case id", job(&Scope{Clients: []string{strings.ToUpper(c1)}}), scope([]string{c1}, nil), true},
+		{"client caller, other client", job(&Scope{Clients: []string{c2}}), scope([]string{c1}, nil), false},
+		{"client caller, two clients", job(&Scope{Clients: []string{c1, c2}}), scope([]string{c1}, nil), false},
+		{"two clients caller, one client", job(&Scope{Clients: []string{c2}}), scope([]string{c1, c2}, nil), true},
+		{"client caller, empty client snapshot", job(&Scope{Clients: []string{}}), scope([]string{c1}, nil), true},
+		{"site caller, snapshot org-wide in sites", job(&Scope{Clients: []string{c1}}), scope(nil, []string{s1}), false},
+		{"site caller, own site", job(&Scope{Sites: []string{s1}}), scope(nil, []string{s1}), true},
+		{"other organization", &Job{OrganizationID: "org-2", Kind: "ci.bulk"}, scope(nil, nil), false},
+		{"export job, creator", &Job{OrganizationID: "org-1", RefTable: "export_job", CreatedBy: "alice"}, scope(nil, nil), true},
+		{"export job, other user", &Job{OrganizationID: "org-1", RefTable: "export_job", CreatedBy: "bob"}, scope(nil, nil), false},
+		{"nil scope", job(nil), nil, false},
+	} {
+		if got := c.job.VisibleTo(c.caller); got != c.want {
+			t.Errorf("%s: VisibleTo = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
@@ -205,5 +417,106 @@ func TestJobMetrics(t *testing.T) {
 	}
 	if age := values["reticora_job_oldest_queued_age_seconds"]; age < 0 || age > time.Minute.Seconds() {
 		t.Errorf("oldest queued age %v", age)
+	}
+}
+
+// TestJobAPICancelRunningJobsByKind covers WP-514 (JOB-03, API-08, UI-16,
+// F-162): a running job is cancelled only when its kind declares it
+// cancellable while running (ci.bulk, history.snapshot, export); a running
+// job of another kind, also a mirrored one (review.merge), is 409 and keeps
+// running; a queued job of every kind is cancelled. Every job answer
+// carries cancellable, per kind and status. A job cancelled while running
+// serves the partial result it kept (200).
+func TestJobAPICancelRunningJobsByKind(t *testing.T) {
+	f := newAPIFixture(t)
+	f.svc.Register(Kind{Name: "ci.bulk", MaxAttempts: 1, Cancellable: true})
+	ctx := context.Background()
+	start := func(job *Job) {
+		t.Helper()
+		if claimed, err := f.svc.ClaimJob(ctx, "org-1", job.ID); err != nil || claimed == nil {
+			t.Fatalf("claim %s: %+v %v", job.Kind, claimed, err)
+		}
+	}
+	runningBulk := f.enqueue(t, "ci.bulk", "alice", "")
+	start(runningBulk)
+	runningMerge := f.enqueue(t, "ci.merge", "alice", "")
+	start(runningMerge)
+	queuedBulk := f.enqueue(t, "ci.bulk", "alice", "")
+	queuedMerge := f.enqueue(t, "ci.merge", "alice", "")
+	queuedSystem := f.enqueue(t, "system.index", "alice", "")
+	done := f.enqueue(t, "ci.bulk", "alice", "")
+	f.finish(t, done, map[string]int{"succeeded": 1})
+	// A mirrored job (review.merge, no registered kind) that runs.
+	if err := f.svc.Track(ctx, "org-1", "review.merge", "review_item", "r-1", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.Mirror(ctx, "org-1", "review_item", "r-1", StatusRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	mirrored, err := f.svc.repo.GetByRef(ctx, "org-1", "review_item", "r-1")
+	if err != nil || mirrored.Status != StatusRunning {
+		t.Fatalf("mirrored job: %+v %v", mirrored, err)
+	}
+
+	want := map[string]bool{
+		runningBulk.ID: true, runningMerge.ID: false, mirrored.ID: false,
+		queuedBulk.ID: true, queuedMerge.ID: true, queuedSystem.ID: true, done.ID: false,
+	}
+	for id, cancellable := range want {
+		w := f.call("GET", "/api/v1/jobs/"+id, "alice")
+		var got map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", id, w.Code, w.Body.String())
+		}
+		if got["cancellable"] != cancellable {
+			t.Errorf("GET: job %s (%v, %v): cancellable = %v, want %v", id, got["kind"], got["status"], got["cancellable"], cancellable)
+		}
+	}
+	var list struct {
+		Data []map[string]any `json:"data"`
+	}
+	w := f.call("GET", "/api/v1/jobs?limit=50", "alice")
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || len(list.Data) != len(want) {
+		t.Fatalf("list: %d %s", w.Code, w.Body.String())
+	}
+	for _, item := range list.Data {
+		if c := want[item["id"].(string)]; item["cancellable"] != c {
+			t.Errorf("list: job %v (%v, %v): cancellable = %v, want %v", item["id"], item["kind"], item["status"], item["cancellable"], c)
+		}
+	}
+
+	// Running, not cancellable: 409 with the kind; the job keeps running.
+	for _, j := range []*Job{runningMerge, mirrored} {
+		w := f.call("DELETE", "/api/v1/jobs/"+j.ID, "alice")
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "the job kind "+j.Kind+" cannot be cancelled while running") {
+			t.Errorf("cancel running %s: %d %s, want 409", j.Kind, w.Code, w.Body.String())
+		}
+		if got, _ := f.svc.Get(ctx, "org-1", j.ID); got.Status != StatusRunning {
+			t.Errorf("running %s after the refused cancel: %s", j.Kind, got.Status)
+		}
+	}
+	// Running ci.bulk and queued jobs of every kind: 200, cancelled.
+	for _, j := range []*Job{runningBulk, queuedBulk, queuedMerge, queuedSystem} {
+		w := f.call("DELETE", "/api/v1/jobs/"+j.ID, "alice")
+		var got map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK ||
+			got["status"] != string(StatusCancelled) || got["cancellable"] != false {
+			t.Errorf("cancel %s %s: %d %s, want 200 cancelled", j.Kind, j.ID, w.Code, w.Body.String())
+		}
+	}
+	if w := f.call("DELETE", "/api/v1/jobs/"+done.ID, "alice"); w.Code != http.StatusConflict {
+		t.Errorf("cancel a succeeded job: %d", w.Code)
+	}
+
+	// The cancelled bulk job without a report has no result (409); with
+	// the partial report its worker kept it is served (200).
+	if w := f.call("GET", "/api/v1/jobs/"+runningBulk.ID+"/result", "alice"); w.Code != http.StatusConflict {
+		t.Errorf("result of a cancelled job without report: %d", w.Code)
+	}
+	if _, err := f.svc.SaveCancelledResult(ctx, "org-1", runningBulk.ID, map[string]int{"skipped": 3}); err != nil {
+		t.Fatal(err)
+	}
+	if w := f.call("GET", "/api/v1/jobs/"+runningBulk.ID+"/result", "alice"); w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"skipped":3}` {
+		t.Errorf("result of a cancelled job with report: %d %s", w.Code, w.Body.String())
 	}
 }

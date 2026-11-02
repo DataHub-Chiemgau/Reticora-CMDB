@@ -34,7 +34,10 @@ func scanRecord(s pgx.Row) (*Record, error) {
 
 // disposalVisible restricts disposal records to those whose asset or CI is
 // visible under the transaction's tenant scope: their policies filter the
-// subqueries, while disposal_record carries no client column yet (WP-025).
+// subqueries. The policy of disposal_record filters by the client and site
+// derived from the asset or CI (migration 000145, WP-353); the predicate stays
+// as defense in depth and also requires a referenced CI to be visible when
+// the scope follows the asset.
 const disposalVisible = `(disposal_record.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = disposal_record.asset_id))
 	AND (disposal_record.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = disposal_record.ci_id))`
 

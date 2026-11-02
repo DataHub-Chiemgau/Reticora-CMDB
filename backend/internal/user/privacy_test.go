@@ -10,6 +10,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
@@ -183,7 +184,8 @@ func TestExportUserDataIncludesTicketsAssignmentsAndRoles(t *testing.T) {
 	if err := repo.CreateRole(ctx, role); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.AssignRole(ctx, "org-1", &UserRoleAssignment{UserID: u.ID, CustomRoleID: role.ID}); err != nil {
+	admin := &identity.Principal{Permissions: identity.AllPermissions()}
+	if err := repo.AssignRole(ctx, "org-1", admin, &UserRoleAssignment{UserID: u.ID, CustomRoleID: role.ID}); err != nil {
 		t.Fatal(err)
 	}
 

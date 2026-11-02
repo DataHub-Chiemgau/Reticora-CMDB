@@ -5,9 +5,13 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { Route, Routes, useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../test/utils';
-import { OnboardingPage, currentStep } from './OnboardingPage';
+import { OnboardingPage, currentStep, passwordPolicyViolations } from './OnboardingPage';
 import { useAuthStore } from '../auth/authStore';
+
+/** A password that meets the realm policy (WP-112, deploy/keycloak). */
+const GOOD_PASSWORD = 'Ein-langes-Passwort-7';
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -31,18 +35,81 @@ beforeAll(async () => {
   ).join('');
 });
 
-function signIn() {
+function signIn(user: { sub: string; email?: string } = { sub: 'user-1' }) {
   useAuthStore.setState({
     token: 'header.payload.signature',
     expiresAt: new Date(Date.now() + 3600_000).toISOString(),
-    user: { sub: 'user-1' },
+    user,
   });
+}
+
+/** LoginProbe stands in for the sign-in page and shows the router state it got. */
+function LoginProbe() {
+  const location = useLocation();
+  return <pre data-testid="login-state">{JSON.stringify(location.state)}</pre>;
+}
+
+/** renderOnboarding renders the onboarding next to a stand-in for /login. */
+function renderOnboarding(route: string) {
+  return renderWithProviders(
+    <Routes>
+      <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/login" element={<LoginProbe />} />
+    </Routes>,
+    { route },
+  );
+}
+
+/** followLogin follows the sign-in link and returns the router state of /login. */
+function followLogin(link: HTMLElement) {
+  fireEvent.click(link);
+  return JSON.parse(screen.getByTestId('login-state').textContent ?? 'null');
+}
+
+function problem(status: number, detail: string, field?: string) {
+  return json({ title: 'Problem', status, detail, ...(field ? { field } : {}) }, status);
+}
+
+/** fillSignup fills the signup form and submits it. */
+function fillSignup() {
+  fireEvent.change(screen.getByLabelText('Organisation'), { target: { value: 'Muster GmbH' } });
+  fireEvent.change(screen.getByLabelText('E-Mail-Adresse'), {
+    target: { value: 'it@muster.example' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Konto anlegen' }));
+}
+
+/** stubSignup answers the challenge and the signup with the given responses. */
+function stubSignup(answers: { challenge?: () => Response; submit?: () => Response }) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith('/signup/challenge')) return answers.challenge?.() ?? json(challenge);
+    if (url.endsWith('/signup') && init?.method === 'POST')
+      return answers.submit?.() ?? json({ status: 'verification_sent' }, 202);
+    return json({ detail: 'unexpected' }, 404);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function signupPosted(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls.some(
+    (call) => String(call[0]) === '/api/v1/signup' && (call[1] as RequestInit)?.method === 'POST',
+  );
 }
 
 interface ServerState {
   collectors: number;
   scopes: unknown[];
   cis: number;
+  /** resolveFails answers the resolve with a 500 problem (WP-529). */
+  resolveFails?: boolean;
+  /** session answers GET /me (session claims); without it /me is 404. */
+  session?: unknown;
+  /** clients answers GET /clients. */
+  clients?: unknown[];
+  /** enroll answers POST /collectors/enrollment-codes; default 201 with a code. */
+  enroll?: (body: { label?: string; client_id?: string }) => Response;
 }
 
 function stubServer(state: ServerState) {
@@ -51,10 +118,26 @@ function stubServer(state: ServerState) {
     if (url.endsWith('/signup/challenge')) return json(challenge);
     if (url.endsWith('/signup') && init?.method === 'POST')
       return json({ status: 'verification_sent' }, 202);
-    if (url.endsWith('/collectors/enrollment-codes'))
-      return json({ code: 'ABCD-EFGH', expires_at: '2026-10-15T00:00:00Z' }, 201);
-    if (url.includes('/review-items/') && init?.method === 'POST')
+    if (url.endsWith('/collectors/enrollment-codes')) {
+      return state.enroll
+        ? state.enroll(JSON.parse(String(init?.body)))
+        : json({ code: 'ABCD-EFGH', expires_at: '2026-10-15T00:00:00Z' }, 201);
+    }
+    if (url.endsWith('/api/v1/me') && state.session) return json(state.session);
+    if (url.includes('/clients')) return json(page(state.clients ?? []));
+    if (url.includes('/review-items/') && init?.method === 'POST') {
+      if (state.resolveFails) {
+        return json(
+          { title: 'Internal Server Error', status: 500, detail: 'scope could not be created' },
+          500,
+        );
+      }
+      // A resolved suggestion is no longer open.
+      state.scopes = state.scopes.filter(
+        (item) => !url.includes(`/review-items/${(item as { id: string }).id}/`),
+      );
       return json({ status: 'resolved' });
+    }
     if (url.includes('/review-items')) return json(page(state.scopes));
     if (url.includes('/collectors')) return json(page([], state.collectors));
     if (url.includes('/cis')) return json(page([], state.cis));
@@ -71,10 +154,20 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  window.sessionStorage.clear();
 });
 
 describe('currentStep', () => {
   const none = { collectorDone: false, scopesDone: false, cisDone: false };
+  it('lets the verification link win over a session (F-351)', () => {
+    // A superadmin who pastes the link into a signed-in tab must reach the
+    // verification, not the collector step of their own organization.
+    expect(currentStep(true, true, none)).toBe('verify');
+    expect(currentStep(true, true, { collectorDone: true, scopesDone: true, cisDone: true })).toBe(
+      'verify',
+    );
+  });
+
   it('orders the steps', () => {
     expect(currentStep(false, false, none)).toBe('signup');
     expect(currentStep(false, true, none)).toBe('verify');
@@ -86,6 +179,20 @@ describe('currentStep', () => {
     expect(currentStep(true, false, { collectorDone: true, scopesDone: true, cisDone: true })).toBe(
       'done',
     );
+  });
+});
+
+describe('passwordPolicyViolations', () => {
+  it('checks the rules of the realm policy like Keycloak', () => {
+    expect(passwordPolicyViolations(GOOD_PASSWORD)).toEqual([]);
+    expect(passwordPolicyViolations('')).toEqual(['length', 'upper', 'lower', 'digit', 'special']);
+    expect(passwordPolicyViolations('Kurz-1a')).toEqual(['length']);
+    expect(passwordPolicyViolations('KEIN-KLEINBUCHSTABE-1')).toEqual(['lower']);
+    expect(passwordPolicyViolations('OhneSonderzeichen12')).toEqual(['special']);
+    // Umlauts are letters; a space counts as a special character.
+    expect(passwordPolicyViolations('Größere Übung 12')).toEqual([]);
+    // Twelve code points, not UTF-16 units.
+    expect(passwordPolicyViolations('Aa1-😀😀😀😀😀😀😀')).toEqual(['length']);
   });
 });
 
@@ -115,29 +222,34 @@ describe('OnboardingPage', () => {
       json({ organization_slug: 'muster-gmbh', trial_ends_at: '2026-11-13T00:00:00Z' }, 201),
     );
     vi.stubGlobal('fetch', fetchMock);
-    renderWithProviders(<OnboardingPage />, { route: '/onboarding?token=tok-1' });
+    renderOnboarding('/onboarding?token=tok-1');
 
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+    expect(screen.getByText(/Mindestens 12 Zeichen mit Groß- und Kleinbuchstaben/)).toBeVisible();
     fireEvent.change(screen.getByLabelText(/Passwort festlegen/), {
-      target: { value: 'ein-langes-passwort' },
+      target: { value: GOOD_PASSWORD },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Konto bestätigen' }));
 
     expect(await screen.findByText(/„muster-gmbh“ ist angelegt/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Abmelden' })).toBeNull();
     expect(
       screen.getByText(
         `Ihr Testzeitraum läuft bis ${new Date('2026-11-13T00:00:00Z').toLocaleDateString('de-DE')}.`,
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Jetzt anmelden und fortfahren' })).toHaveAttribute(
-      'href',
-      '/login',
-    );
+    const login = screen.getByRole('link', { name: 'Jetzt anmelden und fortfahren' });
+    expect(login).toHaveAttribute('href', '/login');
     const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(JSON.parse(String(init.body))).toEqual({
       token: 'tok-1',
-      password: 'ein-langes-passwort',
+      password: GOOD_PASSWORD,
     });
+    // A tab without a session can still share the IdP session of an account
+    // signed in in another tab: the page offers that account's sign-out.
+    expect(screen.getByText(/noch ein anderes Konto angemeldet/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Anderes Konto abmelden' })).toBeVisible();
+    expect(followLogin(login)).toEqual({ from: '/onboarding' });
   });
 
   it('explains an expired verification link', async () => {
@@ -148,10 +260,252 @@ describe('OnboardingPage', () => {
     renderWithProviders(<OnboardingPage />, { route: '/onboarding?token=old' });
 
     fireEvent.change(screen.getByLabelText(/Passwort festlegen/), {
-      target: { value: 'ein-langes-passwort' },
+      target: { value: GOOD_PASSWORD },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Konto bestätigen' }));
     expect(await screen.findByText(/Bestätigungslink ist abgelaufen/)).toBeInTheDocument();
+  });
+
+  it('checks the realm password policy before sending the verification', async () => {
+    const fetchMock = vi.fn(async () => json({ detail: 'unexpected' }, 500));
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding?token=tok-1' });
+
+    // Twelve characters, but no upper-case letter, digit or special character.
+    fireEvent.change(screen.getByLabelText(/Passwort festlegen/), {
+      target: { value: 'einlangeswort' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Konto bestätigen' }));
+
+    expect(
+      await screen.findByText(
+        'Das Passwort erfüllt die Richtlinie noch nicht. Es fehlt: ein Großbuchstabe, eine Ziffer, ein Sonderzeichen.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/Passwort festlegen/)).toHaveAttribute('aria-invalid', 'true');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('localizes a password the IdP refuses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        problem(422, 'Invalid password: must not be equal to the email.', 'password'),
+      ),
+    );
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding?token=tok-1' });
+
+    fireEvent.change(screen.getByLabelText(/Passwort festlegen/), {
+      target: { value: GOOD_PASSWORD },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Konto bestätigen' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Das Konto wurde nicht bestätigt. Bitte prüfen Sie das Passwort.',
+    );
+    expect(screen.getByText(/darf nicht Ihre E-Mail-Adresse sein/)).toBeInTheDocument();
+    expect(screen.queryByText(/must not be equal/)).toBeNull();
+  });
+
+  /** stubSignedInServer answers the verification, the logout and GET /auth/config. */
+  function stubSignedInServer(endSession: string | undefined) {
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url.endsWith('/signup/verify'))
+        return json(
+          { organization_slug: 'muster-gmbh', trial_ends_at: '2026-11-13T00:00:00Z' },
+          201,
+        );
+      if (url.endsWith('/auth/logout') && init?.method === 'POST')
+        return new Response(null, { status: 204 });
+      if (url.endsWith('/auth/config'))
+        return json({
+          issuer: 'https://id.example/realms/reticora',
+          client_id: 'reticora-app',
+          redirect_uri: 'https://cmdb.example/auth/callback',
+          scopes: ['openid'],
+          authorization_endpoint: 'https://id.example/realms/reticora/protocol/openid-connect/auth',
+          ...(endSession ? { end_session_endpoint: endSession } : {}),
+          pkce_required: true,
+        });
+      if (url.includes('/review-items')) return json(page([]));
+      if (url.includes('/collectors')) return json(page([], 1));
+      if (url.includes('/cis')) return json(page([], 3));
+      return json({ detail: 'unexpected' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    return { calls, assign };
+  }
+
+  /** verifySignedIn verifies the link in a tab signed in as the superadmin. */
+  async function verifySignedIn() {
+    signIn({ sub: 'admin-1', email: 'admin@reticora.example' });
+    renderOnboarding('/onboarding?token=tok-1');
+
+    // The token wins over the session: the verification, not the collector.
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '1');
+    expect(
+      screen.getByText(/Dieser Tab ist noch als admin@reticora.example angemeldet/),
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText(/Passwort festlegen/), {
+      target: { value: GOOD_PASSWORD },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Konto bestätigen' }));
+
+    expect(await screen.findByText(/„muster-gmbh“ ist angelegt/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Sie sind noch als admin@reticora.example angemeldet. Melden Sie sich zuerst ab/,
+      ),
+    ).toBeVisible();
+    // Signing in now would reuse the superadmin's IdP session: no sign-in yet.
+    expect(screen.queryByRole('link', { name: 'Jetzt anmelden und fortfahren' })).toBeNull();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Abmelden und mit dem neuen Konto anmelden' }),
+    );
+  }
+
+  it('verifies in a signed-in tab, then ends the Reticora and the IdP session (F-351)', async () => {
+    const endSession = 'https://id.example/realms/reticora/protocol/openid-connect/logout';
+    const { calls, assign } = stubSignedInServer(endSession);
+    await verifySignedIn();
+
+    // RP-initiated logout: the IdP ends the superadmin's session and returns
+    // to the sign-in page, where the new account signs in with its
+    // credentials.
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    expect(useAuthStore.getState().isAuthenticated()).toBe(false);
+    expect(calls.filter((c) => c.includes('/auth/'))).toEqual([
+      'POST /api/v1/auth/logout',
+      'GET /api/v1/auth/config',
+    ]);
+    const url = new URL(String(assign.mock.calls[0]?.[0]));
+    expect(`${url.origin}${url.pathname}`).toBe(endSession);
+    expect(url.searchParams.get('client_id')).toBe('reticora-app');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://cmdb.example/login');
+  });
+
+  it('ends only the Reticora session without an end-session endpoint', async () => {
+    const { calls, assign } = stubSignedInServer(undefined);
+    await verifySignedIn();
+
+    const login = await screen.findByRole('link', { name: 'Jetzt anmelden und fortfahren' });
+    expect(calls).toContain('POST /api/v1/auth/logout');
+    expect(useAuthStore.getState().isAuthenticated()).toBe(false);
+    expect(assign).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: 'Abmelden und mit dem neuen Konto anmelden' }),
+    ).toBeNull();
+    expect(followLogin(login)).toEqual({ from: '/onboarding' });
+  });
+
+  it('says that the server has no self-signup set up (503 on the challenge)', async () => {
+    const fetchMock = stubSignup({
+      challenge: () => problem(503, 'self-signup is not available'),
+    });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    fillSignup();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die Registrierung ist auf diesem Server noch nicht eingerichtet: Es ist kein E-Mail-Versand (SMTP) konfiguriert. Wenden Sie sich an den Betreiber.',
+    );
+    expect(screen.queryByText(/self-signup is not available/)).toBeNull();
+    expect(signupPosted(fetchMock)).toBe(false);
+  });
+
+  it('tells a passing outage of the signup apart from a missing setup', async () => {
+    stubSignup({
+      submit: () => problem(503, 'signup protection is unavailable, try again later'),
+    });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    fillSignup();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die Registrierung ist gerade nicht möglich. Bitte versuchen Sie es in einigen Minuten erneut.',
+    );
+  });
+
+  it('localizes the per-address limit (429)', async () => {
+    stubSignup({
+      submit: () => problem(429, 'too many signups from this address, try again later'),
+    });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    fillSignup();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Zu viele Versuche. Bitte warten Sie einige Minuten und versuchen Sie es dann erneut.',
+    );
+  });
+
+  it('localizes a refused e-mail domain and a failed captcha', async () => {
+    stubSignup({
+      submit: () =>
+        problem(422, 'e-mail addresses of disposable domains are not accepted', 'email'),
+    });
+    const { unmount } = renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    fillSignup();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Diese E-Mail-Domain wird für die Registrierung nicht angenommen/,
+    );
+    expect(screen.getByLabelText('E-Mail-Adresse')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Organisation')).not.toHaveAttribute('aria-invalid');
+    unmount();
+
+    stubSignup({
+      submit: () =>
+        problem(
+          400,
+          'the captcha solution is missing, invalid, expired or was already used',
+          'altcha',
+        ),
+    });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    fillSignup();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die automatische Sicherheitsprüfung ist fehlgeschlagen oder abgelaufen. Bitte senden Sie das Formular erneut ab.',
+    );
+  });
+
+  it('keeps the detail of other refusals', async () => {
+    stubSignup({ submit: () => problem(500, 'signup failed') });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    fillSignup();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die Registrierung ist fehlgeschlagen: signup failed',
+    );
+  });
+
+  it('asks for a secure connection when the proof of work cannot run', async () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    const fetchMock = stubSignup({});
+    // Plain HTTP on a host name: crypto.subtle is undefined.
+    Object.defineProperty(globalThis, 'crypto', {
+      value: { getRandomValues: (values: Uint8Array) => values },
+      configurable: true,
+    });
+    try {
+      renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+      fillSignup();
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'Die Anmeldung erfordert eine sichere Verbindung.',
+      );
+      expect(signupPosted(fetchMock)).toBe(false);
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'crypto', original);
+    }
   });
 
   it('creates an enrollment code while no collector is connected', async () => {
@@ -162,6 +516,67 @@ describe('OnboardingPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Enrollment-Code erzeugen' }));
     expect(await screen.findByText('ABCD-EFGH')).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2');
+  });
+
+  it('offers the client choice to a user restricted to several clients (WP-677)', async () => {
+    signIn();
+    // The server binds the code to the client of collector:manage and refuses
+    // a creator of several clients without client_id (F-425, COL-04).
+    const fetchMock = stubServer({
+      collectors: 0,
+      scopes: [],
+      cis: 0,
+      session: {
+        sub: 'user-1',
+        org: 'org-1',
+        scopes: ['collector:manage', 'discovery:read', 'location:read'],
+        cls: ['client-1', 'client-2'],
+        sts: null,
+        tms: null,
+        iat: 1,
+        exp: 2,
+      },
+      clients: [
+        { id: 'client-1', organization_id: 'org-1', name: 'Kunde A', slug: 'kunde-a' },
+        { id: 'client-2', organization_id: 'org-1', name: 'Kunde B', slug: 'kunde-b' },
+      ],
+      enroll: (body) =>
+        body.client_id
+          ? json(
+              { code: 'ABCD-EFGH', client_id: body.client_id, expires_at: '2026-10-15T00:00:00Z' },
+              201,
+            )
+          : json(
+              {
+                type: 'urn:reticora:problem:invalid-field',
+                title: 'Unprocessable Entity',
+                status: 422,
+                detail: 'client_id: required: your scope holds several clients',
+                field: 'client_id',
+              },
+              422,
+            ),
+    });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    const select = await screen.findByRole('combobox', { name: 'Kunde' });
+    await waitFor(() =>
+      expect(Array.from((select as HTMLSelectElement).options, (o) => o.textContent)).toEqual([
+        'Kunde wählen',
+        'Kunde A',
+        'Kunde B',
+      ]),
+    );
+    const create = screen.getByRole('button', { name: 'Enrollment-Code erzeugen' });
+    expect(create).toBeDisabled();
+    fireEvent.change(select, { target: { value: 'client-1' } });
+    fireEvent.click(create);
+
+    expect(await screen.findByText('ABCD-EFGH')).toBeInTheDocument();
+    const posts = fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST');
+    expect(posts.map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
+      { label: 'onboarding', client_id: 'client-1' },
+    ]);
   });
 
   it('confirms a reported scope', async () => {
@@ -183,6 +598,35 @@ describe('OnboardingPage', () => {
       expect(String(post?.[0])).toBe('/api/v1/review-items/rev-1/resolve');
       expect(JSON.parse(String(post?.[1]?.body))).toEqual({ action: 'accept' });
     });
+    // The confirmed scope completes the step: the first CIs are next (F-177).
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '4'),
+    );
+    expect(screen.getByText(/Die erste Discovery läuft/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a failed confirmation and keeps the suggestion (WP-529, F-177)', async () => {
+    signIn();
+    stubServer({
+      collectors: 1,
+      scopes: [
+        { id: 'rev-1', kind: 'scope_suggested', status: 'open', payload: { cidr: '10.0.0.0/24' } },
+      ],
+      cis: 0,
+      resolveFails: true,
+    });
+    renderWithProviders(<OnboardingPage />, { route: '/onboarding' });
+
+    expect(await screen.findByText('10.0.0.0/24')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Bestätigen' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Der Vorschlag wurde nicht übernommen: scope could not be created',
+    );
+    expect(screen.getByText('10.0.0.0/24')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bestätigen' })).toBeEnabled();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '3');
   });
 
   it('finishes once the first CIs are there', async () => {

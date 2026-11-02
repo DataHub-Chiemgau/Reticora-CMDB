@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,5 +134,68 @@ func TestNextCursorEmptyOnPartialPage(t *testing.T) {
 	}
 	if got := NextCursor(items, FilterParams{}, 1); got == "" {
 		t.Error("expected a cursor for a full page")
+	}
+}
+
+// TestGetLinksIsCursorPaged: with three links of a document,
+// GET /documents/{id}/links?limit=1 answers one entry and a next_cursor;
+// following it returns every link once, newest first; a forged cursor is
+// 400 (WP-467, API-02, F-075).
+func TestGetLinksIsCursorPaged(t *testing.T) {
+	repo := NewMemoryRepository()
+	seedDocuments(t, repo, 2)
+	docs, _, err := repo.List(context.Background(), "org-1", FilterParams{}, api.PaginationParams{Limit: 10})
+	if err != nil || len(docs) != 2 {
+		t.Fatalf("seeded documents: %d, %v", len(docs), err)
+	}
+	doc, other := docs[0], docs[1]
+	created := time.Date(2026, 7, 8, 13, 0, 0, 0, time.UTC)
+	for i, entityID := range []string{"ci-1", "ci-2", "ci-3"} {
+		if err := repo.LinkDocument(context.Background(), &DocumentLink{OrganizationID: "org-1", DocumentID: doc.ID, EntityType: "ci", EntityID: entityID}); err != nil {
+			t.Fatal(err)
+		}
+		// Two links share an instant: id breaks the tie.
+		repo.links[fmt.Sprintf("link-%d", i+1)].CreatedAt = created.Add(time.Duration(min(i, 1)) * time.Second)
+	}
+	if err := repo.LinkDocument(context.Background(), &DocumentLink{OrganizationID: "org-1", DocumentID: other.ID, EntityType: "ci", EntityID: "ci-9"}); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := chi.NewRouter()
+	NewHandler(repo, nil).RegisterRoutes(mux)
+	get := func(url string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", url, nil)
+		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+
+	path := "/api/v1/documents/" + doc.ID + "/links"
+	var entities []string
+	for next, pages := path+"?limit=1", 0; next != ""; pages++ {
+		if pages > 5 {
+			t.Fatal("cursor pagination did not terminate")
+		}
+		w := get(next)
+		var page api.ListResponse[DocumentLink]
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &page) != nil || len(page.Data) != 1 || page.Total != 3 {
+			t.Fatalf("GET %s: %d %s; want {data: [one link], total: 3, next_cursor}", next, w.Code, w.Body.String())
+		}
+		entities = append(entities, page.Data[0].EntityID)
+		next = ""
+		if page.NextCursor != "" {
+			next = path + "?limit=1&cursor=" + page.NextCursor
+		}
+	}
+	if fmt.Sprint(entities) != "[ci-3 ci-2 ci-1]" {
+		t.Errorf("links over the pages: %v; want [ci-3 ci-2 ci-1] (newest first, then id)", entities)
+	}
+
+	if w := get(path + "?cursor=eyJvIjoxfQ.AAAAAAAAAAAAAAAAAAAAAA"); w.Code != http.StatusBadRequest {
+		t.Errorf("forged cursor: %d %s, want 400", w.Code, w.Body.String())
+	}
+	if w := get("/api/v1/documents/" + other.ID + "/links"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"ci-9"`) || strings.Contains(w.Body.String(), `"ci-1"`) {
+		t.Errorf("links of the other document: %d %s", w.Code, w.Body.String())
 	}
 }

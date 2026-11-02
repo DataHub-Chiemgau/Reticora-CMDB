@@ -4,25 +4,20 @@ name: Install Smoke Test
 # environment and that every container becomes healthy. This prevents
 # regressions like the ones fixed in PR #11–#29 (install failures, unhealthy
 # containers, broken Keycloak realm import, TLS issues).
+#
+# The installers install the signed release artifacts by default (E-69,
+# Option 1). The state under test here is not published, so every job builds
+# it with --build-from-source — except release-mode: on a tag v* it installs
+# the default path against the artifacts release.yml publishes for the tag
+# (WP-388, TEC-15).
 
 on:
+  # WP-595 (F-122): every push to main runs the full workflow without a path
+  # filter, so the installation evidence always covers the current state of
+  # main; release tags (the release candidate v1.0.0-rc.<n>) run it as well.
   push:
     branches: [main]
-    # Release tags run the full matrix regardless of the changed paths
-    # (GitHub does not apply path filters to tag pushes).
     tags: ['v*']
-    paths:
-      - 'install*.sh'
-      - 'deploy/docker-compose/**'
-      - 'deploy/keycloak/**'
-      - 'backend/Dockerfile'
-      - 'frontend/Dockerfile'
-      - 'tests/install-*.sh'
-      - 'tests/backup-*.sh'
-      - 'tests/nats-mtls.test.sh'
-      - 'frontend/e2e/onboarding.spec.ts'
-      - 'frontend/e2e/fixtures/**'
-      - '.github/workflows/install-smoke.yml'
   pull_request:
     branches: [main]
     paths:
@@ -31,12 +26,41 @@ on:
       - 'deploy/keycloak/**'
       - 'backend/Dockerfile'
       - 'frontend/Dockerfile'
+      # WP-440: entrypoint hooks (TLS, certificate reload) and nginx
+      # configuration baked into the frontend image.
+      - 'frontend/docker-entrypoint.d/**'
+      - 'frontend/nginx.conf'
+      - 'frontend/keycloak-proxy.conf'
       - 'tests/install-*.sh'
+      # WP-420: Pebble and challtestsrv of tests/install-acme-pebble.test.sh.
+      - 'tests/fixtures/pebble/**'
       - 'tests/backup-*.sh'
       - 'tests/nats-mtls.test.sh'
+      - 'tests/keycloak-realm-upgrade.test.sh'
+      - 'tests/keycloak/**'
       - 'frontend/e2e/onboarding.spec.ts'
       - 'frontend/e2e/fixtures/**'
       - '.github/workflows/install-smoke.yml'
+      # WP-338: the real-stack suite runs against the installation, so every
+      # change it can observe starts the workflow.
+      - 'backend/**'
+      - 'frontend/src/**'
+      - 'frontend/e2e-real/**'
+      # WP-646: shell harness of the TLS origin of the WebKit projects.
+      - 'tests/e2e-real-tls-origin.test.sh'
+      # WP-532: playwright.real.config.ts takes its browser projects from here.
+      - 'frontend/playwright.config.ts'
+      - 'frontend/e2e/support/**'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'deploy/**'
+      - 'collector/**'
+      - 'edgecore/**'
+      - 'tests/audit/**'
+      # WP-546: the collector self-update with two builds (COL-06).
+      - 'tests/collector-selfupdate.test.sh'
+      # WP-387: the installers verify what the release workflow publishes.
+      - '.github/workflows/release.yml'
   # Manual runs (e.g. the G1 evidence for GATE-03) are not path filtered.
   workflow_dispatch:
 
@@ -47,13 +71,59 @@ jobs:
   # Unit tests of the installer helpers and the health check, no Docker needed.
   installer-script-tests:
     runs-on: ubuntu-latest
+    env:
+      # cosign of the installers' signature checks (E-31, release.yml);
+      # checksum from its cosign_checksums.txt.
+      COSIGN_VERSION: v2.4.1
+      COSIGN_SHA256: 8b24b946dd5809c6bd93de08033bcf6bc0ed7d336b7785787c080f574b89249b
     steps:
       - uses: actions/checkout@v4
 
       - name: install-cloud.sh helpers
         run: ./tests/install-cloud-helpers.test.sh
 
-      - name: install-smoke-health.sh
+      # SIM-01 (WP-433, F-113): the development realm holds the administrators
+      # of the seeded organizations demo and acme (organization ids of
+      # backend/cmd/seed, org_admin); their passwords exist only there.
+      - name: Demo administrators of the seed in the development realm (SIM-01)
+        run: ./tests/audit/demo-realm-users.test.sh
+
+      # TEC-15/COL-06 (WP-387, F-131): signature verification before the
+      # installation — release mode of install-cloud.sh, the collector release
+      # and the Go toolchain of install-vm.sh, the source of a release tag in
+      # install.sh and install-vm.sh, against the files release.yml publishes.
+      # The real cosign checks the pinned checksum and the command lines.
+      - name: Install cosign and PyYAML for the signature checks
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
+          curl -fsSL -o "$RUNNER_TEMP/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/cosign" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/cosign"
+          echo "RETICORA_TEST_COSIGN=$RUNNER_TEMP/cosign" >> "$GITHUB_ENV"
+
+      - name: Signature verification before the installation (cosign, SHA256SUMS, go.dev)
+        run: ./tests/install-signature.test.sh
+
+      # INS-02 (WP-385, F-035): strict issuer checks only after the server
+      # and the frontend (/realms/ proxy of a domain issuer) are up.
+      - name: install-cloud.sh issuer checks after the frontend start
+        run: ./tests/install-cloud-issuer-order.test.sh
+
+      # INS-03/TEC-09 (WP-419, F-033/F-034): Let's Encrypt issuance without a
+      # second lineage, key and chain readable for nginx (uid 101) through
+      # certbot's deploy hook, nginx -t before the success message. As root
+      # like certbot and its deploy hook in the certbot container.
+      - name: install-cloud.sh Let's Encrypt issuance (placeholder, deploy hook)
+        run: sudo ./tests/install-cloud-acme.test.sh
+
+      # WP-440 (F-288): besides the stubs, a real compose project (redis:7-alpine)
+      # with a scaled service and a one-off container; fails without Docker.
+      - name: TLS origin of the WebKit real-stack projects (setup-tls-origin.sh, stubs, WP-646)
+        run: ./tests/e2e-real-tls-origin.test.sh
+
+      - name: install-smoke-health.sh (stubs, scaled service and one-off container)
         run: ./tests/install-smoke-health.test.sh
 
       - name: install-preflight.sh (platform, Docker, Compose, sizing)
@@ -65,6 +135,46 @@ jobs:
       - name: Collector NATS endpoint accepts only collector certificates (COL-08)
         run: ./tests/nats-mtls.test.sh
 
+      # COL-08/PRI-07 (WP-431, F-103): docker compose config of the .env that
+      # install-cloud.sh writes. With a TLS domain only 80/443/4222 on all
+      # interfaces, REST API (8080) and Keycloak (8180) on 127.0.0.1; an IP
+      # installation publishes them only through the installer's opt-in
+      # RETICORA_PUBLISH_DIRECT_PORTS=true, with a warning.
+      - name: Compose port policy (COL-08)
+        run: ./tests/audit/compose-port-policy.test.sh
+
+      # INS-06 (WP-432, F-110): install-vm.sh and the image put the command of
+      # the UI's enroll instruction (reticora-collector) on PATH, and the
+      # service reads the identity where it stores it.
+      - name: Installed collector matches the enroll command of the UI (INS-06)
+        run: ./tests/audit/collector-install-cli.test.sh
+
+      # COL-06 (WP-432, F-260): with RETICORA_UPDATE_URL install-vm.sh installs
+      # the pinned cosign of the updater (with the real cosign of the step
+      # above: RETICORA_TEST_COSIGN), without it nothing.
+      - name: install-vm.sh cosign for the signed auto-updates (COL-06)
+        run: ./tests/install-vm-cosign.test.sh
+
+      # INS-06, COL-08: install-vm.sh enrolls with the one-time code (passed in
+      # the environment, never in argv), mounts a private CA in Docker mode,
+      # gives the spool to the image user and probes the NATS endpoint 4222/TCP.
+      - name: install-vm.sh enrollment, NATS endpoint probe and spool owner (INS-06, COL-08)
+        run: ./tests/install-vm-enroll.test.sh
+
+      # COL-06 (WP-546, open evidence of WP-148): the self-update of the
+      # running collector with two builds (v0.0.1, v0.0.2), manifests and
+      # artifacts on a local HTTP server and a cosign stub that accepts only
+      # the fixture bundle: update and new version reported, wrong or missing
+      # signature, beta release on the channel stable, rollback after failed
+      # starts. The real cosign check runs in the ci.yml job cosign-verify.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - name: Collector self-update with two versions (COL-06)
+        run: ./tests/collector-selfupdate.test.sh
+
   # INS-01/TEC-09/GATE-03 (WP-092): the cloud installer on every platform of
   # CH22. Ubuntu runs natively on the GitHub runners; Debian 12 runs the
   # installer in a debian:12 container that drives the runner's Docker daemon
@@ -73,7 +183,9 @@ jobs:
   install-cloud-smoke:
     needs: installer-script-tests
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # The real-stack suite runs in the job e2e-real, one job per browser
+    # project (WP-532).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -91,9 +203,11 @@ jobs:
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
+      # The checked-out state is not published: local build, not
+      # signature-verified (E-69; the default path runs in release-mode).
       - name: Run the cloud installer non-interactively (${{ matrix.platform }})
         if: matrix.container == ''
-        run: ./install.sh --cloud --non-interactive
+        run: ./install.sh --cloud --non-interactive --build-from-source
         env:
           RETICORA_SOURCE_DIR: ${{ github.workspace }}
 
@@ -112,25 +226,142 @@ jobs:
             -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
             -e RETICORA_SOURCE_DIR="$GITHUB_WORKSPACE" \
             "${{ matrix.container }}" \
-            bash -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates git jq openssl >/dev/null && ./install.sh --cloud --non-interactive'
+            bash -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates git jq openssl >/dev/null && ./install.sh --cloud --non-interactive --build-from-source'
           # The installer ran as root in the container; hand the generated
           # .env back to the runner user for the checks below. The session key
           # keeps the ownership the installer chose for the server container.
           sudo chown "$(id -u):$(id -g)" deploy/docker-compose/.env
 
       # Strict: compose/JSON errors, missing or exited containers and every
-      # health state other than "healthy" fail the job.
-      - name: Verify all expected services are running and healthy
+      # health state other than "healthy" fail the job. WP-348 (TEN-03): the
+      # script also asserts via psql (pg_stat_activity, application_name
+      # reticora-server) that the server logs in only as reticora_runtime with
+      # rolsuper = false and rolbypassrls = false.
+      - name: Verify all expected services are running and healthy, server without superuser login
         run: |
           sleep 5
           ./tests/install-smoke-health.sh deploy/docker-compose .env
 
-      # WP-100 (OPS-04): WAL archiving works and a base backup exists.
+      # NFR-06 (WP-458, E-77): the installer chose the log retention of the
+      # platform — on the runners (systemd) journald with the 30-day drop-in,
+      # in the debian:12 container (no systemd) the json-file rotation through
+      # COMPOSE_FILE — and docker compose logs reads the server's log with it.
+      - name: Container logs bounded and readable with docker compose logs (NFR-06)
+        env:
+          PLATFORM_CONTAINER: ${{ matrix.container }}
+        run: |
+          set -euo pipefail
+          cd deploy/docker-compose
+          if [ -z "$PLATFORM_CONTAINER" ]; then
+            want=journald
+            grep -qx 'MaxRetentionSec=30day' /etc/systemd/journald.conf.d/reticora.conf \
+              || { echo "FAIL: no journald drop-in with MaxRetentionSec=30day"; exit 1; }
+            if grep -q '^COMPOSE_FILE=' .env; then echo "FAIL: .env selects $(grep '^COMPOSE_FILE=' .env)"; exit 1; fi
+          else
+            want=json-file
+            grep -qE '^COMPOSE_FILE=.*docker-compose\.logging-json\.yml$' .env \
+              || { echo "FAIL: .env does not select docker-compose.logging-json.yml"; exit 1; }
+          fi
+          driver="$(docker inspect --format '{{.HostConfig.LogConfig.Type}}' "$(docker compose --env-file .env ps -q server)")"
+          [ "$driver" = "$want" ] || { echo "FAIL: the server logs with $driver, expected $want"; exit 1; }
+          lines="$(docker compose --env-file .env logs --no-color --tail 20 server | wc -l)"
+          [ "$lines" -gt 0 ] || { echo "FAIL: docker compose logs server read nothing ($driver)"; exit 1; }
+          echo "OK: the server logs with $driver; docker compose logs read $lines lines"
+
+      # WP-100 (OPS-04, NFR-05), executed evidence of WP-544: the scheduler
+      # backs up only at RETICORA_BACKUP_HOUR, so the step triggers a full
+      # backup itself (retried while the scheduler's first backup holds the
+      # stanza lock). Then a WAL switch must reach the repository
+      # (pg_stat_archiver.archived_count rises within 120 s), 'pgbackrest
+      # info' must list one full backup more than before, health and
+      # verify-repo must pass, and the repository must not open with a wrong
+      # cipher passphrase. The
+      # pgBackRest commands run through reticora-pgbackrest-env.sh, which
+      # derives PGBACKREST_REPO1_CIPHER_PASS from RETICORA_BACKUP_CIPHER_PASS
+      # like the entrypoints of the postgres and backup containers.
       - name: Verify the backup chain
         run: |
+          set -euo pipefail
           cd deploy/docker-compose
-          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh pgbackrest --stanza=reticora check
-          docker compose --env-file .env exec -T backup reticora-pgbackrest-env.sh reticora-backup.sh health
+          dc() { docker compose --env-file .env "$@"; }
+          backrest() { dc exec -T backup reticora-pgbackrest-env.sh "$@"; }
+          sql() { dc exec -T postgres psql -U reticora -d reticora -XAtv ON_ERROR_STOP=1 -c "$1"; }
+          full_backups() {
+            backrest pgbackrest --stanza=reticora --output=json info \
+              | jq '[.[] | select(.name == "reticora") | .backup[]? | select(.type == "full")] | length'
+          }
+
+          # The scheduler may already have taken its first backup; the
+          # triggered one must add a full backup of its own.
+          before_fulls="$(full_backups)"
+          for attempt in $(seq 1 30); do
+            if out="$(backrest pgbackrest --stanza=reticora --type=full backup 2>&1)"; then
+              printf '%s\n' "$out" | tail -n 3
+              break
+            fi
+            printf '%s\n' "$out" | tail -n 5
+            if ! grep -qE 'LockAcquireError|unable to acquire lock' <<<"$out" || [ "$attempt" -eq 30 ]; then
+              echo "FAIL: the triggered full backup failed (attempt $attempt)"; exit 1
+            fi
+            echo "the stanza is locked by a running backup, retrying in 10 s"; sleep 10
+          done
+
+          backrest pgbackrest --stanza=reticora check
+
+          before="$(sql 'SELECT archived_count FROM pg_stat_archiver')"
+          # A committed transaction id puts a record into the current segment,
+          # so pg_switch_wal() closes a segment that has to be archived.
+          sql 'SELECT txid_current()' >/dev/null
+          segment="$(sql 'SELECT pg_walfile_name(pg_switch_wal())')"
+          deadline=$((SECONDS + 120))
+          until after="$(sql 'SELECT archived_count FROM pg_stat_archiver')"; [ "$after" -gt "$before" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "FAIL: archived_count stayed at $after (before $before) for 120 s after the switch of $segment"
+              sql 'SELECT * FROM pg_stat_archiver'; exit 1
+            fi
+            sleep 2
+          done
+          echo "OK: archived_count $before -> $after after the switch of $segment"
+
+          fulls="$(full_backups)"
+          if [ "$fulls" -lt 1 ] || [ "$fulls" -le "$before_fulls" ]; then
+            echo "FAIL: pgbackrest info lists $fulls full backup(s), $before_fulls before the triggered backup"
+            backrest pgbackrest --stanza=reticora info; exit 1
+          fi
+          echo "OK: pgbackrest info lists $fulls full backup(s), $before_fulls before the triggered backup"
+
+          backrest reticora-backup.sh health
+          backrest reticora-backup.sh verify-repo
+
+          # Negative case: the repository is encrypted; with a wrong
+          # passphrase pgBackRest cannot read it (exec bypasses the entrypoint,
+          # so the variable is set directly). 'pgbackrest info' exits 0 even
+          # for a repository it cannot read and reports the error in the
+          # status of the stanza and the repository instead (code 99, the
+          # backup.info does not decrypt), so the step derives the result
+          # from rc and status: unreadable means rc != 0, or a status code
+          # != 0 for both with no backup listed. The JSON can carry the
+          # undecrypted bytes, hence the non-strict parser.
+          set +e
+          wrong="$(dc exec -T -e PGBACKREST_REPO1_CIPHER_PASS=wp544-wrong-passphrase backup pgbackrest --stanza=reticora --output=json info 2>&1)"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            status="$(python3 -c '
+          import json, sys
+          s = [x for x in json.loads(sys.stdin.read(), strict=False) if x.get("name") == "reticora"][0]
+          repo = [r["status"]["code"] for r in s.get("repo", [])]
+          print(s["status"]["code"], min(repo) if repo else 0, len(s.get("backup", [])))' <<<"$wrong")" \
+              || { echo "FAIL: pgbackrest info with a wrong cipher passphrase printed no stanza status"; exit 1; }
+            read -r stanza_code repo_code backups <<<"$status"
+            if [ "$stanza_code" -eq 0 ] || [ "$repo_code" -eq 0 ] || [ "$backups" -ne 0 ]; then
+              echo "FAIL: pgbackrest info read the repository with a wrong cipher passphrase (rc 0, stanza status $stanza_code, repository status $repo_code, $backups backups)"
+              exit 1
+            fi
+            echo "OK: with a wrong cipher passphrase the repository is unreadable (rc 0, stanza status $stanza_code, repository status $repo_code, no backup listed)"
+          else
+            echo "OK: pgbackrest info with a wrong cipher passphrase returned rc $rc"
+          fi
 
       - name: Verify backend health endpoint
         run: |
@@ -169,7 +400,7 @@ jobs:
       - uses: actions/setup-go@v5
         if: matrix.platform == 'ubuntu-24.04'
         with:
-          go-version: "1.26.9"
+          go-version: "1.26.10"
           cache-dependency-path: collector/go.sum
 
       - uses: actions/setup-node@v4
@@ -183,21 +414,117 @@ jobs:
         if: matrix.platform == 'ubuntu-24.04'
         run: ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
 
+      # The onboarding suite downloads its export over the signed download_url
+      # of the job (WP-468, F-077). Since WP-647 (F-376) it names the public
+      # origin (<base URL>/objects/…, forwarded read-only to the object store
+      # by the frontend nginx); the former /etc/hosts entry for minio is gone.
+
+      # WP-529: the report of the onboarding suite (JSON report, traces and
+      # screenshots in its own directory) is uploaded after every run, green
+      # or red; the suite keeps retries: 0 (playwright.install.config.ts).
       - name: Run the onboarding E2E suite
         if: matrix.platform == 'ubuntu-24.04'
         working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/onboarding-e2e/report.json
         run: |
           npm ci
           npx playwright install --with-deps chromium
-          npx playwright test -c e2e/fixtures/playwright.install.config.ts
+          grep -qE '^\s*retries: 0,' e2e/fixtures/playwright.install.config.ts \
+            || { echo "FAIL: the onboarding suite must run with retries: 0"; exit 1; }
+          npx playwright test -c e2e/fixtures/playwright.install.config.ts \
+            --reporter=github,list,json --output "$RUNNER_TEMP/onboarding-e2e/test-results"
 
       - name: Upload the onboarding report
-        if: failure() && matrix.platform == 'ubuntu-24.04'
+        if: always() && matrix.platform == 'ubuntu-24.04'
         uses: actions/upload-artifact@v4
         with:
           name: onboarding-e2e
-          path: frontend/test-results/
-          retention-days: 7
+          path: ${{ runner.temp }}/onboarding-e2e/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # INS-06 (WP-432, retest F-110): the enroll command of the UI on a
+      # collector installed by install-vm.sh. Its functions (systemd mode, the
+      # collector build of setup-onboarding.sh as prebuilt binary, systemctl
+      # stubbed: no systemd in the container) install the collector in a
+      # debian:12 container on the runner's network; there
+      # 'reticora-collector enroll --server <frontend origin> --code <code>'
+      # runs over PATH against this installation: exit 0, the identity at the
+      # default path, collector.env names the same path, the collector is
+      # registered with its certificate, and the binary started like the unit
+      # (ExecStart, EnvironmentFile, systemd's default PATH) authenticates
+      # with that identity (mTLS). The code is stored like
+      # POST /collectors/enrollment-codes stores it (SHA-256), for the
+      # organization of the onboarding suite: the API needs a browser session.
+      - name: Collector installed by install-vm.sh enrolls with the command of the UI (INS-06)
+        if: matrix.platform == 'ubuntu-24.04'
+        run: |
+          set -euo pipefail
+          value() { sed -n "s/^$1=//p" deploy/docker-compose/.env | tail -n 1; }
+          psql_stack() {
+            (cd deploy/docker-compose && docker compose --env-file .env exec -T postgres \
+              psql -U reticora -d reticora -X -qtA -v ON_ERROR_STOP=1 -c "$1")
+          }
+          frontend_port="$(value RETICORA_FRONTEND_PORT)"
+          code="$(openssl rand -hex 24)"
+          # binding_recorded: an unbound code as an org-wide creator mints it;
+          # codes without a recorded binding are not redeemed (000187, F-406).
+          org="$(psql_stack "INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at, binding_recorded)
+            SELECT id, encode(sha256(convert_to('$code', 'UTF8')), 'hex'), 'install-smoke INS-06', now() + interval '30 minutes', true
+            FROM organization WHERE name LIKE 'Muster E2E %' ORDER BY created_at DESC LIMIT 1 RETURNING organization_id")"
+          [ -n "$org" ] || { echo "FAIL: no organization of the onboarding suite"; exit 1; }
+          out="$RUNNER_TEMP/collector-install"
+          mkdir -p "$out"
+          cat > "$out/install-collector.sh" <<'SCRIPT'
+          set -euo pipefail
+          printf '#!/bin/sh\nexit 0\n' > /usr/local/sbin/systemctl
+          chmod +x /usr/local/sbin/systemctl
+          mkdir -p /etc/systemd/system /collector-build/bin /opt/reticora-collector
+          cp /mnt/reticora-collector /collector-build/bin/collector
+          sed -e '/^main "\$@"$/d' /src/install-vm.sh > /tmp/install-vm-lib.sh  # without main, sourced with --build-from-source
+          cp /src/install-preflight.sh /tmp/install-preflight.sh
+          # The answer to the cloud URL question: this installation.
+          printf 'RETICORA_SERVER_URL=%s\n' "$SERVER" > /opt/reticora-collector/collector.env
+          (
+            . /tmp/install-vm-lib.sh --non-interactive --build-from-source
+            SOURCE_DIR=/collector-build    # bin/collector: the prebuilt binary
+            collect_config
+            write_env
+            provide_collector_systemd
+            install_systemd_unit
+          )
+          cd /tmp
+          echo "== reticora-collector on PATH: $(command -v reticora-collector) -> $(readlink -f "$(command -v reticora-collector)")"
+          reticora-collector enroll --server "$SERVER" --code "$CODE" | tee /out/enroll.log
+          creds=/var/lib/reticora-collector/credentials.json
+          env_file=/opt/reticora-collector/collector.env
+          unit=/etc/systemd/system/reticora-collector.service
+          [ -s "$creds" ] || { echo "FAIL: no identity at $creds"; exit 1; }
+          grep -qx "RETICORA_CREDENTIALS_PATH=$creds" "$env_file" \
+            || { echo "FAIL: collector.env names another identity path: $(grep CREDENTIALS "$env_file")"; exit 1; }
+          grep -qx "EnvironmentFile=$env_file" "$unit" || { echo "FAIL: the unit does not read $env_file"; exit 1; }
+          exec_start="$(sed -n 's/^ExecStart=//p' "$unit")"
+          [ "$exec_start" = "$(command -v reticora-collector)" ] || { echo "FAIL: the unit starts $exec_start"; exit 1; }
+          # The service as systemd starts it.
+          mapfile -t service_env < <(grep -E '^[A-Z_]+=' "$env_file")
+          env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "${service_env[@]}" \
+            timeout 10 "$exec_start" > /out/service.log 2>&1 || true
+          if ! grep '"msg":"collector configured"' /out/service.log | grep -q '"mtls":true'; then
+            echo "FAIL: the service did not authenticate with the identity at $creds"
+            tail -n 20 /out/service.log
+            exit 1
+          fi
+          echo "OK: identity at $creds, read by the service (mTLS)"
+          SCRIPT
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE:/src:ro" -v "$E2E_COLLECTOR_BIN:/mnt/reticora-collector:ro" -v "$out:/out" \
+            -e SERVER="http://localhost:${frontend_port:-3000}" -e CODE="$code" \
+            debian:12 bash /out/install-collector.sh
+          id="$(sed -nE 's/^Collector ".*" enrolled as ([0-9a-f-]{36})\.$/\1/p' "$out/enroll.log")"
+          [ "$(psql_stack "SELECT count(*) FROM collector WHERE id = '$id' AND organization_id = '$org' AND cert_fingerprint IS NOT NULL")" = 1 ] \
+            || { echo "FAIL: collector $id is not registered with a certificate in organization $org"; exit 1; }
+          echo "OK: collector $id enrolled with the command of the UI over PATH"
 
       - name: Show logs on failure
         if: failure()
@@ -213,6 +540,672 @@ jobs:
           docker compose --env-file .env logs --tail 80 frontend || true
           echo "=== mailpit logs ==="
           docker ps -aq --filter name=mailpit | xargs -r docker logs --tail 40 || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env down -v --remove-orphans || true
+
+  # TST-03, TST-04 (WP-338, WP-532): the real-stack suite frontend/e2e-real/
+  # on the reference platform (ubuntu-24.04) in all six Playwright projects of
+  # playwright.real.config.ts, which takes them from frontend/playwright.config.ts
+  # (chromium, edge, firefox, webkit, mobile-chrome, mobile-safari). Every
+  # project runs in its own job with its own installation: the suite takes
+  # about 20 minutes per project (D08 of discovery-override.spec.ts watches a
+  # disabled, still running collector over two discovery cycles of 5 minutes,
+  # WP-381). Each job compares the results of its project with the e2e-real
+  # lines of tests/audit/expected-failures.txt for that project
+  # (<project>:<spec file>): a listed test that turned green, an unlisted red
+  # test, a skipped or missing test fail the job. The job e2e-real-ratchet
+  # compares the results of all projects together.
+  # WP-646 (F-375): WebKit does not store the Secure refresh cookie over
+  # http://localhost. The projects webkit and mobile-safari (origin: tls) run
+  # against an installation on the TLS origin https://<sslip.io name of the
+  # runner> with the certificate of Pebble (setup-tls-origin.sh, the Pebble
+  # helpers of tests/install-acme-pebble.test.sh as in tls-domain-pebble);
+  # the Pebble root is in the system trust store of the runner, which the
+  # WebKit build of Playwright reads, and in NODE_EXTRA_CA_CERTS; certificate
+  # errors are not ignored. Before the suite the job checks that BASE_URL is
+  # https:// without localhost and that the sign-in in the project sets the
+  # cookie reticora_refresh. The other projects (origin: loopback) keep the
+  # loopback installation http://localhost:3000 (INS-04 @plain-http
+  # unchanged).
+  e2e-real:
+    needs: installer-script-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browser: chromium
+            origin: loopback
+          - project: edge
+            browser: msedge
+            origin: loopback
+          - project: firefox
+            browser: firefox
+            origin: loopback
+          - project: webkit
+            browser: webkit
+            origin: tls
+          - project: mobile-chrome
+            browser: chromium
+            origin: loopback
+          - project: mobile-safari
+            browser: webkit
+            origin: tls
+    env:
+      PROJECT: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make installer scripts executable
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh frontend/e2e-real/fixtures/*.sh
+
+      # The checked-out state is not published: local build, not
+      # signature-verified (E-69; the default path runs in release-mode).
+      - name: Run the cloud installer non-interactively (ubuntu-24.04)
+        if: matrix.origin == 'loopback'
+        run: ./install.sh --cloud --non-interactive --build-from-source
+        env:
+          RETICORA_SOURCE_DIR: ${{ github.workspace }}
+
+      - name: Install on the TLS origin with the Pebble certificate, test CA in the trust store (WP-646)
+        if: matrix.origin == 'tls'
+        run: ./frontend/e2e-real/fixtures/setup-tls-origin.sh "$RUNNER_TEMP/tls-origin"
+
+      - name: Verify all expected services are running and healthy
+        run: |
+          sleep 5
+          ./tests/install-smoke-health.sh deploy/docker-compose .env
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # Self-signup, mail catcher and collector as for the onboarding suite of
+      # install-cloud-smoke; the real-stack suite creates its own tenants.
+      - name: Prepare the onboarding fixtures (signup configuration, mail catcher, collector)
+        run: ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
+
+      - name: Prepare the real-stack suite (X-Real-IP passthrough, database, Keycloak admin)
+        run: |
+          command -v psql >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+          ./frontend/e2e-real/fixtures/setup-real-stack.sh deploy/docker-compose .env
+
+      - name: Install the frontend dependencies and the browser of ${{ matrix.project }}
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps ${{ matrix.browser }}
+
+      # WP-646: stops the job before the suite unless the WebKit project runs
+      # over the TLS origin and keeps the refresh cookie there.
+      - name: TLS origin of ${{ matrix.project }} (BASE_URL https:// without localhost, refresh cookie after the sign-in)
+        if: matrix.origin == 'tls'
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          ./e2e-real/fixtures/setup-tls-origin.sh --check-base-url "$BASE_URL"
+          ./e2e-real/fixtures/setup-tls-origin.sh --check-base-url "${E2E_ISSUER_URL%%/realms/*}"
+          if ! npx playwright test -c e2e-real/fixtures/playwright.tls-origin.config.ts --project="$PROJECT" --reporter=list \
+              --output "$RUNNER_TEMP/e2e-real/tls-origin-test-results"; then
+            echo "FAIL: the sign-in in $PROJECT over $BASE_URL does not set the refresh cookie reticora_refresh (F-375); the suite does not run"
+            exit 1
+          fi
+
+      # G1 default (RETICORA_MODULES unset): playwright.real.config.ts leaves
+      # the specs of late modules out (WP-541).
+      - name: Run the real-stack E2E suite (${{ matrix.project }}) against the expected-failure list
+        id: e2e-real-g1
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real/e2e-real.json
+        run: |
+          mkdir -p "$RUNNER_TEMP/e2e-real"
+          npx playwright test -c e2e-real/playwright.real.config.ts --project="$PROJECT" --reporter=list,json \
+            --output "$RUNNER_TEMP/e2e-real/test-results" || true
+          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real/e2e-real.json" --results "$RUNNER_TEMP/e2e-real/e2e-real-results.txt"
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --projects "$PROJECT" --results "$RUNNER_TEMP/e2e-real/e2e-real-results.txt"
+
+      # WP-541 (MGT-04, NTF-05, NFR-04): module run. The maintenance module is
+      # off in the G1 default (E-03); the server of the same installation is
+      # restarted with RETICORA_MODULES=maintenance (an overlay on top of the
+      # files setup-real-stack.sh applies, with the signup secrets of the
+      # running server) and the frontend recreated after it, as
+      # setup-real-stack.sh does. It runs whenever the G1 run ran, green or red.
+      - name: Restart the server with RETICORA_MODULES=maintenance (module run)
+        if: ${{ !cancelled() && steps.e2e-real-g1.outcome != 'skipped' }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_WORKSPACE"
+          cd deploy/docker-compose
+          value() { sed -n "s/^$1=//p" .env | tail -n 1 | tr -d "\"'"; }
+          overlay="$RUNNER_TEMP/docker-compose.e2e-real-maintenance.yml"
+          printf 'services:\n  server:\n    environment:\n      RETICORA_MODULES: maintenance\n' >"$overlay"
+          files=(-f docker-compose.yml)
+          [ -f docker-compose.override.yml ] && files+=(-f docker-compose.override.yml)
+          files+=(-f "$repo/frontend/e2e/fixtures/docker-compose.e2e.yml" -f "$repo/frontend/e2e-real/fixtures/docker-compose.e2e-real.yml")
+          # WP-646: the TLS template with the X-Real-IP passthrough of setup-real-stack.sh.
+          E2E_NGINX_TLS_TEMPLATE="$RUNNER_TEMP/nginx-e2e-real-tls.conf.template"
+          if [ -n "$(value RETICORA_TLS_DOMAIN)" ]; then
+            [ -f "$E2E_NGINX_TLS_TEMPLATE" ] || { echo "FAIL: the real-stack setup ($E2E_NGINX_TLS_TEMPLATE) is missing"; exit 1; }
+            files+=(-f "$repo/frontend/e2e-real/fixtures/docker-compose.e2e-real-tls.yml")
+          fi
+          files+=(-f "$overlay")
+          server_id="$(docker compose --env-file .env ps -q server)"
+          container_env() { docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$server_id" | sed -n "s/^$1=//p"; }
+          E2E_CAPTCHA_KEY="$(container_env RETICORA_SIGNUP_CAPTCHA_KEY)"
+          E2E_KC_CLIENT_ID="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_ID)"
+          E2E_KC_CLIENT_SECRET="$(container_env RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET)"
+          E2E_BASE_URL="$(container_env RETICORA_SIGNUP_VERIFY_URL)"; E2E_BASE_URL="${E2E_BASE_URL%/onboarding}"
+          E2E_NGINX_CONF="$RUNNER_TEMP/nginx-e2e-real.conf"
+          if [ -z "$E2E_CAPTCHA_KEY" ] || [ -z "$E2E_KC_CLIENT_SECRET" ] || [ ! -f "$E2E_NGINX_CONF" ] || [ "$E2E_BASE_URL" != "$BASE_URL" ]; then
+            echo "FAIL: the real-stack setup (signup secrets, $E2E_NGINX_CONF, links to '$E2E_BASE_URL' for $BASE_URL) is missing"; exit 1
+          fi
+          export E2E_CAPTCHA_KEY E2E_KC_CLIENT_ID E2E_KC_CLIENT_SECRET E2E_NGINX_CONF E2E_NGINX_TLS_TEMPLATE E2E_BASE_URL
+          docker compose --env-file .env "${files[@]}" up -d server
+          server_port="$(value RETICORA_SERVER_PORT)"; server_port="${server_port:-8080}"
+          for _ in $(seq 1 60); do
+            curl -fsS "http://localhost:${server_port}/api/v1/signup/challenge" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker compose --env-file .env "${files[@]}" up -d --force-recreate frontend
+          for _ in $(seq 1 60); do
+            curl -fsS "$BASE_URL/api/v1/auth/config" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS "$BASE_URL/api/v1/auth/config" >/dev/null \
+            || { echo "FAIL: the frontend at $BASE_URL does not reach the restarted server"; exit 1; }
+          modules="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$(docker compose --env-file .env ps -q server)" | sed -n 's/^RETICORA_MODULES=//p')"
+          [ "$modules" = maintenance ] || { echo "FAIL: the server runs with RETICORA_MODULES='$modules'"; exit 1; }
+          echo "OK: server restarted with RETICORA_MODULES=$modules"
+
+      # Only the specs of the module (E2E_MODULE_RUN, playwright.real.config.ts)
+      # in the project of this job; the ratchet compares the results of both
+      # runs together with the e2e-real lines of that project.
+      - name: Run the real-stack module run (maintenance, ${{ matrix.project }}) against the expected-failure list
+        if: ${{ !cancelled() && steps.e2e-real-g1.outcome != 'skipped' }}
+        working-directory: frontend
+        env:
+          E2E_MODULE_RUN: maintenance
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-real/e2e-real-maintenance.json
+        run: |
+          set -euo pipefail
+          npx playwright test -c e2e-real/playwright.real.config.ts --project="$PROJECT" --reporter=list,json \
+            --output "$RUNNER_TEMP/e2e-real/maintenance-test-results" || true
+          res="$RUNNER_TEMP/e2e-real/e2e-real-maintenance-results.txt"
+          ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real/e2e-real-maintenance.json" --results "$res"
+          grep -q ";$PROJECT:frontend/e2e-real/maintenance.spec.ts;" "$res" \
+            || { echo "FAIL: the module run executed no test of maintenance.spec.ts in $PROJECT"; exit 1; }
+          if grep -v ";$PROJECT:frontend/e2e-real/maintenance.spec.ts;" "$res"; then
+            echo "FAIL: the module run executed other specs than maintenance.spec.ts or another project than $PROJECT"; exit 1
+          fi
+          cat "$RUNNER_TEMP/e2e-real/e2e-real-results.txt" "$res" >"$RUNNER_TEMP/e2e-real/e2e-real-all-results.txt"
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --projects "$PROJECT" --results "$RUNNER_TEMP/e2e-real/e2e-real-all-results.txt"
+
+      # Report, traces and comparison of the project, green or red.
+      - name: Upload the real-stack report (${{ matrix.project }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-real-${{ matrix.project }}
+          path: |
+            ${{ runner.temp }}/e2e-real/
+            ${{ runner.temp }}/tls-origin/logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # The result lines of both runs for e2e-real-ratchet; a project without
+      # them counts as not run there.
+      - name: Upload the real-stack results (${{ matrix.project }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-real-results-${{ matrix.project }}
+          path: ${{ runner.temp }}/e2e-real/e2e-real-all-results.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          cd deploy/docker-compose
+          echo "=== docker compose ps ==="
+          docker compose --env-file .env ps || true
+          echo "=== server logs ==="
+          docker compose --env-file .env logs --tail 80 server || true
+          echo "=== keycloak logs ==="
+          docker compose --env-file .env logs --tail 80 keycloak || true
+          echo "=== frontend logs ==="
+          docker compose --env-file .env logs --tail 80 frontend || true
+          echo "=== mailpit logs ==="
+          docker ps -aq --filter name=mailpit | xargs -r docker logs --tail 40 || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env down -v --remove-orphans || true
+
+  # TST-03 (WP-532): the ratchet over the whole browser matrix. Every project
+  # of playwright.real.config.ts must have delivered its results (a project
+  # missing in the matrix or a job that ended before its runs fails here),
+  # every project lists the same tests (no project leaves a test out), no
+  # spec or support file decides by browser (no browser-dependent skip), and
+  # the results of all projects together are compared with every e2e-real
+  # line of tests/audit/expected-failures.txt: a line for a project that did
+  # not run is "verwaist".
+  e2e-real-ratchet:
+    needs: e2e-real
+    if: ${{ !cancelled() && needs.e2e-real.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Same tests in every project, no browser-dependent skip
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npx playwright test -c e2e-real/playwright.real.config.ts --list --reporter=json >"$RUNNER_TEMP/e2e-real-list.json"
+          python3 - "$RUNNER_TEMP/e2e-real-list.json" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          projects = [p["name"] for p in report["config"]["projects"]]
+          tests = {p: set() for p in projects}
+          def walk(suite, titles):
+              for s in suite.get("suites", []) or []:
+                  yield from walk(s, titles + [s["title"]])
+              for spec in suite.get("specs", []) or []:
+                  for t in spec.get("tests", []):
+                      yield " › ".join(titles + [spec["title"]]), t["projectName"]
+          for top in report["suites"]:
+              for name, project in walk(top, [top["title"]]):
+                  tests[project].add(name)
+          ref = tests[projects[0]]
+          bad = [p for p in projects if tests[p] != ref]
+          for p in bad:
+              print(f"FAIL: project {p} lists other tests than {projects[0]}: missing {sorted(ref - tests[p])[:5]}, extra {sorted(tests[p] - ref)[:5]}")
+          if bad or not ref:
+              sys.exit(1)
+          print(f"OK: {len(projects)} projects ({', '.join(projects)}), {len(ref)} tests each")
+          PY
+          if grep -rnE 'browserName|isMobile|defaultBrowserType|projectName|project\.name' e2e-real --include='*.ts' \
+              --exclude=playwright.real.config.ts; then
+            echo "FAIL: the real-stack suite decides by browser (above); no test may be skipped per browser"; exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-real-results-*
+          path: ${{ runner.temp }}/e2e-real-results
+
+      - name: Compare the results of all projects with the expected-failure list
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/e2e-real-results"
+          all="$RUNNER_TEMP/e2e-real-matrix-results.txt"
+          : >"$all"
+          missing=0
+          for p in $(jq -r '.config.projects[].name' "$RUNNER_TEMP/e2e-real-list.json"); do
+            f="$dir/e2e-real-results-$p/e2e-real-all-results.txt"
+            if [ ! -s "$f" ] || ! grep -q "^e2e-real;$p:" "$f"; then
+              echo "FAIL: no results of project $p (job e2e-real ($p))"; missing=1; continue
+            fi
+            cat "$f" >>"$all"
+          done
+          ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --results "$all"
+          exit "$missing"
+
+  # INS-02/TEC-09 (WP-420, F-033/F-034/F-035): the TLS-domain path against a
+  # real ACME server. Pebble with challtestsrv (tests/fixtures/pebble/)
+  # issues, certbot/certbot:v2.11.0 requests and renews, the installer runs
+  # with RETICORA_TLS_DOMAIN, RETICORA_ACME_SERVER and the CA bundles: first
+  # installation, re-run without a new order, key and chain readable for
+  # nginx (uid 101) after the issuance and after a forced renewal, both
+  # issuer checks in every installer log, failed challenge. The domain is an
+  # sslip.io name of the runner's IP (header of the test). WP-440 (F-139):
+  # the renewed certificate is served without a frontend restart within the
+  # reload interval (10 s here; the test waits up to 10 min), and an
+  # unchanged certificate causes no reload.
+  # WP-558 (INS-04, F-352): the test keeps its installation with the Pebble
+  # certificate (RETICORA_PEBBLE_KEEP_STACK), and the INS-04 tests of the
+  # onboarding suite (tag @ins-04) run over its TLS origin https://<domain>:
+  # authorize URL, redirect_uri and issuer must not name localhost, and the
+  # self-test with a localhost redirect_uri must be recognised. The suite
+  # trusts the Pebble root (E2E_CA_CERT: NSS database, NODE_EXTRA_CA_CERTS)
+  # instead of ignoring certificate errors. The insecure-origin test
+  # (@plain-http) needs a plain-HTTP UI, which a TLS installation redirects
+  # to HTTPS; that redirect is checked instead.
+  tls-domain-pebble:
+    needs: installer-script-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make installer scripts executable
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
+
+      - name: Hand-off of the kept installation (WP-558)
+        run: |
+          echo "RETICORA_PEBBLE_KEEP_STACK=$RUNNER_TEMP/tls-origin" >>"$GITHUB_ENV"
+          echo "E2E_CA_CERT=$RUNNER_TEMP/tls-origin/pebble-root.pem" >>"$GITHUB_ENV"
+
+      - name: Installer against Pebble (issuance, re-run, uid 101 after issuance and renewal, renewal served without restart, issuer checks, failed challenge, installation kept)
+        run: ./tests/install-acme-pebble.test.sh "$RUNNER_TEMP/tls-domain-pebble"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: collector/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Prepare the onboarding suite on the TLS origin
+        run: |
+          [ -s "$E2E_CA_CERT" ] || { echo "FAIL: no kept installation ($E2E_CA_CERT missing)"; exit 1; }
+          ./frontend/e2e/fixtures/setup-onboarding.sh deploy/docker-compose .env
+          domain="$(sed -n 's/^RETICORA_TLS_DOMAIN=//p' deploy/docker-compose/.env | tail -n 1 | tr -d "\"'")"
+          base="$(sed -n 's/^BASE_URL=//p' "$GITHUB_ENV" | tail -n 1)"
+          issuer="$(sed -n 's/^E2E_ISSUER_URL=//p' "$GITHUB_ENV" | tail -n 1)"
+          echo "BASE_URL=$base E2E_ISSUER_URL=$issuer"
+          [ -n "$domain" ] && [ "$base" = "https://$domain" ] \
+            || { echo "FAIL: BASE_URL '$base' is not the TLS origin https://$domain"; exit 1; }
+          case "$base $issuer" in
+            *localhost*|*127.0.0.1*) echo "FAIL: BASE_URL or E2E_ISSUER_URL names localhost"; exit 1 ;;
+          esac
+          # The plain-HTTP origin redirects to the TLS origin.
+          location="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "http://$domain/login")"
+          [ "$location" = "301 https://$domain/login" ] \
+            || { echo "FAIL: http://$domain/login answers '$location', expected '301 https://$domain/login'"; exit 1; }
+
+      - name: Run the INS-04 tests of the onboarding suite over the TLS origin
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/tls-origin-e2e/report.json
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          command -v certutil >/dev/null || sudo apt-get install -y --no-install-recommends libnss3-tools
+          npx playwright test -c e2e/fixtures/playwright.install.config.ts \
+            --grep @ins-04 --grep-invert @plain-http \
+            --reporter=github,list,json --output "$RUNNER_TEMP/tls-origin-e2e/test-results"
+          # The authorize check and its self-test ran and passed.
+          for t in 'the authorization redirect targets the configured issuer with PKCE' \
+            'self-test: a localhost redirect_uri fails the redirect check'; do
+            jq -e --arg t "$t" '[.. | objects | select(.title? == $t) | .tests[]?.results[]?.status] | length > 0 and all(. == "passed")' \
+              "$PLAYWRIGHT_JSON_OUTPUT_NAME" >/dev/null || { echo "FAIL: '$t' did not pass"; exit 1; }
+          done
+
+      - name: Upload the installer, Pebble and stack logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tls-domain-pebble
+          path: |
+            ${{ runner.temp }}/tls-domain-pebble/
+            ${{ runner.temp }}/tls-origin-e2e/
+          retention-days: 14
+
+  # INS-05 (WP-386, F-125): a re-run of the installer applies rotated
+  # passwords and Keycloak values to the existing installation (persisted
+  # volumes) and keeps settings it does not write itself; a run without a
+  # change rotates nothing.
+  reinstall:
+    needs: installer-script-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RETICORA_SOURCE_DIR: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make installer scripts executable
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
+
+      # Keycloak 24 on its own: admin password, client secret and redirect URL
+      # rotated between the installer's Keycloak steps.
+      - name: Keycloak rotation of the installer (Keycloak 24)
+        run: ./tests/install-reinstall.test.sh
+
+      # AUT-09/SEC-07 (WP-428, F-061): --import-realm skips the realm an
+      # earlier release imported (the one before WP-044); the installer
+      # applies policies, MFA flow, roles, groups, acr scope and the declared
+      # organization_id, creates the administrator in it, keeps stricter
+      # values and changes nothing on a re-run.
+      - name: Keycloak realm upgrade from the realm before WP-044 (Keycloak 24)
+        run: ./tests/keycloak-realm-upgrade.test.sh
+
+      # Local build of the checked-out state in every run (E-69).
+      - name: First installation
+        run: ./install.sh --cloud --non-interactive --build-from-source
+
+      - name: Rotate the database passwords and Keycloak values, add RETICORA_HTTP_BIND
+        run: |
+          set -euo pipefail
+          env_file=deploy/docker-compose/.env
+          cp "$env_file" "$RUNNER_TEMP/env.first"
+          set_env() {
+            sed -i "s|^$1=.*|$1=$2|" "$env_file"
+            grep -qx "$1=$2" "$env_file"
+          }
+          set_env RETICORA_DB_PASSWORD "$(openssl rand -hex 16)"
+          set_env RETICORA_DB_APP_PASSWORD "$(openssl rand -hex 24)"
+          set_env KEYCLOAK_DB_PASSWORD "$(openssl rand -hex 16)"
+          set_env KEYCLOAK_ADMIN_PASSWORD "$(openssl rand -hex 16)"
+          set_env RETICORA_OIDC_CLIENT_SECRET "$(openssl rand -hex 24)"
+          set_env RETICORA_OIDC_REDIRECT_URL "http://127.0.0.1:3000/auth/callback"
+          printf 'RETICORA_HTTP_BIND=127.0.0.1\n' >> "$env_file"
+
+      - name: Second run applies the rotation
+        run: |
+          set -o pipefail
+          ./install.sh --cloud --non-interactive --build-from-source 2>&1 | tee "$RUNNER_TEMP/second-run.log"
+          grep -q 'Keycloak rotation: password of the administrator' "$RUNNER_TEMP/second-run.log"
+          grep -q 'Keycloak rotation: client reticora-app secret set' "$RUNNER_TEMP/second-run.log"
+          grep -q 'Keycloak rotation: client reticora-app redirectUris set' "$RUNNER_TEMP/second-run.log"
+
+      - name: Verify the stack after the rotation (health, OIDC login, /readyz, RETICORA_HTTP_BIND)
+        run: |
+          set -euo pipefail
+          ./tests/install-smoke-health.sh deploy/docker-compose .env
+          env_file=deploy/docker-compose/.env
+          value() { sed -n "s/^$1=//p" "$2" | tail -n 1; }
+          kc="http://localhost:$(value RETICORA_KEYCLOAK_PORT "$env_file")"
+          admin="$(value KEYCLOAK_ADMIN "$env_file")"
+          status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          admin_token() {
+            curl -fsS "$kc/realms/master/protocol/openid-connect/token" -d grant_type=password -d client_id=admin-cli \
+              --data-urlencode "username=$admin" --data-urlencode "password=$1" | jq -r .access_token
+          }
+          # The rotated admin password works, the old one no longer.
+          token="$(admin_token "$(value KEYCLOAK_ADMIN_PASSWORD "$env_file")")"
+          [ "$(status "$kc/realms/master/protocol/openid-connect/token" -d grant_type=password -d client_id=admin-cli \
+            --data-urlencode "username=$admin" --data-urlencode "password=$(value KEYCLOAK_ADMIN_PASSWORD "$RUNNER_TEMP/env.first")")" = 401 ]
+          api() { curl -fsS -H "Authorization: Bearer $token" -H 'Content-Type: application/json' "$@"; }
+          client="$(api "$kc/admin/realms/reticora/clients?clientId=reticora-app" | jq '.[0]')"
+          jq -e '.redirectUris | index("http://127.0.0.1:3000/auth/callback")' <<<"$client" >/dev/null
+          # OIDC login over the token endpoint with a smoke user: the rotated
+          # client secret 200, the old one 401.
+          api -X POST "$kc/admin/realms/reticora/users" -d '{"username":"reinstall-smoke@reticora.test",
+            "email":"reinstall-smoke@reticora.test","emailVerified":true,"enabled":true,"firstName":"Reinstall","lastName":"Smoke"}'
+          user="$(api "$kc/admin/realms/reticora/users?username=reinstall-smoke@reticora.test&exact=true" | jq -r '.[0].id')"
+          password="Rs-$(openssl rand -hex 16)"
+          api -X PUT "$kc/admin/realms/reticora/users/$user/reset-password" \
+            -d "$(jq -n --arg p "$password" '{type: "password", value: $p, temporary: false}')"
+          login() {
+            status "$kc/realms/reticora/protocol/openid-connect/token" -d grant_type=password -d client_id=reticora-app \
+              --data-urlencode "client_secret=$1" --data-urlencode "username=reinstall-smoke@reticora.test" \
+              --data-urlencode "password=$password"
+          }
+          [ "$(login "$(value RETICORA_OIDC_CLIENT_SECRET "$env_file")")" = 200 ]
+          [ "$(login "$(value RETICORA_OIDC_CLIENT_SECRET "$RUNNER_TEMP/env.first")")" = 401 ]
+          # The server is ready with the rotated runtime login.
+          [ "$(status "http://localhost:$(value RETICORA_SERVER_PORT "$env_file")/readyz")" = 200 ]
+          # Both database roles and Keycloak's database accept the new passwords over TCP.
+          cd deploy/docker-compose
+          docker compose --env-file .env exec -T -e PGPASSWORD="$(value RETICORA_DB_PASSWORD .env)" postgres \
+            psql -h postgres -U reticora -d reticora -tAc 'SELECT 1' | grep -qx 1
+          docker compose --env-file .env exec -T -e PGPASSWORD="$(value RETICORA_DB_APP_PASSWORD .env)" postgres \
+            psql -h postgres -U reticora_runtime -d reticora -tAc 'SELECT 1' | grep -qx 1
+          docker compose --env-file .env exec -T -e PGPASSWORD="$(value KEYCLOAK_DB_PASSWORD .env)" keycloak-db \
+            psql -h keycloak-db -U keycloak -d keycloak -tAc 'SELECT 1' | grep -qx 1
+          # RETICORA_HTTP_BIND is kept and in effect; .env.previous is private.
+          grep -qx 'RETICORA_HTTP_BIND=127.0.0.1' .env
+          docker compose --env-file .env port frontend 80 | grep -qx '127.0.0.1:3000'
+          [ "$(stat -c %a .env.previous)" = 600 ]
+
+      - name: Third run without a change rotates nothing
+        run: |
+          set -o pipefail
+          ./install.sh --cloud --non-interactive --build-from-source 2>&1 | tee "$RUNNER_TEMP/third-run.log"
+          if grep -E 'Keycloak rotation:|Changed since the last run|Updating the password of database role' "$RUNNER_TEMP/third-run.log"; then
+            echo "FAIL: the third run rotated something"
+            exit 1
+          fi
+          ./tests/install-smoke-health.sh deploy/docker-compose .env
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env ps || true
+          docker compose --env-file .env logs --tail 80 server keycloak || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env down -v --remove-orphans || true
+
+  # TEC-15 (WP-388, E-69 Option 1): on a release tag the default path of the
+  # installer — no switch — against the artifacts release.yml publishes for
+  # this tag: the checkout is checked against the signed SOURCE_COMMIT, the
+  # signed images are verified with cosign and pinned by digest, nothing is
+  # built locally. release.yml publishes only after its outage suite, so the
+  # job first waits for the release and the image signatures. The evidence on
+  # the RC tag is WP-595.
+  release-mode:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: installer-script-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: read
+    env:
+      # Only for the wait; the installer brings its own, checked cosign.
+      COSIGN_VERSION: v2.4.1
+      COSIGN_SHA256: 8b24b946dd5809c6bd93de08033bcf6bc0ed7d336b7785787c080f574b89249b
+      REGISTRY: ghcr.io/datahub-chiemgau
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make installer scripts executable
+        run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
+
+      # Pulls and the cosign registry reads work for private packages as well.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Wait for the signed release of the tag (release.yml)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/cosign" \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  $RUNNER_TEMP/cosign" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/cosign"
+          identity="^https://github\.com/${GITHUB_REPOSITORY//./\\.}/\.github/workflows/release\.yml@refs/tags/v.+$"
+          published() {
+            gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' 2>/dev/null \
+              | grep -qx 'SHA256SUMS.sigstore.json' || return 1
+            local image
+            for image in reticora-server reticora-frontend reticora-postgres; do
+              "$RUNNER_TEMP/cosign" verify "$REGISTRY/$image:$GITHUB_REF_NAME" \
+                --certificate-identity-regexp "$identity" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1 || return 1
+            done
+          }
+          for _ in $(seq 1 150); do
+            if published; then
+              echo "Release $GITHUB_REF_NAME is published and its images are signed."
+              exit 0
+            fi
+            sleep 60
+          done
+          echo "Release $GITHUB_REF_NAME was not published within 150 minutes."
+          exit 1
+
+      - name: Install the signed release (default path, no switch)
+        run: |
+          set -o pipefail
+          ./install.sh --cloud --non-interactive --ref "$GITHUB_REF_NAME" 2>&1 | tee "$RUNNER_TEMP/release-mode.log"
+        env:
+          RETICORA_SOURCE_DIR: ${{ github.workspace }}
+
+      - name: Verify the release mode (verified source, pinned signed images, nothing built)
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/release-mode.log"
+          env_file=deploy/docker-compose/.env
+          grep -q "Source verified: $GITHUB_REF_NAME is commit $(git rev-parse HEAD)" "$log"
+          if grep -q 'not signature-verified' "$log"; then
+            echo "FAIL: the default path reported an unverified installation"
+            exit 1
+          fi
+          for image in server frontend postgres; do
+            grep -qE "^RETICORA_${image^^}_IMAGE=${REGISTRY//./\\.}/reticora-${image}@sha256:[0-9a-f]{64}$" "$env_file"
+            grep -q "Signed image verified: reticora-${image}@sha256:" "$log"
+          done
+          grep -qx "RETICORA_IMAGE_TAG=$GITHUB_REF_NAME" "$env_file"
+          [ -f deploy/docker-compose/docker-compose.override.yml.disabled ]
+          for image in reticora-server reticora-frontend reticora-postgres; do
+            if [ -n "$(docker images -q "$image:latest")" ]; then
+              echo "FAIL: $image:latest was built locally"
+              exit 1
+            fi
+          done
+
+      - name: Verify all expected services are running and healthy
+        run: ./tests/install-smoke-health.sh deploy/docker-compose .env
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          cd deploy/docker-compose
+          docker compose --env-file .env ps || true
+          docker compose --env-file .env logs --tail 80 server keycloak frontend || true
 
       - name: Cleanup
         if: always()

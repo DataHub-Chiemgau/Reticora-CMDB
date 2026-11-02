@@ -145,7 +145,12 @@ func TestIngestToWebhook(t *testing.T) {
 
 // TestTST02ScenarioCoverage keeps the TST-02 scenarios against real services
 // (WP-208) tied to their integration tests: each scenario names the test
-// that proves it, and the test must exist.
+// that proves it, and the test must exist. Certificate renewal is proven by
+// the PostgreSQL-backed TestCollectorPKI (renewal service and endpoint), not
+// by the unit test TestNeedsRenewal (WP-559, F-194). tests/tst02-targets.txt
+// lists exactly these tests; the job migrations of ci.yml fails when one of
+// them did not run with result pass (scripts/ci/db-test-summary.sh
+// --require-pass).
 func TestTST02ScenarioCoverage(t *testing.T) {
 	scenarios := []struct{ scenario, file, test string }{
 		{"RLS incl. client/site/team scope and WITH CHECK", "tenant/rls/matrix_integration_test.go", "TestRLSMatrix"},
@@ -153,7 +158,7 @@ func TestTST02ScenarioCoverage(t *testing.T) {
 		{"ingest to webhook", "server/e2e_scenarios_integration_test.go", "TestIngestToWebhook"},
 		{"idempotency", "middleware/idempotency_integration_test.go", "TestIdempotencyIsAtomicAndPrincipalBound"},
 		{"mTLS of the collector channel", "discovery/natsedge_integration_test.go", "TestCollectorNATSEndpointAuthorization"},
-		{"certificate renewal", "discovery/ca_test.go", "TestNeedsRenewal"},
+		{"certificate renewal", "discovery/ca_test.go", "TestCollectorPKI"},
 		{"impact with several failures", "topology/multi_integration_test.go", "TestMultiImpactAgainstPostgres"},
 		{"entitlement with unlicensed_ci", "entitlement/unlicensed_integration_test.go", "TestUnlicensedCIs"},
 		{"entitlement expiry", "entitlement/enforce_integration_test.go", "TestEntitlementEnforcement"},
@@ -162,14 +167,46 @@ func TestTST02ScenarioCoverage(t *testing.T) {
 		{"notifications (SMTP stub)", "notify/channel_test.go", "TestEmailOverSMTP"},
 		{"runtime DDL", "citype/ddl_job_integration_test.go", "TestAttributeIndexJob"},
 	}
+	want := map[string]bool{}
 	for _, s := range scenarios {
 		src, err := os.ReadFile(filepath.Join("..", s.file))
 		if err != nil {
 			t.Errorf("%s: %v", s.scenario, err)
 			continue
 		}
-		if !strings.Contains(string(src), "func "+s.test+"(") {
+		if !strings.Contains(string(src), "func "+s.test+"(t *testing.T) {") {
 			t.Errorf("%s: %s no longer defines %s", s.scenario, s.file, s.test)
+		}
+		want["internal/"+filepath.Dir(s.file)+" "+s.test] = true
+	}
+
+	// The CI target list names the same tests, by package relative to
+	// backend/ and top-level test name.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "tests", "tst02-targets.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		entry := strings.Join(fields, " ")
+		if len(fields) != 2 || listed[entry] {
+			t.Errorf("tests/tst02-targets.txt: malformed or duplicate entry %q", line)
+		}
+		listed[entry] = true
+		if !want[entry] {
+			t.Errorf("tests/tst02-targets.txt lists %q, which is no TST-02 scenario test", entry)
+		}
+	}
+	for entry := range want {
+		if !listed[entry] {
+			t.Errorf("tests/tst02-targets.txt does not list %q", entry)
 		}
 	}
 }

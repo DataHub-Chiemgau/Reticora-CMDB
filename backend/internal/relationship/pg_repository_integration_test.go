@@ -4,19 +4,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 )
 
 // These tests run against the migrated CI PostgreSQL (see the migrations CI
@@ -117,6 +124,113 @@ func TestTraverseFromProjectsRelTypePG(t *testing.T) {
 	}
 	if len(relsD1) != 2 {
 		t.Fatalf("expected 2 edges at depth 1 (chain start + cycle edge), got %d", len(relsD1))
+	}
+}
+
+// TestRelationshipListOfACIListsEachEdgeOnce covers List for one CI
+// (WP-609, one arm per end of the edge) against PostgreSQL: the stored
+// edges from and to the CI and its edge to itself, the projected contains
+// to its parent and from its child, located_in and mounted_in, each once,
+// with total equal to the edges; pages of three partition them in the
+// order of the list. A principal of client 1 sees neither the edges to a
+// CI of client 2 nor them in the total. Other edges are not listed.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRelationshipListOfACIListsEachEdgeOnce(t *testing.T) {
+	f := scopetest.Seed(t, "06")
+	bg := context.Background()
+	ctx := f.OrgCtx(f.OrgA)
+	repo := relationship.NewPGRepository(f.App)
+	names := map[string]string{}
+	newCI := func(clientID, name string) string {
+		id := f.CI(t, f.OrgA, clientID, name)
+		names[id] = name
+		return id
+	}
+	self, other, parent, child, mounted := newCI(f.Client1, "self"), newCI(f.Client1, "other"),
+		newCI(f.Client1, "parent"), newCI(f.Client1, "child"), newCI(f.Client1, "mounted")
+	foreign := newCI(f.Client2, "client2")
+	room := f.Room(t, f.Client1, "list-room")
+	names[room] = "room"
+	var rack string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO rack (organization_id, room_id, name, height_units) VALUES ($1, $2, 'list-rack', 42)
+		RETURNING id::text`, f.OrgA, room).Scan(&rack); err != nil {
+		t.Fatal(err)
+	}
+	names[rack] = "rack"
+	for _, s := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE ci SET parent_ci_id = $1, location_id = $2 WHERE id = $3`, []any{parent, room, self}},
+		{`UPDATE ci SET parent_ci_id = $1 WHERE id = $2`, []any{self, child}},
+		{`UPDATE ci SET location_id = $1 WHERE id = $2`, []any{rack, mounted}},
+		{`INSERT INTO rack_mount (organization_id, rack_id, ci_id, position_u, height_u) VALUES ($1, $2, $3, 1, 1)`, []any{f.OrgA, rack, mounted}},
+	} {
+		if _, err := f.Admin.Exec(bg, s.sql, s.args...); err != nil {
+			t.Fatalf("%s: %v", s.sql, err)
+		}
+	}
+	for _, e := range [][3]string{
+		{self, other, "depends_on"}, {other, self, "depends_on"}, {self, self, "runs_on"},
+		{foreign, self, "connected_to"}, {self, foreign, "depends_on"}, {other, foreign, "depends_on"},
+	} {
+		if err := repo.Create(ctx, &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: e[0], TargetCIID: e[1], RelType: e[2]}); err != nil {
+			t.Fatalf("create %s %s -> %s: %v", e[2], names[e[0]], names[e[1]], err)
+		}
+	}
+	edge := func(r relationship.Relationship) string {
+		target := names[r.TargetCIID]
+		if r.TargetCIID == "" {
+			target = "@" + names[r.TargetLocationID]
+		}
+		return r.RelType + " " + names[r.SourceCIID] + "->" + target
+	}
+	list := func(lctx context.Context, ciID string, page api.PaginationParams) ([]string, int) {
+		t.Helper()
+		rels, total, err := repo.List(lctx, f.OrgA, ciID, page)
+		if err != nil {
+			t.Fatalf("list %s: %v", names[ciID], err)
+		}
+		out := make([]string, len(rels))
+		for i, r := range rels {
+			out[i] = edge(r)
+		}
+		return out, total
+	}
+
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		ci   string
+		want []string
+	}{
+		{"org-wide", ctx, self, []string{"depends_on self->other", "depends_on other->self", "runs_on self->self",
+			"connected_to client2->self", "depends_on self->client2", "contains parent->self", "contains self->child", "located_in self->@room"}},
+		{"client 1", f.ClientCtx(f.Client1), self, []string{"depends_on self->other", "depends_on other->self", "runs_on self->self",
+			"contains parent->self", "contains self->child", "located_in self->@room"}},
+		{"contains: source", ctx, parent, []string{"contains parent->self"}},
+		{"contains: target", ctx, child, []string{"contains self->child"}},
+		{"mounted CI", ctx, mounted, []string{"mounted_in mounted->@rack", "located_in mounted->@rack"}},
+	} {
+		got, total := list(c.ctx, c.ci, api.PaginationParams{Limit: 50})
+		sorted, want := slices.Clone(got), slices.Clone(c.want)
+		slices.Sort(sorted)
+		slices.Sort(want)
+		if !slices.Equal(sorted, want) || total != len(want) {
+			t.Errorf("%s: relationships of %s: total %d, %q; want %d, %q", c.name, names[c.ci], total, got, len(want), c.want)
+		}
+		var paged []string
+		for offset := 0; offset < len(got)+3; offset += 3 {
+			page, pageTotal := list(c.ctx, c.ci, api.PaginationParams{Limit: 3, Offset: offset})
+			if pageTotal != total {
+				t.Errorf("%s: total %d at offset %d, want %d", c.name, pageTotal, offset, total)
+			}
+			paged = append(paged, page...)
+		}
+		if !slices.Equal(paged, got) {
+			t.Errorf("%s: pages of three %q, want the list %q", c.name, paged, got)
+		}
 	}
 }
 
@@ -259,4 +373,574 @@ func TestRelationshipEdgesFollowREL02(t *testing.T) {
 			t.Errorf("after the transfer: confidence %v attributes %s (%v)", confidence, attrs, err)
 		}
 	})
+}
+
+// TestRelationshipEventsCommitWithTheEdge covers EVT-01/EVT-02 for the
+// relationship repository (WP-400, F-043): Create, Delete and
+// DeleteWithPolicy write relationship.created and relationship.removed in
+// the transaction of the edge, with the edge as entity (entity_seq per
+// edge) and its CIs in the data. A rolled back context transaction (the
+// discovery ingest), a refused write (duplicate, CI of organization B,
+// unknown CI, CI outside the client scope, discovery edge without force,
+// organization B) and a repository without outbox write no event.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRelationshipEventsCommitWithTheEdge(t *testing.T) {
+	f := scopetest.Seed(t, "92")
+	bg := context.Background()
+	ctx := f.OrgCtx(f.OrgA)
+	repo := relationship.NewPGRepository(f.App).WithEvents(events.NewOutbox())
+	c1a, c1b := f.CI(t, f.OrgA, f.Client1, "evt-c1a"), f.CI(t, f.OrgA, f.Client1, "evt-c1b")
+	c2 := f.CI(t, f.OrgA, f.Client2, "evt-c2")
+	foreign := f.CI(t, f.OrgB, "", "evt-foreign")
+	outbox := func(org string) []string {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT type || ' ' || entity_id || ' ' || entity_seq || ' ' ||
+				COALESCE(data->>'source_ci_id', '') || '->' || COALESCE(data->>'target_ci_id', '')
+			FROM event_outbox WHERE organization_id = $1 ORDER BY sequence`, org)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	event := func(typ string, rel *relationship.Relationship, seq int) string {
+		return fmt.Sprintf("%s %s %d %s->%s", typ, rel.ID, seq, rel.SourceCIID, rel.TargetCIID)
+	}
+	exists := func(id string) bool {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_relationship WHERE id::text = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	var want []string
+	check := func(step string) {
+		t.Helper()
+		if got := outbox(f.OrgA); !slices.Equal(got, want) {
+			t.Fatalf("%s: events of organization A\n got %q\nwant %q", step, got, want)
+		}
+	}
+
+	committed := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: c1b, RelType: "depends_on"}
+	if err := repo.Create(ctx, committed); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipCreated, committed, 1))
+	check("create")
+
+	// A rolled back context transaction takes the edge and its event.
+	errRollback := errors.New("roll back")
+	rolledBack := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1b, TargetCIID: c1a, RelType: "depends_on"}
+	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
+		if err := repo.Create(ctx, rolledBack); err != nil {
+			return err
+		}
+		return errRollback
+	}); !errors.Is(err, errRollback) {
+		t.Fatalf("rolled back create: %v", err)
+	}
+	if rolledBack.ID == "" || exists(rolledBack.ID) {
+		t.Fatalf("rolled back edge %q is stored", rolledBack.ID)
+	}
+	check("rolled back create")
+	// A committed context transaction writes the event with the edge.
+	joined := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1b, TargetCIID: c1a, RelType: "depends_on"}
+	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
+		return repo.Create(ctx, joined)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipCreated, joined, 1))
+	check("create in a context transaction")
+
+	// Refused writes.
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		rel  relationship.Relationship
+	}{
+		{"duplicate", ctx, relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: c1b, RelType: "depends_on"}},
+		{"CI of organization B", ctx, relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: foreign, RelType: "depends_on"}},
+		{"unknown CI", ctx, relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: f.ID(), TargetCIID: c1a, RelType: "depends_on"}},
+		{"CI outside the client scope", f.ClientCtx(f.Client1), relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: c2, RelType: "depends_on"}},
+	} {
+		if err := repo.Create(tc.ctx, &tc.rel); err == nil {
+			t.Errorf("create with %s succeeded", tc.name)
+		}
+	}
+	if err := repo.Delete(f.OrgCtx(f.OrgB), f.OrgB, committed.ID); err == nil {
+		t.Error("organization B deleted A's edge")
+	}
+	if err := repo.Delete(f.ClientCtx(f.Client2), f.OrgA, committed.ID); err == nil {
+		t.Error("a principal of client 2 deleted an edge of client 1")
+	}
+	if err := repo.DeleteWithPolicy(f.OrgCtx(f.OrgB), f.OrgB, committed.ID, relationship.DeleteOptions{Force: true}); err == nil {
+		t.Error("organization B deleted A's edge by policy")
+	}
+	var discovered relationship.Relationship
+	if err := f.Admin.QueryRow(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type, source)
+		VALUES ($1, $2, $3, 'connected_to', 'discovery') RETURNING id::text, source_ci_id::text, target_ci_id::text`,
+		f.OrgA, c1a, c1b).Scan(&discovered.ID, &discovered.SourceCIID, &discovered.TargetCIID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, discovered.ID, relationship.DeleteOptions{}); !errors.Is(err, relationship.ErrForceRequired) {
+		t.Errorf("discovery edge without force: %v", err)
+	}
+	// A delete in a rolled back context transaction keeps edge and silence.
+	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
+		if err := repo.Delete(ctx, f.OrgA, committed.ID); err != nil {
+			return err
+		}
+		return errRollback
+	}); !errors.Is(err, errRollback) || !exists(committed.ID) {
+		t.Fatalf("rolled back delete: %v, edge kept %v", err, exists(committed.ID))
+	}
+	check("refused and rolled back writes")
+	if n := len(outbox(f.OrgB)); n != 0 {
+		t.Errorf("organization B has %d events", n)
+	}
+
+	// Deletes: the discovery edge with force (and its suppression), the
+	// manual edges by policy and directly; the removal is the second event
+	// of an edge created through the repository.
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, discovered.ID, relationship.DeleteOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipRemoved, &discovered, 1))
+	if err := repo.DeleteWithPolicy(ctx, f.OrgA, joined.ID, relationship.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipRemoved, joined, 2))
+	if err := repo.Delete(ctx, f.OrgA, committed.ID); err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, event(events.RelationshipRemoved, committed, 2))
+	check("deletes")
+	var payload struct {
+		ID, RelType, Source string
+	}
+	if err := f.Admin.QueryRow(bg, `SELECT data->>'id', data->>'rel_type', data->>'source' FROM event_outbox
+		WHERE organization_id = $1 AND type = 'relationship.removed' AND entity_id = $2`, f.OrgA, discovered.ID).Scan(&payload.ID, &payload.RelType, &payload.Source); err != nil ||
+		payload != (struct{ ID, RelType, Source string }{discovered.ID, "connected_to", "discovery"}) {
+		t.Errorf("relationship.removed data of the discovery edge: %+v, %v", payload, err)
+	}
+
+	// Without an outbox the repository writes no event.
+	plain := relationship.NewPGRepository(f.App)
+	silent := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: c1a, TargetCIID: c1b, RelType: "runs_on"}
+	if err := plain.Create(ctx, silent); err != nil {
+		t.Fatal(err)
+	}
+	if err := plain.Delete(ctx, f.OrgA, silent.ID); err != nil {
+		t.Fatal(err)
+	}
+	check("repository without outbox")
+}
+
+// TestEdgesOfStaysInsideScope covers IMP-04 and IMP-07 (WP-513, F-160)
+// for the read of the providers of a redundant type beyond the depth of a
+// walk: EdgesOf returns the stored edges of the given types with an end
+// among the given CIs, ordered by id, under the caller's scope only. An
+// edge to a CI of another client is missing for a client-1 principal, an
+// edge to a deleted CI for everyone; another organization reads nothing;
+// without a tenant scope the read fails. WalkFrom reports when the node
+// limit cut the walk (Walk.Truncated).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestEdgesOfStaysInsideScope(t *testing.T) {
+	f := scopetest.Seed(t, "06")
+	bg := context.Background()
+	server := f.CI(t, f.OrgA, f.Client1, "edges-of-server")
+	pduA := f.CI(t, f.OrgA, f.Client1, "edges-of-pdu-a")
+	pduB := f.CI(t, f.OrgA, f.Client1, "edges-of-pdu-b")
+	foreign := f.CI(t, f.OrgA, f.Client2, "edges-of-pdu-client2")
+	deleted := f.CI(t, f.OrgA, f.Client1, "edges-of-pdu-deleted")
+	other := f.CI(t, f.OrgA, f.Client1, "edges-of-other")
+	edge := map[string]string{}
+	for name, e := range map[string][3]string{
+		"a":       {server, pduA, "powered_by"},
+		"b":       {server, pduB, "powered_by"},
+		"foreign": {server, foreign, "powered_by"},
+		"deleted": {server, deleted, "powered_by"},
+		"hosted":  {server, other, "hosted_on"},
+		"unrel":   {other, pduA, "powered_by"},
+	} {
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+			VALUES ($1, $2, $3, $4) RETURNING id::text`, f.OrgA, e[0], e[1], e[2]).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		edge[name] = id
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, deleted); err != nil {
+		t.Fatal(err)
+	}
+	repo := relationship.NewPGRepository(f.App)
+	read := func(ctx context.Context, org string) []string {
+		t.Helper()
+		rels, err := repo.EdgesOf(ctx, org, []string{server}, []string{"powered_by", "member_of_cluster"})
+		if err != nil {
+			t.Fatalf("edges of: %v", err)
+		}
+		out := make([]string, 0, len(rels))
+		for i := range rels {
+			if rels[i].SourceCIID != server || rels[i].RelType != "powered_by" {
+				t.Errorf("edge %+v", rels[i])
+			}
+			out = append(out, rels[i].ID)
+		}
+		return out
+	}
+	want := func(names ...string) []string {
+		ids := make([]string, 0, len(names))
+		for _, n := range names {
+			ids = append(ids, edge[n])
+		}
+		slices.Sort(ids)
+		return ids
+	}
+	if got := read(f.OrgCtx(f.OrgA), f.OrgA); !slices.Equal(got, want("a", "b", "foreign")) {
+		t.Errorf("org-wide: %v, want %v", got, want("a", "b", "foreign"))
+	}
+	if got := read(f.ClientCtx(f.Client1), f.OrgA); !slices.Equal(got, want("a", "b")) {
+		t.Errorf("client 1: %v, want %v (no edge to client 2)", got, want("a", "b"))
+	}
+	if got := read(f.OrgCtx(f.OrgB), f.OrgB); len(got) != 0 {
+		t.Errorf("organization B: %v", got)
+	}
+	// The walk reports whether the node limit cut it: the impact then
+	// reads the feeds of every dependent.
+	for maxNodes, want := range map[int]bool{2: true, relationship.MaxTraversalNodes: false} {
+		walk, err := repo.WalkFrom(f.ClientCtx(f.Client1), f.OrgA, server, 2, maxNodes)
+		if err != nil || walk.Truncated != want {
+			t.Errorf("walk of at most %d CIs: truncated %v (%v), want %v", maxNodes, walk != nil && walk.Truncated, err, want)
+		}
+	}
+	if rels, err := repo.EdgesOf(f.OrgCtx(f.OrgA), f.OrgA, nil, []string{"powered_by"}); err != nil || len(rels) != 0 {
+		t.Errorf("no CIs: %v %v", rels, err)
+	}
+	if _, err := repo.EdgesOf(bg, f.OrgA, []string{server}, []string{"powered_by"}); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("without scope: %v, want ErrNoTenantScope", err)
+	}
+
+	// WP-691 (F-420): HiddenEdgesOf returns to the client-1 principal the
+	// edge to the CI of client 2 that EdgesOf leaves out, without its id and
+	// with the end of client 2 empty; the edge to the deleted CI does not
+	// count. An org-wide principal sees every edge: nothing is hidden.
+	hidden, err := repo.HiddenEdgesOf(f.ClientCtx(f.Client1), f.OrgA, []string{server}, []string{"powered_by", "member_of_cluster"})
+	if err != nil || len(hidden) != 1 || !reflect.DeepEqual(hidden[0], relationship.Relationship{SourceCIID: server, RelType: "powered_by"}) {
+		t.Errorf("hidden edges for client 1: %+v %v, want only the powered_by edge from the server without id and target", hidden, err)
+	}
+	if hidden, err = repo.HiddenEdgesOf(f.OrgCtx(f.OrgA), f.OrgA, []string{server}, []string{"powered_by"}); err != nil || len(hidden) != 0 {
+		t.Errorf("hidden edges org-wide: %+v %v, want none", hidden, err)
+	}
+	if hidden, err = repo.HiddenEdgesOf(f.ClientCtx(f.Client2), f.OrgA, []string{foreign}, []string{"powered_by"}); err != nil ||
+		len(hidden) != 1 || !reflect.DeepEqual(hidden[0], relationship.Relationship{TargetCIID: foreign, RelType: "powered_by"}) {
+		t.Errorf("hidden edges for client 2: %+v %v, want the edge to its CI without id and source", hidden, err)
+	}
+	if _, err = repo.HiddenEdgesOf(bg, f.OrgA, []string{server}, []string{"powered_by"}); !errors.Is(err, database.ErrNoTenantScope) {
+		t.Errorf("hidden edges without scope: %v, want ErrNoTenantScope", err)
+	}
+	if _, err = repo.HiddenEdgesOf(f.ClientCtx(f.Client1), f.OrgB, []string{server}, []string{"powered_by"}); !errors.Is(err, database.ErrTenantMismatch) {
+		t.Errorf("hidden edges of another organization: %v, want ErrTenantMismatch", err)
+	}
+}
+
+// TestRelationshipTypeConstraintsEnforced covers WP-592 (REL-01; F-313,
+// E-95 option 1): allowed_source_types and allowed_target_types of a
+// relationship type are CI type keys and are enforced. A key that is no CI
+// type visible to the organization (unknown, or a type of another
+// organization) is refused on create and change of the type with 400 and the
+// field; nothing is stored. POST /relationships refuses a source or target
+// CI of a type outside the list with 422 and a violation on source_ci_id or
+// target_ci_id; nothing is stored. An empty list allows every type, and
+// cardinality is informative until REL-06 [P2].
+//
+// Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestRelationshipTypeConstraintsEnforced' ./internal/relationship/
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRelationshipTypeConstraintsEnforced(t *testing.T) {
+	f := scopetest.Seed(t, "92")
+	bg := context.Background()
+	user := f.AppUser(t, f.OrgA, "rel01-admin")
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user})
+	customType := func(orgID, key string) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci_type (organization_id, name, key) VALUES ($1, $2, $2)`, orgID, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	customType(f.OrgA, "rel01-own-type")
+	customType(f.OrgB, "rel01-foreign-type")
+	ciOfType := func(typeKey, name string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci (organization_id, ci_type_id, name, status)
+			SELECT $1, id, $3, 'active' FROM ci_type WHERE key = $2 AND (organization_id IS NULL OR organization_id = $1)
+			RETURNING id::text`, f.OrgA, typeKey, name).Scan(&id); err != nil {
+			t.Fatalf("CI %s of type %s: %v", name, typeKey, err)
+		}
+		return id
+	}
+	server1, server2 := ciOfType("server", "rel01-server-1"), ciOfType("server", "rel01-server-2")
+	switch1, switch2 := ciOfType("switch", "rel01-switch-1"), ciOfType("switch", "rel01-switch-2")
+	own := ciOfType("rel01-own-type", "rel01-own")
+
+	types := relationshiptype.NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	relationshiptype.NewHandler(types).RegisterRoutes(mux)
+	// As in the server (router.go): the type catalogue checks rel_type.
+	relationship.NewHandler(relationship.NewPGRepository(f.App), types).RegisterRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	var problem struct {
+		Field      string `json:"field"`
+		Violations []struct {
+			Field string `json:"field"`
+		} `json:"violations"`
+	}
+	decode := func(w *httptest.ResponseRecorder) {
+		t.Helper()
+		problem.Field, problem.Violations = "", nil
+		_ = json.Unmarshal(w.Body.Bytes(), &problem)
+	}
+
+	// Type create and change: unknown keys are 400 with the field.
+	for _, c := range []struct {
+		name, body, field string
+	}{
+		{"unknown source type", `{"key":"rel01-bad","display_name":"bad","reverse_name":"bad","allowed_source_types":["b16v-nonexistent-type"]}`,
+			"allowed_source_types"},
+		{"unknown target type", `{"key":"rel01-bad","display_name":"bad","reverse_name":"bad","allowed_source_types":["server"],"allowed_target_types":["switch","b16v-nonexistent-type"]}`,
+			"allowed_target_types"},
+		{"type of another organization", `{"key":"rel01-bad","display_name":"bad","reverse_name":"bad","allowed_source_types":["rel01-foreign-type"]}`,
+			"allowed_source_types"},
+	} {
+		w := call(http.MethodPost, "/api/v1/relationship-types", c.body)
+		decode(w)
+		if w.Code != http.StatusBadRequest || problem.Field != c.field {
+			t.Errorf("create, %s: %d %s, want 400 on %s", c.name, w.Code, w.Body.String(), c.field)
+		}
+	}
+	if w := call(http.MethodGet, "/api/v1/relationship-types/rel01-bad", ""); w.Code != http.StatusNotFound {
+		t.Errorf("a refused type was stored: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(http.MethodPost, "/api/v1/relationship-types", `{"key":"rel01-feeds","display_name":"feeds","reverse_name":"fed by",
+		"allowed_source_types":["server","rel01-own-type"],"allowed_target_types":["switch"],"cardinality":"one_to_one"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create with known types: %d %s", w.Code, w.Body.String())
+	}
+	w := call(http.MethodPatch, "/api/v1/relationship-types/rel01-feeds", `{"allowed_target_types":["switch","b16v-nonexistent-type"]}`)
+	decode(w)
+	if w.Code != http.StatusBadRequest || problem.Field != "allowed_target_types" {
+		t.Errorf("change to an unknown target type: %d %s, want 400 on allowed_target_types", w.Code, w.Body.String())
+	}
+	var stored relationshiptype.Type
+	if w = call(http.MethodGet, "/api/v1/relationship-types/rel01-feeds", ""); json.Unmarshal(w.Body.Bytes(), &stored) != nil ||
+		!slices.Equal(stored.AllowedTargetTypes, []string{"switch"}) {
+		t.Errorf("type after the refused change: %s", w.Body.String())
+	}
+	if w = call(http.MethodPatch, "/api/v1/relationship-types/rel01-feeds", `{"description":"power feeds"}`); w.Code != http.StatusOK {
+		t.Errorf("change without type lists: %d %s", w.Code, w.Body.String())
+	}
+	if w = call(http.MethodPost, "/api/v1/relationship-types", `{"key":"rel01-free","display_name":"free","reverse_name":"free"}`); w.Code != http.StatusCreated {
+		t.Fatalf("create without type lists: %d %s", w.Code, w.Body.String())
+	}
+
+	// Edges: a source or target of a type outside the list is 422 on the
+	// field; nothing is stored.
+	edge := func(relType, source, target string) string {
+		return `{"source_ci_id":"` + source + `","target_ci_id":"` + target + `","rel_type":"` + relType + `"}`
+	}
+	for _, c := range []struct {
+		name, body string
+		status     int
+		fields     []string
+	}{
+		{"server to switch", edge("rel01-feeds", server1, switch1), http.StatusCreated, nil},
+		{"own type to switch", edge("rel01-feeds", own, switch1), http.StatusCreated, nil},
+		{"switch as source", edge("rel01-feeds", switch2, switch1), http.StatusUnprocessableEntity, []string{"source_ci_id"}},
+		{"server as target", edge("rel01-feeds", server1, server2), http.StatusUnprocessableEntity, []string{"target_ci_id"}},
+		{"both ends", edge("rel01-feeds", switch1, server1), http.StatusUnprocessableEntity, []string{"source_ci_id", "target_ci_id"}},
+		// cardinality one_to_one is informative: a second edge of the source.
+		{"second edge of the source", edge("rel01-feeds", server1, switch2), http.StatusCreated, nil},
+		// Empty lists: no restriction.
+		{"type without lists", edge("rel01-free", switch1, server1), http.StatusCreated, nil},
+		{"system type", edge("depends_on", switch1, server2), http.StatusCreated, nil},
+	} {
+		w := call(http.MethodPost, "/api/v1/relationships", c.body)
+		decode(w)
+		var fields []string
+		for _, v := range problem.Violations {
+			fields = append(fields, v.Field)
+		}
+		if w.Code != c.status || !slices.Equal(fields, c.fields) {
+			t.Errorf("%s: %d %s, want %d with violations %v", c.name, w.Code, w.Body.String(), c.status, c.fields)
+		}
+	}
+	var refused int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_relationship WHERE organization_id = $1 AND rel_type = 'rel01-feeds'
+		AND (source_ci_id IN ($2, $3) OR target_ci_id = $4)`, f.OrgA, switch1, switch2, server2).Scan(&refused); err != nil || refused != 0 {
+		t.Errorf("refused edges stored: %d %v", refused, err)
+	}
+	var total int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_relationship WHERE organization_id = $1`, f.OrgA).Scan(&total); err != nil || total != 5 {
+		t.Errorf("stored edges: %d %v, want 5", total, err)
+	}
+}
+
+// TestListHonoursDocumentedQueryFilters covers WP-673 (API-01, API-02),
+// finding F-402: GET /api/v1/relationships applies its documented filters
+// ci_id (either end), source_ci_id, target_ci_id and rel_type, combined,
+// to the stored and the projected edges; an unknown CI lists nothing, a CI
+// filter that is no UUID and an unknown rel_type are 400 problem+json. The
+// edges stay those of the caller's scope: a client-1 principal does not
+// see the edge to the client-2 CI through any filter, the other
+// organization's edge is never listed.
+//
+// Retest: cd backend && TEST_DATABASE_URL=… TEST_APP_DATABASE_URL=… go test -count=1 -run '^TestListHonoursDocumentedQueryFilters$' ./internal/relationship/
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestListHonoursDocumentedQueryFilters(t *testing.T) {
+	f := scopetest.Seed(t, "06")
+	bg := context.Background()
+	ci1 := f.CI(t, f.OrgA, f.Client1, "f402-ci1")
+	ci2 := f.CI(t, f.OrgA, f.Client1, "f402-ci2")
+	ci3 := f.CI(t, f.OrgA, f.Client1, "f402-ci3")
+	ci4 := f.CI(t, f.OrgA, f.Client2, "f402-ci4-client2")
+	foreignA, foreignB := f.CI(t, f.OrgB, "", "f402-foreign-a"), f.CI(t, f.OrgB, "", "f402-foreign-b")
+	edge := func(org, source, target, relType string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+			VALUES ($1, $2, $3, $4) RETURNING id::text`, org, source, target, relType).Scan(&id); err != nil {
+			t.Fatalf("edge %s %s → %s: %v", relType, source, target, err)
+		}
+		return id
+	}
+	e12 := edge(f.OrgA, ci1, ci2, "connected_to")
+	e23 := edge(f.OrgA, ci2, ci3, "depends_on")
+	e31 := edge(f.OrgA, ci3, ci1, "connected_to")
+	e24 := edge(f.OrgA, ci2, ci4, "hosted_on")
+	foreign := edge(f.OrgB, foreignA, foreignB, "connected_to")
+	// ci1 contains ci3: the projected edge contains ci1 → ci3.
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET parent_ci_id = $1 WHERE id = $2`, ci1, ci3); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := chi.NewRouter()
+	// As in the server (router.go): the type catalogue checks rel_type.
+	relationship.NewHandler(relationship.NewPGRepository(f.App), relationshiptype.NewPGRepository(f.App)).RegisterRoutes(mux)
+	orgWide := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	client1 := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	type listed struct {
+		ids       []string // stored edges, sorted
+		contains  bool     // the projected contains ci1 → ci3
+		projected int
+		total     int
+		status    int
+		field     string
+		mediaType string
+	}
+	list := func(ctx context.Context, query string) listed {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/relationships?limit=200"+query, nil).WithContext(ctx))
+		out := listed{ids: []string{}, status: w.Code, mediaType: w.Header().Get("Content-Type")}
+		if w.Code != http.StatusOK {
+			var problem struct {
+				Field string `json:"field"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &problem)
+			out.field = problem.Field
+			return out
+		}
+		var body api.ListResponse[relationship.Relationship]
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("GET %s: %v", query, err)
+		}
+		out.total = body.Total
+		for _, r := range body.Data {
+			if r.Projected {
+				out.projected++
+				out.contains = out.contains || (r.RelType == "contains" && r.SourceCIID == ci1 && r.TargetCIID == ci3)
+				continue
+			}
+			out.ids = append(out.ids, r.ID)
+		}
+		slices.Sort(out.ids)
+		return out
+	}
+	edges := func(ids ...string) []string {
+		out := append([]string{}, ids...)
+		slices.Sort(out)
+		return out
+	}
+
+	for _, c := range []struct {
+		name     string
+		ctx      context.Context
+		query    string
+		want     []string
+		contains bool
+	}{
+		{"control: no filter", orgWide, "", edges(e12, e23, e31, e24), true},
+		{"ci_id of ci1 (either end)", orgWide, "&ci_id=" + ci1, edges(e12, e31), true},
+		{"ci_id of ci2", orgWide, "&ci_id=" + ci2, edges(e12, e23, e24), false},
+		{"source_ci_id of ci2", orgWide, "&source_ci_id=" + ci2, edges(e23, e24), false},
+		{"target_ci_id of ci1", orgWide, "&target_ci_id=" + ci1, edges(e31), false},
+		{"target_ci_id of ci3", orgWide, "&target_ci_id=" + ci3, edges(e23), true},
+		{"rel_type connected_to", orgWide, "&rel_type=connected_to", edges(e12, e31), false},
+		{"rel_type contains (projected)", orgWide, "&rel_type=contains", edges(), true},
+		{"ci_id and rel_type", orgWide, "&ci_id=" + ci2 + "&rel_type=connected_to", edges(e12), false},
+		{"source and target", orgWide, "&source_ci_id=" + ci3 + "&target_ci_id=" + ci1, edges(e31), false},
+		{"ci_id unknown", orgWide, "&ci_id=" + f.ID(), edges(), false},
+		{"ci_id of the other organization", orgWide, "&ci_id=" + foreignA, edges(), false},
+		{"rel_type without an edge", orgWide, "&rel_type=powers", edges(), false},
+		{"empty filter values do not filter", orgWide, "&ci_id=&source_ci_id=&target_ci_id=&rel_type=", edges(e12, e23, e31, e24), true},
+		// The tenant scope stays: client 1 never sees the edge to the
+		// client-2 CI.
+		{"client 1: no filter", client1, "", edges(e12, e23, e31), true},
+		{"client 1: ci_id of the client-2 CI", client1, "&ci_id=" + ci4, edges(), false},
+		{"client 1: target_ci_id of the client-2 CI", client1, "&target_ci_id=" + ci4, edges(), false},
+		{"client 1: rel_type hosted_on", client1, "&rel_type=hosted_on", edges(), false},
+		{"client 1: source_ci_id of ci2", client1, "&source_ci_id=" + ci2, edges(e23), false},
+	} {
+		got := list(c.ctx, c.query)
+		if got.status != http.StatusOK || !slices.Equal(got.ids, c.want) || got.contains != c.contains {
+			t.Errorf("%s: %d, stored edges %v (projected contains ci1 → ci3: %v), want %v (%v)",
+				c.name, got.status, got.ids, got.contains, c.want, c.contains)
+		}
+		if slices.Contains(got.ids, foreign) {
+			t.Errorf("%s: the edge of the other organization is listed", c.name)
+		}
+		if got.status == http.StatusOK && got.total != len(got.ids)+got.projected {
+			t.Errorf("%s: total %d, but %d edges listed", c.name, got.total, len(got.ids)+got.projected)
+		}
+	}
+
+	for _, c := range []struct{ query, field string }{
+		{"&ci_id=not-a-uuid", "ci_id"},
+		{"&source_ci_id=" + ci1 + "x", "source_ci_id"},
+		{"&target_ci_id=1", "target_ci_id"},
+		{"&rel_type=no_such_type", "rel_type"},
+		{"&rel_type=a%00b", "rel_type"},
+	} {
+		got := list(orgWide, c.query)
+		if got.status != http.StatusBadRequest || got.field != c.field || got.mediaType != api.ProblemContentType {
+			t.Errorf("GET %s: %d %q field %q, want 400 problem+json on %s", c.query, got.status, got.mediaType, got.field, c.field)
+		}
+	}
 }

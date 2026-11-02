@@ -1,0 +1,14 @@
+ok   all services running and healthy (JSON lines)
+ok   all services running and healthy (JSON array)
+ok   unhealthy container fails
+ok   container still starting fails
+ok   exited container fails
+ok   missing container of an expected service fails
+ok   compose ps error fails
+ok   compose config error fails
+ok   invalid JSON fails
+ok   empty container list fails
+ok   certbot is not expected without RETICORA_TLS_DOMAIN
+ok   certbot is expected with RETICORA_TLS_DOMAIN
+
+passed: 12, failed: 0

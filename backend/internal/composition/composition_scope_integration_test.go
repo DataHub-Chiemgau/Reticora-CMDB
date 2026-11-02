@@ -3,6 +3,7 @@ package composition_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -53,5 +54,62 @@ func TestCompositionRepositoryClientScope(t *testing.T) {
 	}
 	if _, _, err = repo.List(context.Background(), f.OrgA, "", api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
+	}
+}
+
+// TestCompositionForeignClientUpdate covers the update of an existing link
+// (TEN-06, AST-01, WP-537): a principal restricted to client 1 cannot change
+// role, position or independence flags of the composition of a client-2
+// asset (not found) and the client-2 row stays unchanged; its own link it
+// updates.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCompositionForeignClientUpdate(t *testing.T) {
+	f := scopetest.Seed(t, "2e")
+	bg := context.Background()
+	ownAsset := f.Asset(t, f.OrgA, f.Client1, "scopetest-2e-own")
+	foreignAsset := f.Asset(t, f.OrgA, f.Client2, "scopetest-2e-foreign")
+	ownCI := f.CI(t, f.OrgA, f.Client1, "composition-c1")
+	foreignCI := f.CI(t, f.OrgA, f.Client2, "composition-c2")
+
+	repo := composition.NewPGRepository(f.App)
+	role, position := "disk", "slot-1"
+	foreignC := &composition.Composition{OrganizationID: f.OrgA, ParentAssetID: foreignAsset, ChildCIID: foreignCI, Role: role, Position: position}
+	ownC := &composition.Composition{OrganizationID: f.OrgA, ParentAssetID: ownAsset, ChildCIID: ownCI, Role: role, Position: position}
+	for _, c := range []*composition.Composition{foreignC, ownC} {
+		if err := repo.Create(f.OrgCtx(f.OrgA), c); err != nil {
+			t.Fatalf("org-wide composition: %v", err)
+		}
+	}
+	type row struct {
+		role, position string
+		assignable     bool
+	}
+	stored := func(id string) row {
+		var r row
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(role, ''), COALESCE(position, ''), independently_assignable FROM composition WHERE id = $1`, id).Scan(&r.role, &r.position, &r.assignable); err != nil {
+			t.Fatalf("stored composition %s: %v", id, err)
+		}
+		return r
+	}
+	want := stored(foreignC.ID)
+	newRole, newPosition, assignable := "hijacked", "slot-9", !want.assignable
+	req := composition.UpdateRequest{Role: &newRole, Position: &newPosition, IndependentlyAssignable: &assignable}
+
+	ctx := f.ClientCtx(f.Client1)
+	if _, err := repo.Update(ctx, f.OrgA, foreignC.ID, req); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("client-1 update of a client-2 composition: err=%v, want not found", err)
+	}
+	if got := stored(foreignC.ID); got != want {
+		t.Errorf("client-2 composition after foreign update: %+v, want %+v", got, want)
+	}
+
+	// Positive control: the client-1 principal updates its own link.
+	updated, err := repo.Update(ctx, f.OrgA, ownC.ID, req)
+	if err != nil || updated == nil || updated.Role != newRole {
+		t.Fatalf("client-1 update of own composition: %+v err=%v", updated, err)
+	}
+	if got := stored(ownC.ID); got != (row{role: newRole, position: newPosition, assignable: assignable}) {
+		t.Errorf("own composition after update: %+v", got)
 	}
 }

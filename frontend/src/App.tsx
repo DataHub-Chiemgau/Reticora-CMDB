@@ -1,21 +1,24 @@
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import { ScopeSwitcher } from './components/ScopeSwitcher';
 import { NotificationCenter } from './components/NotificationCenter';
+import { EntitlementExpiryBanner } from './components/EntitlementExpiryBanner';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
 import { Skeleton } from './components/ui/Skeleton';
 import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
-import { fetchAuthConfig, getStoredAuthConfig } from './auth/oidc';
-import { logout } from './auth/session';
+import { refreshSession } from './auth/session';
+import { signOut } from './auth/signOut';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
 import { useEntitlements, useModules, navFeatureFor } from './hooks/useEntitlements';
-import { useThemeStore } from './stores/theme';
+import { nextThemeMode, useThemeStore } from './stores/theme';
+import type { ThemeMode } from './stores/theme';
+import { LanguageSwitch } from './components/LanguageSwitch';
 
 // Route-level code splitting: every feature page is a separate chunk so the
 // initial bundle stays small (perceived speed, spec §8.1). Pages use named
@@ -82,6 +85,10 @@ const FindingsPage = lazyPage(() => import('./pages/FindingsPage'), 'FindingsPag
 const ReviewInboxPage = lazyPage(() => import('./pages/ReviewInboxPage'), 'ReviewInboxPage');
 const JobCenterPage = lazyPage(() => import('./pages/JobCenterPage'), 'JobCenterPage');
 const OnboardingPage = lazyPage(() => import('./pages/OnboardingPage'), 'OnboardingPage');
+const InvitationAcceptPage = lazyPage(
+  () => import('./pages/InvitationAcceptPage'),
+  'InvitationAcceptPage',
+);
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
 
@@ -106,6 +113,8 @@ function App() {
   const location = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const mode = useThemeStore((state) => state.mode);
+  const resolvedTheme = useThemeStore((state) => state.resolved);
+  const osTheme = useThemeStore((state) => state.os);
   const setMode = useThemeStore((state) => state.setMode);
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
@@ -124,14 +133,26 @@ function App() {
     return 'Ctrl+K';
   }, []);
 
-  const isDark =
-    mode === 'dark' ||
-    (mode === 'system' &&
-      typeof document !== 'undefined' &&
-      document.documentElement.classList.contains('dark'));
+  // The theme toggle (header and command palette) cycles relative to the OS
+  // theme: system -> opposite of the OS -> OS theme -> system, so every click
+  // away from 'system' changes the page (nextThemeMode). Its label names the
+  // current mode, in 'system' mode with the theme in effect, and the mode the
+  // next click selects.
+  const themeLabels: Record<ThemeMode, string> = {
+    light: t('theme.light'),
+    dark: t('theme.dark'),
+    system: t('theme.system'),
+  };
+  const themeToggleLabel = t('theme.toggle', {
+    current:
+      mode === 'system'
+        ? t('theme.systemResolved', { theme: themeLabels[resolvedTheme] })
+        : themeLabels[mode],
+    next: themeLabels[nextThemeMode(mode, osTheme)],
+  });
 
-  function toggleDarkMode() {
-    setMode(isDark ? 'light' : 'dark');
+  function cycleTheme() {
+    setMode(nextThemeMode(mode, osTheme));
   }
 
   function handleNavigate(page: AppPage) {
@@ -196,20 +217,13 @@ function App() {
     setIsCreateOpen(true);
   }
 
+  // handleLogout ends the Reticora and the IdP session; the IdP returns to
+  // the sign-in page. Without an end-session endpoint the sign-in is shown
+  // right away.
   async function handleLogout() {
-    await logout();
-
-    try {
-      const config = getStoredAuthConfig() ?? (await fetchAuthConfig());
-      if (config.end_session_endpoint) {
-        window.location.assign(config.end_session_endpoint);
-        return;
-      }
-    } catch {
-      // Fall back to local logout below when OIDC configuration is unreachable.
+    if ((await signOut()) === 'local') {
+      navigate('/login', { replace: true });
     }
-
-    navigate('/login', { replace: true });
   }
 
   return (
@@ -249,41 +263,15 @@ function App() {
                 <span className="max-w-48 truncate">{user?.name || user?.email}</span>
               ) : null}
               <span>{shortcutHint}</span>
+              <LanguageSwitch />
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={toggleDarkMode}
-                aria-label={t('accessibility.toggleDarkMode')}
+                onClick={cycleTheme}
+                aria-label={themeToggleLabel}
+                title={themeToggleLabel}
               >
-                {isDark ? (
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    aria-hidden="true"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <circle cx="12" cy="12" r="4" />
-                    <path d="M12 2v2" />
-                    <path d="M12 20v2" />
-                    <path d="m4.93 4.93 1.41 1.41" />
-                    <path d="m17.66 17.66 1.41 1.41" />
-                    <path d="M2 12h2" />
-                    <path d="M20 12h2" />
-                    <path d="m6.34 17.66-1.41 1.41" />
-                    <path d="m19.07 4.93-1.41 1.41" />
-                  </svg>
-                ) : (
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="h-4 w-4"
-                    aria-hidden="true"
-                    fill="currentColor"
-                  >
-                    <path d="M21 12.79A9 9 0 0 1 11.21 3c0-.34.02-.67.05-1A10 10 0 1 0 22 12c0-.05 0-.11-.01-.16-.3.63-.64.95-.99.95Z" />
-                  </svg>
-                )}
+                <ThemeIcon mode={mode} />
               </Button>
               {isAuthenticated ? (
                 <Button variant="ghost" size="sm" onClick={handleLogout}>
@@ -294,7 +282,11 @@ function App() {
           </div>
         </div>
       </header>
-      <main id="main-content" className="p-6">
+      {/* Expiring entitlements (ENT-07, WP-464). */}
+      {isAuthenticated ? <EntitlementExpiryBanner /> : null}
+      {/* Focusable by script only: target of the skip link and of the command
+          palette after a navigation (UI-10, WP-519). */}
+      <main id="main-content" tabIndex={-1} className="p-6 outline-none">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<CallbackPage />} />
@@ -304,6 +296,15 @@ function App() {
             element={
               <Suspense fallback={<PageFallback />}>
                 <OnboardingPage />
+              </Suspense>
+            }
+          />
+          {/* The invitation link opens the acceptance without a session (TLC-03). */}
+          <Route
+            path="/invitations/accept"
+            element={
+              <Suspense fallback={<PageFallback />}>
+                <InvitationAcceptPage />
               </Suspense>
             }
           />
@@ -367,7 +368,8 @@ function App() {
         <CommandPalette
           onNavigate={handleNavigate}
           onCreateCI={openCreateCI}
-          onToggleDarkMode={toggleDarkMode}
+          onToggleDarkMode={cycleTheme}
+          themeToggleLabel={themeToggleLabel}
           isFeatureEnabled={isEnabled}
           isPageEnabled={isPageEnabled}
         />
@@ -382,10 +384,39 @@ function App() {
   );
 }
 
+// RequireAuth guards the signed-in pages. An expired access token of a stored
+// user (reload, navigation, new start after 15 minutes) is renewed with the
+// refresh cookie before the user is sent to /login (AUT-02, F-066).
 function RequireAuth() {
   const location = useLocation();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
   const hasSession = useAuthStore((state) => Boolean(state.token));
+  const hasUser = useAuthStore((state) => Boolean(state.user));
+  const [renewalFailed, setRenewalFailed] = useState(false);
+  const renewing = !isAuthenticated && hasUser && !renewalFailed;
+
+  useEffect(() => {
+    if (!renewing) {
+      return;
+    }
+    let active = true;
+    void refreshSession()
+      .catch(() => false)
+      .then((renewed) => {
+        // A renewed token the clock still sees as expired (clock skew) must
+        // not keep the user waiting.
+        if (active && !(renewed && useAuthStore.getState().isAuthenticated())) {
+          setRenewalFailed(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [renewing]);
+
+  if (renewing) {
+    return <PageFallback />;
+  }
 
   if (!isAuthenticated) {
     const from = `${location.pathname}${location.search}${location.hash}`;
@@ -393,6 +424,53 @@ function RequireAuth() {
   }
 
   return <Outlet />;
+}
+
+/** ThemeIcon shows the current theme mode: sun (light), moon (dark), monitor (system). */
+function ThemeIcon({ mode }: { mode: ThemeMode }) {
+  if (mode === 'light') {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="h-4 w-4"
+        aria-hidden="true"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+      >
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2" />
+        <path d="M12 20v2" />
+        <path d="m4.93 4.93 1.41 1.41" />
+        <path d="m17.66 17.66 1.41 1.41" />
+        <path d="M2 12h2" />
+        <path d="M20 12h2" />
+        <path d="m6.34 17.66-1.41 1.41" />
+        <path d="m19.07 4.93-1.41 1.41" />
+      </svg>
+    );
+  }
+  if (mode === 'dark') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="currentColor">
+        <path d="M21 12.79A9 9 0 0 1 11.21 3c0-.34.02-.67.05-1A10 10 0 1 0 22 12c0-.05 0-.11-.01-.16-.3.63-.64.95-.99.95Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+    </svg>
+  );
 }
 
 function NavButton({

@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -38,7 +39,7 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 const reservationVisible = `(reservation.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = reservation.asset_id))
 	AND (reservation.quantity_item_id IS NULL OR EXISTS (SELECT 1 FROM quantity_item WHERE quantity_item.id = reservation.quantity_item_id))`
 
-// requireVisible fails with "not found" when the written row of table does not
+// requireVisible fails with ErrNotFound when the written row of table does not
 // satisfy visible, i.e. when a write pointed it at an object outside the
 // tenant scope; the transaction is then rolled back.
 func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
@@ -47,7 +48,39 @@ func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) e
 		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
 	if !ok {
-		return fmt.Errorf("not found")
+		return ErrNotFound
+	}
+	return nil
+}
+
+// requireItem fails with ErrAssetNotFound or ErrItemNotFound when the item
+// to reserve is not visible under the caller's scope. The foreign keys are
+// checked without row level security: an item of another organization
+// passed them and an unknown one failed with the constraint text, so the
+// two could be told apart (TEN-04, API-03, F-047). The check runs before
+// the insert, in the same transaction.
+func requireItem(ctx context.Context, tx pgx.Tx, res *Reservation) error {
+	for _, item := range []struct {
+		table, id string
+		missing   error
+	}{
+		{"asset", res.AssetID, ErrAssetNotFound},
+		{"quantity_item", res.QuantityItemID, ErrItemNotFound},
+	} {
+		if nilIfEmpty(item.id) == nil {
+			continue
+		}
+		if !api.IsUUID(item.id) {
+			return item.missing
+		}
+		var visible bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+item.table+" WHERE id = $1 AND organization_id = $2)",
+			item.id, res.OrganizationID).Scan(&visible); err != nil {
+			return fmt.Errorf("check %s of reservation: %w", item.table, err)
+		}
+		if !visible {
+			return item.missing
+		}
 	}
 	return nil
 }
@@ -96,7 +129,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Reservat
 			selectColumns), id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get reservation: %w", err)
 		}
@@ -111,6 +144,9 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Reservat
 // reservations atomically.
 func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 	return database.WithRequestTenant(ctx, r.pool, res.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireItem(ctx, tx, res); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO reservation (
 				organization_id, item_kind, asset_id, quantity_item_id, quantity,
@@ -125,8 +161,9 @@ func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 			nilIfEmpty(res.Reason), nilIfEmpty(res.CreatedBy))
 		scanned, err := scan(row)
 		if err != nil {
-			if strings.Contains(err.Error(), "idx_reservation_one_active_per_asset") {
-				return fmt.Errorf("asset already has an active reservation")
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_reservation_one_active_per_asset" {
+				return ErrConflict
 			}
 			return fmt.Errorf("create reservation: %w", err)
 		}
@@ -135,7 +172,10 @@ func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 	})
 }
 
-// Transition moves a reservation to a terminal state.
+// Transition moves a reservation to a terminal state. A reservation that is
+// unknown, of another organization or reserves an item outside the caller's
+// scope fails with ErrNotFound, a visible one that is no longer active with
+// ErrNotActive.
 func (r *PGRepository) Transition(ctx context.Context, orgID, id, state string) (*Reservation, error) {
 	var out *Reservation
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -144,7 +184,15 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id, state string) 
 			selectColumns), id, orgID, state))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found or not active")
+				var visible bool
+				if checkErr := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM reservation WHERE "+reservationVisible+" AND id = $1 AND organization_id = $2)",
+					id, orgID).Scan(&visible); checkErr != nil {
+					return fmt.Errorf("check reservation: %w", checkErr)
+				}
+				if !visible {
+					return ErrNotFound
+				}
+				return ErrNotActive
 			}
 			return fmt.Errorf("transition reservation: %w", err)
 		}

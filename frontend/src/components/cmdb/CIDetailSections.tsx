@@ -4,7 +4,7 @@
  * manual overrides, lifecycle, impact analysis and metrics. Each is an expandable
  * <details> so normal users never see the metadata model.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useInstanceFields,
@@ -17,19 +17,92 @@ import {
   useLifecycleDefinitions,
   useLifecycleTransition,
   useEntityHistory,
+  useLocationTree,
 } from '../../api/cmdbHooks';
+import type { LocationTreeNode } from '../../api/cmdb';
 import { DynamicForm, validateAll } from '../form/DynamicForm';
 import { ApiError } from '../../api/client';
 import type { MetricPoint } from '../../api/client';
 import { useCIMetrics } from '../../api/hooks';
 import { ProvenanceTooltip } from './ProvenanceTooltip';
-import type { FieldDefinition } from '../../lib/fieldmeta';
+import { fieldValueText } from './fieldValue';
+import type { FieldDefinition, FieldError } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Modal } from '../ui/Modal';
 import { SkeletonList } from '../ui/Skeleton';
+import { ErrorState } from '../ui/ErrorState';
+
+// ─── Location names and times (CI-06, DB-05) ────────────────────────────────
+
+/** formatDateTime shows a timestamp in the UI language; no value is undefined. */
+export function formatDateTime(value: string | undefined, language: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(language, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/**
+ * formatDate shows a calendar date (YYYY-MM-DD, e.g. a purchase date) in the
+ * UI language. The date has no time zone, so it is formatted as UTC and
+ * shows the same day everywhere.
+ */
+export function formatDate(value: string | undefined, language: string): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00Z` : value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(language, { dateStyle: 'medium', timeZone: 'UTC' });
+}
+
+export interface LocationNames {
+  /** The name of a node of the location tree (site, room, …). */
+  name: (id?: string) => string | undefined;
+  /** The path of a node from its site: Site › Gebäude › Raum › Rack. */
+  path: (id?: string) => string | undefined;
+}
+
+/**
+ * useLocationNames names the nodes of the location tree (GET /locations/tree,
+ * the nodes visible to the user). The tree is read only when enabled, i.e.
+ * when there is a location to name. A node the tree does not hold (not
+ * loaded, outside the user's scope or deleted) keeps its id.
+ */
+export function useLocationNames(enabled: boolean): LocationNames {
+  const tree = useLocationTree({ enabled });
+  return useMemo(() => {
+    const nodes = new Map<string, LocationTreeNode>();
+    const walk = (list: LocationTreeNode[] | undefined) => {
+      for (const node of list ?? []) {
+        nodes.set(node.id, node);
+        walk(node.children);
+      }
+    };
+    walk(tree.data?.data);
+    return {
+      name: (id) => (id ? (nodes.get(id)?.name ?? id) : undefined),
+      path: (id) => {
+        if (!id) return undefined;
+        const names: string[] = [];
+        // A node whose parent is outside the scope is a root of the tree.
+        for (
+          let node = nodes.get(id);
+          node;
+          node = node.parent_id ? nodes.get(node.parent_id) : undefined
+        ) {
+          names.unshift(node.name);
+          if (names.length > nodes.size) break;
+        }
+        return names.length > 0 ? names.join(' › ') : id;
+      },
+    };
+  }, [tree.data]);
+}
+
+/** The location fields of a CI whose values are nodes of the location tree. */
+const LOCATION_FIELDS = new Set(['location_id', 'site_id', 'room_id']);
 
 function Section({
   title,
@@ -77,7 +150,7 @@ export function InstanceFieldsSection({
   const remove = useDeleteInstanceField(ciId);
   const [showAdd, setShowAdd] = useState(false);
   const [draft, setDraft] = useState<FieldDefinition>({ name: '', data_type: 'text' });
-  const [localErrors, setLocalErrors] = useState<Record<string, string | null>>({});
+  const [localErrors, setLocalErrors] = useState<Record<string, FieldError | null>>({});
   // Local draft of the attribute values. The saved CI stays the source of
   // truth, but edits are rendered from the draft so in-flight (and invalid)
   // input is not overwritten by the server response mid-typing.
@@ -92,7 +165,7 @@ export function InstanceFieldsSection({
   const defs = fields.data?.data ?? [];
   return (
     <Section title={t('ci.instanceFields', 'Instanzfelder')} count={defs.length}>
-      <p className="mb-3 text-xs text-gray-500">
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
         {t(
           'ci.instanceFieldsHint',
           'Felder nur für dieses Gerät (z. B. iLO-IP, SAP-SID) — ohne den Typ zu ändern.',
@@ -104,10 +177,10 @@ export function InstanceFieldsSection({
           <li key={f.name} className="flex items-center justify-between">
             <span>
               <span className="font-medium">{f.label || f.name}</span>
-              <span className="ml-2 text-xs text-gray-400">{f.data_type}</span>
+              <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{f.data_type}</span>
             </span>
             <button
-              className="text-xs text-red-600 hover:underline"
+              className="text-xs text-red-600 dark:text-red-400 hover:underline"
               onClick={() => remove.mutate(f.name)}
             >
               {t('common.delete', 'Löschen')}
@@ -115,7 +188,7 @@ export function InstanceFieldsSection({
           </li>
         ))}
         {defs.length === 0 ? (
-          <li className="text-sm text-gray-500">
+          <li className="text-sm text-gray-500 dark:text-gray-400">
             {t('ci.noInstanceFields', 'Keine Instanzfelder.')}
           </li>
         ) : null}
@@ -216,6 +289,11 @@ export function InstanceFieldsSection({
 
 // ─── Field provenance / overrides (§13) ──────────────────────────────────────
 
+/** jsonValue renders a provenance value as JSON; no value is "—". */
+function jsonValue(value: unknown): string {
+  return JSON.stringify(value) ?? '—';
+}
+
 export function ProvenanceSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
   // Every typed field with its source, time and selection reason (REC-10).
@@ -228,26 +306,41 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
   const rows = values.data?.data ?? [];
   const diverged = rows.filter((r) => r.diverged);
   return (
-    <Section title={t('ci.provenance', 'Herkunft & Overrides')} count={diverged.length}>
-      <p className="mb-3 text-xs text-gray-500">
+    <Section
+      title={t('ci.provenance', 'Herkunft & Overrides')}
+      count={values.data ? diverged.length : undefined}
+    >
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
         {t(
           'ci.provenanceHint',
           'Discovery-Wert vs. effektiver Wert. Geschützte manuelle Overrides werden nie von Discovery überschrieben.',
         )}
       </p>
       {values.isLoading ? <SkeletonList rows={2} label="…" /> : null}
+      {/* A failed request is no empty provenance (F-350). */}
+      {values.isError ? (
+        <ErrorState
+          title={t('ci.provenanceLoadError', 'Die Herkunftsdaten konnten nicht geladen werden')}
+          retryLabel={t('common.retry', 'Erneut versuchen')}
+          onRetry={() => void values.refetch()}
+        />
+      ) : null}
       <ul className="space-y-2 text-sm">
         {rows.map((fv) => (
           <li
             key={fv.field}
             className="rounded-md border border-gray-100 px-3 py-2 dark:border-gray-800"
           >
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1 font-medium">
+            {/* Values without a break opportunity (an identity field as JSON)
+                wrap anywhere, and the three columns stack on a phone: before,
+                a row was wider than the 412 px of mobile-chrome and every
+                click on its actions landed on the neighbouring row (WP-646). */}
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+              <span className="flex min-w-0 items-center gap-1 font-medium [overflow-wrap:anywhere]">
                 {fv.field}
                 <ProvenanceTooltip provenance={fv} />
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {fv.diverged ? (
                   <Badge variant="warning">{t('ci.diverged', 'abweichend')}</Badge>
                 ) : null}
@@ -256,7 +349,7 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                 ) : null}
                 {fv.reason === 'override' ? (
                   <button
-                    className="text-xs text-red-600 hover:underline"
+                    className="text-xs text-red-600 dark:text-red-400 hover:underline"
                     onClick={() => clearOverride.mutate(fv.field)}
                   >
                     {t('ci.clearOverride', 'Override aufheben')}
@@ -274,31 +367,44 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                 )}
               </div>
             </div>
-            <dl className="mt-1 grid grid-cols-3 gap-2 text-xs">
+            <dl className="mt-1 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 [&>div]:min-w-0 [&_dd]:[overflow-wrap:anywhere]">
               <div>
-                <dt className="text-gray-400">{t('ci.discovered', 'Discovery')}</dt>
+                <dt className="text-gray-500 dark:text-gray-400">
+                  {t('ci.discovered', 'Discovery')}
+                </dt>
                 <dd className="font-mono">
-                  {JSON.stringify(fv.reason === 'override' ? fv.discovered_value : fv.value) ?? '—'}
+                  {fieldValueText(
+                    t,
+                    fv.field,
+                    fv.reason === 'override' ? fv.discovered_value : fv.value,
+                    jsonValue,
+                  )}
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-400">{t('ci.override', 'Override')}</dt>
+                <dt className="text-gray-500 dark:text-gray-400">{t('ci.override', 'Override')}</dt>
                 <dd className="font-mono">
-                  {fv.reason === 'override' ? JSON.stringify(fv.value) : '—'}
+                  {fv.reason === 'override'
+                    ? fieldValueText(t, fv.field, fv.value, jsonValue)
+                    : '—'}
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-400">{t('ci.effective', 'Effektiv')}</dt>
-                <dd className="font-mono font-semibold">{JSON.stringify(fv.value) ?? '—'}</dd>
+                <dt className="text-gray-500 dark:text-gray-400">
+                  {t('ci.effective', 'Effektiv')}
+                </dt>
+                <dd className="font-mono font-semibold">
+                  {fieldValueText(t, fv.field, fv.value, jsonValue)}
+                </dd>
               </div>
             </dl>
-            <p className="mt-1 text-xs text-gray-400">
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {t('ci.source', 'Quelle')}: {fv.source}
             </p>
           </li>
         ))}
-        {rows.length === 0 && !values.isLoading ? (
-          <li className="text-sm text-gray-500">
+        {rows.length === 0 && !values.isLoading && !values.isError ? (
+          <li className="text-sm text-gray-500 dark:text-gray-400">
             {t(
               'ci.noProvenance',
               'Noch keine Provenienz-Daten (erstellt bei der nächsten Discovery).',
@@ -375,7 +481,9 @@ export function LifecycleSection({
   return (
     <Section title={t('lifecycle.title', 'Lebenszyklus')}>
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-sm text-gray-500">{t('lifecycle.current', 'Aktuell')}:</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">
+          {t('lifecycle.current', 'Aktuell')}:
+        </span>
         <Badge variant="info">{current || '—'}</Badge>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -406,7 +514,7 @@ export function LifecycleSection({
         </Button>
       </div>
       {transition.error ? (
-        <p className="mt-2 text-sm text-red-600">{String(transition.error)}</p>
+        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{String(transition.error)}</p>
       ) : null}
     </Section>
   );
@@ -418,6 +526,11 @@ export function ImpactSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
   const [enabled, setEnabled] = useState(false);
   const blast = useBlastRadius(ciId, enabled);
+  // Certain hits and CIs reached only over connected_to (the network
+  // heuristic, IMP-03) are listed apart; affected_count counts the former.
+  const affected = blast.data?.affected_cis ?? [];
+  const certain = affected.filter((n) => !n.heuristic);
+  const heuristic = affected.filter((n) => n.heuristic);
 
   return (
     <Section title={t('impact.title', 'Auswirkungsanalyse')}>
@@ -429,9 +542,12 @@ export function ImpactSection({ ciId }: { ciId: string }) {
         <SkeletonList rows={3} label="…" />
       ) : blast.data ? (
         <div className="space-y-3">
-          <div className="flex gap-4 text-sm">
+          <div className="flex flex-wrap gap-4 text-sm">
             <span>
               {t('impact.affected', 'Betroffene CIs')}: <strong>{blast.data.affected_count}</strong>
+            </span>
+            <span>
+              {t('impact.heuristic')}: <strong>{blast.data.heuristic_count}</strong>
             </span>
             <span>
               {t('impact.clients', 'Kunden')}: <strong>{blast.data.client_ids?.length ?? 0}</strong>
@@ -439,14 +555,14 @@ export function ImpactSection({ ciId }: { ciId: string }) {
             <span>
               {t('impact.sites', 'Standorte')}: <strong>{blast.data.site_ids?.length ?? 0}</strong>
             </span>
-            <span className="text-red-600">
+            <span className="text-red-600 dark:text-red-400">
               {t('impact.spof', 'SPOF')}:{' '}
               <strong>{blast.data.single_points_of_failure?.length ?? 0}</strong>
             </span>
           </div>
           {(blast.data.single_points_of_failure?.length ?? 0) > 0 ? (
             <div>
-              <p className="text-xs font-semibold text-red-600">
+              <p className="text-xs font-semibold text-red-600 dark:text-red-400">
                 {t('impact.spofList', 'Single Points of Failure:')}
               </p>
               <ul className="text-sm">
@@ -457,17 +573,41 @@ export function ImpactSection({ ciId }: { ciId: string }) {
             </div>
           ) : null}
           <div>
-            <p className="text-xs font-semibold text-gray-500">
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
               {t('impact.affectedList', 'Betroffen:')}
             </p>
-            <ul className="max-h-40 overflow-y-auto text-sm">
-              {(blast.data.affected_cis ?? []).map((n) => (
-                <li key={n.id}>
-                  • {n.name} <span className="text-xs text-gray-400">({n.ci_type})</span>
-                </li>
-              ))}
-            </ul>
+            {certain.length > 0 ? (
+              <ul className="max-h-40 overflow-y-auto text-sm">
+                {certain.map((n) => (
+                  <li key={n.id}>
+                    • {n.name}{' '}
+                    <span className="text-xs text-gray-500 dark:text-gray-400">({n.ci_type})</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t('impact.noneAffected')}</p>
+            )}
           </div>
+          {heuristic.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                {t('impact.heuristicList')}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {t('impact.heuristicHint')}
+              </p>
+              <ul className="max-h-40 overflow-y-auto text-sm">
+                {heuristic.map((n) => (
+                  <li key={n.id}>
+                    • {n.name}{' '}
+                    <span className="text-xs text-gray-500 dark:text-gray-400">({n.ci_type})</span>{' '}
+                    <Badge variant="warning">{t('impact.heuristicMarker')}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </Section>
@@ -512,16 +652,16 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
       ) : metrics.isLoading ? (
         <SkeletonList rows={2} label="…" />
       ) : forbidden ? (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           {t(
             'monitoring.ciNotLicensed',
             'Monitoring ist für diese Organisation nicht freigeschaltet.',
           )}
         </p>
       ) : metrics.error ? (
-        <p className="text-sm text-red-600">{(metrics.error as Error).message}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">{(metrics.error as Error).message}</p>
       ) : (metrics.data?.series.length ?? 0) === 0 ? (
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           {t('monitoring.ciNone', 'Keine Messwerte in den letzten 24 Stunden.')}
         </p>
       ) : (
@@ -545,7 +685,7 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
                     strokeWidth={1.5}
                   />
                 </svg>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
                   {t('monitoring.ciLatest', 'Aktuell')}:{' '}
                   <strong>{latest ? latest.value : '–'}</strong>
                 </span>
@@ -560,25 +700,48 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
 
 // ─── History (CI-06) ─────────────────────────────────────────────────────────
 
+/** historyValue renders an old or new value of a field change; empty is "—". */
+function historyValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
 /**
  * CIHistorySection lists the unified history of a CI (CI-06): changes,
- * history rows and audit entries, newest first, each with its time and the
- * site of the CI at that time.
+ * history rows, location changes and audit entries, newest first, each with
+ * its time and the site of the CI at that time. A CI change is one entry per
+ * change set (AUD-03) with a line per changed field: name, old and new
+ * value; a row written before the change sets is shown as before. Without
+ * audit:read the server leaves the audit entries out (E-78); the section
+ * then says so.
  */
 export function CIHistorySection({ ciId }: { ciId: string }) {
   const { t, i18n } = useTranslation();
   const history = useEntityHistory('ci', ciId);
   const entries = history.data?.data ?? [];
-  const format = (value: string) =>
-    new Date(value).toLocaleString(i18n.language, { dateStyle: 'medium', timeStyle: 'short' });
+  // Sites and location changes are shown with the names of the location
+  // tree (CI-06), the location as its path.
+  const locations = useLocationNames(
+    entries.some(
+      (entry) =>
+        !!entry.site_id ||
+        !!entry.field_changes?.some((change) => LOCATION_FIELDS.has(change.field)),
+    ),
+  );
+  const changeText =
+    (field: string) =>
+    (value: unknown): string =>
+      LOCATION_FIELDS.has(field) && typeof value === 'string' && value !== ''
+        ? ((field === 'location_id' ? locations.path(value) : locations.name(value)) ?? value)
+        : historyValue(value);
   return (
     <Section title={t('ci.history')} count={history.data?.total}>
       {history.isLoading ? (
         <SkeletonList rows={3} label={t('app.loading')} />
       ) : history.error ? (
-        <p className="text-sm text-red-600">{t('ci.historyLoadError')}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">{t('ci.historyLoadError')}</p>
       ) : entries.length === 0 ? (
-        <p className="text-sm text-gray-500">{t('ci.historyEmpty')}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{t('ci.historyEmpty')}</p>
       ) : (
         <ol className="space-y-2 text-sm" aria-label={t('ci.history')}>
           {entries.map((entry) => (
@@ -587,7 +750,7 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
               className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
             >
               <time dateTime={entry.created_at} className="text-gray-500 dark:text-gray-400">
-                {format(entry.created_at)}
+                {formatDateTime(entry.created_at, i18n.language)}
               </time>
               <span className="font-medium">
                 {entry.change_type}
@@ -598,13 +761,25 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
               ) : null}
               {entry.site_id ? (
                 <span className="text-gray-500 dark:text-gray-400">
-                  {t('ci.historySite', { site: entry.site_id })}
+                  {t('ci.historySite', { site: locations.name(entry.site_id) })}
                 </span>
+              ) : null}
+              {entry.change_set_id && entry.field_changes?.length ? (
+                <ul className="basis-full space-y-0.5 pl-4 text-gray-700 dark:text-gray-300">
+                  {entry.field_changes.map((change) => (
+                    <li key={change.field} className="break-all">
+                      {`${change.field}: ${fieldValueText(t, change.field, change.old, changeText(change.field))} → ${fieldValueText(t, change.field, change.new, changeText(change.field))}`}
+                    </li>
+                  ))}
+                </ul>
               ) : null}
             </li>
           ))}
         </ol>
       )}
+      {history.data?.audit_included === false ? (
+        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('ci.historyAuditHint')}</p>
+      ) : null}
     </Section>
   );
 }

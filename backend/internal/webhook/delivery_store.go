@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // Delivery statuses persisted in webhook_delivery.status (WHK-01): pending
@@ -25,6 +27,10 @@ const (
 	StatusDead = "dead"
 )
 
+// ErrDeliveryExists reports an Enqueue of an event a subscription already
+// has a delivery of (WP-506): the stored delivery is sent, no second one.
+var ErrDeliveryExists = errors.New("webhook: delivery of the event exists")
+
 // ErrNoDeliveryStore is returned when a durable operation is requested but no
 // delivery store is configured.
 var ErrNoDeliveryStore = errors.New("webhook: no delivery store configured")
@@ -33,10 +39,17 @@ var ErrNoDeliveryStore = errors.New("webhook: no delivery store configured")
 // queued event is persisted before the first HTTP attempt, so deliveries
 // survive a restart and can be retried with exponential backoff.
 type DeliveryRecord struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organization_id"`
-	SubscriptionID string     `json:"subscription_id"`
-	Event          string     `json:"event"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	SubscriptionID string `json:"subscription_id"`
+	Event          string `json:"event"`
+	// EventID, EventSequence and EntitySeq name the outbox event the
+	// delivery delivers (WP-506): sent as X-Reticora-Event-ID,
+	// X-Reticora-Sequence and X-Reticora-Entity-Seq; empty for test sends
+	// and direct dispatches.
+	EventID        string     `json:"-"`
+	EventSequence  int64      `json:"-"`
+	EntitySeq      int64      `json:"-"`
 	Payload        []byte     `json:"-"`
 	Status         string     `json:"status"`
 	Attempt        int        `json:"attempt"`
@@ -66,18 +79,28 @@ type DeadLetter struct {
 
 // DeliveryStore persists webhook deliveries and their retry schedule.
 type DeliveryStore interface {
-	// Enqueue stores a new delivery in the pending state.
+	// Enqueue stores a new delivery in the pending state; a preset ID is
+	// kept. It is idempotent per event and subscription: a delivery of an
+	// event (EventID) the subscription already has is not stored again,
+	// Enqueue returns ErrDeliveryExists.
 	Enqueue(ctx context.Context, rec DeliveryRecord) (DeliveryRecord, error)
 	// Update persists the outcome of one delivery attempt.
 	Update(ctx context.Context, rec DeliveryRecord) error
 	// ClaimDue atomically leases deliveries whose retry time has come. The
 	// implementation must be safe to run from multiple server replicas.
+	// With an error it may still return leased deliveries, which the
+	// caller processes (F-184).
 	ClaimDue(ctx context.Context, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error)
 	// ListBySubscription returns the delivery history of one subscription.
 	ListBySubscription(ctx context.Context, orgID, subscriptionID string, page api.PaginationParams) ([]DeliveryRecord, int, error)
-	// MoveToDeadLetter moves a failed delivery to the dead-letter queue and
-	// marks the delivery record as dead. It is idempotent per delivery.
-	MoveToDeadLetter(ctx context.Context, rec DeliveryRecord) error
+	// MoveToDeadLetter moves a failed delivery to the dead-letter queue,
+	// marks the delivery record as dead and records webhook.dead (NTF-05,
+	// deadEvent) in one step (WP-550): either all of it happens or none.
+	// The deadLimit-th dead delivery of the subscription since since
+	// switches the subscription off in the same step (WHK-01); disabled
+	// reports it. It is idempotent per delivery: a repeated move records
+	// nothing.
+	MoveToDeadLetter(ctx context.Context, rec *DeliveryRecord, since time.Time) (disabled bool, err error)
 	// ListDeadLetters returns the dead-letter queue of one tenant.
 	ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error)
 }
@@ -89,6 +112,21 @@ type MemoryDeliveryStore struct {
 	items       map[string]DeliveryRecord
 	deadLetters map[string]DeadLetter
 	seq         int
+	// subscriptions switches subscriptions off (WHK-01); NewDispatcher
+	// sets the memory repository of its subscriptions.
+	subscriptions deactivator
+	// outbox keeps the webhook.dead events MoveToDeadLetter records, as
+	// the PostgreSQL store appends them to event_outbox (tests).
+	outbox []events.Event
+}
+
+// deadEvent is webhook.dead of a delivery moved to the dead-letter queue
+// (NTF-05): the owners of the subscription are notified, also that it was
+// switched off (disabled).
+func deadEvent(rec *DeliveryRecord, disabled bool) *events.Event {
+	return &events.Event{OrgID: rec.OrganizationID, Type: events.WebhookDead, EntityID: rec.SubscriptionID,
+		Data: map[string]any{"delivery_id": rec.ID, "subscription_id": rec.SubscriptionID, "event": rec.Event,
+			"attempts": rec.Attempt, "last_error": rec.Error, "subscription_disabled": disabled}}
 }
 
 // NewMemoryDeliveryStore creates an empty in-memory delivery store.
@@ -104,8 +142,17 @@ func (s *MemoryDeliveryStore) Enqueue(_ context.Context, rec DeliveryRecord) (De
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.seq++
-	rec.ID = fmt.Sprintf("%08d-0000-0000-0000-%012d", s.seq, s.seq)
+	if rec.EventID != "" {
+		for id := range s.items {
+			if s.items[id].EventID == rec.EventID && s.items[id].SubscriptionID == rec.SubscriptionID {
+				return s.items[id], ErrDeliveryExists
+			}
+		}
+	}
+	if rec.ID == "" {
+		s.seq++
+		rec.ID = fmt.Sprintf("%08d-0000-0000-0000-%012d", s.seq, s.seq)
+	}
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
 	}
@@ -127,6 +174,7 @@ func (s *MemoryDeliveryStore) Update(_ context.Context, rec DeliveryRecord) erro
 	}
 	rec.Payload = existing.Payload
 	rec.CreatedAt = existing.CreatedAt
+	rec.EventID, rec.EventSequence, rec.EntitySeq = existing.EventID, existing.EventSequence, existing.EntitySeq
 	s.items[rec.ID] = rec
 	return nil
 }
@@ -185,19 +233,28 @@ func (s *MemoryDeliveryStore) ListBySubscription(_ context.Context, orgID, subsc
 	return all[start:end], total, nil
 }
 
-// MoveToDeadLetter records the delivery in the dead-letter queue and marks it
-// dead. Calling it twice for the same delivery is a no-op.
-func (s *MemoryDeliveryStore) MoveToDeadLetter(_ context.Context, rec DeliveryRecord) error {
+// MoveToDeadLetter implements DeliveryStore under the store's lock.
+// Calling it twice for the same delivery is a no-op.
+func (s *MemoryDeliveryStore) MoveToDeadLetter(ctx context.Context, rec *DeliveryRecord, since time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	existing, ok := s.items[rec.ID]
 	if !ok || existing.OrganizationID != rec.OrganizationID {
-		return fmt.Errorf("delivery not found")
+		return false, fmt.Errorf("delivery not found")
 	}
 	if _, ok := s.deadLetters[rec.ID]; ok {
-		return nil
+		return false, nil
 	}
+	dead := 1
+	for id := range s.deadLetters {
+		if dl := s.deadLetters[id]; dl.OrganizationID == rec.OrganizationID && dl.SubscriptionID == rec.SubscriptionID && !dl.DeadAt.Before(since) {
+			dead++
+		}
+	}
+	// A subscription that is gone is not switched off.
+	disabled := dead >= deadLimit && s.subscriptions != nil &&
+		s.subscriptions.Deactivate(ctx, rec.OrganizationID, rec.SubscriptionID) == nil
 
 	s.deadLetters[rec.ID] = DeadLetter{
 		ID:             fmt.Sprintf("dlq-%s", rec.ID),
@@ -219,20 +276,29 @@ func (s *MemoryDeliveryStore) MoveToDeadLetter(_ context.Context, rec DeliveryRe
 	existing.Error = rec.Error
 	existing.NextRetryAt = nil
 	s.items[rec.ID] = existing
-	return nil
+	s.outbox = append(s.outbox, *deadEvent(rec, disabled))
+	return disabled, nil
 }
 
 // ListDeadLetters returns the dead-letter queue of one tenant, newest first.
 func (s *MemoryDeliveryStore) ListDeadLetters(_ context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	return s.listDeadLetters(orgID, page, nil)
+}
 
+// listDeadLetters returns the dead letters of one tenant whose subscription
+// keep accepts (nil: every one), newest first.
+func (s *MemoryDeliveryStore) listDeadLetters(orgID string, page api.PaginationParams, keep func(subscriptionID string) bool) ([]DeadLetter, int, error) {
+	s.mu.RLock()
 	var all []DeadLetter
 	for _, dl := range s.deadLetters {
 		if dl.OrganizationID != orgID {
 			continue
 		}
 		all = append(all, dl)
+	}
+	s.mu.RUnlock()
+	if keep != nil {
+		all = slices.DeleteFunc(all, func(dl DeadLetter) bool { return !keep(dl.SubscriptionID) })
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].DeadAt.After(all[j].DeadAt) })
 

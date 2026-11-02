@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 )
 
 // These tests run against a migrated PostgreSQL instance (see the migrations CI
@@ -124,17 +125,18 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 }
 
 // scoped opens a pool through the production constructor (which switches into
-// the restricted application role and verifies RLS is enforced) and pins it to
-// the given organization.
-func scoped(t *testing.T, ctx context.Context, dsn, orgID string) *pgxpool.Pool {
+// the restricted application role and verifies RLS is enforced) with the
+// runtime test login and pins it to the given organization.
+func scoped(t *testing.T, ctx context.Context, orgID string) *pgxpool.Pool {
 	t.Helper()
 	// The tenant GUC is set on the session below, so every query must run on
 	// that one connection: a second pooled connection would lack it.
+	appDSN := scopetest.AppDSN(t)
 	sep := "?"
-	if strings.Contains(dsn, "?") {
+	if strings.Contains(appDSN, "?") {
 		sep = "&"
 	}
-	pool, err := database.NewPool(ctx, dsn+sep+"pool_max_conns=1")
+	pool, err := database.NewPool(ctx, appDSN+sep+"pool_max_conns=1")
 	if err != nil {
 		t.Fatalf("pool for org %s: %v", orgID, err)
 	}
@@ -183,7 +185,7 @@ func TestRowLevelSecurityBlocksCrossTenantAccess(t *testing.T) {
 	dsn := testDatabaseURL(t)
 	ctx := context.Background()
 	seed(t, ctx, dsn)
-	pool := scoped(t, ctx, dsn, orgA)
+	pool := scoped(t, ctx, orgA)
 
 	t.Run("list is filtered", func(t *testing.T) {
 		for _, table := range []string{"ci", "asset", "ci_type", "relationship_type"} {
@@ -268,7 +270,7 @@ func TestAuditLogIsAppendOnly(t *testing.T) {
 	dsn := testDatabaseURL(t)
 	ctx := context.Background()
 	seed(t, ctx, dsn)
-	pool := scoped(t, ctx, dsn, orgA)
+	pool := scoped(t, ctx, orgA)
 
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO audit_log (organization_id, action, resource_type, resource_id)
@@ -289,7 +291,7 @@ func TestAssetMovementIsAppendOnly(t *testing.T) {
 	dsn := testDatabaseURL(t)
 	ctx := context.Background()
 	seed(t, ctx, dsn)
-	pool := scoped(t, ctx, dsn, orgA)
+	pool := scoped(t, ctx, orgA)
 
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO asset_movement (organization_id, asset_id, movement_type)

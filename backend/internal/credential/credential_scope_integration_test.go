@@ -3,6 +3,8 @@ package credential_test
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -66,5 +68,55 @@ func TestCredentialRepositoryClientScope(t *testing.T) {
 
 	if _, err = repo.List(context.Background(), f.OrgA); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
+	}
+}
+
+// TestCredentialKindNASMigration covers migration 000149 (WP-379, E-68): the
+// CHECK constraint of credential.kind accepts the kind nas, still refuses
+// unknown kinds, and the down migration aborts with a message while a
+// credential of kind nas exists; without one it reverts. Both down runs are
+// rolled back.
+func TestCredentialKindNASMigration(t *testing.T) {
+	f := scopetest.Seed(t, "15")
+	bg := context.Background()
+	repo := credential.NewPGRepository(f.App)
+	orgCtx := f.OrgCtx(f.OrgA)
+
+	nas := &credential.StoredCredential{
+		Credential: credential.Credential{OrganizationID: f.OrgA, Name: "nas-admin", Kind: credential.KindNAS, KeyVersion: 1},
+		Ciphertext: []byte("ciphertext"),
+	}
+	if err := repo.Create(orgCtx, nas); err != nil {
+		t.Fatalf("create kind nas: %v", err)
+	}
+	unknown := &credential.StoredCredential{
+		Credential: credential.Credential{OrganizationID: f.OrgA, Name: "telnet", Kind: "telnet", KeyVersion: 1},
+		Ciphertext: []byte("ciphertext"),
+	}
+	if err := repo.Create(orgCtx, unknown); err == nil {
+		t.Fatal("the constraint accepted the unknown kind telnet")
+	}
+
+	down, err := os.ReadFile("../../migrations/000149_credential_kind_nas.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revert := func() error {
+		tx, beginErr := f.Admin.Begin(bg)
+		if beginErr != nil {
+			t.Fatal(beginErr)
+		}
+		defer func() { _ = tx.Rollback(bg) }()
+		_, execErr := tx.Exec(bg, string(down))
+		return execErr
+	}
+	if err = revert(); err == nil || !strings.Contains(err.Error(), "credentials of kind nas; migration 000149 cannot be reverted") {
+		t.Fatalf("down with a nas credential: %v, want the refusal", err)
+	}
+	if err = repo.Delete(orgCtx, f.OrgA, nas.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = revert(); err != nil {
+		t.Fatalf("down without a nas credential: %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -12,12 +13,17 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 )
 
 const collectorSelectColumns = `
@@ -44,11 +50,24 @@ type PGRepository struct {
 	pool *pgxpool.Pool
 	// lockTimeout replaces ingestLockTimeout when set (tests).
 	lockTimeout time.Duration
+	// bus announces disables (WithDisableAnnouncer).
+	bus *nats.Conn
+	// tracker mirrors the status changes of discovery jobs into the
+	// generic job model (JOB-01); set by Handler.WithJobTracker.
+	tracker jobs.Tracker
 }
 
 // NewPGRepository creates a new PostgreSQL-backed discovery repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{PGRepository: reviews.NewPGRepository(pool), pool: pool}
+}
+
+// WithDisableAnnouncer makes UpdateCollector announce every disable on the
+// internal NATS once committed (AnnounceDisabled): the edge worker of one
+// replica, whichever, cuts the collector's open connections (COL-04, F-025).
+func (r *PGRepository) WithDisableAnnouncer(nc *nats.Conn) *PGRepository {
+	r.bus = nc
+	return r
 }
 
 // Discovery jobs, review items and suppressions carry no client column yet
@@ -57,7 +76,10 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 // a job through its collector, a review item through all its candidate CIs, a
 // suppression through both CIs.
 const (
-	jobVisible         = "(discovery_job.collector_id IS NULL OR EXISTS (SELECT 1 FROM collector WHERE collector.id = discovery_job.collector_id))"
+	jobVisible = "(discovery_job.collector_id IS NULL OR EXISTS (SELECT 1 FROM collector WHERE collector.id = discovery_job.collector_id))"
+	// jobAdHoc matches the discovery jobs the collector runs; a job with a
+	// kind in its config (iga_relay) belongs to another executor.
+	jobAdHoc           = "COALESCE(discovery_job.config->>'kind', '') = ''"
 	suppressionVisible = `EXISTS (SELECT 1 FROM ci WHERE ci.id = relationship_suppression.source_ci_id)
 	AND EXISTS (SELECT 1 FROM ci WHERE ci.id = relationship_suppression.target_ci_id)`
 )
@@ -109,6 +131,28 @@ func (r *PGRepository) ListCollectors(ctx context.Context, orgID string, page ap
 	})
 
 	return items, total, err
+}
+
+// CountCollectors implements Repository. It counts in an org-wide
+// transaction: max_collectors is a quota of the organization, and a client-
+// or site-scoped caller must not stay below it by seeing fewer collectors.
+func (r *PGRepository) CountCollectors(ctx context.Context, orgID string) (int64, error) {
+	scope := database.OrgWideScope(orgID, "")
+	var n int64
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		n, err = countCollectors(ctx, tx, orgID)
+		return err
+	})
+	return n, err
+}
+
+func countCollectors(ctx context.Context, tx pgx.Tx, orgID string) (int64, error) {
+	var n int64
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM collector WHERE organization_id = $1 AND status <> 'disabled'`, orgID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count collectors: %w", err)
+	}
+	return n, nil
 }
 
 func (r *PGRepository) RegisterCollector(ctx context.Context, c *Collector) error {
@@ -180,14 +224,34 @@ func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string)
 	return status, err
 }
 
+// CollectorStatus implements Repository.
+func (r *PGRepository) CollectorStatus(ctx context.Context, orgID, collectorID string) (string, error) {
+	if !audit.IsUUID(collectorID) {
+		return "", api.ErrNotFound
+	}
+	var status string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT status FROM collector WHERE id = $1 AND organization_id = $2`, collectorID, orgID).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		return err
+	})
+	return status, err
+}
+
 // UpdateCollector implements Repository.
 func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error) {
+	// A malformed id names no collector either (404, F-257).
+	if !audit.IsUUID(collectorID) {
+		return nil, api.ErrNotFound
+	}
 	var out *Collector
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		current, err := scanCollector(tx.QueryRow(ctx, `SELECT `+collectorSelectColumns+
 			` FROM collector WHERE id = $1 AND organization_id = $2 FOR UPDATE`, collectorID, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not found")
+			return api.ErrNotFound
 		}
 		if err != nil {
 			return err
@@ -218,6 +282,14 @@ func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID s
 		}
 		return nil
 	})
+	// Open connections outlive the revocation: the edge workers cut them.
+	// A repeated disable is announced again (another cut).
+	if err == nil && r.bus != nil && patch.Status != nil && out.Status == CollectorDisabled {
+		if aerr := AnnounceDisabled(r.bus, orgID, collectorID); aerr != nil {
+			slog.Error("announce the disable of a collector", "event", "discovery.collector.kick_failed",
+				"organization_id", orgID, "collector_id", collectorID, "error", aerr)
+		}
+	}
 	return out, err
 }
 
@@ -361,6 +433,107 @@ func (r *PGRepository) CreateJob(ctx context.Context, j *Job) error {
 	})
 }
 
+// setJobTracker implements jobTrackingRepository.
+func (r *PGRepository) setJobTracker(tracker jobs.Tracker) {
+	r.tracker = tracker
+}
+
+// UpdateJobStatus sets the status of a discovery job of the tenant scope:
+// running stamps started_at, completed and failed stamp completed_at, and a
+// failed job keeps errMsg as its cause (JobErrorOf). Once committed, the
+// generic job of the discovery job takes the status (JOB-01, like the export
+// worker); a failure there is logged and the status stays. The options
+// require a status the job has (JobFrom) or its collector (JobOfCollector)
+// and add the result (JobResult); a job that does not match is not found.
+func (r *PGRepository) UpdateJobStatus(ctx context.Context, orgID, id, status, errMsg string, opts ...JobUpdateOption) (*Job, error) {
+	mirrored, ok := jobMirrorStatus[status]
+	if !ok {
+		return nil, &api.FieldError{Field: "status", Message: "invalid discovery job status"}
+	}
+	if status != JobStatusFailed {
+		errMsg = ""
+	}
+	var u jobUpdate
+	for _, opt := range opts {
+		opt(&u)
+	}
+	var result any
+	if u.result != nil {
+		result = u.result
+	}
+	var job *Job
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf(`
+			UPDATE discovery_job SET
+				status = $3,
+				started_at = CASE WHEN $3 = 'pending' THEN started_at ELSE COALESCE(started_at, now()) END,
+				completed_at = CASE WHEN $3 IN ('completed', 'failed') THEN now() ELSE NULL END,
+				result_summary = CASE WHEN $4 = '' AND $7::jsonb IS NULL THEN result_summary
+					ELSE COALESCE(result_summary, '{}'::jsonb) || COALESCE($7::jsonb, '{}'::jsonb)
+						|| CASE WHEN $4 = '' THEN '{}'::jsonb ELSE jsonb_build_object('error', $4::text) END END
+			WHERE id = $1 AND organization_id = $2 AND %s
+				AND ($5::text[] IS NULL OR status = ANY($5::text[]))
+				AND ($6 = '' OR collector_id::text = $6)
+			RETURNING %s`, jobVisible, jobSelectColumns)
+		scanned, err := scanJob(tx.QueryRow(ctx, query, id, orgID, status, errMsg, u.from, u.collectorID, result))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return fmt.Errorf("update discovery job status: %w", err)
+		}
+		job = scanned
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if r.tracker != nil {
+		if err := r.tracker.Mirror(ctx, orgID, "discovery_job", id, mirrored, errMsg); err != nil {
+			slog.Warn("mirror discovery job", "job", id, "status", status, "error", err)
+		}
+	}
+	return job, nil
+}
+
+// OpenCollectorJobs returns the oldest pending ad-hoc jobs of a collector
+// (JobRunRepository).
+func (r *PGRepository) OpenCollectorJobs(ctx context.Context, orgID, collectorID string, limit int) ([]Job, error) {
+	return r.queryJobs(ctx, orgID, fmt.Sprintf(`SELECT %s FROM discovery_job
+		WHERE organization_id = $1 AND collector_id = $2 AND status = 'pending' AND %s AND %s
+		ORDER BY created_at LIMIT $3`, jobSelectColumns, jobAdHoc, jobVisible), orgID, collectorID, limit)
+}
+
+// OverdueJobs returns the pending or running ad-hoc jobs whose last status
+// change (created_at, started_at) lies before before (JobRunRepository).
+func (r *PGRepository) OverdueJobs(ctx context.Context, orgID string, before time.Time, limit int) ([]Job, error) {
+	return r.queryJobs(ctx, orgID, fmt.Sprintf(`SELECT %s FROM discovery_job
+		WHERE organization_id = $1 AND status IN ('pending', 'running') AND COALESCE(started_at, created_at) < $2
+			AND %s AND %s
+		ORDER BY created_at LIMIT $3`, jobSelectColumns, jobAdHoc, jobVisible), orgID, before, limit)
+}
+
+// queryJobs reads discovery jobs in the tenant scope.
+func (r *PGRepository) queryJobs(ctx context.Context, orgID, query string, args ...any) ([]Job, error) {
+	out := make([]Job, 0)
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list discovery jobs: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			job, err := scanJob(rows)
+			if err != nil {
+				return fmt.Errorf("scan discovery job: %w", err)
+			}
+			out = append(out, *job)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (r *PGRepository) GetJob(ctx context.Context, orgID, id string) (*Job, error) {
 	var job *Job
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -496,6 +669,48 @@ func (r *PGRepository) LookupCITypeIDs(ctx context.Context, orgID string, namesO
 	return types, nil
 }
 
+// LookupCITypeIDsWithUnique implements CITypeUniqueLookup: the types of
+// LookupCITypeIDs and, in the same statement, per type id the keys of its
+// unique attributes and of the global ones (MET-15, F-432), as
+// ci.PGRepository.UniqueConflicts selects them.
+func (r *PGRepository) LookupCITypeIDsWithUnique(ctx context.Context, orgID string, namesOrKeys []string) (
+	types map[string]string, unique map[string][]string, err error) {
+	types, unique = map[string]string{}, map[string][]string{}
+	if len(namesOrKeys) == 0 {
+		return types, unique, nil
+	}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, qerr := tx.Query(ctx, `
+			SELECT DISTINCT ON (k.name) k.name, t.id::text,
+				ARRAY(SELECT d.key FROM attribute_definition d
+					WHERE d.is_unique AND (d.ci_type_id = t.id OR d.ci_type_id IS NULL)
+					  AND (d.organization_id = $2::uuid OR d.organization_id IS NULL)
+					ORDER BY d.key)
+			FROM unnest($1::text[]) AS k(name)
+			JOIN ci_type t ON (t.key = k.name OR t.name = k.name)
+			  AND (t.organization_id IS NULL OR t.organization_id = $2)
+			ORDER BY k.name, t.organization_id NULLS LAST, t.id
+		`, namesOrKeys, orgID)
+		if qerr != nil {
+			return qerr
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, id string
+			var keys []string
+			if serr := rows.Scan(&name, &id, &keys); serr != nil {
+				return serr
+			}
+			types[name], unique[id] = id, keys
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("lookup ci types: %w", err)
+	}
+	return types, unique, nil
+}
+
 // RunInTx implements TxRunner: fn runs in one transaction of the context's
 // tenant scope, which every repository call with fn's context joins.
 func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
@@ -586,9 +801,10 @@ var ciCountLockSQL = boundedLocksSQL("$1", `SELECT CASE WHEN $3 THEN pg_advisory
 
 // LockCICount implements CICountLocker: it takes the organization's max_cis
 // lock, exclusive or shared, until the end of the context transaction and
-// then counts the CIs the transaction sees, as ci.List counts them. The
-// count is a statement of its own, so it sees what every holder before
-// committed.
+// then counts the active CIs of the organization, also those outside the
+// scope of the transaction (ci_active_count, migration 000186, F-403), as
+// ci.CountActive counts them. The count is a statement of its own, so it
+// sees what every holder before committed.
 func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive bool) (int64, error) {
 	key := ingestLockKey(ciCountLockNamespace + strings.ToLower(orgID))
 	var count int64
@@ -596,7 +812,7 @@ func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive 
 		if _, err := tx.Exec(ctx, ciCountLockSQL, r.lockTimeoutSetting(), key, exclusive); err != nil {
 			return fmt.Errorf("lock max_cis: %w", err)
 		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID).Scan(&count); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT ci_active_count()`).Scan(&count); err != nil {
 			return fmt.Errorf("count cis: %w", err)
 		}
 		return nil
@@ -604,16 +820,40 @@ func (r *PGRepository) LockCICount(ctx context.Context, orgID string, exclusive 
 	return count, err
 }
 
-// CreateEnrollmentCode stores the hash of a new enrollment code.
+// CreateEnrollmentCode stores the hash of a new enrollment code with its
+// client and site binding (F-406, migration 000187): the site decides the
+// client, and collector_enrollment_code_scope_insert admits only a binding
+// within the scope of the transaction, as collector_isolation does for
+// POST /collectors.
 func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *EnrollmentCode) error {
-	return database.WithRequestTenant(ctx, r.pool, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithRequestTenant(ctx, r.pool, code.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-			INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at)
-			VALUES ($1, $2, $3, $4)
-			RETURNING id::text, created_at
-		`, code.OrganizationID, enrollmentCodeHash(code.RawCode()), code.Label, code.ExpiresAt).
-			Scan(&code.ID, &code.CreatedAt)
+			INSERT INTO collector_enrollment_code (organization_id, code_hash, label, expires_at, created_by,
+				binding_recorded, client_id, site_id)
+			VALUES ($1, $2, $3, $4, $5, true, $6, $7)
+			RETURNING id::text, created_at, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
+		`, code.OrganizationID, enrollmentCodeHash(code.RawCode()), code.Label, code.ExpiresAt, nilIfEmpty(code.CreatedBy),
+			nilIfEmpty(code.ClientID), nilIfEmpty(code.SiteID)).
+			Scan(&code.ID, &code.CreatedAt, &code.ClientID, &code.SiteID)
 	})
+	return enrollmentCodeError(err)
+}
+
+// enrollmentCodeError names the request field of a refused binding.
+func enrollmentCodeError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.ConstraintName {
+	case "collector_enrollment_code_client_fkey":
+		return &api.FieldError{Field: "client_id", Message: "client not found", Status: http.StatusUnprocessableEntity}
+	case "collector_enrollment_code_site_fkey":
+		return &api.FieldError{Field: "site_id", Message: "site not found", Status: http.StatusUnprocessableEntity}
+	case "collector_enrollment_code_site_client":
+		return &api.FieldError{Field: "site_id", Message: "the site belongs to another client", Status: http.StatusUnprocessableEntity}
+	}
+	return err
 }
 
 // EnrollCollector consumes a code and registers the collector in one
@@ -622,15 +862,25 @@ func (r *PGRepository) CreateEnrollmentCode(ctx context.Context, code *Enrollmen
 // the read-only system flag (the hash is the credential). The consuming
 // UPDATE … WHERE used_at IS NULL … RETURNING lets concurrent enrollments
 // with one code succeed exactly once; a failed registration leaves the
-// code unused.
+// code unused and writes no collector.enrolled.
 func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *Collector, issue CertIssuer) (*IssuedCert, error) {
+	return r.EnrollCollectorWithQuota(ctx, rawCode, c, issue, nil)
+}
+
+// EnrollCollectorWithQuota implements Repository: max_collectors is
+// counted and checked in the enrollment transaction before the code is
+// consumed, so a refusal rolls back and leaves the code unused.
+func (r *PGRepository) EnrollCollectorWithQuota(ctx context.Context, rawCode string, c *Collector, issue CertIssuer, quota QuotaGuard) (*IssuedCert, error) {
 	hash := enrollmentCodeHash(rawCode)
-	var orgID string
+	var orgID, boundClient, boundSite string
 	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		// A code without a recorded binding (minted before migration 000187)
+		// is not redeemed: its creator's scope is not known (F-406).
 		lookupErr := tx.QueryRow(ctx, `
-			SELECT organization_id::text FROM collector_enrollment_code
-			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
-		`, hash).Scan(&orgID)
+			SELECT organization_id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
+			FROM collector_enrollment_code
+			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now() AND binding_recorded
+		`, hash).Scan(&orgID, &boundClient, &boundSite)
 		if lookupErr == pgx.ErrNoRows {
 			return errEnrollmentCodeInvalid
 		}
@@ -644,13 +894,29 @@ func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *C
 	}
 
 	c.OrganizationID = orgID
+	// The collector lands in the client and site of the code; a client or
+	// site of the request outside them registers nothing (F-406).
+	if berr := applyEnrollmentBinding(boundClient, boundSite, c); berr != nil {
+		return nil, berr
+	}
 	scope := database.OrgWideScope(orgID, "")
 	var cert *IssuedCert
 	err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		if quota != nil {
+			current, countErr := countCollectors(ctx, tx, orgID)
+			if countErr != nil {
+				return countErr
+			}
+			// The guard reads the entitlements in this transaction.
+			qctx := database.ContextWithTx(database.ContextWithTenantScope(ctx, &scope), tx)
+			if qerr := quota.AllowCreate(qctx, orgID, entitlement.LimitMaxCollectors, current); qerr != nil {
+				return qerr
+			}
+		}
 		var codeID string
 		consumeErr := tx.QueryRow(ctx, `
 			UPDATE collector_enrollment_code SET used_at = now()
-			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()
+			WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now() AND binding_recorded
 			RETURNING id::text
 		`, hash).Scan(&codeID)
 		if consumeErr == pgx.ErrNoRows {
@@ -670,19 +936,35 @@ func (r *PGRepository) EnrollCollector(ctx context.Context, rawCode string, c *C
 		if insErr != nil {
 			return collectorError(fmt.Errorf("register collector: %w", insErr))
 		}
+		if (boundClient != "" && !strings.EqualFold(created.ClientID, boundClient)) ||
+			(boundSite != "" && !strings.EqualFold(created.SiteID, boundSite)) {
+			return fmt.Errorf("register collector: client %q site %q outside the binding of the enrollment code", created.ClientID, created.SiteID)
+		}
 		*c = *created
 		if _, uerr := tx.Exec(ctx, `UPDATE collector_enrollment_code SET used_by_collector_id = $2 WHERE id = $1`,
 			codeID, c.ID); uerr != nil {
 			return fmt.Errorf("record enrolled collector: %w", uerr)
 		}
-		if issue == nil {
-			return nil
+		if issue != nil {
+			// No change of the collector CA runs while the certificate is
+			// issued and recorded (lockCAShared).
+			if lerr := lockCAShared(ctx, tx); lerr != nil {
+				return lerr
+			}
+			var ierr error
+			if cert, ierr = issue(ctx, orgID, c.ID); ierr != nil {
+				return ierr
+			}
+			if rerr := recordCertificateTx(ctx, tx, orgID, c, cert); rerr != nil {
+				return rerr
+			}
 		}
-		var ierr error
-		if cert, ierr = issue(ctx, orgID, c.ID); ierr != nil {
-			return ierr
-		}
-		return recordCertificateTx(ctx, tx, orgID, c, cert)
+		// collector.enrolled (EVT-02) commits with the collector, after its
+		// other writes; the data leaves out the configuration.
+		_, eerr := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.CollectorEnrolled, EntityID: c.ID,
+			Data: map[string]any{"id": c.ID, "name": c.Name, "version": c.Version, "client_id": c.ClientID, "site_id": c.SiteID,
+				"status": c.Status, "cert_fingerprint": c.CertFingerprint, "cert_not_after": c.CertNotAfter}})
+		return eerr
 	})
 	return cert, err
 }
@@ -702,10 +984,16 @@ func recordCertificateTx(ctx context.Context, tx pgx.Tx, orgID string, c *Collec
 	return nil
 }
 
-// RenewCertificate implements Repository: the collector is locked, its
-// newest valid certificate decides whether renewal is due; the former
-// certificate stays valid until it expires.
-func (r *PGRepository) RenewCertificate(ctx context.Context, orgID, collectorID string, issue CertIssuer) (*IssuedCert, error) {
+// RenewEdgeCertificate issues the successor of the collector's certificate
+// predecessor (serial, hex) for a renewal request whose signature with that
+// certificate's key the caller verified (CertificateRenewal): the
+// collector is locked, it must not be disabled, the predecessor must be its
+// own and not revoked, and a predecessor renewed within the replay window
+// of the request gets no second successor (ErrRenewalNotDue). The successor
+// is recorded and audited (collector.certificate_issued) in the same
+// transaction; the predecessor stays valid until the collector connects
+// with the successor or SupersededGrace passed (RunEdge).
+func (r *PGRepository) RenewEdgeCertificate(ctx context.Context, orgID, collectorID, predecessor string, issue CertIssuer) (*IssuedCert, error) {
 	var cert *IssuedCert
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		c, err := scanCollector(tx.QueryRow(ctx, `SELECT `+collectorSelectColumns+
@@ -719,24 +1007,40 @@ func (r *PGRepository) RenewCertificate(ctx context.Context, orgID, collectorID 
 		if c.Status == CollectorDisabled {
 			return ErrCollectorDisabled
 		}
-		var notBefore, notAfter time.Time
-		err = tx.QueryRow(ctx, `SELECT not_before, not_after FROM collector_certificate
-			WHERE collector_id = $1 AND revoked_at IS NULL AND not_after > now() ORDER BY not_after DESC LIMIT 1`,
-			collectorID).Scan(&notBefore, &notAfter)
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-		case err != nil:
+		var current, renewed bool
+		if err = tx.QueryRow(ctx, `SELECT p.revoked_at IS NULL, EXISTS (SELECT 1 FROM collector_certificate n
+				WHERE n.collector_id = p.collector_id AND n.created_at > p.created_at AND n.created_at > now() - make_interval(secs => $3))
+			FROM collector_certificate p WHERE p.collector_id = $1 AND p.serial = $2`,
+			collectorID, predecessor, renewalReplayWindow.Seconds()).Scan(&current, &renewed); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
-		case !NeedsRenewal(notBefore, notAfter, time.Now().UTC()):
-			return ErrRenewalNotDue
+		}
+		switch {
+		case !current:
+			return errCertificateNotCurrent
+		case renewed:
+			return fmt.Errorf("%w: the certificate was renewed within the last %s", ErrRenewalNotDue, renewalReplayWindow)
+		}
+		if lerr := lockCAShared(ctx, tx); lerr != nil {
+			return lerr
 		}
 		if cert, err = issue(ctx, orgID, collectorID); err != nil {
 			return err
 		}
-		return recordCertificateTx(ctx, tx, orgID, c, cert)
+		if rerr := recordCertificateTx(ctx, tx, orgID, c, cert); rerr != nil {
+			return rerr
+		}
+		_, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{OrganizationID: orgID, ActorType: "system",
+			Action: "collector.certificate_issued", ResourceType: "collector", ResourceID: collectorID, Source: audit.SourceCollector,
+			Changes: map[string]interface{}{"serial": cert.Serial, "predecessor_serial": predecessor, "fingerprint": cert.Fingerprint,
+				"not_after": cert.NotAfter.UTC().Format(time.RFC3339)}})
+		return err
 	})
 	return cert, err
 }
+
+// errCertificateNotCurrent: the certificate of a renewal request is no
+// recorded, unrevoked certificate of the collector.
+var errCertificateNotCurrent = errors.New("the certificate is no current certificate of the collector")
 
 // errEnrollmentCodeInvalid is returned for unknown, expired and used codes
 // alike, so a caller learns nothing about which case applies.
@@ -801,11 +1105,11 @@ func (r *PGRepository) MarkRecordsProcessed(ctx context.Context, orgID string, r
 const identityPage = 1000
 
 // IdentityCandidates returns the ids of the CIs an incoming device may be,
-// using the indexes on serial number, hardware UUID, primary MAC, management
-// IP and hostname/FQDN plus the attribute index for interface MACs, over the
-// whole inventory of the organization (REC-02, NFR-01). The matches are read
-// page by page on (created_at, id) without an upper bound (WP-205).
-// Soft-deleted CIs are excluded.
+// using the indexes on serial number, hardware UUID, management IP and
+// hostname/FQDN plus the MAC index of ci_identity_mac for primary and
+// interface MACs, over the whole inventory of the organization (REC-02,
+// NFR-01). The matches are read page by page on (created_at, id) without an
+// upper bound (WP-205). Soft-deleted CIs are excluded.
 func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *IdentityQuery) ([]string, error) {
 	var ids []string
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -848,6 +1152,73 @@ func (r *PGRepository) IdentityCandidates(ctx context.Context, orgID string, q *
 	return ids, err
 }
 
+// PowerDevices lists the live CIs of the organization whose stored report
+// holds outlets (raw_data.power.outlets, IMP-09), in the tenant scope of
+// ctx, for the feeds of new CIs (derivePowerFeedsOf).
+func (r *PGRepository) PowerDevices(ctx context.Context, orgID string) ([]StoredPowerDevice, error) {
+	var out []StoredPowerDevice
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text, attributes->'raw_data'->'power'->'outlets' FROM ci
+			WHERE organization_id = $1 AND deleted_at IS NULL
+			AND jsonb_typeof(attributes->'raw_data'->'power'->'outlets') = 'array'
+			ORDER BY created_at, id`, orgID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d StoredPowerDevice
+			if err := rows.Scan(&d.ID, &d.Outlets); err != nil {
+				return err
+			}
+			out = append(out, d)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// NeighborReporters lists the live CIs of the organization whose stored
+// report holds an LLDP/CDP neighbor naming one of the keys
+// (raw_data.neighbors, F-374), in the tenant scope of ctx, for the edges
+// to new CIs (deriveNeighborsOf). The stored values are trimmed; the IP and
+// hostname compare in lower case, the MAC without separators, as
+// normalizeKey and normalizeMAC do.
+func (r *PGRepository) NeighborReporters(ctx context.Context, orgID string, keys *NeighborKeys) ([]NeighborReporter, error) {
+	var out []NeighborReporter
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.id::text, c.attributes->'raw_data'->'neighbors' FROM ci c
+			WHERE c.organization_id = $1 AND c.deleted_at IS NULL
+			AND jsonb_typeof(c.attributes->'raw_data'->'neighbors') = 'array'
+			AND EXISTS (SELECT 1 FROM jsonb_array_elements(c.attributes->'raw_data'->'neighbors') n
+				WHERE lower(n->>'remote_ip') = ANY($2::text[])
+				OR translate(lower(n->>'remote_mac'), ':-.', '') = ANY($3::text[])
+				OR lower(n->>'remote_hostname') = ANY($4::text[]))
+			ORDER BY c.created_at, c.id`, orgID, nonNil(keys.IPs), nonNil(keys.MACs), nonNil(keys.Hostnames))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n NeighborReporter
+			if err := rows.Scan(&n.ID, &n.Neighbors); err != nil {
+				return err
+			}
+			out = append(out, n)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// nonNil is list, or an empty list for nil (an empty array, not NULL).
+func nonNil(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
+}
+
 // DiscoveryEdge finds the edge of a type between two CIs with an index
 // lookup instead of listing every edge of the source (WP-205): a core switch
 // with thousands of neighbours is re-confirmed without a scan or a cap.
@@ -866,6 +1237,43 @@ func (r *PGRepository) DiscoveryEdge(ctx context.Context, orgID, sourceID, targe
 		return nil
 	})
 	return id, source, found, err
+}
+
+// DiscoveryEdges finds the edges of several (source, target, type) keys with
+// one statement, each as DiscoveryEdge finds it: the oldest edge of the key
+// (WP-608, NFR-03). A key without an edge is missing from the map. The
+// re-discovery of a batch reads the edges of all its devices at once
+// instead of one transaction per edge.
+func (r *PGRepository) DiscoveryEdges(ctx context.Context, orgID string, keys []EdgeKey) (map[EdgeKey]FoundEdge, error) {
+	out := make(map[EdgeKey]FoundEdge, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	sources, targets, types := make([]string, len(keys)), make([]string, len(keys)), make([]string, len(keys))
+	for i, k := range keys {
+		sources[i], targets[i], types[i] = k.SourceCIID, k.TargetCIID, k.RelType
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT ON (k.n) k.n, r.id::text, r.source
+			FROM unnest($2::uuid[], $3::uuid[], $4::text[]) WITH ORDINALITY AS k(source_ci_id, target_ci_id, rel_type, n)
+			JOIN ci_relationship r ON r.organization_id = $1 AND r.source_ci_id = k.source_ci_id
+				AND r.target_ci_id = k.target_ci_id AND r.rel_type = k.rel_type
+			ORDER BY k.n, r.created_at, r.id`, orgID, sources, targets, types)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n int
+			var e FoundEdge
+			if err := rows.Scan(&n, &e.ID, &e.Source); err != nil {
+				return err
+			}
+			out[keys[n-1]] = e
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 // DeletedIdentityCandidates returns the soft-deleted CIs an incoming device
@@ -904,11 +1312,15 @@ func (r *PGRepository) DeletedIdentityCandidates(ctx context.Context, orgID stri
 
 // identityFilter matches CIs by the indexed identity columns of q: only
 // the parts q carries become terms, so the planner combines the indexes on
-// serial number, hardware UUID, primary MAC, interface MACs, management IP
-// and hostname/FQDN (BitmapOr) instead of scanning the inventory (NFR-01,
-// NFR-03). Hostnames compare with the stored lower-case columns (migration
-// 000134): lower() is not leakproof and keeps an index unused under RLS. The arguments start at $2 after the organization; ok is false
-// when q carries no identity.
+// serial number, hardware UUID, management IP, hostname/FQDN and the primary
+// key (BitmapOr) instead of scanning the inventory (NFR-01, NFR-03).
+// Serial numbers, hostnames and FQDNs compare with the stored lower-case
+// columns (migrations 000134 and 000180, F-246): lower() is not leakproof
+// and keeps an index unused under RLS. Primary and interface MACs come from
+// ci_identity_mac (migration 000161, WP-434) with leakproof equality only;
+// the ids are an array of an InitPlan, because an IN sub-select within the
+// OR would be a filter on every CI of the organization. The arguments start
+// at $2 after the organization; ok is false when q carries no identity.
 func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []any, ok bool) {
 	args = []any{orgID}
 	var terms []string
@@ -917,18 +1329,13 @@ func identityFilter(orgID string, q *IdentityQuery) (predicate string, args []an
 		terms = append(terms, fmt.Sprintf(term, len(args)))
 	}
 	if q.SerialNumber != "" {
-		add("serial_number = $%d", q.SerialNumber)
+		add("serial_number_lc = $%d", strings.ToLower(q.SerialNumber))
 	}
 	if q.HardwareUUID != "" {
 		add("hardware_uuid = $%d::uuid", q.HardwareUUID)
 	}
 	if len(q.MACs) > 0 {
-		add("primary_mac = ANY($%d::macaddr[])", q.MACs)
-		macDocs := make([]string, 0, len(q.MACs))
-		for _, mac := range q.MACs {
-			macDocs = append(macDocs, `{"fingerprint":{"mac_addresses":["`+mac+`"]}}`)
-		}
-		add("attributes @> ANY($%d::jsonb[])", macDocs)
+		add("id = ANY (ARRAY(SELECT ci_id FROM ci_identity_mac WHERE organization_id = $1 AND mac = ANY($%d::macaddr[])))", q.MACs)
 	}
 	if ip := hostOnly(q.ManagementIP); ip != "" {
 		add("management_ip = $%d::inet", ip)
@@ -982,36 +1389,39 @@ func identityBranches(keys *IdentityKeys, deleted bool) (branches []identityBran
 		}
 	}
 	if len(keys.Serials) > 0 {
-		branch("serial", "serial", fmt.Sprintf("$%d::text[]", add(keys.Serials)), "c.serial_number = k.v", "c.serial_number = k.v")
+		serials := make([]string, len(keys.Serials))
+		for i, v := range keys.Serials {
+			serials[i] = strings.ToLower(v)
+		}
+		branch("serial", "serial", fmt.Sprintf("$%d::text[]", add(serials)), "c.serial_number_lc = k.v", "c.serial_number_lc = k.v")
 	}
 	if len(keys.UUIDs) > 0 {
 		branch("uuid", "uuid", fmt.Sprintf("$%d::text[]::uuid[]", add(keys.UUIDs)), "c.hardware_uuid = k.v", "c.hardware_uuid = k.v")
 	}
 	if len(keys.MACs) > 0 {
+		// Primary and interface MACs come from ci_identity_mac (migration
+		// 000161, WP-434): (organization_id, mac) and the join on the
+		// primary key of ci are index conditions; one row per CI and MAC.
+		// The live branch repeats the values as mac = ANY on the side
+		// table, so its scan reads only the batch's MACs whatever join
+		// order the planner picks (with outdated statistics it may start
+		// from the side table and leave mac = k.v to the join). The
+		// parameter is bound as macaddr[]: a cast from text[] is no
+		// leakproof expression and would stay above the RLS barrier.
 		n := add(keys.MACs)
-		branch("primary_mac", "mac", fmt.Sprintf("$%d::text[]::macaddr[]", n), "c.primary_mac = k.v", "c.primary_mac = k.v")
-		// Interface MACs of the fingerprint: jsonb containment is not
-		// leakproof and reads the organization's CIs once per batch (per
-		// record before); the array elements narrow the containment test
-		// to the matching values, the test itself stays exact.
-		state := "IS NULL"
 		if deleted {
-			state = "IS NOT NULL"
-		}
-		var columns string
-		if deleted {
-			columns = "'mac'::text AS kind, k.n, c.id"
+			branches = append(branches, identityBranch{"mac", fmt.Sprintf(`SELECT 'mac'::text AS kind, k.n, d.id
+			FROM unnest($%d::macaddr[]) WITH ORDINALITY AS k(v, n)
+			CROSS JOIN LATERAL (SELECT c.id FROM ci_identity_mac m JOIN ci c ON c.id = m.ci_id
+				WHERE m.organization_id = $1 AND m.mac = k.v AND c.organization_id = $1 AND c.deleted_at IS NOT NULL
+				ORDER BY c.deleted_at DESC, c.id LIMIT 1000) d`, n)})
 		} else {
-			columns = "c.id, c.created_at, 'mac'::text AS kind, k.n"
+			branches = append(branches, identityBranch{"mac", fmt.Sprintf(`SELECT c.id, c.created_at, 'mac'::text AS kind, k.n
+			FROM unnest($%[1]d::macaddr[]) WITH ORDINALITY AS k(v, n)
+			JOIN ci_identity_mac m ON m.organization_id = $1 AND m.mac = k.v AND m.mac = ANY($%[1]d::macaddr[])
+			JOIN ci c ON c.id = m.ci_id
+			WHERE c.organization_id = $1 AND c.deleted_at IS NULL`, n)})
 		}
-		branches = append(branches, identityBranch{"fingerprint_mac", fmt.Sprintf(`SELECT %s
-			FROM ci c
-			CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(c.attributes -> 'fingerprint' -> 'mac_addresses') = 'array'
-				THEN c.attributes -> 'fingerprint' -> 'mac_addresses' END) AS fm(v)
-			JOIN unnest($%d::text[]) WITH ORDINALITY AS k(v, n) ON k.v = fm.v
-			WHERE c.organization_id = $1 AND c.deleted_at %s
-				AND c.attributes @> jsonb_build_object('fingerprint', jsonb_build_object('mac_addresses', jsonb_build_array(k.v)))`,
-			columns, n, state)})
 	}
 	if len(keys.IPs) > 0 {
 		branch("ip", "ip", fmt.Sprintf("$%d::text[]::inet[]", add(keys.IPs)), "c.management_ip = k.v", "c.management_ip = k.v")
@@ -1030,8 +1440,8 @@ func identityBranches(keys *IdentityKeys, deleted bool) (branches []identityBran
 
 // identityHitsSQL is the live candidate query of branches, read page by
 // page on (created_at, id, kind, n) from parameter first on. UNION drops the
-// repeated hit of a MAC that is primary and in the fingerprint, and of a
-// host name that is hostname and FQDN.
+// repeated hit of a host name that is hostname and FQDN (a MAC that is
+// primary and in the fingerprint is one row of ci_identity_mac).
 func identityHitsSQL(branches []identityBranch, first int) string {
 	parts := make([]string, len(branches))
 	for i, b := range branches {

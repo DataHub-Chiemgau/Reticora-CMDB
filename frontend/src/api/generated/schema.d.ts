@@ -30,7 +30,7 @@ export interface paths {
     };
     /**
      * Readiness check
-     * @description Checks the configured dependencies (database with required extensions, Redis, object storage, NATS) with a timeout per check. Liveness stays on /healthz. Failing checks are only named; the cause is logged by the server. On an instance that runs the ingest worker, `details.ingest` reports the last 30-second sample of the ingest lane backlog (WP-334, OPS-05), summed over all organizations, with its `sampled_at`; the request itself makes no call to NATS. The detail is informational and never changes the status.
+     * @description Checks the configured dependencies of the instance with a timeout of two seconds per check (OPS-01): `database` (with the required extensions), `redis`, `object_storage` (a TCP connection to the host:port the S3 client uses for RETICORA_S3_ENDPOINT, also for a URL or an endpoint without port: 443 or 80 by scheme or RETICORA_S3_USE_SSL), `nats`, and `smtp` when RETICORA_SMTP_HOST is set (connection, 220 greeting and EHLO in the TLS mode of RETICORA_SMTP_TLS; no mail is sent and no credentials are used, and one connection answers the requests of a second, WP-442). A dependency that is not configured has no key. While a configured mail server is unreachable, the instance answers 503 and leaves the load balancer. The database check also fails while the event trigger that restricts the application roles to index DDL is disabled or missing, e.g. after an aborted TimescaleDB extension update (WP-604, OPS-01); an extension below the version of its installed library is only logged as a warning by the start check of the server. Liveness stays on /healthz. Failing checks are only named; the server logs "readiness check failed" with the check, its address (without credentials) and the cause once when a check turns unavailable, and "readiness check recovered" once when it passes again. On an instance that runs the ingest worker, `details.ingest` reports the last 30-second sample of the ingest lane backlog (WP-334, OPS-05), summed over all organizations, with its `sampled_at`; the request itself makes no call to NATS. The detail is informational and never changes the status.
      */
     get: operations['getReadiness'];
     put?: never;
@@ -56,7 +56,9 @@ export interface paths {
      *     session. Only members of the operator group (RETICORA_OPERATOR_GROUP,
      *     default "operators") who logged in with a second factor (amr, or acr
      *     in RETICORA_OPERATOR_MFA_ACR) get one. Every attempt is recorded in
-     *     operator_audit. Operator sessions are refused by the tenant API.
+     *     operator_audit; when the entry cannot be written the answer is 500
+     *     and no session is issued (F-208). Operator sessions are refused by
+     *     the tenant API.
      */
     post: operations['operatorLogin'];
     delete?: never;
@@ -72,7 +74,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The authenticated operator */
+    /**
+     * The authenticated operator
+     * @description Like every request under /api/v1/admin, refused ones included, it is recorded in operator_audit; when the entry cannot be written the answer is 500 instead of the response (F-208).
+     */
     get: operations['getOperator'];
     put?: never;
     post?: never;
@@ -89,12 +94,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List every organization */
+    /**
+     * List every organization
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listOrganizationsAsOperator'];
     put?: never;
     /**
      * Create an organization with plan and limits (TLC-02)
-     * @description Runs the creation chain of the self-signup without verification: the organization with its slug (derived from the name unless given), the default VRF and standard roles, the first user as org_admin, and the entitlements of the plan (source manual) with the given limits in the limits of their feature. With an IdP admin client the first org_admin receives an account and the IdP's mail to set a password (`admin_invited`). The creation and its `org.create` entry in operator_audit are atomic. Reseller creation is phase 4.
+     * @description Runs the creation chain of the self-signup without verification: the organization with its slug (derived from the name unless given), the default VRF and standard roles, the first user as org_admin, and the entitlements of the plan (source manual) with the given limits in the limits of their feature. With an IdP admin client and the central SMTP server (RETICORA_SMTP_HOST, whose settings the IdP's realm also uses) the first org_admin receives an account and the IdP's mail to set a password (`admin_invited`); without the SMTP server no IdP account is created, since the IdP could not send the mail. The creation and its `org.create` entry in operator_audit are atomic. Reseller creation is phase 4.
      */
     post: operations['createOrganizationAsOperator'];
     delete?: never;
@@ -118,7 +126,7 @@ export interface paths {
     put?: never;
     /**
      * Grant or update an entitlement of an organization
-     * @description The only path that writes entitlements (ENT-04, E-12). The change is recorded in operator_audit with the previous and the new state.
+     * @description The only path that writes entitlements (ENT-04, E-12). The change is recorded in operator_audit with the previous and the new state, in the same transaction: when the entry cannot be written the change is rolled back and the answer is 500 (F-208).
      */
     post: operations['grantEntitlementAsOperator'];
     delete?: never;
@@ -155,6 +163,43 @@ export interface paths {
     get: operations['verifyOperatorAudit'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/alerts/alertmanager': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Operations alerts of Alertmanager into the notification channels (OPS-05)
+     * @description Webhook receiver of Alertmanager (payload version 4, E-75). Each
+     *     notification of an alert group becomes one notification (category
+     *     `ops_alert`) of the operator organization RETICORA_OPS_ALERT_ORG_ID
+     *     on its enabled notification channels, addressed to its users who hold
+     *     monitoring:write organization-wide. A firing group with an alert of
+     *     severity `critical` ignores quiet hours and muted categories. The
+     *     deduplication key is derived from the group key, the status and the
+     *     latest `startsAt` of the group's alerts: a repeated notification
+     *     queues nothing, a resolved group or a new alert in it notifies again.
+     *     A queued notification is recorded in the audit log of the operator
+     *     organization (`notification.ops_alert_queued`, without the token).
+     *
+     *     Only the bearer token RETICORA_OPS_ALERT_TOKEN authenticates: user
+     *     sessions, API keys and operator credentials are refused with 401,
+     *     which is recorded in operator_audit. Without an operator organization
+     *     the endpoint answers 404 (also with a valid token) and Alertmanager
+     *     keeps delivering by e-mail. A request carries at most 1 MiB and 100
+     *     alerts.
+     */
+    post: operations['receiveAlertmanagerAlerts'];
     delete?: never;
     options?: never;
     head?: never;
@@ -212,7 +257,7 @@ export interface paths {
     put?: never;
     /**
      * Request a self-signup (TLC-01)
-     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. The request passes the pre-auth limit (AUT-10), at most five signups per client IP and hour (429), the ALTCHA solution (400, `field` = `altcha`) and the disposable-domain blocklist (422, `field` = `email`). 503 while no e-mail channel, IdP administration or protection store is available.
+     * @description Stores a signup request and sends a verification link to the address. The answer is 202 whether or not the address already has an account. The request passes the pre-auth limit (AUT-10), at most five signups per client IP in any span of 3600 seconds (429; Retry-After is the time until the oldest of them leaves the span), the ALTCHA solution (400, `field` = `altcha`) and the disposable-domain blocklist (422, `field` = `email`). 503 while no e-mail channel, IdP administration or protection store is available.
      */
     post: operations['submitSignup'];
     delete?: never;
@@ -232,7 +277,7 @@ export interface paths {
     put?: never;
     /**
      * Verify a self-signup and create the organization (TLC-01)
-     * @description The token of the verification link is the credential. Creates, in one transaction, the organization with a slug derived from its name, the default VRF, the first user as org_admin and the trial entitlements (ENT-07), sets the password in the IdP (it is never stored by Reticora) and records the signup in operator_audit. 404 for an unknown or used token, 410 for an expired one, 409 when the address already has an IdP account, 422 when the IdP rejects the password.
+     * @description The token of the verification link is the credential. Creates, in one transaction, the organization with a slug derived from its name, the default VRF, the first user as org_admin and the trial entitlements (ENT-07), sets the password in the IdP (it is never stored by Reticora) and records the signup in operator_audit. The slug is the first free one of the name's slug, slug-2 … slug-20 and slug with a random suffix of six characters a-z0-9; Greek and Cyrillic names are transliterated, a name without such letters gets org-<suffix>. 404 for an unknown or used token, 410 for an expired one, 409 when the address already has an IdP account (`field` = `email`) or no slug candidate is free (`field` = `organization_name`; the request stays pending), 422 when the IdP rejects the password.
      */
     post: operations['verifySignup'];
     delete?: never;
@@ -254,6 +299,22 @@ export interface paths {
      * Complete the OIDC callback flow and issue a session token
      * @description Issues a 15-minute access token (AUT-02) and sets the refresh token as
      *     an HttpOnly, Secure, SameSite=Strict cookie for /api/v1/auth.
+     *     A first login that makes the user org_admin (a pending org_admin
+     *     invitation, or an account an administrator made org_admin) binds the
+     *     IdP account to MFA (Keycloak realm role mfa_required, AUT-09); when
+     *     that fails, the login answers 503 and changes nothing.
+     *     A first login with a pending invitation creates the user only within
+     *     max_users (active users, ENT-03); at the limit it answers 403
+     *     entitlement-limit, creates no user and leaves the invitation open.
+     *     A deactivated user, and a first login without an admission, get 403.
+     *     Parallel first logins into an organization without any user admit
+     *     exactly one of them as its first user (F-198).
+     *     Only the first login (an account an administrator created, or the
+     *     first user of the organization) assigns the configured default role,
+     *     when the user holds no role yet; a later login assigns none. A login
+     *     that resolves no role (no role assignment, no custom role, no IdP
+     *     role) gets 403 without session and refresh cookie, and the refusal
+     *     is audited (user.login_refused, TEN-04, RBA-03).
      */
     post: operations['authCallback'];
     delete?: never;
@@ -378,14 +439,14 @@ export interface paths {
     post?: never;
     /**
      * Delete a configuration item
-     * @description Soft delete (CI-05): sets deleted_at and the operative status decommissioned (the lifecycle state stays, LCY-01) and releases the asset link; relationships stay, traversal and impact skip the CI. POST /cis/{id}/restore brings it back within 90 days, afterwards the retention run deletes it with its interfaces and IP addresses.
+     * @description Soft delete (CI-05): sets deleted_at and the operative status decommissioned (the lifecycle state stays, LCY-01) and releases the asset link; relationships stay, traversal and impact skip the CI. POST /cis/{id}/restore brings it back within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days), afterwards the retention run deletes it with its interfaces and IP addresses.
      */
     delete: operations['deleteCI'];
     options?: never;
     head?: never;
     /**
      * Update a configuration item
-     * @description Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
+     * @description JSON merge patch (RFC 7396, CI-04): null clears a nullable field, absent members stay. 404 only for a CI that does not exist or is not visible; any other failure is 500. Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
      */
     patch: operations['updateCI'];
     trace?: never;
@@ -404,7 +465,7 @@ export interface paths {
     put?: never;
     /**
      * Restore a deleted CI within the retention (CI-05, API-05)
-     * @description Clears the deletion of a CI deleted less than 90 days ago; the change history and the audit trail record the restore (ci.restored). Requires ci:delete.
+     * @description Clears the deletion of a CI deleted within the soft-delete retention (RETICORA_RETENTION_SOFT_DELETE_DAYS, default and minimum 90 days); the status and the asset link of the deletion come back, the change history and the audit trail record the restore (ci.restored). Requires ci:delete. A CI of another organization, outside the caller's scope or unknown is 404. The restored CI counts against max_cis like a new one: with max_cis reached the restore is 403 entitlement-limit and the CI stays deleted (ENT-03).
      */
     post: operations['restoreCI'];
     delete?: never;
@@ -427,7 +488,7 @@ export interface paths {
     put?: never;
     /**
      * Change the type of a CI (CI-11)
-     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_change, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type.
+     * @description Manual reclassification. The CI keeps its id, relationships, mounts, asset link and history; required attributes of the target type the CI does not carry are returned as findings and do not block. The change is recorded as ci_change type_changed, audit ci.type_changed and event ci.changed (changed_fields ci_type_id). Discovery uses the same service but may only raise generic_device to a specific type. The values the CI carries must be free under the unique attributes of the target type (MET-15); discovery keeps generic_device when another active CI holds one of them.
      */
     post: operations['changeCIType'];
     delete?: never;
@@ -473,7 +534,7 @@ export interface paths {
     put?: never;
     /**
      * Revert the merge of this (merged) CI within 30 days (CI-12)
-     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values and the asset link, and the rows the merge removed. After 30 days the snapshot is gone (410). Requires ci:delete.
+     * @description Restores the merged CI of the path and its survivor from the merge snapshot: both CI rows, the moved relationships, interfaces, contacts, history, document links, field values, the asset link and the CI link of endpoint agents, and the rows the merge removed. After 30 days the snapshot is gone (410). A survivor changed after the merge (its version is above the version the merge recorded) is not overwritten silently: the unmerge answers 409 with the fields of the later history entries and changes nothing; force=true restores the snapshot over those changes, and the audit entry ci.unmerged names force and the overwritten fields (E-80). A survivor that is part of a later merge still open (merged into another CI, or another CI merged into it later) blocks the unmerge, also with force=true: 409 unmerge-later-merge names that merge, which is unmerged first; an unmerge never touches another open merge (F-416). The revert of the merge job behaves like an unmerge without force. The merged CI becomes active again and counts against max_cis like a new one: with max_cis reached the unmerge is 403 entitlement-limit and the merge stays (ENT-03). Requires ci:delete.
      */
     post: operations['unmergeCI'];
     delete?: never;
@@ -493,7 +554,7 @@ export interface paths {
     put?: never;
     /**
      * Bulk status change of up to 500 CIs (API-08, BLK-01)
-     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write.
+     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. Every change is a manual change like a PATCH of status (CI-04, OVR-01): the status is set also over an existing override and gets a protected override with the requesting user (for a job its creator) as author; the CI version rises (API-07), so a later PATCH of status with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the requested status afterwards, otherwise it is an error.
      */
     post: operations['bulkCIs'];
     delete?: never;
@@ -571,7 +632,7 @@ export interface paths {
     /**
      * List audit log entries
      * @deprecated
-     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05). A principal restricted to clients, sites or teams lists only the entries about objects it may read, for domain and route entries alike (`resource_type` `ci` or `racks`); entries of an unknown type and about deleted objects are hidden from it, `total` counts only the visible entries (TEN-06, TEN-09, F-389).
      */
     get: operations['listAuditEntriesLegacy'];
     put?: never;
@@ -599,7 +660,7 @@ export interface paths {
     };
     /**
      * List audit log entries
-     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05).
+     * @description Newest first; requires audit:read (AUD-05). The filters combine with AND; `from` is inclusive, `to` exclusive. Personal values (e-mail, names, phone) are stored as PII-vault surrogates and resolved here; a deleted vault entry shows as null (SEC-05). A principal restricted to clients, sites or teams lists only the entries about objects it may read, for domain and route entries alike (`resource_type` `ci` or `racks`); entries of an unknown type and about deleted objects are hidden from it, `total` counts only the visible entries (TEN-06, TEN-09, F-389).
      */
     get: operations['listAuditEntries'];
     put?: never;
@@ -665,7 +726,7 @@ export interface paths {
     get: operations['getRetentionPolicy'];
     /**
      * Configure the tenant data-retention policy
-     * @description Creates or updates the retention policy. `retention_days = 0` keeps data forever (no erasure). `mode` selects whether expired records are anonymized (default; rows stay for referential integrity) or deleted. Requires user:manage.
+     * @description Creates or updates the retention policy. `retention_days = 0` keeps data forever (no erasure); a value outside 0..2147483647 is a 400 field error. `mode` selects whether expired records are anonymized (default; rows stay for referential integrity) or deleted. Requires user:manage.
      */
     put: operations['putRetentionPolicy'];
     post?: never;
@@ -702,12 +763,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List relationships */
+    /**
+     * List relationships
+     * @description The stored and the projected relationships of the caller's tenant scope. The filters combine (all must hold); a filter without value does not filter. A CI that is unknown or outside the scope lists nothing (API-01, F-402).
+     */
     get: operations['listRelationships'];
     put?: never;
     /**
      * Create a relationship
-     * @description contains, contained_by, parent_of, child_of, mounted_in and located_in are projected and cannot be stored (422, REL-01, CH27): containment is the CI's parent_ci_id, mounted_in follows from the rack mount, located_in from the CI's location.
+     * @description contains, contained_by, parent_of, child_of, mounted_in and located_in are projected and cannot be stored (422, REL-01, CH27): containment is the CI's parent_ci_id, mounted_in follows from the rack mount, located_in from the CI's location. A principal restricted to some clients or sites may connect its own CI with a visible org-wide CI (client or site NULL); the edge carries the client and site of the own endpoint and is visible only there. An edge between two org-wide CIs is reserved to org-wide principals (403, E-09, E-62).
      */
     post: operations['createRelationship'];
     delete?: never;
@@ -731,16 +795,59 @@ export interface paths {
     post?: never;
     /**
      * Delete a relationship
-     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05).
+     * @description Manual and other edges are deleted as asked. A discovery edge is deleted only with force=true (409 otherwise) and is then recorded as suppression for its CIs and type, so discovery does not recreate it (REL-03, REL-04). Discovery never changes or removes manual edges (REL-05). 404 only for an edge the caller does not find (unknown, another organization, outside the scope, malformed id); other failures are not reported as 404 (F-272). The suppression records the acting user (created_by) and the reason; it is audited as relationship.suppression_created with actor and reason, listed by GET /api/v1/relationship-suppressions and lifted by DELETE /api/v1/relationship-suppressions/{id} (F-273).
      */
     delete: operations['deleteRelationship'];
     options?: never;
     head?: never;
     /**
      * Edit or verify a relationship
-     * @description Updates the provenance and verification metadata of an existing relationship. The edge endpoints and rel_type are immutable; rewiring is expressed by deleting and recreating the relationship so the graph history stays truthful.
+     * @description Updates the provenance and verification metadata of an existing relationship. The edge endpoints and rel_type are immutable; rewiring is expressed by deleting and recreating the relationship so the graph history stays truthful. attributes.provenance (actor, actor type, source and time of the edge) is recorded by the system and cannot be changed (422, REL-08, F-270).
      */
     patch: operations['updateRelationship'];
+    trace?: never;
+  };
+  '/api/v1/relationship-suppressions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List suppressions of removed discovery edges
+     * @description The suppressions of the organization whose source and target CI the caller sees (organization, client and site scope), newest first: each names the CIs and type of a discovery edge removed with force, who removed it, why and when (REL-03, F-273). Discovery does not create these edges again until the suppression is lifted.
+     */
+    get: operations['listRelationshipSuppressions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/relationship-suppressions/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Lift a suppression
+     * @description Deletes the suppression, so the next discovery cycle that reports the edge creates it again (REL-03, F-273). Needs relationship:write, the permission of the forced DELETE /api/v1/relationships/{id} that created it. Audited as relationship.suppression_lifted with the actor and the reason and creator of the suppression. 404 for a suppression the caller does not find (unknown, another organization, a CI outside the scope, malformed id).
+     */
+    delete: operations['liftRelationshipSuppression'];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/webhooks': {
@@ -750,10 +857,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List webhook subscriptions */
+    /**
+     * List webhook subscriptions
+     * @description Lists the subscriptions in the caller's scope (TEN-09, E-98): those whose creator's client, site and team scope lies in the caller's scope. Subscriptions created before this rule apply to the whole organization and are listed for callers without client, site and team restriction only. Every route with a subscription id answers 404 for a subscription outside the caller's scope.
+     */
     get: operations['listWebhooks'];
     put?: never;
-    /** Create a webhook subscription */
+    /**
+     * Create a webhook subscription
+     * @description The subscription takes the client, site and team scope of its creator (TEN-09, E-98): only callers whose scope covers it see and manage it, and it receives only events whose objects lie in that scope; events of unknown scope and events about objects of the whole organization reach subscriptions of creators without restriction only. A service account in `service_account_id` must be visible to the creator (422 otherwise); the subscription then receives only the events both the creator's scope and the account's read rights cover. invitation.created is delivered without its link: the acceptance token reaches the invitee by mail only.
+     *     Every delivery is a POST with the event data as JSON body and the headers X-Reticora-Event (event type), X-Reticora-Delivery (delivery ID) and X-Reticora-Signature (`sha256=` HMAC-SHA256 of the body with the subscription secret). A delivery of a domain event also carries X-Reticora-Event-ID (the event ID), X-Reticora-Sequence (the sequence of the event in the organization) and X-Reticora-Entity-Seq (the sequence of the event among those of its entity; absent for an event without an entity). Delivery is at least once: the delivery ID derives from the event and the subscription, and every retry of a delivery keeps it and the headers, so receivers drop repeats by X-Reticora-Delivery or X-Reticora-Event-ID and order the events of an entity by X-Reticora-Entity-Seq.
+     */
     post: operations['createWebhook'];
     delete?: never;
     options?: never;
@@ -883,7 +997,7 @@ export interface paths {
     };
     /**
      * List the webhook dead-letter queue
-     * @description Returns deliveries that exhausted their retry budget and were moved to the dead-letter queue, newest first. Operators inspect this queue to find permanently failed deliveries and replay them.
+     * @description Returns deliveries that exhausted their retry budget and were moved to the dead-letter queue, newest first: those of the subscriptions in the caller's scope (E-98). Operators inspect this queue to find permanently failed deliveries and replay them.
      */
     get: operations['listWebhookDeadLetters'];
     put?: never;
@@ -986,7 +1100,7 @@ export interface paths {
     /**
      * List asynchronous export jobs
      * @deprecated
-     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
+     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed, nor jobs whose recorded scope (`scope`) the caller's current scope no longer covers. Completed, unexpired jobs carry a time-limited signed download URL.
      */
     get: operations['listExportJobsLegacy'];
     put?: never;
@@ -1042,7 +1156,7 @@ export interface paths {
     post?: never;
     /**
      * Cancel a queued or running job
-     * @description Allowed for the creator of the job and for holders of the permission of its kind (ci.bulk ci:write, ci.merge ci:delete, export export:run). A finished job is 409.
+     * @description Allowed for the creator of the job and for holders of the permission of its kind (ci.bulk ci:write, ci.merge ci:delete, export export:run). A queued job of every kind is cancelled. A running job is cancelled only when its kind can be cancelled while running (ci.bulk, history.snapshot, export; the job's cancellable field): its worker stops at the next checkpoint and records no further status, a bulk change keeps its partial report as the result (processed ids with their result, the others skipped). A running job of any other kind (e.g. review.merge, the discovery jobs) and a finished job are 409.
      */
     delete: operations['cancelJob'];
     options?: never;
@@ -1060,7 +1174,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** The result of a succeeded job */
+    /**
+     * The result of a succeeded job
+     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled).
+     */
     get: operations['getJobResult'];
     put?: never;
     post?: never;
@@ -1084,7 +1201,7 @@ export interface paths {
     put?: never;
     /**
      * Revert a succeeded job where the revert is defined (E-25)
-     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02.
+     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02. A successful revert is recorded on the job (reverted_at, reverted_by); a second revert is 409 "the job is already reverted" (F-329). The revert of ci.merge makes the merged CI active again: with max_cis reached it is 403 entitlement-limit like POST /cis/{id}/unmerge and the merge stays (ENT-03).
      */
     post: operations['revertJob'];
     delete?: never;
@@ -1102,7 +1219,7 @@ export interface paths {
     };
     /**
      * List asynchronous export jobs
-     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed. Completed, unexpired jobs carry a time-limited signed download URL.
+     * @description Returns the caller's own export jobs newest first; jobs of other users are not listed, nor jobs whose recorded scope (`scope`) the caller's current scope no longer covers. Completed, unexpired jobs carry a time-limited signed download URL.
      */
     get: operations['listExportJobs'];
     put?: never;
@@ -1134,7 +1251,7 @@ export interface paths {
     /**
      * Get an export job
      * @deprecated
-     * @description Only the job's creator reads it; for anyone else the job does not exist (404).
+     * @description Only the job's creator reads it, and only while its current scope covers the scope the job recorded (`scope`); for anyone else the job does not exist (404).
      */
     get: operations['getExportJobLegacy'];
     put?: never;
@@ -1157,7 +1274,7 @@ export interface paths {
     };
     /**
      * Get an export job
-     * @description Only the job's creator reads it; for anyone else the job does not exist (404).
+     * @description Only the job's creator reads it, and only while its current scope covers the scope the job recorded (`scope`); for anyone else the job does not exist (404).
      */
     get: operations['getExportJob'];
     put?: never;
@@ -1316,7 +1433,10 @@ export interface paths {
     /** List documents */
     get: operations['listDocuments'];
     put?: never;
-    /** Create a document metadata record */
+    /**
+     * Create a document metadata record
+     * @description A new document has no link and is org-wide; a principal restricted to some clients or sites gets 403 (E-09, transition rule of E-61).
+     */
     post: operations['createDocument'];
     delete?: never;
     options?: never;
@@ -1338,11 +1458,17 @@ export interface paths {
     get: operations['getDocument'];
     put?: never;
     post?: never;
-    /** Delete a document */
+    /**
+     * Delete a document
+     * @description A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     */
     delete: operations['deleteDocument'];
     options?: never;
     head?: never;
-    /** Update a document */
+    /**
+     * Update a document
+     * @description A principal restricted to some clients or sites changes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateDocument'];
     trace?: never;
   };
@@ -1476,7 +1602,10 @@ export interface paths {
     /** List maintenance windows */
     get: operations['listMaintenanceWindows'];
     put?: never;
-    /** Create a maintenance window */
+    /**
+     * Create a maintenance window
+     * @description A window without ci_ids is org-wide; a principal restricted to some clients or sites gets 403 for it (E-09).
+     */
     post: operations['createMaintenanceWindow'];
     delete?: never;
     options?: never;
@@ -1498,11 +1627,17 @@ export interface paths {
     get: operations['getMaintenanceWindow'];
     put?: never;
     post?: never;
-    /** Delete a maintenance window */
+    /**
+     * Delete a maintenance window
+     * @description A principal restricted to some clients or sites deletes only windows whose CIs it sees completely; other windows answer 404 (TEN-05, E-09).
+     */
     delete: operations['deleteMaintenanceWindow'];
     options?: never;
     head?: never;
-    /** Update a maintenance window (incl. status transitions) */
+    /**
+     * Update a maintenance window (incl. status transitions)
+     * @description A principal restricted to some clients or sites changes only windows whose CIs it sees completely; a window that also covers another client's CI or has no CI (org-wide) answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateMaintenanceWindow'];
     trace?: never;
   };
@@ -1997,7 +2132,7 @@ export interface paths {
     put?: never;
     /**
      * Ingest endpoint telemetry (health metrics + software inventory)
-     * @description Reconciles the endpoint into a CI (source "agent") and writes health metrics into the time-series store. The software inventory lands in the CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch) are rejected.
+     * @description Reconciles the endpoint into a CI (source "agent") and writes health metrics into the time-series store. The software inventory lands in the CI attributes for patch posture (spec §9.4). Disabled agents (kill-switch) are rejected. The CI linked to the agent is the anchor, a merged one through its survivor; only a deleted linked CI is reconciled afresh. A linked CI that cannot be read is 503 and nothing is stored.
      */
     post: operations['ingestAgentTelemetry'];
     delete?: never;
@@ -2378,7 +2513,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the organization's API keys (without secrets) */
+    /**
+     * List the organization's API keys (without secrets)
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listAPIKeys'];
     put?: never;
     /**
@@ -2389,6 +2527,25 @@ export interface paths {
      *     permissions must be held by the caller; at use the key grants the
      *     intersection of its permissions and its owner's current rights, in
      *     the owner's scope. API keys cannot create keys.
+     *
+     *     A key bound to a service account (`service_account_id`, RBA-08) acts
+     *     with the account's rights. The account must exist in the caller's
+     *     organization (otherwise 404), and what the key would grant through
+     *     it, the requested permissions within the account's grants, must lie
+     *     within the caller's own scope; otherwise 403. A deactivated account's
+     *     permissions are then required organization-wide. The key records the
+     *     scope (clients, sites, teams) in which the caller holds each of its
+     *     permissions; at use it grants the account's then current rights
+     *     within that scope only, so roles the account receives later never
+     *     widen it beyond its creator (F-397, like E-98 for webhooks). It keeps
+     *     that scope when the creator is deactivated (E-64) and on rotation.
+     *     Keys bound before this rule (migration 000185) act at most with their
+     *     creator's current rights.
+     *
+     *     A new key counts against max_api_keys (ENT-03): at the limit of the
+     *     active keys (neither revoked nor expired) the request gets 403
+     *     entitlement-limit and no key is created. A rotation replaces a key
+     *     and is not checked.
      */
     post: operations['createAPIKey'];
     delete?: never;
@@ -2407,7 +2564,14 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Revoke an API key at once */
+    /**
+     * Revoke an API key at once
+     * @description Allowed to the key's owner (the user who created a key not bound to a
+     *     service account) or to a caller holding every permission of the key
+     *     in at least the scope in which the key's holder (owner or service
+     *     account) holds it; otherwise 403 and the key stays unchanged. A key
+     *     of another organization is 404.
+     */
     delete: operations['revokeAPIKey'];
     options?: never;
     head?: never;
@@ -2428,6 +2592,13 @@ export interface paths {
      * @description Issues a successor with the same name, permissions, owner, environment
      *     and expiry. The previous key stays valid until the end of the overlap
      *     (default 24 hours, at most 7 days) or its own earlier expiry (SEC-06).
+     *
+     *     The successor's plaintext is returned, so only the key's owner (the
+     *     user who created a key not bound to a service account) or a caller
+     *     holding every permission of the key in at least the scope in which
+     *     the key's holder (owner or service account) holds it may rotate;
+     *     otherwise 403 and the key stays unchanged. A key of another
+     *     organization is 404.
      */
     post: operations['rotateAPIKey'];
     delete?: never;
@@ -2446,7 +2617,10 @@ export interface paths {
     /** List users */
     get: operations['listUsers'];
     put?: never;
-    /** Create a user */
+    /**
+     * Create a user
+     * @description The new user counts against max_users (ENT-03): at the limit of the organization's active users the request gets 403 entitlement-limit and no user is created.
+     */
     post: operations['createUser'];
     delete?: never;
     options?: never;
@@ -2470,12 +2644,15 @@ export interface paths {
     post?: never;
     /**
      * Delete a user
-     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04).
+     * @description A user who owns open objects (open tickets, active assignments, keys not returned) or is referenced by closed records cannot be deleted; hand the objects over, or deactivate or anonymize the user (TLC-04). The caller cannot delete their own account: the request answers 400 ("you cannot delete your own account") and nothing is changed (F-377). The deletion ends every access of the user at once, like a deactivation and in the transaction of the deletion (TLC-04, AUT-02, F-393): the user's sessions and refresh cookies are revoked, every active API key the user created for themself is revoked, and the audit entry user.deleted records it. Keys the user created for service accounts stay valid (decision E-64, option 2): the audit entry lists them (id, prefix, name, service account; never the secret), and the org_admins receive a notification to rotate them. An unknown user or a user of another organization answers 404, a refused deletion (400, 409) ends nothing. If the sessions cannot be revoked, nothing is deleted and the answer is 503.
      */
     delete: operations['deleteUser'];
     options?: never;
     head?: never;
-    /** Update a user */
+    /**
+     * Update a user
+     * @description A non-active status deactivates the user (TLC-04): in the same transaction the user's sessions and refresh cookies are revoked and every active API key the user created for themself is revoked. Keys the user created for service accounts belong to the service account and stay valid (decision E-64, option 2): the audit entry of the deactivation lists them (id, prefix, name, service account; never the secret), and the org_admins of the organization receive a notification to rotate them. The sessions are revoked only after the user was found in the caller's organization; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503. The caller cannot deactivate their own account: a non-active status for the caller's own user answers 400 ("you cannot deactivate your own account") before anything is written, revoked or audited (F-377). Other fields of the own account (e.g. display_name) and status active stay allowed.
+     */
     patch: operations['updateUser'];
     trace?: never;
   };
@@ -2486,10 +2663,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Query metric points */
+    /**
+     * Query metric points
+     * @description The series is paged in chronological order with `limit` and the signed `cursor` (API-02); a client that needs the whole series follows `next_cursor` to the end.
+     */
     get: operations['queryMetrics'];
     put?: never;
-    /** Ingest one or more metrics */
+    /**
+     * Ingest one or more metrics
+     * @description Stores the samples for the caller's organization (MON-02). A sample with `ci_id` is stored for that CI; a sample without `ci_id` is assigned by its `target` label among the CIs the caller sees, or counted as unassigned and not stored. The body is accepted whole or not at all: when one sample names a CI that the caller does not see (unknown, of another organization or outside the caller's client/site scope, TEN-06), the request answers 404 with `field` `ci_id` and the offending ci_id in `detail`, like GET /api/v1/cis/{id}/metrics, and no sample of the body is stored (F-394). A malformed `ci_id` answers 400. The collectors' edge subject `.metrics` answers the same statuses.
+     */
     post: operations['ingestMetrics'];
     delete?: never;
     options?: never;
@@ -2506,7 +2689,7 @@ export interface paths {
     };
     /**
      * Metric series of one CI (MON-02)
-     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature.
+     * @description Returns the series of one CI for the detail view: the named metric or, without name, every metric the CI reported since from (default the last 24 hours). Requires the monitoring feature. A CI outside the caller's client/site scope or unknown answers 404, a malformed id 400.
      */
     get: operations['getCIMetrics'];
     put?: never;
@@ -2524,7 +2707,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List alert rules */
+    /**
+     * List alert rules
+     * @description Ordered by name, paged with `limit` and the signed `cursor` (API-02); a client that needs every rule follows `next_cursor` to the end.
+     */
     get: operations['listAlerts'];
     put?: never;
     /** Create an alert rule */
@@ -2565,7 +2751,7 @@ export interface paths {
     };
     /**
      * List review items
-     * @description The review queue of reconciliation (REC-08). Items open longer than 14 days carry escalated = true; escalated=true lists only those (the dashboard's escalation).
+     * @description The review queue of reconciliation (REC-08). Items open longer than 14 days carry escalated = true; escalated=true lists only those (the dashboard's escalation). The queue is cmdb_core like GraphQL reviewInbox and the deprecated /discovery/review-items: it is read without the discovery feature (CI merges open items as well); only resolving a scope_suggested item needs discovery (F-400).
      */
     get: operations['listReviewItems'];
     put?: never;
@@ -2610,7 +2796,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge removes the new CI); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -2629,6 +2815,7 @@ export interface paths {
     /**
      * List reconciliation review items (deprecated, use /api/v1/review-items)
      * @deprecated
+     * @description Alias of its successor with the same rule: the review queue is cmdb_core, not gated by the discovery feature (F-400).
      */
     get: operations['listDiscoveryReviewItems'];
     put?: never;
@@ -2654,7 +2841,7 @@ export interface paths {
     /**
      * Resolve a reconciliation review item (deprecated, use /api/v1/review-items/{id}/resolve)
      * @deprecated
-     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited.
+     * @description An unlicensed_ci item (a discovered device held because max_cis is reached, ENT-03) is resolved with create, which adopts the device as a CI within max_cis (403 entitlement-limit otherwise), or with dismiss, which discards it; both are audited. resolved_by and the audit actor are the caller; a body with resolved_by is 400. Like its successor the path is cmdb_core; a scope_suggested item needs the discovery feature (403 feature-not-entitled, F-400).
      */
     post: operations['resolveDiscoveryReviewItem'];
     delete?: never;
@@ -2703,7 +2890,7 @@ export interface paths {
   '/api/v1/topology/cis/{id}/impact': {
     parameters: {
       query?: {
-        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
@@ -2720,7 +2907,7 @@ export interface paths {
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
      * @deprecated
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Over a redundant type (powered_by, member_of_cluster) a CI is impacted only when all its providers failed (IMP-04), also those outside the client or site scope of the caller, which the answer never names (IMP-07). Powers the Ausfallsimulation in the topology view. Answers with every field of the impacted CIs until its sunset; the sparse fieldset (fields) is only offered by the successor.
      */
     get: operations['getCIImpactLegacy'];
     put?: never;
@@ -2740,7 +2927,7 @@ export interface paths {
     };
     /**
      * Joint impact of several CIs failing at once (IMP-05)
-     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
+     * @description Redundancy analysis and maintenance windows: the CIs in ci_ids fail together; a CI behind a redundant type (powered_by, member_of_cluster) is impacted only when all its providers are among the failed or impacted CIs (IMP-04). A provider outside the client or site scope of the caller counts as well, so the impact equals that of an org-wide caller, restricted to the visible CIs; the answer never names such a provider (IMP-07). The answer lists the failed CIs, the impacted CIs with their shortest paths and a summary.
      */
     get: operations['getMultiImpact'];
     put?: never;
@@ -2754,7 +2941,7 @@ export interface paths {
   '/api/v1/impact/{ci_id}': {
     parameters: {
       query?: {
-        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
@@ -2772,7 +2959,7 @@ export interface paths {
     };
     /**
      * Failure simulation — CIs that lose connectivity/power/hosting when this CI fails
-     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Powers the Ausfallsimulation in the topology view.
+     * @description Follows the impact_direction of each relationship type (IMP-01, CH27): over source_depends_on_target the failure of the target reaches the source, over target_depends_on_source the other way, none does not propagate. connected_to is undirected and only a network heuristic: CIs reached only through it carry heuristic true (IMP-03). Over a redundant type (powered_by, member_of_cluster) a CI is impacted only when all its providers failed (IMP-04), also those outside the client or site scope of the caller, which the answer never names (IMP-07). Powers the Ausfallsimulation in the topology view.
      */
     get: operations['getCIImpact'];
     put?: never;
@@ -2798,8 +2985,8 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Update name, settings, time zone, currency and locale of the organization
-     * @description The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field.
+     * Update name, settings, time zone, currency, locale and AI opt-in of the organization
+     * @description Every field belongs to the whole organization and is inherited by all its clients, so only a principal holding user:manage for the whole organization changes any of them (name, settings, timezone, currency, locale, ai_opt_in; RBA-03). A holder bound to a client, a site or a team, one holding user:manage only in such a scope, a client-bound API key or a request without principal gets 403 and nothing is changed. The time zone is an IANA name (Europe/Berlin), the currency an ISO 4217 code (EUR) and the locale a BCP 47 tag, stored in canonical form (de-ch → de-CH). Slug and plan are not changed here. An invalid value answers 400 naming the field. ai_opt_in is the organization's consent to external AI processing (AI-02); a change writes the audit entry organization.ai_opt_in_changed with the old and the new value in the same transaction.
      */
     patch: operations['updateOrganization'];
     trace?: never;
@@ -2811,7 +2998,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List clients */
+    /**
+     * List clients
+     * @description Requires location:read, which every standard role with a client reference holds (RBA-02); the list contains only the clients of the caller's scope (RLS). Creating, updating and deleting a client requires user:manage.
+     */
     get: operations['listClients'];
     put?: never;
     /** Create a client */
@@ -2832,7 +3022,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a client */
+    /**
+     * Get a client
+     * @description Requires location:read; a client outside the caller's scope answers 404 (RLS).
+     */
     get: operations['getClient'];
     put?: never;
     post?: never;
@@ -2960,7 +3153,10 @@ export interface paths {
     delete: operations['deleteRoom'];
     options?: never;
     head?: never;
-    /** Update a room */
+    /**
+     * Update a room
+     * @description Changes name, floor, room type or the floor-plan layout. The layout replaces the positions the caller sees (see Room.layout): every key must be a CI of the organization that the caller sees, that is not deleted and that is located in this room (its location is the room or lies below it), and x and y must lie in 0..1, otherwise 422 naming `layout.<ci>` or `layout.<ci>.x|y`; a CI the caller does not see is answered like an unknown id. Stored entries of CIs the caller does not see are kept unchanged; stored entries of CIs the caller sees that are deleted or no longer located in the room are dropped. The merge runs under the room's row lock after the If-Match check. Optimistic concurrency: If-Match names the ETag of the room the editor read; a room changed since is refused with 409 (field `If-Match`) and stays unchanged. Without If-Match (or with "*") the PATCH is applied.
+     */
     patch: operations['updateRoom'];
     trace?: never;
   };
@@ -3346,11 +3542,14 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The signed-in user's quiet hours and muted categories */
+    /**
+     * The signed-in user's quiet hours, category subscriptions and digest
+     * @description Without stored preferences the defaults (Europe/Berlin, nothing muted, every category subscribed, digest `{"review":"hourly"}`). `subscriptions` lists every notification category as subscribed or muted (NTF-03, E-91 option 2). Notifications are written in the user's language (`locale`, else the organization's locale, else de-DE; de-DE and en-US); `locale` is always returned, empty when the user has chosen no language.
+     */
     get: operations['getNotificationPreferences'];
     /**
-     * Set quiet hours and muted categories
-     * @description Critical notifications ignore both (NTF-04).
+     * Set quiet hours, category subscriptions and digest
+     * @description Critical notifications ignore quiet hours and muted categories and are never bundled (NTF-04). A digest naming an unknown or critical category or a window other than hourly or daily is refused with 400. A category named in `subscriptions` is muted or subscribed as stated there, whatever `muted_categories` says (NTF-03, E-91 option 2); an unknown category or a state other than subscribed or muted is refused with 400. `locale` sets the language of the user's notifications (de-DE, en-US, or empty for the organization's locale); omitted, the stored language stays; any other value is refused with 400 (F-383).
      */
     put: operations['setNotificationPreferences'];
     post?: never;
@@ -3369,11 +3568,14 @@ export interface paths {
     };
     /**
      * Notification channels of the organization
-     * @description Secrets (password, secret) are returned as `********`.
+     * @description Requires notification:manage for the whole organization (RBA-02: org_admin only; RBA-03, F-418): channels belong to the organization, not to a client, and receive the notifications of every client. A holder bound to a client, a site or a team gets 403. Secrets (password, secret) are returned as `********`, the url of a webhook channel as scheme and host with masked path and query (`https://hooks.example.org/********`): path and query carry the token of an incoming webhook.
      */
     get: operations['listNotificationChannels'];
     put?: never;
-    /** Create a notification channel */
+    /**
+     * Create a notification channel
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is created. A webhook channel is a target of the whole organization: it receives the notifications of every client with name and e-mail of their recipients, so only an org-wide administrator creates one. The response is redacted like the list. The server of an own SMTP channel (provider smtp) is held to the egress policy (SEC-08): without RETICORA_EGRESS_ALLOW_PRIVATE=true an IP literal or name of a private, loopback, link-local or unique-local network and a port other than 25, 465 or 587 are refused with 422 (field host or port, the detail names the setting); cloud metadata endpoints (169.254.169.254, fd00:ec2::254) are refused in every mode. The url of a webhook channel (provider webhook) is held to the same policy: http or https, no credentials in the url, and no IP literal or name of the internal network unless RETICORA_EGRESS_ALLOW_PRIVATE=true, metadata endpoints in no mode; a refused url answers 400 (field url). The address a name resolves to is checked again on every connection. central_smtp is the operator's server and exempt.
+     */
     post: operations['createNotificationChannel'];
     delete?: never;
     options?: never;
@@ -3390,17 +3592,23 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a notification channel */
+    /**
+     * Get a notification channel
+     * @description Requires notification:manage for the whole organization (F-418; 403 for a holder bound to a client, a site or a team, also for an unknown id); redacted like the list.
+     */
     get: operations['getNotificationChannel'];
     put?: never;
     post?: never;
-    /** Delete a notification channel */
+    /**
+     * Delete a notification channel
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is deleted.
+     */
     delete: operations['deleteNotificationChannel'];
     options?: never;
     head?: never;
     /**
      * Update name, configuration or enabled flag
-     * @description A configuration replaces the stored one; a secret sent back as `********` keeps its value. Kind and provider cannot change.
+     * @description Requires notification:manage for the whole organization (F-418): a holder bound to a client, a site or a team gets 403 and nothing is changed. A configuration replaces the stored one; a secret sent back as `********` and a webhook url sent back as returned (masked) keep their value. A secret sent back as `********` while the configuration changes its destination (smtp: host, port, tls or username; webhook: url) is refused with 400 (field password or secret): it must be entered again. A configuration is held to the egress policy like on create (422, field host or port; webhook: 400, field url). Kind and provider cannot change.
      */
     patch: operations['updateNotificationChannel'];
     trace?: never;
@@ -3412,7 +3620,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Latest notification deliveries with their status */
+    /**
+     * Latest notification deliveries with their status
+     * @description Requires notification:manage for the whole organization (RBA-02: org_admin only; RBA-03, F-418): the deliveries name recipients of every client, so a holder bound to a client, a site or a team gets 403. A delivery shows recipients, category, subject, status, attempts and the last error, not its content (body, data): links and tokens such as an invitation link are not returned, URLs in subject and last error are masked like the url of a webhook channel.
+     */
     get: operations['listNotificationDeliveries'];
     put?: never;
     post?: never;
@@ -3432,7 +3643,10 @@ export interface paths {
     /** List the VRFs of the organization, the default first */
     get: operations['listVRFs'];
     put?: never;
-    /** Create a VRF (vrf:manage) */
+    /**
+     * Create a VRF (vrf:manage)
+     * @description A VRF is org-wide; a principal restricted to some clients or sites gets 403 (TEN-05, E-09).
+     */
     post: operations['createVRF'];
     delete?: never;
     options?: never;
@@ -3456,12 +3670,15 @@ export interface paths {
     post?: never;
     /**
      * Delete a VRF (vrf:manage)
-     * @description The default VRF and VRFs with subnets or addresses cannot be deleted (422).
+     * @description The default VRF and VRFs with subnets or addresses cannot be deleted (422). A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09).
      */
     delete: operations['deleteVRF'];
     options?: never;
     head?: never;
-    /** Rename a VRF or change its description (vrf:manage) */
+    /**
+     * Rename a VRF or change its description (vrf:manage)
+     * @description A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09).
+     */
     patch: operations['updateVRF'];
     trace?: never;
   };
@@ -3695,7 +3912,10 @@ export interface paths {
     get: operations['getNetworkInterface'];
     put?: never;
     post?: never;
-    /** Delete a network interface */
+    /**
+     * Delete a network interface
+     * @description Deletes the interface (REL-05). An edge that names it as its source or target interface and is not an unverified discovery edge – a manual or verified edge, or an edge of another source – keeps it: 409, `relationship_ids` lists those edges the caller can see. The unverified discovery edges at the interface are removed with it and recorded in the history of its CI (ci_change relationship_change). Addresses bound to the interface are unbound; one whose address is also present unbound in the same VRF is deleted with the interface.
+     */
     delete: operations['deleteNetworkInterface'];
     options?: never;
     head?: never;
@@ -3782,7 +4002,10 @@ export interface paths {
     /** List discovery collectors */
     get: operations['listCollectors'];
     put?: never;
-    /** Register a discovery collector */
+    /**
+     * Register a discovery collector
+     * @description The new collector counts against max_collectors (ENT-03): at the limit of the organization's collectors that are not disabled, counted organization-wide, the request gets 403 entitlement-limit and no collector is registered. site_id binds the collector to a site, which decides its client: an unknown or not visible site and a site of another client than client_id are 422 with field site_id, nothing is registered (COL-01, F-423).
+     */
     post: operations['registerCollector'];
     delete?: never;
     options?: never;
@@ -3801,7 +4024,7 @@ export interface paths {
     put?: never;
     /**
      * Mint a single-use collector enrollment code
-     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll.
+     * @description Zero-config onboarding: returns the plaintext code exactly once. Only its SHA-256 hash is stored. The collector redeems the code via /api/v1/collectors/enroll. The code is bound to the client and site the collector is enrolled in (TEN-09, E-08), within the scope in which the caller holds collector:manage, as POST /api/v1/collectors allows it: `client_id` and `site_id` choose them; without them a caller restricted to exactly one client (site) is bound to it, a caller restricted to several must choose (422), and a dimension the caller holds org-wide stays unbound, so the collector may name a client of the organization when it enrolls. A site decides the client. The web UI offers the client choice when the caller's collector:manage scope of GET /api/v1/me (pscp, otherwise cls) holds several clients (F-425). While a code bound to a site is neither used nor expired, the site is not deleted (409 collector_enrollment_code, E-71, F-430).
      */
     post: operations['createCollectorEnrollmentCode'];
     delete?: never;
@@ -3821,7 +4044,7 @@ export interface paths {
     put?: never;
     /**
      * Enroll a collector with an enrollment code
-     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04).
+     * @description Unauthenticated by bearer design — the single-use enrollment code is the credential (valid 24 h, consumed exactly once). On success the collector identity is registered under the code's organization and returned with its id. With `csr` (PEM certificate signing request of the collector's locally generated key) the internal CA issues the collector's client certificate (CN = collector id, 90 days, COL-04). The enrollment counts against max_collectors of the code's organization (ENT-03): at the limit it answers 403 entitlement-limit, registers nothing and leaves the code unused and valid. The collector is registered in the client and site the code is bound to (see createCollectorEnrollmentCode); `client_id` may then be left out or must name that client, otherwise the answer is 422, nothing is registered and the code stays unused. Only a code without a client binding takes the `client_id` of the request (a client of the code's organization; without it the collector is organization-wide). Codes minted before the binding was recorded are not accepted (401).
      */
     post: operations['enrollCollector'];
     delete?: never;
@@ -3839,34 +4062,11 @@ export interface paths {
     };
     /**
      * Trust bundle and revocation list of the collector certificates
-     * @description The trust bundle holds the active CA and, during a CA roll-over, the previous one (COL-04); the revocation list names the revoked certificates (disabled collectors) that have not expired.
+     * @description The trust bundle holds the active CA and, during a CA roll-over, the previous one (COL-04); the revocation list names the revoked certificates (disabled collectors, predecessors of renewed certificates) that have not expired. Collectors renew their certificate over their mTLS NATS channel (collector.<org>.<id>.certificate.renew), not over this API.
      */
     get: operations['getCollectorPKI'];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/collectors/{id}/certificate': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Renew the collector certificate
-     * @description The collector sends a CSR of a new local key once its certificate reached 60 % of its lifetime (409 before); a disabled collector gets none (403). Requires discovery:ingest.
-     */
-    post: operations['renewCollectorCertificate'];
     delete?: never;
     options?: never;
     head?: never;
@@ -3914,7 +4114,7 @@ export interface paths {
     head?: never;
     /**
      * Rename, bind to a site, disable or enable a collector
-     * @description Requires collector:manage. The site decides the client (422 for a site of another client). status disabled refuses the collector's heartbeats; active enables a disabled collector again (offline until its next heartbeat).
+     * @description Requires collector:manage. The site decides the client (422 for a site of another client). status disabled refuses the collector's heartbeats; active enables a disabled collector again (offline until its next heartbeat). An empty name, another status and an unknown or not visible site are 422 with field name, status or site_id; the collector stays unchanged (F-423).
      */
     patch: operations['updateCollector'];
     trace?: never;
@@ -3985,7 +4185,7 @@ export interface paths {
     put?: never;
     /**
      * Ingest discovery results in bulk
-     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21).
+     * @description Reconciles a batch of discovered items against existing CIs, creating, updating or queueing them for manual review. This is the canonical endpoint that `/api/v1/discovery/ingest` aliases. Both require the discovery feature; after the discovery license expired they answer 403 with the problem type license-expired (CH21). While the ingest queue (NATS) is unreachable both answer 503 at once and queue nothing, not even after the reconnect (OPS-06, WP-449); records of the batch queued before a failure are deduplicated by record_id when the batch is sent again. Without the queue the records are processed in the request; a record that fails is rejected alone and listed in errors, the others are processed (WP-481). Only when every record is rejected does the request answer with the error status of the first.
      */
     post: operations['bulkIngest'];
     delete?: never;
@@ -4003,13 +4203,13 @@ export interface paths {
     };
     /**
      * List credential metadata
-     * @description Returns credential metadata (never the secret material) for the authenticated tenant. The organization is derived from the session and cannot be supplied by the client.
+     * @description Returns credential metadata (never the secret material) for the authenticated tenant. The organization is derived from the session and cannot be supplied by the client. The list is paged with `limit` and the signed `cursor` (API-02); an empty list is `data: []`.
      */
     get: operations['listCredentials'];
     put?: never;
     /**
      * Create an encrypted credential
-     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored.
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
      */
     post: operations['createCredential'];
     delete?: never;
@@ -4030,12 +4230,15 @@ export interface paths {
     };
     /**
      * Get credential metadata
-     * @description Returns credential metadata (never the secret material) for the authenticated tenant.
+     * @description Returns credential metadata (never the secret material) for the authenticated tenant. An id that is no UUID is answered like an unknown one (404, API-03).
      */
     get: operations['getCredential'];
     put?: never;
     post?: never;
-    /** Delete a credential */
+    /**
+     * Delete a credential
+     * @description An id that is no UUID is answered like an unknown one (404, API-03).
+     */
     delete: operations['deleteCredential'];
     options?: never;
     head?: never;
@@ -4076,7 +4279,7 @@ export interface paths {
     get: operations['downloadDocumentContent'];
     /**
      * Upload the binary content of a document
-     * @description Stores the request body as the document's object in blob storage. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB.
+     * @description Stores the request body as the document's object in blob storage. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB. A principal restricted to some clients or sites uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09).
      */
     put: operations['uploadDocumentContent'];
     post?: never;
@@ -4096,10 +4299,16 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List entities linked to a document */
+    /**
+     * List entities linked to a document
+     * @description Newest first, paged with `limit` and the signed `cursor` (API-02); a client that needs every link follows `next_cursor` to the end.
+     */
     get: operations['getDocumentLinks'];
     put?: never;
-    /** Link a document to another entity */
+    /**
+     * Link a document to another entity
+     * @description A principal restricted to some clients or sites may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09).
+     */
     post: operations['linkDocument'];
     delete?: never;
     options?: never;
@@ -4116,13 +4325,13 @@ export interface paths {
     };
     /**
      * List the organization's invitations (TLC-03)
-     * @description Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage.
+     * @description Status is derived from acceptance and expiry (pending, accepted, expired). Requires user:manage. Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listInvitations'];
     put?: never;
     /**
      * Invite an address with a predefined role and scope (TLC-03)
-     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a pending invitation for the same address is a conflict (renew it instead). Requires user:manage.
+     * @description The invitation is valid for seven days; only the hash of its token is stored. The invitee gets a mail with the organization name, the expiry and the link RETICORA_INVITATION_ACCEPT_URL?token=<token> (NTF-05), and the issue writes the event invitation.created in the same transaction; a refused issue (403, 409, 422) creates neither. With the IdP admin client, which the server wires for invitations only with a central SMTP server (RETICORA_SMTP_HOST), the acceptance creates a verified account of the invited address, so the token reaches the invited mailbox only: the issue sends the mail straight to that address over the central SMTP server, never over a notification channel of the organization (also when the organization has none), and neither the response nor the event carries the token or the link. When the SMTP server does not take the mail, nothing is stored and the server answers 503 with the detail "the invitation e-mail could not be sent". Without the IdP admin client the response carries the token once, and the event carries the link, which the organization's e-mail channels mail to the invitee. Role and scope must exist in the organization (422 otherwise); a client role (scope client) is invited with scope_type client only, a site role with scope_type site only, an organization role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the issuer must hold user:manage and every permission of the role in a scope covering the invitation's scope (a client covers its sites, site.client_id); otherwise 403, nothing is stored or audited. A pending invitation for the same address is a conflict (renew it instead). Webhook deliveries of the event leave out the link. Without RETICORA_INVITATION_ACCEPT_URL the server answers 503 (invitations not configured), like the signup without verification page. Requires user:manage.
      */
     post: operations['issueInvitation'];
     delete?: never;
@@ -4142,7 +4351,7 @@ export interface paths {
     put?: never;
     /**
      * Accept an invitation (TLC-03)
-     * @description The token is the credential; the request passes the pre-auth limit (AUT-10). The invitation is consumed atomically and once: it creates the user with the invited role and scope. With the IdP admin client the password creates the IdP account (never stored by Reticora); otherwise the user signs in with an existing IdP account of the address, which the first login links. 404 for an unknown, revoked or used token, 410 for an expired one, 409 when the organization already has a user with the address.
+     * @description The token is the credential; the request passes the pre-auth limit (AUT-10). The invitation is consumed atomically and once: it creates the user with the invited role and scope. With the IdP admin client the password creates the IdP account (never stored by Reticora); otherwise the user signs in with an existing IdP account of the address, which the first login links. 404 for an unknown, revoked or used token, 410 for an expired one, 409 when the organization already has a user with the address. An org_admin account is bound to MFA (Keycloak realm role mfa_required, AUT-09); when that fails, the account is deleted again, the acceptance answers 503 and the invitation stays open. The new user counts against max_users (active users, ENT-03): at the limit the acceptance answers 403 entitlement-limit, creates neither user nor IdP account and the invitation stays open.
      */
     post: operations['acceptInvitation'];
     delete?: never;
@@ -4165,7 +4374,7 @@ export interface paths {
     put?: never;
     /**
      * Renew a pending or expired invitation (TLC-03)
-     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. Requires user:manage.
+     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. The grant ceiling of the issue applies to the renewing principal, not to the original issuer: it must hold user:manage and every permission of the invited role in a scope covering the invitation's scope (403 otherwise, nothing changes). Like the issue, the renewal mails the invitee the new link and expiry and writes invitation.created: with the IdP admin client straight over the central SMTP server, without token in the response or the event (when the SMTP server does not take the mail, the old token and expiry stay and the server answers 503 "the invitation e-mail could not be sent"); without it over the organization's e-mail channels, with the new token once in the response. Without RETICORA_INVITATION_ACCEPT_URL it answers 503 (invitations not configured). Requires user:manage.
      */
     post: operations['renewInvitation'];
     delete?: never;
@@ -4204,7 +4413,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the organization's service accounts */
+    /**
+     * List the organization's service accounts
+     * @description Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     */
     get: operations['listServiceAccounts'];
     put?: never;
     /** Create a service account (RBA-08) */
@@ -4245,7 +4457,21 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the role assignments of a service account */
+    /**
+     * Replace the role assignments of a service account
+     * @description Assigning roles is managing roles and needs `role:manage`, as for
+     *     users (RBA-08); the other service-account operations stay on
+     *     `user:manage`/`user:read`.
+     *
+     *     Grant ceiling: every assignment of the new list (role, optionally
+     *     limited by `scope_client_id`/`scope_site_id`) must lie within the
+     *     caller's rights, each of the role's permissions held by the caller in
+     *     a scope covering the assignment's scope; every existing assignment
+     *     missing from the new list is removed and must lie within the caller's
+     *     rights as well. Otherwise 403 naming the permissions not covered (and
+     *     the assignment, for a removal); the assignments stay unchanged. A
+     *     service account of another organization is 404.
+     */
     put: operations['setServiceAccountRoles'];
     post?: never;
     delete?: never;
@@ -4304,10 +4530,16 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List members of a team */
+    /**
+     * List members of a team
+     * @description Paged with `limit` and the signed `cursor` (API-02); a client that needs every member follows `next_cursor` to the end.
+     */
     get: operations['listTeamMembers'];
     put?: never;
-    /** Add a member to a team */
+    /**
+     * Add a member to a team
+     * @description A team that is unknown, of another organization or outside the caller's team scope is 404 alike; a user_id that is no user of the organization is 422 on user_id (TEN-04, API-03).
+     */
     post: operations['addTeamMember'];
     delete?: never;
     options?: never;
@@ -4367,6 +4599,7 @@ export interface paths {
     /**
      * Assign a custom role to a user
      * @deprecated
+     * @description Like POST /api/v1/role-assignments, with the same grant ceiling (403).
      */
     post: operations['assignRoleLegacy'];
     delete?: never;
@@ -4385,9 +4618,35 @@ export interface paths {
     /** List the role assignments of a user (API-05) */
     get: operations['listRoleAssignments'];
     put?: never;
-    /** Assign a role to a user (API-05) */
+    /**
+     * Assign a role to a user (API-05)
+     * @description The user and the role must belong to the organization, and a team scope must name a team of the organization (404 otherwise). A client or site scope must name a client or site of the organization in scope_id, an organization-wide assignment names none (422 field scope_id otherwise; a scope is never widened to the organization). A client role (scope client) is assigned with scope_type client only, a site role with scope_type site only, an organization role or custom role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the caller must hold role:manage and every permission of the standard or custom role in a scope covering the assignment's scope (a client covers its sites, site.client_id; a team scope needs the clients and sites of the whole organization and that team); otherwise 403 and nothing is stored, before any MFA binding. Assigning a standard role again in the same scope stores no second assignment and answers with the existing one. Assigning the standard role org_admin binds the IdP account of the user to MFA (Keycloak realm role mfa_required, AUT-09) before the assignment is stored; a user without IdP account yet is bound at the first login. When the binding fails (no Keycloak admin client, admin API refused or unreachable), nothing is assigned and the answer is 503.
+     */
     post: operations['createRoleAssignment'];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/role-assignments/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke a role assignment (API-05, AUT-02)
+     * @description Removes a standard or custom role assignment of the organization (the id of GET /api/v1/role-assignments). Grant ceiling (RBA-03, F-017): the caller must hold role:manage and every permission of the role in a scope covering the assignment's scope, the rule of POST /api/v1/role-assignments; otherwise 403 and the assignment stays. An unknown id or an assignment of another organization is 404. The assignment is removed and the audit entry role_assignment.revoked (caller, table, user, role, scope) is written in one transaction. The user loses the rights at the next token refresh or sign-in (AUT-02); an access token issued before keeps them until it expires. Revoking org_admin leaves the MFA binding of the IdP account (Keycloak realm role mfa_required) in place. Roles from IdP groups are revoked in the IdP, not here.
+     */
+    delete: operations['revokeRoleAssignment'];
     options?: never;
     head?: never;
     patch?: never;
@@ -4407,11 +4666,17 @@ export interface paths {
     get: operations['getRole'];
     put?: never;
     post?: never;
-    /** Delete a custom role */
+    /**
+     * Delete a custom role
+     * @description Deletes the role with all its assignments. The caller must be able to revoke each assignment (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the role and its assignments stay.
+     */
     delete: operations['deleteRole'];
     options?: never;
     head?: never;
-    /** Update a custom role */
+    /**
+     * Update a custom role
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the role stays unchanged. Permissions the request removes are taken from every assignment of the role, so the caller must be able to revoke each of them (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the role stays unchanged.
+     */
     patch: operations['updateRole'];
     trace?: never;
   };
@@ -4452,7 +4717,7 @@ export interface paths {
     put?: never;
     /**
      * Anonymize a user (GDPR Art. 17, right to erasure)
-     * @description Replaces all personal data (e-mail, display name, avatar, external ID) with non-identifying surrogate values and disables the account. The row itself and audit history are kept so referential integrity and the audit chain survive. Requires user:manage.
+     * @description Replaces all personal data (e-mail, display name, avatar, external ID) with non-identifying surrogate values and disables the account. The row itself and audit history are kept so referential integrity and the audit chain survive. Requires user:manage. Like a deactivation (TLC-04), it revokes the user's sessions and refresh cookies and every active API key the user created for themself, in the same transaction and only for a user of the caller's organization. Keys the user created for service accounts stay valid (decision E-64, option 2): the audit entry lists them (id, prefix, name, service account; never the secret), and the org_admins of the organization receive a notification to rotate them; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503. The caller cannot anonymize their own account (400).
      */
     post: operations['anonymizeUser'];
     delete?: never;
@@ -4474,6 +4739,7 @@ export interface paths {
     /**
      * List custom role assignments for a user
      * @deprecated
+     * @description Paged with `limit` and the signed `cursor` (API-02).
      */
     get: operations['listUserRolesLegacy'];
     put?: never;
@@ -4491,7 +4757,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List permission catalogue */
+    /**
+     * List permission catalogue
+     * @description Paged with `limit` and the signed `cursor` (API-02); a client that needs the whole catalogue follows `next_cursor` to the end.
+     */
     get: operations['listPermissions'];
     put?: never;
     post?: never;
@@ -4511,9 +4780,15 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List permissions granted to a role */
+    /**
+     * List permissions granted to a role
+     * @description The permissions the standard role grants, as every authorization path resolves them (RBA-02, F-398): its grants (role_permission) and its seed permissions of the RBA-02 matrix, within the catalogue. A seed permission without a grant row carries the creation time of the role and no granted_by. Paged with `limit` and the signed `cursor` (API-02); a client that needs every grant follows `next_cursor` to the end.
+     */
     get: operations['listRolePermissions'];
-    /** Replace permissions granted to a role */
+    /**
+     * Replace permissions granted to a role
+     * @description The role applies to all its assignments, org-wide ones too: permissions the request adds to the role must be held by the caller organization-wide (RBA-03, F-015); otherwise 403 and the permissions of the role stay unchanged. Permissions the request removes are taken from every assignment of the role (users and service accounts), so the caller must be able to revoke each of them (role:manage and every permission of the role in a scope covering the assignment's scope, the rule of DELETE /api/v1/role-assignments/{id}; RBA-03, TEN-09, F-396); otherwise 403 and the permissions stay unchanged. The seed permissions of a standard role (its RBA-02 matrix row) cannot be removed: a request without one of them is 409 with the problem type https://reticora.io/problems/standard-role-permissions naming them, and nothing changes (F-398); a narrower role is a custom role (RBA-03). The response lists every permission the role grants afterwards, the seed permissions included, as GET /api/v1/roles/{id}/permissions does.
+     */
     put: operations['replaceRolePermissions'];
     post?: never;
     delete?: never;
@@ -4529,7 +4804,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get effective permissions for the authenticated caller */
+    /**
+     * Get effective permissions for the authenticated caller
+     * @description Self-service: every authenticated user reads its own user_id and effective permissions; no permission (not even permission:read) is required, like for /api/v1/me.
+     */
     get: operations['getMyPermissions'];
     put?: never;
     post?: never;
@@ -4881,7 +5159,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Evaluate active compliance rules against tenant CIs */
+    /**
+     * Evaluate active compliance rules against tenant CIs
+     * @description The evaluation replaces the results of the whole organization; a principal restricted to some clients, sites or teams gets 403 (TEN-06, E-09).
+     */
     post: operations['evaluateCompliance'];
     delete?: never;
     options?: never;
@@ -4979,7 +5260,10 @@ export interface paths {
     delete: operations['deleteIGAConnector'];
     options?: never;
     head?: never;
-    /** Update an IGA connector */
+    /**
+     * Update an IGA connector
+     * @description A changed base_url of a SCIM connector is held to the rules of create (SEC-08): https, and without RETICORA_EGRESS_ALLOW_PRIVATE=true no IP literal or name of a private, loopback, link-local or unique-local network (also embedded in a NAT64, 6to4, Teredo or IPv4-compatible IPv6 address); cloud metadata endpoints are refused in every mode. A refused URL answers 400 with the field base_url and changes nothing.
+     */
     patch: operations['updateIGAConnector'];
     trace?: never;
   };
@@ -5426,7 +5710,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List assistant conversations */
+    /**
+     * List assistant conversations
+     * @description Most recently updated first, paged with `limit` and the signed `cursor` (API-02); a client that needs every conversation follows `next_cursor` to the end.
+     */
     get: operations['listAIConversations'];
     put?: never;
     /** Create an assistant conversation */
@@ -5446,7 +5733,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Ask the governed RAG assistant */
+    /**
+     * Ask the governed RAG assistant
+     * @description The question and the matching CI context are sent to the external AI provider only for an organization that opted in to external AI processing (organization.ai_opt_in) and holds the ai add-on (AI-02). Otherwise the request is refused with 403 and the problem type ai-opt-in-required before a conversation is created, anything is retrieved or the provider is called.
+     */
     post: operations['askAI'];
     delete?: never;
     options?: never;
@@ -5512,7 +5802,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Reconstruct asset state at a point in time */
+    /**
+     * Reconstruct asset state at a point in time
+     * @description Replays the changes of the asset (creation, updates, deletion) up to at (default now). An asset the caller cannot see (unknown, deleted, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     */
     get: operations['listAssetsIdState'];
     put?: never;
     post?: never;
@@ -5529,7 +5822,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage global CI field definitions */
+    /**
+     * Manage global CI field definitions
+     * @description The global fields (no CI type, MET-13): the organization's organization-wide fields, which apply to every CI type of the organization, and the read-only system fields (`is_system`).
+     */
     get: operations['listCiFieldsGlobal'];
     /** Manage global CI field definitions */
     put: operations['putCiFieldsGlobal'];
@@ -5566,7 +5862,7 @@ export interface paths {
     };
     /**
      * List attribute definitions (MET-10)
-     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global).
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global). Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listAttributeDefinitions'];
     put?: never;
@@ -5748,7 +6044,10 @@ export interface paths {
     };
     /** Manage CI type field definitions */
     get: operations['listCiTypesIdFields'];
-    /** Manage CI type field definitions */
+    /**
+     * Manage CI type field definitions
+     * @description Creates or updates a field of a CI type of the organization (legacy view of attribute_definition). System CI types (`is_system`, no organization) are read-only for tenants until inheritance (MET-06): a field on them is refused with 422 on `ci_type_id`; organization-wide fields (PUT /api/v1/ci-fields/global) apply to every CI type including the system types. An unknown CI type, or one of another organization, is 404.
+     */
     put: operations['putCiTypesIdFields'];
     post?: never;
     delete?: never;
@@ -5800,7 +6099,7 @@ export interface paths {
     };
     /**
      * Compute the blast radius of a CI failure
-     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed. single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one.
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed, also those outside the client or site scope of the caller, which the answer never names (IMP-07). single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
      */
     get: operations['listCisIdBlastRadius'];
     put?: never;
@@ -5818,7 +6117,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List upstream/downstream dependencies of a CI */
+    /**
+     * List upstream/downstream dependencies of a CI
+     * @description Upstream are the CIs this CI depends on, downstream the CIs that depend on it, both read from the impact_direction of each relationship type (IMP-01), the way /api/v1/impact/{ci_id} lets a failure travel: for vm hosted_on server the server is upstream of the vm and the vm downstream of the server; powered_by and the containment projected from parent_ci_id alike. Undirected types (connected_to, a heuristic) and types without impact direction are no dependency. Only CIs the caller sees and that are not deleted are listed or passed (IMP-07).
+     */
     get: operations['listCisIdDependencies'];
     put?: never;
     post?: never;
@@ -5874,7 +6176,7 @@ export interface paths {
     };
     /**
      * List field provenance (discovered/override/effective) of a CI
-     * @description Per field the observed value with source and time, the manual override with author, reason and time, and the effective value: the override when there is one, otherwise the observed value (OVR-01). GET /cis/{id} and the CI list return the same effective values.
+     * @description Per field the observed value with source and time, the manual override with author, reason and time, and the effective value: the override when there is one, otherwise the observed value (OVR-01). GET /cis/{id} and the CI list return the same effective values. A CI that is unknown, not visible or soft-deleted is 404 like GET /cis/{id} (F-422).
      */
     get: operations['listCisIdFields'];
     put?: never;
@@ -5891,7 +6193,7 @@ export interface paths {
       header?: never;
       path: {
         id: string;
-        /** @description CI column or attribute name */
+        /** @description CI column or attribute name. The attribute namespaces _overrides, _observed, _provenance and _instance are no fields (GLO-13): 400 with the field name. */
         name: string;
       };
       cookie?: never;
@@ -5899,13 +6201,13 @@ export interface paths {
     get?: never;
     /**
      * Set a manual field override
-     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden.
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden; a reserved namespace (_overrides, _observed, _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409. An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422).
      */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
     /**
      * Clear a manual field override
-     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited.
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version. A reserved namespace as name is 400 (GLO-13). An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422).
      */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
@@ -5954,7 +6256,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Reconstruct CI state at a point in time */
+    /**
+     * Reconstruct CI state at a point in time
+     * @description Replays the change trail of the CI (its ci_change field rows from the creation on and its entity_change rows) up to at (default now), with the values its history shows. A CI the caller cannot see (unknown, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     */
     get: operations['listCisIdState'];
     put?: never;
     post?: never;
@@ -6012,7 +6317,7 @@ export interface paths {
     put?: never;
     /**
      * State snapshot of a CI or asset as a job (JOB-04)
-     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read.
+     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read. An entity the caller cannot see (unknown, or of another organization, client or site) is 404 and no job is created; without a recorded change up to at (before the creation) the job fails with "no recorded state before <at>" (404 without the job model).
      */
     post: operations['createStateSnapshot'];
     delete?: never;
@@ -6028,7 +6333,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the unified change history of an entity */
+    /**
+     * List the unified change history of an entity
+     * @description Needs ci:read and the read permission of the entity type: ci:read for ci, relationship:read for relationship, location:read for location, asset:read for asset, reservation and composition (CI-06, E-78). The history is read in the caller's client and site scope. The audit entries of a CI are part of its history only when the caller holds audit:read; audit_included says whether they are. They are the entries about the CI under both forms of its type: those of the domain audit (resource_type ci) and those of the route audit (resource_type cis: the writes on its sub-resources such as interfaces, contacts, lifecycle transitions and unmerge), and the route entries of its contact links (ci-contacts) and network interfaces (network-interfaces), the delete of one included. A caller restricted to some clients, sites or teams reads only the entries GET /audit-log shows it (an entry about a deleted link or interface is not among them).
+     */
     get: operations['getHistoryEntitytypeId'];
     put?: never;
     post?: never;
@@ -6102,7 +6410,10 @@ export interface paths {
     /** Manage lifecycle definitions */
     get: operations['listLifecycleDefinitions'];
     put?: never;
-    /** Manage lifecycle definitions */
+    /**
+     * Manage lifecycle definitions
+     * @description `applies_to` is asset (default), ci or both; another value is a 422 field error. A taken key is 409.
+     */
     post: operations['createLifecycleDefinitions'];
     delete?: never;
     options?: never;
@@ -6137,13 +6448,13 @@ export interface paths {
     };
     /**
      * List nodes of the location tree
-     * @description Nodes of the canonical location tree (LOC-10) visible in the caller's scope, parents first.
+     * @description Nodes of the canonical location tree (LOC-10) visible in the caller's scope, parents first. Reading the tree is cmdb_core: rack nodes with their names are listed without the rack_view feature, which gates the rack resource (/racks, /mounts, /rack-mounts) and the writes of rack nodes here (ENT-05, F-400).
      */
     get: operations['listLocations'];
     put?: never;
     /**
      * Create a node of the location tree
-     * @description The parent must be of the kind the parent matrix allows (site > building > room > rack, site > warehouse > zone > shelf > bin). A site is a root and needs client_id; every other node inherits client and site from its parent.
+     * @description The parent must be of the kind the parent matrix allows (site > building > room > rack, site > warehouse > zone > shelf > bin). A site is a root and needs client_id; every other node inherits client and site from its parent. A node of kind rack needs the rack_view feature like POST /racks (403 feature-not-entitled otherwise, F-400).
      */
     post: operations['createLocation'];
     delete?: never;
@@ -6187,14 +6498,14 @@ export interface paths {
     post?: never;
     /**
      * Delete a leaf node
-     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11). Deleting a site, building, room or rack through its own endpoint checks the whole subtree.
+     * @description Refused with 409 while the node has child locations or CIs, assets, stock items, movements, rack mounts or role assignments reference it (LOC-11); a site also while VLANs, subnets, collectors, discovery scopes, unexpired agent enrollment tokens, collector enrollment codes that are neither used nor expired, or merge tombstones within tombstone_until are bound to it (E-71, F-430). Expired tokens, expired or used enrollment codes and tombstones are removed with the site. Deleting a site, building, room or rack through its own endpoint follows the same rules; no delete cascades into the subtree. Deleting a rack node needs the rack_view feature like DELETE /racks/{id} (403 feature-not-entitled otherwise, F-400).
      */
     delete: operations['deleteLocation'];
     options?: never;
     head?: never;
     /**
      * Rename and/or move a node
-     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved.
+     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved. Renaming or moving a rack node needs the rack_view feature like PATCH /racks/{id} (403 feature-not-entitled otherwise, the rack stays unchanged, F-400).
      */
     patch: operations['updateLocation'];
     trace?: never;
@@ -6223,9 +6534,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read or update the source-priority policy */
+    /**
+     * Read or update the source-priority policy
+     * @description The organization's default policy; without one the built-in priorities: the sources of the REC-03 rank table by descending rank, sources of the same rank by name.
+     */
     get: operations['listReconciliationSourcePolicy'];
-    /** Read or update the source-priority policy */
+    /**
+     * Read or update the source-priority policy
+     * @description `priorities` must not be empty; `name` and the priorities must not contain NUL characters (400 field error).
+     */
     put: operations['putReconciliationSourcePolicy'];
     post?: never;
     delete?: never;
@@ -6244,7 +6561,10 @@ export interface paths {
     /** List the relationship types (system catalogue and the organization's) */
     get: operations['listRelationshipTypes'];
     put?: never;
-    /** Create a relationship type of the organization */
+    /**
+     * Create a relationship type of the organization
+     * @description allowed_source_types and allowed_target_types name CI type keys the organization sees (system types and its own); an unknown key is refused with 400 and `field` allowed_source_types or allowed_target_types, nothing is stored (REL-01, E-95, F-313).
+     */
     post: operations['createRelationshipTypes'];
     delete?: never;
     options?: never;
@@ -6269,7 +6589,10 @@ export interface paths {
     delete: operations['deleteRelationshipTypesKey'];
     options?: never;
     head?: never;
-    /** Update a relationship type of the organization (system types are read-only) */
+    /**
+     * Update a relationship type of the organization (system types are read-only)
+     * @description A given allowed_source_types or allowed_target_types with a key that names no CI type the organization sees is refused with 400 and `field` allowed_source_types or allowed_target_types; the type stays unchanged (REL-01, E-95, F-313).
+     */
     patch: operations['updateRelationshipTypesKey'];
     trace?: never;
   };
@@ -6377,13 +6700,16 @@ export interface paths {
     get: operations['getSavedViewsId'];
     put?: never;
     post?: never;
-    /** Delete a saved view */
+    /**
+     * Delete a saved view
+     * @description Only the owner deletes the view (E-86, option 1). A view shared with the caller, org-wide or with a role, answers 404 and stays.
+     */
     delete: operations['deleteSavedViewsId'];
     options?: never;
     head?: never;
     /**
      * Update a saved view
-     * @description The owner changes the view; a view shared org-wide is editable by everybody, a role-shared one only by its owner.
+     * @description Only the owner changes the view (E-86, option 1). For everybody else a view shared org-wide or with a role is read-only, and its PATCH answers 404 like a view the caller cannot see; the view stays unchanged. Only the fields sent change: a request without shared keeps the sharing. Every id in shared_with_roles must be a role or custom role of the organization.
      */
     patch: operations['updateSavedViewsId'];
     trace?: never;
@@ -6434,7 +6760,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes; an invalid AST is 422 naming the node.
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the type of the value (for in of the first element, all elements sharing it): a number only with numeric values, a boolean only with booleans, a time string with lt, lte, gt or gte only with values holding a time, other strings as text. An attribute value of another JSON type counts as missing: it matches neither eq, in nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); the results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -6463,9 +6789,9 @@ export interface components {
       default?: unknown;
       enum_values?: string[];
       multi_value: boolean;
-      /** @description Indexed for search: an `attribute.index` job builds `idx_attr_<id>` concurrently (DB-04). */
+      /** @description Indexed for search: a job builds the index concurrently (DB-04). A non-unique definition of an organization without a CI type uses the index of its key, shared by all organizations (`attribute.index.key` job, `idx_attr_key_<key>`, or `idx_attr_keyh_<hash>` for other keys; E-73); other definitions get `idx_attr_<id>` (`attribute.index` job). */
       searchable: boolean;
-      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. */
+      /** @description The value is unique among the active CIs (MET-15), enforced by the server and the unique index `idx_attr_<id>_u`; soft-deleted CIs do not count. The server check covers the CIs outside the client or site scope of the writer as well, also before the index exists, and every write that sets or brings back the values of a CI: POST and PATCH /cis, the restore (POST /cis/{id}/restore), the unmerge (POST /cis/{id}/unmerge), the type change (POST /cis/{id}/type) and the resolutions of review items that create or reactivate a CI (409 with `violations`). The discovery ingest does not store a discovered value another active CI holds (counted in invalid_values) and does not reclassify a CI whose value the target type's unique attribute holds elsewhere. */
       unique: boolean;
       /**
        * @description Unique per organization or per client (CIs without a client count as one client).
@@ -6473,9 +6799,7 @@ export interface components {
        */
       unique_scope: 'org' | 'client';
       inheritable: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      validation?: components['schemas']['AttributeValidation'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -6489,6 +6813,21 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description The validation of an attribute definition (MET-10): a rule AST of MET-45 or the legacy structure. Requests may send either; the server checks the rule with backend/internal/rules (an invalid rule is 400 on the field validation), stores it as the AST and answers the AST, also for definitions stored in the legacy structure. A required rule makes the definition required. CI writes are validated against it (422). */
+    AttributeValidation:
+      components['schemas']['rule'] | components['schemas']['AttributeValidationLegacy'];
+    /** @description A rule of the JSON rule language of the metamodel (MET-45, phase 1: required, pattern, range and enum, combined with all), defined by api/rules.schema.json. */
+    RuleAST: components['schemas']['rule'];
+    /** @description The former validation structure, translated into the AST: options → enum, pattern and patterns → pattern, min/max → range, min_length/max_length → range of length; several rules are combined with all. {} is no rule. */
+    AttributeValidationLegacy: {
+      min?: number;
+      max?: number;
+      min_length?: number;
+      max_length?: number;
+      pattern?: string;
+      patterns?: string[];
+      options?: (string | number | boolean)[];
+    };
     AttributeDefinitionListResponse: {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
       next_cursor?: string;
@@ -6501,6 +6840,7 @@ export interface components {
     AttributeDefinitionCreate: {
       /** @description Omitted for a global definition. */
       ci_type_id?: string;
+      /** @description The reserved namespaces _overrides, _observed, _provenance and _instance are no keys (GLO-13): 400 with field key; the other definition checks name their own field (data_type, reference_target, validation, conditional, default; F-408). */
       key: string;
       display_name?: components['schemas']['LocalizedText'] | string;
       description?: string;
@@ -6516,9 +6856,7 @@ export interface components {
       /** @enum {string} */
       unique_scope?: 'org' | 'client';
       inheritable?: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      validation?: components['schemas']['AttributeValidation'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -6542,9 +6880,8 @@ export interface components {
       /** @enum {string} */
       unique_scope?: 'org' | 'client';
       inheritable?: boolean;
-      validation?: {
-        [key: string]: unknown;
-      };
+      /** @description The new rules; null or {} removes them. */
+      validation?: components['schemas']['AttributeValidation'] | null;
       conditional?: {
         [key: string]: unknown;
       };
@@ -6588,7 +6925,33 @@ export interface components {
       quiet_end?: string;
       /** @example Europe/Berlin */
       time_zone: string;
+      /** @description Categories the user unsubscribed; critical notifications reach the user anyway. */
       muted_categories: string[];
+      /**
+       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey and expired licences are critical). In a PUT the named categories win over `muted_categories`; the response lists every category.
+       * @example {
+       *       "review": "muted",
+       *       "export": "subscribed"
+       *     }
+       */
+      subscriptions?: {
+        [key: string]: 'subscribed' | 'muted';
+      };
+      /**
+       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (entitlement, export, job, review, webhook); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
+       * @example {
+       *       "review": "hourly"
+       *     }
+       */
+      digest?: {
+        [key: string]: 'hourly' | 'daily';
+      };
+      /**
+       * @description Language of the user's notifications (NTF-03, F-383): de-DE or en-US; empty: the organization's locale (LOC-01), else de-DE. As long as the user has chosen no language, a login takes the language of the IdP's `locale` claim (de* → de-DE, en* → en-US; Keycloak sends it with internationalization enabled); a choice made here, including the empty one after a language, is never replaced by a login. The language of the user interface follows the browser (E-99).
+       * @example en-US
+       * @enum {string}
+       */
+      locale?: '' | 'de-DE' | 'en-US';
     };
     NotificationChannel: {
       id: string;
@@ -6598,7 +6961,7 @@ export interface components {
       kind: 'email' | 'inapp' | 'webhook' | 'sms' | 'pager';
       /** @enum {string} */
       provider: 'central_smtp' | 'smtp' | 'inapp' | 'webhook';
-      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`. */
+      /** @description central_smtp: sender_name, reply_to; smtp: host, port, tls (starttls|tls|none), username, password, from; webhook: url, secret. Secrets are returned as `********`, the webhook url as scheme and host with masked path and query. The smtp host and port are held to the egress policy (SEC-08). */
       config?: {
         [key: string]: unknown;
       };
@@ -6619,6 +6982,7 @@ export interface components {
       };
       enabled?: boolean;
     };
+    /** @description A queued delivery without its content: body and data (links, tokens) stay in the delivery queue. */
     NotificationDelivery: {
       id: string;
       organization_id: string;
@@ -6628,10 +6992,6 @@ export interface components {
       category: string;
       critical: boolean;
       subject: string;
-      body: string;
-      data?: {
-        [key: string]: unknown;
-      };
       dedup_key?: string;
       /** @enum {string} */
       status: 'pending' | 'sending' | 'sent' | 'failed' | 'suppressed';
@@ -6787,7 +7147,7 @@ export interface components {
       accepted_at?: string;
       /** Format: date-time */
       created_at: string;
-      /** @description Only in the response of issue and renewal; shown once. */
+      /** @description Only in the response of issue and renewal, shown once, and only when the acceptance creates no IdP account (no IdP admin client); otherwise the token reaches the invitee only by the invitation mail, which the server sends straight over its central SMTP server. */
       token?: string;
     };
     InvitationListResponse: {
@@ -6877,17 +7237,25 @@ export interface components {
     CollectorHeartbeatRequest: {
       spool?: components['schemas']['CollectorSpoolReport'];
     };
-    /** @description Offline spool state of a collector; dropped counters only grow while the collector runs. */
+    /** @description Offline spool state of a collector. The dropped counters are the losses not yet acknowledged: the collector reduces them by the reported amounts once the heartbeat was answered with 204. Reported losses raise reticora_collector_spool_dropped_total (kind messages or samples), backpressure raises reticora_collector_spool_backpressure_total. */
     CollectorSpoolReport: {
       messages?: number;
       /** Format: int64 */
       bytes?: number;
       /** Format: int64 */
       oldest_age_seconds?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Lost spool batches (expired, size limit, corrupt, refused with 4xx and quarantined), records rejected in an accepted batch and rejected or unreadable agent telemetry.
+       */
       dropped_messages?: number;
       /** Format: int64 */
       dropped_bytes?: number;
+      /**
+       * Format: int64
+       * @description Metric samples and traps dropped on upload failures; they are counted, not spooled (E-79).
+       */
+      dropped_samples?: number;
       backpressure?: boolean;
     };
     IGAObject: {
@@ -6938,12 +7306,14 @@ export interface components {
     };
     RackLayout: {
       rack: components['schemas']['Rack'];
-      mounts: components['schemas']['RackMount'][];
+      /** @description The mounts by position; an empty rack has an empty list (F-253). */
+      mounts: components['schemas']['RackLayoutMount'][];
       /** @description Free units per face (front, rear). */
       free: {
         [key: string]: number[];
       };
     };
+    /** @description An omitted height_u or face takes its default; an explicit value outside minimum or enum (height_u 0 or below, face "") is 400 with field height_u or face, nothing is stored and an existing mount stays unchanged (F-415). */
     PutRackMountRequest: {
       position_u: number;
       /** @default 1 */
@@ -6963,7 +7333,7 @@ export interface components {
       field?: string;
       /** @enum {string} */
       op?: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'like' | 'in' | 'exists';
-      /** @description A string, number or boolean; a list for in. */
+      /** @description A value of the field's kind (UUID, RFC 3339 time or date, number, boolean or string); a non-empty list of them for in; true, false or nothing for exists. */
       value?: unknown;
     };
     SavedViewSortKey: {
@@ -6999,12 +7369,17 @@ export interface components {
       name?: string;
       /** @enum {string} */
       entity_kind?: 'ci' | 'asset';
+      /** @description The filter spec; it holds no sort or columns (422 on filter_spec.sort or filter_spec.columns), those are the view's own. */
       filter_spec?: {
         [key: string]: unknown;
       };
+      /** @description Sort keys of the view; a run sends them to /api/v1/search/query, which orders the rows by them. */
       sort?: components['schemas']['SavedViewSortKey'][];
+      /** @description Columns of the view; a run sends them to /api/v1/search/query, which returns their values per row. */
       columns?: string[];
+      /** @description Shares the view org-wide. A PATCH without it keeps the current sharing. */
       shared?: boolean;
+      /** @description Role or custom role ids of the organization whose holders may read the view. */
       shared_with_roles?: string[];
     };
     ImpactAnalysis: {
@@ -7033,6 +7408,34 @@ export interface components {
       impacted: components['schemas']['ImpactNodeFields'][];
       count: number;
       summary: components['schemas']['ImpactSummary'];
+    };
+    BlastRadius: {
+      ci_id: string;
+      /** @description The CIs the failure reaches, certain ones first, then by name; heuristic hits (IMP-03) carry heuristic true. */
+      affected_cis: components['schemas']['BlastRadiusCI'][];
+      /** @description The CIs reached over directed impact rules only, without heuristic hits. */
+      affected_count: number;
+      /** @description The CIs reached only over an undirected network edge (connected_to). */
+      heuristic_count: number;
+      affected_services?: components['schemas']['TopologyNode'][];
+      /** @description Clients of the affected CIs (heuristic hits not included). */
+      client_ids?: string[];
+      /** @description Sites of the affected CIs (heuristic hits not included). */
+      site_ids?: string[];
+      single_points_of_failure?: components['schemas']['TopologyNode'][];
+      protected_by_redundancy?: components['schemas']['TopologyNode'][];
+    };
+    BlastRadiusCI: components['schemas']['TopologyNode'] & {
+      /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
+      heuristic: boolean;
+    };
+    DependencyResult: {
+      ci_id: string;
+      /** @enum {string} */
+      direction: 'upstream' | 'downstream';
+      depth: number;
+      nodes: components['schemas']['TopologyNode'][];
+      count: number;
     };
     ImpactSummary: {
       failed: number;
@@ -7088,10 +7491,15 @@ export interface components {
       total: number;
       succeeded: number;
       failed: number;
+      /** @description Ids not processed because the bulk job was cancelled. */
+      skipped?: number;
+      /** @description The bulk job was cancelled while running and stopped before the skipped ids. */
+      cancelled?: boolean;
       items: {
         id: string;
         /** @enum {string} */
-        result: 'ok' | 'error';
+        result: 'ok' | 'error' | 'skipped';
+        /** @description The HTTP status the single operation would have answered; 0 for a skipped id. */
         code: number;
         error?: string;
       }[];
@@ -7123,15 +7531,67 @@ export interface components {
       /** Format: date-time */
       created_at: string;
       /**
-       * @description The trail of the entry (CI history only).
+       * @description The trail of the entry (CI and location history only).
        * @enum {string}
        */
-      source?: 'ci_change' | 'entity_change' | 'audit';
+      source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change';
       /**
        * Format: uuid
-       * @description The site of the CI when the change was made.
+       * @description The site of the CI when the change was made (ci_change), or the site of the moved location (location_change).
        */
       site_id?: string;
+      /**
+       * @description The kind of a CI change (AUD-03); only ci_change entries carry it and the fields below. A ci_change entry is one change set, the field rows of one write; one of several rows has no field_name, old_value and new_value, field_changes holds them.
+       * @enum {string}
+       */
+      change_kind?:
+        | 'created'
+        | 'updated'
+        | 'deleted'
+        | 'restored'
+        | 'merged'
+        | 'type_changed'
+        | 'relationship_added'
+        | 'relationship_removed'
+        | 'status_changed';
+      /**
+       * Format: uuid
+       * @description The change set of the entry; absent for a row written before the change sets, which is an entry of its own.
+       */
+      change_set_id?: string;
+      /** @description The changed fields of the change set, ordered by field name; a row without a field (create, delete) is none. */
+      field_changes?: components['schemas']['HistoryFieldChange'][];
+      /**
+       * @description The source of the CI change as in the audit log (AUD-03); source names the trail of the entry.
+       * @enum {string}
+       */
+      change_source?: 'ui' | 'api' | 'collector' | 'import' | 'system';
+      /**
+       * Format: uuid
+       * @description The collector of a discovery change.
+       */
+      collector_id?: string;
+      /** @description The X-Request-ID of the request that made the change (AUD-07). */
+      request_id?: string;
+      /** @description The correlation id of the change (X-Correlation-ID, or the record of a discovery change). */
+      correlation_id?: string;
+      /**
+       * Format: date-time
+       * @description The time of the observation of a discovery change.
+       */
+      observed_at?: string;
+      /**
+       * Format: uuid
+       * @description The user who made the change; absent for an API key or the system.
+       */
+      actor_user_id?: string;
+    };
+    HistoryFieldChange: {
+      field: string;
+      /** @description The value before the change; null when the field was empty. */
+      old: unknown;
+      /** @description The value after the change; null when the field was cleared. */
+      new: unknown;
     };
     HistoryListResponse: {
       data: components['schemas']['HistoryChange'][];
@@ -7141,6 +7601,8 @@ export interface components {
       has_more?: boolean;
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
       next_cursor?: string;
+      /** @description True when the audit entries of the entity are part of the history: a CI's history read with audit:read (E-78). False for a caller without audit:read and for the other entity types. */
+      audit_included?: boolean;
     };
     /** @description RFC 7807 Problem Details object (API-03). Every error response (4xx/5xx) is `application/problem+json` and carries `trace_id`, the request id also returned in the `X-Request-ID` header. */
     ProblemDetail: {
@@ -7153,7 +7615,7 @@ export interface components {
       instance?: string;
       /** @description Request id of the failed request (equals the X-Request-ID response header). */
       trace_id: string;
-      /** @description Request field a 400 or 409 refers to (e.g. the unique `name` of a client). */
+      /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client). */
       field?: string;
     };
     PaginationEnvelope: {
@@ -7172,13 +7634,34 @@ export interface components {
       /** @enum {string} */
       status: 'ready' | 'not_ready';
       /**
-       * @description Result per dependency.
+       * @description Result per configured dependency; a dependency the instance is not configured for has no key.
        * @example {
        *       "database": "ok",
-       *       "redis": "unavailable"
+       *       "redis": "ok",
+       *       "smtp": "unavailable"
        *     }
        */
       checks: {
+        /**
+         * @description PostgreSQL with the required extensions and the DDL event trigger.
+         * @enum {string}
+         */
+        database?: 'ok' | 'unavailable';
+        /** @enum {string} */
+        redis?: 'ok' | 'unavailable';
+        /**
+         * @description S3 endpoint (RETICORA_S3_ENDPOINT) at the host:port its client connects to.
+         * @enum {string}
+         */
+        object_storage?: 'ok' | 'unavailable';
+        /** @enum {string} */
+        nats?: 'ok' | 'unavailable';
+        /**
+         * @description Central SMTP server, only with RETICORA_SMTP_HOST: connection, 220 greeting and EHLO in the configured TLS mode (WP-442).
+         * @enum {string}
+         */
+        smtp?: 'ok' | 'unavailable';
+      } & {
         [key: string]: 'ok' | 'unavailable';
       };
       /** @description Informational figures per subsystem; they never change the status. A detail that cannot be read is `{"error": "unavailable"}`. */
@@ -7265,8 +7748,28 @@ export interface components {
       cls?: string[] | null;
       sts?: string[] | null;
       tms?: string[] | null;
+      /**
+       * @description Permission scopes: for each permission whose scope differs from the
+       *     session scope (cls, sts, tms), the scope in which the caller holds
+       *     it, in the same form; a permission not listed holds the session
+       *     scope. The UI reads it for collector:manage to offer the client
+       *     choice of an enrollment code (createCollectorEnrollmentCode,
+       *     F-425).
+       */
+      pscp?: {
+        [key: string]: {
+          cls?: string[] | null;
+          sts?: string[] | null;
+          tms?: string[] | null;
+        };
+      };
       name?: string;
       email?: string;
+      /**
+       * @description Session id: the refresh family started at login. Every refresh
+       *     keeps it; the per-session rate limit counts it (API-04).
+       */
+      sid?: string;
       jti?: string;
       groups?: string[];
       /**
@@ -7302,7 +7805,7 @@ export interface components {
       /** @description Asset the CI is linked to (DB-05, AST-04). The asset is canonical for serial number, location, physical lifecycle and inventory data; they appear read-only under asset. */
       asset_id?: string;
       asset?: components['schemas']['CIAssetFacts'];
-      /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). */
+      /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). The parent is a CI of the same client or an org-wide CI (TEN-05). */
       parent_ci_id?: string;
       /** @description Software lifecycle; only CI types with a lifecycle model have one, and it changes through lifecycle transitions (DB-05). */
       readonly lifecycle_state?: string;
@@ -7319,6 +7822,7 @@ export interface components {
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
       readonly room_id?: string;
+      /** @description A system type or a type of the CI's organization; the database refuses a type of another organization on every write path (CI-01, TEN-09). */
       ci_type_id: string;
       name: string;
       status: components['schemas']['CIStatus'];
@@ -7359,6 +7863,17 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description A CI with the collections requested by include (API-05). Without include it is the CI alone. */
+    CIWithIncludes: components['schemas']['CI'] & {
+      /** @description At most 200 relationships of the CI the caller may see. */
+      relationships?: components['schemas']['Relationship'][];
+      /** @description At most 200 contact links of the CI the caller may see. */
+      contacts?: components['schemas']['CIContact'][];
+      /** @description The embedded collections the server capped: the collection has more rows the caller may see than it embeds, e.g. relationships true. Absent when every embedded collection is complete. */
+      truncated?: {
+        [key: string]: true;
+      };
+    };
     /** @description Canonical data of the linked asset, shown read-only on the CI (DB-05). */
     CIAssetFacts: {
       id: string;
@@ -7379,13 +7894,17 @@ export interface components {
       invoice_number?: string;
     };
     CreateCIRequest: {
+      /**
+       * Format: uuid
+       * @description ID (UUID) of an active system type or an active type of the organization (GET /api/v1/ci-types; CI-01, TEN-09), not its key. Any other value is rejected (422 on ci_type_id); an unknown ID and a type of another organization get the same answer.
+       */
       ci_type_id: string;
       client_id?: string;
       /** @description Node of the location tree; site and room of the CI follow from it. */
       location_id?: string;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string;
-      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
+      /** @description Containing CI: a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422). */
       parent_ci_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
@@ -7408,31 +7927,32 @@ export interface components {
       /** @description Defaults to manual. With manual or import the CI is manual (is_manual); an unknown source is rejected (400 with the field). */
       discovery_source?: components['schemas']['CIDiscoverySource'];
     };
-    /** @description A manual change. attributes is an RFC 7396 merge patch (nested objects merge, null removes a member). Every changed field gets a protected override that discovery does not overwrite. */
+    /** @description A manual change as an RFC 7396 merge patch (CI-04): an absent member stays unchanged; null clears a nullable field (the stored value becomes empty and its protected override holds null); null on name, status, attributes, discovery_source, last_seen_at or change_reason is refused with 422 naming the field. attributes merges nested objects, null removes a member. Every changed field gets a protected override that discovery does not overwrite. */
     UpdateCIRequest: {
       /** @description Reason stored with the overrides of this change. */
       change_reason?: string;
       name?: string;
       status?: components['schemas']['CIStatus'];
-      client_id?: string;
+      /** @description A CI that moves to a client cannot contain CIs of another client or org-wide CIs (422 on client_id, TEN-05); an org-wide CI (empty string) can. */
+      client_id?: string | null;
       /** @description Node of the location tree; site and room of the CI follow from it. */
-      location_id?: string;
+      location_id?: string | null;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
-      asset_id?: string;
-      /** @description Containing CI (empty string clears it on update); cycles are rejected (422). */
-      parent_ci_id?: string;
-      manufacturer?: string;
-      model?: string;
-      serial_number?: string;
-      hardware_uuid?: string;
-      management_ip?: string;
-      primary_mac?: string;
-      hostname?: string;
-      fqdn?: string;
-      os_name?: string;
-      os_version?: string;
-      firmware_version?: string;
-      sys_object_id?: string;
+      asset_id?: string | null;
+      /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. */
+      parent_ci_id?: string | null;
+      manufacturer?: string | null;
+      model?: string | null;
+      serial_number?: string | null;
+      hardware_uuid?: string | null;
+      management_ip?: string | null;
+      primary_mac?: string | null;
+      hostname?: string | null;
+      fqdn?: string | null;
+      os_name?: string | null;
+      os_version?: string | null;
+      firmware_version?: string | null;
+      sys_object_id?: string | null;
       /** @description RFC 7396 merge patch. The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
         [key: string]: unknown;
@@ -7483,7 +8003,7 @@ export interface components {
       action: string;
       resource_type: string;
       resource_id?: string;
-      /** @description What changed. Domain entries carry old and new values; the entry of a write request names the route, the response status, the written fields and, for resources without a UUID, resource_key. */
+      /** @description What changed. Domain entries carry old and new values; the entry of a write request names the route, the response status, the written fields and, for resources without a UUID, resource_key, and in `values` one `{field, old, new}` per changed column of the row the route changed (a create only new, a delete only old values; AUD-07). Secrets never appear; a personal value appears only as `{"$surrogate": "<id of its row>"}` (CH16). `values_unavailable: true` marks an entry whose row could not be read after the request. */
       changes?: {
         [key: string]: unknown;
       };
@@ -7510,7 +8030,7 @@ export interface components {
       broken_id?: string;
       /** @description Chain position (seq) where the first violation was found. */
       broken_at?: number;
-      /** @description `sequence gap`, `previous_hash mismatch` or `hash mismatch`. */
+      /** @description `sequence gap`, `previous_hash mismatch` or `hash mismatch`; for an entry whose personal values were sealed after it was chained (migration 000189) `sealed entry changed after its seal` or `sealed value differs from the original` (the values in the vault no longer give back the original). */
       broken_reason?: string;
     };
     /** @enum {string} */
@@ -7534,8 +8054,11 @@ export interface components {
       impact_direction: components['schemas']['RelationshipImpactDirection'];
       /** @description Edges of the type are redundant feeds (powered_by, member_of_cluster); impact needs all of them to fail. */
       redundant: boolean;
+      /** @description CI type keys an edge of the type may start at; POST /relationships refuses a source CI of another type (422, source_ci_id). Empty allows every type (REL-01, E-95). */
       allowed_source_types: string[];
+      /** @description CI type keys an edge of the type may end at; POST /relationships refuses a target CI of another type (422, target_ci_id). Empty allows every type (REL-01, E-95). */
       allowed_target_types: string[];
+      /** @description Informative until REL-06 [P2]; not enforced (E-95). */
       cardinality: string;
       readonly is_system: boolean;
       description?: string;
@@ -7553,8 +8076,11 @@ export interface components {
       category?: components['schemas']['RelationshipTypeCategory'];
       impact_direction?: components['schemas']['RelationshipImpactDirection'];
       redundant?: boolean;
+      /** @description CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type. */
       allowed_source_types?: string[];
+      /** @description CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type. */
       allowed_target_types?: string[];
+      /** @description Informative until REL-06 [P2]; not enforced (E-95). */
       cardinality?: string;
       description?: string;
     };
@@ -7583,7 +8109,7 @@ export interface components {
       attributes: {
         [key: string]: unknown;
       };
-      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). */
+      /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). An edge that is verified or re-confirmed is kept, also while a cleanup run is under way: a verification answered with 200 is never undone by the cleanup (F-411). */
       source: string;
       confidence?: number;
       /** @description Port of the source CI the edge starts at (REL-02). */
@@ -7613,7 +8139,10 @@ export interface components {
       attributes?: {
         [key: string]: unknown;
       };
-      /** @default manual */
+      /**
+       * @description manual, api, import, integration or workflow ("rule" is accepted as workflow). discovery and agent are reserved to the discovery and agent paths (422 on source, REL-08, F-271).
+       * @default manual
+       */
       source: string;
       confidence?: number;
       /** @description An interface of the source CI; the edge is unique per (source, target, type, interfaces), a taken one is 409. */
@@ -7623,7 +8152,7 @@ export interface components {
     };
     /** @description All properties are optional; only the supplied ones are changed. */
     UpdateRelationshipRequest: {
-      /** @description Merged into the existing attributes. */
+      /** @description Merged into the existing attributes. The key provenance is reserved to the system (422, F-270). */
       attributes?: {
         [key: string]: unknown;
       };
@@ -7636,6 +8165,31 @@ export interface components {
     };
     RelationshipListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Relationship'][];
+    };
+    /** @description A discovery edge removed with force that discovery does not create again (REL-03, F-273). */
+    RelationshipSuppression: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      source_ci_id: string;
+      /** Format: uuid */
+      target_ci_id: string;
+      /** @description Key of the relationship type; empty when the type no longer exists. */
+      rel_type: string;
+      /** @description Reason given when the edge was removed; absent when none was given. */
+      reason?: string;
+      /**
+       * Format: uuid
+       * @description The user who removed the edge; absent for a principal without user or after the user was deleted.
+       */
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    RelationshipSuppressionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RelationshipSuppression'][];
     };
     /** @enum {string} */
     WebhookEvent:
@@ -7650,7 +8204,10 @@ export interface components {
       id: string;
       organization_id: string;
       name: string;
-      /** Format: uri */
+      /**
+       * Format: uri
+       * @description Subscriber URL. It often carries a token in path, query or userinfo: a caller without webhook:manage gets only scheme and host (SEC-01).
+       */
       url: string;
       events: components['schemas']['WebhookEvent'][];
       is_active: boolean;
@@ -7663,7 +8220,7 @@ export interface components {
        * @description Until when the previous secret still signs after a rotation (SEC-06).
        */
       previous_secret_expires_at?: string;
-      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose objects the account may read; every CI or asset an event references must be readable, objects without client or site count as readable like under RLS. An event whose scope cannot be determined reaches the subscription only when the account reads org-wide. */
       service_account_id?: string;
       /** Format: date-time */
       created_at: string;
@@ -7679,7 +8236,7 @@ export interface components {
       headers?: {
         [key: string]: string;
       };
-      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose object the account may read. */
+      /** @description Binds the subscription to a service account (RBA-08): it then receives only events whose objects the account may read; every CI or asset an event references must be readable, objects without client or site count as readable like under RLS. An event whose scope cannot be determined reaches the subscription only when the account reads org-wide. The account must be visible to the creator (422 otherwise), and the scope of the creator still applies: the binding never widens it (E-98). */
       service_account_id?: string;
     };
     WebhookDelivery: {
@@ -7707,6 +8264,7 @@ export interface components {
       max_attempts: number;
       response_status?: number;
       duration_ms?: number;
+      /** @description Error of the last attempt. For a caller without webhook:manage every URL in it is reduced to scheme and host (SEC-01). */
       error?: string;
       /** Format: date-time */
       next_retry_at?: string;
@@ -7726,6 +8284,7 @@ export interface components {
       event: string;
       attempts: number;
       last_status_code?: number;
+      /** @description Error of the last attempt. For a caller without webhook:manage every URL in it is reduced to scheme and host (SEC-01). */
       last_error?: string;
       /** Format: date-time */
       first_attempt_at?: string;
@@ -7865,7 +8424,25 @@ export interface components {
       rejected_future?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
+      /** @description Sum over the processed records of the discovered values dropped because a manual write would refuse them: the data type of a typed CI column (MET-11; a multi-line hostname, a hardware_uuid that is no UUID, a malformed MAC or IP), the field definitions of the CI type (CI-03) or a unique attribute whose value another active CI holds (MET-15, also before the unique index exists; the CI keeps its own value). The rest of each record is stored; no value fails a record or the batch (WP-501). Absent when no value was dropped; with the queue the records are processed asynchronously and it stays absent. */
+      invalid_values?: number;
       job_id?: string;
+      /** @description Records processed, deduplicated or queued (REC-01). A record that fails does not take the others of the request down (WP-481). */
+      accepted: number;
+      /** @description Records refused with an error, each listed in errors. When every record is rejected the request answers with the error status of the first one instead of 202. */
+      rejected: number;
+      /** @description The records refused with an error, one entry each. */
+      errors?: components['schemas']['DiscoveryIngestRecordError'][];
+    };
+    DiscoveryIngestRecordError: {
+      /** @description The record_id of the record; absent for items of the deprecated collector_id/items request. */
+      record_id?: string;
+      /** @description The HTTP status the record alone would have been answered with, e.g. 403 for a record outside the sender's scope. */
+      status: number;
+      /** @description Why the record was refused, without internals. */
+      detail: string;
+      /** @description The failure is transient (database, network, or an earlier record of the same device failed transiently); sent again, the record may succeed. False for a record that can never succeed. */
+      retryable: boolean;
     };
     /** @enum {string} */
     DiscoveryJobStatus: 'queued' | 'running' | 'completed' | 'failed';
@@ -7916,6 +8493,15 @@ export interface components {
       started_at?: string;
       /** Format: date-time */
       finished_at?: string;
+      /**
+       * Format: date-time
+       * @description When the succeeded job was reverted (POST /jobs/{id}/revert); absent while it is not.
+       */
+      reverted_at?: string;
+      /** @description The user who reverted the job; absent while it is not reverted. */
+      reverted_by?: string;
+      /** @description Whether DELETE /jobs/{id} cancels the job now: true for a queued job and for a running job of a kind that can be cancelled while running (ci.bulk, history.snapshot, export), false otherwise. */
+      cancellable: boolean;
     };
     JobListResponse: {
       data: components['schemas']['Job'][];
@@ -7949,7 +8535,10 @@ export interface components {
       /** Format: int64 */
       file_size_bytes?: number;
       error_message?: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Start of the current run; while the job runs, the worker renews it as heartbeat (every 5 minutes). A running job without heartbeat for 15 minutes is queued again (TEC-14, F-315).
+       */
       started_at?: string;
       /** Format: date-time */
       completed_at?: string;
@@ -8005,11 +8594,33 @@ export interface components {
       };
     };
     GrantEntitlementRequest: {
-      feature_key: string;
+      /**
+       * @description A feature key of ENT-02, a module key or an add-on; any other key is 422 with `field` feature_key (F-209).
+       * @enum {string}
+       */
+      feature_key:
+        | 'cmdb_core'
+        | 'discovery'
+        | 'topology'
+        | 'rack_view'
+        | 'export_csv'
+        | 'webhooks'
+        | 'api_access'
+        | 'notifications_email'
+        | 'inventory'
+        | 'documents'
+        | 'stocktake'
+        | 'ticketing'
+        | 'monitoring'
+        | 'endpoint_agent'
+        | 'workflow_forms'
+        | 'compliance'
+        | 'iga'
+        | 'ai';
       plan?: components['schemas']['EntitlementPlan'];
       /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys; any other key is 422 with `field` limits (F-209). A missing quota is unlimited (E-34). */
       limits?: {
         [key: string]: number;
       };
@@ -8386,6 +8997,9 @@ export interface components {
       action: string;
       description: string;
     };
+    PermissionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Permission'][];
+    };
     RolePermissionGrant: {
       organization_id: string;
       role_id: string;
@@ -8393,6 +9007,9 @@ export interface components {
       /** Format: date-time */
       granted_at: string;
       granted_by?: string;
+    };
+    RolePermissionGrantListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RolePermissionGrant'][];
     };
     ReplaceRolePermissionsRequest: {
       permission_keys: string[];
@@ -9042,13 +9659,27 @@ export interface components {
       /** Format: int64 */
       current_version: number;
     };
+    /** @description The unmerge is blocked by a later open merge of the survivor (F-416): the merge later_merge_id of later_merge_victim_id into later_merge_survivor_id is unmerged first. A later merge into a CI outside the caller's scope is named only by its victim (the survivor of this merge); later_merge_id and later_merge_survivor_id are absent. */
+    UnmergeLaterMergeProblem: components['schemas']['ProblemDetail'] & {
+      /** Format: uuid */
+      later_merge_id?: string;
+      /** Format: uuid */
+      later_merge_victim_id: string;
+      /** Format: uuid */
+      later_merge_survivor_id?: string;
+    };
     ViolationProblem: components['schemas']['ProblemDetail'] & {
       violations: {
         field: string;
         detail: string;
       }[];
     };
+    InterfaceInUseProblem: components['schemas']['ProblemDetail'] & {
+      /** @description IDs of the edges visible to the caller that keep the interface (REL-05): every edge at the interface except an unverified discovery edge. */
+      relationship_ids?: string[];
+    };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -9057,6 +9688,13 @@ export interface components {
         | 'asset_movement'
         | 'rack_mount'
         | 'role_assignment'
+        | 'vlan'
+        | 'subnet'
+        | 'collector'
+        | 'discovery_scope'
+        | 'agent_enrollment_token'
+        | 'collector_enrollment_code'
+        | 'ci_merge'
       )[];
     };
     /** @enum {string} */
@@ -9325,14 +9963,17 @@ export interface components {
       environment: 'live' | 'test';
       permissions: string[];
       owner_id: string;
-      /** @description The key acts with this service account's rights (RBA-08). */
+      /** @description The key acts with this service account's rights (RBA-08), within the scope its creator held at binding (F-397). */
       service_account_id?: string;
       rotated_from?: string;
       /** Format: date-time */
       expires_at?: string;
       /** Format: date-time */
       revoked_at?: string;
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Time of the last use, accurate to a minute: it is written at most once a minute, so the last use lies between this time and one minute later (WP-610).
+       */
       last_used_at?: string;
       /** Format: date-time */
       created_at: string;
@@ -9360,7 +10001,7 @@ export interface components {
        * @enum {string}
        */
       environment: 'live' | 'test';
-      /** @description The key acts with this service account's rights (RBA-08). */
+      /** @description The key acts with this service account's rights (RBA-08), within the scope its creator held at binding (F-397). */
       service_account_id?: string;
     };
     RotateAPIKeyRequest: {
@@ -9448,7 +10089,9 @@ export interface components {
       operator_id: string;
       /** @enum {string} */
       operator_kind: 'oidc' | 'break_glass';
+      /** @description "login", a named change (e.g. entitlement.grant, org.create) or the method and the percent-encoded path below /api/v1/admin of the request (e.g. "GET /orgs"); a NUL byte or invalid UTF-8 in the path appears encoded (%00, %FF), never as a failed entry. */
       action: string;
+      /** @description The organization of /admin/orgs/{id}/... when {id} is a UUID. */
       target_org?: string;
       status: number;
       details: {
@@ -9472,6 +10115,54 @@ export interface components {
       /** Format: int64 */
       broken_at?: number;
       reason?: string;
+    };
+    /** @description Payload of an Alertmanager webhook notification, version 4 (field names as Alertmanager sends them); further fields are ignored. */
+    AlertmanagerWebhook: {
+      /** @enum {string} */
+      version: '4';
+      /** @description Key of the alert group (route and group labels). */
+      groupKey: string;
+      /** @description Alerts Alertmanager left out (max_alerts). */
+      truncatedAlerts?: number;
+      /** @enum {string} */
+      status: 'firing' | 'resolved';
+      receiver?: string;
+      groupLabels?: {
+        [key: string]: string;
+      };
+      commonLabels?: {
+        [key: string]: string;
+      };
+      commonAnnotations?: {
+        [key: string]: string;
+      };
+      externalURL?: string;
+      alerts: components['schemas']['AlertmanagerAlert'][];
+    };
+    AlertmanagerAlert: {
+      /** @enum {string} */
+      status: 'firing' | 'resolved';
+      labels: {
+        [key: string]: string;
+      };
+      annotations?: {
+        [key: string]: string;
+      };
+      /** Format: date-time */
+      startsAt: string;
+      /** Format: date-time */
+      endsAt?: string;
+      generatorURL?: string;
+      fingerprint?: string;
+    };
+    OpsAlertReceipt: {
+      /**
+       * @description duplicate when an earlier request with the same deduplication key queued the notification.
+       * @enum {string}
+       */
+      notification: 'queued' | 'duplicate';
+      /** @description Deliveries this request queued on the channels of the operator organization. */
+      deliveries: number;
     };
     User: {
       id: string;
@@ -9560,13 +10251,16 @@ export interface components {
       timestamp: string;
       value: number;
     };
+    MetricPointListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['MetricPoint'][];
+    };
     /** @description Partial alert rule update; every field is optional and only set fields are applied. */
     UpdateAlertRuleRequest: {
       name?: string;
       /** @enum {string} */
       condition?: 'gt' | 'lt' | 'eq';
       threshold?: number;
-      /** @description Go duration string. */
+      /** @description Go duration string between 0s and 9600h (400 days). */
       duration?: string;
       /** @enum {string} */
       severity?: 'critical' | 'warning' | 'info';
@@ -9596,6 +10290,9 @@ export interface components {
        */
       last_fired_at?: string;
     };
+    AlertRuleListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['AlertRule'][];
+    };
     CreateAlertRuleRequest: {
       id?: string;
       name: string;
@@ -9603,7 +10300,7 @@ export interface components {
       /** @enum {string} */
       condition: 'gt' | 'lt' | 'eq';
       threshold: number;
-      /** @description Go duration string. */
+      /** @description Go duration string between 0s and 9600h (400 days); nanoseconds as a number are accepted too. */
       duration?: string;
       /** @enum {string} */
       severity?: 'critical' | 'warning' | 'info';
@@ -9665,6 +10362,7 @@ export interface components {
         [key: string]: unknown;
       };
       candidate_ci_ids?: string[];
+      /** @description The principal (user or service account) that resolved the item; absent when the system resolved it: an unlicensed_ci item adopted after max_cis was raised, or an unclassified_device item closed with resolution reclassified because discovery classified its CI later (DIS-02). */
       resolved_by?: string;
       /** Format: date-time */
       resolved_at?: string;
@@ -9683,6 +10381,7 @@ export interface components {
     ReviewItemListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ReviewItem'][];
     };
+    /** @description The resolver is always the authenticated principal (user or service account) and is stored as resolved_by; a body naming resolved_by, or any other unknown field, is refused with 400. */
     ReviewItemResolveRequest: {
       /**
        * @description merge folds the observation into a candidate CI (requires ci_id); new creates a CI from the observation; accept applies what the item proposes; dismiss closes the item with no change. create is the deprecated name of new.
@@ -9691,7 +10390,11 @@ export interface components {
       action: 'merge' | 'new' | 'dismiss' | 'accept' | 'create';
       /** @description Target candidate CI id, required when action is merge. */
       ci_id?: string;
-      resolved_by?: string;
+      /**
+       * Format: uuid
+       * @description Type of the CI new creates (UI-16), the id of an active system type or of a type of the organization (GET /ci-types). It takes precedence over the type name the item recorded; without it that name is resolved as the ingest resolves it. A value that is no UUID or names no such type is 422 with field ci_type_id.
+       */
+      ci_type_id?: string;
       /** @description Optional human-readable resolution note. */
       resolution?: string;
     };
@@ -9732,6 +10435,14 @@ export interface components {
       name: string;
       slug: string;
       plan: string;
+      /**
+       * @description Free settings of the organization. `branding.sender_name` is the sender name and subject prefix of its notification e-mails (NTF-03); without it the organization's name. An e-mail channel's own sender name, and the display name of an own SMTP server's sender address, take precedence.
+       * @example {
+       *       "branding": {
+       *         "sender_name": "ACME Service Desk"
+       *       }
+       *     }
+       */
       settings: {
         [key: string]: unknown;
       };
@@ -9746,10 +10457,12 @@ export interface components {
        */
       currency: string;
       /**
-       * @description BCP 47 language tag.
+       * @description BCP 47 language tag. Notifications to users who kept the account default locale and to addresses without an account are written in it (de-DE or en-US; another language gets de-DE, NTF-03).
        * @example de-DE
        */
       locale: string;
+      /** @description The organization's consent to external AI processing (AI-02); together with the ai add-on it enables the AI assistant. */
+      ai_opt_in: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -9757,12 +10470,15 @@ export interface components {
     };
     UpdateOrganizationRequest: {
       name?: string;
+      /** @description Free settings; `branding.sender_name` brands the notification e-mails (see Organization.settings). */
       settings?: {
         [key: string]: unknown;
       };
       timezone?: string;
       currency?: string;
       locale?: string;
+      /** @description Organization AI opt-in (AI-02); only a holder of user:manage for the whole organization may set it, the change is audited. */
+      ai_opt_in?: boolean;
     };
     /** @description Customer of the organization (LOC-02); the name is unique per organization. */
     Client: {
@@ -9883,7 +10599,7 @@ export interface components {
       name: string;
       floor?: number;
       room_type?: string;
-      /** @description Floor-plan object positions, object_id → {x, y} normalized 0..1. */
+      /** @description Floor-plan object positions, CI id → {x, y} normalized 0..1. Only entries of CIs the caller sees, that are not deleted and that are located in this room are returned; an entry of a CI that was deleted or moved out of the room (e.g. to another client) is ignored, it neither shows nor blocks a PATCH. */
       layout?: {
         [key: string]: {
           x?: number;
@@ -9905,7 +10621,7 @@ export interface components {
       name?: string;
       floor?: number;
       room_type?: string;
-      /** @description Replaces the room's floor-plan object positions. Map of object_id → {x, y} in normalized 0..1 coordinates; an empty object clears the layout. */
+      /** @description Replaces the room's floor-plan object positions the caller sees. Map of CI id → {x, y} in normalized 0..1 coordinates; an empty object clears them. Each key must be a CI of the organization the caller sees, not deleted and located in this room (422 otherwise). Positions of CIs the caller does not see stay as stored. */
       layout?: {
         [key: string]: {
           x?: number;
@@ -9964,7 +10680,17 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      /** @description Name of the mounted CI. Set in the layout and the mount lists of a rack, absent in the answer of a single mount (RCK-02). */
+      ci_name?: string;
+      /** @description Name of the CI type of the mounted CI; set like ci_name. */
+      ci_type?: string;
     };
+    /** @description A mount of the rack layout with the names of the CI and its type, so the layout is shown without reading each CI (RCK-02, F-252). */
+    RackLayoutMount: components['schemas']['RackMount'] & {
+      ci_name: string;
+      ci_type: string;
+    };
+    /** @description An omitted height_u or face takes its default (1, front); an explicit value outside minimum or enum (height_u 0 or below, face "") is 400 with field height_u or face and nothing is stored (F-415). */
     CreateRackMountRequest: {
       ci_id: string;
       position_u: number;
@@ -10103,7 +10829,7 @@ export interface components {
       /** @description VRF of the subnet (CH10); the CIDR is unique per VRF. */
       vrf_id?: string;
       name?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
@@ -10121,7 +10847,7 @@ export interface components {
       /** @description VRF of the subnet; the organization's default VRF when omitted. */
       vrf_id?: string;
       name?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
@@ -10134,14 +10860,14 @@ export interface components {
       name?: string;
       /** @description Moves the subnet and its addresses to another VRF (empty string = default VRF). */
       vrf_id?: string;
-      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. */
+      /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
       description?: string;
       is_management?: boolean;
     };
-    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. */
+    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. Every principal of the organization reads the VRFs; only principals without client or site restriction create, change or delete them (E-09). */
     VRF: {
       id: string;
       organization_id: string;
@@ -10250,7 +10976,7 @@ export interface components {
       if_type: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management: boolean;
       is_uplink: boolean;
@@ -10273,7 +10999,7 @@ export interface components {
       if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
@@ -10290,7 +11016,7 @@ export interface components {
       if_type?: 'ethernet' | 'fiber' | 'wifi' | 'virtual' | 'loopback' | 'serial' | 'management';
       speed_mbps?: number;
       mtu?: number;
-      /** @description VLAN of the VLAN catalog (NET-01). */
+      /** @description VLAN of the VLAN catalog (NET-01). The VLAN is one the caller can see, of the client of the CI or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       is_management?: boolean;
       is_uplink?: boolean;
@@ -10362,6 +11088,8 @@ export interface components {
     RegisterCollectorRequest: {
       name: string;
       client_id?: string;
+      /** @description Site of the collector; it decides the client (422 with field site_id for an unknown site or one of another client than client_id). */
+      site_id?: string;
       version?: string;
       status?: string;
       config?: {
@@ -10386,6 +11114,7 @@ export interface components {
       vrf_id?: string;
       /** @description Interval (e.g. 24h, at least 5m) or five-field cron expression. */
       schedule: string;
+      /** @description The bound credentials. Empty: the collector uses the organization-wide credentials and those of the scope's client for this scope (E-67). */
       credential_ids: string[];
       plugins: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
       enabled: boolean;
@@ -10430,12 +11159,14 @@ export interface components {
       name?: string;
       /** @enum {string} */
       kind: 'cidr' | 'host' | 'range';
+      /** @description CIDR, IP address or host name, or "first-last" address range. IPv6 addresses carry no zone; a target with one (fe80::1%eth0) is refused with 422 on the field target. */
       target: string;
       client_id?: string;
       site_id?: string;
       vrf_id?: string;
       /** @description Defaults to 24h. */
       schedule?: string;
+      /** @description Credentials of the organization that are organization-wide or of the scope's client (decided by the site or the collector), else 422 on credential_ids. Empty: the scope uses the organization-wide credentials and those of its client (E-67). */
       credential_ids?: string[];
       /** @description Defaults to sweep and snmp. */
       plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
@@ -10445,10 +11176,12 @@ export interface components {
       name?: string;
       /** @enum {string} */
       kind?: 'cidr' | 'host' | 'range';
+      /** @description CIDR, IP address or host name, or "first-last" address range. IPv6 addresses carry no zone; a target with one (fe80::1%eth0) is refused with 422 on the field target. */
       target?: string;
       site_id?: string;
       vrf_id?: string;
       schedule?: string;
+      /** @description Replaces the list; organization-wide credentials or those of the scope's client, else 422 on credential_ids. */
       credential_ids?: string[];
       plugins?: ('sweep' | 'snmp' | 'ssh' | 'wmi' | 'ipmi' | 'redfish' | 'power' | 'nas')[];
       enabled?: boolean;
@@ -10472,13 +11205,17 @@ export interface components {
         | 'ipmi'
         | 'wmi'
         | 'api_token'
-        | 'nut';
+        | 'nut'
+        | 'nas';
       scope?: string;
       key_version: number;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    CredentialListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Credential'][];
     };
     CreateCredentialRequest: {
       client_id?: string;
@@ -10493,7 +11230,8 @@ export interface components {
         | 'ipmi'
         | 'wmi'
         | 'api_token'
-        | 'nut';
+        | 'nut'
+        | 'nas';
       scope?: string;
       /** @description Plaintext secret data, encrypted at rest before storage. */
       secret: {
@@ -10508,6 +11246,9 @@ export interface components {
       entity_id: string;
       /** Format: date-time */
       created_at: string;
+    };
+    DocumentLinkListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['DocumentLink'][];
     };
     CreateDocumentLinkRequest: {
       entity_type: string;
@@ -10546,6 +11287,9 @@ export interface components {
       /** Format: date-time */
       joined_at: string;
     };
+    TeamMemberListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['TeamMember'][];
+    };
     AddTeamMemberRequest: {
       user_id: string;
       /** @description Defaults to "member" when omitted. */
@@ -10557,6 +11301,7 @@ export interface components {
       organization_id: string;
       name: string;
       description?: string;
+      /** @description True for system roles: the seeded standard roles (also is_builtin) and system custom roles. The UI marks them "System". */
       is_system: boolean;
       /** @description True for the seeded standard roles stored in `role`. */
       is_builtin?: boolean;
@@ -10584,11 +11329,19 @@ export interface components {
       user_id: string;
       custom_role_id?: string;
       role_id?: string;
-      scope_type: string;
+      /**
+       * @description Scope of the assignment (RBA-03); see AssignRoleRequest.scope_type.
+       * @enum {string}
+       */
+      scope_type: 'organization' | 'client' | 'site' | 'team';
+      /** @description Client, site or team of the scope; absent for organization. */
       scope_id?: string;
       /** Format: date-time */
       granted_at: string;
       granted_by?: string;
+    };
+    RoleAssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RoleAssignment'][];
     };
     /** @description Assigns a role to a user. Exactly one of `custom_role_id` (tenant-defined role) or `role_id` (seeded standard role) must be set. */
     AssignRoleRequest: {
@@ -10596,21 +11349,35 @@ export interface components {
       custom_role_id?: string;
       /** @description ID of a standard (builtin) role; mutually exclusive with custom_role_id. */
       role_id?: string;
-      /** @description Defaults to "organization" when omitted. */
-      scope_type?: string;
+      /**
+       * @description Scope of the assignment (RBA-03); defaults to "organization" when omitted. client, site and team name the client, site or team in scope_id: a client or site scope needs a client or site of the organization (422 otherwise), a team scope a team of the organization (404 otherwise). A site assignment is confined to the client of its site. The scopes of all assignments of a user are united per dimension (clients, sites, teams) and the dimensions are intersected (E-70 option 1): a site assignment next to a client assignment limits the sites of that client as well (client C1 plus a site S1 of C1 grants C1 at S1 and without site only), and a team assignment limits the tickets of every assignment to its team plus tickets without team, which stay read-only (E-11, TEN-05). An org-wide assignment lifts every dimension.
+       * @enum {string}
+       */
+      scope_type?: 'organization' | 'client' | 'site' | 'team';
+      /** @description The client, site or team of a scoped assignment; omitted for organization. */
       scope_id?: string;
     };
     SearchHit: {
       id: string;
       organization_id: string;
       /** @enum {string} */
-      entity_type: 'ci' | 'asset' | 'document' | 'ticket' | 'contact' | 'compliance';
+      entity_type:
+        | 'ci'
+        | 'asset'
+        | 'document'
+        | 'ticket'
+        | 'contact'
+        | 'compliance'
+        | 'location'
+        | 'reservation';
       entity_id: string;
       title: string;
       summary?: string;
+      /** @description Page of the entity in the SPA (SRC-01). A location links to its node in the location tree (/locations?node=<id>); a contact has no page and an empty url, its hit carries the details for the contact card of the command palette instead (F-334). */
       url: string;
       score: number;
       highlights?: string[];
+      /** @description For a contact hit: email, phone and role of the contact (each only when set), read at query time from the PII vault and the contact under the caller's scope, like GET /contacts/{id}; the name is the title. The search index itself stores no personal data. */
       metadata?: {
         [key: string]: string;
       };
@@ -10639,6 +11406,9 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    AIConversationListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['AIConversation'][];
+    };
     AICitation: {
       entity_type: string;
       entity_id: string;
@@ -10657,6 +11427,50 @@ export interface components {
       prompt_tokens: number;
       completion_tokens: number;
     };
+    rule:
+      | components['schemas']['all']
+      | components['schemas']['required']
+      | components['schemas']['pattern']
+      | components['schemas']['range']
+      | components['schemas']['enum'];
+    /** @description Every rule must hold; violations are reported in order. */
+    all: {
+      /** @constant */
+      op: 'all';
+      rules: components['schemas']['rule'][];
+    };
+    /** @description The value must not be empty (code required). */
+    required: {
+      /** @constant */
+      op: 'required';
+    };
+    /** @description A string value must match the regular expression (code pattern; a non-string value: pattern.type). */
+    pattern: {
+      /** @constant */
+      op: 'pattern';
+      pattern: string;
+    };
+    /** @description The number (of: value) or the length of a string (of: length) lies within min and max, inclusive (codes range.min, range.max; a value of another kind: range.type). */
+    range:
+      | {
+          /** @constant */
+          op: 'range';
+          /**
+           * @default value
+           * @enum {unknown}
+           */
+          of: 'value' | 'length';
+          min?: number;
+          max?: number;
+        }
+      | unknown
+      | unknown;
+    /** @description The value is one of the values; strings, numbers and booleans compare by type and value (code enum). */
+    enum: {
+      /** @constant */
+      op: 'enum';
+      values: (string | number | boolean)[];
+    };
   };
   responses: {
     /** @description Bad request */
@@ -10668,9 +11482,12 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description Unauthorized */
+    /** @description Unauthorized: the credential is missing or invalid. A failed authentication counts against the pre-auth budget of the client IP (AUT-10); the X-RateLimit headers describe that budget. */
     Unauthorized: {
       headers: {
+        'X-RateLimit-Limit': components['headers']['X-RateLimit-Limit'];
+        'X-RateLimit-Remaining': components['headers']['X-RateLimit-Remaining'];
+        'X-RateLimit-Reset': components['headers']['X-RateLimit-Reset'];
         [name: string]: unknown;
       };
       content: {
@@ -10679,6 +11496,33 @@ export interface components {
     };
     /** @description Forbidden */
     Forbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Forbidden: the principal does not hold notification:manage, or holds it only for some clients, sites or teams. Notification channels and their deliveries belong to the whole organization (a channel receives the notifications of every client, a delivery names recipients of every client), so only a holder of notification:manage for the whole organization administers them (RBA-03, TEN-06, F-418); nothing is created, changed or deleted. */
+    NotificationAdminForbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Forbidden: a missing permission, or the organization's plan does not include the feature of this operation (rack_view for racks, mounts and rack nodes of the location tree, api_access for API keys, discovery for discovery scopes; type https://reticora.io/problems/feature-not-entitled, ENT-05). */
+    FeatureNotEntitled: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Forbidden: a missing permission, the organization's plan does not include the feature (type https://reticora.io/problems/feature-not-entitled, ENT-05), or the quota of the operation is reached (type https://reticora.io/problems/entitlement-limit, ENT-03): max_users for users, max_api_keys for API keys, max_collectors for collectors, max_cis (the active CIs of the whole organization, also those of clients and sites outside the caller's scope) for every write that makes a CI active (POST /cis, the restore, the unmerge, and of a review item new and the merge of a resurrected_device item). Nothing is created, restored or unmerged; after a downgrade below the stock the existing objects stay usable and readable (ENT-08). Every quota counts the whole organization; the detail of entitlement-limit names count and limit ("N of L in use") only to a caller with org-wide client and site scope. A caller restricted to clients or sites, an invitation, a first login and an enrollment get "the limit of the plan is reached" without numbers (F-414). */
+    EntitlementLimit: {
       headers: {
         [name: string]: unknown;
       };
@@ -10722,7 +11566,7 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
-    /** @description A rate limit is spent: the pre-auth budget of the client IP (AUT-10), the budget of the API key or session, or the organization budget (API-04). */
+    /** @description A rate limit is spent: the pre-auth budget of the client IP (AUT-10), the budget of the API key or session, or the organization budget (API-04). The X-RateLimit headers describe the budget that refused the request. */
     TooManyRequests: {
       headers: {
         /** @description Seconds until the budget is renewed. */
@@ -10745,6 +11589,17 @@ export interface components {
         'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
+    /** @description A dependency the request needs is unreachable (OPS-06): the ingest queue (NATS), the API key store (database) or a database connection that cannot be established. Nothing was stored; the request may be repeated after Retry-After. */
+    DependencyUnavailable: {
+      headers: {
+        /** @description Seconds after which the request may be repeated. */
+        'Retry-After'?: number;
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
     /** @description The location or its subtree is still referenced; dependencies lists the kinds of referencing objects */
     LocationInUse: {
       headers: {
@@ -10752,6 +11607,15 @@ export interface components {
       };
       content: {
         'application/problem+json': components['schemas']['DependencyProblem'];
+      };
+    };
+    /** @description The name is taken below the same parent: a site per client, a building per site, a room per building, a rack per room (LOC-03..06). `field` is `name`; nothing was stored. */
+    LocationNameTaken: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
       };
     };
     /** @description The request violates the parent matrix or a field rule; violations name the field */
@@ -10774,6 +11638,25 @@ export interface components {
     };
   };
   parameters: {
+    /**
+     * @description Deduplicates a POST for 24 hours (API-04); every POST endpoint
+     *     accepts it. The key is bound to the caller (organization and
+     *     principal), the method and the path. The first request reserves
+     *     it: a concurrent request with the same key gets 409, a later one
+     *     with the same body gets the stored answer with
+     *     `Idempotency-Replayed: true` without running the request again,
+     *     one with a different body 409.
+     *
+     *     2xx, 3xx and 4xx answers are stored. A 5xx answer is not stored
+     *     and releases the key: a retry with the same key runs the request
+     *     again, e.g. after a 503 with `Retry-After` during a dependency or
+     *     audit outage.
+     *
+     *     A replayed answer is the stored one verbatim: the `trace_id` of a
+     *     replayed problem is that of the first request, while the
+     *     `X-Request-ID` header always names the current request.
+     */
+    IdempotencyKey: string;
     /** @description Resource identifier. */
     ResourceID: string;
     /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
@@ -10910,6 +11793,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -10932,18 +11816,35 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listOrganizationsAsOperator: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Organizations */
+      /** @description Organizations, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -10952,6 +11853,7 @@ export interface operations {
           'application/json': components['schemas']['OperatorOrgListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -11039,7 +11941,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description cmdb_core disabled or limited in time, unknown source or negative limit */
+      /** @description Unknown feature key (`field` feature_key), unknown quota key or negative limit (`field` limits), cmdb_core disabled (`field` enabled) or limited in time (`field` valid_until), unknown source (`field` source); nothing is stored. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -11109,6 +12011,53 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  receiveAlertmanagerAlerts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AlertmanagerWebhook'];
+      };
+    };
+    responses: {
+      /** @description The notification is queued, or was queued by an earlier identical request */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OpsAlertReceipt'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Body larger than 1 MiB */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Not an Alertmanager payload of version 4 (status, group key, alerts, startsAt), or more than 100 alerts */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getAuthConfig: {
@@ -11253,8 +12202,26 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
+      /** @description The ID token is invalid, or it carries no valid organization attribute: none, not a UUID, or one that names no organization of the instance (type https://reticora.io/problems/login-no-organization, AUT-09, CH26, F-395). No user is created and no session is issued. */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The login is refused, no session and no refresh cookie are issued. The type names the reason, the client shows its own text for it (F-197): a first login without admission (https://reticora.io/problems/login-not-admitted, AUT-01), a deactivated user (https://reticora.io/problems/login-user-inactive, TLC-04), a user without any role (https://reticora.io/problems/login-no-role, TEN-04, RBA-03), or a first login with an invitation while max_users is reached (https://reticora.io/problems/entitlement-limit, ENT-03). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   refreshSession: {
@@ -11426,7 +12393,27 @@ export interface operations {
   createCI: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description Deduplicates a POST for 24 hours (API-04); every POST endpoint
+         *     accepts it. The key is bound to the caller (organization and
+         *     principal), the method and the path. The first request reserves
+         *     it: a concurrent request with the same key gets 409, a later one
+         *     with the same body gets the stored answer with
+         *     `Idempotency-Replayed: true` without running the request again,
+         *     one with a different body 409.
+         *
+         *     2xx, 3xx and 4xx answers are stored. A 5xx answer is not stored
+         *     and releases the key: a retry with the same key runs the request
+         *     again, e.g. after a 503 with `Retry-After` during a dependency or
+         *     audit outage.
+         *
+         *     A replayed answer is the stored one verbatim: the `trace_id` of a
+         *     replayed problem is that of the first request, while the
+         *     `X-Request-ID` header always names the current request.
+         */
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
       path?: never;
       cookie?: never;
     };
@@ -11447,7 +12434,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. */
+      403: components['responses']['EntitlementLimit'];
+      /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. The check covers every CI of the scope of the attribute, also those outside the client or site scope of the caller, and never names the other CI. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -11456,13 +12444,22 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
   getCI: {
     parameters: {
       query?: {
-        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. */
+        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. A collection embeds at most 200 rows; one with more rows the caller may see is named in `truncated` (CIWithIncludes). */
         include?: string;
       };
       header?: never;
@@ -11482,7 +12479,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['CI'];
+          'application/json': components['schemas']['CIWithIncludes'];
         };
       };
       /** @description The CI was merged into another; Location names the survivor (12 months, CI-12). */
@@ -11562,7 +12559,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes) */
+      /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes; also a CI outside the client or site scope of the caller, which is never named) */
       409: {
         headers: {
           [name: string]: unknown;
@@ -11582,6 +12579,16 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      /** @description A field value is not allowed; `violations` names the field, e.g. null on a required field such as name or status ("must not be null"). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   restoreCI: {
@@ -11606,8 +12613,17 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
+      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description The CI was deleted longer ago than the retention. */
       410: {
         headers: {
@@ -11632,7 +12648,10 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': {
-          /** Format: uuid */
+          /**
+           * Format: uuid
+           * @description ID of an active system type or an active type of the organization (CI-01, TEN-09).
+           */
           ci_type_id: string;
         };
       };
@@ -11651,13 +12670,22 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The target type does not exist. */
+      /** @description Another active CI holds a value the CI carries of a unique attribute of the target type (MET-15): urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists. The CI keeps its type. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+      /** @description The target type is not allowed, `violations` names ci_type_id: no UUID ("not the ID (UUID) of a CI type"), no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or deactivated ("the CI type is deactivated"). */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/problem+json': components['schemas']['ProblemDetail'];
+          'application/problem+json': components['schemas']['ViolationProblem'];
         };
       };
     };
@@ -11716,7 +12744,10 @@ export interface operations {
   };
   unmergeCI: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Restore the snapshot although the survivor changed after the merge; the later changes of the survivor are overwritten. */
+        force?: boolean;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -11735,16 +12766,20 @@ export interface operations {
           'application/json': components['schemas']['CIUnmergeResult'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description One of the CIs is locked by another write. */
+      /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), the survivor is part of a later open merge (UnmergeLaterMergeProblem, type urn:reticora:problem:unmerge-later-merge: unmerge that merge first; force does not override it), one of the CIs is locked by another write, or another active CI holds a value of a unique attribute of the merged CI or of the survivor in the snapshot meanwhile (MET-15: urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; force does not override it, the merge stays). */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/problem+json': components['schemas']['ProblemDetail'];
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['UnmergeLaterMergeProblem']
+            | components['schemas']['ProblemDetail'];
         };
       };
       /** @description The merge snapshot is older than 30 days. */
@@ -12096,11 +13131,14 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
-        /** @description Return relationships where the CI is either the source or target. */
+        /** @description Return relationships where the CI is either the source or target. Not a UUID → 400. */
         ci_id?: string;
+        /** @description Return relationships whose source is the CI. Not a UUID → 400. */
         source_ci_id?: string;
+        /** @description Return relationships whose target is the CI (projected mounted_in and located_in have none). Not a UUID → 400. */
         target_ci_id?: string;
-        rel_type?: components['schemas']['RelationshipType'];
+        /** @description Return relationships of this type: a key of the relationship type catalogue the organization sees (GET /api/v1/relationship-types), the projected types contains, mounted_in and located_in included. A key the catalogue does not know → 400. */
+        rel_type?: string;
       };
       header?: never;
       path?: never;
@@ -12117,6 +13155,7 @@ export interface operations {
           'application/json': components['schemas']['RelationshipListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -12145,13 +13184,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Structural relationship type, which is projected and cannot be stored */
-      422: {
+      403: components['responses']['Forbidden'];
+      /** @description The edge exists already (the same source, target, type and interfaces), e.g. a repeated create */
+      409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, an unknown ID or a soft-deleted CI (CI-05, F-424). `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, nothing is stored (REL-01, E-95, F-313). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ViolationProblem'] | components['schemas']['ProblemDetail'];
         };
       };
       500: components['responses']['InternalServerError'];
@@ -12162,6 +13212,8 @@ export interface operations {
       query?: {
         /** @description Required to delete a discovery edge; creates its suppression. */
         force?: boolean;
+        /** @description Why the discovery edge is removed, stored with its suppression (trimmed, at most 1000 characters). The UI asks for it in the confirmation of "Entfernen und unterdrücken"; other edges ignore it. */
+        reason?: string;
       };
       header?: never;
       path: {
@@ -12180,8 +13232,19 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      /** @description The suppression of a discovery edge is refused because its type has no relationship type entry; without the suppression discovery would recreate the edge, so it is not deleted. `violations` names rel_type (F-272). A reason longer than 1000 characters or with a NUL character names reason; nothing is deleted. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   updateRelationship: {
@@ -12212,6 +13275,82 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description attributes carries the reserved key provenance; `violations` names attributes.provenance and nothing is changed (F-270). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+    };
+  };
+  listRelationshipSuppressions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only the suppressions whose source or target is this CI. */
+        ci_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated list of suppressions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelationshipSuppressionListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  liftRelationshipSuppression: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Suppression lifted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listWebhooks: {
@@ -12277,6 +13416,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -12531,7 +13671,15 @@ export interface operations {
           'application/json': components['schemas']['DiscoveryIngestResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
+      /** @description The body is unusable: no valid JSON or gzip, no records, records and items mixed, or a reserved attribute namespace. A malformed value of a typed CI column (e.g. hardware_uuid, primary_mac, management_ip, a multi-line hostname) refuses nothing: it is dropped, counted in invalid_values, and the rest of its record and the other records are processed (WP-501). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       /** @description Decompressed body larger than 64 MiB */
@@ -12543,7 +13691,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field). identity.hardware_uuid and identity.primary_mac are values of typed CI columns: a malformed one is dropped and counted in invalid_values instead (WP-501). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -12553,6 +13701,7 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['DependencyUnavailable'];
     };
   };
   listDiscoveryJobs: {
@@ -12838,7 +13987,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The job is finished already. */
+      /** @description The job is finished already, or it runs and its kind cannot be cancelled while running. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12904,13 +14053,16 @@ export interface operations {
           'application/json': {
             job_id: string;
             reverted: boolean;
+            /** Format: date-time */
+            reverted_at?: string;
+            reverted_by?: string;
           };
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      /** @description The kind defines no revert or the job did not succeed. */
+      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the survivor is part of a later open merge (the detail names that merge; its job is reverted first, F-416), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -12919,6 +14071,8 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listExportJobs: {
@@ -13173,6 +14327,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description ci_id or client_id is no UUID, or ci_id names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04), or client_id names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13252,6 +14424,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The field is owned by the parent asset of a composition (spec §5). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description ci_id is no UUID or names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listAssignments: {
@@ -13447,6 +14637,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -13840,6 +15031,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   getMaintenanceWindow: {
@@ -13963,6 +15155,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listDisposalRecords: {
@@ -14981,6 +16174,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      503: components['responses']['DependencyUnavailable'];
     };
   };
   agentHeartbeat: {
@@ -15562,6 +16756,15 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may delete it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
     };
   };
@@ -15592,6 +16795,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may change it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
     };
   };
@@ -15733,6 +16945,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may complete it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Stocktake is already completed or cancelled */
       409: {
@@ -15819,6 +17040,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -15897,7 +17128,17 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listTicketComments: {
@@ -15973,7 +17214,23 @@ export interface operations {
   };
   listAPIKeys: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -15989,8 +17246,9 @@ export interface operations {
           'application/json': components['schemas']['APIKeyListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -16018,7 +17276,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
+      404: components['responses']['NotFound'];
       /** @description Name, permissions, expiry or environment invalid */
       422: {
         headers: {
@@ -16051,7 +17310,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
@@ -16082,7 +17341,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       /** @description Overlap out of range */
       422: {
@@ -16160,6 +17419,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -16207,9 +17467,11 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   updateUser: {
@@ -16252,6 +17514,21 @@ export interface operations {
         to?: string;
         /** @description Go duration string used for aggregation, for example 5m or 1h. */
         step?: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path?: never;
@@ -16259,13 +17536,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Metric point series */
+      /** @description Paginated metric point series */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['MetricPoint'][];
+          'application/json': components['schemas']['MetricPointListResponse'];
         };
       };
       400: components['responses']['BadRequest'];
@@ -16299,6 +17576,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description A sample names a CI the caller does not see (`field` ci_id, the ci_id in `detail`); nothing of the body is stored. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -16331,26 +17617,44 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
     };
   };
   listAlerts: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Alert rules */
+      /** @description Paginated alert rules */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['AlertRule'][];
+          'application/json': components['schemas']['AlertRuleListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
     };
   };
@@ -16379,6 +17683,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       409: components['responses']['Conflict'];
+      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   deleteAlert: {
@@ -16432,6 +17745,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listReviewItems: {
@@ -16452,7 +17774,9 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Return items of this status. Another value → 400 with field status (F-426). */
         status?: 'open' | 'resolved' | 'dismissed';
+        /** @description Return items of this review type. Another value → 400 with field kind (F-426). */
         kind?:
           | 'unclassified_device'
           | 'ambiguous_identity'
@@ -16539,10 +17863,10 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      /** @description The action does not resolve items of this type */
+      /** @description The action does not resolve items of this type, new cannot tell the client of the device, new has no CI type (field ci_type_id), or the effect refuses a value of the item (the field it names, e.g. collector_id or target of a suggested scope) */
       422: {
         headers: {
           [name: string]: unknown;
@@ -16572,7 +17896,9 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Return items of this status. Another value → 400 with field status (F-426). */
         status?: 'open' | 'resolved' | 'dismissed';
+        /** @description Return items of this review type. Another value → 400 with field kind (F-426). */
         kind?:
           | 'unclassified_device'
           | 'ambiguous_identity'
@@ -16601,6 +17927,7 @@ export interface operations {
           'application/json': components['schemas']['ReviewItemListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -16632,7 +17959,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
@@ -16645,9 +17972,9 @@ export interface operations {
         site_id?: string;
         /** @description CI type id (ci.ci_type_id) to filter by. */
         ci_type?: string;
-        /** @description When set, returns a subgraph reachable from this CI. */
+        /** @description When set, returns a subgraph reachable from this CI (a UUID). A CI the caller does not see is 404. */
         root_ci_id?: string;
-        /** @description Traversal depth from root_ci_id (default 2, max 20). */
+        /** @description Traversal depth from root_ci_id (default 2); a larger value than 20 is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
       };
       header?: never;
@@ -16665,7 +17992,25 @@ export interface operations {
           'application/json': components['schemas']['TopologyGraph'];
         };
       };
+      /** @description root_ci_id, client_id, site_id or ci_type is no UUID (for root_ci_id with field root_ci_id), or depth is no integer or below 1 (field depth). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
+      /** @description root_ci_id names no CI the caller sees: an unknown or deleted CI, a CI of another organization or of a client or site outside the scope. The answer is the same in each case ("ci not found") and does not name the CI (F-161). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Without root_ci_id the filtered topology holds more than 2,000 CIs (IMP-06); narrow it with site_id, client_id or ci_type (a CI type id) or set root_ci_id. */
       422: {
         headers: {
@@ -16707,7 +18052,7 @@ export interface operations {
   getCIImpactLegacy: {
     parameters: {
       query?: {
-        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
@@ -16730,6 +18075,15 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['ImpactAnalysis'];
+        };
+      };
+      /** @description depth is no integer or below 1 (field depth). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -16755,7 +18109,7 @@ export interface operations {
         categories?: string;
         /** @description Restrict the analysis to one relationship type. */
         rel_type?: string;
-        /** @description Maximum hops of the impact paths. */
+        /** @description Maximum hops of the impact paths; defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
@@ -16793,7 +18147,7 @@ export interface operations {
   getCIImpact: {
     parameters: {
       query?: {
-        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20. */
+        /** @description Maximum hops of the impact paths (IMP-02); defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
         /** @description Restrict the simulation to one dependency class (e.g. powered_by, connected_to, hosted_on). */
         rel_type?: string;
@@ -16819,6 +18173,15 @@ export interface operations {
         content: {
           'application/json':
             components['schemas']['ImpactAnalysis'] | components['schemas']['ImpactAnalysisFields'];
+        };
+      };
+      /** @description depth is no integer or below 1 (field depth). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -16881,6 +18244,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -17239,7 +18603,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -17386,7 +18752,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -17405,6 +18773,8 @@ export interface operations {
       /** @description Room details */
       200: {
         headers: {
+          /** @description The room's version, derived from updated_at; send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -17442,7 +18812,10 @@ export interface operations {
   updateRoom: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the room version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -17458,6 +18831,8 @@ export interface operations {
       /** @description Room updated */
       200: {
         headers: {
+          /** @description The room's new version. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -17467,7 +18842,33 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description The room was changed since the If-Match version (field `If-Match`), or the name is already taken in the building (field `name`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match is not an ETag of the room. */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A layout coordinate lies outside 0..1 (field `layout.<ci>.x` or `layout.<ci>.y`), or a layout key is not a CI of the organization visible to the caller, not deleted and located in this room (field `layout.<ci>`; the same answer for an unknown id and a CI the caller does not see). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listRacks: {
@@ -17506,6 +18907,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -17533,6 +18935,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
@@ -17560,6 +18963,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -17583,6 +18987,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['LocationInUse'];
     };
@@ -17614,8 +19019,17 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description The name is taken in the room (`field` name), or height_units is below the highest unit occupied by a mount, max(position_u + height_u − 1) (RCK-01): `field` is height_units and `detail` names that unit. The rack is unchanged. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -17641,6 +19055,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -17681,9 +19096,19 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face, exceeds the rack height or mounts a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description ci_id is no UUID, or names a CI that is unknown, of another organization or outside the caller's scope; all answer alike (TEN-04). */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -17714,7 +19139,17 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listRackMounts: {
@@ -17755,6 +19190,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -17785,9 +19221,19 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description ci_id is no UUID, or names a CI that is unknown, of another organization or outside the caller's scope; all answer alike (TEN-04). */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -17834,6 +19280,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -17861,9 +19308,19 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides or is not allowed (RCK-01, RCK-02). */
+      /** @description The mount collides or is not allowed (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description ci_id is no UUID, or names a CI that is unknown, of another organization or outside the caller's scope; all answer alike (TEN-04). */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -17895,6 +19352,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -17918,7 +19376,17 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateRackMountLegacy: {
@@ -17948,8 +19416,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -17982,6 +19451,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18005,7 +19475,17 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      /** @description The unmount would change the location of the CI's asset or of another CI of the asset outside the scoped principal's scope (F-379, F-380); the mount stays. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateRackMount: {
@@ -18035,8 +19515,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
-      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02). */
+      /** @description The mount collides with another on an overlapping face (front, rear, both), exceeds the rack height, mounts a CI that is mounted already or a child CI of a composition (RCK-01, RCK-02), or is a scoped principal's placement that would change the location of the CI's asset or of another CI of the asset outside its scope (F-379, F-380); nothing is stored. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -18581,6 +20062,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['NotificationAdminForbidden'];
     };
   };
   createNotificationChannel: {
@@ -18607,7 +20089,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['NotificationAdminForbidden'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getNotificationChannel: {
@@ -18631,6 +20115,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18653,6 +20138,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -18682,8 +20168,10 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['NotificationAdminForbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listNotificationDeliveries: {
@@ -18720,6 +20208,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['NotificationAdminForbidden'];
     };
   };
   listVRFs: {
@@ -18784,6 +20273,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
     };
   };
@@ -19085,6 +20575,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19164,6 +20655,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listSubnetAddresses: {
@@ -19563,7 +21055,17 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description The CI does not exist or the caller cannot see it, e.g. a CI of another organization (F-311). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19613,6 +21115,16 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Edges keep the interface; `relationship_ids` names those the caller can see (empty when only edges outside its scope do). Without `relationship_ids`: an address of the interface collides with an unbound address the caller cannot see. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['InterfaceInUseProblem'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   updateNetworkInterface: {
@@ -19644,6 +21156,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   returnAssignment: {
@@ -19811,6 +21324,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19827,6 +21342,16 @@ export interface operations {
           label?: string;
           /** @description Validity in minutes; defaults to and is capped at 1440 (24 h, COL-04). */
           ttl_minutes?: number;
+          /**
+           * Format: uuid
+           * @description Client the collector is enrolled in; must lie in the caller's scope.
+           */
+          client_id?: string;
+          /**
+           * Format: uuid
+           * @description Site the collector is bound to; must lie in the caller's scope and decides the client.
+           */
+          site_id?: string;
         };
       };
     };
@@ -19843,11 +21368,23 @@ export interface operations {
             label?: string;
             /** Format: date-time */
             expires_at?: string;
+            /**
+             * Format: uuid
+             * @description Client the code binds the collector to; absent when unbound.
+             */
+            client_id?: string;
+            /**
+             * Format: uuid
+             * @description Site the code binds the collector to; absent when unbound.
+             */
+            site_id?: string;
           };
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   enrollCollector: {
@@ -19863,6 +21400,7 @@ export interface operations {
           code: string;
           name: string;
           version?: string;
+          /** @description Client of the collector; must be the code's client when the code is bound to one. */
           client_id?: string;
           /** @description PEM certificate signing request */
           csr?: string;
@@ -19883,6 +21421,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
@@ -19909,41 +21448,6 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      503: components['responses']['ServiceUnavailable'];
-    };
-  };
-  renewCollectorCertificate: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': {
-          csr: string;
-        };
-      };
-    };
-    responses: {
-      /** @description Certificate issued */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['CollectorCertificate'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -20049,7 +21553,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
     };
   };
   createDiscoveryScope: {
@@ -20076,7 +21580,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
@@ -20103,7 +21607,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -20127,7 +21631,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
     };
   };
@@ -20158,7 +21662,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -20194,7 +21698,15 @@ export interface operations {
           'application/json': components['schemas']['DiscoveryIngestResponse'];
         };
       };
-      400: components['responses']['BadRequest'];
+      /** @description The body is unusable: no valid JSON or gzip, no records, records and items mixed, or a reserved attribute namespace. A malformed value of a typed CI column (e.g. hardware_uuid, primary_mac, management_ip, a multi-line hostname) refuses nothing: it is dropped, counted in invalid_values, and the rest of its record and the other records are processed (WP-501). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       /** @description Decompressed body larger than 64 MiB */
@@ -20206,7 +21718,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field) */
+      /** @description A record breaks the DeviceRecord contract; the detail names each field (records[i].field). identity.hardware_uuid and identity.primary_mac are values of typed CI columns: a malformed one is dropped and counted in invalid_values instead (WP-501). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -20216,26 +21728,44 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['DependencyUnavailable'];
     };
   };
   listCredentials: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Credential metadata list */
+      /** @description Paginated credential metadata list */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['Credential'][];
+          'application/json': components['schemas']['CredentialListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -20264,6 +21794,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -20442,7 +21974,23 @@ export interface operations {
   };
   getDocumentLinks: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -20452,15 +22000,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Document links */
+      /** @description Paginated document links */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['DocumentLink'][];
+          'application/json': components['schemas']['DocumentLinkListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -20492,13 +22041,30 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };
   listInvitations: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -20514,6 +22080,7 @@ export interface operations {
           'application/json': components['schemas']['InvitationListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       503: components['responses']['ServiceUnavailable'];
@@ -20532,7 +22099,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Invitation issued, with its token */
+      /** @description Invitation issued; with its token only when the acceptance creates no IdP account (no IdP admin client) */
       201: {
         headers: {
           [name: string]: unknown;
@@ -20572,6 +22139,7 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       /** @description The invitation has expired */
@@ -20600,7 +22168,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Invitation renewed, with its new token */
+      /** @description Invitation renewed; with its new token only when the acceptance creates no IdP account (no IdP admin client) */
       200: {
         headers: {
           [name: string]: unknown;
@@ -20644,14 +22212,30 @@ export interface operations {
   };
   listServiceAccounts: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Service accounts with their role assignments */
+      /** @description Service accounts with their role assignments, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -20660,6 +22244,7 @@ export interface operations {
           'application/json': components['schemas']['ServiceAccountListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
@@ -20902,6 +22487,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description A team of this name exists already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description lead_id is no user of the organization (an unknown user and one of another organization answer alike). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -20951,6 +22554,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Records such as tickets still reference the team. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateTeam: {
@@ -20981,11 +22593,45 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description A team of this name exists already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description lead_id is no user of the organization (an unknown user and one of another organization answer alike). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listTeamMembers: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -20995,15 +22641,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Team members */
+      /** @description Paginated team members */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['TeamMember'][];
+          'application/json': components['schemas']['TeamMemberListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };
@@ -21036,6 +22683,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The user is a member of the team already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description user_id is no user of the organization (an unknown user and one of another organization answer alike). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   removeTeamMember: {
@@ -21152,7 +22817,10 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listRoleAssignments: {
@@ -21208,6 +22876,33 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  revokeRoleAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Role assignment revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -21256,6 +22951,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -21286,7 +22982,17 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description A role of this name exists already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   exportUserData: {
@@ -21349,13 +23055,31 @@ export interface operations {
           'application/json': components['schemas']['User'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listUserRolesLegacy: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -21365,44 +23089,78 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Role assignments for the user */
+      /** @description Paginated role assignments for the user */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RoleAssignment'][];
+          'application/json': components['schemas']['RoleAssignmentListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
   };
   listPermissions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Permission catalogue */
+      /** @description Paginated permission catalogue */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['Permission'][];
+          'application/json': components['schemas']['PermissionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
   };
   listRolePermissions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -21412,16 +23170,26 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Role permission grants */
+      /** @description Paginated role permission grants */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['RolePermissionGrant'][];
+          'application/json': components['schemas']['RolePermissionGrantListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description The role id is no UUID. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21453,6 +23221,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      /** @description The role is no standard role of the organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The request leaves out a seed permission of the standard role (type https://reticora.io/problems/standard-role-permissions; the detail names the role and the permissions). Nothing changes. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21542,6 +23328,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description client_id is no UUID or names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21659,7 +23463,25 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
+      /** @description client_id is no UUID or names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getTicketSLA: {
@@ -21712,9 +23534,26 @@ export interface operations {
           'application/json': components['schemas']['TicketSLA'];
         };
       };
-      400: components['responses']['BadRequest'];
+      /** @description No SLA policy matches the priority of the ticket (no sla_id given). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description sla_id is no UUID or names a policy that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listFormDefinitions: {
@@ -21753,6 +23592,7 @@ export interface operations {
           'application/json': components['schemas']['FormDefinitionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -21781,6 +23621,24 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope, or a client-scoped caller names no client (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description client_id is no UUID or names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21859,7 +23717,25 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
+      /** @description client_id is no UUID or names no client of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listFormSubmissions: {
@@ -21901,6 +23777,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21935,11 +23812,20 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ValidationProblem'];
+          'application/problem+json': components['schemas']['ValidationProblem'];
         };
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listAllFormSubmissions: {
@@ -21980,6 +23866,7 @@ export interface operations {
           'application/json': components['schemas']['FormSubmissionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22219,6 +24106,7 @@ export interface operations {
           'application/json': components['schemas']['WorkflowRunListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22275,6 +24163,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listComplianceRules: {
@@ -22314,6 +24203,7 @@ export interface operations {
           'application/json': components['schemas']['ComplianceRuleListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22342,6 +24232,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -22421,6 +24320,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   evaluateCompliance: {
@@ -22442,6 +24350,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -22481,6 +24390,7 @@ export interface operations {
           'application/json': components['schemas']['ComplianceResultListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22505,6 +24415,7 @@ export interface operations {
           'application/json': components['schemas']['ComplianceEvaluationResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };
@@ -22643,6 +24554,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description credential_id or collector_id is no UUID or names no object of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -22806,6 +24726,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description credential_id or collector_id is no UUID or names no object of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23226,6 +25155,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description user_id or a connector_id of the matching policies is no UUID or names no object of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23330,6 +25268,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description subject_user_id is missing, no UUID or no user of the organization, or connector_id names no connector of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23548,6 +25495,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description An item names a user or connector that is no UUID or no object of the organization (unknown and foreign alike, TEN-04); `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23763,6 +25719,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description connector_id is no UUID or names no connector of the organization (unknown and foreign alike, TEN-04). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -23916,6 +25881,13 @@ export interface operations {
         content: {
           'application/json': components['schemas']['SCIMResource'];
         };
+      };
+      /** @description The userName is taken (scimType uniqueness); the detail names no constraint (F-047). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -24183,6 +26155,13 @@ export interface operations {
         content: {
           'application/json': components['schemas']['SCIMResource'];
         };
+      };
+      /** @description The displayName is taken (scimType uniqueness); the detail names no constraint (F-047). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -24471,22 +26450,39 @@ export interface operations {
   };
   listAIConversations: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Conversations */
+      /** @description Paginated conversations */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['AIConversation'][];
+          'application/json': components['schemas']['AIConversationListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
     };
@@ -24543,7 +26539,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Missing permission, the ai add-on is not entitled (feature-not-entitled), or the organization has not opted in to external AI processing (https://reticora.io/problems/ai-opt-in-required). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -24588,6 +26592,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -24595,6 +26600,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listAssetsIdMovements: {
@@ -24615,6 +26622,13 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset id is no UUID. */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -24645,6 +26659,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCiFieldsGlobal: {
@@ -24656,12 +26671,43 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Manage global CI field definitions */
+      /** @description Every global field in one answer (legacy field view of attribute_definition); the list is not paged, so next_cursor is always absent. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
+            data: {
+              id?: string;
+              /** @description Empty for global fields. */
+              ci_type_id?: string;
+              /** @enum {string} */
+              scope: 'global' | 'type';
+              name: string;
+              label?: string;
+              description?: string;
+              data_type: string;
+              required: boolean;
+              default_value?: string;
+              enum_values?: string[];
+              ui_group?: string;
+              sort_order: number;
+              validation?: components['schemas']['AttributeValidationLegacy'];
+              conditional?: {
+                [key: string]: unknown;
+              };
+              reference_target?: string;
+              is_system?: boolean;
+            }[];
+            total?: number;
+            limit?: number;
+            offset?: number;
+            has_more?: boolean;
+          };
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -24688,6 +26734,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -24695,6 +26742,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCiFieldsGlobalName: {
@@ -24727,6 +26776,21 @@ export interface operations {
       query?: {
         ci_type_id?: string;
         scope?: 'type' | 'global';
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
       };
       header?: never;
       path?: never;
@@ -24734,7 +26798,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Attribute definitions */
+      /** @description Attribute definitions, newest first */
       200: {
         headers: {
           [name: string]: unknown;
@@ -24743,6 +26807,7 @@ export interface operations {
           'application/json': components['schemas']['AttributeDefinitionListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       503: components['responses']['ServiceUnavailable'];
     };
@@ -24918,6 +26983,8 @@ export interface operations {
         };
         content?: never;
       };
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listCiTypesTemplates: {
@@ -25085,6 +27152,9 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   createCiTypesIdDeactivate: {
@@ -25153,6 +27223,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25160,6 +27231,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCiTypesIdFieldsName: {
@@ -25216,7 +27289,10 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
@@ -25226,7 +27302,9 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['BlastRadius'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -25235,13 +27313,21 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCisIdDependencies: {
     parameters: {
-      query?: never;
+      query?: {
+        direction?: 'upstream' | 'downstream';
+        /** @description Maximum hops; defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
+        depth?: number;
+      };
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
@@ -25251,7 +27337,18 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DependencyResult'];
+        };
+      };
+      /** @description direction is neither upstream nor downstream, or depth is no integer or below 1 (field depth). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -25260,6 +27357,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCisIdFieldDefinitions: {
@@ -25303,6 +27401,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25310,6 +27409,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   deleteCisIdFieldDefinitionsName: {
@@ -25362,6 +27463,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   putCisIdFieldsNameOverride: {
@@ -25370,7 +27472,7 @@ export interface operations {
       header?: never;
       path: {
         id: string;
-        /** @description CI column or attribute name */
+        /** @description CI column or attribute name. The attribute namespaces _overrides, _observed, _provenance and _instance are no fields (GLO-13): 400 with the field name. */
         name: string;
       };
       cookie?: never;
@@ -25384,6 +27486,8 @@ export interface operations {
       /** @description Field provenance after the change */
       200: {
         headers: {
+          /** @description The new CI version (API-07); send it as If-Match with a PATCH of the CI. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -25402,6 +27506,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      500: components['responses']['InternalServerError'];
     };
   };
   deleteCisIdFieldsNameOverride: {
@@ -25410,7 +27515,7 @@ export interface operations {
       header?: never;
       path: {
         id: string;
-        /** @description CI column or attribute name */
+        /** @description CI column or attribute name. The attribute namespaces _overrides, _observed, _provenance and _instance are no fields (GLO-13): 400 with the field name. */
         name: string;
       };
       cookie?: never;
@@ -25420,14 +27525,26 @@ export interface operations {
       /** @description Field provenance after the change */
       200: {
         headers: {
+          /** @description The CI version after the change (API-07); send it as If-Match with a PATCH of the CI. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['FieldProvenance'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
+      /** @description Unknown, invisible or soft-deleted CI, or the CI has no value of the field */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   createCisIdLifecycleTransitions: {
@@ -25446,6 +27563,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25453,6 +27571,8 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getCisIdParent: {
@@ -25510,6 +27630,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCompositions: {
@@ -25682,7 +27803,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description Unknown entity type. */
+      404: components['responses']['NotFound'];
+      /** @description Unknown entity type, or an entity_id that is no UUID. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -25711,10 +27833,22 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Keeps only the CI changes of this kind (AUD-03); entries without a change kind (entity_change, location_change, audit) are left out. Only for entity type ci; an unknown kind or another entity type is 400 naming the field change_kind. */
+        change_kind?:
+          | 'created'
+          | 'updated'
+          | 'deleted'
+          | 'restored'
+          | 'merged'
+          | 'type_changed'
+          | 'relationship_added'
+          | 'relationship_removed'
+          | 'status_changed';
       };
       header?: never;
       path: {
-        entityType: string;
+        /** @description The entity type. Locations of the common tree (site to bin) are type location; the retired type location_node is refused with 400. */
+        entityType: 'ci' | 'asset' | 'relationship' | 'location' | 'reservation' | 'composition';
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
@@ -25722,7 +27856,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change rows (with the site at the time), entity_change rows and audit entries. */
+      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change changes with the site at the time, one entry per change set with change_kind and field_changes (AUD-03; a row written before the change sets is an entry of its own), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. Without audit:read the audit entries are left out (audit_included false). */
       200: {
         headers: {
           [name: string]: unknown;
@@ -25731,12 +27865,39 @@ export interface operations {
           'application/json': components['schemas']['HistoryListResponse'];
         };
       };
+      /** @description The entity type is not one of the listed types, the id is no UUID, or change_kind is no known kind or is given for another entity type than ci (field change_kind). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Unauthorized */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description The caller lacks ci:read or the read permission of the entity type. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The CI is unknown or outside the caller's scope; the location is unknown or outside the caller's scope: neither the location nor a location_change of it is visible to the caller. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -25806,8 +27967,36 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description name is missing. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description client_id lies outside the caller's scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description An item with this SKU exists already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description client_id or location_id is no UUID, client_id names no client of the organization, or location_id a location that is unknown, of another organization or outside the caller's scope (all alike). */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -25838,6 +28027,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The item is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   deleteInventoryItemsId: {
@@ -25863,6 +28059,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The item is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   updateInventoryItemsId: {
@@ -25883,6 +28086,20 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The item is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description location_id is no UUID or names a location that is unknown, of another organization or outside the caller's scope (all alike). */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -25931,6 +28148,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -25938,6 +28156,8 @@ export interface operations {
         };
         content?: never;
       };
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getLifecycleDefinitionsId: {
@@ -26044,6 +28264,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
+      409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];
     };
   };
@@ -26111,6 +28333,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       409: components['responses']['LocationInUse'];
     };
@@ -26141,7 +28364,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      409: components['responses']['LocationNameTaken'];
       422: components['responses']['LocationViolation'];
     };
   };
@@ -26211,6 +28436,7 @@ export interface operations {
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -26402,8 +28628,36 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Neither asset_id nor quantity_item_id is set, or a value is invalid. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset has an active reservation already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description An id field is no UUID; `field` names it. */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -26434,6 +28688,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The reservation is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   createReservationsIdRelease: {
@@ -26454,6 +28715,20 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The reservation is unknown, of another organization or reserves an item outside the caller's scope (all alike, TEN-04). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The reservation is no longer active. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -26525,7 +28800,16 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Invalid filter AST, sort key, column or role id. */
+      /** @description The caller has a view of this name already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -26645,7 +28929,16 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
-      /** @description Invalid filter AST, sort key, column or role id. */
+      /** @description The owner has another view of this name; the view stays unchanged. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -26697,8 +28990,29 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description movement_type is invalid or the item or quantity is missing. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description An id field is no UUID, or from_location_id/to_location_id names a location that is unknown, of another organization or outside the caller's scope; `field` names it. */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -26729,6 +29043,13 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The item is unknown, of another organization or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description No stock available to convert */
       409: {
         headers: {
@@ -26751,20 +29072,22 @@ export interface operations {
           /** @enum {string} */
           entity_kind?: 'ci' | 'asset';
           where?: components['schemas']['FilterExpr'];
+          sort?: components['schemas']['SavedViewSortKey'][];
+          columns?: string[];
         } & {
           [key: string]: unknown;
         };
       };
     };
     responses: {
-      /** @description Filtered query results */
+      /** @description Filtered query results: id, entity_kind, name, summary, attributes and, when the request listed columns, columns (an object of the listed fields and their values). */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description Invalid filter spec */
+      /** @description Invalid filter spec (malformed JSON, unknown member or entity_kind), or a value the database refuses after the checks (e.g. NUL in a flat text field); the detail is generic and never carries database text. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -26778,7 +29101,16 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Invalid filter AST. */
+      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid filter AST, filter value, sort key or column; field names it (where.<path>, the flat field, sort[<i>].field, sort[<i>].dir or columns[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -26787,6 +29119,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      500: components['responses']['InternalServerError'];
     };
   };
 }

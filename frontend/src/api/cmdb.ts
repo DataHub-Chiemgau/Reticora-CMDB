@@ -4,7 +4,7 @@
  * existing client.ts. All calls flow through the same fetchAPI (auth, RFC
  * 7807 errors, idempotency).
  */
-import { fetchAPI, type PaginatedResponse } from './client';
+import { fetchAllPages, fetchAPI, type PaginatedResponse } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import type { components } from './generated/schema';
 
@@ -122,15 +122,33 @@ export const ciTypeApi = {
 };
 
 // Index flags of an attribute definition (MET-15, DB-04): a change queues
-// the attribute.index job that builds idx_attr_<id> or idx_attr_<id>_u.
+// the job that builds idx_attr_<id>, idx_attr_<id>_u or the index of the key
+// (idx_attr_key_<key>, E-73).
 export interface AttributeIndexFlags {
   searchable: boolean;
   unique: boolean;
   unique_scope: 'org' | 'client';
 }
 
+export type AttributeDefinition = components['schemas']['AttributeDefinition'];
+export type AttributeIndexJob = components['schemas']['Job'];
+
+// The job that brings the index of a definition in line with its flags.
+export const ATTRIBUTE_INDEX_JOB_KIND = 'attribute.index';
+
 export const attributeDefinitionApi = {
-  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<unknown> {
+  // Every definition of the filter: the list pages at 200 (API-02, F-215),
+  // so the field editor follows next_cursor instead of reading one page.
+  async list(params: { ci_type_id?: string; scope?: 'type' | 'global' }): Promise<{
+    data: AttributeDefinition[];
+  }> {
+    return { data: await fetchAllPages<AttributeDefinition>('/attribute-definitions', params) };
+  },
+  // The index jobs of the organization, newest first (JOB-03, job:read).
+  indexJobs(): Promise<PaginatedResponse<AttributeIndexJob>> {
+    return fetchAPI(`/jobs?kind=${ATTRIBUTE_INDEX_JOB_KIND}&limit=100`);
+  },
+  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<AttributeDefinition> {
     return fetchAPI(`/attribute-definitions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(flags),
@@ -140,11 +158,22 @@ export const attributeDefinitionApi = {
 
 // ─── Global + instance field definitions (§2) ────────────────────────────────
 
+/**
+ * A global field of GET /ci-fields/global (MET-13): an organization-wide
+ * field applies to every CI type of the organization, the system types
+ * included; a system field (is_system) is read-only.
+ */
+export type GlobalFieldDefinition = FieldDefinition & {
+  id?: string;
+  scope?: 'global' | 'type';
+  is_system?: boolean;
+};
+
 export const ciFieldApi = {
-  listGlobal(): Promise<{ data: FieldDefinition[] }> {
+  listGlobal(): Promise<{ data: GlobalFieldDefinition[] }> {
     return fetchAPI('/ci-fields/global');
   },
-  upsertGlobal(field: FieldDefinition): Promise<FieldDefinition> {
+  upsertGlobal(field: FieldDefinition): Promise<GlobalFieldDefinition> {
     return fetchAPI('/ci-fields/global', { method: 'PUT', body: JSON.stringify(field) });
   },
   deleteGlobal(name: string): Promise<void> {
@@ -307,8 +336,14 @@ export const LOCATION_CHILD_KINDS: Record<LocationKind, LocationKind[]> = {
 
 /** clientApi lists the clients a site can belong to. */
 export const clientApi = {
-  list() {
-    return fetchAPI<components['schemas']['ClientListResponse']>('/clients?limit=200');
+  /** One page of 200 clients; `offset` reads the following pages (F-340). */
+  list({ offset = 0 }: { offset?: number } = {}) {
+    return fetchAPI<components['schemas']['ClientListResponse']>(
+      `/clients?limit=200${offset > 0 ? `&offset=${offset}` : ''}`,
+    );
+  },
+  get(id: string) {
+    return fetchAPI<components['schemas']['Client']>(`/clients/${encodeURIComponent(id)}`);
   },
 };
 
@@ -593,10 +628,45 @@ export interface EntityChange {
   new_value?: unknown;
   comment?: string;
   created_at: string;
-  /** Trail of the entry in the unified CI history (CI-06). */
-  source?: 'ci_change' | 'entity_change' | 'audit';
+  /** Trail of the entry in the unified CI and location history (CI-06, LOC-11). */
+  source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change';
   /** Site of the CI when the change was made. */
   site_id?: string;
+  /** Kind of a CI change (AUD-03); only ci_change entries carry it and the fields below. */
+  change_kind?: ChangeKind;
+  /**
+   * Change set of a ci_change entry: the field rows of one write. Absent for
+   * a row written before the change sets, which is an entry of its own.
+   */
+  change_set_id?: string;
+  /** Changed fields of the change set, ordered by field name. */
+  field_changes?: FieldChange[];
+  /** Source of the CI change as in the audit log (`source` names the trail). */
+  change_source?: 'ui' | 'api' | 'collector' | 'import' | 'system';
+  collector_id?: string;
+  request_id?: string;
+  correlation_id?: string;
+  observed_at?: string;
+  actor_user_id?: string;
+}
+
+/** Kinds of a CI change (AUD-03). */
+export type ChangeKind =
+  | 'created'
+  | 'updated'
+  | 'deleted'
+  | 'restored'
+  | 'merged'
+  | 'type_changed'
+  | 'relationship_added'
+  | 'relationship_removed'
+  | 'status_changed';
+
+/** One changed field of a change set (AUD-03). */
+export interface FieldChange {
+  field: string;
+  old: unknown;
+  new: unknown;
 }
 
 export interface StateSnapshot {
@@ -607,9 +677,18 @@ export interface StateSnapshot {
   deleted: boolean;
 }
 
+/** A page of a history; audit_included is false without audit:read (E-78). */
+export interface HistoryPage extends PaginatedResponse<EntityChange> {
+  audit_included?: boolean;
+}
+
 export const historyApi = {
-  list(entityType: string, id: string, params: { limit?: number; offset?: number } = {}) {
-    return fetchAPI<PaginatedResponse<EntityChange>>(`/history/${entityType}/${id}${qs(params)}`);
+  list(
+    entityType: string,
+    id: string,
+    params: { limit?: number; offset?: number; change_kind?: ChangeKind } = {},
+  ) {
+    return fetchAPI<HistoryPage>(`/history/${entityType}/${id}${qs(params)}`);
   },
   stateAt(entityType: 'assets' | 'cis', id: string, at?: string): Promise<StateSnapshot> {
     return fetchAPI(`/${entityType}/${id}/state${qs({ at })}`);
@@ -624,14 +703,11 @@ export interface ImpactResult {
   count: number;
 }
 
-export interface BlastRadius {
-  ci_id: string;
-  affected_cis: Array<{ id: string; name: string; ci_type: string }>;
-  affected_count: number;
-  client_ids?: string[];
-  site_ids?: string[];
-  single_points_of_failure?: Array<{ id: string; name: string }>;
-}
+/**
+ * The blast radius of a CI failure: affected_count counts the certain hits,
+ * heuristic_count the CIs reached only over connected_to (IMP-03, WP-490).
+ */
+export type BlastRadius = components['schemas']['BlastRadius'];
 
 /**
  * The fields of an impacted CI that ImpactResult declares (API-02): without
@@ -684,7 +760,57 @@ export interface QueryResult {
   name: string;
   summary?: string;
   attributes?: Record<string, unknown>;
+  /** The values of the columns the run asked for, by field (VIE-01). */
+  columns?: Record<string, unknown>;
 }
+
+/**
+ * The fields a view sorts by or shows, per entity kind: the whitelist of the
+ * query engine (backend savedview astFields, VIE-01). attributes.<key> and
+ * id are accepted as well, the page offers these.
+ */
+export const VIEW_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  ci: [
+    'name',
+    'status',
+    'hostname',
+    'fqdn',
+    'serial_number',
+    'manufacturer',
+    'model',
+    'os_name',
+    'os_version',
+    'management_ip',
+    'lifecycle_state',
+    'discovery_source',
+    'health',
+    'ci_type',
+    'client_id',
+    'site_id',
+    'location_id',
+    'is_manual',
+    'created_at',
+    'updated_at',
+    'last_seen_at',
+  ],
+  asset: [
+    'name',
+    'asset_tag',
+    'category',
+    'status',
+    'serial_number',
+    'supplier',
+    'lifecycle_state',
+    'barcode',
+    'rfid_tag',
+    'purchase_cost',
+    'purchase_date',
+    'warranty_end',
+    'client_id',
+    'location_id',
+    'created_at',
+  ],
+};
 
 export const savedViewApi = {
   list(params: { limit?: number; offset?: number } = {}) {
@@ -710,8 +836,16 @@ export const savedViewApi = {
   delete(id: string): Promise<void> {
     return fetchAPI(`/saved-views/${id}`, { method: 'DELETE' });
   },
+  /**
+   * Runs a filter spec; sort and columns are those of the view being run
+   * and order the rows and select the columns of each row.
+   */
   query(
-    spec: Record<string, unknown> & { entity_kind?: string },
+    spec: Record<string, unknown> & {
+      entity_kind?: string;
+      sort?: SavedViewSortKey[];
+      columns?: string[];
+    },
     params: { limit?: number; offset?: number } = {},
   ) {
     return fetchAPI<PaginatedResponse<QueryResult>>(`/search/query${qs(params)}`, {
@@ -720,3 +854,53 @@ export const savedViewApi = {
     });
   },
 };
+
+// ─── CI bulk (API-08, BLK-01) ────────────────────────────────────────────────
+
+/** The report of a bulk change per id, also the result of a ci.bulk job. */
+export type CIBulkReport = components['schemas']['CIBulkResult'];
+
+/** BULK_MAX_IDS is the most ids one bulk change takes (API-08). */
+export const BULK_MAX_IDS = 500;
+
+/** The page size of collectCIs: the largest page the CI list answers (API-02). */
+const COLLECT_PAGE_SIZE = 200;
+
+export interface CollectedCIs {
+  /** The matches in list order, at most `max`. */
+  cis: { id: string; name: string }[];
+  /** All matches of the filter, also those beyond `max`. */
+  total: number;
+}
+
+/**
+ * collectCIs gathers the ids and names of the CIs of the filtered CI list
+ * page by page, up to `max` (WP-520, F-328). It reads the list the CMDB page
+ * shows, with its filters and the selected scope, so it never holds a CI the
+ * list would not show.
+ */
+export async function collectCIs(
+  filter: { search?: string; status?: string; ci_type_id?: string },
+  max = BULK_MAX_IDS,
+): Promise<CollectedCIs> {
+  const seen = new Set<string>();
+  const cis: CollectedCIs['cis'] = [];
+  let total = 0;
+  for (let offset = 0; cis.length < max; offset += COLLECT_PAGE_SIZE) {
+    const page = await fetchAPI<PaginatedResponse<{ id: string; name: string }>>(
+      `/cis${qs({ ...filter, limit: COLLECT_PAGE_SIZE, offset })}`,
+    );
+    const rows = page.data ?? [];
+    total = page.total;
+    for (const ci of rows) {
+      if (cis.length < max && !seen.has(ci.id)) {
+        seen.add(ci.id);
+        cis.push({ id: ci.id, name: ci.name });
+      }
+    }
+    if (!page.has_more || rows.length === 0) {
+      break;
+    }
+  }
+  return { cis, total };
+}

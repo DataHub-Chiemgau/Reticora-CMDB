@@ -1,0 +1,32 @@
+
+Running 6 tests using 1 worker
+
+  ✓  1 e2e/onboarding.spec.ts:125:3 › install → signup/login → dashboard (INS-04, ABN-01 d) › the API answers through the frontend origin (no "failed to fetch") (1.2s)
+  ✓  2 e2e/onboarding.spec.ts:135:3 › install → signup/login → dashboard (INS-04, ABN-01 d) › the authorization redirect targets the configured issuer with PKCE (636ms)
+  ✓  3 e2e/onboarding.spec.ts:148:3 › install → signup/login → dashboard (INS-04, ABN-01 d) › an insecure origin explains the secure-context requirement (389ms)
+  ✓  4 e2e/onboarding.spec.ts:155:3 › install → signup/login → dashboard (INS-04, ABN-01 d) › an unreachable backend is explained (392ms)
+  ✓  5 e2e/onboarding.spec.ts:163:3 › install → signup/login → dashboard (INS-04, ABN-01 d) › self-signup, verification, trial, login and dashboard (4.7s)
+{"time":"2026-10-15T07:28:46.51823804Z","level":"INFO","msg":"starting collector","environment":"development","version":"dev"}
+{"time":"2026-10-15T07:28:46.518298993Z","level":"WARN","msg":"collector runs the simulated device fleet","event":"collector.simulate.enabled","devices":30,"subnet":"198.51.100.0/27"}
+{"time":"2026-10-15T07:28:46.518698523Z","level":"INFO","msg":"collector configured","nats_url":"tls://localhost:4222","server_url":"http://localhost:8080","scan_subnets":["198.51.100.0/27"],"protocols":["simulate"],"poll_interval":"15m0s","sweep_interval":"24h0m0s","heartbeat_interval":"10s","mtls":true,"spool_dir":"/tmp/reticora-e2e-a9uN01/spool","sweep_concurrency":256,"sweep_icmp":"raw"}
+{"time":"2026-10-15T07:28:46.519543806Z","level":"INFO","msg":"discovery started","pass":"local","protocols":["simulate"]}
+{"time":"2026-10-15T07:28:46.519572253Z","level":"INFO","msg":"running discovery plugin","protocol":"simulate","targets":30}
+{"time":"2026-10-15T07:28:46.519524525Z","level":"WARN","msg":"agent relay disabled","reason":"RETICORA_AGENT_RELAY_TLS_CERT_FILE and RETICORA_AGENT_RELAY_TLS_KEY_FILE are not set"}
+{"time":"2026-10-15T07:28:46.521841132Z","level":"INFO","msg":"heartbeat completed","status":401,"duration_ms":2}
+{"time":"2026-10-15T07:28:46.532235089Z","level":"INFO","msg":"discovery plugin completed","protocol":"simulate","probed":30,"records":30}
+{"time":"2026-10-15T07:28:46.537381765Z","level":"INFO","msg":"discovery results spooled for later delivery","message_id":"20261015T072846.519466971Z-d7ac1b91"}
+{"time":"2026-10-15T07:28:46.538224071Z","level":"INFO","msg":"spool stats","spool_messages":1,"spool_bytes":46456,"spool_oldest_age":"5.861065ms","spool_max_bytes":1073741824,"spool_max_age":"72h0m0s"}
+{"time":"2026-10-15T07:28:46.538249253Z","level":"ERROR","msg":"failed to upload discovery records","event":"discovery.upload.failed","error":"upload failed with status 401","count":30}
+{"time":"2026-10-15T07:28:46.538276147Z","level":"INFO","msg":"discovery completed","duration_ms":18,"total_records":30}
+{"time":"2026-10-15T07:28:46.540680436Z","level":"INFO","msg":"collector NATS endpoint connected over mTLS","url":"tls://localhost:4222"}
+{"time":"2026-10-15T07:28:46.555608344Z","level":"INFO","msg":"discovery scopes updated","scopes":0}
+{"time":"2026-10-15T07:28:46.571898454Z","level":"INFO","msg":"credential bundle updated","entries":0}
+{"time":"2026-10-15T07:28:46.571962367Z","level":"INFO","msg":"local subnets reported","subnets":["192.0.2.0/24","172.17.0.0/16","172.18.0.0/16"],"suggested":3}
+{"time":"2026-10-15T07:28:56.537683274Z","level":"INFO","msg":"heartbeat completed","status":204,"transport":"edge","duration_ms":11}
+{"time":"2026-10-15T07:28:56.565400998Z","level":"INFO","msg":"spooled discovery results delivered","message_id":"20261015T072846.519466971Z-d7ac1b91"}
+{"time":"2026-10-15T07:28:56.565453778Z","level":"INFO","msg":"spool stats","spool_messages":0,"spool_bytes":0,"spool_oldest_age":"0s","spool_max_bytes":1073741824,"spool_max_age":"72h0m0s"}
+{"time":"2026-10-15T07:29:06.534962565Z","level":"INFO","msg":"heartbeat completed","status":204,"transport":"edge","duration_ms":8}
+{"time":"2026-10-15T07:29:10.459418709Z","level":"INFO","msg":"collector shutting down"}
+  ✓  6 e2e/onboarding.spec.ts:193:3 › install → signup/login → dashboard (INS-04, ABN-01 d) › collector, scopes, 30 simulated devices, review, impact and export (25.3s)
+
+  6 passed (34.8s)

@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { ApiError } from '../api/client';
 import type { TopologyGraphData } from '../api/client';
 import { useCI, useCINeighbors, useUpdateCI } from '../api/hooks';
+import { localizedText } from '../api/cmdb';
+import { useCIType, useCITypes } from '../api/cmdbHooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -18,9 +21,13 @@ import {
   ImpactSection,
   CIMetricsSection,
   CIHistorySection,
+  formatDate,
+  formatDateTime,
+  useLocationNames,
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
 import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
+import { ScopeBanner } from '../components/ScopeBanner';
 
 export interface NeighborEntry {
   id: string;
@@ -66,14 +73,43 @@ export function buildNeighborList(graph: TopologyGraphData, ciId: string): Neigh
 }
 
 export function CIDetailPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { id = '' } = useParams<{ id: string }>();
   const [isEditOpen, setIsEditOpen] = useState(false);
 
   const ciQuery = useCI(id);
+  // The type is shown by its label in the UI language (GLO-10, UI-18); the
+  // list includes deactivated types, which a CI can still carry. A type
+  // beyond the first page of the list is read on its own.
+  const ciTypes = useCITypes({ include_inactive: true, limit: 200 });
+  const typeId = ciQuery.data?.ci_type_id;
+  const listedType = ciTypes.data?.data.find((type) => type.id === typeId);
+  const singleType = useCIType(typeId, {
+    enabled: !!ciTypes.data && !listedType && !!ciTypes.data.has_more,
+  });
   const neighborsQuery = useCINeighbors(id);
+  // Location, site and room are shown by name from the location tree (CI-06,
+  // DB-05, F-237); the tree is read only for a CI that has a location.
+  const locations = useLocationNames(
+    !!(
+      ciQuery.data?.location_id ||
+      ciQuery.data?.site_id ||
+      ciQuery.data?.room_id ||
+      ciQuery.data?.asset?.location_id
+    ),
+  );
   const updateCI = useUpdateCI();
+  // Instance attribute saves (API-07, F-082): every save carries If-Match with
+  // the CI version the page shows. The fields save on every valid change, so
+  // the saves run one after another and a save waiting behind another uses
+  // the version that save returned; only the latest waiting values are sent,
+  // always to the CI they were typed on.
+  const attributeSaves = useRef<{
+    running: boolean;
+    pending: { id: string; version?: number; attributes: Record<string, unknown> } | null;
+    saved?: { id: string; version: number };
+  }>({ running: false, pending: null });
 
   if (ciQuery.isLoading) {
     return <SkeletonList rows={5} label={t('app.loading')} />;
@@ -92,6 +128,64 @@ export function CIDetailPage() {
 
   const ci = ciQuery.data;
   const neighbors = neighborsQuery.data ? buildNeighborList(neighborsQuery.data, ci.id) : [];
+  // The type id is shown only while the type is unknown (not loaded, not
+  // visible to the user or deleted).
+  const ciType =
+    listedType ?? (singleType.data?.id === ci.ci_type_id ? singleType.data : undefined);
+  const typeLabel = ciType
+    ? localizedText(ciType.display_name, i18n.language) || ciType.name
+    : ci.ci_type_id;
+
+  function saveAttributes(attrs: Record<string, unknown>) {
+    const queue = attributeSaves.current;
+    queue.pending = { id: ci.id, version: ci.version, attributes: attrs };
+    if (queue.running) return;
+    queue.running = true;
+    void (async () => {
+      try {
+        while (queue.pending) {
+          const next = queue.pending;
+          queue.pending = null;
+          const saved = queue.saved?.id === next.id ? queue.saved.version : undefined;
+          const version =
+            saved !== undefined && (next.version === undefined || saved > next.version)
+              ? saved
+              : next.version;
+          const result = await updateCI.mutateAsync({
+            id: next.id,
+            data: { attributes: next.attributes },
+            version,
+          });
+          if (result.version !== undefined) {
+            queue.saved = { id: result.id, version: result.version };
+          }
+        }
+      } catch {
+        // The refusal is shown through the mutation state; the values typed
+        // after it are not sent on the stale version.
+        queue.pending = null;
+      } finally {
+        queue.running = false;
+      }
+    })();
+  }
+
+  // 409 names the fields changed since the shown version; 412 means the
+  // version is unknown or missing. Both are resolved by reloading the CI.
+  const attributeError = (() => {
+    const err = updateCI.error;
+    if (err instanceof ApiError && err.status === 409) {
+      return new Error(
+        t('ci.instanceFieldsConflict', {
+          fields: err.conflictFields.length > 0 ? err.conflictFields.join(', ') : 'attributes',
+        }),
+      );
+    }
+    if (err instanceof ApiError && err.status === 412) {
+      return new Error(t('ci.instanceFieldsPrecondition'));
+    }
+    return err as Error | null;
+  })();
 
   return (
     <div className="space-y-4">
@@ -104,6 +198,10 @@ export function CIDetailPage() {
         </Link>
       </nav>
 
+      {/* A CI outside the chosen client or site is shown with a notice
+          (E-87 option 1); access stays with the server (row-level security). */}
+      <ScopeBanner object={ci} />
+
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{ci.name}</h2>
@@ -111,7 +209,7 @@ export function CIDetailPage() {
             <Badge variant={getStatusBadgeVariant(ci.status)}>
               {t(getStatusTranslationKey(ci.status))}
             </Badge>
-            <Badge variant="info">{ci.ci_type_id}</Badge>
+            <Badge variant="info">{typeLabel}</Badge>
             {ci.health ? (
               <Badge variant={healthBadgeVariant(ci.health)}>
                 {t(`ci.healthState.${ci.health}`)}
@@ -133,7 +231,7 @@ export function CIDetailPage() {
         <Card title={t('ci.overview')}>
           <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
             <DetailRow label="ID" value={ci.id} />
-            <DetailRow label={t('form.fields.ciType')} value={ci.ci_type_id} />
+            <DetailRow label={t('form.fields.ciType')} value={typeLabel} />
             <DetailRow label={t('ci.manufacturer')} value={ci.manufacturer} />
             <DetailRow label={t('ci.model')} value={ci.model} />
             <DetailRow
@@ -143,13 +241,25 @@ export function CIDetailPage() {
             <DetailRow label={t('ci.managementIp')} value={ci.management_ip} />
             <DetailRow label={t('ci.firmware')} value={ci.firmware_version} />
             <DetailRow label={t('ci.source')} value={ci.discovery_source} />
-            <DetailRow label={t('ci.location')} value={ci.location_id} />
-            <DetailRow label={t('ci.site')} value={ci.site_id} />
-            <DetailRow label={t('ci.room')} value={ci.room_id} />
-            <DetailRow label={t('ci.firstSeen')} value={ci.first_seen_at} />
-            <DetailRow label={t('ci.lastSeen')} value={ci.last_seen_at} />
-            <DetailRow label={t('ci.created')} value={ci.created_at} />
-            <DetailRow label={t('ci.updated')} value={ci.updated_at} />
+            <DetailRow label={t('ci.location')} value={locations.path(ci.location_id)} />
+            <DetailRow label={t('ci.site')} value={locations.name(ci.site_id)} />
+            <DetailRow label={t('ci.room')} value={locations.name(ci.room_id)} />
+            <DetailRow
+              label={t('ci.firstSeen')}
+              value={formatDateTime(ci.first_seen_at, i18n.language)}
+            />
+            <DetailRow
+              label={t('ci.lastSeen')}
+              value={formatDateTime(ci.last_seen_at, i18n.language)}
+            />
+            <DetailRow
+              label={t('ci.created')}
+              value={formatDateTime(ci.created_at, i18n.language)}
+            />
+            <DetailRow
+              label={t('ci.updated')}
+              value={formatDateTime(ci.updated_at, i18n.language)}
+            />
           </dl>
         </Card>
 
@@ -169,13 +279,23 @@ export function CIDetailPage() {
               {t('ci.assetCanonicalHint')}
             </p>
             <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+              {/* Every canonical field of the asset, read-only (DB-05, AST-04, F-238). */}
               <DetailRow label={t('ci.assetTag')} value={ci.asset.asset_tag} />
               <DetailRow label={t('ci.serialNumber')} value={ci.asset.serial_number} />
-              <DetailRow label={t('ci.location')} value={ci.asset.location_id} />
+              <DetailRow label={t('ci.location')} value={locations.path(ci.asset.location_id)} />
               <DetailRow label={t('ci.physicalLifecycle')} value={ci.asset.lifecycle_state} />
+              <DetailRow label={t('ci.rfidTag')} value={ci.asset.rfid_tag} />
               <DetailRow label={t('ci.barcode')} value={ci.asset.barcode} />
+              <DetailRow
+                label={t('ci.purchaseDate')}
+                value={formatDate(ci.asset.purchase_date, i18n.language)}
+              />
+              <DetailRow
+                label={t('ci.warrantyEnd')}
+                value={formatDate(ci.asset.warranty_end, i18n.language)}
+              />
               <DetailRow label={t('ci.supplier')} value={ci.asset.supplier} />
-              <DetailRow label={t('ci.warrantyEnd')} value={ci.asset.warranty_end} />
+              <DetailRow label={t('ci.invoiceNumber')} value={ci.asset.invoice_number} />
             </dl>
           </Card>
         )}
@@ -228,8 +348,8 @@ export function CIDetailPage() {
         <InstanceFieldsSection
           ciId={ci.id}
           attributes={ci.attributes ?? {}}
-          onChanged={(attrs) => updateCI.mutate({ id: ci.id, data: { attributes: attrs } })}
-          serverError={updateCI.error as Error | null}
+          onChanged={saveAttributes}
+          serverError={attributeError}
         />
         <ProvenanceSection ciId={ci.id} />
         <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />

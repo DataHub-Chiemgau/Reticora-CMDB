@@ -249,6 +249,7 @@ func (l *LocalizedText) UnmarshalJSON(b []byte) error {
 
 // Validate checks the languages and lengths; an empty text is valid (the
 // name is used).
+// validation: fixed texts naming the language.
 func (l LocalizedText) Validate() error {
 	for lang, text := range l {
 		if lang != "de" && lang != "en" {

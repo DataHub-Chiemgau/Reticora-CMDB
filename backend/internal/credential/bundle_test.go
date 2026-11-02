@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -93,11 +94,13 @@ func (r *recordedDelivery) BundleDelivered(_ context.Context, _ *BundleTarget, i
 	return nil
 }
 
-// TestBundleSelectsScopeCredentials covers WP-147 (COL-02): a bundle holds
-// only the credentials relevant for the collector (its client's and the
-// organization-wide ones, or the listed ones), and the server answers
-// requests on the collector's subject over NATS with the sealed bundle
-// (TEST_NATS_URL) — refused requests get no bundle.
+// TestBundleSelectsScopeCredentials covers WP-147 (COL-02) and WP-376
+// (E-67): a bundle holds exactly the listed credentials (the effective
+// credentials of the collector's scopes, resolved by the BundleGate); an
+// empty list, like none, seals an empty bundle and reports no ids – there is
+// no fallback to the collector's client. The server answers requests on the
+// collector's subject over NATS with the sealed bundle (TEST_NATS_URL) —
+// refused requests get no bundle.
 func TestBundleSelectsScopeCredentials(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(NewMemoryRepository(), testEncryptor(t))
@@ -113,26 +116,43 @@ func TestBundleSelectsScopeCredentials(t *testing.T) {
 	own, shared, foreign := mk("own", "client-1"), mk("shared", ""), mk("foreign", "client-2")
 	key := newCollectorKey(t)
 	target := &BundleTarget{OrganizationID: "org-1", CollectorID: "col-1", ClientID: "client-1", PublicKey: &key.PublicKey}
-	b, ids, err := svc.Bundle(ctx, target)
-	if err != nil {
-		t.Fatal(err)
+	held := func(list []string) ([]string, []string) {
+		t.Helper()
+		target.CredentialIDs = list
+		b, ids, err := svc.Bundle(ctx, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opened, err := OpenBundle(b, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, c := range opened.Credentials {
+			got = append(got, c.ID)
+		}
+		return got, ids
 	}
-	opened, _ := OpenBundle(b, key)
-	got := map[string]bool{}
-	for _, c := range opened.Credentials {
-		got[c.ID] = true
+	// No list and an empty list: an empty bundle, not the client's
+	// credentials; the delivery names an empty list.
+	for name, list := range map[string][]string{"nil": nil, "empty": {}} {
+		if got, ids := held(list); len(got) != 0 || ids == nil || len(ids) != 0 {
+			t.Errorf("%s list: bundle holds %v (ids %#v), want an empty bundle with ids []", name, got, ids)
+		}
 	}
-	if !got[own] || !got[shared] || got[foreign] || len(ids) != 2 {
-		t.Fatalf("bundle holds %v (ids %v)", got, ids)
+	// Explicit ids: exactly those, whatever their client (the gate filters
+	// by the scope's client before).
+	if got, ids := held([]string{own, shared}); len(got) != 2 || !slices.Contains(got, own) || !slices.Contains(got, shared) ||
+		!slices.Equal(ids, got) {
+		t.Fatalf("listed own and shared: bundle holds %v (ids %v)", got, ids)
 	}
-	target.CredentialIDs = []string{foreign}
-	if b, _, err = svc.Bundle(ctx, target); err != nil {
-		t.Fatal(err)
+	if got, ids := held([]string{foreign}); !slices.Equal(got, []string{foreign}) || !slices.Equal(ids, []string{foreign}) {
+		t.Fatalf("listed credentials: %v (ids %v)", got, ids)
 	}
-	if opened, _ = OpenBundle(b, key); len(opened.Credentials) != 1 || opened.Credentials[0].ID != foreign {
-		t.Fatalf("listed credentials: %+v", opened.Credentials)
+	if got, _ := held([]string{"00000000-0000-4000-8000-0000000000aa"}); len(got) != 0 {
+		t.Fatalf("an unknown id selected %v", got)
 	}
-	target.CredentialIDs = nil
+	target.CredentialIDs = []string{own, shared}
 
 	url := os.Getenv("TEST_NATS_URL")
 	if url == "" {
@@ -169,8 +189,8 @@ func TestBundleSelectsScopeCredentials(t *testing.T) {
 	if resp.Bundle == nil || len(delivered.ids) != 2 {
 		t.Fatalf("bundle reply %+v, delivered %v", resp, delivered.ids)
 	}
-	if opened, err = OpenBundle(resp.Bundle, key); err != nil || len(opened.Credentials) != 2 {
-		t.Fatalf("reply bundle: %v", err)
+	if opened, oerr := OpenBundle(resp.Bundle, key); oerr != nil || len(opened.Credentials) != 2 {
+		t.Fatalf("reply bundle: %v", oerr)
 	}
 	if resp = ask("collector.org-1.col-2" + BundleRequestSuffix); resp.Bundle != nil || resp.Error == "" {
 		t.Fatalf("request of an unverified collector: %+v", resp)

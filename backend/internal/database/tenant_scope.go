@@ -25,6 +25,24 @@ const (
 	TeamScopeGUC   = "app.team_scope"
 )
 
+// OrgWideScopeSQL is the SQL condition "the transaction is not restricted in
+// the client or site scope" (both GUCs empty, as WithTenant sets them for
+// AllScopes). Repositories use it where only org-wide principals may write
+// (E-09), in line with the policies of migration 000139.
+const OrgWideScopeSQL = "(NULLIF(current_setting('" + ClientScopeGUC + "', true), '') IS NULL" +
+	" AND NULLIF(current_setting('" + SiteScopeGUC + "', true), '') IS NULL)"
+
+// ScopedWriteSQL is the SQL condition "client_id and site_id of the row are
+// in the transaction's write scope" (unqualified columns, resolved in the
+// innermost FROM): an org-wide principal writes every row, a scoped principal
+// only rows of its clients and sites and no org-wide one (NULL, E-09), like
+// the WITH CHECK of the link tables of migration 000064. Repositories count
+// the writable links with it (migration 000146).
+const ScopedWriteSQL = "((NULLIF(current_setting('" + ClientScopeGUC + "', true), '') IS NULL" +
+	" OR client_id = ANY (string_to_array(current_setting('" + ClientScopeGUC + "', true), ',')::uuid[]))" +
+	" AND (NULLIF(current_setting('" + SiteScopeGUC + "', true), '') IS NULL" +
+	" OR site_id = ANY (string_to_array(current_setting('" + SiteScopeGUC + "', true), ',')::uuid[])))"
+
 // noAccessScope is the GUC value of an empty scope set. The policies treat an
 // unset or empty scope GUC as "all" (TEN-04: NULL = all clients of the org),
 // so an empty set is encoded as the nil UUID, which matches no row: the
@@ -241,7 +259,12 @@ type tenantTx struct {
 	after []func(context.Context)
 	// before are the writes BeforeCommit put last.
 	before []func() error
+	// batches are the items AfterCommitBatch collects, by key.
+	batches map[any]*afterBatch
 }
+
+// afterBatch holds the items of one AfterCommitBatch key of a transaction.
+type afterBatch struct{ items []any }
 
 // aborted reports whether a statement failed in the open transaction; it
 // reads the connection's transaction status without a round trip.
@@ -355,6 +378,10 @@ func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
 	}
 	t.mu.Lock()
 	mark, beforeMark := len(t.after), len(t.before)
+	batchMarks := make(map[any]int, len(t.batches))
+	for key, b := range t.batches {
+		batchMarks[key] = len(b.items)
+	}
 	t.mu.Unlock()
 	err = fn(ctx)
 	if err == nil && t.aborted() {
@@ -368,6 +395,14 @@ func Savepoint(ctx context.Context, fn func(ctx context.Context) error) error {
 		}
 		t.mu.Lock()
 		t.after, t.before = t.after[:mark], t.before[:beforeMark]
+		for key, b := range t.batches {
+			// A batch opened under the savepoint lost its callback with it.
+			if n, ok := batchMarks[key]; ok {
+				b.items = b.items[:n]
+			} else {
+				delete(t.batches, key)
+			}
+		}
 		t.mu.Unlock()
 		return err
 	}
@@ -423,6 +458,47 @@ func AfterCommit(ctx context.Context, fn func(ctx context.Context)) {
 	t.mu.Unlock()
 	if state == txCommitted {
 		fn(WithoutTx(ctx))
+	}
+}
+
+// AfterCommitBatch adds item to the batch key of the context's transaction:
+// once the transaction has committed, fn (the one of the first item of the
+// batch) runs once with the items in the order they were added, with a
+// context detached from it, like an AfterCommit callback. A rollback drops
+// the batch, the rollback of a savepoint the items added under it. Without
+// a context transaction fn runs at once with item. Work that every write of
+// a transaction would do on its own after the commit (a search index) is
+// done once for all of them.
+func AfterCommitBatch(ctx context.Context, key, item any, fn func(ctx context.Context, items []any)) {
+	t, ok := ctx.Value(txKey{}).(*tenantTx)
+	if !ok || t == nil {
+		fn(ctx, []any{item})
+		return
+	}
+	t.mu.Lock()
+	state := t.state.Load()
+	if state == txOpen {
+		b := t.batches[key]
+		if b == nil {
+			b = &afterBatch{}
+			if t.batches == nil {
+				t.batches = map[any]*afterBatch{}
+			}
+			t.batches[key] = b
+			t.after = append(t.after, func(ctx context.Context) {
+				t.mu.Lock()
+				items := b.items
+				t.mu.Unlock()
+				if len(items) > 0 {
+					fn(ctx, items)
+				}
+			})
+		}
+		b.items = append(b.items, item)
+	}
+	t.mu.Unlock()
+	if state == txCommitted {
+		fn(WithoutTx(ctx), []any{item})
 	}
 }
 

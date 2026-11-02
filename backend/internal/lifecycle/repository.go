@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
+
+// ErrConflict: the in-memory repository refuses a key that is taken (409;
+// PostgreSQL reports the unique violation, 23505).
+var ErrConflict = errors.New("a lifecycle definition with this key already exists")
 
 // Repository defines persistence for lifecycle definitions.
 type Repository interface {
@@ -93,7 +98,7 @@ func (r *MemoryRepository) Create(_ context.Context, def *Definition) error {
 	defer r.mu.Unlock()
 	for _, existing := range r.defs {
 		if existing.OrganizationID == def.OrganizationID && existing.Key == def.Key {
-			return fmt.Errorf("a lifecycle definition with this key already exists")
+			return ErrConflict
 		}
 	}
 	r.seq++

@@ -54,7 +54,7 @@ func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*De
 		var err error
 		d, err = scanDef(tx.QueryRow(ctx, "SELECT "+defCols+" FROM workflow_def WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("workflow definition not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -113,13 +113,16 @@ func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, r
 		if len(set) == 0 {
 			var err error
 			d, err = scanDef(tx.QueryRow(ctx, "SELECT "+defCols+" FROM workflow_def WHERE id=$1 AND organization_id=$2", id, orgID))
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
 			return err
 		}
 		set = append(set, "updated_at=now()")
 		var err error
 		d, err = scanDef(tx.QueryRow(ctx, fmt.Sprintf("UPDATE workflow_def SET %s WHERE id=$1 AND organization_id=$2 RETURNING %s", strings.Join(set, ","), defCols), args...))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("workflow definition not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -132,7 +135,7 @@ func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) e
 			return err
 		}
 		if cmd.RowsAffected() == 0 {
-			return fmt.Errorf("workflow definition not found")
+			return ErrNotFound
 		}
 		return nil
 	})
@@ -196,7 +199,7 @@ func (r *PGRepository) GetRun(ctx context.Context, orgID, id string) (*Run, erro
 		var err error
 		run, err = scanRun(tx.QueryRow(ctx, "SELECT "+runCols+" FROM workflow_run WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("workflow run not found")
+			return ErrRunNotFound
 		}
 		if err != nil {
 			return err

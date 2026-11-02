@@ -2,20 +2,24 @@ package ci
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -148,31 +152,100 @@ func NewPGRepositoryWithAudit(pool *pgxpool.Pool, recorder audit.TxRecorder) *PG
 	return &PGRepository{pool: pool, recorder: recorder}
 }
 
-// List returns paginated CIs filtered by the given parameters.
-// attributeFilterKind checks that an attribute may be filtered (API-02):
-// it must be defined (else 422) and searchable (else 400 with a hint), and
-// its data type gives the filter kind.
-func attributeFilterKind(ctx context.Context, tx pgx.Tx, f api.Filter, key string) (string, error) {
-	var dataType string
-	var searchable bool
-	err := tx.QueryRow(ctx, `SELECT data_type, bool_or(searchable) FROM attribute_definition
-		WHERE key = $1 GROUP BY data_type ORDER BY bool_or(searchable) DESC LIMIT 1`, key).Scan(&dataType, &searchable)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown attribute %q", key)}
+// withoutSort runs fn with sorting switched off for the planner (SET
+// LOCAL). In a joined transaction (restore) it switches it back to the
+// session's value afterwards; in a transaction of its own the setting ends
+// with it, and the list's statements after the page (count, overrides,
+// asset facts) do not sort. With a failed statement in fn the transaction
+// is aborted and only fn's error counts.
+func withoutSort(ctx context.Context, tx pgx.Tx, restore bool, fn func() error) error {
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_sort = off"); err != nil {
+		return fmt.Errorf("list cis: %w", err)
 	}
-	if err != nil {
-		return "", fmt.Errorf("attribute definition %s: %w", key, err)
+	ferr := fn()
+	if !restore {
+		return ferr
 	}
-	if !searchable {
-		return "", &api.FieldError{Field: "filter[" + f.Field + "]",
-			Message: fmt.Sprintf("attribute %q is not searchable; mark it searchable in its attribute definition to filter on it", key)}
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_sort TO DEFAULT"); err != nil && ferr == nil {
+		return fmt.Errorf("list cis: %w", err)
 	}
-	return fieldmeta.FilterKind(dataType), nil
+	return ferr
 }
 
+// attributeFilterOf checks that an attribute may be filtered (API-02) and
+// returns its filter kind and the CI types the filter is restricted to (nil
+// for none). The definitions of a CI's type decide (WP-566, F-216): a
+// definition of the type and the global ones (of the organization and the
+// system; row level security hides those of other organizations) apply to
+// it, and the attribute is searchable for the type when one of them is.
+// types are the CI types the query names (named), else every type
+// counts. The attribute must be defined for one of them (else 422) and
+// searchable for one (else 400 with a hint); the searchable definitions
+// give the kind, and when they compare differently (integer in one type,
+// text in another) the filter is 400 with the hint to name the type. The
+// hits are restricted to the types the attribute is searchable for unless
+// a searchable global definition covers every type or every named type is
+// one of them, so a filter on a type definition keeps the query shape that
+// its index (partial on the type, WP-435) serves.
+func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string, types []string, named bool) (kind string, restrict []string, err error) {
+	query, args := `SELECT COALESCE(ci_type_id::text, ''), data_type, searchable FROM attribute_definition WHERE key = $1`, []any{key}
+	if named {
+		query += ` AND (ci_type_id IS NULL OR ci_type_id::text = ANY($2::text[]))`
+		args = append(args, types)
+	}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return "", nil, fmt.Errorf("attribute definition %s: %w", key, err)
+	}
+	var (
+		typeID, dataType string
+		searchable       bool
+		defined, global  bool
+		kinds, typed     []string
+	)
+	if _, err = pgx.ForEachRow(rows, []any{&typeID, &dataType, &searchable}, func() error {
+		defined = true
+		if !searchable {
+			return nil
+		}
+		if k := fieldmeta.FilterKind(dataType); !slices.Contains(kinds, k) {
+			kinds = append(kinds, k)
+		}
+		if typeID == "" {
+			global = true
+		} else {
+			typed = append(typed, typeID)
+		}
+		return nil
+	}); err != nil {
+		return "", nil, fmt.Errorf("attribute definition %s: %w", key, err)
+	}
+	field := "filter[" + f.Field + "]"
+	switch {
+	case !defined && named:
+		return "", nil, &api.FieldError{Field: field, Status: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("unknown attribute %q for the given ci_type_id", key)}
+	case !defined:
+		return "", nil, &api.FieldError{Field: field, Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown attribute %q", key)}
+	case len(kinds) == 0:
+		return "", nil, &api.FieldError{Field: field,
+			Message: fmt.Sprintf("attribute %q is not searchable; mark it searchable in its attribute definition to filter on it", key)}
+	case len(kinds) > 1:
+		return "", nil, &api.FieldError{Field: field,
+			Message: fmt.Sprintf("attribute %q has different data types in the CI types that make it searchable; give ci_type_id to filter on it", key)}
+	}
+	if global || (named && len(typed) == len(types)) {
+		return kinds[0], nil, nil
+	}
+	return kinds[0], typed, nil
+}
+
+// List returns paginated CIs filtered by the given parameters.
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	items := make([]Item, 0)
 	var total int
+	// joined: the list runs in the caller's transaction (database.ContextWithTx).
+	joined := database.InTx(ctx)
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"deleted_at IS NULL"}
@@ -209,10 +282,12 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
 		}
+		orgNamed := false
+		types, typesNamed := filter.namedTypes()
 		for _, f := range filter.Filters {
 			expr := filterColumns[f.Field].expr
 			if key, ok := f.Attribute(); ok {
-				kind, err := attributeFilterKind(ctx, tx, f, key)
+				kind, restrict, err := attributeFilterOf(ctx, tx, f, key, types, typesNamed)
 				if err != nil {
 					return err
 				}
@@ -220,9 +295,30 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 				if cerr := f.Check(); cerr != nil {
 					return cerr
 				}
-				expr = fmt.Sprintf("attributes->>$%d::text", argPos)
-				args = append(args, key)
-				argPos++
+				// Only CIs whose type makes the attribute searchable
+				// (WP-566). A parameter: with one type the custom plan
+				// proves the predicate of the type definition's index.
+				if restrict != nil {
+					whereParts = append(whereParts, fmt.Sprintf("ci_type_id = ANY($%d::uuid[])", argPos))
+					args = append(args, restrict)
+					argPos++
+				}
+				// The expression of the attribute indexes (WP-435, E-73):
+				// reticora_attr_text is leakproof, so the comparison is an
+				// index condition under row level security, where ->> was
+				// evaluated only after the policies of ci (F-114). The key
+				// is a literal, as in the indexes (WP-607): with a parameter
+				// a generic plan of the prepared statement matched no index.
+				// The query names the organization as a value, which
+				// ci_isolation (a setting) does not: it leads the index of
+				// a key and is the predicate of a definition's own index.
+				if !orgNamed {
+					whereParts = append(whereParts, fmt.Sprintf("organization_id = $%d::uuid", argPos))
+					args = append(args, orgID)
+					argPos++
+					orgNamed = true
+				}
+				expr = citype.KeyExpression(key)
 			}
 			if expr == "" {
 				return &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity, Message: "unknown filter field"}
@@ -234,11 +330,6 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")
-		countQuery := "SELECT COUNT(*) FROM ci WHERE " + whereClause
-		if err := tx.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
-			return fmt.Errorf("count cis: %w", err)
-		}
-
 		sortColumn, sortDirection := NormalizeSort(filter)
 
 		// Keyset pagination: when a cursor is supplied it replaces the OFFSET
@@ -254,41 +345,83 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			argPos += 2
 		}
 
+		// Sort keys and limit (NFR-02, WP-605): the keys are qualified because
+		// the select list names id::text "id", and ORDER BY id sorted by that
+		// text, which no index delivers (the keyset clause compares the uuid).
+		// The limit is a sub-select: the planner cannot estimate the client
+		// predicate of ci_isolation and expects an org-wide principal to see
+		// 0.5 % of the organization's CIs, so with LIMIT 50 known at 10,000
+		// CIs it read and sorted the whole organization instead of the first
+		// entries of idx_ci_list_sort. Without the value it assumes a page of
+		// 10 % of the rows, as in the generic plan of a prepared statement.
 		var listQuery string
 		if page.Cursor != nil {
 			listArgs = append(listArgs, page.Limit)
 			listQuery = fmt.Sprintf(
-				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
+				"SELECT %s FROM ci WHERE %s ORDER BY ci.%s %s, ci.id %s LIMIT (SELECT $%d::bigint)",
 				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			listQuery = fmt.Sprintf(
-				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				"SELECT %s FROM ci WHERE %s ORDER BY ci.%s %s, ci.id %s LIMIT (SELECT $%d::bigint) OFFSET $%d",
 				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
 		}
 
-		rows, err := tx.Query(ctx, listQuery, listArgs...)
-		if err != nil {
-			return fmt.Errorf("list cis: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			item, err := scanCI(rows)
+		readPage := func() error {
+			rows, err := tx.Query(ctx, listQuery, listArgs...)
 			if err != nil {
-				return fmt.Errorf("scan ci: %w", err)
+				return fmt.Errorf("list cis: %w", err)
 			}
-			items = append(items, *item)
+			defer rows.Close()
+			for rows.Next() {
+				item, err := scanCI(rows)
+				if err != nil {
+					return fmt.Errorf("scan ci: %w", err)
+				}
+				items = append(items, *item)
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate cis: %w", err)
+			}
+			return nil
+		}
+		// The page of an unfiltered list in the default order is read from
+		// idx_ci_list_sort in index order (NFR-02, WP-438, F-117). Once the
+		// CIs carry a client and a site, the planner estimates the client and
+		// site predicates of ci_isolation at 0.5 % each and expects one
+		// visible CI; the limit then saves nothing in its estimate, and it
+		// reads and sorts the whole organization whenever that is cheaper
+		// than reading all of it through the index (with 10,000 CIs tens of
+		// milliseconds instead of under one). Without sorting, the ordered
+		// index scan is the only plan left; it reads offset + limit entries
+		// (for a client- or site-scoped principal also the invisible ones in
+		// between). Filters keep the planner's choice: a selective one is
+		// cheaper through its own index and a sort.
+		var pageErr error
+		if len(whereParts) == 1 && sortColumn == "created_at" {
+			pageErr = withoutSort(ctx, tx, joined, readPage)
+		} else {
+			pageErr = readPage()
+		}
+		if pageErr != nil {
+			return pageErr
 		}
 
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate cis: %w", err)
+		// total counts every matching CI. Without a cursor, a page that is
+		// shorter than the limit and not past the end holds the last rows, so
+		// it gives the count; otherwise the count reads the matching CIs once
+		// more (without filters an index-only scan of idx_ci_list_sort can
+		// serve it).
+		if page.Cursor == nil && len(items) < page.Limit && (len(items) > 0 || page.Offset == 0) {
+			total = page.Offset + len(items)
+		} else if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ci WHERE "+whereClause, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count cis: %w", err)
 		}
-		rows.Close()
+
 		ptrs := make([]*Item, len(items))
 		for i := range items {
 			ptrs[i] = &items[i]
@@ -302,6 +435,24 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 	return items, total, err
 }
 
+var _ ActiveCounter = (*PGRepository)(nil)
+
+// CountActive implements ActiveCounter: the number of active CIs of the
+// organization, also of the clients and sites outside the caller's scope
+// (max_cis, F-403). ci_active_count() (migration 000186) widens only the
+// client and site scope for the one count, in the caller's transaction when
+// ctx carries one, and returns nothing but the number.
+func (r *PGRepository) CountActive(ctx context.Context, orgID string) (int64, error) {
+	var n int64
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT ci_active_count()`).Scan(&n); err != nil {
+			return fmt.Errorf("count active cis: %w", err)
+		}
+		return nil
+	})
+	return n, err
+}
+
 // GetByID retrieves a single CI by ID within the tenant scope.
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, error) {
 	var item *Item
@@ -312,7 +463,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 		item, err = scanCI(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci by id: %w", err)
 		}
@@ -378,58 +529,88 @@ var nodeOverrideFields = []string{"name", "status", "management_ip"}
 // CIs, as the traversal that reached so many CIs reads all its edges.
 const nodeOrgReadAbove = 2000
 
-// nodeQuery reads the node projection with the overrides of the projected
-// fields ($2); the two %s narrow the overrides and the CIs.
+// nodeQuery reads the node projection; %s narrows the CIs. The overrides
+// of the projected fields are a second statement (nodeOverrideQuery),
+// applied in Go (NFR-02, WP-611): the planner cannot estimate the client
+// and site predicates of ci_isolation and expects one visible CI once the
+// CIs carry a client and a site, so with the overrides of the organization
+// aggregated in a joined subquery it ran a nested loop that aggregated all
+// of them again for every CI (10,000 CIs with 500 overrides: 5.5 s instead
+// of 25 ms, WP-438, F-117), and the lateral read per CI that replaced it
+// still looked the overrides up once per CI.
 const nodeQuery = `SELECT c.id::text, c.name, c.ci_type_id::text, c.status, COALESCE(c.client_id::text, ''),
-		COALESCE(c.site_id::text, ''), COALESCE(host(c.management_ip), ''), o.overrides
+		COALESCE(c.site_id::text, ''), COALESCE(host(c.management_ip), '')
 	FROM ci c
-	LEFT JOIN (SELECT f.ci_id, jsonb_object_agg(f.field_name, f.override_value) AS overrides
-		FROM ci_field_value f
-		WHERE %s AND f.field_name = ANY($2::text[]) AND f.override_at IS NOT NULL
-		GROUP BY f.ci_id) o ON o.ci_id = c.id
 	WHERE c.organization_id = $1 AND %s AND c.deleted_at IS NULL`
 
+// nodeOverrideQuery reads the overrides of the projected fields ($2); %s
+// narrows the CIs. The policy of ci_field_value shows the overrides of the
+// CIs the scope shows.
+const nodeOverrideQuery = `SELECT ci_id::text, field_name, override_value FROM ci_field_value
+	WHERE organization_id = $1 AND field_name = ANY($2::text[]) AND override_at IS NOT NULL AND %s`
+
 var (
-	nodesByID  = fmt.Sprintf(nodeQuery, "f.ci_id = ANY($3::uuid[])", "c.id = ANY($3::uuid[])")
-	nodesByOrg = fmt.Sprintf(nodeQuery, "f.organization_id = $1", "true")
+	nodesByID          = fmt.Sprintf(nodeQuery, "c.id = ANY($2::uuid[])")
+	nodesByOrg         = fmt.Sprintf(nodeQuery, "true")
+	nodeOverridesByID  = fmt.Sprintf(nodeOverrideQuery, "ci_id = ANY($3::uuid[])")
+	nodeOverridesByOrg = fmt.Sprintf(nodeOverrideQuery, "true")
 )
 
 // ListNodes implements NodeReader: the projection of the visible, not
-// deleted CIs among ids with their overrides in one statement, without
+// deleted CIs among ids with their overrides, one statement each, without
 // attributes and asset facts.
 func (r *PGRepository) ListNodes(ctx context.Context, orgID string, ids []string) ([]Node, error) {
 	nodes := []Node{}
 	if len(ids) == 0 {
 		return nodes, nil
 	}
-	query, args := nodesByID, []any{orgID, nodeOverrideFields, ids}
+	nodeSQL, nodeArgs := nodesByID, []any{orgID, ids}
+	overrideSQL, overrideArgs := nodeOverridesByID, []any{orgID, nodeOverrideFields, ids}
 	var wanted map[string]bool
 	if len(ids) > nodeOrgReadAbove {
-		query, args = nodesByOrg, args[:2]
+		nodeSQL, nodeArgs = nodesByOrg, nodeArgs[:1]
+		overrideSQL, overrideArgs = nodeOverridesByOrg, overrideArgs[:2]
 		wanted = make(map[string]bool, len(ids))
 		for _, id := range ids {
 			wanted[id] = true
 		}
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, query, args...)
+		rows, err := tx.Query(ctx, nodeSQL, nodeArgs...)
 		if err != nil {
 			return fmt.Errorf("list ci nodes: %w", err)
 		}
-		defer rows.Close()
+		index := map[string]int{}
 		for rows.Next() {
 			var n Node
-			var overrides map[string]any
-			if err = rows.Scan(&n.ID, &n.Name, &n.CITypeID, &n.Status, &n.ClientID, &n.SiteID, &n.ManagementIP, &overrides); err != nil {
+			if err = rows.Scan(&n.ID, &n.Name, &n.CITypeID, &n.Status, &n.ClientID, &n.SiteID, &n.ManagementIP); err != nil {
+				rows.Close()
 				return fmt.Errorf("scan ci node: %w", err)
 			}
 			if wanted != nil && !wanted[n.ID] {
 				continue
 			}
-			for field, value := range overrides {
-				applyNodeOverride(&n, field, value)
-			}
+			index[n.ID] = len(nodes)
 			nodes = append(nodes, n)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil || len(nodes) == 0 {
+			return err
+		}
+		rows, err = tx.Query(ctx, overrideSQL, overrideArgs...)
+		if err != nil {
+			return fmt.Errorf("read node overrides: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, field string
+			var value any
+			if err = rows.Scan(&id, &field, &value); err != nil {
+				return fmt.Errorf("scan node override: %w", err)
+			}
+			if i, ok := index[id]; ok {
+				applyNodeOverride(&nodes[i], field, value)
+			}
 		}
 		return rows.Err()
 	})
@@ -498,6 +679,13 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at
 		`
 
+		if err := checkCITypes(ctx, tx, item.OrganizationID, []*Item{item}); err != nil {
+			return err
+		}
+		if err := checkParents(ctx, tx, item.OrganizationID, []*Item{item}); err != nil {
+			return err
+		}
+
 		var createdAt time.Time
 		var updatedAt time.Time
 		if err := tx.QueryRow(ctx, query,
@@ -535,7 +723,7 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
 			return err
 		}
-		if err := r.recordCIChange(ctx, tx, item.OrganizationID, item.ID, item.Version, "create", "", nil, item); err != nil {
+		if err := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindCreated), item.OrganizationID, item.ID, item.Version, "create", "", nil, item); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.created", item, map[string]interface{}{"after": item}); err != nil {
@@ -566,6 +754,12 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 		}
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := checkCITypes(ctx, tx, orgID, items); err != nil {
+			return err
+		}
+		if err := checkParents(ctx, tx, orgID, items); err != nil {
+			return err
+		}
 		created, refused, err := insertCIs(ctx, tx, orgID, items)
 		if err != nil {
 			return locationError(fmt.Errorf("create cis: %w", err))
@@ -687,9 +881,10 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 }
 
 // recordCreates writes the history entry of each new CI, as Create does,
-// with one statement.
+// with one statement; each is a change set of its own (AUD-03).
 func (r *PGRepository) recordCreates(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
 	ids, values, versions := make([]string, len(items)), make([]string, len(items)), make([]int64, len(items))
+	sets := make([]string, len(items))
 	for i, item := range items {
 		sealed, err := sealChangeValue(ctx, tx, orgID, "", item)
 		if err != nil {
@@ -698,13 +893,17 @@ func (r *PGRepository) recordCreates(ctx context.Context, tx pgx.Tx, orgID strin
 		if values[i], err = marshalJSONValue(sealed); err != nil {
 			return fmt.Errorf("marshal new ci change value: %w", err)
 		}
-		ids[i], versions[i] = item.ID, item.Version
+		ids[i], versions[i], sets[i] = item.ID, item.Version, newChangeSet(ChangeKindCreated).id
 	}
+	who := changeOrigin(ctx)
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, ci_version)
-		SELECT $1, c.ci_id::uuid, $2::uuid, 'create', NULL, 'null'::jsonb, c.new_value::jsonb, c.ci_version
-		FROM unnest($3::text[], $4::text[], $5::bigint[]) WITH ORDINALITY AS c(ci_id, new_value, ci_version, ord)
-		ORDER BY c.ord`, orgID, nilIfEmpty(tenant.FromContext(ctx).UserID), ids, values, versions); err != nil {
+		INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, ci_version,
+			change_kind, change_set_id, actor_user_id, source, request_id, correlation_id)
+		SELECT $1, c.ci_id::uuid, $2::uuid, 'create', NULL, 'null'::jsonb, c.new_value::jsonb, c.ci_version,
+			$7, c.change_set_id::uuid, $8::uuid, $9, $10, $11
+		FROM unnest($3::text[], $4::text[], $5::bigint[], $6::text[]) WITH ORDINALITY AS c(ci_id, new_value, ci_version, change_set_id, ord)
+		ORDER BY c.ord`, orgID, who.actorID, ids, values, versions, sets, ChangeKindCreated,
+		who.actorUserID, who.source, who.requestID, who.correlationID); err != nil {
 		return fmt.Errorf("record ci changes: %w", err)
 	}
 	return nil
@@ -771,149 +970,462 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	var item *Item
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		// FOR UPDATE: the merge patch is computed from this state.
-		beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
-		before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
+		w, err := r.updateRow(ctx, tx, orgID, id, &req)
 		if err != nil {
-			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
-			}
-			return fmt.Errorf("get ci before update: %w", err)
+			return err
 		}
-		if req.Manual != nil {
-			if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
-				return preErr
-			}
-		} else if dropErr := dropOverriddenFields(ctx, tx, id, &req); dropErr != nil {
-			return dropErr
-		}
-
-		setClauses := make([]string, 0, 18)
-		args := []any{id}
-		argPos := 2
-
-		addStringField := func(column string, value *string) {
-			if value == nil {
-				return
-			}
-			setClauses = append(setClauses, fmt.Sprintf("%s = $%d", column, argPos))
-			args = append(args, nilIfEmpty(*value))
-			argPos++
-		}
-
-		addStringField("name", req.Name)
-		addStringField("status", req.Status)
-		addStringField("client_id", req.ClientID)
-		addStringField("asset_id", req.AssetID)
-		addStringField("parent_ci_id", req.ParentCIID)
-		addStringField("location_id", req.LocationID)
-		addStringField("manufacturer", req.Manufacturer)
-		addStringField("model", req.Model)
-		addStringField("serial_number", req.SerialNumber)
-		addStringField("hardware_uuid", req.HardwareUUID)
-		addStringField("management_ip", req.ManagementIP)
-		addStringField("primary_mac", req.PrimaryMAC)
-		addStringField("hostname", req.Hostname)
-		addStringField("fqdn", req.FQDN)
-		addStringField("os_name", req.OSName)
-		addStringField("os_version", req.OSVersion)
-		addStringField("firmware_version", req.FirmwareVersion)
-		addStringField("sys_object_id", req.SysObjectID)
-		addStringField("discovery_source", req.DiscoverySource)
-
-		if req.Attributes != nil {
-			// RFC 7396: nested objects merge, null removes a member (CI-04).
-			// Instance attributes are stored under _instance; the projected
-			// namespaces of the row stay (CI-10).
-			instance, namesErr := instanceFieldNames(ctx, tx, id)
-			if namesErr != nil {
-				return namesErr
-			}
-			setClauses = append(setClauses, fmt.Sprintf("attributes = $%d::jsonb || ci_attribute_namespaces(attributes)", argPos))
-			args = append(args, storedAttributes(MergePatch(before.Attributes, req.Attributes), instance))
-			argPos++
-		}
-
-		if req.LastSeenAt != nil {
-			parsed, err := time.Parse(time.RFC3339, *req.LastSeenAt)
-			if err != nil {
-				return fmt.Errorf("parse last_seen_at: %w", err)
-			}
-			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
-			args = append(args, parsed)
-			argPos++
-		}
-
-		if len(setClauses) == 0 {
-			item = before
+		item = w.after
+		if len(w.changes) == 0 {
 			return nil
 		}
-
-		setClauses = append(setClauses, "updated_at = NOW()")
-		if req.Manual != nil || req.Authoritative {
-			// Rank >= 92 writes raise the version (API-07).
-			setClauses = append(setClauses, "version = version + 1")
-		}
-		// The tenant predicate is redundant with row-level security but is kept
-		// as defense in depth: a missing or wrong app.org_id must never allow a
-		// cross-tenant write.
-		query := fmt.Sprintf(
-			"UPDATE ci SET %s WHERE id = $1 AND organization_id = $%d AND deleted_at IS NULL RETURNING %s",
-			strings.Join(setClauses, ", "),
-			argPos,
-			ciSelectColumns,
-		)
-		args = append(args, orgID)
-
-		item, err = scanCI(tx.QueryRow(ctx, query, args...))
-		if err != nil {
-			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
-			}
-			return locationError(fmt.Errorf("update ci: %w", err))
-		}
-
-		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
+		set := newChangeSet(w.kind())
+		if err := r.recordFieldChanges(ctx, tx, set, orgID, id, item.Version, w.changes); err != nil {
 			return err
 		}
-		changes := diffCI(before, item)
-		if len(changes) == 0 {
-			return nil
-		}
-		if req.Manual != nil {
-			if err := recordManualOverrides(ctx, tx, orgID, before, item, &req); err != nil {
-				return err
-			}
-		}
-		changeType := "update"
-		action := "ci.updated"
-		if len(changes) == 1 && changes[0].Field == "status" {
-			changeType = "status_change"
-			action = "ci.status_changed"
-		}
-		for _, change := range changes {
-			fieldChangeType := changeType
-			if change.Field == "status" {
-				fieldChangeType = "status_change"
-			}
-			if err := r.recordCIChange(ctx, tx, orgID, id, item.Version, fieldChangeType, change.Field, change.Old, change.New); err != nil {
-				return err
-			}
-		}
-		if err := r.recordAudit(ctx, tx, action, item, map[string]interface{}{"before": before, "after": item, "fields": changes}); err != nil {
+		if err := r.recordUpdateAudit(ctx, tx, w); err != nil {
 			return err
 		}
-		changedFields := make([]string, 0, len(changes))
-		for _, change := range changes {
-			changedFields = append(changedFields, change.Field)
-		}
-		if err := r.recordEvent(ctx, tx, events.CIChanged, item, changedFields); err != nil {
-			return err
-		}
-		return nil
+		return r.recordEvent(ctx, tx, events.CIChanged, item, changedFieldNames(w.changes))
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
+}
+
+// rowUpdate is the UPDATE of a CI row: the row before and after it and the
+// historized fields it changed (diffCI).
+type rowUpdate struct {
+	before, after *Item
+	changes       []ciFieldChange
+}
+
+// kind is the change kind of the field changes (AUD-03): a status change
+// alone is status_changed, everything else updated.
+func (w *rowUpdate) kind() string {
+	if len(w.changes) == 1 && w.changes[0].Field == "status" {
+		return ChangeKindStatusChanged
+	}
+	return ChangeKindUpdated
+}
+
+// recordFieldChanges writes the field rows of an update into the change set.
+func (r *PGRepository) recordFieldChanges(ctx context.Context, tx pgx.Tx, set changeSet, orgID, id string, version int64, changes []ciFieldChange) error {
+	changeType := "update"
+	if len(changes) == 1 && changes[0].Field == "status" {
+		changeType = "status_change"
+	}
+	for _, change := range changes {
+		fieldChangeType := changeType
+		if change.Field == "status" {
+			fieldChangeType = "status_change"
+		}
+		if err := r.recordCIChange(ctx, tx, set, orgID, id, version, fieldChangeType, change.Field, change.Old, change.New); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recordUpdateAudit writes the audit entry of the field changes of w.
+func (r *PGRepository) recordUpdateAudit(ctx context.Context, tx pgx.Tx, w *rowUpdate) error {
+	action := "ci.updated"
+	if w.kind() == ChangeKindStatusChanged {
+		action = "ci.status_changed"
+	}
+	return r.recordAudit(ctx, tx, action, w.after, map[string]interface{}{"before": w.before, "after": w.after, "fields": w.changes})
+}
+
+// changedFieldNames lists the fields of changes for the event ci.changed.
+func changedFieldNames(changes []ciFieldChange) []string {
+	names := make([]string, 0, len(changes))
+	for _, change := range changes {
+		names = append(names, change.Field)
+	}
+	return names
+}
+
+// updateRow applies req to the row of CI id in tx; it writes the manual
+// overrides of a manual change but no history, audit entry or event.
+func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id string, reqp *UpdateRequest) (*rowUpdate, error) {
+	req := *reqp
+	var item *Item
+	// FOR UPDATE: the merge patch is computed from this state.
+	beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
+	before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get ci before update: %w", err)
+	}
+	if reviveErr := reviveSighted(before, &req); reviveErr != nil {
+		return nil, reviveErr
+	}
+	if req.Manual != nil {
+		if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
+			return nil, preErr
+		}
+	} else if dropErr := dropOverriddenFields(ctx, tx, id, &req); dropErr != nil {
+		return nil, dropErr
+	}
+	if scopeErr := checkContainmentScope(ctx, tx, orgID, before, &req); scopeErr != nil {
+		return nil, scopeErr
+	}
+	if adoptErr := r.adoptCILocation(ctx, tx, orgID, before, &req); adoptErr != nil {
+		return nil, adoptErr
+	}
+
+	setClauses := make([]string, 0, 18)
+	args := []any{id}
+	argPos := 2
+
+	addStringField := func(column string, value *string) {
+		if value == nil {
+			return
+		}
+		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", column, argPos))
+		args = append(args, nilIfEmpty(*value))
+		argPos++
+	}
+
+	addStringField("name", req.Name)
+	addStringField("status", req.Status)
+	addStringField("client_id", req.ClientID)
+	addStringField("asset_id", req.AssetID)
+	addStringField("parent_ci_id", req.ParentCIID)
+	addStringField("location_id", req.LocationID)
+	addStringField("manufacturer", req.Manufacturer)
+	addStringField("model", req.Model)
+	addStringField("serial_number", req.SerialNumber)
+	addStringField("hardware_uuid", req.HardwareUUID)
+	addStringField("management_ip", req.ManagementIP)
+	addStringField("primary_mac", req.PrimaryMAC)
+	addStringField("hostname", req.Hostname)
+	addStringField("fqdn", req.FQDN)
+	addStringField("os_name", req.OSName)
+	addStringField("os_version", req.OSVersion)
+	addStringField("firmware_version", req.FirmwareVersion)
+	addStringField("sys_object_id", req.SysObjectID)
+	addStringField("discovery_source", req.DiscoverySource)
+
+	if req.Attributes != nil {
+		// RFC 7396: nested objects merge, null removes a member (CI-04).
+		// Instance attributes are stored under _instance; the projected
+		// namespaces of the row stay (CI-10).
+		instance, namesErr := instanceFieldNames(ctx, tx, id)
+		if namesErr != nil {
+			return nil, namesErr
+		}
+		setClauses = append(setClauses, fmt.Sprintf("attributes = $%d::jsonb || ci_attribute_namespaces(attributes)", argPos))
+		args = append(args, storedAttributes(MergePatch(before.Attributes, req.Attributes), instance))
+		argPos++
+	}
+
+	if req.LastSeenAt != nil {
+		parsed, parseErr := time.Parse(time.RFC3339, *req.LastSeenAt)
+		if parseErr != nil {
+			// A malformed value is the client's error, not a 500 (F-229).
+			return nil, &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
+		}
+		// A sighting (discovery, agent) keeps the later time: a record
+		// observed before the last sighting does not move it back (GLO-12).
+		if req.Manual == nil {
+			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = GREATEST(last_seen_at, $%d)", argPos))
+		} else {
+			setClauses = append(setClauses, fmt.Sprintf("last_seen_at = $%d", argPos))
+		}
+		args = append(args, parsed)
+		argPos++
+	}
+
+	if len(setClauses) == 0 {
+		return &rowUpdate{before: before, after: before}, nil
+	}
+
+	setClauses = append(setClauses, "updated_at = NOW()")
+	if req.Manual != nil || req.Authoritative {
+		// Rank >= 92 writes raise the version (API-07).
+		setClauses = append(setClauses, "version = version + 1")
+	}
+	// The tenant predicate is redundant with row-level security but is kept
+	// as defense in depth: a missing or wrong app.org_id must never allow a
+	// cross-tenant write.
+	query := fmt.Sprintf(
+		"UPDATE ci SET %s WHERE id = $1 AND organization_id = $%d AND deleted_at IS NULL RETURNING %s",
+		strings.Join(setClauses, ", "),
+		argPos,
+		ciSelectColumns,
+	)
+	args = append(args, orgID)
+
+	item, err = scanCI(tx.QueryRow(ctx, query, args...))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, locationError(fmt.Errorf("update ci: %w", err))
+	}
+
+	if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
+		return nil, err
+	}
+	w := &rowUpdate{before: before, after: item, changes: diffCI(before, item)}
+	if len(w.changes) > 0 && req.Manual != nil {
+		if err := recordManualOverrides(ctx, tx, orgID, before, item, &req); err != nil {
+			return nil, err
+		}
+	}
+	return w, nil
+}
+
+// reviveSighted brings an unknown CI back to active for a sighting
+// (UpdateRequest.Sighting) newer than the last one of the locked row
+// before: like a status the record carries, a field override of the status
+// keeps it (dropOverriddenFields).
+func reviveSighted(before *Item, req *UpdateRequest) error {
+	if !req.Sighting || req.Status != nil || req.LastSeenAt == nil || before.Status != StatusUnknown {
+		return nil
+	}
+	seen, err := time.Parse(time.RFC3339, *req.LastSeenAt)
+	if err != nil {
+		return &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
+	}
+	if before.LastSeenAt == nil || seen.After(*before.LastSeenAt) {
+		active := StatusActive
+		req.Status = &active
+	}
+	return nil
+}
+
+// checkCITypes keeps the type of a CI within its organization (CI-01,
+// TEN-09; F-144). The foreign key of ci_type_id has one column and bypasses
+// row level security; the trigger ci_type_organization refuses a type of
+// another organization on every path. Here a type ID that is no UUID is
+// refused before any statement, and the types the writer chose (ChosenType)
+// are read in the writing transaction under the principal's row level
+// security with one statement: a private type of another organization is
+// invisible and, like an unknown ID, "CI type not found"; a deactivated type
+// is refused. Items without ChosenType (discovery, agent) cost no statement.
+func checkCITypes(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
+	var chosen []string
+	for _, item := range items {
+		if err := checkCITypeID(item.CITypeID); err != nil {
+			return err
+		}
+		if item.ChosenType {
+			chosen = append(chosen, item.CITypeID)
+		}
+	}
+	if len(chosen) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT t.is_active
+		FROM unnest($2::uuid[]) WITH ORDINALITY AS l(id, ord)
+		LEFT JOIN ci_type t ON t.id = l.id AND (t.organization_id IS NULL OR t.organization_id = $1)
+		ORDER BY l.ord`, orgID, chosen)
+	if err != nil {
+		return fmt.Errorf("read ci types: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var active *bool
+		if err := rows.Scan(&active); err != nil {
+			return fmt.Errorf("read ci types: %w", err)
+		}
+		switch {
+		case active == nil:
+			return ciTypeViolation(ciTypeNotFound)
+		case !*active:
+			return ciTypeViolation(ciTypeDeactivated)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read ci types: %w", err)
+	}
+	return nil
+}
+
+// parentOfAnotherClient is the violation of a parent outside the CI's client.
+const parentOfAnotherClient = "the parent CI belongs to another client"
+
+// checkParents keeps containment within a client (TEN-05, AST-05; F-086).
+// The composite foreign key of parent_ci_id checks only the organization and
+// bypasses row level security, so the parents of the items are read here, in
+// the writing transaction under the principal's row level security, with one
+// statement: a parent the principal cannot see, or a deleted one, is "parent
+// CI not found"; a parent of another client than the CI is refused; a parent
+// of the CI's client or an org-wide parent (E-09, E-62) is accepted. Items
+// without a parent cost no statement.
+func checkParents(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
+	var parents, clients []*string
+	for _, item := range items {
+		if strings.TrimSpace(item.ParentCIID) == "" {
+			continue
+		}
+		parent := item.ParentCIID
+		var client *string
+		if strings.TrimSpace(item.ClientID) != "" {
+			client = &item.ClientID
+		}
+		parents, clients = append(parents, &parent), append(clients, client)
+	}
+	if len(parents) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT c.id IS NOT NULL, COALESCE(c.client_id IS NULL OR c.client_id = l.client_id::uuid, false)
+		FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS l(parent_ci_id, client_id, ord)
+		LEFT JOIN ci c ON c.id = l.parent_ci_id::uuid AND c.organization_id = $1 AND c.deleted_at IS NULL
+		ORDER BY l.ord`, orgID, parents, clients)
+	if err != nil {
+		return fmt.Errorf("read parent cis: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var visible, sameClient bool
+		if err := rows.Scan(&visible, &sameClient); err != nil {
+			return fmt.Errorf("read parent cis: %w", err)
+		}
+		switch {
+		case !visible:
+			return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: "parent CI not found"}}}
+		case !sameClient:
+			return &ValidationError{Violations: []Violation{{Field: "parent_ci_id", Detail: parentOfAnotherClient}}}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read parent cis: %w", err)
+	}
+	return nil
+}
+
+// checkContainmentScope applies checkParents to an update: to a new parent
+// and to the parent of a CI that moves to another client. A CI that moves to
+// a client must not contain CIs of another client or org-wide CIs, read the
+// same way; a CI that becomes org-wide may contain CIs of any client.
+func checkContainmentScope(ctx context.Context, tx pgx.Tx, orgID string, before *Item, req *UpdateRequest) error {
+	after := &Item{ClientID: before.ClientID, ParentCIID: before.ParentCIID}
+	if req.ClientID != nil {
+		after.ClientID = strings.TrimSpace(*req.ClientID)
+	}
+	if req.ParentCIID != nil {
+		after.ParentCIID = strings.TrimSpace(*req.ParentCIID)
+	}
+	moved := after.ClientID != before.ClientID
+	if after.ParentCIID != before.ParentCIID || moved {
+		if err := checkParents(ctx, tx, orgID, []*Item{after}); err != nil {
+			return err
+		}
+	}
+	if !moved || after.ClientID == "" {
+		return nil
+	}
+	var foreign bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE organization_id = $1 AND parent_ci_id = $2
+		AND deleted_at IS NULL AND client_id IS DISTINCT FROM $3::uuid)`, orgID, before.ID, after.ClientID).Scan(&foreign); err != nil {
+		return fmt.Errorf("read contained cis: %w", err)
+	}
+	if foreign {
+		return &ValidationError{Violations: []Violation{{Field: "client_id",
+			Detail: "the CI contains CIs of another client or org-wide CIs (their parent_ci_id)"}}}
+	}
+	return nil
+}
+
+// adoptCILocation keeps the location of a CI that is linked to an asset
+// without location (DB-05, E-81 option 1; F-239): the mirror trigger
+// ci_mirror_asset_location would set the CI's location to the asset's NULL
+// and so drop location, site and room and with them the scope of the CI.
+// The asset takes the location the CI has after the update instead, in the
+// writing transaction under the principal's row level security, with an
+// audit entry on the asset; the trigger then mirrors it back. An asset with
+// a location keeps it and the CI takes it as before. An asset without
+// location the principal may read but not update is refused with 422 on
+// asset_id rather than losing the location silently.
+func (r *PGRepository) adoptCILocation(ctx context.Context, tx pgx.Tx, orgID string, before *Item, req *UpdateRequest) error {
+	if req.AssetID == nil {
+		return nil
+	}
+	assetID := strings.TrimSpace(*req.AssetID)
+	if assetID == "" || assetID == before.AssetID || !api.IsUUID(assetID) {
+		// Unlinking, no new link, or an ID the update itself refuses.
+		return nil
+	}
+	location := before.LocationID
+	if req.LocationID != nil {
+		location = strings.TrimSpace(*req.LocationID)
+	}
+	if location == "" {
+		return nil
+	}
+	tag, err := tx.Exec(ctx, `UPDATE asset SET location_id = $3
+		WHERE id = $1 AND organization_id = $2 AND location_id IS NULL`, assetID, orgID, location)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case "42501":
+				return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: assetCannotTakeLocation}}}
+			case "23503":
+				return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: "location not found"}}}
+			}
+		}
+		return fmt.Errorf("asset takes the location of the CI: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// The asset has a location (mirrored as before), is not visible
+		// (the update refuses the link), or may not be updated here.
+		var unlocated bool
+		err = tx.QueryRow(ctx, `SELECT location_id IS NULL FROM asset WHERE id = $1 AND organization_id = $2`,
+			assetID, orgID).Scan(&unlocated)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return nil
+		case err != nil:
+			return fmt.Errorf("read asset location: %w", err)
+		case unlocated:
+			return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: assetCannotTakeLocation}}}
+		}
+		return nil
+	}
+	return r.recordAssetLocationAudit(ctx, tx, orgID, assetID, before.ID, location)
+}
+
+// assetCannotTakeLocation refuses a link that would drop the CI's location.
+const assetCannotTakeLocation = "the asset has no location and cannot take the location of the CI"
+
+// recordAssetLocationAudit audits the location an asset took from the CI
+// linked to it (adoptCILocation).
+func (r *PGRepository) recordAssetLocationAudit(ctx context.Context, tx pgx.Tx, orgID, assetID, ciID, location string) error {
+	if r.recorder == nil {
+		return nil
+	}
+	t := tenant.FromContext(ctx)
+	actorType := "system"
+	if strings.TrimSpace(t.UserID) != "" {
+		actorType = "user"
+	}
+	entry := audit.Entry{
+		OrganizationID: orgID,
+		ActorID:        strings.TrimSpace(t.UserID),
+		ActorType:      actorType,
+		Action:         "asset.updated",
+		ResourceType:   "asset",
+		ResourceID:     assetID,
+		Changes: map[string]interface{}{
+			"before": map[string]any{"location_id": nil},
+			"after":  map[string]any{"location_id": location},
+			"fields": []ciFieldChange{{Field: "location_id", Old: nil, New: location}},
+			"reason": "location taken from the CI linked to the asset",
+			"ci_id":  ciID,
+		},
+	}
+	return lastInTx(ctx, func() error {
+		if _, err := r.recorder.Record(ctx, tx, entry); err != nil {
+			return fmt.Errorf("record audit: %w", err)
+		}
+		return nil
+	})
 }
 
 // instanceFieldNames lists the names of the instance attributes of a CI.
@@ -941,7 +1453,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		before, err := scanCI(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci for delete: %w", err)
 		}
@@ -963,14 +1475,14 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("delete ci: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		released := map[string]any{"status": StatusDecommissioned}
 		if before.AssetID != "" {
 			released["unlinked_asset_id"] = before.AssetID
 			released["asset_primary"] = assetPrimary
 		}
-		if err := r.recordCIChange(ctx, tx, orgID, id, before.Version, "delete", "", before, released); err != nil {
+		if err := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindDeleted), orgID, id, before.Version, "delete", "", before, released); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.deleted", before, map[string]interface{}{"before": before}); err != nil {
@@ -988,13 +1500,15 @@ func (r *PGRepository) Restore(ctx context.Context, orgID, id string) (*Item, er
 }
 
 // RestoreDeleted implements Restorer: POST /cis/{id}/restore within the
-// retention (CI-05); an older deletion is ErrRetentionExpired.
+// retention (CI-05); an older deletion is ErrRetentionExpired, a CI that is
+// not deleted ErrNotDeleted.
 func (r *PGRepository) RestoreDeleted(ctx context.Context, orgID, id string, retention time.Duration) (*Item, error) {
 	return r.restore(ctx, orgID, id, retention, "update", "api")
 }
 
 // restore clears deleted_at of a deleted CI (retention 0: no limit) and
-// records the change, the audit entry and the ci.restored event.
+// records the change, the audit entry and the ci.restored event. A CI that
+// is not deleted is ErrNotDeleted, a merged one ErrMergeConflict.
 func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention time.Duration, changeType, reason string) (*Item, error) {
 	var restored *Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -1003,12 +1517,12 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		if err := tx.QueryRow(ctx, "SELECT deleted_at, COALESCE(merged_into_id::text, '') FROM ci WHERE id = $1 AND organization_id = $2",
 			id, orgID).Scan(&deletedAt, &mergedInto); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ci for restore: %w", err)
 		}
 		if deletedAt == nil {
-			return fmt.Errorf("not found")
+			return ErrNotDeleted
 		}
 		// A merged CI comes back only through the unmerge (CI-12).
 		if mergedInto != "" {
@@ -1039,7 +1553,7 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 			return locationError(fmt.Errorf("restore ci: %w", err))
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return ErrNotFound
 		}
 		if primary && assetID != "" {
 			if _, err = tx.Exec(ctx, "UPDATE asset SET ci_id = $1 WHERE id = $2 AND ci_id IS NULL", id, assetID); err != nil {
@@ -1050,7 +1564,10 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {
 			return fmt.Errorf("get restored ci: %w", err)
 		}
-		if changeErr := r.recordCIChange(ctx, tx, orgID, id, restored.Version, changeType, "deleted_at", "deleted", nil); changeErr != nil {
+		if uerr := r.checkUniqueBack(ctx, tx, restored); uerr != nil {
+			return uerr
+		}
+		if changeErr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindRestored), orgID, id, restored.Version, changeType, "deleted_at", "deleted", nil); changeErr != nil {
 			return changeErr
 		}
 		if err := r.recordAudit(ctx, tx, "ci.restored", restored, map[string]interface{}{"reason": reason}); err != nil {
@@ -1202,6 +1719,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		return nil, err
 	}
 
+	item.Overridden = overridden(item.Attributes)
 	item.Attributes = presentAttributes(item.Attributes)
 	if firstSeen.Valid {
 		t := firstSeen.Time.UTC()
@@ -1257,7 +1775,84 @@ func (r *PGRepository) recordAudit(ctx context.Context, tx pgx.Tx, action string
 	})
 }
 
-func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
+// Kinds of a CI change (AUD-03, CI-11); ci_change.change_kind holds for the
+// change set (000167).
+const (
+	ChangeKindCreated             = "created"
+	ChangeKindUpdated             = "updated"
+	ChangeKindDeleted             = "deleted"
+	ChangeKindRestored            = "restored"
+	ChangeKindMerged              = "merged"
+	ChangeKindTypeChanged         = "type_changed"
+	ChangeKindRelationshipAdded   = "relationship_added"
+	ChangeKindRelationshipRemoved = "relationship_removed"
+	ChangeKindStatusChanged       = "status_changed"
+)
+
+// changeSet is one write of a CI (AUD-03, E-82 option 2): its field rows in
+// ci_change share the id and the kind. record names the ingest record the
+// write comes from (UpdateRecord).
+type changeSet struct {
+	id, kind string
+	record   *RecordOrigin
+}
+
+// newChangeSet returns a change set of kind with a new id.
+func newChangeSet(kind string) changeSet {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return changeSet{id: fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), kind: kind}
+}
+
+// origin is who made a CI change and the request it came with (AUD-03,
+// AUD-07); nil values are stored as NULL.
+type origin struct {
+	actorID, actorUserID, source, requestID, correlationID any
+	collectorID, observedAt                                any
+}
+
+// changeOrigin returns the origin of a change made with ctx: the subject as
+// actor_id, the user (not an API key) as actor_user_id, and the source,
+// request and correlation id the audit middleware attached to the request.
+// Without a request the source is system, as in the audit log.
+func changeOrigin(ctx context.Context) origin {
+	userID := tenant.FromContext(ctx).UserID
+	o := origin{actorID: nilIfEmpty(userID), source: audit.SourceSystem}
+	if p, ok := identity.PrincipalFromContext(ctx); (!ok || p.Type != identity.PrincipalTypeAPIKey) && audit.IsUUID(userID) {
+		o.actorUserID = userID
+	}
+	if info, ok := audit.RequestInfoFrom(ctx); ok {
+		if info.Source != "" {
+			o.source = info.Source
+		}
+		o.requestID, o.correlationID = nilIfEmpty(info.RequestID), nilIfEmpty(info.CorrelationID)
+	}
+	return o
+}
+
+// withRecord adds the ingest record a change comes from (AUD-03): its source
+// is the collector, with the collector's id (a UUID, else none) and the time
+// of the observation; the record id is the correlation id.
+func (o *origin) withRecord(rec *RecordOrigin) {
+	if rec == nil {
+		return
+	}
+	o.source = audit.SourceCollector
+	if audit.IsUUID(rec.CollectorID) {
+		o.collectorID = rec.CollectorID
+	}
+	if !rec.ObservedAt.IsZero() {
+		o.observedAt = rec.ObservedAt.UTC()
+	}
+	if strings.TrimSpace(rec.RecordID) != "" {
+		o.correlationID = rec.RecordID
+	}
+}
+
+// recordCIChange writes one field row of the change set set.
+func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, set changeSet, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
 	// Personal values are stored as vault surrogates (SEC-05).
 	oldValue, err := sealChangeValue(ctx, tx, orgID, fieldName, oldValue)
 	if err != nil {
@@ -1274,7 +1869,8 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciI
 	if err != nil {
 		return fmt.Errorf("marshal new ci change value: %w", err)
 	}
-	actorID := nilIfEmpty(tenant.FromContext(ctx).UserID)
+	who := changeOrigin(ctx)
+	who.withRecord(set.record)
 	_, err = tx.Exec(ctx, `
 		INSERT INTO ci_change (
 			organization_id,
@@ -1284,9 +1880,18 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, orgID, ciI
 			field_name,
 			old_value,
 			new_value,
-			ci_version
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)
-	`, orgID, ciID, actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON, version)
+			ci_version,
+			change_kind,
+			change_set_id,
+			actor_user_id,
+			source,
+			request_id,
+			correlation_id,
+			collector_id,
+			observed_at
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+	`, orgID, ciID, who.actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON, version,
+		set.kind, set.id, who.actorUserID, who.source, who.requestID, who.correlationID, who.collectorID, who.observedAt)
 	if err != nil {
 		return fmt.Errorf("record ci change: %w", err)
 	}
@@ -1397,6 +2002,10 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "health", Detail: "the health is computed from monitoring"}}}
 	case "ci_asset_id_fkey":
 		return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: "asset not found"}}}
+	case "ci_ci_type_id_fkey", "ci_type_organization":
+		// An unknown type and a type of another organization (trigger of
+		// migration 000153) are the same answer (TEN-09).
+		return ciTypeViolation(ciTypeNotFound)
 	case "ci_location_from_asset":
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
 	}
@@ -1466,7 +2075,12 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 			// The location of a linked CI is the asset's (DB-05).
 			continue
 		}
-		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, change.New, req.Manual.Author, reason, true); err != nil {
+		value := change.New
+		if req.isNull(change.Field) {
+			// A field the patch set to null is overridden with null (CH9).
+			value = nil
+		}
+		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, value, req.Manual.Author, reason, true); err != nil {
 			return err
 		}
 	}
@@ -1671,7 +2285,9 @@ func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error)
 	if !errors.As(err, &ue) || ue.index == "" {
 		return err
 	}
-	hexID := strings.TrimSuffix(strings.TrimPrefix(ue.index, "idx_attr_"), "_u")
+	// The index of a rebuild carries the suffix until it takes the name of
+	// the old one (citype.DDLJob.Ensure).
+	hexID := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(ue.index, citype.IndexPrefix), citype.RebuildSuffix), "_u")
 	if len(hexID) != 32 {
 		return err
 	}
@@ -1689,6 +2305,16 @@ func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error)
 // CI type and the global ones whose value another active CI of the
 // organization (scope org) or of the same client (scope client) holds.
 // Soft-deleted CIs do not count (MET-15).
+//
+// The check covers the CIs the caller does not see (F-421): for a caller
+// restricted in the client or site scope it runs in an own transaction,
+// which only reads, with the organization-wide scope of the caller's
+// organization (database.OrgWideScope, app.org_id stays), so the value of
+// a CI of another client or site is found also while the unique index
+// does not exist yet (DB-04). It returns only the keys of the attributes,
+// never the other CI. When ctx carries the caller's transaction, the
+// check also runs in it, so a CI written earlier in that transaction
+// counts as well.
 func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) ([]string, error) {
 	if len(attrs) == 0 {
 		return nil, nil
@@ -1698,7 +2324,7 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 		return nil, fmt.Errorf("encode attributes: %w", err)
 	}
 	var keys []string
-	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	check := func(ctx context.Context, tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx, `
 			SELECT d.key FROM attribute_definition d
 			WHERE d.is_unique AND (d.ci_type_id = $2::uuid OR d.ci_type_id IS NULL)
@@ -1715,73 +2341,265 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 		if qerr != nil {
 			return fmt.Errorf("check unique attributes: %w", qerr)
 		}
-		keys, qerr = pgx.CollectRows(rows, pgx.RowTo[string])
+		found, qerr := pgx.CollectRows(rows, pgx.RowTo[string])
+		for _, key := range found {
+			if !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
 		return qerr
-	})
-	return keys, err
+	}
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok || (scope.Clients.IsAll() && scope.Sites.IsAll()) {
+		err = database.WithRequestTenant(ctx, r.pool, orgID, check)
+		return keys, err
+	}
+	if !strings.EqualFold(scope.OrgID, orgID) {
+		return nil, fmt.Errorf("%w: %q", database.ErrTenantMismatch, orgID)
+	}
+	if database.InTx(ctx) {
+		if terr := database.WithRequestTenant(ctx, r.pool, orgID, check); terr != nil {
+			return nil, terr
+		}
+	}
+	wide := database.OrgWideScope(scope.OrgID, scope.UserID)
+	if werr := database.WithTenant(database.WithoutTx(ctx), r.pool, &wide, check); werr != nil {
+		return nil, werr
+	}
+	slices.Sort(keys)
+	return keys, nil
+}
+
+// checkUniqueBack refuses a CI that comes back with its values (restore,
+// unmerge) while another active CI holds a value of one of its unique
+// attributes (MET-15, F-429): the check of ci.Service (CheckUnique), run in
+// the writing transaction tx, so it holds also while the unique index does
+// not exist yet. The caller's transaction rolls back; the CI stays deleted
+// or merged.
+func (r *PGRepository) checkUniqueBack(ctx context.Context, tx pgx.Tx, item *Item) error {
+	return CheckUnique(database.ContextWithTx(ctx, tx), r, item.OrganizationID, item.CITypeID, item.ClientID, item.ID, item.Attributes)
 }
 
 // ChangeType implements TypeChanger (CI-11): the CI keeps its row, so its
 // relationships, mounts, asset link and history stay; required attributes
 // of the target type the CI lacks are reported as findings.
 func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode string) (*TypeChangeResult, error) {
-	result := &TypeChangeResult{Findings: []TypeFinding{}}
+	if !api.IsUUID(typeID) {
+		return nil, ErrUnknownType
+	}
+	var result *TypeChangeResult
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
-		before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
+		tc, err := r.changeTypeRow(ctx, tx, orgID, ciID, typeID, mode)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
-			}
-			return fmt.Errorf("get ci for type change: %w", err)
+			return err
 		}
-		var toKey string
-		var required []string
-		err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}') FROM ci_type
-			WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&toKey, &required)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrUnknownType
-			}
-			return fmt.Errorf("get target type: %w", err)
-		}
-		var fromKey string
-		if err = tx.QueryRow(ctx, "SELECT COALESCE(key, name) FROM ci_type WHERE id = $1", before.CITypeID).Scan(&fromKey); err != nil &&
-			!errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("get current type: %w", err)
-		}
-		if mode == TypeChangeDiscovery && !DiscoveryMayReclassify(fromKey, toKey) {
-			return ErrReclassificationRefused
-		}
-		result.Findings = MissingRequired(required, before.Attributes)
-		if before.CITypeID == typeID {
-			result.CI = before
+		result = &tc.result
+		if !tc.result.Changed {
 			return nil
 		}
-		if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
-			WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
-			return fmt.Errorf("change ci type: %w", err)
-		}
-		after, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns), ciID, orgID))
-		if err != nil {
-			return fmt.Errorf("get changed ci: %w", err)
-		}
-		result.CI, result.Changed = after, true
-		change := map[string]any{"ci_type_id": typeID, "type": toKey, "mode": mode, "findings": result.Findings}
-		if changeErr := r.recordCIChange(ctx, tx, orgID, ciID, after.Version, "type_change", "ci_type_id",
-			map[string]any{"ci_type_id": before.CITypeID, "type": fromKey}, change); changeErr != nil {
+		if changeErr := r.recordTypeChange(ctx, tx, newChangeSet(ChangeKindTypeChanged), orgID, tc); changeErr != nil {
 			return changeErr
 		}
-		if auditErr := r.recordAudit(ctx, tx, "ci.type_changed", after, map[string]interface{}{
-			"from": fromKey, "to": toKey, "mode": mode, "findings": result.Findings,
-		}); auditErr != nil {
+		if auditErr := r.recordTypeChangeAudit(ctx, tx, tc); auditErr != nil {
 			return auditErr
 		}
 		// EVT-02 has no own type event: ci.changed names ci_type_id.
-		return r.recordEvent(ctx, tx, events.CIChanged, after, []string{"ci_type_id"})
+		return r.recordEvent(ctx, tx, events.CIChanged, tc.result.CI, []string{"ci_type_id"})
 	})
 	if err != nil {
-		return nil, err
+		// A concurrent write the check could not see: the index names the
+		// attribute.
+		return nil, r.uniqueField(ctx, orgID, err)
 	}
 	return result, nil
+}
+
+// typeChange is the change of the type of a CI row: the result, the type
+// before and the keys of both types.
+type typeChange struct {
+	result         TypeChangeResult
+	fromTypeID     string
+	fromKey, toKey string
+	mode           string
+}
+
+// changeTypeRow changes the type of CI ciID to typeID in tx (CI-11); it
+// writes no history, audit entry or event.
+func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID, typeID, mode string) (*typeChange, error) {
+	tc := &typeChange{result: TypeChangeResult{Findings: []TypeFinding{}}, mode: mode}
+	query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
+	before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get ci for type change: %w", err)
+	}
+	// The target is read under the principal's row level security: a
+	// private type of another organization is unknown (TEN-09).
+	var required []string
+	var active bool
+	err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}'), is_active FROM ci_type
+		WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&tc.toKey, &required, &active)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUnknownType
+		}
+		return nil, fmt.Errorf("get target type: %w", err)
+	}
+	if err = tx.QueryRow(ctx, "SELECT COALESCE(key, name) FROM ci_type WHERE id = $1", before.CITypeID).Scan(&tc.fromKey); err != nil &&
+		!errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("get current type: %w", err)
+	}
+	if mode == TypeChangeDiscovery && !DiscoveryMayReclassify(tc.fromKey, tc.toKey) {
+		return nil, ErrReclassificationRefused
+	}
+	tc.fromTypeID = before.CITypeID
+	tc.result.Findings = MissingRequired(required, before.Attributes)
+	if before.CITypeID == typeID {
+		tc.result.CI = before
+		return tc, nil
+	}
+	// A person cannot choose a deactivated type (CI-01); discovery
+	// raises generic_device to the type it resolved, as it creates CIs.
+	if mode == TypeChangeManual && !active {
+		return nil, ciTypeViolation(ciTypeDeactivated)
+	}
+	// The values the CI carries fall under the unique attributes of the
+	// target type (MET-15, F-431): the check of ci.Service (CheckUnique) in
+	// the writing transaction, before the row changes, so it holds also
+	// while the unique index does not exist yet. A value another active CI
+	// holds is a *UniqueError; the CI keeps its type.
+	if uerr := CheckUnique(database.ContextWithTx(ctx, tx), r, orgID, typeID, before.ClientID, ciID, before.Attributes); uerr != nil {
+		return nil, uerr
+	}
+	if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
+		WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
+		return nil, locationError(fmt.Errorf("change ci type: %w", err))
+	}
+	after, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns), ciID, orgID))
+	if err != nil {
+		return nil, fmt.Errorf("get changed ci: %w", err)
+	}
+	tc.result.CI, tc.result.Changed = after, true
+	return tc, nil
+}
+
+// recordTypeChange writes the ci_type_id row of a type change into set.
+func (r *PGRepository) recordTypeChange(ctx context.Context, tx pgx.Tx, set changeSet, orgID string, tc *typeChange) error {
+	after := tc.result.CI
+	change := map[string]any{"ci_type_id": after.CITypeID, "type": tc.toKey, "mode": tc.mode, "findings": tc.result.Findings}
+	return r.recordCIChange(ctx, tx, set, orgID, after.ID, after.Version, "type_changed", "ci_type_id",
+		map[string]any{"ci_type_id": tc.fromTypeID, "type": tc.fromKey}, change)
+}
+
+// recordTypeChangeAudit writes the audit entry ci.type_changed.
+func (r *PGRepository) recordTypeChangeAudit(ctx context.Context, tx pgx.Tx, tc *typeChange) error {
+	return r.recordAudit(ctx, tx, "ci.type_changed", tc.result.CI, map[string]interface{}{
+		"from": tc.fromKey, "to": tc.toKey, "mode": tc.mode, "findings": tc.result.Findings,
+	})
+}
+
+// UpdateRecord implements RecordUpdater (AUD-03, CI-11): the field update
+// and the reclassification of one ingest record run in one transaction (the
+// context's, else its own) and are recorded as one change set with the
+// record's origin, one event ci.changed (and ci.online for a CI it brings
+// back from unknown to active) and the audit entries of the update and of
+// the type change. A reclassification discovery may not make
+// (ErrReclassificationRefused, ErrUnknownType) or a value of a unique attribute
+// of the target type refuses (keepsType, F-432) leaves the type as it is.
+func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
+	result := &RecordUpdateResult{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		w, err := r.updateRow(ctx, tx, orgID, id, &rec.Update)
+		if err != nil {
+			return err
+		}
+		item := w.after
+		var tc *typeChange
+		if rec.TypeID != "" && rec.TypeID != item.CITypeID && api.IsUUID(rec.TypeID) {
+			tc, err = r.changeTypeRow(ctx, tx, orgID, id, rec.TypeID, TypeChangeDiscovery)
+			switch {
+			case keepsType(ctx, err, id, rec.TypeID):
+				// The unique check only reads: the transaction goes on.
+				tc = nil
+			case err != nil:
+				return err
+			case !tc.result.Changed:
+				tc = nil
+			default:
+				item = tc.result.CI
+				if factsErr := loadAssetFacts(ctx, tx, []*Item{item}); factsErr != nil {
+					return factsErr
+				}
+				result.TypeChanged = true
+			}
+		}
+		result.CI = item
+		if len(w.changes) == 0 && tc == nil {
+			return nil
+		}
+		result.Changed = true
+		kind := w.kind()
+		if tc != nil {
+			kind = ChangeKindTypeChanged
+		}
+		set := newChangeSet(kind)
+		set.record = &rec.Origin
+		if changeErr := r.recordFieldChanges(ctx, tx, set, orgID, id, item.Version, w.changes); changeErr != nil {
+			return changeErr
+		}
+		changed := changedFieldNames(w.changes)
+		if tc != nil {
+			if typeErr := r.recordTypeChange(ctx, tx, set, orgID, tc); typeErr != nil {
+				return typeErr
+			}
+			changed = append(changed, "ci_type_id")
+		}
+		if len(w.changes) > 0 {
+			if auditErr := r.recordUpdateAudit(ctx, tx, w); auditErr != nil {
+				return auditErr
+			}
+		}
+		if tc != nil {
+			if auditErr := r.recordTypeChangeAudit(ctx, tx, tc); auditErr != nil {
+				return auditErr
+			}
+		}
+		// One event per record (EVT-02): ci.changed names every changed
+		// field, ci_type_id included.
+		if eventErr := r.recordEvent(ctx, tx, events.CIChanged, item, changed); eventErr != nil {
+			return eventErr
+		}
+		// A record that brings an unknown CI back to active raises ci.online
+		// after it (REC-09, LCY-05, F-268); the status before is the one of
+		// the locked row, so a CI that was active already raises none.
+		if w.before.Status == StatusUnknown && item.Status == StatusActive {
+			return r.recordOnline(ctx, tx, item)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, r.uniqueField(ctx, orgID, err)
+	}
+	return result, nil
+}
+
+// recordOnline writes the event ci.online of a CI the ingest brought back
+// from unknown to active, like recordEvent; its data are those of the
+// offline detector's ci.online (lifecycle.OfflineDetector) without the
+// scope interval, which only the detector knows.
+func (r *PGRepository) recordOnline(ctx context.Context, tx pgx.Tx, item *Item) error {
+	if r.outbox == nil {
+		return nil
+	}
+	data := map[string]any{"id": item.ID, "name": item.Name, "client_id": item.ClientID, "site_id": item.SiteID, "status": item.Status}
+	if item.LastSeenAt != nil {
+		data["last_seen_at"] = item.LastSeenAt.UTC().Format(time.RFC3339)
+	}
+	orgID, id := item.OrganizationID, item.ID
+	return lastInTx(ctx, func() error {
+		_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.CIOnline, EntityID: id, Data: data})
+		return err
+	})
 }

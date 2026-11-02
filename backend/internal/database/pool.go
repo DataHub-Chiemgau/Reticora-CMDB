@@ -38,12 +38,61 @@ const PoolMaxConns = 25
 // NewPool creates a pgx connection pool suitable for production use.
 //
 // Every connection switches into the restricted application role before it is
-// handed out, so RLS policies apply even when the configured login role is a
-// superuser or the schema owner. If isolation cannot be guaranteed, pool
-// creation fails instead of silently serving cross-tenant data. Every
-// connection uses the UTF-8 client encoding the quoting of the tenant
-// transaction relies on (pinClientEncoding); another one is refused.
+// handed out, so RLS policies apply to every request. If isolation cannot be
+// guaranteed, pool creation fails instead of silently serving cross-tenant
+// data. Every connection uses the UTF-8 client encoding the quoting of the
+// tenant transaction relies on (pinClientEncoding); another one is refused.
+// No connection compiles queries with JIT (disableJIT).
+//
+// On top of that the runtime login is checked: a login (session_user) that is
+// SUPERUSER or BYPASSRLS or reaches such a role is refused, because RESET ROLE
+// would undo the switch (VerifyRLSEnforced, F-057), and the effective rights
+// must match the role contract (VerifyRoleContract). cmd/server is the caller.
 func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	pool, err := newAppRolePool(ctx, databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := VerifyRLSEnforced(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	// The effective rights, including inherited ones, must match the role
+	// contract (TEN-03, CH19); any deviation refuses the start.
+	if err := VerifyRoleContract(ctx, pool, DefaultOwnerRole); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	return pool, nil
+}
+
+// NewAdminPool creates a pool with the same configuration as NewPool (size,
+// client encoding, no JIT, SET ROLE into the application role, refusal when
+// that role bypasses row level security) but without the check of the runtime
+// login (VerifyRLSEnforced, VerifyRoleContract). It is only for command-line
+// tools that log in with the migration/admin login (cmd/seed,
+// cmd/audit-verify, cmd/audit-seed, TEN-03, WP-351); their tenant work still
+// runs under RLS as the application role. The server never uses it: every
+// caller is listed with a reason in adminPoolCallers (tenantguard_allowlist.go)
+// and checked by TestAdminPoolCallersAreListed.
+func NewAdminPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	pool, err := newAppRolePool(ctx, databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := verifyCurrentRoleEnforcesRLS(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return pool, nil
+}
+
+// newAppRolePool is the shared part of NewPool and NewAdminPool: a pool whose
+// connections switch into the application role; the callers check the
+// effective rights.
+func newAppRolePool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if strings.TrimSpace(databaseURL) == "" {
 		return nil, fmt.Errorf("database URL is required")
 	}
@@ -56,6 +105,7 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	config.MaxConns = PoolMaxConns
 	config.MinConns = 5
 	pinClientEncoding(config)
+	disableJIT(config)
 
 	role := appRole()
 	if role != "" {
@@ -85,19 +135,6 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		pool.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
-
-	if err := VerifyRLSEnforced(ctx, pool); err != nil {
-		pool.Close()
-		return nil, err
-	}
-
-	// The effective rights, including inherited ones, must match the role
-	// contract (TEN-03, CH19); any deviation refuses the start.
-	if err := VerifyRoleContract(ctx, pool, DefaultOwnerRole); err != nil {
-		pool.Close()
-		return nil, err
-	}
-
 	return pool, nil
 }
 
@@ -131,8 +168,22 @@ func NewMaintenancePool(ctx context.Context, databaseURL string) (*pgxpool.Pool,
 // VerifyRLSEnforced fails when the effective database role can bypass Row Level
 // Security. Tenant isolation in Reticora is enforced by RLS policies keyed on
 // app.org_id; a superuser or BYPASSRLS role turns every policy into a no-op and
-// exposes all tenants to each other.
+// exposes all tenants to each other. The login (session_user) is checked as
+// well: a login that is SUPERUSER or BYPASSRLS, or reaches such a role
+// inherited or by SET ROLE, gets it back with RESET ROLE on any pooled
+// connection (F-057), so it fails with a *RoleContractError naming the
+// session user. It is part of the runtime login check of NewPool;
+// NewAdminPool only runs verifyCurrentRoleEnforcesRLS.
 func VerifyRLSEnforced(ctx context.Context, pool *pgxpool.Pool) error {
+	if err := verifyCurrentRoleEnforcesRLS(ctx, pool); err != nil {
+		return err
+	}
+	return verifyLoginCannotEscalate(ctx, pool)
+}
+
+// verifyCurrentRoleEnforcesRLS fails when current_user, the role the
+// connections switched into, is a superuser or has BYPASSRLS.
+func verifyCurrentRoleEnforcesRLS(ctx context.Context, pool *pgxpool.Pool) error {
 	var current string
 	var super, bypass bool
 	err := pool.QueryRow(ctx, `
@@ -187,6 +238,23 @@ func pinClientEncoding(config *pgxpool.Config) {
 		config.ConnConfig.RuntimeParams = map[string]string{}
 	}
 	config.ConnConfig.RuntimeParams["client_encoding"] = clientEncoding
+}
+
+// disableJIT turns off the JIT compilation of PostgreSQL for the connections
+// of config (WP-610). The row level security policies and the visibility
+// subqueries lift the estimated cost of short requests above jit_above_cost,
+// so PostgreSQL compiled them first: of the 75 ms the global search took, 69
+// were JIT (U5 of the WP-439 load runs). The application runs no queries long
+// enough to repay the compilation. Like the client encoding, the setting is
+// a startup parameter and overrides the database URL and the defaults of the
+// login role and the database; a default of the application role (ALTER ROLE
+// reticora_app SET jit) would not apply, as the connections enter that role
+// with SET ROLE.
+func disableJIT(config *pgxpool.Config) {
+	if config.ConnConfig.RuntimeParams == nil {
+		config.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	config.ConnConfig.RuntimeParams["jit"] = "off"
 }
 
 // checkClientEncoding refuses a connection whose client encoding, as the
@@ -284,12 +352,44 @@ const SystemGUC = "app.system"
 // policies valid, so
 // only the SELECT-only system exceptions (organization, webhook_delivery,
 // webhook_dead_letter, export_job, alert_rule, collector_enrollment_code,
-// api_key)
+// api_key) and the system tables (platform_secret, WithSystemWrite)
 // return rows. Workers use it to find due work and then change rows per
-// organization in WithTenant (E-08). Every caller is listed in the
-// allow-list of the architecture test (WP-041).
+// organization in WithTenant (E-08). Every file outside this package that
+// calls it is listed with its reason in withSystemCallers
+// (tenantguard_allowlist.go); TestWithSystemCallersAreListed fails for an
+// unlisted file, a stale entry and an empty reason (WP-561). Test files
+// may call it.
 func WithSystem(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return fmt.Errorf("begin system transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT
+		set_config('`+SystemGUC+`', 'on', true),
+		set_config('`+OrgGUC+`', $1, true),
+		set_config('`+UserGUC+`', '', true),
+		set_config('`+ClientScopeGUC+`', $1, true),
+		set_config('`+SiteScopeGUC+`', $1, true),
+		set_config('`+TeamScopeGUC+`', $1, true)`, noAccessScope); err != nil {
+		return fmt.Errorf("set system context: %w", err)
+	}
+	if err := fn(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// WithSystemWrite runs fn like WithSystem (system flag, no tenant), but in a
+// read-write transaction. It is for the system tables without organization
+// (platform_secret, migration 000163; rls.SystemTables), whose every policy
+// requires the system flag: on any other table the transaction changes
+// nothing, as the tenant policies never let the system flag write
+// (rls.RuleSystemWrite) and the operator tables require OperatorGUC. Its
+// callers are listed in systemWriteCallers (tenantguard_allowlist.go).
+func WithSystemWrite(ctx context.Context, pool *pgxpool.Pool, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin system transaction: %w", err)
 	}
@@ -370,6 +470,26 @@ func WithOrganizationSetup(ctx context.Context, pool *pgxpool.Pool, orgID string
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// WithOperatorTenant runs fn in a new transaction of the context's tenant
+// scope (WithRequestTenant, orgID its organization) in which the operator
+// flag is set as well: an operator's change to the organization and its
+// operator_audit entry commit or roll back together (SEC-07, WP-564). The
+// repositories fn calls with its context join the transaction
+// (ContextWithTx). Like WithOrganizationSetup it reaches the operator tables
+// and this one organization, no other. A transaction in ctx is never
+// joined: the flag is set only in a transaction opened here.
+func WithOperatorTenant(ctx context.Context, pool *pgxpool.Pool, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if ctx.Value(txKey{}) != nil {
+		return ErrTxNotJoinable
+	}
+	return WithRequestTenant(ctx, pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('`+OperatorGUC+`', 'on', true)`); err != nil {
+			return fmt.Errorf("set operator context: %w", err)
+		}
+		return fn(ContextWithTx(ctx, tx), tx)
+	})
 }
 
 // OrganizationIDs lists the ids of all organizations for workers that iterate

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -66,8 +67,8 @@ const (
 	commentVisible = "EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ticket_comment.ticket_id AND " + ticketVisible + ")"
 )
 
-// requireVisible fails with "not found" when the written row of table does not
-// satisfy visible, i.e. when a write pointed it at an object outside the
+// requireVisible fails with ErrNotFound when the written row of table does
+// not satisfy visible, i.e. when a write pointed it at an object outside the
 // tenant scope; the transaction is then rolled back.
 func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
 	var ok bool
@@ -75,7 +76,42 @@ func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) e
 		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
 	if !ok {
-		return fmt.Errorf("not found")
+		return ErrNotFound
+	}
+	return nil
+}
+
+// requireRefs fails with a 422 field error when an object a ticket names
+// (assignee, team, related CI or asset; nil: not written) is no UUID or not
+// visible under the caller's scope. The foreign keys of ticket are checked
+// without row level security: an object of another organization or client
+// passed them, an unknown one failed with the constraint text, so the two
+// could be told apart (TEN-04, API-03, F-047). The check runs before the
+// write, in its transaction.
+func requireRefs(ctx context.Context, tx pgx.Tx, orgID string, assigneeID, teamID, ciID, assetID *string) error {
+	for _, ref := range []struct {
+		table, field, missing string
+		id                    *string
+	}{
+		{"app_user", "assignee_id", "user not found", assigneeID},
+		{"team", "team_id", "team not found", teamID},
+		{"ci", "related_ci_id", "CI not found", ciID},
+		{"asset", "related_asset_id", "asset not found", assetID},
+	} {
+		if ref.id == nil || nilIfEmpty(*ref.id) == nil {
+			continue
+		}
+		if err := api.RequireUUID(ref.field, *ref.id); err != nil {
+			return err
+		}
+		var visible bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+ref.table+" WHERE id = $1 AND organization_id = $2)",
+			*ref.id, orgID).Scan(&visible); err != nil {
+			return fmt.Errorf("check %s of ticket: %w", ref.field, err)
+		}
+		if !visible {
+			return &api.FieldError{Field: ref.field, Message: ref.missing, Status: http.StatusUnprocessableEntity}
+		}
 	}
 	return nil
 }
@@ -177,7 +213,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Ticket, 
 		item, err = scanTicket(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("ticket not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("get ticket by id: %w", err)
 		}
@@ -193,6 +229,9 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 	return database.WithRequestTenant(ctx, r.pool, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if t.Tags == nil {
 			t.Tags = []string{}
+		}
+		if err := requireRefs(ctx, tx, t.OrganizationID, &t.AssigneeID, &t.TeamID, &t.RelatedCIID, &t.RelatedAssetID); err != nil {
+			return err
 		}
 		query := `
 			INSERT INTO ticket (
@@ -244,6 +283,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	var item *Ticket
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireRefs(ctx, tx, orgID, req.AssigneeID, req.TeamID, req.RelatedCIID, req.RelatedAssetID); err != nil {
+			return err
+		}
 		setClauses := make([]string, 0, 12)
 		args := []any{id, orgID}
 		argPos := 3
@@ -297,7 +339,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			item, err = scanTicket(tx.QueryRow(ctx, query, id, orgID))
 			if err != nil {
 				if err == pgx.ErrNoRows {
-					return fmt.Errorf("ticket not found")
+					return ErrNotFound
 				}
 				return fmt.Errorf("get ticket for update: %w", err)
 			}
@@ -314,7 +356,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		item, err = scanTicket(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
-				return fmt.Errorf("ticket not found")
+				return ErrNotFound
 			}
 			return fmt.Errorf("update ticket: %w", err)
 		}
@@ -331,7 +373,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return fmt.Errorf("delete ticket: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("ticket not found")
+			return ErrNotFound
 		}
 		return nil
 	})
@@ -344,7 +386,7 @@ func (r *PGRepository) AddComment(ctx context.Context, c *Comment) error {
 			return fmt.Errorf("check ticket for comment: %w", err)
 		}
 		if !exists {
-			return fmt.Errorf("ticket not found")
+			return ErrNotFound
 		}
 
 		query := `
@@ -477,13 +519,15 @@ func nilIfEmpty(value string) any {
 	return value
 }
 
+// parseOptionalTime parses due_date; a value that is no RFC 3339 timestamp
+// is a 400 field error with a fixed text.
 func parseOptionalTime(value string) (any, error) {
 	if strings.TrimSpace(value) == "" {
 		return nil, nil
 	}
 	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
-		return nil, err
+		return nil, &api.FieldError{Field: "due_date", Message: "must be an RFC 3339 timestamp", Status: http.StatusBadRequest}
 	}
 	return parsed, nil
 }

@@ -1,9 +1,12 @@
 package discovery
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
 
 // RelationshipSource marks derived topology edges as originating from discovery.
@@ -36,6 +40,9 @@ type DerivedRelationship struct {
 	Confidence float64 `json:"confidence"`
 	// Attributes describe the edge (outlet, feed, redundancy).
 	Attributes map[string]any `json:"attributes,omitempty"`
+	// Refresh are the attributes a re-confirmation of the stored edge
+	// sets; a nil value removes one (WP-498). Nil leaves them unchanged.
+	Refresh map[string]any `json:"-"`
 }
 
 // NeighborIndex resolves discovered neighbor identifiers to existing CI ids.
@@ -123,11 +130,14 @@ func DeriveRelationships(
 // the edges to upsert and the neighbors with an unknown relationship key
 // (TOP-01): LLDP/CDP neighbors are connected_to with confidence 1.0; FDB
 // entries give connected_to with 0.6 only on ports without an LLDP/CDP
-// neighbor and with at most four MACs (more is a trunk); ARP entries only
-// enrich, they give no edge. resolve maps (ip, mac, hostname) to a CI id;
-// suppressed skips (source, target, type) edges a user removed (REL-03).
-// The result is deduplicated and
-// free of self-loops.
+// neighbor, with at most four MACs (more is a trunk) and to CIs no LLDP/CDP
+// neighbor of the device names; ARP entries only enrich, they give no edge.
+// resolve maps (ip, mac, hostname) to a CI id; suppressed skips (source,
+// target, type) edges a user removed (REL-03). The result is deduplicated,
+// keeping the highest confidence of an edge, and free of self-loops. It does
+// not depend on the order of rels: the FDB entries are derived after every
+// other neighbor (F-269: an FDB entry listed before the LLDP neighbor of the
+// same CI gave that edge 0.6, and the stored value flipped between ingests).
 func DeriveTopology(
 	sourceCIID string,
 	rels []wire.IngestRelationship,
@@ -156,10 +166,26 @@ func DeriveTopology(
 		}
 	}
 
-	seen := make(map[string]struct{})
+	// Every other neighbor first, the FDB entries last.
+	order := make([]int, 0, len(rels))
+	for i := range rels {
+		if neighborProtocol(&rels[i]) != "fdb" {
+			order = append(order, i)
+		}
+	}
+	for i := range rels {
+		if neighborProtocol(&rels[i]) == "fdb" {
+			order = append(order, i)
+		}
+	}
+
+	// edgeAt is the index of an edge in derived; lldpPeers are the CIs an
+	// LLDP/CDP neighbor of the device names.
+	edgeAt := make(map[string]int)
+	lldpPeers := make(map[string]bool)
 	var derived []DerivedRelationship
 	var unknown []UnknownRelationship
-	for i := range rels {
+	for _, i := range order {
 		rel := &rels[i]
 		protocol := neighborProtocol(rel)
 		port := normalizeKey(rel.LocalInterface)
@@ -180,6 +206,14 @@ func DeriveTopology(
 		if !ok || targetID == "" || targetID == sourceCIID {
 			continue
 		}
+		switch protocol {
+		case "lldp", "cdp":
+			lldpPeers[targetID] = true
+		case "fdb":
+			if lldpPeers[targetID] {
+				continue // the LLDP/CDP neighbor is the edge of the pair
+			}
+		}
 		if suppressed != nil && known && suppressed(sourceCIID, targetID, relType) {
 			continue
 		}
@@ -187,14 +221,15 @@ func DeriveTopology(
 			unknown = append(unknown, UnknownRelationship{SourceCIID: sourceCIID, TargetCIID: targetID, TypeKey: rel.TypeKey, Neighbor: *rel})
 			continue
 		}
-		key := sourceCIID + "|" + targetID + "|" + relType
-		if _, dup := seen[key]; dup {
-			continue
-		}
-		seen[key] = struct{}{}
 		if confidence == 0 {
 			confidence = defaultConfidence
 		}
+		key := sourceCIID + "|" + targetID + "|" + relType
+		if at, dup := edgeAt[key]; dup {
+			derived[at].Confidence = max(derived[at].Confidence, confidence)
+			continue
+		}
+		edgeAt[key] = len(derived)
 		derived = append(derived, DerivedRelationship{
 			SourceCIID: sourceCIID,
 			TargetCIID: targetID,
@@ -222,9 +257,14 @@ func normalizeKey(value string) string {
 	return strings.TrimSpace(strings.ToLower(value))
 }
 
+// macSeparators removes the separators of the usual MAC notations; one
+// Replacer for every call (building one per call was a few percent of the
+// server's CPU during a re-discovery, WP-608).
+var macSeparators = strings.NewReplacer(":", "", "-", "", ".", "")
+
 func normalizeMAC(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
-	value = strings.NewReplacer(":", "", "-", "", ".", "").Replace(value)
+	value = macSeparators.Replace(value)
 	return value
 }
 
@@ -254,23 +294,272 @@ func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []Inge
 		return 0
 	}
 
-	created := 0
+	derived := make([][]DerivedRelationship, len(items))
+	unknown := make([][]UnknownRelationship, len(items))
 	for i, item := range items {
 		srcID := resolvedCIID[i]
 		if srcID == "" || len(item.Relationships) == 0 {
 			continue
 		}
-		derived, unknown := DeriveTopology(srcID, item.Relationships, index.Resolve, suppressed)
-		for _, d := range derived {
+		derived[i], unknown[i] = DeriveTopology(srcID, item.Relationships, index.Resolve, suppressed)
+	}
+	return h.writeTopology(ctx, orgID, derived, unknown, true)
+}
+
+// writeTopology writes the derived edges and opens the reviews of the
+// unknown keys, device by device, and returns the number of new edges.
+// The edges seen again are read with one statement and, with confirm,
+// re-confirmed with one (WP-608, NFR-03); every other edge takes the path
+// of one edge, which also finds an edge created earlier in the batch.
+func (h *Handler) writeTopology(ctx context.Context, orgID string, derived [][]DerivedRelationship, unknown [][]UnknownRelationship, confirm bool) int {
+	var keys []EdgeKey
+	for i := range derived {
+		for _, d := range derived[i] {
+			keys = append(keys, d.key())
+		}
+	}
+	known := h.discoveryEdges(ctx, orgID, keys)
+	var confirmations []relationship.Confirmation
+	created := 0
+	for i := range derived {
+		for _, d := range derived[i] {
+			if e, ok := known[d.key()]; ok {
+				if confirm && relationship.MayChange(RelationshipSource, e.Source) {
+					confidence := d.Confidence
+					confirmations = append(confirmations, relationship.Confirmation{ID: e.ID, Confidence: &confidence})
+				}
+				continue
+			}
 			if h.upsertRelationship(ctx, orgID, d) {
 				created++
 			}
 		}
-		for i := range unknown {
-			h.reviewUnknownRelationship(ctx, orgID, &unknown[i])
+	}
+	for i := range unknown {
+		for j := range unknown[i] {
+			h.reviewUnknownRelationship(ctx, orgID, &unknown[i][j])
 		}
 	}
+	h.confirmEdges(ctx, orgID, confirmations)
 	return created
+}
+
+// StoredNeighbor is an LLDP/CDP neighbor a device reported, stored with its
+// CI (raw_data.neighbors, F-374).
+type StoredNeighbor struct {
+	Protocol       string `json:"protocol"`
+	LocalInterface string `json:"local_interface,omitempty"`
+	RemoteIP       string `json:"remote_ip,omitempty"`
+	RemoteMAC      string `json:"remote_mac,omitempty"`
+	RemoteHostname string `json:"remote_hostname,omitempty"`
+}
+
+// storedNeighbors returns the LLDP/CDP neighbors of a record as they are
+// stored: trimmed, without duplicates and sorted, so that an unchanged
+// report leaves raw_data unchanged whatever order the collector lists them
+// in (AUD-03). FDB and ARP entries are not stored.
+func storedNeighbors(neighbors []plugins.DeviceNeighbor) []StoredNeighbor {
+	var out []StoredNeighbor
+	seen := map[StoredNeighbor]bool{}
+	for i := range neighbors {
+		n := StoredNeighbor{
+			Protocol:       strings.ToLower(strings.TrimSpace(neighbors[i].Protocol)),
+			LocalInterface: strings.TrimSpace(neighbors[i].LocalInterface),
+			RemoteIP:       strings.TrimSpace(neighbors[i].RemoteIP),
+			RemoteMAC:      strings.TrimSpace(neighbors[i].RemoteMAC),
+			RemoteHostname: strings.TrimSpace(neighbors[i].RemoteHostname),
+		}
+		if (n.Protocol != "lldp" && n.Protocol != "cdp") || (n.RemoteIP == "" && n.RemoteMAC == "" && n.RemoteHostname == "") || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	slices.SortFunc(out, func(a, b StoredNeighbor) int {
+		return cmp.Or(cmp.Compare(a.LocalInterface, b.LocalInterface), cmp.Compare(a.Protocol, b.Protocol),
+			cmp.Compare(a.RemoteIP, b.RemoteIP), cmp.Compare(a.RemoteMAC, b.RemoteMAC), cmp.Compare(a.RemoteHostname, b.RemoteHostname))
+	})
+	return out
+}
+
+// NeighborKeys are the normalized identifiers of new CIs a stored
+// neighbor may name: management IPs, MACs (normalizeMAC) and hostnames
+// or FQDNs, as BuildNeighborIndex indexes them.
+type NeighborKeys struct {
+	IPs, MACs, Hostnames []string
+}
+
+// NeighborReporter is a CI with the neighbors stored from its last report.
+type NeighborReporter struct {
+	ID        string
+	Neighbors []StoredNeighbor
+}
+
+// NeighborReporterFinder lists the CIs of an organization whose stored
+// neighbors name one of the keys (PostgreSQL, F-374).
+type NeighborReporterFinder interface {
+	NeighborReporters(ctx context.Context, orgID string, keys *NeighborKeys) ([]NeighborReporter, error)
+}
+
+// deriveNeighborsOf writes the LLDP/CDP edges other devices reported to the
+// CIs a batch created (created, with their ids createdCIID), from the
+// neighbors stored on the reporting CIs. A reporting device processed
+// before its neighbor's CI existed (another lane, an earlier batch) found
+// no CI to connect to (relationships-suppression.spec.ts R01: 4 of 7 edges
+// of sim-access-01 after the first cycle). Each side derives after its own
+// commit, so whichever of the two derives last sees the other and every
+// edge is written in the cycle that reports both, as derivePowerFeedsOf
+// does for powered_by (WP-498). The neighbors resolve as in deriveTopology
+// (TOP-01 confidence, REL-03 suppressions fail-closed); only the edges to
+// the new CIs are written, edges that exist are left as they are (the
+// reporter's own report re-confirms them), and the CIs processed in this
+// batch were derived with their own report.
+func (h *Handler) deriveNeighborsOf(ctx context.Context, orgID string, created []IngestItem, createdCIID, processedCIID []string) int {
+	if h.relRepo == nil || len(createdCIID) == 0 {
+		return 0
+	}
+	finder, ok := h.repo.(NeighborReporterFinder)
+	if !ok {
+		return 0
+	}
+	newIDs := map[string]bool{}
+	for _, id := range createdCIID {
+		newIDs[id] = true
+	}
+	ips, macs, hosts := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	var keys NeighborKeys
+	add := func(set map[string]bool, list *[]string, key string) {
+		if key != "" && !set[key] {
+			set[key] = true
+			*list = append(*list, key)
+		}
+	}
+	for i := range created {
+		add(ips, &keys.IPs, normalizeKey(created[i].ManagementIP))
+		add(macs, &keys.MACs, normalizeMAC(created[i].PrimaryMAC))
+		add(hosts, &keys.Hostnames, normalizeKey(created[i].Hostname))
+		add(hosts, &keys.Hostnames, normalizeKey(created[i].FQDN))
+	}
+	if len(keys.IPs)+len(keys.MACs)+len(keys.Hostnames) == 0 {
+		return 0
+	}
+	reporters, err := finder.NeighborReporters(ctx, orgID, &keys)
+	if err != nil {
+		slog.Warn("topology of new CIs not derived: stored neighbors not loaded", "event", "discovery.topology.neighbors_failed",
+			"organization_id", orgID, "error", err)
+		return 0
+	}
+	processed := map[string]bool{}
+	for _, id := range processedCIID {
+		processed[id] = true
+	}
+	var sources []string
+	var items []IngestItem
+	for _, r := range reporters {
+		if processed[r.ID] {
+			continue
+		}
+		var rels []wire.IngestRelationship
+		for _, n := range r.Neighbors {
+			if !ips[normalizeKey(n.RemoteIP)] && !macs[normalizeMAC(n.RemoteMAC)] && !hosts[normalizeKey(n.RemoteHostname)] {
+				continue
+			}
+			rels = append(rels, wire.IngestRelationship{TargetIP: n.RemoteIP, TargetMAC: n.RemoteMAC, TargetHostname: n.RemoteHostname,
+				TypeKey: "connected_to", Protocol: n.Protocol, LocalInterface: n.LocalInterface})
+		}
+		if len(rels) > 0 {
+			sources = append(sources, r.ID)
+			items = append(items, IngestItem{Relationships: rels})
+		}
+	}
+	if len(items) == 0 {
+		return 0
+	}
+	suppressed, err := h.suppressionChecker(ctx, orgID)
+	if err != nil {
+		slog.Error("topology of new CIs skipped: suppressions not loaded", "event", "discovery.topology.failed", "organization_id", orgID, "error", err)
+		return 0
+	}
+	// The neighbors resolve against every CI they name, not only the new
+	// ones: a neighbor whose IP names an older CI stays that CI's edge.
+	index := BuildNeighborIndex(h.neighborCandidates(ctx, orgID, items))
+	derived := make([][]DerivedRelationship, len(items))
+	unknown := make([][]UnknownRelationship, len(items))
+	for i := range items {
+		all, odd := DeriveTopology(sources[i], items[i].Relationships, index.Resolve, suppressed)
+		for _, d := range all {
+			if newIDs[d.TargetCIID] {
+				derived[i] = append(derived[i], d)
+			}
+		}
+		for j := range odd {
+			if newIDs[odd[j].TargetCIID] {
+				unknown[i] = append(unknown[i], odd[j])
+			}
+		}
+	}
+	return h.writeTopology(ctx, orgID, derived, unknown, false)
+}
+
+// EdgeKey is the source, target and type of a discovery edge.
+type EdgeKey struct {
+	SourceCIID, TargetCIID, RelType string
+}
+
+// FoundEdge is the oldest edge of an EdgeKey: its id and source.
+type FoundEdge struct {
+	ID, Source string
+}
+
+func (d *DerivedRelationship) key() EdgeKey {
+	return EdgeKey{SourceCIID: d.SourceCIID, TargetCIID: d.TargetCIID, RelType: d.RelType}
+}
+
+// edgesFinder looks the edges of several keys up with one statement
+// (PostgreSQL, WP-608).
+type edgesFinder interface {
+	DiscoveryEdges(ctx context.Context, orgID string, keys []EdgeKey) (map[EdgeKey]FoundEdge, error)
+}
+
+// discoveryEdges returns the existing edges of keys, read at once; nil when
+// the repository cannot or the read failed, then every edge takes the path
+// of one edge (upsertRelationship).
+func (h *Handler) discoveryEdges(ctx context.Context, orgID string, keys []EdgeKey) map[EdgeKey]FoundEdge {
+	finder, ok := h.repo.(edgesFinder)
+	if !ok || len(keys) == 0 {
+		return nil
+	}
+	found, err := finder.DiscoveryEdges(ctx, orgID, keys)
+	if err != nil {
+		slog.Warn("discovery edges not read at once", "organization_id", orgID, "error", err)
+		return nil
+	}
+	return found
+}
+
+// confirmEdges re-confirms the discovery edges a batch saw again: with one
+// statement where the relationship store can, else, and when that fails,
+// edge by edge as before.
+func (h *Handler) confirmEdges(ctx context.Context, orgID string, confirmations []relationship.Confirmation) {
+	if len(confirmations) == 0 {
+		return
+	}
+	if batch, ok := h.relRepo.(relationship.BatchConfirmer); ok {
+		err := batch.ConfirmMany(ctx, orgID, confirmations)
+		if err == nil {
+			return
+		}
+		slog.Warn("re-confirm discovery edges at once", "organization_id", orgID, "error", err)
+	}
+	confirmer, ok := h.relRepo.(relationship.Confirmer)
+	if !ok {
+		return
+	}
+	for _, c := range confirmations {
+		if err := confirmer.Confirm(ctx, orgID, c.ID, c.Confidence); err != nil {
+			slog.Warn("re-confirm discovery edge", "relationship_id", c.ID, "error", err)
+		}
+	}
 }
 
 // suppressionChecker returns a predicate that reports whether an edge
@@ -311,16 +600,25 @@ type edgeFinder interface {
 // another source between the same CIs stays untouched (source policy,
 // REL-08). It reports whether a new edge was created.
 func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d DerivedRelationship) bool {
+	created, _ := h.upsertRelationshipErr(ctx, orgID, d, false)
+	return created
+}
+
+// upsertRelationshipErr is upsertRelationship with the error of the
+// creation, for a caller that answers for it (the accept of an
+// unknown_relationship item, F-405). checkTypes makes the creation check
+// the type lists of the relationship type as POST /relationships does: an
+// edge a person decides on (F-424); an observed edge is recorded without.
+// A soft-deleted CI is refused either way (relationship.PGRepository.Create).
+func (h *Handler) upsertRelationshipErr(ctx context.Context, orgID string, d DerivedRelationship, checkTypes bool) (bool, error) {
 	confidence := d.Confidence
 	if finder, ok := h.repo.(edgeFinder); ok {
 		id, source, found, err := finder.DiscoveryEdge(ctx, orgID, d.SourceCIID, d.TargetCIID, d.RelType)
 		if err == nil && found {
-			if confirmer, ok := h.relRepo.(relationship.Confirmer); ok && relationship.MayChange(RelationshipSource, source) {
-				if cerr := confirmer.Confirm(ctx, orgID, id, &confidence); cerr != nil {
-					slog.Warn("re-confirm discovery edge", "relationship_id", id, "error", cerr)
-				}
+			if relationship.MayChange(RelationshipSource, source) {
+				h.reconfirm(ctx, orgID, id, &confidence, d.Refresh)
 			}
-			return false
+			return false, nil
 		}
 	} else if existing, _, err := h.relRepo.List(ctx, orgID, d.SourceCIID, api.PaginationParams{Limit: 10000, Offset: 0}); err == nil {
 		for i := range existing {
@@ -328,12 +626,10 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 			if rel.SourceCIID != d.SourceCIID || rel.TargetCIID != d.TargetCIID || rel.RelType != d.RelType {
 				continue
 			}
-			if confirmer, ok := h.relRepo.(relationship.Confirmer); ok && relationship.MayChange(RelationshipSource, rel.Source) {
-				if cerr := confirmer.Confirm(ctx, orgID, rel.ID, &confidence); cerr != nil {
-					slog.Warn("re-confirm discovery edge", "relationship_id", rel.ID, "error", cerr)
-				}
+			if relationship.MayChange(RelationshipSource, rel.Source) {
+				h.reconfirm(ctx, orgID, rel.ID, &confidence, d.Refresh)
 			}
-			return false
+			return false, nil
 		}
 	}
 	rel := &relationship.Relationship{
@@ -345,10 +641,27 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 		Attributes:     edgeAttributes(d.Attributes),
 		Confidence:     &confidence,
 	}
-	if err := h.relRepo.Create(ctx, rel); err != nil {
-		return false
+	if checkTypes {
+		rel.CheckTypeLists()
 	}
-	return true
+	if err := h.relRepo.Create(ctx, rel); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// reconfirm re-confirms one discovery edge; with refresh its attributes
+// too, which only a BatchConfirmer can (WP-498).
+func (h *Handler) reconfirm(ctx context.Context, orgID, id string, confidence *float64, refresh map[string]any) {
+	if refresh != nil {
+		h.confirmEdges(ctx, orgID, []relationship.Confirmation{{ID: id, Confidence: confidence, Attributes: refresh}})
+		return
+	}
+	if confirmer, ok := h.relRepo.(relationship.Confirmer); ok {
+		if err := confirmer.Confirm(ctx, orgID, id, confidence); err != nil {
+			slog.Warn("re-confirm discovery edge", "relationship_id", id, "error", err)
+		}
+	}
 }
 
 // ReviewKindUnknownRelationship is the review of a neighbor reported with
@@ -356,9 +669,11 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 const ReviewKindUnknownRelationship = reviews.KindUnknownRelationship
 
 // reviewUnknownRelationship opens the review of an unknown key; a
-// dismissed key of the pair stays dismissed.
+// dismissed key of the pair stays dismissed, and an accepted pair opens no
+// new review while its edge exists or its suppression keeps it away
+// (acceptedEdgeHolds, F-382).
 func (h *Handler) reviewUnknownRelationship(ctx context.Context, orgID string, u *UnknownRelationship) {
-	_, err := h.ReviewService().OpenUnlessDismissed(ctx, &ReviewItem{
+	_, err := h.ReviewService().OpenUnlessSettled(ctx, &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindUnknownRelationship,
 		Status:         ReviewStatusOpen,
@@ -373,24 +688,84 @@ func (h *Handler) reviewUnknownRelationship(ctx context.Context, orgID string, u
 			"target_ip":       u.Neighbor.TargetIP,
 			"target_mac":      u.Neighbor.TargetMAC,
 		},
-	}, "type_key")
+	}, "type_key", h.acceptedEdgeHolds)
 	if err != nil {
 		slog.Error("open unknown_relationship review", "organization_id", orgID, "error", err)
 	}
 }
 
+// acceptedEdgeHolds reports whether an accepted unknown_relationship review
+// still holds (F-382): the pair has the connected_to edge accept records
+// (source -> target, of any source, as upsertRelationship finds it), or
+// that edge is suppressed: a user deleted it (force, REL-03), which answers
+// the question as a dismissal would. Once the suppression is lifted the
+// pair has neither and the next report opens a new review.
+func (h *Handler) acceptedEdgeHolds(ctx context.Context, item *ReviewItem) (bool, error) {
+	sourceID, targetID := payloadString(item.Payload, "source_ci_id"), payloadString(item.Payload, "target_ci_id")
+	if sourceID == "" || targetID == "" || h.relRepo == nil {
+		return false, nil
+	}
+	const relType = "connected_to"
+	if finder, ok := h.repo.(edgeFinder); ok {
+		_, _, found, err := finder.DiscoveryEdge(ctx, item.OrganizationID, sourceID, targetID, relType)
+		if err != nil || found {
+			return found, err
+		}
+	} else {
+		existing, _, err := h.relRepo.List(ctx, item.OrganizationID, sourceID, api.PaginationParams{Limit: 10000, Offset: 0})
+		if err != nil {
+			return false, err
+		}
+		for i := range existing {
+			if existing[i].SourceCIID == sourceID && existing[i].TargetCIID == targetID && existing[i].RelType == relType {
+				return true, nil
+			}
+		}
+	}
+	suppressed, err := h.suppressionChecker(ctx, item.OrganizationID)
+	if err != nil {
+		return false, err
+	}
+	return suppressed != nil && suppressed(sourceID, targetID, relType), nil
+}
+
 // resolveUnknownRelationship: accept records the neighbor as connected_to
-// (confidence 0.5); dismiss keeps the edge away.
+// (confidence 0.5); dismiss keeps the edge away. An accept that records no
+// edge is refused and the item stays open (TOP-01, F-405): CIs that are no
+// UUIDs or whose types the type lists of connected_to do not allow are 422,
+// a CI that is gone (unknown, not visible or soft-deleted) 404 (F-424). The
+// accept is a human decision: it checks the type lists like POST
+// /relationships.
 func (h *Handler) resolveUnknownRelationship(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	if res.Action != reviews.ActionAccept || h.relRepo == nil {
 		return false, nil
 	}
 	d := DerivedRelationship{SourceCIID: payloadString(item.Payload, "source_ci_id"), TargetCIID: payloadString(item.Payload, "target_ci_id"),
 		RelType: "connected_to", Confidence: defaultConfidence}
-	if d.SourceCIID == "" || d.TargetCIID == "" {
+	if !isUUID(d.SourceCIID) || !isUUID(d.TargetCIID) {
 		return false, refused(http.StatusUnprocessableEntity, "the item names no CIs")
 	}
-	h.upsertRelationship(ctx, item.OrganizationID, d)
+	// A CI deleted meanwhile is gone also when the edge exists already, which
+	// the creation (it refuses a deleted end) would only re-confirm.
+	if h.ciRepo != nil {
+		for _, id := range []string{d.SourceCIID, d.TargetCIID} {
+			if _, err := h.ciRepo.GetByID(ctx, item.OrganizationID, id); err != nil {
+				if errors.Is(err, ci.ErrNotFound) || isNotFound(err) {
+					return false, refused(http.StatusNotFound, "the source or target CI was not found")
+				}
+				return false, err
+			}
+		}
+	}
+	if _, err := h.upsertRelationshipErr(ctx, item.OrganizationID, d, true); err != nil {
+		switch {
+		case errors.Is(err, relationship.ErrSourceCINotFound), errors.Is(err, relationship.ErrTargetCINotFound):
+			return false, refused(http.StatusNotFound, "the source or target CI was not found")
+		case errors.Is(err, relationship.ErrSourceCITypeNotAllowed), errors.Is(err, relationship.ErrTargetCITypeNotAllowed):
+			return false, refused(http.StatusUnprocessableEntity, err.Error())
+		}
+		return false, err
+	}
 	res.Note = "recorded as connected_to"
 	return false, nil
 }

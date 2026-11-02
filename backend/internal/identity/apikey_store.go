@@ -2,11 +2,13 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -28,20 +30,40 @@ func NewPGAPIKeyStore(pool *pgxpool.Pool) *PGAPIKeyStore {
 }
 
 const apiKeyColumns = `id, organization_id, name, key_hash, key_prefix, environment, permissions,
-	created_by, service_account_id, rotated_from, expires_at, revoked_at, last_used_at, created_at`
+	created_by, service_account_id, creator_scope, rotated_from, expires_at, revoked_at, last_used_at, created_at`
 
 func scanAPIKey(row pgx.Row) (*StoredAPIKey, error) {
 	var key StoredAPIKey
 	var permissions []string
+	var creatorScope []byte
 	if err := row.Scan(&key.ID, &key.OrganizationID, &key.Name, &key.KeyHash, &key.KeyPrefix, &key.Environment,
-		&permissions, &key.CreatedBy, &key.ServiceAccountID, &key.RotatedFrom, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &key.CreatedAt); err != nil {
+		&permissions, &key.CreatedBy, &key.ServiceAccountID, &creatorScope, &key.RotatedFrom, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &key.CreatedAt); err != nil {
 		return nil, err
 	}
 	key.Permissions = make([]Permission, len(permissions))
 	for i, p := range permissions {
 		key.Permissions[i] = Permission(p)
 	}
+	if creatorScope != nil {
+		// An unreadable snapshot fails closed: the lookup errs (503) instead
+		// of granting the account's rights unbounded.
+		if err := json.Unmarshal(creatorScope, &key.CreatorScope); err != nil {
+			return nil, fmt.Errorf("decode api_key creator_scope: %w", err)
+		}
+		if key.CreatorScope == nil {
+			key.CreatorScope = map[Permission]Scope{}
+		}
+	}
 	return &key, nil
+}
+
+// creatorScopeJSON encodes a key's creator scope for the column
+// creator_scope (migration 000185); nil stays NULL.
+func creatorScopeJSON(scope map[Permission]Scope) ([]byte, error) {
+	if scope == nil {
+		return nil, nil
+	}
+	return json.Marshal(scope)
 }
 
 // LookupByPrefix identifies a key by its public prefix (hash index). The key
@@ -80,12 +102,16 @@ func insertAPIKey(ctx context.Context, tx pgx.Tx, key *StoredAPIKey) (*StoredAPI
 	if environment == "" {
 		environment = APIKeyEnvironmentLive
 	}
+	creatorScope, err := creatorScopeJSON(key.CreatorScope)
+	if err != nil {
+		return nil, fmt.Errorf("encode api_key creator_scope: %w", err)
+	}
 	created, err := scanAPIKey(tx.QueryRow(ctx, `
-		INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by, service_account_id, rotated_from, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by, service_account_id, creator_scope, rotated_from, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING `+apiKeyColumns,
 		key.OrganizationID, key.Name, key.KeyHash, key.KeyPrefix, environment,
-		permissionStrings(key.Permissions), key.CreatedBy, key.ServiceAccountID, key.RotatedFrom, key.ExpiresAt))
+		permissionStrings(key.Permissions), key.CreatedBy, key.ServiceAccountID, creatorScope, key.RotatedFrom, key.ExpiresAt))
 	if err != nil {
 		return nil, fmt.Errorf("insert api_key: %w", err)
 	}
@@ -135,9 +161,13 @@ func (s *PGAPIKeyStore) Create(ctx context.Context, key *StoredAPIKey) (*StoredA
 		if created, err = insertAPIKey(ctx, tx, key); err != nil {
 			return err
 		}
-		return recordAPIKeyAudit(ctx, tx, created, "api_key.created", map[string]any{
+		changes := map[string]any{
 			"permissions": permissionStrings(created.Permissions), "environment": created.Environment, "owner": created.CreatedBy,
-		})
+		}
+		if created.CreatorScope != nil {
+			changes["creator_scope"] = created.CreatorScope
+		}
+		return recordAPIKeyAudit(ctx, tx, created, "api_key.created", changes)
 	})
 	return created, err
 }
@@ -162,6 +192,59 @@ func (s *PGAPIKeyStore) List(ctx context.Context, orgID string) ([]StoredAPIKey,
 		return rows.Err()
 	})
 	return keys, err
+}
+
+// ListPage returns a page of the organization's keys without hashes,
+// newest first on (created_at, id): at most one more than the limit (see
+// api.NewestFirstSQL) and the number of keys (API-02, F-215).
+func (s *PGAPIKeyStore) ListPage(ctx context.Context, orgID string, page api.PaginationParams) ([]StoredAPIKey, int, error) {
+	var keys []StoredAPIKey
+	var total int
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM api_key WHERE organization_id = $1`, orgID).Scan(&total); err != nil {
+			return fmt.Errorf("count api_key: %w", err)
+		}
+		where, tail, args, err := api.NewestFirstSQL(page, 2)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT `+apiKeyColumns+` FROM api_key WHERE organization_id = $1 AND `+where+` `+tail,
+			append([]any{orgID}, args...)...)
+		if err != nil {
+			return fmt.Errorf("list api_key: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			key, scanErr := scanAPIKey(rows)
+			if scanErr != nil {
+				return fmt.Errorf("scan api_key: %w", scanErr)
+			}
+			key.KeyHash = ""
+			keys = append(keys, *key)
+		}
+		return rows.Err()
+	})
+	return keys, total, err
+}
+
+// Get returns a key of the organization without its hash; an unknown or
+// foreign key is ErrAPIKeyNotFound.
+func (s *PGAPIKeyStore) Get(ctx context.Context, orgID, id string) (*StoredAPIKey, error) {
+	var key *StoredAPIKey
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		found, err := scanAPIKey(tx.QueryRow(ctx, `SELECT `+apiKeyColumns+` FROM api_key
+			WHERE organization_id = $1 AND id = $2`, orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAPIKeyNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read api_key: %w", err)
+		}
+		found.KeyHash = ""
+		key = found
+		return nil
+	})
+	return key, err
 }
 
 func lockAPIKey(ctx context.Context, tx pgx.Tx, orgID, id string) (*StoredAPIKey, error) {
@@ -202,7 +285,7 @@ type RotatedAPIKey struct {
 }
 
 // Rotate replaces a key: the new key takes over name, permissions, owner,
-// environment and expiry; the old key stays valid until overlapUntil (or its
+// service account, creator scope, environment and expiry; the old key stays valid until overlapUntil (or its
 // own earlier expiry) so clients can switch without downtime (SEC-06). Both
 // changes and the audit entry commit together.
 func (s *PGAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overlapUntil time.Time) (*RotatedAPIKey, error) {
@@ -222,7 +305,7 @@ func (s *PGAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overlapUnt
 		next := &StoredAPIKey{
 			OrganizationID: orgID, Name: old.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 			Environment: old.Environment, Permissions: old.Permissions, CreatedBy: old.CreatedBy,
-			ServiceAccountID: old.ServiceAccountID, RotatedFrom: &old.ID, ExpiresAt: old.ExpiresAt,
+			ServiceAccountID: old.ServiceAccountID, CreatorScope: old.CreatorScope, RotatedFrom: &old.ID, ExpiresAt: old.ExpiresAt,
 		}
 		if created, txErr = insertAPIKey(ctx, tx, next); txErr != nil {
 			return txErr
@@ -242,32 +325,90 @@ func (s *PGAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overlapUnt
 	return &RotatedAPIKey{Created: created, Previous: old, Plaintext: generated.Plaintext}, nil
 }
 
-// MarkUsed updates the last_used_at timestamp. It runs while the key is being
-// validated, before a principal exists, on behalf of the key's organization,
-// so it uses an org-wide scope (E-08).
+// lastUsedInterval is the precision of api_key.last_used_at: MarkUsed
+// writes it at most once per interval and key (WP-610).
+const lastUsedInterval = time.Minute
+
+// MarkUsed updates the last_used_at timestamp, at most once per
+// lastUsedInterval (WP-610). The condition is part of the UPDATE: a row
+// written less than lastUsedInterval ago does not match, so the requests of
+// a key in between neither write nor lock it. Before, every request wrote
+// the same row and waited for the lock of the previous one (U4 of the WP-439
+// load runs: up to 3.3 s). A request that meets the one write of the
+// interval waits for that single short transaction; PostgreSQL then checks
+// the condition again on the new row version and leaves it. last_used_at is
+// accurate to the interval: the last use lies between last_used_at and
+// lastUsedInterval later.
+//
+// It runs while the key is being validated, before a principal exists, on
+// behalf of the key's organization, so it uses an org-wide scope (E-08).
 func (s *PGAPIKeyStore) MarkUsed(ctx context.Context, orgID, id string) error {
 	scope := database.OrgWideScope(orgID, "")
 	return database.WithTenant(ctx, s.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "UPDATE api_key SET last_used_at = now() WHERE id = $1", id); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE api_key SET last_used_at = now()
+			WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - make_interval(secs => $2))`,
+			id, lastUsedInterval.Seconds()); err != nil {
 			return fmt.Errorf("update api_key last_used: %w", err)
 		}
 		return nil
 	})
 }
 
-// RevokeUserAPIKeys revokes every active API key the user created, inside the
-// caller's transaction, so a deactivation and the revocation of the user's
-// service tokens commit together (TLC-04). It returns the number of keys
-// revoked.
+// RevokeUserAPIKeys revokes every active API key the user created for
+// themself, inside the caller's transaction, so a deactivation and the
+// revocation of the user's service tokens commit together (TLC-04). It
+// returns the number of keys revoked.
+//
+// Keys the user created for a service account stay valid: they belong to the
+// service account (AUT-04, RBA-08; decision E-64, option 2).
+// KeptServiceAccountKeys lists them for the audit entry and the rotation
+// notice of the deactivation.
 func RevokeUserAPIKeys(ctx context.Context, tx pgx.Tx, orgID, userID string) (int64, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE api_key SET revoked_at = now(), updated_at = now()
-		WHERE organization_id = $1 AND created_by = $2 AND revoked_at IS NULL
+		WHERE organization_id = $1 AND created_by = $2 AND revoked_at IS NULL AND service_account_id IS NULL
 	`, orgID, userID)
 	if err != nil {
 		return 0, fmt.Errorf("revoke api keys of user: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// KeptServiceAccountKey is a key a deactivated user created for a service
+// account that stays valid (E-64, option 2): what an administrator needs to
+// find and rotate it, never the secret or its hash.
+type KeptServiceAccountKey struct {
+	ID                 string `json:"id"`
+	KeyPrefix          string `json:"key_prefix"`
+	Name               string `json:"name"`
+	ServiceAccountID   string `json:"service_account_id"`
+	ServiceAccountName string `json:"service_account_name"`
+}
+
+// KeptServiceAccountKeys lists the active, unexpired keys the user created
+// for service accounts of the organization, inside the caller's transaction,
+// ordered by service account and key name.
+func KeptServiceAccountKeys(ctx context.Context, tx pgx.Tx, orgID, userID string) ([]KeptServiceAccountKey, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT k.id::text, k.key_prefix, k.name, k.service_account_id::text, sa.name
+		FROM api_key k
+		JOIN service_account sa ON sa.id = k.service_account_id AND sa.organization_id = k.organization_id
+		WHERE k.organization_id = $1 AND k.created_by = $2 AND k.service_account_id IS NOT NULL
+		  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > now())
+		ORDER BY sa.name, k.name, k.id
+	`, orgID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list service-account keys of user: %w", err)
+	}
+	kept, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (KeptServiceAccountKey, error) {
+		var k KeptServiceAccountKey
+		scanErr := row.Scan(&k.ID, &k.KeyPrefix, &k.Name, &k.ServiceAccountID, &k.ServiceAccountName)
+		return k, scanErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list service-account keys of user: %w", err)
+	}
+	return kept, nil
 }
 
 // APIKeyRepository is the identification (APIKeyStore) and the management
@@ -289,6 +430,12 @@ func NewMemoryAPIKeyStore() *MemoryAPIKeyStore { return &MemoryAPIKeyStore{} }
 func cloneAPIKey(k *StoredAPIKey) *StoredAPIKey {
 	c := *k
 	c.Permissions = append([]Permission(nil), k.Permissions...)
+	if k.CreatorScope != nil {
+		c.CreatorScope = make(map[Permission]Scope, len(k.CreatorScope))
+		for p, s := range k.CreatorScope {
+			c.CreatorScope[p] = intersectScope(&s, &s)
+		}
+	}
 	return &c
 }
 
@@ -336,6 +483,15 @@ func (m *MemoryAPIKeyStore) List(_ context.Context, orgID string) ([]StoredAPIKe
 	return out, nil
 }
 
+// ListPage implements APIKeyManager.
+func (m *MemoryAPIKeyStore) ListPage(ctx context.Context, orgID string, page api.PaginationParams) ([]StoredAPIKey, int, error) {
+	keys, _ := m.List(ctx, orgID)
+	return api.NewestFirstSlice(keys, page, apiKeyPosition)
+}
+
+// apiKeyPosition is the (created_at, id) position of a key in its list.
+func apiKeyPosition(k *StoredAPIKey) (createdAt time.Time, id string) { return k.CreatedAt, k.ID }
+
 func (m *MemoryAPIKeyStore) find(orgID, id string) *StoredAPIKey {
 	for _, k := range m.keys {
 		if k.OrganizationID == orgID && k.ID == id {
@@ -343,6 +499,19 @@ func (m *MemoryAPIKeyStore) find(orgID, id string) *StoredAPIKey {
 		}
 	}
 	return nil
+}
+
+// Get implements APIKeyManager.
+func (m *MemoryAPIKeyStore) Get(_ context.Context, orgID, id string) (*StoredAPIKey, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := m.find(orgID, id)
+	if k == nil {
+		return nil, ErrAPIKeyNotFound
+	}
+	c := cloneAPIKey(k)
+	c.KeyHash = ""
+	return c, nil
 }
 
 // Revoke implements APIKeyManager.
@@ -384,7 +553,7 @@ func (m *MemoryAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overla
 	created, err := m.Create(ctx, &StoredAPIKey{
 		OrganizationID: orgID, Name: previous.Name, KeyHash: generated.KeyHash, KeyPrefix: generated.KeyPrefix,
 		Environment: previous.Environment, Permissions: previous.Permissions, CreatedBy: previous.CreatedBy,
-		ServiceAccountID: previous.ServiceAccountID, RotatedFrom: &previous.ID, ExpiresAt: expiry,
+		ServiceAccountID: previous.ServiceAccountID, CreatorScope: previous.CreatorScope, RotatedFrom: &previous.ID, ExpiresAt: expiry,
 	})
 	if err != nil {
 		return nil, err
@@ -393,13 +562,15 @@ func (m *MemoryAPIKeyStore) Rotate(ctx context.Context, orgID, id string, overla
 	return &RotatedAPIKey{Created: created, Previous: previous, Plaintext: generated.Plaintext}, nil
 }
 
-// MarkUsed implements APIKeyStore.
+// MarkUsed implements APIKeyStore with the interval of PGAPIKeyStore.
 func (m *MemoryAPIKeyStore) MarkUsed(_ context.Context, orgID, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if k := m.find(orgID, id); k != nil {
 		now := time.Now().UTC()
-		k.LastUsedAt = &now
+		if k.LastUsedAt == nil || k.LastUsedAt.Before(now.Add(-lastUsedInterval)) {
+			k.LastUsedAt = &now
+		}
 	}
 	return nil
 }

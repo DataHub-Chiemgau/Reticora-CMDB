@@ -9,14 +9,22 @@ export const DASHBOARD_ROLES: readonly DashboardRole[] = [
 ];
 
 export type DashboardWidget =
-  'ciSummary' | 'collectors' | 'slaBreaches' | 'compliance' | 'assets' | 'stocktake' | 'tickets';
+  | 'ciSummary'
+  | 'collectors'
+  | 'reviewEscalation'
+  | 'slaBreaches'
+  | 'compliance'
+  | 'assets'
+  | 'stocktake'
+  | 'tickets';
 
 const ROLE_STORAGE_KEY = 'reticora-dashboard-role';
 
+// reviewEscalation: review items open longer than 14 days (REC-08, F-247).
 export const roleWidgets: Record<DashboardRole, DashboardWidget[]> = {
-  technician: ['ciSummary', 'collectors', 'slaBreaches', 'compliance'],
+  technician: ['ciSummary', 'collectors', 'reviewEscalation', 'slaBreaches', 'compliance'],
   procurement: ['assets', 'stocktake'],
-  management: ['ciSummary', 'tickets', 'compliance', 'slaBreaches'],
+  management: ['ciSummary', 'reviewEscalation', 'tickets', 'compliance', 'slaBreaches'],
 };
 
 // The values stored before GLO-10 (German enum values) map onto the

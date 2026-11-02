@@ -51,6 +51,9 @@ const (
 	StatusDismissed = "dismissed"
 )
 
+// Statuses lists the review statuses, the enum of the status filter.
+var Statuses = []string{StatusOpen, StatusResolved, StatusDismissed}
+
 // Resolution actions of REC-08.
 const (
 	ActionMerge   = "merge"
@@ -117,6 +120,12 @@ type Item struct {
 	// Deduplicated is set by CreateReviewItem when an open item of the same
 	// object and type already existed; Item then describes that item.
 	Deduplicated bool `json:"-"`
+	// ClientID and SiteID scope an item without candidate CIs: the producer
+	// sets the client and site of the device, collector or subnet it is
+	// about. With candidates the database derives both from the candidate
+	// CIs (migration 000140). Not part of the API.
+	ClientID string `json:"-"`
+	SiteID   string `json:"-"`
 }
 
 // markEscalated sets Escalated from the creation time.
@@ -135,11 +144,30 @@ type Filter struct {
 	Escalated bool
 }
 
-// Resolution is the request body for resolving an item.
+// ResolveRequest is the request body for resolving an item
+// (ReviewItemResolveRequest). It names no resolver: a body with resolved_by
+// is refused as an unknown field (400).
+type ResolveRequest struct {
+	Action string `json:"action"`
+	CIID   string `json:"ci_id,omitempty"`
+	// CITypeID is the type of the CI new creates; it takes precedence over
+	// the type name the item recorded.
+	CITypeID string `json:"ci_type_id,omitempty"`
+	Note     string `json:"resolution,omitempty"`
+}
+
+// Resolution is the resolution of an item as the service carries it out.
 type Resolution struct {
-	Action     string `json:"action"`
-	CIID       string `json:"ci_id,omitempty"`
-	ResolvedBy string `json:"resolved_by,omitempty"`
+	Action string `json:"action"`
+	CIID   string `json:"ci_id,omitempty"`
+	// CITypeID is the type the principal chose for the CI new creates
+	// (UI-16); empty to take the type the item recorded.
+	CITypeID string `json:"-"`
+	// ResolvedBy is the principal (user or service account) that resolves
+	// the item: the handler takes it from the request, never from the body
+	// (F-091). It is stored as resolved_by and is the audit actor; empty
+	// for the system (adoption after max_cis was raised).
+	ResolvedBy string `json:"-"`
 	Note       string `json:"resolution,omitempty"`
 	// Status is the terminal status to persist; derived from Action.
 	Status string `json:"-"`
@@ -152,7 +180,20 @@ type Repository interface {
 	CreateReviewItem(ctx context.Context, item *Item) error
 	ListReviewItems(ctx context.Context, orgID string, filter Filter, page api.PaginationParams) ([]Item, int, error)
 	GetReviewItem(ctx context.Context, orgID, id string) (*Item, error)
+	// ResolveReviewItem resolves an open item; an item that is no longer
+	// open is ErrAlreadyResolved, an unknown or invisible one ErrNotFound.
 	ResolveReviewItem(ctx context.Context, orgID, id string, resolution *Resolution) (*Item, error)
+}
+
+// Locker is a repository whose resolutions run in one transaction with
+// their effect (REC-08, F-404): RunInTx runs fn in a transaction of the
+// context's tenant scope that every repository call with fn's context
+// joins, LockReviewItem locks the row of the item until that transaction
+// ends and returns the item as it stands then (ErrNotFound when unknown or
+// invisible). The PostgreSQL repository implements it.
+type Locker interface {
+	RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error
+	LockReviewItem(ctx context.Context, orgID, id string) (*Item, error)
 }
 
 // Errors of a resolution; the handler maps them to HTTP statuses.
@@ -167,9 +208,15 @@ type Error struct {
 	Message string
 	// Problem is an RFC 7807 problem type, when the refusal has one.
 	Problem string
+	// Field is the request field the refusal names, when it names one.
+	Field string
 }
 
 func (e *Error) Error() string { return e.Message }
+
+// PublicMessage implements jobs.PublicError: a failed review.merge job
+// shows the refusal (F-372).
+func (e *Error) PublicMessage() string { return e.Message }
 
 // ProblemType implements api.TypedProblem when Problem is set.
 func (e *Error) ProblemType() string { return e.Problem }

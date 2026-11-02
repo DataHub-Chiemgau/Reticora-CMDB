@@ -1,4 +1,4 @@
-.PHONY: generate build test test-backend test-collector test-edgecore test-db test-frontend lint lint-backend lint-frontend lint-collector lint-edgecore check-golangci-lint migrate-up migrate-down migrate-roundtrip schema-baseline up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
+.PHONY: generate build test test-backend test-collector test-edgecore test-db test-frontend lint lint-backend lint-frontend lint-collector lint-edgecore lint-debt check-golangci-lint migrate-up migrate-down migrate-roundtrip schema-baseline up down seed e2e fmt vet oapi-codegen generate-api-client check-api-client
 
 # ─── Variables ──────────────────────────────────────────────────────────────────
 BACKEND_DIR := backend
@@ -98,6 +98,11 @@ lint-collector: check-golangci-lint
 lint-edgecore: check-golangci-lint
 	@echo "==> Linting edgecore..."
 	cd $(EDGECORE_DIR) && $(GOLANGCI_LINT_RUN)
+
+# Lint backlog without issues.new-from-rev per module against
+# tests/lint-debt-baseline.txt; fails when a number rises (WP-499, F-123).
+lint-debt: check-golangci-lint
+	GOLANGCI_LINT=$(GOLANGCI_LINT) ./scripts/ci/lint-debt.sh
 
 # ─── Format ─────────────────────────────────────────────────────────────────────
 fmt:

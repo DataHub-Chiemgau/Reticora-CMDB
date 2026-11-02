@@ -7,19 +7,26 @@ import (
 	"sync/atomic"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 // gatedRoutes maps API path prefixes to the feature key required to use them.
 // Paths that are not listed belong to the always-available core (CMDB, tenants,
-// users, auth, audit and the entitlement API itself).
+// users, auth, audit and the entitlement API itself), among them the
+// location tree and the review queue; writes of rack nodes of the tree and
+// the resolution of scope_suggested items check their feature in the
+// handler (F-400). docs/README.md lists the mapping.
 var gatedRoutes = []struct {
 	prefix  string
 	feature string
 }{
 	{"/api/v1/ingest", FeatureDiscovery},
 	{"/api/v1/discovery", FeatureDiscovery},
+	// The discovery scopes are a resource of their own, not below
+	// /api/v1/discovery/ (F-400).
+	{"/api/v1/discovery-scopes", FeatureDiscovery},
 	{"/api/v1/collectors", FeatureDiscovery},
 	{"/api/v1/credentials", FeatureDiscovery},
 	{"/api/v1/assets", FeatureInventory},
@@ -41,6 +48,14 @@ var gatedRoutes = []struct {
 	{"/api/v1/desk-bookings", FeatureInventory},
 	{"/api/v1/tickets", FeatureTicketing},
 	{"/api/v1/webhooks", FeatureWebhooks},
+	// Racks, their layout and the mounts are the rack_view feature (ENT-02,
+	// ENT-05, F-070).
+	{"/api/v1/racks", FeatureRackView},
+	{"/api/v1/mounts", FeatureRackView},
+	{"/api/v1/rack-mounts", FeatureRackView},
+	// Managing API keys is the api_access feature; requests authenticated
+	// with a key need it as well (Middleware).
+	{"/api/v1/api-keys", FeatureAPIAccess},
 	{"/api/v1/exports", FeatureExportCSV},
 	{"/api/v1/export", FeatureExportCSV},
 	{"/api/v1/topology", FeatureTopology},
@@ -57,6 +72,13 @@ var gatedRoutes = []struct {
 	{"/scim/v2", FeatureIGA},
 	{"/api/v1/ai", FeatureAI},
 }
+
+// coreRoutes are core paths below a gated prefix. The review queue is
+// cmdb_core (REC-08: CI merges open review items as well): its deprecated
+// alias below /api/v1/discovery follows its successor /api/v1/review-items
+// and GraphQL reviewInbox (F-400). Resolving a scope_suggested item needs
+// the discovery feature in the discovery effect instead.
+var coreRoutes = []string{"/api/v1/discovery/review-items"}
 
 // gatedSuffixes gate sub-resources of core resources (/api/v1/cis/{id}/...).
 var gatedSuffixes = []struct {
@@ -106,6 +128,11 @@ func RequiredFeature(path string) (string, bool) {
 	if path == "/api/v1/collectors/enroll" {
 		return "", false
 	}
+	for _, prefix := range coreRoutes {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") || strings.HasPrefix(path, prefix+"?") {
+			return "", false
+		}
+	}
 	for _, route := range gatedRoutes {
 		if path == route.prefix || strings.HasPrefix(path, route.prefix+"/") || strings.HasPrefix(path, route.prefix+"?") {
 			return route.feature, true
@@ -122,12 +149,16 @@ func RequiredFeature(path string) (string, bool) {
 // Middleware blocks requests to features the organization is not entitled
 // to (ENT-03, ENT-05). After the discovery license expired only ingest and
 // new scans are refused (CH21, ENT-07); the collector heartbeat keeps
-// working so the collector learns that it is paused. It must run after the
-// tenant middleware so the organization is known.
+// working so the collector learns that it is paused. A request
+// authenticated with an API key needs api_access on every path; a session
+// does not (F-070). It must run after the auth and tenant middleware so the
+// principal and the organization are known.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		feature, gated := RequiredFeature(r.URL.Path)
-		if !gated {
+		principal, _ := identity.PrincipalFromContext(r.Context())
+		apiKey := principal.Type == identity.PrincipalTypeAPIKey
+		if !gated && !apiKey {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -135,6 +166,23 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		orgID := tenant.FromContext(r.Context()).OrganizationID
 		if orgID == "" {
 			api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+			return
+		}
+
+		if apiKey && feature != FeatureAPIAccess {
+			_, ok, err := s.Check(r.Context(), orgID, FeatureAPIAccess)
+			if err != nil {
+				api.WriteError(w, http.StatusInternalServerError, "Internal Error", "entitlement lookup failed")
+				return
+			}
+			if !ok {
+				notEntitled := &FeatureNotEntitledError{FeatureKey: FeatureAPIAccess}
+				api.WriteProblem(w, http.StatusForbidden, notEntitled.ProblemType(), "Forbidden", notEntitled.Error())
+				return
+			}
+		}
+		if !gated {
+			next.ServeHTTP(w, r)
 			return
 		}
 

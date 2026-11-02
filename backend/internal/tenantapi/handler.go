@@ -1,9 +1,13 @@
 package tenantapi
 
 import (
+	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -76,13 +80,17 @@ func writeWriteError(w http.ResponseWriter, err error, notFound string) {
 
 // writeCreateError reports a failed create of a building or room: field
 // errors and conflicts with their field (LOC-04, LOC-05), database errors
-// sanitized, an unknown or invisible parent as 400.
+// sanitized, an unknown or invisible parent as 400. Other repository
+// errors go to the log only (API-03).
 func writeCreateError(w http.ResponseWriter, err error) {
 	switch {
 	case writeFieldError(w, err):
 	case api.WriteDBError(w, err):
+	case err.Error() == "not found", strings.HasSuffix(err.Error(), " not found"):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "the parent site or building was not found")
 	default:
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		slog.Warn("create of a building or room failed", "error", err)
+		api.WriteRepoError(w, err)
 	}
 }
 
@@ -103,10 +111,18 @@ func (h *Handler) GetOrganization(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateOrganization handles PATCH /api/v1/org: name, settings, IANA time
-// zone, ISO 4217 currency and BCP 47 locale (canonicalized).
+// zone, ISO 4217 currency and BCP 47 locale (canonicalized), and the AI
+// opt-in (AI-02). Every field belongs to the whole organization and is
+// inherited by all its clients, so only an org-wide holder of user:manage
+// changes any of them (RBA-03, F-359); the route authorization accepts any
+// scope of user:manage, so the check is here, before the body is read.
 func (h *Handler) UpdateOrganization(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOrUnauthorized(w, r)
 	if !ok {
+		return
+	}
+	if !identity.HoldsOrgWide(r.Context(), identity.PermUserManage) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "only a holder of user:manage for the whole organization may change the organization")
 		return
 	}
 	var req UpdateOrganizationRequest
@@ -525,10 +541,15 @@ func (h *Handler) GetRoom(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "room not found")
 		return
 	}
+	w.Header().Set("ETag", RoomETag(rm))
 	api.WriteJSON(w, http.StatusOK, rm)
 }
 
-// UpdateRoom handles PATCH /api/v1/rooms/{id}
+// UpdateRoom handles PATCH /api/v1/rooms/{id}. The layout is checked for
+// range and CI keys (422, F-341) and replaces only the positions the caller
+// sees (F-427, see mergeLayout); If-Match with the room's ETag refuses a
+// room changed since with 409, a PATCH without If-Match stays allowed
+// (F-342). The answer carries the new ETag.
 func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOrUnauthorized(w, r)
 	if !ok {
@@ -539,11 +560,25 @@ func (h *Handler) UpdateRoom(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	version, present, err := api.ParseIfMatch(r)
+	if err != nil {
+		api.WritePreconditionFailed(w, "If-Match is not an ETag of the room")
+		return
+	}
+	if present && version != api.IfMatchAny {
+		at := time.UnixMicro(version).UTC()
+		req.IfMatch = &at
+	}
+	if err = validateLayoutRange(req.Layout); err != nil {
+		writeFieldError(w, err)
+		return
+	}
 	rm, err := h.repo.UpdateRoom(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		writeWriteError(w, err, "room not found")
 		return
 	}
+	w.Header().Set("ETag", RoomETag(rm))
 	api.WriteJSON(w, http.StatusOK, rm)
 }
 

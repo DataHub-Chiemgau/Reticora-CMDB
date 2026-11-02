@@ -1,16 +1,25 @@
 package relationship
 
 import (
+	"cmp"
 	"context"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,6 +52,9 @@ type PGRepository struct {
 	// bulkFrontier is the frontier size beyond which a traversal reads every
 	// edge of the organization at once instead of the next level.
 	bulkFrontier int
+	// outbox receives relationship.created and relationship.removed
+	// (WithEvents).
+	outbox *events.Outbox
 }
 
 // DefaultBulkFrontier: a traversal whose frontier exceeds this many nodes
@@ -61,6 +73,33 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 func (r *PGRepository) WithBulkFrontier(n int) *PGRepository {
 	r.bulkFrontier = max(n, 0)
 	return r
+}
+
+// WithEvents makes Create, Delete and DeleteWithPolicy write
+// relationship.created and relationship.removed into the outbox of their
+// transaction (EVT-01, EVT-02): a refused or rolled back mutation leaves no
+// event.
+func (r *PGRepository) WithEvents(outbox *events.Outbox) *PGRepository {
+	r.outbox = outbox
+	return r
+}
+
+// recordEvent writes the event of an edge mutation in tx, with the edge as
+// written or deleted as data: in a context transaction (the discovery
+// ingest) right before its commit, after every other write, else at once
+// (database.BeforeCommit: the outbox takes an organization-wide lock until
+// the commit, WP-334).
+func (r *PGRepository) recordEvent(ctx context.Context, tx pgx.Tx, eventType string, rel *Relationship) error {
+	if r.outbox == nil {
+		return nil
+	}
+	// The caller may change its edge before a later commit.
+	edge := *rel
+	edge.Attributes = maps.Clone(rel.Attributes)
+	return database.BeforeCommit(ctx, func() error {
+		_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: edge.OrganizationID, Type: eventType, EntityID: edge.ID, Data: &edge})
+		return err
+	})
 }
 
 // visibleEndpoints restricts relationship rows to edges whose source and
@@ -98,28 +137,76 @@ const graphEdges = `(
 	FROM ci_structure_edge WHERE rel_type = 'contains'
 )`
 
+// listEdges is the edge set List counts and pages: the stored relationships
+// of the organization ($1) with visible endpoints and the projected ones,
+// with byCI those of the CI $2.
+//
+// The edges of one CI are one arm per end of the edge, in the stored and
+// in the projected edges (WP-609): source = $2, and target = $2 for edges
+// whose source is another CI, so an edge of the CI to itself is listed
+// once. As an equality the CI reaches every branch of ci_structure_edge
+// and the join with ci src. An OR of both ends stays a filter above the
+// projection; with RLS the planner estimates one visible CI and, once
+// rack_mount is large (it holds the mounts of all organizations), joins
+// every CI of the organization with the projection (NFR-02).
+//
+// filters (the further filters of GET /api/v1/relationships, F-402) is
+// appended to every arm as equalities, so each reaches its branch of the
+// projection as well.
+func listEdges(byCI bool, filters string) string {
+	stored := `
+			SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
+			       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
+			       source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at,
+			       false AS projected, NULL::uuid AS target_location_id
+			FROM ci_relationship WHERE organization_id = $1 AND ` + visibleEndpoints
+	projected := `
+			SELECT * FROM (` + projectedEdges + `) p WHERE p.organization_id = $1`
+	arms := []string{stored, projected}
+	if byCI {
+		arms = make([]string, 0, 4)
+		for _, edges := range []string{stored, projected} {
+			arms = append(arms,
+				edges+` AND source_ci_id = $2`,
+				edges+` AND target_ci_id = $2 AND source_ci_id IS DISTINCT FROM $2`)
+		}
+	}
+	for i := range arms {
+		arms[i] += filters
+	}
+	return strings.Join(arms, `
+			UNION ALL`)
+}
+
 // List returns the relationships of the organization (of one CI when ciID
 // is set): the stored ones and, after them, the projected structural ones.
 func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
+	return r.ListFiltered(ctx, orgID, ListFilter{CIID: ciID}, page)
+}
+
+// ListFiltered is List with the filters of GET /api/v1/relationships
+// (F-402): the CI at either end, at the source or the target end, and the
+// type. The CI ids are UUIDs (checked by the handler); the edges stay those
+// of the caller's tenant scope (RLS on ci_relationship and ci).
+func (r *PGRepository) ListFiltered(ctx context.Context, orgID string, filter ListFilter, page api.PaginationParams) ([]Relationship, int, error) {
 	items := make([]Relationship, 0)
 	var total int
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		args := []any{orgID}
-		ciFilter := "true"
-		if ciID != "" {
-			ciFilter = "(source_ci_id = $2 OR target_ci_id = $2)"
-			args = append(args, ciID)
+		if filter.CIID != "" {
+			args = append(args, filter.CIID)
 		}
-		edges := fmt.Sprintf(`
-			SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
-			       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
-			       source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at,
-			       false AS projected, NULL::uuid AS target_location_id
-			FROM ci_relationship WHERE organization_id = $1 AND %s AND %s
-			UNION ALL
-			SELECT * FROM (%s) p WHERE p.organization_id = $1 AND %s`,
-			visibleEndpoints, ciFilter, projectedEdges, ciFilter)
+		var filters strings.Builder
+		for _, f := range []struct{ column, value string }{
+			{"source_ci_id", filter.SourceCIID}, {"target_ci_id", filter.TargetCIID}, {"rel_type", filter.RelType},
+		} {
+			if f.value != "" {
+				args = append(args, f.value)
+				fmt.Fprintf(&filters, ` AND %s = $%d`, f.column, len(args))
+			}
+		}
+		edges := listEdges(filter.CIID != "", filters.String())
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ("+edges+") e", args...).Scan(&total); err != nil {
 			return fmt.Errorf("count relationships: %w", err)
 		}
@@ -162,37 +249,63 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		if rel.Source == "" {
 			rel.Source = "manual"
 		}
+		// The endpoints are checked under the caller's scope in the same
+		// statement as the insert: a CI the caller cannot see (another
+		// organization, a client or site outside the scope, an unknown id)
+		// or a soft-deleted CI (CI-05, F-424) inserts nothing and is named
+		// by its sentinel (F-145). With
+		// checkTypeLists the type of a visible end must be in the allowed
+		// list of the relationship type the caller sees (the organization's
+		// shadows the system one); an empty list allows every type (E-95,
+		// F-313).
 		query := `
-			INSERT INTO ci_relationship (
-				organization_id,
-				source_ci_id,
-				target_ci_id,
-				rel_type,
-				attributes,
-				source,
-				confidence,
-				first_seen_at,
-				last_seen_at,
-				verification_state,
-				source_system,
-				notes,
-				source_interface_id,
-				target_interface_id,
-				last_confirmed_at,
-				verified_by,
-				verified_at
+			WITH rel_type AS (
+				SELECT allowed_source_types, allowed_target_types FROM relationship_type
+				WHERE key = $4 AND $16::boolean ORDER BY organization_id NULLS LAST LIMIT 1
+			), ends AS (
+				SELECT EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid AND ci.deleted_at IS NULL) AS source_visible,
+				       EXISTS (SELECT 1 FROM ci WHERE ci.id = $3::uuid AND ci.deleted_at IS NULL) AS target_visible,
+				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $2::uuid LEFT JOIN ci_type t ON t.id = ci.ci_type_id
+				                   WHERE jsonb_array_length(rel_type.allowed_source_types) > 0
+				                     AND NOT COALESCE(rel_type.allowed_source_types ? t.key, false)) AS source_allowed,
+				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $3::uuid LEFT JOIN ci_type t ON t.id = ci.ci_type_id
+				                   WHERE jsonb_array_length(rel_type.allowed_target_types) > 0
+				                     AND NOT COALESCE(rel_type.allowed_target_types ? t.key, false)) AS target_allowed
+			), created AS (
+				INSERT INTO ci_relationship (
+					organization_id,
+					source_ci_id,
+					target_ci_id,
+					rel_type,
+					attributes,
+					source,
+					confidence,
+					first_seen_at,
+					last_seen_at,
+					verification_state,
+					source_system,
+					notes,
+					source_interface_id,
+					target_interface_id,
+					last_confirmed_at,
+					verified_by,
+					verified_at
+				)
+				SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::jsonb, $6::text, $7::numeric,
+					$8::timestamptz, $9::timestamptz, $10::text, $11::text, $12::text,
+					$13::uuid, $14::uuid, now(),
+					(SELECT id FROM app_user WHERE id::text = $15::text),
+					CASE WHEN $10::text = 'verified' THEN now() END
+				FROM ends WHERE ends.source_visible AND ends.target_visible AND ends.source_allowed AND ends.target_allowed
+				RETURNING id::text AS id, created_at, updated_at, last_confirmed_at,
+					COALESCE(verified_by::text, '') AS verified_by, verified_at
 			)
-			SELECT $1::uuid, $2::uuid, $3::uuid, $4::text, $5::jsonb, $6::text, $7::numeric,
-				$8::timestamptz, $9::timestamptz, $10::text, $11::text, $12::text,
-				$13::uuid, $14::uuid, now(),
-				(SELECT id FROM app_user WHERE id::text = $15::text),
-				CASE WHEN $10::text = 'verified' THEN now() END
-			WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = $2)
-			  AND EXISTS (SELECT 1 FROM ci WHERE ci.id = $3)
-			RETURNING id::text, created_at, updated_at, last_confirmed_at, COALESCE(verified_by::text, ''), verified_at
+			SELECT ends.source_visible, ends.target_visible, ends.source_allowed, ends.target_allowed, created.*
+			FROM ends LEFT JOIN created ON true
 		`
-		var createdAt, updatedAt, confirmedAt time.Time
-		var verifiedAt *time.Time
+		var sourceVisible, targetVisible, sourceAllowed, targetAllowed bool
+		var id, verifiedBy *string
+		var createdAt, updatedAt, confirmedAt, verifiedAt *time.Time
 		firstSeen := any(nil)
 		if rel.Source != "manual" {
 			firstSeen = time.Now().UTC()
@@ -217,17 +330,36 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 			nilIfEmptyStr(rel.SourceInterfaceID),
 			nilIfEmptyStr(rel.TargetInterfaceID),
 			rel.VerifiedBy,
-		).Scan(&rel.ID, &createdAt, &updatedAt, &confirmedAt, &rel.VerifiedBy, &verifiedAt); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
-			}
+			rel.checkTypeLists,
+		).Scan(&sourceVisible, &targetVisible, &sourceAllowed, &targetAllowed,
+			&id, &createdAt, &updatedAt, &confirmedAt, &verifiedBy, &verifiedAt); err != nil {
 			return fmt.Errorf("create relationship: %w", err)
 		}
-		rel.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
-		rel.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
-		rel.LastConfirmedAt = confirmedAt.UTC().Format(time.RFC3339Nano)
+		var refused []error
+		switch {
+		case !sourceVisible:
+			refused = append(refused, ErrSourceCINotFound)
+		case !sourceAllowed:
+			refused = append(refused, ErrSourceCITypeNotAllowed)
+		}
+		switch {
+		case !targetVisible:
+			refused = append(refused, ErrTargetCINotFound)
+		case !targetAllowed:
+			refused = append(refused, ErrTargetCITypeNotAllowed)
+		}
+		if len(refused) > 0 {
+			return errors.Join(refused...)
+		}
+		if id == nil {
+			return fmt.Errorf("create relationship: no row inserted")
+		}
+		rel.ID, rel.VerifiedBy = *id, *verifiedBy
+		rel.CreatedAt = formatTime(createdAt)
+		rel.UpdatedAt = formatTime(updatedAt)
+		rel.LastConfirmedAt = formatTime(confirmedAt)
 		rel.VerifiedAt = formatTime(verifiedAt)
-		return nil
+		return r.recordEvent(ctx, tx, events.RelationshipCreated, rel)
 	})
 }
 
@@ -240,7 +372,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		args := []any{id, orgID}
 		pos := 3
 		if req.Attributes != nil {
-			sets = append(sets, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || $%d", pos))
+			// The stored provenance stays: actor and time of the edge are
+			// recorded by the system (REL-08, F-270).
+			sets = append(sets, fmt.Sprintf("attributes = COALESCE(attributes, '{}'::jsonb) || ($%d::jsonb - '%s')", pos, ProvenanceAttribute))
 			args = append(args, req.Attributes)
 			pos++
 		}
@@ -291,164 +425,656 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND "+visibleEndpoints, id, orgID)
+		deleted, err := scanRelationship(tx.QueryRow(ctx, "DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2 AND "+
+			visibleEndpoints+" RETURNING "+relationshipSelectColumns, id, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
-		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
-		}
-		return nil
+		return r.recordEvent(ctx, tx, events.RelationshipRemoved, deleted)
 	})
 }
 
 // DeleteWithPolicy implements PolicyDeleter: a discovery edge is deleted
 // only with force and then recorded in relationship_suppression for its
-// CIs and type, so discovery does not recreate it (REL-03, REL-04); other
+// CIs and type, with the actor and the reason, so discovery does not
+// recreate it (REL-03, REL-04); the new suppression is audited
+// (relationship.suppression_created, F-273) in the same transaction. Other
 // edges are deleted as asked.
-func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, force bool) error {
+func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, opts DeleteOptions) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var source, relType, src, dst string
-		err := tx.QueryRow(ctx, `SELECT source, rel_type, source_ci_id::text, target_ci_id::text FROM ci_relationship
-			WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID).Scan(&source, &relType, &src, &dst)
+		edge, err := scanRelationship(tx.QueryRow(ctx, `SELECT `+relationshipSelectColumns+` FROM ci_relationship
+			WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("not found")
+			return api.ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
-		if source == "discovery" && !force {
+		source, relType, src, dst := edge.Source, edge.RelType, edge.SourceCIID, edge.TargetCIID
+		if source == "discovery" && !opts.Force {
 			return ErrForceRequired
 		}
 		if _, err = tx.Exec(ctx, `DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2`, id, orgID); err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
 		if source != "discovery" {
-			return nil
+			return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
 		}
-		tag, err := tx.Exec(ctx, `INSERT INTO relationship_suppression (organization_id, source_ci_id, target_ci_id, relationship_type_id)
-			SELECT $1, $2, $3, rt.id FROM relationship_type rt
+		// created_by is the acting user of the organization (none for a
+		// principal without user, read under RLS like verified_by).
+		var suppressionID, createdBy string
+		err = tx.QueryRow(ctx, `INSERT INTO relationship_suppression (organization_id, source_ci_id, target_ci_id, relationship_type_id,
+				created_by, reason)
+			SELECT $1, $2, $3, rt.id, (SELECT u.id FROM app_user u WHERE u.id::text = $5::text AND u.organization_id = $1), NULLIF($6::text, '')
+			FROM relationship_type rt
 			WHERE rt.key = $4 AND (rt.organization_id = $1 OR rt.organization_id IS NULL)
 			ORDER BY rt.organization_id NULLS LAST LIMIT 1
-			ON CONFLICT (organization_id, source_ci_id, target_ci_id, relationship_type_id) DO NOTHING`, orgID, src, dst, relType)
-		if err != nil {
-			return fmt.Errorf("suppress relationship: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
+			ON CONFLICT (organization_id, source_ci_id, target_ci_id, relationship_type_id) DO NOTHING
+			RETURNING id::text, COALESCE(created_by::text, '')`, orgID, src, dst, relType, opts.Actor.ID, opts.Reason).
+			Scan(&suppressionID, &createdBy)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
 			// The type has no relationship_type row, or the edge was
 			// suppressed already; without a row the deletion would not
-			// stick, so it is refused.
+			// stick, so it is refused (ErrSuppressionType, 422).
 			var exists bool
 			if qerr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM relationship_suppression s JOIN relationship_type rt ON rt.id = s.relationship_type_id
 				WHERE s.organization_id = $1 AND s.source_ci_id = $2 AND s.target_ci_id = $3 AND rt.key = $4)`, orgID, src, dst, relType).Scan(&exists); qerr != nil {
-				return qerr
+				return fmt.Errorf("suppress relationship: %w", qerr)
 			}
 			if !exists {
-				return fmt.Errorf("suppress relationship: unknown relationship type %q", relType)
+				return fmt.Errorf("suppress relationship %q: %w", relType, ErrSuppressionType)
+			}
+		case err != nil:
+			return fmt.Errorf("suppress relationship: %w", err)
+		default:
+			changes := map[string]any{"relationship_id": edge.ID, "source_ci_id": src, "target_ci_id": dst, "rel_type": relType,
+				"relationship_source": source}
+			if opts.Reason != "" {
+				changes["reason"] = opts.Reason
+			}
+			if createdBy != "" {
+				changes["created_by"] = createdBy
+			}
+			if auditErr := recordSuppressionAudit(ctx, tx, orgID, ActionSuppressionCreated, suppressionID, opts.Actor, changes); auditErr != nil {
+				return auditErr
 			}
 		}
-		return nil
+		return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
 	})
 }
 
-// TraverseFrom walks the configuration graph from rootCIID breadth first,
-// one edge read per hop, under the caller's full tenant scope (RLS on ci and
-// ci_relationship). Each node is expanded once, so a walk costs at most two
-// statements per hop and reads each edge at most twice, whatever cycles the
-// graph has (NFR-02, WP-206; the former recursive CTE re-expanded every node
-// at every depth). Once a level reaches more than bulkFrontier CIs, the walk
-// reads every edge of the organization in one statement instead of the
-// further levels (organizationEdges, WP-335): the statements of a walk then
-// no longer grow with the graph. The walk only passes through CIs that are
-// visible and not deleted: the CIs a level reaches are checked against ci
-// under the same scope, and an edge is followed only when both endpoints
-// passed, so an invisible or deleted intermediate node never connects
-// visible ones (IMP-07). The result follows SelectTraversal, the semantics
-// the memory repository shares.
-func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
-	if maxDepth < 1 || maxNodes < 1 {
-		return make([]Relationship, 0), nil
+// recordSuppressionAudit appends the audit entry of a suppression change
+// (F-273) in tx: who (the actor), what (action, the suppression) and its
+// values. The entry of the request makes the route audit write none of its
+// own; for the forced deletion it names the deleted edge as well.
+func recordSuppressionAudit(ctx context.Context, tx pgx.Tx, orgID, action, suppressionID string, actor Actor, changes map[string]any) error {
+	actorType := actor.Type
+	if actorType == "" {
+		actorType = "user"
 	}
-	var edges []edgeRow
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID, ActorID: actor.ID, ActorType: actorType, Action: action,
+		ResourceType: "relationship_suppression", ResourceID: suppressionID, Changes: changes,
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", action, err)
+	}
+	return nil
+}
+
+// suppressionVisible restricts relationship_suppression rows (alias s) to
+// those whose source and target CI are both visible under the transaction's
+// tenant scope, like visibleEndpoints for edges.
+const suppressionVisible = `EXISTS (SELECT 1 FROM ci WHERE ci.id = s.source_ci_id)
+	AND EXISTS (SELECT 1 FROM ci WHERE ci.id = s.target_ci_id)`
+
+// ListSuppressions implements SuppressionStore under the caller's full
+// tenant scope (RLS on relationship_suppression and ci).
+func (r *PGRepository) ListSuppressions(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Suppression, int, error) {
+	items := make([]Suppression, 0)
+	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var rootVisible bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $2 AND organization_id = $1 AND deleted_at IS NULL)`,
-			orgID, rootCIID).Scan(&rootVisible); err != nil {
-			return fmt.Errorf("traverse relationships: %w", err)
+		where := `s.organization_id = $1 AND ` + suppressionVisible
+		args := []any{orgID}
+		if ciID != "" {
+			where += ` AND (s.source_ci_id = $2::uuid OR s.target_ci_id = $2::uuid)`
+			args = append(args, ciID)
 		}
-		if !rootVisible {
-			return nil
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM relationship_suppression s WHERE `+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count suppressions: %w", err)
 		}
-		// A wide level reaches most of the graph: one read of all edges
-		// replaces the further levels, and the selection re-derives the
-		// walk from it.
-		readAll := func() error {
-			var err error
-			edges, err = organizationEdges(ctx, tx, orgID)
-			return err
+		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT s.id::text, s.organization_id::text, s.source_ci_id::text, s.target_ci_id::text,
+				COALESCE(rt.key, ''), COALESCE(s.reason, ''), COALESCE(s.created_by::text, ''), s.created_at
+			FROM relationship_suppression s LEFT JOIN relationship_type rt ON rt.id = s.relationship_type_id
+			WHERE %s ORDER BY s.created_at DESC, s.id LIMIT $%d OFFSET $%d`, where, len(args)+1, len(args)+2),
+			append(args, page.Limit, page.Offset)...)
+		if err != nil {
+			return fmt.Errorf("list suppressions: %w", err)
 		}
-		// visible holds every CI checked so far, true when it is visible
-		// and not deleted; a CI is checked in the level that reaches it.
-		visible := map[string]bool{rootCIID: true}
-		seenEdge := map[string]bool{}
-		reached := 1
-		frontier := []string{rootCIID}
-		hops := maxDepth
-		for hop := 0; hop < hops && len(frontier) > 0; hop++ {
-			if len(frontier) > r.bulkFrontier {
-				return readAll()
+		defer rows.Close()
+		for rows.Next() {
+			var s Suppression
+			var createdAt time.Time
+			if err := rows.Scan(&s.ID, &s.OrganizationID, &s.SourceCIID, &s.TargetCIID, &s.RelType, &s.Reason, &s.CreatedBy, &createdAt); err != nil {
+				return fmt.Errorf("scan suppression: %w", err)
 			}
-			level, err := frontierEdges(ctx, tx, orgID, frontier)
-			if err != nil {
-				return err
-			}
-			var unchecked []string
-			fresh := level[:0]
-			for i := range level {
-				if seenEdge[level[i].id] {
-					continue
-				}
-				seenEdge[level[i].id] = true
-				fresh = append(fresh, level[i])
-				for _, id := range []string{level[i].sourceCIID, level[i].targetCIID} {
-					if _, checked := visible[id]; !checked && id != "" {
-						visible[id] = false
-						unchecked = append(unchecked, id)
-					}
-				}
-			}
-			if len(unchecked) > r.bulkFrontier && hop+1 < hops {
-				return readAll()
-			}
-			if err := visibleCIs(ctx, tx, orgID, unchecked, visible); err != nil {
-				return err
-			}
-			for i := range fresh {
-				if visible[fresh[i].sourceCIID] && visible[fresh[i].targetCIID] {
-					edges = append(edges, fresh[i])
-				}
-			}
-			var next []string
-			for _, id := range unchecked {
-				if visible[id] {
-					next = append(next, id)
-				}
-			}
-			reached += len(next)
-			// Beyond the node limit the walk ends after collecting the
-			// edges of the nodes just reached: nodes further away are
-			// dropped by the limit anyway.
-			if reached > maxNodes && len(next) > 0 {
-				hops = min(hops, hop+2)
-			}
-			frontier = next
+			s.CreatedAt = formatTime(&createdAt)
+			items = append(items, s)
 		}
-		return nil
+		return rows.Err()
+	})
+	return items, total, err
+}
+
+// LiftSuppression implements SuppressionStore: the suppression is deleted
+// under the caller's full tenant scope and audited
+// (relationship.suppression_lifted) in the same transaction.
+func (r *PGRepository) LiftSuppression(ctx context.Context, orgID, id string, actor Actor) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var src, dst, relType, reason, createdBy string
+		var createdAt time.Time
+		err := tx.QueryRow(ctx, `WITH lifted AS (
+				DELETE FROM relationship_suppression s WHERE s.id = $1 AND s.organization_id = $2 AND `+suppressionVisible+`
+				RETURNING s.source_ci_id, s.target_ci_id, s.relationship_type_id, s.reason, s.created_by, s.created_at
+			)
+			SELECT l.source_ci_id::text, l.target_ci_id::text, COALESCE(rt.key, ''), COALESCE(l.reason, ''),
+				COALESCE(l.created_by::text, ''), l.created_at
+			FROM lifted l LEFT JOIN relationship_type rt ON rt.id = l.relationship_type_id`, id, orgID).
+			Scan(&src, &dst, &relType, &reason, &createdBy, &createdAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lift suppression: %w", err)
+		}
+		changes := map[string]any{"source_ci_id": src, "target_ci_id": dst, "rel_type": relType,
+			"suppressed_at": formatTime(&createdAt)}
+		if reason != "" {
+			changes["reason"] = reason
+		}
+		if createdBy != "" {
+			changes["created_by"] = createdBy
+		}
+		return recordSuppressionAudit(ctx, tx, orgID, ActionSuppressionLifted, id, actor, changes)
+	})
+}
+
+// TraverseFrom walks the configuration graph from rootCIID like WalkFrom and
+// returns the kept edges as relationships, ordered by id. The result follows
+// SelectTraversal, the semantics the memory repository shares.
+func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) ([]Relationship, error) {
+	walk, err := r.WalkFrom(ctx, orgID, rootCIID, maxDepth, maxNodes)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Relationship, 0, len(walk.Edges))
+	for i := range walk.Edges {
+		e := &walk.Edges[i]
+		result = append(result, Relationship{ID: e.ID, SourceCIID: walk.CIs[e.SourceCI], TargetCIID: walk.CIs[e.TargetCI],
+			RelType: e.RelType, Source: e.Source})
+	}
+	return result, nil
+}
+
+// WalkFrom implements Walker. It walks the configuration graph from
+// rootCIID breadth first, one edge read per hop, under the caller's full
+// tenant scope (RLS on ci and ci_relationship). Each node is expanded once,
+// so a walk costs at most two statements per hop and reads each edge at
+// most twice, whatever cycles the graph has (NFR-02, WP-206; the former
+// recursive CTE re-expanded every node at every depth). Once a level
+// reaches more than bulkFrontier CIs, the walk reads every edge of the
+// organization in one statement instead of the further levels (WP-335):
+// the statements of a walk then no longer grow with the graph. The walk
+// only passes through CIs that are visible and not deleted: the CIs a level
+// reaches are checked against ci under the same scope, the root with the
+// first of them, and an edge is followed only when both endpoints passed,
+// so an invisible or deleted intermediate node never connects visible ones
+// (IMP-07). The result follows SelectTraversal.
+//
+// The walk reads only what it needs of an edge (id, source, target, type
+// and origin), the ids in their binary form, and works on CI numbers: the
+// adjacency, the hop distances and the selection are slices indexed by
+// number instead of maps keyed by id strings (NFR-02, WP-611). Only the CIs
+// and edges it returns get their text form.
+func (r *PGRepository) WalkFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) (*Walk, error) {
+	if maxDepth < 1 || maxNodes < 1 {
+		return &Walk{CIs: []string{rootCIID}, Edges: []WalkEdge{}}, nil
+	}
+	var root pgtype.UUID
+	if err := root.Scan(rootCIID); err != nil {
+		return nil, fmt.Errorf("traverse relationships: root: %w", err)
+	}
+	g := newWalkGraph(root.Bytes)
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return r.walk(ctx, tx, orgID, g, maxDepth, maxNodes)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return selectEdgeRows(rootCIID, edges, maxDepth, maxNodes), nil
+	return g.selectWalk(maxDepth, maxNodes), nil
+}
+
+// walk reads the edges and CIs of a walk from the root (number 0) into g.
+func (r *PGRepository) walk(ctx context.Context, tx pgx.Tx, orgID string, g *walkGraph, maxDepth, maxNodes int) error {
+	// A wide level reaches most of the graph: one read of all edges
+	// replaces the further levels, and the selection re-derives the walk
+	// from it. The edges come first, then the CIs, so an edge to a CI
+	// deleted or moved out of the scope in between is dropped.
+	readAll := func() error {
+		edges, err := g.readEdges(ctx, tx, `SELECT `+walkSelectColumns+` FROM `+graphEdges+` r WHERE r.organization_id = $1`, orgID)
+		if err != nil {
+			return err
+		}
+		g.edges = edges
+		return g.checkOrganization(ctx, tx, orgID)
+	}
+	seenEdge := map[edgeKey]struct{}{}
+	reached := 1
+	frontier := []int32{0}
+	hops := maxDepth
+	for hop := 0; hop < hops && len(frontier) > 0; hop++ {
+		if len(frontier) > r.bulkFrontier {
+			return readAll()
+		}
+		ids := make([]uuid, len(frontier))
+		for i, n := range frontier {
+			ids[i] = g.ids[n]
+		}
+		// The edge reads carry no join with ci: the edge rows pass the RLS
+		// of ci_relationship and of the security_invoker view
+		// ci_structure_edge, which leave edges to CIs outside the scope or
+		// deleted ones (and the parent of a containment) unchecked. The
+		// CIs read afterwards under the same scope close that gap (IMP-07).
+		level, err := g.readEdges(ctx, tx, `SELECT `+walkSelectColumns+` FROM `+graphEdges+` r
+			WHERE r.organization_id = $1 AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))`, orgID, ids)
+		if err != nil {
+			return err
+		}
+		// The CIs this level reaches first; the root is checked with them.
+		var unchecked []int32
+		fresh := level[:0]
+		for i := range level {
+			if _, seen := seenEdge[level[i].id]; seen {
+				continue
+			}
+			seenEdge[level[i].id] = struct{}{}
+			fresh = append(fresh, level[i])
+			for _, n := range [2]int32{level[i].source, level[i].target} {
+				if g.state[n] == ciUnchecked && n != 0 {
+					g.state[n] = ciHidden
+					unchecked = append(unchecked, n)
+				}
+			}
+		}
+		if len(unchecked) > r.bulkFrontier && hop+1 < hops {
+			return readAll()
+		}
+		check := unchecked
+		if g.state[0] == ciUnchecked {
+			check = append([]int32{0}, unchecked...)
+		}
+		if err := g.checkCIs(ctx, tx, orgID, check); err != nil {
+			return err
+		}
+		if g.state[0] != ciVisible {
+			return nil
+		}
+		for i := range fresh {
+			if g.state[fresh[i].source] == ciVisible && g.state[fresh[i].target] == ciVisible {
+				g.edges = append(g.edges, fresh[i])
+			}
+		}
+		next := unchecked[:0]
+		for _, n := range unchecked {
+			if g.state[n] == ciVisible {
+				next = append(next, n)
+			}
+		}
+		reached += len(next)
+		// Beyond the node limit the walk ends after collecting the edges
+		// of the nodes just reached: nodes further away are dropped by the
+		// limit anyway.
+		if reached > maxNodes && len(next) > 0 {
+			hops = min(hops, hop+2)
+		}
+		frontier = next
+	}
+	return nil
+}
+
+// walkSelectColumns are the columns a walk reads of an edge: the ids in
+// their binary form (readEdges).
+const walkSelectColumns = `r.id, r.source_ci_id, r.target_ci_id, r.rel_type, r.source`
+
+// uuid is an id in its binary form.
+type uuid = [16]byte
+
+// ciState is what a walk knows of a CI's visibility.
+type ciState uint8
+
+const (
+	// ciUnchecked: not checked yet.
+	ciUnchecked ciState = iota
+	// ciHidden: not visible under the scope, deleted, or being checked.
+	ciHidden
+	// ciVisible: visible and not deleted.
+	ciVisible
+)
+
+// walkGraph is what a walk reads: every CI it met as a number (the root is
+// 0) with its id and visibility, and the edges with the numbers of their
+// ends. The types and origins of the edges are interned (text).
+type walkGraph struct {
+	number map[uuid]int32
+	ids    []uuid
+	state  []ciState
+	edges  []walkRow
+	text   []string
+	index  map[string]int32
+}
+
+// walkRow is an edge a walk read.
+type walkRow struct {
+	id             edgeKey
+	source, target int32
+	relType        int32
+	origin         int32
+}
+
+// edgeKey is an edge id as its two big-endian halves: compared like the
+// text form, and cheaper to sort than the bytes.
+type edgeKey [2]uint64
+
+func keyOf(id *uuid) edgeKey {
+	return edgeKey{binary.BigEndian.Uint64(id[:8]), binary.BigEndian.Uint64(id[8:])}
+}
+
+func (k edgeKey) uuid() uuid {
+	var id uuid
+	binary.BigEndian.PutUint64(id[:8], k[0])
+	binary.BigEndian.PutUint64(id[8:], k[1])
+	return id
+}
+
+func compareKeys(a, b edgeKey) int {
+	if a[0] != b[0] {
+		return cmp.Compare(a[0], b[0])
+	}
+	return cmp.Compare(a[1], b[1])
+}
+
+func newWalkGraph(root uuid) *walkGraph {
+	g := &walkGraph{number: map[uuid]int32{}, index: map[string]int32{}}
+	g.ci(root)
+	return g
+}
+
+// ci returns the number of the CI id, a new one for a CI not met before.
+func (g *walkGraph) ci(id uuid) int32 {
+	if n, ok := g.number[id]; ok {
+		return n
+	}
+	n := int32(len(g.ids))
+	g.number[id] = n
+	g.ids = append(g.ids, id)
+	g.state = append(g.state, ciUnchecked)
+	return n
+}
+
+// intern returns the number of a type or origin; the lookup of raw does
+// not copy it.
+func (g *walkGraph) intern(raw []byte) int32 {
+	if n, ok := g.index[string(raw)]; ok {
+		return n
+	}
+	s := string(raw)
+	n := int32(len(g.text))
+	g.index[s] = n
+	g.text = append(g.text, s)
+	return n
+}
+
+// readEdges reads the edges of query (walkSelectColumns) from the raw rows
+// and gives the CIs at their ends numbers.
+func (g *walkGraph) readEdges(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]walkRow, error) {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("traverse relationships: %w", err)
+	}
+	defer rows.Close()
+	var edges []walkRow
+	var formats []pgconn.FieldDescription
+	for rows.Next() {
+		if formats == nil {
+			formats = rows.FieldDescriptions()
+		}
+		raw := rows.RawValues()
+		if len(raw) != 5 || raw[3] == nil || raw[4] == nil {
+			return nil, errors.New("scan traversed relationship: unexpected row")
+		}
+		var ids [3]uuid
+		for i := range ids {
+			if ids[i], err = uuidValue(raw[i], formats[i].Format); err != nil {
+				return nil, fmt.Errorf("scan traversed relationship: %w", err)
+			}
+		}
+		e := walkRow{id: keyOf(&ids[0]), source: g.ci(ids[1]), target: g.ci(ids[2])}
+		e.relType, e.origin = g.intern(raw[3]), g.intern(raw[4])
+		edges = append(edges, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan traversed relationship: %w", err)
+	}
+	return edges, nil
+}
+
+// checkCIs marks those of the CIs nums that are visible, not deleted CIs
+// under the transaction's scope; the others are hidden.
+func (g *walkGraph) checkCIs(ctx context.Context, tx pgx.Tx, orgID string, nums []int32) error {
+	if len(nums) == 0 {
+		return nil
+	}
+	ids := make([]uuid, len(nums))
+	for i, n := range nums {
+		ids[i] = g.ids[n]
+		g.state[n] = ciHidden
+	}
+	return g.markVisible(ctx, tx, `SELECT id FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`, orgID, ids)
+}
+
+// checkOrganization reads the visible, not deleted CIs of the organization
+// and marks the CIs of g by them.
+func (g *walkGraph) checkOrganization(ctx context.Context, tx pgx.Tx, orgID string) error {
+	for n := range g.state {
+		g.state[n] = ciHidden
+	}
+	return g.markVisible(ctx, tx, `SELECT id FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID)
+}
+
+// markVisible marks the CIs of g among the ids query returns visible.
+func (g *walkGraph) markVisible(ctx context.Context, tx pgx.Tx, query string, args ...any) error {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("read visible cis: %w", err)
+	}
+	defer rows.Close()
+	var format int16
+	first := true
+	for rows.Next() {
+		if first {
+			format, first = rows.FieldDescriptions()[0].Format, false
+		}
+		raw := rows.RawValues()
+		if len(raw) != 1 {
+			return errors.New("read visible cis: unexpected row")
+		}
+		id, err := uuidValue(raw[0], format)
+		if err != nil {
+			return fmt.Errorf("read visible cis: %w", err)
+		}
+		if n, ok := g.number[id]; ok {
+			g.state[n] = ciVisible
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read visible cis: %w", err)
+	}
+	return nil
+}
+
+// uuidValue reads a uuid column of a raw row: 16 bytes in the binary
+// format, the text form in the text format.
+func uuidValue(raw []byte, format int16) (uuid, error) {
+	var id uuid
+	switch {
+	case raw == nil:
+		return id, errors.New("null id")
+	case format == pgx.BinaryFormatCode && len(raw) == len(id):
+		copy(id[:], raw)
+		return id, nil
+	case format == pgx.TextFormatCode:
+		var text pgtype.UUID
+		if err := text.Scan(string(raw)); err != nil {
+			return id, err
+		}
+		return text.Bytes, nil
+	}
+	return id, fmt.Errorf("id of %d bytes in format %d", len(raw), format)
+}
+
+// compareUUID orders ids like their text form.
+func compareUUID(a, b *uuid) int {
+	return compareKeys(keyOf(a), keyOf(b))
+}
+
+// formatUUID returns the text form of id as PostgreSQL writes it.
+func formatUUID(id *uuid) string {
+	var b [36]byte
+	hex.Encode(b[0:8], id[0:4])
+	b[8] = '-'
+	hex.Encode(b[9:13], id[4:6])
+	b[13] = '-'
+	hex.Encode(b[14:18], id[6:8])
+	b[18] = '-'
+	hex.Encode(b[19:23], id[8:10])
+	b[23] = '-'
+	hex.Encode(b[24:], id[10:])
+	return string(b[:])
+}
+
+// selectWalk is SelectTraversal on the CI numbers of g: every node gets
+// its hop distance from the root (at most maxDepth); the maxNodes nodes
+// with the smallest distance (ties by id) are kept, and the walk holds each
+// edge between visible kept nodes that leaves a node closer than maxDepth,
+// ordered by id. The CIs are numbered anew in the order the walk reaches
+// them, over the edges in the order of their ids, so the numbering does not
+// depend on the order the rows were read in.
+func (g *walkGraph) selectWalk(maxDepth, maxNodes int) *Walk {
+	walk := &Walk{CIs: []string{formatUUID(&g.ids[0])}, Edges: []WalkEdge{}}
+	if g.state[0] != ciVisible {
+		return walk
+	}
+	edges := g.edges[:0]
+	for i := range g.edges {
+		if g.state[g.edges[i].source] == ciVisible && g.state[g.edges[i].target] == ciVisible {
+			edges = append(edges, g.edges[i])
+		}
+	}
+	slices.SortFunc(edges, func(a, b walkRow) int { return compareKeys(a.id, b.id) })
+
+	// Adjacency index: the edges of each node in the order of their ids,
+	// each node expands its own edges only (NFR-02).
+	n := len(g.ids)
+	first := make([]int32, n+1)
+	for i := range edges {
+		first[edges[i].source+1]++
+		if edges[i].target != edges[i].source {
+			first[edges[i].target+1]++
+		}
+	}
+	for v := 0; v < n; v++ {
+		first[v+1] += first[v]
+	}
+	incident := make([]int32, first[n])
+	next := slices.Clone(first[:n])
+	for i := range edges {
+		incident[next[edges[i].source]] = int32(i)
+		next[edges[i].source]++
+		if edges[i].target != edges[i].source {
+			incident[next[edges[i].target]] = int32(i)
+			next[edges[i].target]++
+		}
+	}
+
+	depth := make([]int32, n)
+	for v := range depth {
+		depth[v] = -1
+	}
+	depth[0] = 0
+	order := []int32{0}
+	for d, start := int32(1), 0; int(d) <= maxDepth && start < len(order); d++ {
+		end := len(order)
+		for _, v := range order[start:end] {
+			for _, i := range incident[first[v]:first[v+1]] {
+				neighbor := edges[i].target
+				if neighbor == v {
+					neighbor = edges[i].source
+				}
+				if depth[neighbor] < 0 {
+					depth[neighbor] = d
+					order = append(order, neighbor)
+				}
+			}
+		}
+		start = end
+	}
+
+	// Beyond the node limit only the nodes closest to the root are kept.
+	kept := order
+	walk.Truncated = len(order) > maxNodes
+	if walk.Truncated {
+		kept = slices.Clone(order)
+		slices.SortFunc(kept, func(a, b int32) int {
+			if depth[a] != depth[b] {
+				return cmp.Compare(depth[a], depth[b])
+			}
+			return compareUUID(&g.ids[a], &g.ids[b])
+		})
+		limited := make([]bool, n)
+		for _, v := range kept[:maxNodes] {
+			limited[v] = true
+		}
+		kept = order[:0:0]
+		for _, v := range order {
+			if limited[v] {
+				kept = append(kept, v)
+			}
+		}
+	}
+	number := make([]int32, n)
+	for v := range number {
+		number[v] = -1
+	}
+	walk.CIs = make([]string, len(kept))
+	walk.Edges = make([]WalkEdge, 0, len(edges))
+	for k, v := range kept {
+		number[v] = int32(k)
+		walk.CIs[k] = formatUUID(&g.ids[v])
+	}
+	for i := range edges {
+		e := &edges[i]
+		source, target := number[e.source], number[e.target]
+		if source < 0 || target < 0 || min(depth[e.source], depth[e.target]) >= int32(maxDepth) {
+			continue
+		}
+		id := e.id.uuid()
+		walk.Edges = append(walk.Edges, WalkEdge{ID: formatUUID(&id), SourceCI: source, TargetCI: target,
+			RelType: g.text[e.relType], Source: g.text[e.origin]})
+	}
+	return walk
 }
 
 const traversalSelectColumns = `
@@ -459,47 +1085,156 @@ const traversalSelectColumns = `
 	r.source
 `
 
-// edgeRow is what a traversal reads of an edge. The organization read holds
-// every edge of the organization, so it keeps only these columns and turns
-// just the selected edges into a Relationship.
+// edgeRow is what EdgesAmong reads of an edge, the ids as text (a walk
+// reads them binary, walkSelectColumns).
 type edgeRow struct{ id, sourceCIID, targetCIID, relType, source string }
 
 func edgeRowEnds(e *edgeRow) (source, target string) { return e.sourceCIID, e.targetCIID }
 
-// frontierEdges reads the edges of the frontier CIs. The edge reads of a
-// traversal carry no join with ci: the edge rows pass the RLS of
-// ci_relationship and of the security_invoker view ci_structure_edge, which
-// leave edges to CIs outside the scope or deleted ones (and the parent of a
-// containment) unchecked. The CIs read afterwards under the same scope
-// close that gap (IMP-07): an edge with an endpoint outside them is
-// dropped, also when that CI was deleted or moved out of the scope after
-// the edges were read.
-func frontierEdges(ctx context.Context, tx pgx.Tx, orgID string, frontier []string) ([]edgeRow, error) {
-	return readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM `+graphEdges+` r
-		WHERE r.organization_id = $1 AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))`, orgID, frontier)
-}
-
-// organizationEdges reads every traversable edge of the organization in one
-// statement, then the visible, not deleted CIs, and keeps the edges between
-// two of them.
-func organizationEdges(ctx context.Context, tx pgx.Tx, orgID string) ([]edgeRow, error) {
-	edges, err := readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM `+graphEdges+` r WHERE r.organization_id = $1`, orgID)
+// EdgesAmong implements EdgeReader under the caller's full tenant scope
+// (NFR-02, WP-602), like a level of WalkFrom: one statement reads the
+// edges of graphEdges, the stored relationships and the projected
+// containment as List and WalkFrom read them, between two of ids; a
+// second one the CIs among ids that are visible and not deleted under the
+// same scope (visibleCIs). An edge is kept when both of its CIs are, as
+// visibleEndpoints keeps it for List. Neither statement joins edges with
+// ci: the plan of such a join follows the statistics, and with stale ones
+// it read the CIs of the organization once per edge (seconds for 2,000
+// CIs). Both statements are filtered by the constant ids alone.
+func (r *PGRepository) EdgesAmong(ctx context.Context, orgID string, ids []string) ([]Relationship, error) {
+	result := make([]Relationship, 0)
+	if len(ids) == 0 {
+		return result, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		edges, err := readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM `+graphEdges+` r
+			WHERE r.organization_id = $1 AND r.source_ci_id = ANY($2::uuid[]) AND r.target_ci_id = ANY($2::uuid[])
+			ORDER BY r.id`, orgID, ids)
+		if err != nil {
+			return err
+		}
+		visible := make(map[string]bool, len(ids))
+		if err := visibleCIs(ctx, tx, orgID, ids, visible); err != nil {
+			return err
+		}
+		for _, e := range visibleEdges(edges, edgeRowEnds, visible) {
+			result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, orgID)
+	return result, nil
+}
+
+// EdgesOf implements IncidentEdgeReader under the caller's full tenant
+// scope (RLS on ci and ci_relationship): one statement reads the stored
+// relationships of relTypes with an end among ciIDs whose source and
+// target are visible, not deleted CIs (IMP-04, IMP-07). A client-scoped
+// principal thus never learns of an edge to a CI of another client.
+func (r *PGRepository) EdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error) {
+	result := make([]Relationship, 0)
+	if len(ciIDs) == 0 || len(relTypes) == 0 {
+		return result, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		edges, err := readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM ci_relationship r
+			WHERE r.organization_id = $1 AND r.rel_type = ANY($3::text[])
+				AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.source_ci_id AND ci.deleted_at IS NULL)
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.target_ci_id AND ci.deleted_at IS NULL)
+			ORDER BY r.id`, orgID, ciIDs, relTypes)
+		if err != nil {
+			return err
+		}
+		for _, e := range edges {
+			result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("read visible cis: %w", err)
+		return nil, err
 	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	return result, nil
+}
+
+var _ HiddenEdgeReader = (*PGRepository)(nil)
+
+// HiddenEdgesOf implements HiddenEdgeReader (IMP-04, IMP-07, F-420). For a
+// caller restricted in the client or site scope one statement reads, in an
+// own transaction with the organization-wide scope of the caller's
+// organization (database.OrgWideScope, read only), the stored
+// relationships of relTypes with an end among ciIDs between two not
+// deleted CIs; one statement under the caller's scope then finds the edges
+// and ends the caller sees. Only the edges EdgesOf would not return leave
+// the repository, without id and source and with the ids of the ends the
+// caller does not see left empty: no id of a hidden CI or edge reaches the
+// caller. An org-wide caller sees every edge; nothing is read.
+func (r *PGRepository) HiddenEdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error) {
+	result := make([]Relationship, 0)
+	scope, ok := database.TenantScopeFromContext(ctx)
+	switch {
+	case !ok:
+		return nil, database.ErrNoTenantScope
+	case !strings.EqualFold(scope.OrgID, orgID):
+		return nil, fmt.Errorf("%w: %q", database.ErrTenantMismatch, orgID)
+	case len(ciIDs) == 0 || len(relTypes) == 0 || (scope.Clients.IsAll() && scope.Sites.IsAll()):
+		return result, nil
+	}
+	wide := database.OrgWideScope(scope.OrgID, scope.UserID)
+	var edges []edgeRow
+	err := database.WithTenant(database.WithoutTx(ctx), r.pool, &wide, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		edges, err = readEdges(ctx, tx, `SELECT `+traversalSelectColumns+` FROM ci_relationship r
+			WHERE r.organization_id = $1 AND r.rel_type = ANY($3::text[])
+				AND (r.source_ci_id = ANY($2::uuid[]) OR r.target_ci_id = ANY($2::uuid[]))
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.source_ci_id AND ci.deleted_at IS NULL)
+				AND EXISTS (SELECT 1 FROM ci WHERE ci.id = r.target_ci_id AND ci.deleted_at IS NULL)
+			ORDER BY r.id`, orgID, ciIDs, relTypes)
+		return err
+	})
+	if err != nil || len(edges) == 0 {
+		return result, err
+	}
+	edgeIDs := make([]string, 0, len(edges))
+	ends := make([]string, 0, 2*len(edges))
+	for _, e := range edges {
+		edgeIDs = append(edgeIDs, e.id)
+		ends = append(ends, e.sourceCIID, e.targetCIID)
+	}
+	seenEdge, seenCI := map[string]bool{}, map[string]bool{}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, qerr := tx.Query(ctx, `SELECT id::text FROM ci_relationship WHERE organization_id = $1 AND id = ANY($2::uuid[])`, orgID, edgeIDs)
+		if qerr != nil {
+			return fmt.Errorf("read visible relationships: %w", qerr)
+		}
+		ids, qerr := pgx.CollectRows(rows, pgx.RowTo[string])
+		if qerr != nil {
+			return fmt.Errorf("read visible relationships: %w", qerr)
+		}
+		for _, id := range ids {
+			seenEdge[id] = true
+		}
+		return visibleCIs(ctx, tx, orgID, ends, seenCI)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("read visible cis: %w", err)
+		return nil, err
 	}
-	visible := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		visible[id] = true
+	for _, e := range edges {
+		if seenEdge[e.id] && seenCI[e.sourceCIID] && seenCI[e.targetCIID] {
+			continue
+		}
+		rel := Relationship{RelType: e.relType}
+		if seenCI[e.sourceCIID] {
+			rel.SourceCIID = e.sourceCIID
+		}
+		if seenCI[e.targetCIID] {
+			rel.TargetCIID = e.targetCIID
+		}
+		result = append(result, rel)
 	}
-	return visibleEdges(edges, edgeRowEnds, visible), nil
+	return result, nil
 }
 
 func readEdges(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]edgeRow, error) {
@@ -536,18 +1271,6 @@ func visibleCIs(ctx context.Context, tx pgx.Tx, orgID string, ids []string, visi
 		visible[id] = true
 	}
 	return nil
-}
-
-// selectEdgeRows is SelectTraversal over edge rows.
-func selectEdgeRows(rootCIID string, edges []edgeRow, maxDepth, maxNodes int) []Relationship {
-	kept := selectEdges(rootCIID, edges, edgeRowEnds, maxDepth, maxNodes)
-	slices.SortFunc(kept, func(a, b int) int { return strings.Compare(edges[a].id, edges[b].id) })
-	result := make([]Relationship, 0, len(kept))
-	for _, i := range kept {
-		e := &edges[i]
-		result = append(result, Relationship{ID: e.id, SourceCIID: e.sourceCIID, TargetCIID: e.targetCIID, RelType: e.relType, Source: e.source})
-	}
-	return result
 }
 
 type relationshipScanner interface {
@@ -635,5 +1358,116 @@ func (r *PGRepository) Confirm(ctx context.Context, orgID, id string, confidence
 			return fmt.Errorf("not found")
 		}
 		return err
+	})
+}
+
+// ConfirmMany implements BatchConfirmer with one UPDATE: the confirmations
+// of an edge apply as one Confirm after the other would (the last reported
+// confidence wins), and the rows are taken in the order of their ids. An
+// edge that is gone or no discovery edge is not changed, as Confirm does
+// not change it. The attributes of a confirmation are merged into the
+// stored ones, a null removes one (WP-498); several confirmations of an
+// edge merge in their order.
+func (r *PGRepository) ConfirmMany(ctx context.Context, orgID string, confirmations []Confirmation) error {
+	type confirmation struct {
+		confidence *float64
+		attributes map[string]any
+		patched    bool
+	}
+	byID := make(map[string]*confirmation, len(confirmations))
+	for _, c := range confirmations {
+		cur := byID[c.ID]
+		if cur == nil {
+			cur = &confirmation{}
+			byID[c.ID] = cur
+		}
+		if c.Confidence != nil {
+			cur.confidence = c.Confidence
+		}
+		if c.Attributes != nil {
+			cur.attributes = mergePatch(cur.attributes, c.Attributes)
+			cur.patched = true
+		}
+	}
+	if len(byID) == 0 {
+		return nil
+	}
+	ids := slices.Sorted(maps.Keys(byID))
+	values := make([]*float64, len(ids))
+	patches := make([]*string, len(ids))
+	for i, id := range ids {
+		values[i] = byID[id].confidence
+		if byID[id].patched {
+			b, err := json.Marshal(byID[id].attributes)
+			if err != nil {
+				return fmt.Errorf("confirm relationships: attributes: %w", err)
+			}
+			patch := string(b)
+			patches[i] = &patch
+		}
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE ci_relationship r
+			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE(c.confidence, r.confidence),
+			    attributes = CASE WHEN c.patch IS NULL THEN r.attributes
+			        ELSE (COALESCE(r.attributes, '{}'::jsonb) - ARRAY(SELECT key FROM jsonb_each(c.patch::jsonb) WHERE value = 'null'::jsonb))
+			             || jsonb_strip_nulls(c.patch::jsonb) END
+			FROM unnest($2::uuid[], $3::numeric[], $4::text[]) AS c(id, confidence, patch)
+			WHERE r.id = c.id AND r.organization_id = $1 AND r.source = 'discovery'`, orgID, ids, values, patches)
+		return err
+	})
+}
+
+// mergePatch merges the attribute patch b over a, keeping the nulls of b
+// (they remove the attribute when the patch is applied).
+func mergePatch(a, b map[string]any) map[string]any {
+	out := make(map[string]any, len(a)+len(b))
+	maps.Copy(out, a)
+	maps.Copy(out, b)
+	return out
+}
+
+// redundancyLockClass is the class of the advisory lock under which the
+// redundancy of an organization's feeds is recomputed (MarkRedundant). It
+// uses the two-argument form, pg_advisory_xact_lock(class, key), like the
+// ingest locks, and differs from their classes, from those of the audit
+// chain (0x52657469), the event outbox (0x45766e74) and its publisher
+// (0x45766e75).
+const redundancyLockClass int32 = 0x52526564 // "RRed"
+
+// MarkRedundant implements RedundancyMarker with one UPDATE under the
+// organization's redundancy lock: parallel ingest lanes write the edges of
+// the two PDUs of a server at the same time, and each recomputes after its
+// edges have committed. Under the lock the statement of the lane that comes
+// last sees the edges of all others, so the last value written is the one
+// of every stored edge, whatever order the lanes take (WP-498, F-112).
+// Only edges with visible endpoints are counted and changed.
+func (r *PGRepository) MarkRedundant(ctx context.Context, orgID, relType string, sourceCIIDs []string) error {
+	if len(sourceCIIDs) == 0 {
+		return nil
+	}
+	ids := slices.Sorted(slices.Values(sourceCIIDs))
+	ids = slices.Compact(ids)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2::text))`, redundancyLockClass, orgID); err != nil {
+			return fmt.Errorf("mark redundant feeds: lock: %w", err)
+		}
+		_, err := tx.Exec(ctx, `WITH edge AS (
+				SELECT id, source_ci_id, target_ci_id, attributes FROM ci_relationship
+				WHERE organization_id = $1 AND rel_type = $2 AND source = 'discovery' AND source_ci_id = ANY($3::uuid[])
+				  AND `+visibleEndpoints+`
+			), feeds AS (
+				SELECT source_ci_id, count(DISTINCT target_ci_id) FILTER (WHERE (attributes->>'outlet_state') IS DISTINCT FROM 'off') > 1 AS redundant
+				FROM edge GROUP BY source_ci_id
+			)
+			UPDATE ci_relationship r
+			SET attributes = jsonb_set(COALESCE(r.attributes, '{}'::jsonb), '{redundant}', to_jsonb(f.redundant)), updated_at = now()
+			FROM edge e JOIN feeds f ON f.source_ci_id = e.source_ci_id
+			WHERE r.id = e.id AND r.organization_id = $1
+			  AND (r.attributes->'redundant') IS DISTINCT FROM to_jsonb(f.redundant)`, orgID, relType, ids)
+		if err != nil {
+			return fmt.Errorf("mark redundant feeds: %w", err)
+		}
+		return nil
 	})
 }

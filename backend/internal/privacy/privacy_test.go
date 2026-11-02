@@ -2,10 +2,12 @@ package privacy
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 )
@@ -46,8 +48,17 @@ func TestRetentionPolicyLifecycle(t *testing.T) {
 		t.Fatalf("unexpected updated policy: %+v", updated)
 	}
 
-	if _, err := svc.Configure(ctx, "org-1", UpdatePolicyRequest{RetentionDays: intPtr(-1)}); err == nil {
-		t.Fatal("negative retention must be rejected")
+	// Outside 0..2147483647 (the integer column) is a field error, never a
+	// driver encode error (F-047).
+	for _, days := range []int{-1, MaxRetentionDays + 1} {
+		_, err := svc.Configure(ctx, "org-1", UpdatePolicyRequest{RetentionDays: intPtr(days)})
+		var fe *api.FieldError
+		if !errors.As(err, &fe) || fe.Field != "retention_days" {
+			t.Fatalf("retention_days %d: %v, want a field error for retention_days", days, err)
+		}
+	}
+	if p, err := svc.Configure(ctx, "org-1", UpdatePolicyRequest{RetentionDays: intPtr(MaxRetentionDays)}); err != nil || p.RetentionDays != MaxRetentionDays {
+		t.Fatalf("retention_days %d: %+v %v, want accepted", MaxRetentionDays, p, err)
 	}
 	if _, err := svc.Configure(ctx, "org-1", UpdatePolicyRequest{Mode: strPtr("shred")}); err == nil {
 		t.Fatal("invalid mode must be rejected")

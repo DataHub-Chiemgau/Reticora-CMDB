@@ -1,0 +1,152 @@
+name: e2e-prev
+
+# UI-18/NFR-07 (WP-531, E-88 option 1): the previous browser versions. The
+# job e2e of ci.yml runs the current ones (the builds of the @playwright/test
+# of frontend/package.json); here frontend/e2e-prev pins the previous minor of
+# @playwright/test, whose Chromium, Firefox and WebKit are n-1, and the
+# project chrome-prev runs Chrome n-1 from Chrome for Testing. The specs are
+# those of frontend/e2e (smoke, a11y, keyboard and the core flows against the
+# strict, contract-checked mock backend), run unchanged through
+# frontend/e2e-prev/playwright.prev.config.ts. Limitation (docs/README.md,
+# Browser-Unterstützung): Edge n-1 is approximated by Chromium n-1, Safari n-1
+# (desktop and iOS) by WebKit n-1.
+#
+# Every project uploads its report as e2e-prev-report-<project>, also when it
+# is green.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *" # nightly at 03:17 UTC
+  pull_request:
+    paths:
+      - "frontend/e2e-prev/**"
+      - ".github/workflows/e2e-prev.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-prev-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Keep the build for the browser jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-prev-dist
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  e2e-prev:
+    runs-on: ubuntu-latest
+    needs: [build]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium
+            browser: chromium
+          - project: chrome-prev
+            browser: chromium
+          - project: firefox
+            browser: firefox
+          - project: webkit
+            browser: webkit
+          - project: mobile-chrome
+            browser: chromium
+          - project: mobile-safari
+            browser: webkit
+    defaults:
+      run:
+        working-directory: frontend/e2e-prev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/e2e-prev/package-lock.json
+
+      # Only the pinned runner and what the specs import; the specs of
+      # frontend/e2e resolve them from here (tsconfig.json).
+      - name: Install the previous Playwright
+        run: npm ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: e2e-prev-dist
+          path: frontend/dist
+
+      # The browser builds of the pinned @playwright/test, i.e. n-1; for
+      # chrome-prev only the system libraries of Chromium.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      # Chrome n-1: the newest build of the milestone below the current
+      # Stable from Chrome for Testing (no checksums are published; the
+      # download is TLS from Google's storage and the version is logged).
+      - name: Install Chrome n-1 from Chrome for Testing
+        if: matrix.project == 'chrome-prev'
+        run: |
+          set -euo pipefail
+          cft=https://googlechromelabs.github.io/chrome-for-testing
+          stable=$(curl -sSfL "$cft/last-known-good-versions.json" | jq -r '.channels.Stable.version')
+          milestone=$(( ${stable%%.*} - 1 ))
+          curl -sSfL -o "$RUNNER_TEMP/milestones.json" "$cft/latest-versions-per-milestone-with-downloads.json"
+          version=$(jq -r --arg m "$milestone" '.milestones[$m].version' "$RUNNER_TEMP/milestones.json")
+          url=$(jq -r --arg m "$milestone" '.milestones[$m].downloads.chrome[] | select(.platform == "linux64") | .url' "$RUNNER_TEMP/milestones.json")
+          test -n "$url" && test "$url" != null
+          echo "Chrome Stable $stable, n-1: $version ($url)"
+          curl -sSfL -o "$RUNNER_TEMP/chrome.zip" "$url"
+          unzip -q "$RUNNER_TEMP/chrome.zip" -d "$RUNNER_TEMP/chrome-prev"
+          exe="$RUNNER_TEMP/chrome-prev/chrome-linux64/chrome"
+          "$exe" --version
+          echo "PW_CHROME_PREV_EXECUTABLE=$exe" >> "$GITHUB_ENV"
+
+      - name: Run E2E tests (previous versions)
+        run: |
+          npx --yes serve@14.2.6 -s ../dist -l 4173 &
+          npx --yes wait-on@9.5.1 http://localhost:4173 --timeout 10000
+          npx playwright --version
+          npx playwright test --config playwright.prev.config.ts --project=${{ matrix.project }}
+        env:
+          CI: "true"
+          BASE_URL: http://localhost:4173
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-prev-report-${{ matrix.project }}
+          path: |
+            frontend/playwright-report/prev/
+            frontend/test-results/prev/
+          if-no-files-found: error
+          retention-days: 30

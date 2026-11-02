@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -47,11 +48,14 @@ import (
 )
 
 type collectorConfig struct {
-	ServerURL         string
-	OrganizationID    string
-	CollectorID       string
-	ScanSubnets       []string
-	Protocols         []string
+	ServerURL string
+	// ServerURLFromEnv is set when RETICORA_SERVER_URL set ServerURL; it
+	// then wins over the server URL of the enrollment.
+	ServerURLFromEnv bool
+	OrganizationID   string
+	CollectorID      string
+	ScanSubnets      []string
+	Protocols        []string
 	// Simulate replaces discovery by the deterministic 30-device fleet of
 	// plugins/simulate (RETICORA_SIMULATE, SIM-02); refused in production.
 	Simulate bool
@@ -66,14 +70,21 @@ type collectorConfig struct {
 	// SpoolFlushInterval is how often the spool is delivered (default 30 s).
 	SpoolFlushInterval time.Duration
 	HeartbeatInterval  time.Duration
-	// Credentials are namespaced by protocol ("ssh.username",
-	// "redfish.password", "snmp.community"); plugins receive only their own
-	// namespace through plugins.CredentialsFor (COL-02).
+	// Credentials are the locally configured credentials (RETICORA_*),
+	// namespaced by protocol ("ssh.username", "redfish.password",
+	// "snmp.community"); plugins receive only their own namespace through
+	// plugins.CredentialsFor (COL-02). They apply to the configured subnets
+	// (fallback pass, metric polling, traps), never to a server scope: a
+	// scope uses the bundle credentials of its credential_ids.
 	Credentials map[string]string
-	// RedfishTLSScopes are the per-network TLS exceptions of the Redfish
-	// plugin (RETICORA_REDFISH_TLS_SCOPES); outside them certificates are
-	// verified against the system roots.
-	RedfishTLSScopes []redfish.TLSScope
+	// RedfishTLSScopes, WMITLSScopes and NASTLSScopes are the per-network
+	// TLS exceptions of the Redfish, WMI and NAS plugins
+	// (RETICORA_REDFISH_TLS_SCOPES, RETICORA_WMI_TLS_SCOPES,
+	// RETICORA_NAS_TLS_SCOPES); outside them certificates are verified
+	// against the system roots.
+	RedfishTLSScopes []plugins.TLSScope
+	WMITLSScopes     []plugins.TLSScope
+	NASTLSScopes     []plugins.TLSScope
 	// SpoolDir is the disk buffer location for discovery results collected
 	// while the backend is unreachable (offline operation per spec §5.2).
 	SpoolDir string
@@ -88,12 +99,16 @@ type collectorConfig struct {
 	// Traps are normalized into metric events and sent to the monitoring
 	// ingest so existing alert rules can fire on them (spec §9).
 	TrapListenAddr string
-	// MetricsInterval enables metric polling when > 0: the configured SNMP
-	// poll metrics are collected from the discovered targets every interval
-	// and uploaded to the monitoring ingest (Epic E: Collector-Polling).
+	// MetricsInterval enables metric polling when > 0: the SNMP poll
+	// metrics are collected from the scan targets every interval and
+	// uploaded to the monitoring ingest (Epic E: Collector-Polling, MON-02).
+	// Default defaultMetricsInterval; RETICORA_METRICS_INTERVAL=0 turns it
+	// off.
 	MetricsInterval time.Duration
-	// PollMetrics lists the numeric OIDs polled on every SNMP target. The
-	// default covers the standard IF-MIB interface counters of ifIndex 1.
+	// PollMetrics lists numeric OIDs polled on every SNMP target instead of
+	// the standard poll (RETICORA_SNMP_POLL_METRICS). Empty selects the
+	// standard poll: the interface counters of all interfaces
+	// (snmp.PollInterfaces).
 	PollMetrics []snmp.PollMetric
 	// TLS identity material. When CertPEM/KeyPEM are set (directly, via
 	// CertFile/KeyFile, or via the keystore at CredentialsPath) the upload
@@ -106,6 +121,10 @@ type collectorConfig struct {
 	TLSCAFile       string
 	TLSServerName   string
 	CredentialsPath string
+	// NATSServerName (RETICORA_NATS_TLS_SERVER_NAME) is the one name the
+	// edge certificate must be valid for; empty accepts the dialled host,
+	// reticora-collector-nats and nats-edge (edgeTLSConfig).
+	NATSServerName string
 	// AgentRelayAddr, AgentRelayCertFile and AgentRelayKeyFile configure the
 	// agent relay (AGT-03). It runs over TLS only: without a server
 	// certificate the relay stays off.
@@ -141,11 +160,6 @@ func Main() {
 	if handled, code := runCommand(context.Background(), os.Args[1:], os.Stdout, os.Stderr); handled {
 		os.Exit(code)
 	}
-	collectorCfg := loadCollectorConfig()
-	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
-	pluginRegistry["sweep"] = newSweep(&collectorCfg)
-	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
-
 	environment := envOrDefault("RETICORA_ENVIRONMENT", "development")
 	logLevel := slog.LevelInfo
 	if environment == "development" {
@@ -153,8 +167,29 @@ func Main() {
 	}
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
+	// Unattended enrollment from RETICORA_ENROLL_TOKEN and
+	// RETICORA_CLOUD_URL before the configuration reads the keystore
+	// (COL-04).
+	if enrolled, err := bootstrapEnrollment(context.Background(), os.Getenv); err != nil {
+		slog.Error("collector enrollment failed", "event", "collector.enroll.failed", "error", err)
+		os.Exit(1)
+	} else if enrolled {
+		slog.Info("collector enrolled from the environment", "event", "collector.enroll.completed",
+			"credentials_path", credentialsPath())
+	}
+
+	collectorCfg := loadCollectorConfig()
+	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
+	pluginRegistry["nas"] = nas.New(nas.WithTLSScopes(collectorCfg.NASTLSScopes...))
+	pluginRegistry["sweep"] = newSweep(&collectorCfg)
+	loadProfileDir(os.Getenv("RETICORA_PROFILES_DIR"))
+
 	slog.Info("starting collector", "environment", environment, "version", Version)
-	if err := applySimulation(&collectorCfg, environment); err != nil {
+	// The simulation check reads the variable itself: the "development"
+	// default above must not allow it when RETICORA_ENVIRONMENT is unset
+	// (F-276).
+	if err := applySimulation(&collectorCfg, os.Getenv("RETICORA_ENVIRONMENT")); err != nil {
 		slog.Error("collector simulation refused", "event", "collector.simulate.refused", "error", err)
 		os.Exit(1)
 	}
@@ -190,7 +225,10 @@ func Main() {
 
 	slog.Info("collector configured",
 		"nats_url", natsEndpoint(collectorCfg.ServerURL),
+		"nats_tls_server_name", collectorCfg.NATSServerName,
 		"server_url", collectorCfg.ServerURL,
+		"organization_id", collectorCfg.OrganizationID,
+		"collector_id", collectorCfg.CollectorID,
 		"scan_subnets", collectorCfg.ScanSubnets,
 		"protocols", collectorCfg.Protocols,
 		"poll_interval", collectorCfg.DiscoveryInterval.String(),
@@ -211,12 +249,13 @@ func Main() {
 		go runUpdateLoop(ctx, collectorCfg.UpdateInterval, newUpdateChecker(&collectorCfg), confirmed, restart)
 	}
 	go runAgentRelay(ctx, collectorCfg, uploader)
-	// The collector's mTLS channel to the NATS endpoint (COL-08).
-	go runNATS(ctx, collectorCfg)
+	// The collector's mTLS channel to the NATS endpoint (COL-08); a
+	// collector enrolled after its start takes the identity over from it.
+	go runNATS(ctx, collectorCfg, uploader.adoptIdentity)
 	if collectorCfg.TrapListenAddr != "" {
 		go runTrapReceiver(ctx, collectorCfg, uploader)
 	}
-	if collectorCfg.MetricsInterval > 0 && len(collectorCfg.PollMetrics) > 0 {
+	if collectorCfg.MetricsInterval > 0 {
 		go runMetricsLoop(ctx, collectorCfg, uploader)
 	}
 
@@ -253,6 +292,45 @@ type uploader struct {
 	// flushMu serializes spool deliveries; flushNow wakes the flusher.
 	flushMu  sync.Mutex
 	flushNow chan struct{}
+	// metrics holds the metric batches the edge did not take yet (edge.go).
+	metrics metricBuffer
+	// droppedSamples counts the metric samples and traps dropped since the
+	// last heartbeat the server accepted (E-79: counted, not spooled).
+	droppedSamples atomic.Int64
+	// monitoringRefusedAt is the time (Unix nanoseconds) the server last
+	// refused metric samples because monitoring is not licensed; 0 while
+	// they are sent (edge.go monitoringPaused).
+	monitoringRefusedAt atomic.Int64
+	// idMu guards the identity in cfg (ServerURL, OrganizationID,
+	// CollectorID): runNATS hands over the enrolled identity when the
+	// credentials file appears after the start (adoptIdentity). Read it
+	// with config().
+	idMu sync.RWMutex
+}
+
+// config returns the configuration of the uploader with its current
+// identity.
+func (u *uploader) config() collectorConfig {
+	u.idMu.RLock()
+	defer u.idMu.RUnlock()
+	return u.cfg
+}
+
+// adoptIdentity takes over server URL, organization and collector id of a
+// collector enrolled after its start (runNATS).
+func (u *uploader) adoptIdentity(enrolled collectorConfig) {
+	u.idMu.Lock()
+	u.cfg.ServerURL, u.cfg.OrganizationID, u.cfg.CollectorID = enrolled.ServerURL, enrolled.OrganizationID, enrolled.CollectorID
+	u.idMu.Unlock()
+	slog.Info("collector identity taken from the enrollment", "event", "collector.identity.adopted",
+		"server_url", enrolled.ServerURL, "organization_id", enrolled.OrganizationID, "collector_id", enrolled.CollectorID)
+}
+
+// withIdentity returns cfg with the uploader's current identity.
+func (u *uploader) withIdentity(cfg collectorConfig) collectorConfig {
+	id := u.config()
+	cfg.ServerURL, cfg.OrganizationID, cfg.CollectorID = id.ServerURL, id.OrganizationID, id.CollectorID
+	return cfg
 }
 
 // LicenseStatusHeader carries the discovery license status on heartbeat
@@ -392,6 +470,8 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	}
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
+	// Every start has a new scheduler: the sweep of a scope starts from the
+	// run state the server sends with it, not at once (F-109).
 	sched, hosts := newScheduler(), &hostCache{}
 
 	for {
@@ -404,6 +484,9 @@ func runDiscoveryLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 				"event", "collector.spool.backpressure")
 		default:
 			runDueDiscovery(ctx, &cfg, up, sched, hosts, time.Now())
+			// Jobs created through the API run once, after the due passes
+			// (JOB-01, F-358).
+			runOpenJobs(ctx, &cfg, up, hosts)
 		}
 		select {
 		case <-ctx.Done():
@@ -432,61 +515,14 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		if len(due) == 0 {
 			continue
 		}
-		slog.Info("discovery started", "pass", pass.key, "protocols", due)
-		var passRecords []plugins.DeviceRecord
-		var errs []runError
-		for _, protocol := range due {
-			if ctx.Err() != nil {
-				break
-			}
-			plug, ok := pluginRegistry[protocol]
-			if !ok {
-				slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
-				continue
-			}
-			targets := pass.targetsFor(protocol, hosts)
-			slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
-			creds := plugins.CredentialsFor(protocol, credentialsFor(cfg))
-			hits, err := plug.Probe(ctx, targets, creds)
-			if err != nil {
-				slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
-				errs = append(errs, runError{Protocol: protocol, Message: err.Error()})
-				continue
-			}
-			if protocol == "sweep" {
-				reachable := hitTargets(hits)
-				// The sweep is the reachability series of the CIs (MON-02).
-				uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
-				hosts.set(pass.key, reachable)
-			}
-			collected, failed := collectHits(ctx, protocol, plug, hits, creds)
-			errs = append(errs, failed...)
-			if protocol == "power" {
-				// UPS and PDU readings of the power devices (MON-02).
-				uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", credentialsFor(cfg))))
-			}
-			slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
-			passRecords = append(passRecords, collected...)
-		}
-		tagRecords(passRecords, pass.scope)
+		passRecords, errs := runPass(ctx, cfg, up, &pass, due, hosts)
 		records = append(records, passRecords...)
 		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, next: pass.nextRun(sched)})
 	}
 	if len(outcomes) == 0 {
 		return 0
 	}
-	records = deliverableRecords(ctx, records)
-	// Upload the records in a compressed batch; the spool flusher delivers
-	// what could not be sent.
-	var uploadErr *runError
-	if len(records) > 0 {
-		if err := up.uploadRecordsAt(ctx, records, now); err != nil {
-			slog.Error("failed to upload discovery records", "event", "discovery.upload.failed", "error", err, "count", len(records))
-			uploadErr = &runError{Protocol: "upload", Cause: "upload_failed", Message: err.Error()}
-		} else {
-			slog.Info("discovery records uploaded", "count", len(records))
-		}
-	}
+	records, uploadErr := uploadDiscovered(ctx, up, records, now)
 	for _, o := range outcomes {
 		errs := o.errs
 		if uploadErr != nil && o.records > 0 {
@@ -498,48 +534,170 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 	return len(records)
 }
 
-// expandSubnets converts CIDR notations to individual IP targets.
-const maxSubnetExpansionTargets = 4096
+// runPass runs the protocols of a pass, the sweep first, and returns its
+// records, tagged with its scope, and its run errors (DIS-08).
+func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *discoveryPass, protocols []string, hosts *hostCache) ([]plugins.DeviceRecord, []runError) {
+	slog.Info("discovery started", "pass", pass.key, "protocols", protocols)
+	// Only the credentials of this pass (COL-02, DIS-09); every plugin
+	// receives the namespace of its protocol.
+	passCreds := credentialsFor(cfg, pass.scope)
+	var passRecords []plugins.DeviceRecord
+	var errs []runError
+	if pass.truncated {
+		slog.Warn("discovery scope truncated", "event", "discovery.scope.truncated", "scope_id", pass.scope.ID,
+			"target", pass.scope.Target, "limit", maxScopeAddresses)
+		errs = append(errs, truncationError(pass.scope))
+	}
+	for _, protocol := range protocols {
+		if ctx.Err() != nil {
+			break
+		}
+		plug, ok := pluginRegistry[protocol]
+		if !ok {
+			slog.Warn("unknown protocol plugin, skipping", "protocol", protocol)
+			continue
+		}
+		targets := pass.targetsFor(protocol, hosts)
+		slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
+		creds := plugins.CredentialsFor(protocol, passCreds)
+		hits, err := plug.Probe(ctx, targets, creds)
+		var probeErrs *plugins.ProbeErrors
+		if errors.As(err, &probeErrs) {
+			// Targets the probe could not check go with protocol, target
+			// and cause into the scope run (DIS-08).
+			errs = append(errs, probeTargetErrors(protocol, probeErrs)...)
+		} else if err != nil {
+			slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
+			errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
+			continue
+		}
+		if pass.scope != nil && pass.scope.Kind == "host" && ctx.Err() == nil {
+			errs = append(errs, silentHostTargets(protocol, targets, hits, probeErrs)...)
+		}
+		if protocol == "sweep" {
+			reachable := hitTargets(hits)
+			// The sweep is the reachability series of the CIs (MON-02).
+			uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
+			hosts.set(pass.key, reachable)
+		}
+		collected, failed := collectHits(ctx, protocol, plug, hits, creds)
+		errs = append(errs, failed...)
+		if protocol == "power" {
+			// UPS and PDU readings of the power devices (MON-02).
+			uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", passCreds)))
+		}
+		slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
+		passRecords = append(passRecords, collected...)
+	}
+	tagRecords(passRecords, pass.scope)
+	return passRecords, errs
+}
 
+// probeTargetErrors returns the run errors of the targets a probe could not
+// check.
+func probeTargetErrors(protocol string, probeErrs *plugins.ProbeErrors) []runError {
+	out := make([]runError, 0, len(probeErrs.Targets))
+	for _, f := range probeErrs.Targets {
+		slog.Warn("discovery target failed in the probe", "event", "discovery.target.failed",
+			"protocol", protocol, "target", f.Target, "error", f.Err)
+		out = append(out, runError{Protocol: protocol, Target: f.Target, Cause: plugins.ErrorCause(f.Err), Message: f.Err.Error()})
+	}
+	return out
+}
+
+// silentHostTargets returns a run error unreachable for each target of a
+// host scope that did not answer the protocol's probe and has no probe
+// error of its own (DIS-08): a host scope names the target it expects to
+// answer. A host scope has one target, so a probe without hits means it did
+// not answer, also when the target is a name the hit carries as address.
+// Silent addresses of a network (CIDR, range) are no error.
+func silentHostTargets(protocol string, targets []string, hits []plugins.Result, probeErrs *plugins.ProbeErrors) []runError {
+	if len(hits) > 0 {
+		return nil
+	}
+	failed := map[string]bool{}
+	if probeErrs != nil {
+		for _, f := range probeErrs.Targets {
+			failed[f.Target] = true
+		}
+	}
+	var out []runError
+	for _, target := range targets {
+		if failed[target] {
+			continue
+		}
+		slog.Warn("discovery target did not answer", "event", "discovery.target.failed", "protocol", protocol, "target", target)
+		out = append(out, runError{Protocol: protocol, Target: target, Cause: "unreachable",
+			Message: fmt.Sprintf("%s: %s did not answer the probe", protocol, target)})
+	}
+	return out
+}
+
+// uploadDiscovered merges the records of a run and uploads them in a
+// compressed batch; the spool flusher delivers what could not be sent. It
+// returns the merged records and the upload error of the run, if any.
+func uploadDiscovered(ctx context.Context, up *uploader, records []plugins.DeviceRecord, now time.Time) ([]plugins.DeviceRecord, *runError) {
+	// The sweep record of a target another protocol of its scope classified
+	// is no unclassified device of its own (DIS-02); targets configured by
+	// name have their address by now.
+	records = profiles.MergeByTarget(deliverableRecords(ctx, records))
+	if len(records) == 0 {
+		return records, nil
+	}
+	if err := up.uploadRecordsAt(ctx, records, now); err != nil {
+		slog.Error("failed to upload discovery records", "event", "discovery.upload.failed", "error", err, "count", len(records))
+		return records, &runError{Protocol: "upload", Cause: "upload_failed", Message: err.Error()}
+	}
+	slog.Info("discovery records uploaded", "count", len(records))
+	return records, nil
+}
+
+// maxScopeAddresses bounds the addresses of one CIDR or range scope; it
+// equals discovery.MaxScopeAddresses of the server, so every scope the API
+// accepts is expanded completely (DIS-09). testdata/scope-limits.json is
+// the contract both modules test against.
+const maxScopeAddresses = 65536
+
+// expandSubnets converts CIDR notations to individual IP targets; a
+// subnet larger than maxScopeAddresses is cut and logged.
 func expandSubnets(subnets []string) []string {
 	var targets []string
 	for _, subnet := range subnets {
-		_, ipNet, err := net.ParseCIDR(subnet)
-		if err != nil {
-			// Treat as single host
-			targets = append(targets, subnet)
-			continue
+		subnetTargets, truncated := expandCIDR(subnet)
+		if truncated {
+			slog.Warn("subnet expansion limit reached", "subnet", subnet, "limit", maxScopeAddresses)
 		}
-
-		maskOnes, _ := ipNet.Mask.Size()
-		var subnetTargets []string
-		for ip := ipNet.IP.Mask(ipNet.Mask); ipNet.Contains(ip); incrementIP(ip) {
-			subnetTargets = append(subnetTargets, ip.String())
-			// Safety limit to avoid expanding huge ranges
-			if len(subnetTargets) > maxSubnetExpansionTargets {
-				slog.Warn("subnet expansion limit reached", "subnet", subnet, "limit", maxSubnetExpansionTargets)
-				break
-			}
-		}
-
-		// Remove network and broadcast addresses for /30 and larger prefixes
-		// For /31 and /32 all addresses are usable (point-to-point or host routes)
-		if maskOnes <= 30 && len(subnetTargets) > 2 {
-			subnetTargets = subnetTargets[1 : len(subnetTargets)-1]
-		}
-
 		targets = append(targets, subnetTargets...)
 	}
 	return targets
 }
 
-func incrementIP(ip net.IP) {
-	for j := len(ip) - 1; j >= 0; j-- {
-		ip[j]++
-		if ip[j] > 0 {
+// expandCIDR returns the addresses of a CIDR (a non-CIDR target is a
+// single host) and whether it had more than maxScopeAddresses.
+func expandCIDR(subnet string) (targets []string, truncated bool) {
+	prefix, err := netip.ParsePrefix(subnet)
+	if err != nil {
+		return []string{subnet}, false
+	}
+	prefix = prefix.Masked()
+	// Network and broadcast addresses are skipped for /30 and larger
+	// prefixes; for /31 and /32 all addresses are usable (point-to-point
+	// or host routes).
+	inner := prefix.Bits() <= 30
+	ip := prefix.Addr()
+	if inner {
+		ip = ip.Next()
+	}
+	for ; prefix.Contains(ip); ip = ip.Next() {
+		if inner && !prefix.Contains(ip.Next()) {
 			break
 		}
+		if len(targets) == maxScopeAddresses {
+			return targets, true
+		}
+		targets = append(targets, ip.String())
 	}
+	return targets, false
 }
 
 // collectParallelism bounds the parallel Collect calls of one plugin.
@@ -567,7 +725,9 @@ func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits
 				if err != nil {
 					slog.Warn("discovery target failed; reporting the probe result", "event", "discovery.target.failed",
 						"protocol", protocol, "target", hit.IP, "error", err)
-					failures[i] = &runError{Protocol: protocol, Target: hit.IP, Message: err.Error()}
+					// The cause the plugin knows (auth_failed, unreachable) goes
+					// with protocol and target into the scope run (DIS-08).
+					failures[i] = &runError{Protocol: protocol, Target: hit.IP, Cause: plugins.ErrorCause(err), Message: err.Error()}
 				}
 				out[i] = plugins.RecordFromResult(protocol, hit, probedAt)
 				return
@@ -636,92 +796,245 @@ func (u *uploader) uploadRecords(ctx context.Context, records []plugins.DeviceRe
 }
 
 // uploadRecordsAt sends the DeviceRecords of a discovery cycle that started at
-// sourceTime to the backend via compressed JSON POST. While older batches
-// wait in the spool the new batch is queued behind them, so the backend
-// receives data in source-time order (COL-05). When the upload fails and a
-// spool directory is configured, the batch is persisted and delivered by
-// flushSpool once the backend is reachable again.
+// sourceTime to the backend: over the edge, or compressed to the HTTP
+// ingest without it. The records go in payloads that fit the edge's
+// message size (recordbatch.go), in their order; a record larger than the
+// edge's own limit is quarantined and counted as lost (while that limit is
+// unknown, it waits in a payload of its own until the edge decides). While
+// older batches wait in the spool the payloads are queued behind them, so
+// the backend receives data in source-time order (COL-05). When a payload
+// fails transiently and a spool directory is configured, it and the
+// payloads after it are persisted and delivered by flushSpool once the
+// backend is reachable again. Every failure is returned, so the caller
+// never reports undelivered records as uploaded.
 func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.DeviceRecord, sourceTime time.Time) error {
-	cfg := u.cfg
-	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
-		slog.Warn("skipping upload due to incomplete configuration")
-		return nil
-	}
-
 	if u.paused.Load() {
 		return errLicenseExpired
 	}
-	payload, err := json.Marshal(plugins.DeviceRecordBatch{Records: records})
+	raws, err := marshalRecords(records)
 	if err != nil {
-		return fmt.Errorf("marshal records: %w", err)
+		return err
+	}
+	limit, known := recordPayloadLimit()
+	payloads, oversized := splitRecords(raws, limit, known)
+	var errs []error
+	for _, p := range oversized {
+		u.quarantineOversized(ctx, p, sourceTime, limit)
+	}
+	if len(oversized) > 0 {
+		errs = append(errs, fmt.Errorf("%w (%d records, limit %d bytes)", errRecordTooLarge, len(oversized), limit))
 	}
 
-	if u.spool != nil {
-		if backlog, lenErr := u.spool.Len(ctx); lenErr == nil && backlog > 0 {
-			if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
-				return fmt.Errorf("queue behind spool backlog: %w", spoolErr)
+	for i, p := range payloads {
+		if u.spool != nil {
+			if backlog, lenErr := u.spool.Len(ctx); lenErr == nil && backlog > 0 {
+				if spoolErr := u.spoolPayloads(ctx, payloads[i:], sourceTime); spoolErr != nil {
+					return errors.Join(append(errs, fmt.Errorf("queue behind spool backlog: %w", spoolErr))...)
+				}
+				u.flushSpool(ctx)
+				return errors.Join(errs...)
 			}
-			u.flushSpool(ctx)
-			return nil
 		}
+		lost, postErr := u.postPayload(ctx, p.data)
+		switch {
+		case postErr == nil:
+			u.countRejected(ctx, lost)
+			continue
+		case errors.Is(postErr, errLicenseExpired):
+			return postErr
+		case errors.Is(postErr, errUploadRejected):
+			// A poison batch is never spooled: retrying it would only repeat
+			// the refusal and hold up the batches behind it (F-085).
+			u.quarantineBatch(ctx, p.data, sourceTime, postErr)
+			errs = append(errs, postErr)
+			continue
+		}
+		// Transient (no edge and a 401 of the HTTP path, 5xx, network), not
+		// enrolled yet, or larger than an edge with a smaller limit takes
+		// (flushSpool splits it): this payload and the ones behind it wait
+		// in the spool in their order.
+		if spoolErr := u.spoolPayloads(ctx, payloads[i:], sourceTime); spoolErr != nil {
+			return errors.Join(append(errs, fmt.Errorf("upload failed (%v) and spooling failed: %w", postErr, spoolErr))...)
+		}
+		return errors.Join(append(errs, postErr)...)
 	}
+	return errors.Join(errs...)
+}
 
-	if err := u.postPayload(ctx, payload); err != nil {
-		if errors.Is(err, errLicenseExpired) {
-			return err
+// spoolPayloads persists payloads in their order with the source time of
+// their run (partSourceTime). When the spool is full, the payloads after
+// the refused one are not spooled either (a later one could fit and
+// overtake it): the spool counted the refused one, they are counted as
+// lost too (NFR-04: every loss is counted).
+func (u *uploader) spoolPayloads(ctx context.Context, payloads []recordsPayload, sourceTime time.Time) error {
+	for i, p := range payloads {
+		err := u.spoolResults(ctx, p.data, partSourceTime(sourceTime, i))
+		if err == nil {
+			continue
 		}
-		if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
-			return fmt.Errorf("upload failed (%v) and spooling failed: %w", err, spoolErr)
+		if rest := payloads[i+1:]; errors.Is(err, buffer.ErrSpoolFull) && len(rest) > 0 {
+			loss := buffer.Loss{Messages: len(rest), Reason: buffer.LossSpoolFull}
+			for _, q := range rest {
+				loss.Bytes += int64(len(q.data))
+			}
+			if lossErr := u.spool.RecordLoss(ctx, loss); lossErr != nil {
+				err = fmt.Errorf("%w; %w", err, lossErr)
+			}
 		}
 		return err
 	}
 	return nil
 }
 
+// errIncompleteConfig: without the edge the HTTP path needs server URL,
+// organization and collector id, which a collector lacks before its
+// enrollment. The batch stays in the spool; once the collector is
+// enrolled, the edge delivers it.
+var errIncompleteConfig = errors.New("not delivered: no edge channel, and server URL, organization or collector id is missing (not enrolled yet)")
+
+// httpUnauthenticatedLogged is set once a 401 of the HTTP path was logged
+// in the current edge outage; natsConnLog.connected resets it.
+var httpUnauthenticatedLogged atomic.Bool
+
+// warnUnauthenticated logs, once per edge outage, that the HTTP path
+// refused the collector: the HTTP API authenticates no collector (F-046),
+// only the mTLS edge delivers.
+func warnUnauthenticated(cfg *collectorConfig) {
+	if httpUnauthenticatedLogged.Swap(true) {
+		return
+	}
+	slog.Warn("HTTP ingest answered 401: the HTTP API authenticates no collector; records wait in the spool until the mTLS edge is connected",
+		"event", "collector.upload.unauthenticated", "nats_url", natsEndpoint(cfg.ServerURL),
+		"hint", "the collector.nats.unreachable messages name why the edge is not connected")
+}
+
+// errUploadRejected marks a batch the server refused for good (a poison
+// batch): a 4xx answer other than 401, 408 and 429. 5xx, 401, 408, 429 and
+// network errors are transient; the batch stays in the spool and is retried.
+var errUploadRejected = errors.New("upload rejected")
+
+// permanentStatus reports whether an HTTP status refuses a request for
+// good: every 4xx except 408 (timeout) and 429 (rate limit).
+func permanentStatus(code int) bool {
+	return code >= 400 && code < 500 && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests
+}
+
+// uploadStatusError classifies a refused upload by its status. A 401 refuses
+// the collector's credential on that path, not the batch: the HTTP path
+// answers 401 until the mTLS edge is connected, so the batch stays in the
+// spool and the edge delivers it.
+func uploadStatusError(code int, detail string) error {
+	if permanentStatus(code) && code != http.StatusUnauthorized {
+		return fmt.Errorf("%w with status %d: %s", errUploadRejected, code, detail)
+	}
+	return fmt.Errorf("upload failed with status %d: %s", code, detail)
+}
+
+// ingestResult is the part of the ingest answer (202) the collector reads:
+// the records the server rejected one by one (WP-481) and those refused for
+// an observed_at in the future. Both are lost.
+type ingestResult struct {
+	Rejected       int `json:"rejected"`
+	RejectedFuture int `json:"rejected_future"`
+}
+
+func (r *ingestResult) lost() int {
+	if r == nil {
+		return 0
+	}
+	return max(r.Rejected, 0) + max(r.RejectedFuture, 0)
+}
+
+// countRejected counts the records the server rejected in an accepted batch
+// as a loss of the spool, reported with the next heartbeat.
+func (u *uploader) countRejected(ctx context.Context, records int) {
+	if records <= 0 {
+		return
+	}
+	slog.Error("records rejected by the backend; counted as lost", "event", "collector.records.rejected", "count", records)
+	if u.spool == nil {
+		return
+	}
+	if err := u.spool.RecordLoss(ctx, buffer.Loss{Messages: records, Reason: buffer.LossRejected}); err != nil {
+		slog.Error("recording rejected records failed", "count", records, "error", err)
+	}
+}
+
+// quarantineBatch keeps a batch the server refused for good in the spool's
+// quarantine directory and counts it as a loss.
+func (u *uploader) quarantineBatch(ctx context.Context, payload []byte, sourceTime time.Time, cause error) {
+	slog.Error("batch rejected by the backend; quarantined and counted as lost", "event", "collector.spool.quarantined",
+		"error", cause)
+	if u.spool == nil {
+		return
+	}
+	if err := u.spool.Quarantine(ctx, &buffer.Message{Topic: spoolTopic, Payload: payload, CreatedAt: sourceTime.UTC()}); err != nil {
+		slog.Error("quarantining the rejected batch failed", "error", err)
+	}
+}
+
 // postPayload delivers a single JSON payload: over the edge when the
-// collector holds its NATS channel, else compressed to the HTTP ingest.
-func (u *uploader) postPayload(ctx context.Context, payload []byte) error {
-	if err := u.postViaEdge(ctx, payload); !errors.Is(err, errNoEdge) {
-		return err
+// collector holds its NATS channel, else compressed to the HTTP ingest. It
+// returns the number of records the server rejected in an accepted batch;
+// a batch refused for good fails with errUploadRejected. A payload larger
+// than the edge takes fails with errEdgeTooLarge and is never sent to the
+// HTTP path, which authenticates no collector (the caller splits it);
+// without the edge and the identity the HTTP path needs it fails with
+// errIncompleteConfig.
+func (u *uploader) postPayload(ctx context.Context, payload []byte) (lost int, err error) {
+	if lost, err = u.postViaEdge(ctx, payload); !errors.Is(err, errNoEdge) {
+		return lost, err
+	}
+	cfg := u.config()
+	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
+		return 0, errIncompleteConfig
 	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(payload); err != nil {
-		return fmt.Errorf("compress results: %w", err)
+		return 0, fmt.Errorf("compress results: %w", err)
 	}
 	if err := gz.Close(); err != nil {
-		return fmt.Errorf("finalize compression: %w", err)
+		return 0, fmt.Errorf("finalize compression: %w", err)
 	}
 
-	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/discovery/ingest"
+	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/discovery/ingest"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
 	if err != nil {
-		return fmt.Errorf("build upload request: %w", err)
+		return 0, fmt.Errorf("build upload request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("X-Organization-ID", u.cfg.OrganizationID)
-	req.Header.Set("X-Collector-ID", u.cfg.CollectorID)
+	req.Header.Set("X-Organization-ID", cfg.OrganizationID)
+	req.Header.Set("X-Collector-ID", cfg.CollectorID)
 
 	resp, err := u.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("upload request: %w", err)
+		return 0, fmt.Errorf("upload request: %w", err)
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 
-	if resp.StatusCode == http.StatusForbidden {
-		var problem struct {
-			Type string `json:"type"`
-		}
-		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&problem) == nil && problem.Type == problemLicenseExpired {
-			u.setLicenseStatus("expired")
-			return errLicenseExpired
-		}
-	}
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("upload failed with status %d", resp.StatusCode)
+		var problem struct {
+			Type   string `json:"type"`
+			Detail string `json:"detail"`
+		}
+		_ = json.Unmarshal(body, &problem)
+		if resp.StatusCode == http.StatusForbidden && problem.Type == problemLicenseExpired {
+			u.setLicenseStatus("expired")
+			return 0, errLicenseExpired
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			warnUnauthenticated(&cfg)
+		}
+		return 0, uploadStatusError(resp.StatusCode, problem.Detail)
 	}
-	return nil
+	var result ingestResult
+	if json.Unmarshal(body, &result) != nil {
+		return 0, nil
+	}
+	return result.lost(), nil
 }
 
 // postAgentTelemetry forwards an endpoint-agent telemetry payload to the
@@ -736,7 +1049,7 @@ func (u *uploader) postAgentTelemetry(ctx context.Context, token string, payload
 		return fmt.Errorf("finalize compression: %w", err)
 	}
 
-	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/agents/telemetry"
+	endpoint := strings.TrimRight(u.config().ServerURL, "/") + "/api/v1/agents/telemetry"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
 	if err != nil {
 		return fmt.Errorf("build telemetry request: %w", err)
@@ -753,16 +1066,17 @@ func (u *uploader) postAgentTelemetry(ctx context.Context, token string, payload
 	defer resp.Body.Close()
 
 	switch {
-	case resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests:
-		return fmt.Errorf("telemetry upload failed with status %d", resp.StatusCode)
-	case resp.StatusCode >= 400:
+	case permanentStatus(resp.StatusCode):
 		return fmt.Errorf("%w: status %d", errTelemetryRejected, resp.StatusCode)
+	case resp.StatusCode >= 400:
+		return fmt.Errorf("telemetry upload failed with status %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// errTelemetryRejected marks a 4xx answer: the backend refused the agent
-// credential or payload, so the telemetry is not spooled for a retry.
+// errTelemetryRejected marks a 4xx answer other than 408 and 429: the
+// backend refused the agent credential or payload, so the telemetry is not
+// spooled for a retry.
 var errTelemetryRejected = errors.New("agent telemetry rejected")
 
 // spoolResults persists an undeliverable batch to the disk buffer. A full
@@ -806,10 +1120,18 @@ func (u *uploader) logSpoolStats(ctx context.Context) {
 const spoolFlushBatch = 64
 
 // flushSpool delivers buffered batches in source-time order until the spool is
-// empty. Delivery stops at the first failure so spooled batches are never
-// reordered or dropped.
+// empty. A transient failure (network, 5xx, 408, 429) stops the delivery:
+// the batch stays and is retried on the next flush (the flusher's interval
+// or the next accepted heartbeat), so spooled batches are never reordered.
+// A batch the server refuses for good (4xx, a poison batch) is quarantined
+// and counted as lost, and the delivery continues with the next batch
+// (F-085); records rejected inside an accepted batch are counted as lost
+// before the batch is acknowledged. A records batch larger than the edge
+// takes is replaced by its parts (splitSpooledBatch), which are delivered
+// next; it never goes to the HTTP path and never blocks the batches behind
+// it.
 func (u *uploader) flushSpool(ctx context.Context) {
-	if u.spool == nil || u.cfg.ServerURL == "" || u.paused.Load() {
+	if u.spool == nil || u.config().ServerURL == "" || u.paused.Load() {
 		return
 	}
 	u.flushMu.Lock()
@@ -826,29 +1148,57 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			slog.Error("read upload spool failed", "error", err)
 			return
 		}
-		progressed := false
-		for _, msg := range msgs {
+		progressed, split := false, false
+	batch:
+		for i := range msgs {
+			msg := &msgs[i]
 			if ctx.Err() != nil {
 				return
 			}
-			var deliver func() error
+			var lost int
+			var err error
 			switch msg.Topic {
 			case spoolTopic:
-				deliver = func() error { return u.postPayload(ctx, msg.Payload) }
+				lost, err = u.postPayload(ctx, msg.Payload)
 			case agentTelemetryTopic:
-				deliver = func() error { return u.replayAgentTelemetry(ctx, msg.Payload) }
+				err = u.replayAgentTelemetry(ctx, msg.Payload)
 			default:
-				continue
+				err = fmt.Errorf("%w: unknown spool topic %q", errUploadRejected, msg.Topic)
 			}
-			if err := deliver(); err != nil {
-				if errors.Is(err, errLicenseExpired) {
-					// The spooled batches stay until the license is renewed.
-					slog.Warn("spool flush postponed; discovery license expired", "message_id", msg.ID)
+			switch {
+			case err == nil:
+			case errors.Is(err, errLicenseExpired):
+				// The spooled batches stay until the license is renewed.
+				slog.Warn("spool flush postponed; discovery license expired", "message_id", msg.ID)
+				return
+			case errors.Is(err, errEdgeTooLarge) && msg.Topic == spoolTopic:
+				if serr := u.splitSpooledBatch(ctx, msg); serr != nil {
+					slog.Error("spool flush postponed; the batch larger than the edge takes was not split",
+						"message_id", msg.ID, "error", serr)
 					return
 				}
-				slog.Warn("spool flush postponed; backend still unreachable", "message_id", msg.ID, "error", err)
+				// The parts take the batch's place in the spool: read it anew.
+				progressed, split = true, true
+				break batch
+			case errors.Is(err, errIncompleteConfig):
+				// Not enrolled yet (logged by runNATS); the batches wait.
+				slog.Debug("spool flush postponed; not enrolled yet", "message_id", msg.ID)
+				return
+			case errors.Is(err, errUploadRejected):
+				if qErr := u.spool.Reject(ctx, msg.ID); qErr != nil {
+					slog.Error("quarantining a rejected spool batch failed", "message_id", msg.ID, "error", qErr)
+					return
+				}
+				slog.Error("spooled batch rejected by the backend; quarantined and counted as lost",
+					"event", "collector.spool.quarantined", "message_id", msg.ID, "error", err)
+				progressed = true
+				continue
+			default:
+				slog.Warn("spool flush postponed; backend unavailable, retried on the next flush",
+					"message_id", msg.ID, "error", err)
 				return
 			}
+			u.countRejected(ctx, lost)
 			if err := u.spool.Ack(ctx, []string{msg.ID}); err != nil {
 				slog.Error("spool ack failed", "message_id", msg.ID, "error", err)
 				return
@@ -857,25 +1207,27 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			progressed = true
 			slog.Info("spooled discovery results delivered", "message_id", msg.ID)
 		}
-		if len(msgs) < spoolFlushBatch || !progressed {
+		if !split && (len(msgs) < spoolFlushBatch || !progressed) {
 			return
 		}
 	}
 }
 
 // replayAgentTelemetry delivers a spooled relay message to the agent
-// telemetry endpoint. A message the backend rejects (4xx) is dropped instead
-// of blocking the spool.
+// telemetry endpoint. A message that is unreadable or that the backend
+// rejects for good (4xx other than 408/429) is counted as lost and then
+// dropped instead of blocking the spool (F-233); the loss is recorded
+// before the caller acknowledges the message.
 func (u *uploader) replayAgentTelemetry(ctx context.Context, message []byte) error {
 	var msg relayMessage
 	if err := json.Unmarshal(message, &msg); err != nil {
-		slog.Error("spooled agent telemetry unreadable; dropped", "error", err)
-		return nil
+		slog.Error("spooled agent telemetry unreadable; dropped and counted as lost", "error", err)
+		return u.spool.RecordLoss(ctx, buffer.Loss{Messages: 1, Bytes: int64(len(message)), Reason: buffer.LossCorrupt})
 	}
 	err := u.postAgentTelemetry(ctx, msg.Token, msg.Telemetry)
 	if errors.Is(err, errTelemetryRejected) {
-		slog.Warn("spooled agent telemetry rejected; dropped", "error", err)
-		return nil
+		slog.Warn("spooled agent telemetry rejected; dropped and counted as lost", "error", err)
+		return u.spool.RecordLoss(ctx, buffer.Loss{Messages: 1, Bytes: int64(len(message)), Reason: buffer.LossRejected})
 	}
 	return err
 }
@@ -901,7 +1253,8 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 	defer ticker.Stop()
 
 	for {
-		status, ok := postHeartbeat(ctx, up.client, cfg, up.spoolReport(ctx))
+		// The identity of an enrollment after the start (adoptIdentity).
+		status, ok := up.heartbeat(ctx, up.withIdentity(cfg))
 		if status != "" {
 			up.setLicenseStatus(status)
 		}
@@ -921,15 +1274,49 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 	}
 }
 
+// heartbeat sends one heartbeat with the spool report. Once the server
+// accepted it, the reported losses are acknowledged: the persisted spool
+// totals and the dropped samples shrink by exactly the reported amounts, so
+// a loss recorded meanwhile goes with the next heartbeat and a heartbeat
+// that fails reports the same losses again.
+func (u *uploader) heartbeat(ctx context.Context, cfg collectorConfig) (status string, ok bool) {
+	report := u.spoolReport(ctx)
+	status, ok = postHeartbeat(ctx, u.client, cfg, report)
+	if ok {
+		u.ackLoss(ctx, report)
+	}
+	return status, ok
+}
+
+// ackLoss acknowledges the losses of a spool report the server accepted.
+func (u *uploader) ackLoss(ctx context.Context, report *spoolReport) {
+	if report == nil {
+		return
+	}
+	if report.DroppedSamples > 0 {
+		u.droppedSamples.Add(-report.DroppedSamples)
+	}
+	if u.spool != nil && (report.DroppedMessages > 0 || report.DroppedBytes > 0) {
+		if err := u.spool.AckLoss(ctx, report.DroppedMessages, report.DroppedBytes); err != nil {
+			slog.Error("acknowledging reported spool losses failed; they are reported again", "error", err)
+		}
+	}
+}
+
 // spoolReport is the spool state sent with every heartbeat so the server sees
-// backlog, backpressure and losses (NFR-04, OPS-06).
+// backlog, backpressure and losses (NFR-04, OPS-06). The dropped counters
+// are the losses not yet acknowledged by an accepted heartbeat.
 type spoolReport struct {
 	Messages         int   `json:"messages"`
 	Bytes            int64 `json:"bytes"`
 	OldestAgeSeconds int64 `json:"oldest_age_seconds"`
 	DroppedMessages  int64 `json:"dropped_messages"`
 	DroppedBytes     int64 `json:"dropped_bytes"`
-	Backpressure     bool  `json:"backpressure"`
+	// DroppedSamples counts metric samples and traps dropped on upload
+	// failures (E-79); omitted while zero, so a server without the field
+	// still accepts the heartbeat.
+	DroppedSamples int64 `json:"dropped_samples,omitempty"`
+	Backpressure   bool  `json:"backpressure"`
 }
 
 type heartbeatBody struct {
@@ -937,44 +1324,72 @@ type heartbeatBody struct {
 }
 
 func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
+	report := &spoolReport{DroppedSamples: max(u.droppedSamples.Load(), 0)}
 	if u.spool == nil {
-		return nil
+		if report.DroppedSamples == 0 {
+			return nil
+		}
+		return report
 	}
 	stats, err := u.spool.Stats(ctx)
 	if err != nil {
-		return nil
+		slog.Warn("spool stats unavailable for the heartbeat", "error", err)
+		if report.DroppedSamples == 0 {
+			return nil
+		}
+		return report
 	}
-	return &spoolReport{
-		Messages:         stats.Messages,
-		Bytes:            stats.Bytes,
-		OldestAgeSeconds: int64(stats.OldestAge.Seconds()),
-		DroppedMessages:  stats.DroppedMessages,
-		DroppedBytes:     stats.DroppedBytes,
-		Backpressure:     u.backpressure(ctx),
+	report.Messages = stats.Messages
+	report.Bytes = stats.Bytes
+	report.OldestAgeSeconds = int64(stats.OldestAge.Seconds())
+	report.DroppedMessages = stats.DroppedMessages
+	report.DroppedBytes = stats.DroppedBytes
+	report.Backpressure = u.backpressure(ctx)
+	return report
+}
+
+// dropSamples counts metric samples or traps that were dropped; the next
+// heartbeat reports them (E-79, NFR-04).
+func (u *uploader) dropSamples(n int) {
+	if n > 0 {
+		u.droppedSamples.Add(int64(n))
 	}
 }
 
-// postHeartbeat sends a heartbeat and returns the discovery license status of
-// the response ("" when unknown) and whether the server accepted it.
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) (status string, ok bool) {
-	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
-		slog.Warn("skipping heartbeat due to incomplete configuration",
-			"server_url", cfg.ServerURL,
-			"organization_id", cfg.OrganizationID,
-			"collector_id", cfg.CollectorID,
-		)
-		return "", false
-	}
+// heartbeatSkipLogged is set once a heartbeat without the identity of the
+// HTTP path was logged; an accepted heartbeat resets it.
+var heartbeatSkipLogged atomic.Bool
 
-	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/collectors/" + cfg.CollectorID + "/heartbeat"
+// postHeartbeat sends a heartbeat and returns the discovery license status of
+// the response ("" when unknown) and whether the server accepted it. The
+// edge takes organization and collector from the certificate; the HTTP
+// path needs them in cfg. A refused heartbeat is an error with the reason
+// (collector.heartbeat.refused): the server does not see the collector.
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) (status string, ok bool) {
 	body, err := json.Marshal(heartbeatBody{Spool: spool})
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
 		return "", false
 	}
-	if license, ok, handled := heartbeatViaEdge(ctx, body); handled {
-		return license, ok
+	if license, accepted, handled := heartbeatViaEdge(ctx, body); handled {
+		if accepted {
+			heartbeatSkipLogged.Store(false)
+		}
+		return license, accepted
 	}
+	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
+		if !heartbeatSkipLogged.Swap(true) {
+			slog.Warn("skipping heartbeat due to incomplete configuration",
+				"server_url", cfg.ServerURL,
+				"organization_id", cfg.OrganizationID,
+				"collector_id", cfg.CollectorID,
+				"hint", "without the edge the heartbeat needs organization and collector id; enrollment sets them",
+			)
+		}
+		return "", false
+	}
+
+	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/collectors/" + cfg.CollectorID + "/heartbeat"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("build heartbeat request failed", "error", err)
@@ -991,68 +1406,98 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	}
 	defer resp.Body.Close()
 
-	slog.Info("heartbeat completed", "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
 	if resp.StatusCode >= 300 {
+		hint := "the server refused the heartbeat of the collector"
+		if resp.StatusCode == http.StatusUnauthorized {
+			hint = "collectors deliver over the mTLS edge " + natsEndpoint(cfg.ServerURL) +
+				"; the HTTP API authenticates no collector. The collector.nats.unreachable messages name why the edge is not connected"
+		}
+		slog.Error("heartbeat refused", "event", "collector.heartbeat.refused", "status", resp.StatusCode, "transport", "http",
+			"endpoint", endpoint, "hint", hint)
 		return "", false
 	}
+	heartbeatSkipLogged.Store(false)
+	slog.Info("heartbeat completed", "status", resp.StatusCode, "transport", "http", "duration_ms", time.Since(start).Milliseconds())
 	return resp.Header.Get(LicenseStatusHeader), true
 }
 
 // runTrapReceiver receives SNMP traps and forwards them as metric events to
 // the monitoring ingest, so the existing alert rules can fire on traps (e.g.
-// "any linkDown trap → critical alert"). Failed uploads are logged and
-// dropped: traps are fire-and-forget events, spooling them like discovery
-// results would delay alerts past the point where they are useful.
+// "any linkDown trap → critical alert"). Without the edge a trap waits in
+// the bounded metric buffer; it is not spooled to disk like discovery
+// results, which would delay alerts past the point where they are useful.
 func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
-	rcv := &snmp.TrapReceiver{
-		ListenAddr: cfg.TrapListenAddr,
-		Community:  plugins.CredentialsFor("snmp", credentialsFor(&cfg))["community"],
-		Sink: func(ctx context.Context, ev snmp.TrapEvent) {
-			slog.Info("snmp trap received", "source", ev.SourceIP, "trap_oid", ev.TrapOID)
-			if err := up.uploadTrapEvent(ctx, ev); err != nil {
-				slog.Warn("trap event upload failed", "source", ev.SourceIP, "trap_oid", ev.TrapOID, "error", err)
-			}
-		},
-	}
-	if err := rcv.Run(ctx); err != nil {
+	if err := newTrapReceiver(cfg, up).Run(ctx); err != nil {
 		slog.Error("snmp trap receiver stopped", "error", err)
 	}
 }
 
-// runMetricsLoop polls the configured numeric SNMP metrics on every scan
-// target and uploads the samples to the monitoring ingest (Epic E:
+// newTrapReceiver builds the trap receiver. Traps arrive from any device,
+// so only the locally configured community applies, never one of a server
+// scope (COL-02).
+func newTrapReceiver(cfg collectorConfig, up *uploader) *snmp.TrapReceiver {
+	return &snmp.TrapReceiver{
+		ListenAddr: cfg.TrapListenAddr,
+		Community:  plugins.CredentialsFor("snmp", cfg.Credentials)["community"],
+		Sink: func(ctx context.Context, ev snmp.TrapEvent) {
+			slog.Info("snmp trap received", "source", ev.SourceIP, "trap_oid", ev.TrapOID)
+			if err := up.uploadTrapEvent(ctx, ev); err != nil {
+				slog.Error("trap event upload failed", "source", ev.SourceIP, "trap_oid", ev.TrapOID, "count", 1, "error", err)
+			}
+		},
+	}
+}
+
+// metricPoller polls numeric SNMP metrics of a target (snmp.Plugin).
+type metricPoller interface {
+	Poll(ctx context.Context, target string, creds map[string]string, metrics []snmp.PollMetric) ([]plugins.MetricSample, error)
+}
+
+// interfacePoller walks the interface counters of a target, the standard
+// poll (snmp.Plugin).
+type interfacePoller interface {
+	PollInterfaces(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error)
+}
+
+// pduPoller reads the load of a PDU from the metering table of its vendor
+// family (power.Plugin).
+type pduPoller interface {
+	PDUValues(ctx context.Context, target string, creds map[string]string, family string) ([]plugins.MetricSample, error)
+}
+
+// defaultMetricsInterval is the interval of the standard poll (MON-02).
+const defaultMetricsInterval = 5 * time.Minute
+
+// metricPollParallelism bounds the targets polled at the same time, so
+// silent hosts of a subnet (one timeout each) do not stretch a cycle.
+const metricPollParallelism = 16
+
+// runMetricsLoop polls the SNMP metrics (metricPollFunc: the standard
+// interface poll or the configured OIDs) on every scan target and uploads the samples to the monitoring ingest (Epic E:
 // Collector-Polling). Polling runs independently of discovery so metric
-// intervals can be much shorter than discovery cycles.
+// intervals can be much shorter than discovery cycles. The scan targets are
+// the configured subnets, so only the locally configured credentials apply,
+// never those of a server scope (COL-02).
 func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	ticker := time.NewTicker(cfg.MetricsInterval)
 	defer ticker.Stop()
 
-	poller, ok := pluginRegistry["snmp"].(*snmp.Plugin)
+	poll, ok := metricPollFunc(cfg)
 	if !ok {
 		slog.Error("snmp plugin unavailable; metric polling disabled")
 		return
 	}
 
-	creds := plugins.CredentialsFor("snmp", credentialsFor(&cfg))
+	creds := plugins.CredentialsFor("snmp", cfg.Credentials)
 	for {
-		targets := expandSubnets(cfg.ScanSubnets)
-		samples := make([]plugins.MetricSample, 0, len(targets)*len(cfg.PollMetrics))
-		for _, target := range targets {
-			if ctx.Err() != nil {
-				break
-			}
-			polled, err := poller.Poll(ctx, target, creds, cfg.PollMetrics)
-			if err != nil {
-				slog.Debug("metric poll failed", "target", target, "error", err)
-				continue
-			}
-			samples = append(samples, polled...)
-		}
-		if len(samples) > 0 {
-			if err := up.uploadMetricSamples(ctx, samples); err != nil {
-				slog.Warn("metric sample upload failed", "count", len(samples), "error", err)
-			} else {
-				slog.Info("metric samples uploaded", "count", len(samples))
+		// While monitoring is not licensed the targets are not polled: the
+		// samples would not be sent (monitoringPaused).
+		if !up.monitoringPaused(time.Now()) {
+			samples := pollTargets(ctx, expandSubnets(cfg.ScanSubnets), creds, poll)
+			if len(samples) > 0 {
+				if err := up.uploadMetricSamples(ctx, samples); err != nil {
+					slog.Error("metric sample upload failed", "count", len(samples), "error", err)
+				}
 			}
 		}
 
@@ -1065,16 +1510,70 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 	}
 }
 
+// metricPollFunc is the poll of one target: the configured OIDs
+// (RETICORA_SNMP_POLL_METRICS) or, without them, the interface counters
+// of all interfaces (MON-02).
+func metricPollFunc(cfg collectorConfig) (func(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error), bool) {
+	if len(cfg.PollMetrics) > 0 {
+		poller, ok := pluginRegistry["snmp"].(metricPoller)
+		if !ok {
+			return nil, false
+		}
+		return func(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error) {
+			return poller.Poll(ctx, target, creds, cfg.PollMetrics)
+		}, true
+	}
+	poller, ok := pluginRegistry["snmp"].(interfacePoller)
+	if !ok {
+		return nil, false
+	}
+	return poller.PollInterfaces, true
+}
+
+// pollTargets polls every target, at most metricPollParallelism at the
+// same time, and returns the samples in target order; a failing target
+// is skipped.
+func pollTargets(ctx context.Context, targets []string, creds map[string]string,
+	poll func(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error)) []plugins.MetricSample {
+	polled := make([][]plugins.MetricSample, len(targets))
+	sem := make(chan struct{}, metricPollParallelism)
+	var wg sync.WaitGroup
+	for i, target := range targets {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			samples, err := poll(ctx, target, creds)
+			if err != nil {
+				slog.Debug("metric poll failed", "target", target, "error", err)
+				return
+			}
+			polled[i] = samples
+		}()
+	}
+	wg.Wait()
+	var samples []plugins.MetricSample
+	for _, s := range polled {
+		samples = append(samples, s...)
+	}
+	return samples
+}
+
 // uploadMetricSamples converts collector metric samples into monitoring
-// ingest payloads and POSTs them in one batch.
+// ingest samples and sends them over the edge (postMetrics, edge.go).
 func (u *uploader) uploadMetricSamples(ctx context.Context, samples []plugins.MetricSample) error {
-	if u.cfg.ServerURL == "" || u.cfg.OrganizationID == "" || u.cfg.CollectorID == "" {
+	cfg := u.config()
+	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		return nil
 	}
 	metrics := make([]map[string]any, 0, len(samples))
 	now := time.Now().UTC()
 	for _, sample := range samples {
-		labels := map[string]string{"collector_id": u.cfg.CollectorID, "kind": "snmp_poll"}
+		labels := map[string]string{"collector_id": cfg.CollectorID, "kind": "snmp_poll"}
 		for k, v := range sample.Labels {
 			labels[k] = v
 		}
@@ -1085,46 +1584,20 @@ func (u *uploader) uploadMetricSamples(ctx context.Context, samples []plugins.Me
 			"timestamp": now.Format(time.RFC3339Nano),
 		})
 	}
-	payload, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("marshal metric samples: %w", err)
-	}
-	return u.postMetricsPayload(ctx, payload)
-}
-
-// postMetricsPayload POSTs a monitoring ingest payload (shared by trap
-// events and polled metrics).
-func (u *uploader) postMetricsPayload(ctx context.Context, payload []byte) error {
-	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/monitoring/metrics"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("build metrics upload request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Organization-ID", u.cfg.OrganizationID)
-	req.Header.Set("X-Collector-ID", u.cfg.CollectorID)
-
-	resp, err := u.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("metrics upload request: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("metrics upload failed with status %d", resp.StatusCode)
-	}
-	return nil
+	return u.postMetrics(ctx, metrics)
 }
 
 // uploadTrapEvent maps a normalized trap onto a monitoring metric sample and
-// POSTs it to the ingest endpoint. The metric name is stable so alert rules
+// sends it to the monitoring ingest. The metric name is stable so alert rules
 // can target it; trap-specific context travels in the labels.
 func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error {
-	if u.cfg.ServerURL == "" || u.cfg.OrganizationID == "" || u.cfg.CollectorID == "" {
+	cfg := u.config()
+	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		return nil
 	}
 	labels := map[string]string{
 		"source_ip":    ev.SourceIP,
-		"collector_id": u.cfg.CollectorID,
+		"collector_id": cfg.CollectorID,
 		"kind":         "snmp_trap",
 	}
 	if ev.TrapOID != "" {
@@ -1145,7 +1618,7 @@ func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error
 	if err != nil {
 		return fmt.Errorf("marshal trap event: %w", err)
 	}
-	return u.postMetricsPayload(ctx, payload)
+	return u.postMetricsPayload(ctx, payload, 1)
 }
 
 // agentTelemetryTopic is the spool topic of relayed agent telemetry; it is
@@ -1271,13 +1744,6 @@ func (u *uploader) spoolAgentTelemetry(ctx context.Context, message []byte) erro
 
 func loadCollectorConfig() collectorConfig {
 	creds := credentialsFromEnv(os.Getenv)
-	tlsScopes, err := parseRedfishTLSScopes(os.Getenv("RETICORA_REDFISH_TLS_SCOPES"), os.ReadFile)
-	if err != nil {
-		// Fail closed: without the exception the default verification
-		// applies and unverifiable BMCs are not contacted.
-		slog.Error("invalid RETICORA_REDFISH_TLS_SCOPES; using default certificate verification", "error", err)
-		tlsScopes = nil
-	}
 	updateURL := strings.TrimSpace(os.Getenv("RETICORA_UPDATE_URL"))
 	channel, channelOK := updateChannelFromEnv(os.Getenv("RETICORA_UPDATE_CHANNEL"))
 	if !channelOK {
@@ -1296,12 +1762,14 @@ func loadCollectorConfig() collectorConfig {
 		SpoolFlushInterval: durationEnvOrDefault("RETICORA_SPOOL_FLUSH_INTERVAL", defaultSpoolFlush),
 		HeartbeatInterval:  durationEnvOrDefault("RETICORA_HEARTBEAT_INTERVAL", time.Minute),
 		Credentials:        creds,
-		RedfishTLSScopes:   tlsScopes,
+		RedfishTLSScopes:   tlsScopesFromEnv("RETICORA_REDFISH_TLS_SCOPES"),
+		WMITLSScopes:       tlsScopesFromEnv("RETICORA_WMI_TLS_SCOPES"),
+		NASTLSScopes:       tlsScopesFromEnv("RETICORA_NAS_TLS_SCOPES"),
 		SpoolDir:           envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
 		SpoolMaxBytes:      int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
 		TrapListenAddr:     os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
-		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", 0),
+		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", defaultMetricsInterval),
 		PollMetrics:        pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),
 		TLSCertPEM:         []byte(os.Getenv("RETICORA_TLS_CLIENT_CERT")),
 		TLSKeyPEM:          []byte(os.Getenv("RETICORA_TLS_CLIENT_KEY")),
@@ -1310,6 +1778,7 @@ func loadCollectorConfig() collectorConfig {
 		TLSKeyFile:         os.Getenv("RETICORA_TLS_CLIENT_KEY_FILE"),
 		TLSCAFile:          os.Getenv("RETICORA_TLS_CA_FILE"),
 		TLSServerName:      os.Getenv("RETICORA_TLS_SERVER_NAME"),
+		NATSServerName:     strings.TrimSpace(os.Getenv("RETICORA_NATS_TLS_SERVER_NAME")),
 		AgentRelayAddr:     envOrDefault("RETICORA_AGENT_RELAY_ADDR", ":9443"),
 		AgentRelayCertFile: os.Getenv("RETICORA_AGENT_RELAY_TLS_CERT_FILE"),
 		AgentRelayKeyFile:  os.Getenv("RETICORA_AGENT_RELAY_TLS_KEY_FILE"),
@@ -1319,27 +1788,34 @@ func loadCollectorConfig() collectorConfig {
 		UpdateChannel:      channel,
 		UpdateInterval:     durationEnvOrDefault("RETICORA_UPDATE_INTERVAL", 6*time.Hour),
 	}
+	cfg.ServerURLFromEnv = strings.TrimSpace(os.Getenv("RETICORA_SERVER_URL")) != ""
 	// After `enroll` the credentials file holds server URL and identity
-	// (INS-06); the environment still wins.
-	if err := applyEnrolledIdentity(context.Background(), &cfg, strings.TrimSpace(os.Getenv("RETICORA_SERVER_URL")) != ""); err != nil && !errors.Is(err, keystore.ErrNotFound) {
+	// (INS-06); the certificate's identity wins, RETICORA_SERVER_URL still
+	// wins over the enrolled server URL. A collector enrolled after its
+	// start applies it in runNATS.
+	if err := applyEnrolledIdentity(context.Background(), &cfg, cfg.ServerURLFromEnv); err != nil && !errors.Is(err, keystore.ErrNotFound) {
 		slog.Warn("enrolled identity not applied", "path", cfg.CredentialsPath, "error", err)
 	}
 	return cfg
 }
 
-// errSimulateInProduction: RETICORA_SIMULATE is refused in production.
-var errSimulateInProduction = errors.New("RETICORA_SIMULATE cannot be enabled in production")
+// errSimulateRefused: RETICORA_SIMULATE outside development and test.
+var errSimulateRefused = errors.New("RETICORA_SIMULATE is only allowed with RETICORA_ENVIRONMENT=development or test")
 
 // applySimulation switches the collector to the simulated fleet when
 // RETICORA_SIMULATE is set (SIM-02): the only protocol is "simulate" on the
 // fleet's subnet, and the records take the real upload and ingest path.
-// Production refuses it.
+// Only an explicit development or test environment (case-insensitive)
+// allows it; an empty, unknown, staging or production value refuses it
+// (fail-closed, F-276).
 func applySimulation(cfg *collectorConfig, environment string) error {
 	if !cfg.Simulate {
 		return nil
 	}
-	if strings.EqualFold(strings.TrimSpace(environment), "production") {
-		return errSimulateInProduction
+	switch strings.ToLower(strings.TrimSpace(environment)) {
+	case "development", "test":
+	default:
+		return fmt.Errorf("%w, not RETICORA_ENVIRONMENT=%q", errSimulateRefused, environment)
 	}
 	pluginRegistry["simulate"] = simulate.New()
 	cfg.Protocols = []string{"simulate"}
@@ -1418,13 +1894,26 @@ func credentialsFromEnv(getenv func(string) string) map[string]string {
 	return creds
 }
 
-// parseRedfishTLSScopes parses RETICORA_REDFISH_TLS_SCOPES: entries separated
-// by ";" in the form "<cidr>=<rule>[,<rule>...]" with the rules
-// "ca:<path to PEM bundle>" and "pin:<hex SHA-256 of the leaf certificate's
-// SubjectPublicKeyInfo>", e.g.
+// tlsScopesFromEnv reads the TLS scopes of a plugin from the variable name.
+func tlsScopesFromEnv(name string) []plugins.TLSScope {
+	scopes, err := parseTLSScopes(os.Getenv(name), os.ReadFile)
+	if err != nil {
+		// Fail closed: without the exception the default verification
+		// applies and unverifiable devices are not contacted.
+		slog.Error("invalid "+name+"; using default certificate verification", "error", err)
+		return nil
+	}
+	return scopes
+}
+
+// parseTLSScopes parses RETICORA_REDFISH_TLS_SCOPES,
+// RETICORA_WMI_TLS_SCOPES and RETICORA_NAS_TLS_SCOPES: entries separated by
+// ";" in the form
+// "<cidr>=<rule>[,<rule>...]" with the rules "ca:<path to PEM bundle>" and
+// "pin:<hex SHA-256 of the leaf certificate's SubjectPublicKeyInfo>", e.g.
 // "10.0.10.0/24=ca:/etc/reticora/bmc-ca.pem;10.0.20.5/32=pin:9f86d0…".
-func parseRedfishTLSScopes(value string, readFile func(string) ([]byte, error)) ([]redfish.TLSScope, error) {
-	var scopes []redfish.TLSScope
+func parseTLSScopes(value string, readFile func(string) ([]byte, error)) ([]plugins.TLSScope, error) {
+	var scopes []plugins.TLSScope
 	for _, entry := range strings.Split(value, ";") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
@@ -1438,7 +1927,7 @@ func parseRedfishTLSScopes(value string, readFile func(string) ([]byte, error)) 
 		if err != nil {
 			return nil, fmt.Errorf("scope %q: %w", entry, err)
 		}
-		scope := redfish.TLSScope{Network: network}
+		scope := plugins.TLSScope{Network: network}
 		for _, rule := range strings.Split(rules, ",") {
 			kind, arg, _ := strings.Cut(strings.TrimSpace(rule), ":")
 			switch kind {
@@ -1468,22 +1957,14 @@ func parseRedfishTLSScopes(value string, readFile func(string) ([]byte, error)) 
 	return scopes, nil
 }
 
-// defaultPollMetrics polls the IF-MIB interface counters of ifIndex 1 when
-// no explicit list is configured.
-var defaultPollMetrics = []snmp.PollMetric{
-	{Name: "if_in_octets", OID: "1.3.6.1.2.1.2.2.1.10.1"},
-	{Name: "if_out_octets", OID: "1.3.6.1.2.1.2.2.1.16.1"},
-	{Name: "if_oper_status", OID: "1.3.6.1.2.1.2.2.1.8.1"},
-}
-
 // pollMetricsFromEnv parses RETICORA_SNMP_POLL_METRICS entries in the form
-// "name=oid,name=oid" (e.g. "ifInOctets=1.3.6.1.2.1.2.2.1.10.1"). An empty
-// value selects the defaults so metric polling works out of the box once
-// RETICORA_METRICS_INTERVAL is set.
+// "name=oid,name=oid" (e.g. "ifInOctets=1.3.6.1.2.1.2.2.1.10.1"); they
+// replace the standard poll. An empty or entirely invalid value selects
+// the standard poll (nil): the interface counters of all interfaces.
 func pollMetricsFromEnv(value string) []snmp.PollMetric {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return defaultPollMetrics
+		return nil
 	}
 	metrics := make([]snmp.PollMetric, 0)
 	for _, entry := range strings.Split(value, ",") {
@@ -1495,7 +1976,7 @@ func pollMetricsFromEnv(value string) []snmp.PollMetric {
 		metrics = append(metrics, snmp.PollMetric{Name: strings.TrimSpace(name), OID: strings.TrimSpace(oid)})
 	}
 	if len(metrics) == 0 {
-		return defaultPollMetrics
+		return nil
 	}
 	return metrics
 }
@@ -1592,41 +2073,62 @@ var upsPollMetrics = []snmp.PollMetric{
 	{Name: "ups_output_load_percent", OID: "1.3.6.1.2.1.33.1.4.4.1.5.1"},
 }
 
-// pollPowerValues reads the UPS-MIB values of the power devices the power
-// plugin found; the runtime is reported in minutes and converted.
+// pollPowerValues reads the values of the power devices the power plugin
+// found with the SNMP credentials of their pass, by the device type and
+// vendor family of the hit (power.HitDevice): a PDU the load per phase or
+// inlet from the metering table of its family (power.Plugin.PDUValues), a
+// PDU of another family nothing; every other power device the UPS-MIB,
+// whose runtime is reported in minutes and converted. Every sample carries
+// kind=power, target and device=pdu|ups.
 func pollPowerValues(ctx context.Context, hits []plugins.Result, creds map[string]string) []plugins.MetricSample {
-	poller, ok := pluginRegistry["snmp"].(*snmp.Plugin)
-	if !ok {
-		return nil
-	}
 	var samples []plugins.MetricSample
 	for i := range hits {
 		if hits[i].IP == "" || ctx.Err() != nil {
 			continue
 		}
-		polled, err := poller.Poll(ctx, hits[i].IP, creds, upsPollMetrics)
+		var (
+			polled []plugins.MetricSample
+			err    error
+		)
+		deviceType, family := power.HitDevice(&hits[i])
+		if deviceType == "pdu" {
+			poller, ok := pluginRegistry["power"].(pduPoller)
+			if !ok {
+				continue
+			}
+			polled, err = poller.PDUValues(ctx, hits[i].IP, creds, family)
+		} else {
+			poller, ok := pluginRegistry["snmp"].(metricPoller)
+			if !ok {
+				continue
+			}
+			polled, err = poller.Poll(ctx, hits[i].IP, creds, upsPollMetrics)
+			for j := range polled {
+				polled[j].Labels["device"] = "ups"
+				if polled[j].Name == "ups_battery_runtime_seconds" {
+					polled[j].Value *= 60
+				}
+			}
+		}
 		if err != nil {
 			slog.Debug("power value poll failed", "target", hits[i].IP, "error", err)
 			continue
 		}
 		for j := range polled {
 			polled[j].Labels["kind"] = "power"
-			if polled[j].Name == "ups_battery_runtime_seconds" {
-				polled[j].Value *= 60
-			}
 		}
 		samples = append(samples, polled...)
 	}
 	return samples
 }
 
-// uploadSamples sends metric samples; a failure is logged, the next run
-// sends fresh values.
+// uploadSamples sends metric samples over the edge; without it they wait
+// in the metric buffer, a refusal or drop is logged as an error.
 func uploadSamples(ctx context.Context, up *uploader, samples []plugins.MetricSample) {
 	if len(samples) == 0 || up == nil {
 		return
 	}
 	if err := up.uploadMetricSamples(ctx, samples); err != nil {
-		slog.Warn("metric sample upload failed", "count", len(samples), "error", err)
+		slog.Error("metric sample upload failed", "count", len(samples), "error", err)
 	}
 }

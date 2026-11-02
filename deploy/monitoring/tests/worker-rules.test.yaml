@@ -1,0 +1,262 @@
+# promtool unit test of deploy/monitoring/worker-rules.yaml (WP-446, OPS-05):
+# each of the five worker alerts fires and stays silent where it must.
+# promtool reads plain rule groups, not a PrometheusRule: the groups of
+# spec.groups are extracted into worker-rules.groups.yaml next to a copy of
+# this file (tests/monitoring-config.test.sh, CI job monitoring-config):
+#
+#   promtool test rules worker-rules.test.yaml
+rule_files:
+  - worker-rules.groups.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # ReticoraWorkerStopped: export stops on server-1 at minute 3 and fires
+  # after 5 minutes. Not: a disabled worker (server-2), a running worker
+  # (ingest), a loop that was down for 4 minutes only (notifier).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_worker_enabled{instance="server-1:8080",job="reticora-server",worker="export"}'
+        values: '1x20'
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="export"}'
+        values: '1 1 1 0x17'
+      - series: 'reticora_worker_enabled{instance="server-2:8080",job="reticora-server",worker="export"}'
+        values: '0x20'
+      - series: 'reticora_worker_up{instance="server-2:8080",job="reticora-server",worker="export"}'
+        values: '0x20'
+      - series: 'reticora_worker_enabled{instance="server-1:8080",job="reticora-server",worker="ingest"}'
+        values: '1x20'
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="ingest"}'
+        values: '1x20'
+      - series: 'reticora_worker_enabled{instance="server-1:8080",job="reticora-server",worker="notifier"}'
+        values: '1x20'
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="notifier"}'
+        values: '1 1 1 0 0 0 0 1x13'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: ReticoraWorkerStopped
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: ReticoraWorkerStopped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: server-1:8080
+              job: reticora-server
+              worker: export
+            exp_annotations:
+              summary: "Worker export stopped on server-1:8080"
+              description: "The worker is switched on (RETICORA_WORKER_*_ENABLED) but its loop has stopped. Restart the instance and check its log for 'worker stopped unexpectedly'."
+      - eval_time: 20m
+        alertname: ReticoraWorkerStopped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: server-1:8080
+              job: reticora-server
+              worker: export
+            exp_annotations:
+              summary: "Worker export stopped on server-1:8080"
+              description: "The worker is switched on (RETICORA_WORKER_*_ENABLED) but its loop has stopped. Restart the instance and check its log for 'worker stopped unexpectedly'."
+
+  # ReticoraWorkerErrors: export fails once a minute on server-1 (more than
+  # 5 failures in 15 minutes from minute 6, fires 15 minutes later); notifier
+  # fails 4.5 times in 15 minutes on each of two instances, together 9 (the
+  # rule sums the instances). Not: 5 failures in a row and then none
+  # (ingest), one failure every 4 minutes (events).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_worker_errors_total{instance="server-1:8080",job="reticora-server",worker="export"}'
+        values: '0+1x40'
+      - series: 'reticora_worker_errors_total{instance="server-1:8080",job="reticora-server",worker="notifier"}'
+        values: '0+0.3x40'
+      - series: 'reticora_worker_errors_total{instance="server-2:8080",job="reticora-server",worker="notifier"}'
+        values: '0+0.3x40'
+      - series: 'reticora_worker_errors_total{instance="server-1:8080",job="reticora-server",worker="ingest"}'
+        values: '0+1x5 5x35'
+      - series: 'reticora_worker_errors_total{instance="server-1:8080",job="reticora-server",worker="events"}'
+        values: '0+0.25x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReticoraWorkerErrors
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: ReticoraWorkerErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              worker: export
+            exp_annotations:
+              summary: "Worker export keeps failing"
+              description: "More than 5 failures in 15 minutes; the worker log names the failing step."
+          - exp_labels:
+              severity: warning
+              worker: notifier
+            exp_annotations:
+              summary: "Worker notifier keeps failing"
+              description: "More than 5 failures in 15 minutes; the worker log names the failing step."
+
+  # ReticoraWorkerNoSuccess (F-295): credential_bundles runs from the start
+  # but every cycle fails, so it has no last-success series at all: it fires
+  # 30 minutes after the start. export succeeded once at minute 0 and fails
+  # since: it fires 35 minutes later. Not: a worker that succeeds every minute
+  # (ingest), a worker that only one of two instances runs successfully
+  # (scheduler, the other replica does not lead), a stopped worker without
+  # success (notifier, ReticoraWorkerStopped covers it).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="credential_bundles"}'
+        values: '1x60'
+      - series: 'reticora_worker_runs_total{instance="server-1:8080",job="reticora-server",worker="credential_bundles"}'
+        values: '0+1x60'
+      - series: 'reticora_worker_errors_total{instance="server-1:8080",job="reticora-server",worker="credential_bundles"}'
+        values: '0+1x60'
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="export"}'
+        values: '1x60'
+      - series: 'reticora_worker_last_success_timestamp_seconds{instance="server-1:8080",job="reticora-server",worker="export"}'
+        values: '0x60'
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="ingest"}'
+        values: '1x60'
+      - series: 'reticora_worker_last_success_timestamp_seconds{instance="server-1:8080",job="reticora-server",worker="ingest"}'
+        values: '0+60x60'
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="scheduler"}'
+        values: '1x60'
+      - series: 'reticora_worker_last_success_timestamp_seconds{instance="server-1:8080",job="reticora-server",worker="scheduler"}'
+        values: '0+60x60'
+      - series: 'reticora_worker_up{instance="server-2:8080",job="reticora-server",worker="scheduler"}'
+        values: '1x60'
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="notifier"}'
+        values: '0x60'
+      - series: 'reticora_worker_enabled{instance="server-1:8080",job="reticora-server",worker="notifier"}'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: ReticoraWorkerNoSuccess
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: ReticoraWorkerNoSuccess
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              worker: credential_bundles
+            exp_annotations:
+              summary: "Worker credential_bundles has not completed a run for 30 minutes"
+              description: "Every cycle of the worker failed for 30 minutes, or none has succeeded since the start (for example database, object storage or NATS unreachable)."
+      - eval_time: 34m
+        alertname: ReticoraWorkerNoSuccess
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              worker: credential_bundles
+            exp_annotations:
+              summary: "Worker credential_bundles has not completed a run for 30 minutes"
+              description: "Every cycle of the worker failed for 30 minutes, or none has succeeded since the start (for example database, object storage or NATS unreachable)."
+      - eval_time: 35m
+        alertname: ReticoraWorkerNoSuccess
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              worker: credential_bundles
+            exp_annotations:
+              summary: "Worker credential_bundles has not completed a run for 30 minutes"
+              description: "Every cycle of the worker failed for 30 minutes, or none has succeeded since the start (for example database, object storage or NATS unreachable)."
+          - exp_labels:
+              severity: critical
+              worker: export
+            exp_annotations:
+              summary: "Worker export has not completed a run for 30 minutes"
+              description: "Every cycle of the worker failed for 30 minutes, or none has succeeded since the start (for example database, object storage or NATS unreachable)."
+
+  # ReticoraWorkerNoSuccess after a restart: events succeeds every minute
+  # until minute 10, the restarted process fails every cycle and exports no
+  # last-success series (stale from minute 11). The alert still fires, 30
+  # minutes after the last series sample went stale.
+  - interval: 1m
+    input_series:
+      - series: 'reticora_worker_up{instance="server-1:8080",job="reticora-server",worker="events"}'
+        values: '1x60'
+      - series: 'reticora_worker_last_success_timestamp_seconds{instance="server-1:8080",job="reticora-server",worker="events"}'
+        values: '0+60x10 stale'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: ReticoraWorkerNoSuccess
+        exp_alerts: []
+      - eval_time: 41m
+        alertname: ReticoraWorkerNoSuccess
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              worker: events
+            exp_annotations:
+              summary: "Worker events has not completed a run for 30 minutes"
+              description: "Every cycle of the worker failed for 30 minutes, or none has succeeded since the start (for example database, object storage or NATS unreachable)."
+
+  # ReticoraWorkerBacklog: export stays above 1000 and fires after 15
+  # minutes. Not: exactly 1000 (webhook_dispatcher), above 1000 for 10
+  # minutes only (ingest).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_worker_backlog{instance="server-1:8080",job="reticora-server",worker="export"}'
+        values: '1500x30'
+      - series: 'reticora_worker_backlog{instance="server-1:8080",job="reticora-server",worker="webhook_dispatcher"}'
+        values: '1000x30'
+      - series: 'reticora_worker_backlog{instance="server-1:8080",job="reticora-server",worker="ingest"}'
+        values: '2000x9 50x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: ReticoraWorkerBacklog
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: ReticoraWorkerBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              worker: export
+            exp_annotations:
+              summary: "Backlog of worker export above 1000"
+              description: "1500 items are waiting. Check the worker's errors, or run more instances with the worker switched on."
+      - eval_time: 30m
+        alertname: ReticoraWorkerBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              worker: export
+            exp_annotations:
+              summary: "Backlog of worker export above 1000"
+              description: "1500 items are waiting. Check the worker's errors, or run more instances with the worker switched on."
+
+  # ReticoraWorkerBacklogGrowing: ingest grows by 10 a minute, is above 100
+  # from minute 11 and fires 30 minutes later. Not: growing but at most 90
+  # (export), high but flat (notifier), shrinking (webhook_dispatcher).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_worker_backlog{instance="server-1:8080",job="reticora-server",worker="ingest"}'
+        values: '0+10x90'
+      - series: 'reticora_worker_backlog{instance="server-1:8080",job="reticora-server",worker="export"}'
+        values: '0+1x90'
+      - series: 'reticora_worker_backlog{instance="server-1:8080",job="reticora-server",worker="notifier"}'
+        values: '500x90'
+      - series: 'reticora_worker_backlog{instance="server-1:8080",job="reticora-server",worker="webhook_dispatcher"}'
+        values: '900-10x89'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: ReticoraWorkerBacklogGrowing
+        exp_alerts: []
+      - eval_time: 41m
+        alertname: ReticoraWorkerBacklogGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              worker: ingest
+            exp_annotations:
+              summary: "Backlog of worker ingest keeps growing"
+              description: "The backlog has grown for 30 minutes; the worker does not keep up."
+      - eval_time: 90m
+        alertname: ReticoraWorkerBacklogGrowing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              worker: ingest
+            exp_annotations:
+              summary: "Backlog of worker ingest keeps growing"
+              description: "The backlog has grown for 30 minutes; the worker does not keep up."

@@ -137,7 +137,7 @@ func (h *Handler) ListAssignments(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, map[string]any{"data": items})
+	api.WriteJSON(w, http.StatusOK, map[string]any{"data": api.NonNilSlice(items)})
 }
 
 // Assign handles POST /api/v1/trainings/{id}/assignments.
@@ -173,7 +173,7 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 	created, err := h.repo.Assign(r.Context(), a)
 	if err != nil {
 		if strings.Contains(err.Error(), "already assigned") {
-			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+			api.WriteError(w, http.StatusConflict, "Conflict", "user already assigned")
 			return
 		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "training not found")

@@ -80,6 +80,29 @@ var oidcRoleMapping = map[string]string{
 	"reticora-viewer":   "viewer",
 }
 
+// orgAdminRole is the standard role whose holders must use MFA (AUT-09).
+const orgAdminRole = "org_admin"
+
+// realmMFAGroup is the realm group that maps to org_admin and carries the
+// realm role mfa_required itself (deploy/keycloak, WP-357). A login from it
+// needs no binding through the Keycloak admin API (E-65 option 1): the
+// installer administrator of a standard installation, which has no admin
+// client, signs in. Only the exact realm name is exempt.
+const realmMFAGroup = "reticora-admin"
+
+// orgAdminWithoutRealmMFA reports whether the IdP groups map to org_admin
+// through a group other than realmMFAGroup, such as org_admin (WP-367): the
+// realm does not bind its members to MFA, the login must.
+func orgAdminWithoutRealmMFA(groups []string) bool {
+	for _, group := range groups {
+		name := strings.TrimPrefix(strings.TrimSpace(group), "/")
+		if oidcRoleMapping[strings.ToLower(name)] == orgAdminRole && name != realmMFAGroup {
+			return true
+		}
+	}
+	return false
+}
+
 // StandardRolesForGroups maps IdP roles and groups to standard role names,
 // sorted and without duplicates.
 func StandardRolesForGroups(groups []string) []string {

@@ -1,8 +1,14 @@
 package savedview
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
+	"regexp"
 	"strings"
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // CompileSQL renders the WHERE clause (without the keyword) and its args for
@@ -10,8 +16,12 @@ import (
 // slice so the caller controls the parameter offset via startAt.
 //
 // Field names are fixed allow-listed identifiers — never user input — so the
-// generated SQL is injection-safe; only values are parameterized.
+// generated SQL is injection-safe; only values are parameterized. The spec
+// is validated first (Validate), so no value fails a cast in SQL.
 func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (string, []any, error) {
+	if err := f.Validate(entityKind); err != nil {
+		return "", nil, err
+	}
 	var parts []string
 	add := func(clause string, vals ...any) {
 		parts = append(parts, clause)
@@ -114,11 +124,11 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 	}
 	if f.HasRelationship != "" && table == "ci" {
 		p := next()
-		add(fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = %s AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))`, p), f.HasRelationship)
+		add(relationshipExists(f.HasRelationship, p), f.HasRelationship)
 	}
 	if f.LacksRelationship != "" && table == "ci" {
 		p := next()
-		add(fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = %s AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))`, p), f.LacksRelationship)
+		add("NOT "+relationshipExists(f.LacksRelationship, p), f.LacksRelationship)
 	}
 	if f.UpstreamOf != "" && table == "ci" {
 		// CIs upstream of X: sources of edges pointing (transitively) into X,
@@ -170,9 +180,6 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 	}
 
 	if f.Where != nil {
-		if err := f.Where.Validate(entityKind); err != nil {
-			return "", nil, err
-		}
 		clause, astArgs, _, err := f.Where.CompileSQL(entityKind, table, nil, pos)
 		if err != nil {
 			return "", nil, err
@@ -185,8 +192,65 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 	return strings.Join(parts, " AND "), args, nil
 }
 
+// Validate checks the values of the spec that SQL would cast before any
+// query runs (SRC-03, API-03): the ids of client_id, location_id,
+// upstream_of and downstream_of are UUIDs, the AST in where is valid for
+// the entity kind, and so are the sort keys and columns of the run
+// (validatePresentation). A violation is a 422 *api.FieldError naming the
+// field, for the AST where.<path> (e.g. where.and[1].value).
+func (f *FilterSpec) Validate(entityKind string) error {
+	if err := validatePresentation(entityKind, f.Sort, f.Columns); err != nil {
+		return err
+	}
+	for _, id := range []struct{ field, value string }{
+		{"client_id", f.ClientID}, {"location_id", f.LocationID},
+		{"upstream_of", f.UpstreamOf}, {"downstream_of", f.DownstreamOf},
+	} {
+		if id.value != "" && !isUUID(id.value) {
+			return &api.FieldError{Field: id.field, Message: "must be a UUID", Status: http.StatusUnprocessableEntity}
+		}
+	}
+	if f.Where == nil {
+		return nil
+	}
+	err := f.Where.Validate(entityKind)
+	var astErr *ASTError
+	if errors.As(err, &astErr) {
+		return &api.FieldError{Field: "where" + astErr.Path, Message: astErr.Message, Status: http.StatusUnprocessableEntity}
+	}
+	return err
+}
+
 // MaxRelationshipDepth bounds upstream_of and downstream_of (SRC-04).
 const MaxRelationshipDepth = 5
+
+// projectedRelTypes are the structural relationship types of the view
+// ci_structure_edge (DB-05, CH27): contains from ci.parent_ci_id,
+// mounted_in from rack_mount and located_in from ci.location_id. They are
+// never stored in ci_relationship (F-244).
+var projectedRelTypes = map[string]bool{"contains": true, "mounted_in": true, "located_in": true}
+
+// relationshipExists is the predicate of has_relationship (and, negated,
+// of lacks_relationship): the CI is an end of a relationship of type p, a
+// stored one or, for a type of projectedRelTypes, a projected one (F-244).
+// Both read under the caller's RLS: ci_relationship carries the scope of
+// both ends, the view ci_structure_edge runs as the invoker and is
+// joined with the visible CI of the other end, as the relationship API
+// lists projected edges (internal/relationship); the target of mounted_in and
+// located_in is a location. The projection is read with one arm per end
+// of the edge, each an equality on the CI, as the relationship API lists
+// the edges of a CI (WP-609).
+func relationshipExists(relType, p string) string {
+	stored := fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = %s AND (r.source_ci_id = ci.id OR r.target_ci_id = ci.id))`, p)
+	if !projectedRelTypes[relType] {
+		return stored
+	}
+	return fmt.Sprintf(`(%s
+		OR EXISTS (SELECT 1 FROM ci_structure_edge e WHERE e.rel_type = %s AND e.source_ci_id = ci.id
+			AND (e.target_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci t WHERE t.id = e.target_ci_id)))
+		OR EXISTS (SELECT 1 FROM ci_structure_edge e WHERE e.rel_type = %s AND e.target_ci_id = ci.id
+			AND EXISTS (SELECT 1 FROM ci s WHERE s.id = e.source_ci_id)))`, stored, p, p)
+}
 
 // QueryResult is one row of a filter execution.
 type QueryResult struct {
@@ -195,6 +259,9 @@ type QueryResult struct {
 	Name       string         `json:"name"`
 	Summary    string         `json:"summary,omitempty"`
 	Attributes map[string]any `json:"attributes,omitempty"`
+	// Columns holds the value of each requested column (FilterSpec.Columns)
+	// by field name; absent when the run asked for no columns.
+	Columns map[string]any `json:"columns,omitempty"`
 }
 
 // Filter AST (SRC-03, MET-45): Where combines comparisons with and, or and
@@ -337,15 +404,28 @@ func (e *Expr) validate(entityKind, path string, depth int, nodes *int) error {
 	return e.validateComparison(kind, path)
 }
 
-// fieldKind resolves the comparison's field; attributes compare by the
-// value's type.
+// fieldKind resolves the comparison's field. Attributes have no declared
+// type and compare by the value's type (for in by the first element's): a
+// number as number, a boolean as bool, a string as text, or as time when
+// it is a time compared with lt, lte, gt or gte.
 func (e *Expr) fieldKind(entityKind string) (string, error) {
 	if key, ok := strings.CutPrefix(e.Field, "attributes."); ok {
 		if !validAttributeKey(key) {
 			return "", fmt.Errorf("invalid attribute key %q", key)
 		}
-		if _, isNumber := e.Value.(float64); isNumber {
+		v := e.Value
+		if list, isList := v.([]any); isList && len(list) > 0 {
+			v = list[0]
+		}
+		switch v := v.(type) {
+		case float64:
 			return kindNumber, nil
+		case bool:
+			return kindBool, nil
+		case string:
+			if ordering(e.Op) && validTime(v) {
+				return kindTime, nil
+			}
 		}
 		return kindText, nil
 	}
@@ -363,9 +443,15 @@ func (e *Expr) fieldKind(entityKind string) (string, error) {
 	return f.kind, nil
 }
 
+// validateComparison checks the operator for the field kind and every value
+// against it (each element of in), so that no value reaches a cast in SQL
+// that could fail (F-179).
 func (e *Expr) validateComparison(kind, path string) error {
 	switch e.Op {
 	case OpExists:
+		if _, isBool := e.Value.(bool); e.Value != nil && !isBool {
+			return &ASTError{path + ".value", "exists takes true, false or no value"}
+		}
 		return nil
 	case OpEq, OpNe:
 	case OpLt, OpLte, OpGt, OpGte:
@@ -379,17 +465,84 @@ func (e *Expr) validateComparison(kind, path string) error {
 	case OpIn:
 		values, ok := e.Value.([]any)
 		if !ok || len(values) == 0 {
-			return &ASTError{path, "in needs a non-empty list"}
+			return &ASTError{path + ".value", "in needs a non-empty list"}
+		}
+		for i, v := range values {
+			if msg := valueError(kind, v); msg != "" {
+				return &ASTError{fmt.Sprintf("%s.value[%d]", path, i), msg}
+			}
 		}
 		return nil
 	default:
 		return &ASTError{path, fmt.Sprintf("unknown operator %q", e.Op)}
 	}
-	switch e.Value.(type) {
-	case string, float64, bool:
-		return nil
+	if msg := valueError(kind, e.Value); msg != "" {
+		return &ASTError{path + ".value", msg}
 	}
-	return &ASTError{path, "the value must be a string, number or boolean"}
+	return nil
+}
+
+// valueError reports why v is no value of the field kind, or "" when it is
+// one. Attributes take their kind from the value, so for them only the
+// elements of in after the first can disagree.
+func valueError(kind string, v any) string {
+	switch v.(type) {
+	case string, float64, bool:
+	default:
+		return "must be a string, number or boolean"
+	}
+	switch kind {
+	case kindNumber:
+		if _, ok := v.(float64); !ok {
+			return "must be a number"
+		}
+		return ""
+	case kindBool:
+		if _, ok := v.(bool); !ok {
+			return "must be true or false"
+		}
+		return ""
+	}
+	s, ok := v.(string)
+	switch {
+	case !ok:
+		return "must be a string"
+	case strings.ContainsRune(s, 0):
+		return "must not contain NUL characters"
+	case kind == kindUUID && !isUUID(s):
+		return "must be a UUID"
+	case kind == kindTime && !validTime(s):
+		return "must be an RFC 3339 time or a date (YYYY-MM-DD)"
+	}
+	return ""
+}
+
+// ordering reports whether op compares by order.
+func ordering(op string) bool {
+	return op == OpLt || op == OpLte || op == OpGt || op == OpGte
+}
+
+// rfc3339Shape is the form of an RFC 3339 time or a date. time.Parse is
+// more lenient (a comma before the fraction, offset minute 60), which
+// timestamptz refuses.
+var rfc3339Shape = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:[0-5]\d))?$`)
+
+// validTime reports whether s is an RFC 3339 time or a date that
+// PostgreSQL's timestamptz accepts: year 0001 or later and a UTC offset
+// below 16 hours.
+func validTime(s string) bool {
+	if !rfc3339Shape.MatchString(s) {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t, err = time.Parse(time.DateOnly, s)
+	}
+	if err != nil {
+		return false
+	}
+	_, offset := t.Zone()
+	return t.Year() >= 1 && offset > -16*3600 && offset < 16*3600
 }
 
 // CompileSQL renders the AST as a SQL predicate on table; args are
@@ -428,39 +581,58 @@ func (e *Expr) CompileSQL(entityKind, table string, args []any, startAt int) (sq
 		if ferr != nil {
 			return "", ferr
 		}
-		col, wrap := n.column(entityKind, table, param)
-		return wrap(comparison(col, kind, n, param)), nil
+		col, jsonValue, wrap := n.column(entityKind, table, param)
+		return wrap(comparison(col, jsonValue, kind, n, param)), nil
 	}
 	sql, err = compile(e)
 	return sql, args, next, err
 }
 
-// column returns the SQL expression of the field and, for asset fields of
-// a CI, the wrapper that evaluates the comparison on the linked asset.
-func (e *Expr) column(entityKind, table string, param func(any) string) (col string, wrap func(string) string) {
+// column returns the SQL expression of the field, for a dynamic attribute
+// also its JSON value (jsonValue), and for asset fields of a CI the
+// wrapper that evaluates the comparison on the linked asset.
+func (e *Expr) column(entityKind, table string, param func(any) string) (col, jsonValue string, wrap func(string) string) {
 	wrap = func(s string) string { return s }
 	if key, ok := strings.CutPrefix(e.Field, "attributes."); ok {
 		jsonb := table + ".attributes"
 		if entityKind == "asset" {
 			jsonb = table + ".custom_fields"
 		}
-		return fmt.Sprintf("%s->>%s", jsonb, param(key)), wrap
+		p := param(key)
+		return fmt.Sprintf("%s->>%s", jsonb, p), fmt.Sprintf("%s->%s", jsonb, p), wrap
 	}
 	if sub, ok := strings.CutPrefix(e.Field, "asset."); ok && entityKind == "ci" {
 		wrap = func(s string) string {
 			return fmt.Sprintf("EXISTS (SELECT 1 FROM asset sa WHERE sa.id = %s.asset_id AND %s)", table, s)
 		}
-		return fmt.Sprintf(astFields["asset"][sub].expr, "sa"), wrap
+		return fmt.Sprintf(astFields["asset"][sub].expr, "sa"), "", wrap
 	}
-	return fmt.Sprintf(astFields[entityKind][e.Field].expr, table), wrap
+	return fmt.Sprintf(astFields[entityKind][e.Field].expr, table), "", wrap
 }
 
-// comparison renders one comparison with the casts of the field kind.
-func comparison(col, kind string, e *Expr, param func(any) string) string {
+// attributeGuards are the type checks under which comparison casts a
+// dynamic attribute (%[1]s its JSON value, %[2]s its text). None of them
+// can fail, so the result does not depend on the order in which
+// PostgreSQL evaluates the predicates (F-165).
+var attributeGuards = map[string]string{
+	kindNumber: `jsonb_typeof(%[1]s) = 'number'`,
+	kindBool:   `jsonb_typeof(%[1]s) = 'boolean'`,
+	kindTime:   `jsonb_typeof(%[1]s) = 'string' AND %[2]s ~ '^\d{4}-\d{2}-\d{2}' AND pg_input_is_valid(%[2]s, 'timestamptz')`,
+}
+
+// comparison renders one comparison with the casts of the field kind. A
+// dynamic attribute is cast only under its type check: a value of another
+// type compares as NULL like a missing key, so it matches neither eq, in
+// nor an order comparison, and like a missing key it matches ne (IS
+// DISTINCT FROM). The values themselves are validated (validateComparison).
+func comparison(col, jsonValue, kind string, e *Expr, param func(any) string) string {
 	cast := map[string]string{kindText: "", kindNumber: "::numeric", kindTime: "::timestamptz", kindUUID: "::uuid", kindBool: "::boolean"}[kind]
 	lhs := col
 	if kind != kindText {
 		lhs = "(" + col + ")" + cast
+		if jsonValue != "" {
+			lhs = "CASE WHEN " + fmt.Sprintf(attributeGuards[kind], jsonValue, col) + " THEN " + lhs + " END"
+		}
 	}
 	value := func(v any) string { return param(fmt.Sprint(v)) + cast }
 	switch e.Op {

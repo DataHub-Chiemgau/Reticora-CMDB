@@ -27,7 +27,15 @@ nebeneinander arbeiten.
 - Ohne NATS (`RETICORA_NATS_URL` leer) verarbeitet der Server den Ingest in
   der Anfrage, seriell je Organisation und Prozess, wie vor WP-334 ohne
   Sperren. Mehrere Instanzen ohne NATS sperren sich dabei nicht gegenseitig
-  (vorbestehend); in der Produktion deshalb mit NATS betreiben.
+  und können Geräte mit schwacher Identität doppelt anlegen (F-282). Deshalb
+  gilt (WP-586):
+  - `RETICORA_ENVIRONMENT=production` ohne `RETICORA_NATS_URL` startet
+    nicht: Die Startprüfung meldet „RETICORA_ENVIRONMENT=production requires
+    RETICORA_NATS_URL …“ mit Verweis auf dieses Dokument (Exit 1). Das
+    ausgelieferte Compose und die Kubernetes-Manifeste setzen die Variable.
+  - `development` und `staging` starten ohne NATS, protokollieren aber beim
+    Start die Konfigurationswarnung „RETICORA_NATS_URL is not set …“. Ohne
+    NATS nur eine Instanz betreiben.
 - Im Speicherbetrieb (`--no-db` mit NATS) kann das Repository nicht sperren.
   Ein Prozess verarbeitet dann jede Organisation seriell, unabhängig von
   `RETICORA_INGEST_LANES`; die Subjects bleiben je Spur.
@@ -59,6 +67,20 @@ nebeneinander arbeiten.
   Organisation für alle Consumer).
 - **Collector-Edge:** Records über den mTLS-NATS-Kanal (COL-08) laufen über
   dieselbe Queue und dieselben Subjects.
+- **Client des Collectors (F-407, DIS-05):** Die Records eines an einen
+  Client (oder eine Site) gebundenen Collectors laufen im Client-Scope des
+  Collectors; die Nachricht trägt ihn zum Consumer. Ein Record ohne
+  `client_id` erhält den Client des Collectors (bei Site-Bindung auch dessen
+  Site); ein Record mit einem anderen Client, einer anderen Site, einer Site
+  eines anderen Clients oder einer `scope_id`, die der Client nicht sieht,
+  wird einzeln mit 403 abgewiesen und nicht veröffentlicht, die übrigen
+  Records des Batches laufen weiter (WP-481); sind alle abgewiesen,
+  antwortet die Edge 403. Die Identitätsauflösung sieht nur CIs dieses
+  Clients (und org-weite, die sie nicht übernimmt): Ein Record mit der
+  Seriennummer eines CIs eines anderen Clients ändert dieses nicht und wird
+  mit 409 abgewiesen. Der Site-Scope bleibt beim Ingest org-weit, weil ein
+  entdecktes CI seine Site aus einer Location erhält, nicht aus dem Record.
+  Records eines org-weiten Collectors behalten den Client ihres Scopes.
 
 ## Garantien (E-56)
 
@@ -126,6 +148,39 @@ nebeneinander arbeiten.
   der Sperren (55P03) wiederholen ihn ebenso, aber nach 100, 200 und 300 ms.
   Die Queue sieht diese Wiederholungen nicht; sie zählen nicht gegen
   `MaxDeliver`.
+
+## Fehler je Record (WP-481)
+
+Ein Record, der scheitert, nimmt die übrigen Records seiner Gruppe nicht
+mit (REC-01). Die Verarbeitung setzt mit dem nächsten Record fort; jede
+Nachricht wird für ihren Record entschieden:
+
+- **Verarbeitet** (auch als Duplikat übersprungen): Ack.
+- **Dauerhafter Fehler** (Klasse 4xx: Record außerhalb des Scopes des
+  Absenders, vom Datenmodell abgewiesener Wert, eindeutiger Wert, den ein
+  anderes CI hält): sofort Term, Log `ingest.message.failed` mit
+  `permanent=true`, Metrik
+  `reticora_ingest_dead_letters_total{reason="permanent"}`. Er hält keinen
+  anderen Record auf.
+- **Transienter Fehler** (Datenbank, Netz, Deadlock oder Wartegrenze nach
+  den Wiederholungen oben): Nak, nach `MaxDeliver` (5) Term
+  (`reason="max_deliver"`). Die folgenden Records der Gruppe, die einen
+  Identitätsschlüssel der Identitätssperre mit ihm teilen (Seriennummer,
+  Hardware-UUID, MAC, Management-IP je VRF), werden nicht verarbeitet,
+  sondern ebenfalls Nak, damit die Reihenfolge je Gerät erhalten bleibt
+  (E-56); Records anderer Geräte werden verarbeitet und bestätigt. Ein
+  Record ohne Identitätsschlüssel hält keinen anderen auf.
+- Scheitert ein Record in der Batch-Transaktion seines Fensters, rollt das
+  Fenster zurück und seine Records laufen einzeln (`ingest.batch.fallback`,
+  siehe „Kosten je Transaktion“). Scheitert der Rahmen eines Batches
+  dauerhaft (etwa die Prüfung eines unbekannten Typs außerhalb des Scopes),
+  läuft jeder Record in einem eigenen Rahmen (`ingest.frame.fallback`).
+
+Ohne NATS (Ingest in der Anfrage) antwortet der Ingest mit 202 und den
+Zählern `accepted` und `rejected` sowie je abgewiesenem Record einem Eintrag
+in `errors` (`record_id`, `status`, `detail`, `retryable`); nur wenn kein
+Record angenommen wurde, bleibt der Fehlerstatus des ersten Records
+(z. B. 403).
 
 ## Upgrade und Altconsumer
 
@@ -242,6 +297,7 @@ geht es so:
   | `reticora_ingest_lane_backlog{lane}` | Rückstand je Spur (`legacy` = Altconsumer) |
   | `reticora_ingest_lane_records_total{lane}` | bestätigte Nachrichten je Spur |
   | `reticora_ingest_record_retries_total{reason}` | Wiederholungen im Prozess (`deadlock`, `serialization`, `identity`, `near_limit`, `out_of_memory`, `lock_timeout`) |
+  | `reticora_ingest_dead_letters_total{reason}` | aufgegebene Nachrichten (`undecodable`, `permanent`, `max_deliver`; siehe „Fehler je Record“) |
   | `reticora_worker_backlog{worker="ingest"}` | Summe aller Spuren (bestehende Alerts) |
 
 - Eine einzelne hängende Spur fällt in der Summe kaum auf: steigt
@@ -254,10 +310,22 @@ Für Records aus der Queue kommt je Record- und Batch-Transaktion eine
 Anweisung hinzu (die Identitätssperre samt Wartegrenze), mit einer Spur wie
 mit mehreren: ein Batch von 20 neuen Geräten braucht 11 statt 10
 Anweisungen, ein neuer Record einzeln 13 statt 12. Updates bekannter Geräte
-lesen ihre Kandidaten unter der Sperre neu (2 Anweisungen mehr).
-Organisationen mit `max_cis` zählen je anlegender Transaktion einmal neu
-(2 Anweisungen). Ohne NATS (Ingest in der Anfrage) bleibt es bei 10 und 12
-Anweisungen.
+laufen seit WP-608 in der Batch-Transaktion ihres Fensters, unter dessen
+Identitätssperren und mit den Kandidaten, die das Fenster gelesen hat; nur
+ein weiterer Record desselben Geräts im Fenster folgt in einer eigenen
+Transaktion und liest seine Kandidaten unter der Sperre neu (2 Anweisungen
+mehr). Audit-Einträge und Events des Fensters entstehen am Ende unter den
+Sperren der Organisation, ein COMMIT für das ganze Fenster. Die
+Batch-Transaktion hält die Zeilensperren ihrer bekannten Geräte bis zu
+ihrem COMMIT (ein Fenster, höchstens 100 Records); eine manuelle Änderung
+eines dieser CIs wartet so lange. Gerät eine Operation über mehrere CIs
+dabei in einen Deadlock mit dem Fenster, bricht PostgreSQL eine Seite ab;
+trifft es das Fenster, rollt es zurück und seine Records laufen einzeln. Die Wiederentdeckung des Lastszenarios
+`rediscover` kostet so etwa 21,5 statt 36 Anweisungen je Record
+(`TestRediscoverStatementBudget`). Organisationen mit `max_cis` zählen je
+anlegender Transaktion einmal neu (2 Anweisungen). Ohne NATS (Ingest in der
+Anfrage) bleibt es bei 10 und 12 Anweisungen, Updates bekannter Geräte
+laufen dort einzeln.
 
 ### Lock-Tabelle bemessen
 

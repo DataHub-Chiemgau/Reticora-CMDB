@@ -20,7 +20,10 @@ type FieldLister interface {
 // schema), the organization's global attributes (MET-13), the attributes
 // of the CI type and those of the single CI instance (MET-14). A narrower
 // layer tightens a wider one and cannot drop its rules; conflicting
-// definitions are a *CompositionError.
+// definitions are a *CompositionError. The system, organization and type
+// layers come from attribute_definition only (DB-03); the instance layer
+// stays in ci_instance_field_definition (decision E-92, transitional rule
+// option 2: MET-14 is [P2], WP-256).
 //
 // It implements ci.FieldResolver, which the CI service uses to validate
 // attribute payloads server-side.

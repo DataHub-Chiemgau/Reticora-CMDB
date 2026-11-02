@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -29,28 +30,47 @@ func NewPGDeliveryStore(pool *pgxpool.Pool) *PGDeliveryStore {
 
 // orgScope is the scope of delivery bookkeeping: deliveries belong to the
 // organization, not to the principal whose action raised the event, so they
-// are written org-wide on behalf of the organization (E-08).
+// are written org-wide on behalf of the organization (E-08). Only the
+// dispatcher paths use it (Enqueue, Update, the retry claim,
+// MoveToDeadLetter, CountDeadSince, PGRepository.Deactivate); the request
+// paths of the delivery view (ListBySubscription, ListDeadLetters, Requeue)
+// and of the subscriptions, RotateSecret included, run with the
+// principal's scope (database.WithRequestTenant, F-183).
 func orgScope(orgID string) *database.TenantScope {
 	scope := database.OrgWideScope(orgID, "")
 	return &scope
 }
 
-// Enqueue stores a new pending delivery for the tenant.
+// visibleSubscription restricts the deliveries or dead letters of the table
+// alias to the subscriptions the transaction sees: webhook_subscription is
+// read under its row level security (migration 000155), so a request reads
+// only those of the subscriptions in its scope (E-98, TEN-09).
+func visibleSubscription(alias string) string {
+	return `EXISTS (SELECT 1 FROM webhook_subscription s WHERE s.id = ` + alias + `.subscription_id)`
+}
+
+// Enqueue stores a new pending delivery for the tenant. A preset ID is
+// kept; a delivery of an event the subscription already has is not stored
+// again (unique index of migration 000169, WP-506): ErrDeliveryExists.
 func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (DeliveryRecord, error) {
 	stored := rec
 
 	err := database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
 			INSERT INTO webhook_delivery (
-				organization_id, subscription_id, event, payload,
-				status, attempt, max_attempts, next_retry_at
+				id, organization_id, subscription_id, event, payload,
+				status, attempt, max_attempts, next_retry_at,
+				event_id, event_sequence, event_entity_seq
 			)
 			VALUES (
-				current_setting('app.org_id')::uuid, $1, $2, $3,
-				$4, $5, $6, $7
+				COALESCE($1::uuid, gen_random_uuid()), current_setting('app.org_id')::uuid, $2, $3, $4,
+				$5, $6, $7, $8,
+				$9::uuid, $10, $11
 			)
+			ON CONFLICT DO NOTHING
 			RETURNING id::text, created_at
 		`,
+			nullableString(rec.ID),
 			rec.SubscriptionID,
 			rec.Event,
 			rec.Payload,
@@ -58,8 +78,15 @@ func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (Deli
 			rec.Attempt,
 			maxAttemptsOrDefault(rec.MaxAttempts),
 			rec.NextRetryAt,
+			nullableString(rec.EventID),
+			nullableInt64(rec.EventSequence),
+			nullableInt64(rec.EntitySeq),
 		)
-		if err := row.Scan(&stored.ID, &stored.CreatedAt); err != nil {
+		err := row.Scan(&stored.ID, &stored.CreatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDeliveryExists
+		}
+		if err != nil {
 			return fmt.Errorf("enqueue webhook delivery: %w", err)
 		}
 		stored.CreatedAt = stored.CreatedAt.UTC()
@@ -124,44 +151,71 @@ func (s *PGDeliveryStore) CountDue(ctx context.Context, now time.Time) (int, err
 // The system flag only finds the organizations with due deliveries; each
 // organization's deliveries are then leased in its own tenant transaction,
 // because the system flag cannot write (WP-022).
+//
+// The organizations are served in the order of their oldest due delivery,
+// each first up to an equal share of limit, so the backlog of one
+// organization cannot crowd the others out of the batch; what the share
+// leaves of limit goes to the organizations that filled their share, in the
+// same order. A failing organization does not stop the others: ClaimDue
+// returns the deliveries it leased together with the joined errors, and the
+// caller must process them (F-184).
 func (s *PGDeliveryStore) ClaimDue(ctx context.Context, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
 	var orgIDs []string
 	err := database.WithSystem(ctx, s.pool, func(ctx context.Context, tx pgx.Tx) error {
+		// At most limit organizations: each one claims at least one.
 		rows, err := tx.Query(ctx, `
-			SELECT DISTINCT organization_id::text
+			SELECT organization_id::text
 			FROM webhook_delivery
 			WHERE status IN ('pending', 'failed', 'delivering')
 			  AND next_retry_at IS NOT NULL
-			  AND next_retry_at <= $1`, now)
+			  AND next_retry_at <= $1
+			GROUP BY organization_id
+			ORDER BY min(next_retry_at), organization_id
+			LIMIT $2`, now, limit)
 		if err != nil {
 			return fmt.Errorf("find due webhook deliveries: %w", err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				return fmt.Errorf("scan organization: %w", err)
-			}
-			orgIDs = append(orgIDs, id)
+		orgIDs, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return fmt.Errorf("scan organization: %w", err)
 		}
-		return rows.Err()
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	if len(orgIDs) == 0 {
+		return nil, nil
+	}
 
 	records := make([]DeliveryRecord, 0, limit)
+	var errs []error
+	claim := func(orgID string, n int) int {
+		claimed, err := s.claimDueForOrg(ctx, orgID, now, n, lease)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("organization %s: %w", orgID, err))
+			return 0
+		}
+		records = append(records, claimed...)
+		return len(claimed)
+	}
+	share := limit / len(orgIDs)
+	var more []string
 	for _, orgID := range orgIDs {
+		if claim(orgID, share) == share {
+			more = append(more, orgID)
+		}
+	}
+	for _, orgID := range more {
 		if len(records) >= limit {
 			break
 		}
-		claimed, err := s.claimDueForOrg(ctx, orgID, now, limit-len(records), lease)
-		if err != nil {
-			return records, err
-		}
-		records = append(records, claimed...)
+		claim(orgID, limit-len(records))
 	}
-	return records, nil
+	return records, errors.Join(errs...)
 }
 
 func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now time.Time, limit int, lease time.Duration) ([]DeliveryRecord, error) {
@@ -185,7 +239,8 @@ func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now 
 			FROM due
 			WHERE d.id = due.id
 			RETURNING d.id::text, d.organization_id::text, d.subscription_id::text, d.event,
-			          d.payload, d.status, d.attempt, d.max_attempts, d.created_at
+			          d.payload, d.status, d.attempt, d.max_attempts, d.created_at,
+			          COALESCE(d.event_id::text, ''), COALESCE(d.event_sequence, 0), COALESCE(d.event_entity_seq, 0)
 		`, now, limit, now.Add(lease))
 		if err != nil {
 			return fmt.Errorf("claim due webhook deliveries: %w", err)
@@ -204,6 +259,9 @@ func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now 
 				&rec.Attempt,
 				&rec.MaxAttempts,
 				&rec.CreatedAt,
+				&rec.EventID,
+				&rec.EventSequence,
+				&rec.EntitySeq,
 			); err != nil {
 				return fmt.Errorf("scan webhook delivery: %w", err)
 			}
@@ -215,14 +273,15 @@ func (s *PGDeliveryStore) claimDueForOrg(ctx context.Context, orgID string, now 
 	return records, err
 }
 
-// ListBySubscription returns the delivery history of a subscription.
+// ListBySubscription returns the delivery history of a subscription the
+// caller sees.
 func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscriptionID string, page api.PaginationParams) ([]DeliveryRecord, int, error) {
 	records := make([]DeliveryRecord, 0)
 	total := 0
 
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			"SELECT COUNT(*) FROM webhook_delivery WHERE subscription_id = $1", subscriptionID,
+			"SELECT COUNT(*) FROM webhook_delivery d WHERE d.subscription_id = $1 AND "+visibleSubscription("d"), subscriptionID,
 		).Scan(&total); err != nil {
 			return fmt.Errorf("count webhook deliveries: %w", err)
 		}
@@ -231,8 +290,8 @@ func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscri
 			SELECT id::text, organization_id::text, subscription_id::text, event, status,
 			       attempt, max_attempts, response_status, duration_ms, error,
 			       next_retry_at, delivered_at, created_at
-			FROM webhook_delivery
-			WHERE subscription_id = $1
+			FROM webhook_delivery d
+			WHERE d.subscription_id = $1 AND `+visibleSubscription("d")+`
 			ORDER BY created_at DESC
 			LIMIT $2 OFFSET $3
 		`, subscriptionID, page.Limit, page.Offset)
@@ -283,12 +342,20 @@ func (s *PGDeliveryStore) ListBySubscription(ctx context.Context, orgID, subscri
 	return records, total, err
 }
 
-// MoveToDeadLetter moves a failed delivery into the dead-letter queue and
-// marks the delivery record dead, atomically. Repeating the move for the same
-// delivery is a no-op.
-func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryRecord) error {
-	return database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `
+// MoveToDeadLetter implements DeliveryStore in one tenant transaction: the
+// dead letter, the dead delivery, the switch-off of the subscription
+// (WHK-01) and webhook.dead in the outbox (NTF-05, WP-550). A failed step
+// rolls back all of them; the delivery stays where it was. The
+// subscription row is locked first, so concurrent moves of its deliveries
+// count each other's dead letters. Repeating the move for the same delivery
+// is a no-op.
+func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec *DeliveryRecord, since time.Time) (bool, error) {
+	disabled := false
+	err := database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM webhook_subscription WHERE id = $1 FOR UPDATE`, rec.SubscriptionID); err != nil {
+			return fmt.Errorf("lock webhook subscription: %w", err)
+		}
+		moved, err := tx.Exec(ctx, `
 			INSERT INTO webhook_dead_letter (
 				delivery_id, organization_id, subscription_id, event, payload,
 				attempts, last_status_code, last_error, first_attempt_at
@@ -303,7 +370,8 @@ func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryReco
 			rec.Attempt,
 			nullableInt(rec.ResponseStatus),
 			nullableString(rec.Error),
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("insert webhook dead letter: %w", err)
 		}
 
@@ -331,18 +399,45 @@ func (s *PGDeliveryStore) MoveToDeadLetter(ctx context.Context, rec DeliveryReco
 		if tag.RowsAffected() == 0 {
 			return fmt.Errorf("delivery not found")
 		}
+		if moved.RowsAffected() == 0 {
+			// Moved before: reported then.
+			return nil
+		}
+
+		var dead int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM webhook_dead_letter
+			WHERE organization_id = $1 AND subscription_id = $2 AND dead_at >= $3`,
+			rec.OrganizationID, rec.SubscriptionID, since).Scan(&dead); err != nil {
+			return fmt.Errorf("count dead webhook deliveries: %w", err)
+		}
+		if dead >= deadLimit {
+			off, err := tx.Exec(ctx, `UPDATE webhook_subscription SET is_active = false, updated_at = now()
+				WHERE id = $1 AND organization_id = $2`, rec.SubscriptionID, rec.OrganizationID)
+			if err != nil {
+				return fmt.Errorf("deactivate webhook: %w", err)
+			}
+			disabled = off.RowsAffected() > 0
+		}
+		if _, err := events.NewOutbox().Append(ctx, tx, deadEvent(rec, disabled)); err != nil {
+			return fmt.Errorf("report dead webhook delivery: %w", err)
+		}
 		return nil
 	})
+	if err != nil {
+		return false, err
+	}
+	return disabled, nil
 }
 
-// ListDeadLetters returns the dead-letter queue of one tenant, newest first.
+// ListDeadLetters returns the dead-letter queue of one tenant, newest first:
+// the dead letters of the subscriptions the caller sees.
 func (s *PGDeliveryStore) ListDeadLetters(ctx context.Context, orgID string, page api.PaginationParams) ([]DeadLetter, int, error) {
 	letters := make([]DeadLetter, 0)
 	total := 0
 
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			"SELECT COUNT(*) FROM webhook_dead_letter WHERE organization_id = $1", orgID,
+			"SELECT COUNT(*) FROM webhook_dead_letter dl WHERE dl.organization_id = $1 AND "+visibleSubscription("dl"), orgID,
 		).Scan(&total); err != nil {
 			return fmt.Errorf("count webhook dead letters: %w", err)
 		}
@@ -350,8 +445,8 @@ func (s *PGDeliveryStore) ListDeadLetters(ctx context.Context, orgID string, pag
 		rows, err := tx.Query(ctx, `
 			SELECT id::text, delivery_id::text, organization_id::text, subscription_id::text,
 			       event, attempts, last_status_code, last_error, first_attempt_at, dead_at
-			FROM webhook_dead_letter
-			WHERE organization_id = $1
+			FROM webhook_dead_letter dl
+			WHERE dl.organization_id = $1 AND `+visibleSubscription("dl")+`
 			ORDER BY dead_at DESC
 			LIMIT $2 OFFSET $3
 		`, orgID, page.Limit, page.Offset)
@@ -420,6 +515,13 @@ func nullableInt(value int) *int {
 	return &value
 }
 
+func nullableInt64(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
+}
+
 func nullableString(value string) *string {
 	if value == "" {
 		return nil
@@ -441,13 +543,15 @@ func (s *PGDeliveryStore) CountDeadSince(ctx context.Context, orgID, subscriptio
 	return n, nil
 }
 
-// Requeue puts a failed or dead delivery back into the queue with a fresh
-// retry budget and removes its dead letter (WHK-01).
+// Requeue puts a failed or dead delivery of a subscription the caller sees
+// back into the queue with a fresh retry budget and removes its dead letter
+// (WHK-01).
 func (s *PGDeliveryStore) Requeue(ctx context.Context, orgID, subscriptionID, deliveryID string, now time.Time) (DeliveryRecord, error) {
 	var rec DeliveryRecord
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var status string
-		err := tx.QueryRow(ctx, `SELECT status FROM webhook_delivery WHERE id = $1 AND subscription_id = $2 FOR UPDATE`,
+		err := tx.QueryRow(ctx, `SELECT d.status FROM webhook_delivery d WHERE d.id = $1 AND d.subscription_id = $2 AND `+
+			visibleSubscription("d")+` FOR UPDATE OF d`,
 			deliveryID, subscriptionID).Scan(&status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("not found")

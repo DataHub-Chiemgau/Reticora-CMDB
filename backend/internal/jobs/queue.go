@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
 // Distribution over NATS (TEC-14): a job is stored in the job table and
@@ -73,6 +76,9 @@ type Queue struct {
 
 	mu       sync.RWMutex
 	handlers map[string]Handler
+	// failures counts what failed since the last sweep: storage errors,
+	// failed attempts and errors of the consumers (OPS-05).
+	failures atomic.Int64
 }
 
 // NewQueue creates a queue for svc on js; js may be nil when only Process
@@ -93,11 +99,29 @@ func (q *Queue) Handle(k Kind, h Handler) {
 	q.handlers[k.Name] = h
 }
 
+// IsCancelled reports whether the job was cancelled, the checkpoint of a
+// handler of a cancellable kind (Service.IsCancelled).
+func (q *Queue) IsCancelled(ctx context.Context, orgID, id string) (bool, error) {
+	return q.svc.IsCancelled(ctx, orgID, id)
+}
+
+// SaveCancelledResult stores the result of a job cancelled while it ran
+// (Service.SaveCancelledResult).
+func (q *Queue) SaveCancelledResult(ctx context.Context, orgID, id string, result any) (*Job, error) {
+	return q.svc.SaveCancelledResult(ctx, orgID, id, result)
+}
+
 func (q *Queue) handler(kind string) (Handler, bool) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 	h, ok := q.handlers[kind]
 	return h, ok
+}
+
+// Handles reports whether the queue runs jobs of kind.
+func (q *Queue) Handles(kind string) bool {
+	_, ok := q.handler(kind)
+	return ok
 }
 
 // Setup creates or updates the work-queue stream.
@@ -117,8 +141,12 @@ func (q *Queue) Setup(ctx context.Context) error {
 // Submit stores a job and announces it. A job that exists already (same
 // idempotency key) is announced again while it is queued; the claim keeps
 // it from running twice. A failed announcement leaves the job queued for
-// the sweep.
+// the sweep. A kind without a handler (Handle) is refused (ErrUnknownKind):
+// its job would stay queued, since no worker consumes it.
 func (q *Queue) Submit(ctx context.Context, orgID, kind string, params any, opts EnqueueOptions) (*Job, bool, error) {
+	if !q.Handles(kind) {
+		return nil, false, fmt.Errorf("%w: %s has no handler on the job queue", ErrUnknownKind, kind)
+	}
 	job, created, err := q.svc.Enqueue(ctx, orgID, kind, params, opts)
 	if err != nil {
 		return nil, false, err
@@ -163,6 +191,7 @@ func (q *Queue) process(ctx context.Context, d Delivery, m *Message, mayReclaim 
 		return q.ack(d, false)
 	}
 	if err != nil {
+		q.failures.Add(1)
 		slog.Error("claim job", "job", m.JobID, "error", err)
 		return q.nak(d, retryDelay)
 	}
@@ -172,6 +201,7 @@ func (q *Queue) process(ctx context.Context, d Delivery, m *Message, mayReclaim 
 
 	h, ok := q.handler(job.Kind)
 	if !ok {
+		q.failures.Add(1)
 		_, _ = q.svc.Fail(ctx, job.OrganizationID, job.ID, fmt.Errorf("%w: %s", ErrUnknownKind, job.Kind))
 		return q.nak(d, retryDelay)
 	}
@@ -179,22 +209,34 @@ func (q *Queue) process(ctx context.Context, d Delivery, m *Message, mayReclaim 
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	timed, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, stop := q.svc.runContext(timed, job.OrganizationID, job.ID)
 	result, herr := h(runCtx, job)
+	stop()
 	cancel()
 	if ctx.Err() != nil {
 		// Shutdown: the job stays running and the message unacknowledged;
 		// after the timeout another worker takes the job over.
 		return Outcome{Ran: true}
 	}
+	// Cancelled while it ran (JOB-03, F-162): its result is not stored
+	// and its status stays; the message needs no further delivery.
+	if cancelled, cerr := q.svc.IsCancelled(ctx, job.OrganizationID, job.ID); cerr == nil && cancelled {
+		return q.ack(d, true)
+	}
 	if herr == nil {
 		if _, err = q.svc.Succeed(ctx, job.OrganizationID, job.ID, result); err != nil && !errors.Is(err, ErrTransition) {
+			q.failures.Add(1)
 			slog.Error("record job success", "job", job.ID, "error", err)
 		}
 		return q.ack(d, true)
 	}
+	// A failed attempt counts as a failure of the worker, as in the export
+	// worker; the job is retried after its backoff or fails.
+	q.failures.Add(1)
 	failed, err := q.svc.Fail(ctx, job.OrganizationID, job.ID, herr)
 	if err != nil {
+		q.failures.Add(1)
 		slog.Error("record job failure", "job", job.ID, "error", err)
 		out := q.nak(d, retryDelay)
 		out.Ran = true
@@ -215,6 +257,8 @@ func (q *Queue) notClaimed(ctx context.Context, d Delivery, m *Message, mayRecla
 		return q.ack(d, false)
 	}
 	if err != nil {
+		q.failures.Add(1)
+		slog.Error("read job", "job", m.JobID, "error", err)
 		return q.nak(d, retryDelay)
 	}
 	now := q.svc.now()
@@ -238,9 +282,13 @@ func (q *Queue) notClaimed(ctx context.Context, d Delivery, m *Message, mayRecla
 		}
 		return q.nak(d, max(retryDelay, started.Add(timeout).Sub(now)))
 	}
-	failed, err := q.svc.Fail(ctx, job.OrganizationID, job.ID, fmt.Errorf("%w after %s (worker lost)", ErrTimeout, timeout))
+	failed, err := q.svc.Fail(ctx, job.OrganizationID, job.ID, errWorkerLost(timeout))
 	if err != nil {
 		// Taken over or ended meanwhile (ErrTransition) or a storage error.
+		if !errors.Is(err, ErrTransition) {
+			q.failures.Add(1)
+			slog.Error("take over job", "job", job.ID, "error", err)
+		}
 		return q.nak(d, retryDelay)
 	}
 	if failed.Status != StatusQueued {
@@ -276,13 +324,23 @@ func (q *Queue) Run(ctx context.Context) {
 	ticker := time.NewTicker(q.SweepInterval)
 	defer ticker.Stop()
 	for {
-		q.Sweep(ctx)
+		q.cycle(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
 	}
+}
+
+// cycle is one cycle of the worker jobs (OPS-05): a sweep, recorded with
+// its failures and those since the previous sweep.
+func (q *Queue) cycle(ctx context.Context) {
+	failures := q.Sweep(ctx)
+	if ctx.Err() != nil {
+		return
+	}
+	observability.ObserveWorkerRun("jobs", failures+int(q.failures.Swap(0)))
 }
 
 // consume starts one durable consumer per registered kind.
@@ -308,7 +366,11 @@ func (q *Queue) consume(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("ensure consumer for %s: %w", name, err)
 		}
-		cc, err := consumer.Consume(func(msg jetstream.Msg) { q.Process(ctx, msg) })
+		cc, err := consumer.Consume(func(msg jetstream.Msg) { q.Process(ctx, msg) },
+			jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, cerr error) {
+				q.failures.Add(1)
+				slog.Warn("consume jobs", "kind", name, "error", cerr)
+			}))
 		if err != nil {
 			return fmt.Errorf("consume %s: %w", name, err)
 		}
@@ -322,21 +384,32 @@ func (q *Queue) consume(ctx context.Context) error {
 
 // Sweep announces the registered kinds' queued jobs again that have been
 // due for longer than SweepInterval: their announcement was lost or the
-// queue is behind; the claim discards the duplicates of the latter.
-func (q *Queue) Sweep(ctx context.Context) {
+// queue is behind; the claim discards the duplicates of the latter. It
+// also asks for the stream, so that a sweep without due jobs fails while
+// JetStream does not answer, and returns its failures.
+func (q *Queue) Sweep(ctx context.Context) (failures int) {
+	if q.js == nil {
+		failures++
+		slog.Warn("job stream", "stream", q.Stream, "error", "no JetStream connection")
+	} else if _, err := q.js.Stream(ctx, q.Stream); err != nil {
+		failures++
+		slog.Warn("job stream", "stream", q.Stream, "error", err)
+	}
 	due, err := q.svc.repo.QueuedDue(ctx, q.svc.now().Add(-q.SweepInterval), 500)
 	if err != nil {
 		slog.Warn("list due jobs", "error", err)
-		return
+		return failures + 1
 	}
 	for i := range due {
 		if _, ok := q.handler(due[i].Kind); !ok {
 			continue
 		}
 		if err := q.publish(ctx, &due[i]); err != nil {
+			failures++
 			slog.Warn("announce job", "job", due[i].ID, "error", err)
 		}
 	}
+	return failures
 }
 
 // consumerToken keeps a kind usable in a consumer name.

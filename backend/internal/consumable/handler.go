@@ -183,7 +183,7 @@ func (h *Handler) AddMovement(w http.ResponseWriter, r *http.Request) {
 	c, err := h.repo.AddMovement(r.Context(), m)
 	if err != nil {
 		if strings.Contains(err.Error(), "insufficient stock") {
-			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
+			api.WriteError(w, http.StatusConflict, "Conflict", "insufficient stock")
 			return
 		}
 		if strings.Contains(err.Error(), "not found") {

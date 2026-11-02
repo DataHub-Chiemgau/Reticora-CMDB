@@ -151,6 +151,18 @@ func TestTraversalStaysInsideScope(t *testing.T) {
 			if rels, err := mode.repo.TraverseFrom(f.OrgCtx(f.OrgB), f.OrgB, root, 5, relationship.MaxTraversalNodes); err != nil || len(rels) != 0 {
 				t.Errorf("org B: %d relationships, %v", len(rels), err)
 			}
+			// A root the scope does not show, or a deleted one, connects
+			// nothing: the walk checks it with the CIs of its first level
+			// (WP-611), and its walk holds the root alone.
+			for name, c := range map[string]struct {
+				ctx  context.Context
+				root string
+			}{"CI of client 2 for client 1": {f.ClientCtx(f.Client1), foreign}, "deleted CI": {f.OrgCtx(f.OrgA), deleted}} {
+				walk, err := mode.repo.WalkFrom(c.ctx, f.OrgA, c.root, 5, relationship.MaxTraversalNodes)
+				if err != nil || len(walk.Edges) != 0 || len(walk.CIs) != 1 || walk.CIs[0] != c.root {
+					t.Errorf("%s as root: %+v, %v", name, walk, err)
+				}
+			}
 
 			for _, maxNodes := range []int{1, 2, 4, 6, relationship.MaxTraversalNodes} {
 				got, _ := reached(f.OrgCtx(f.OrgA), maxNodes)

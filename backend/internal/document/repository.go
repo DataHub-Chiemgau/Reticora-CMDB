@@ -15,6 +15,10 @@ import (
 type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Document, error)
+	// GetWritable returns the document only when the caller may change it
+	// (WP-341: all links visible, or an org-wide principal); otherwise it
+	// fails like GetByID for a missing document.
+	GetWritable(ctx context.Context, orgID, id string) (*Document, error)
 	Create(ctx context.Context, d *Document) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Document, error)
 	// SetStorage stores the blob location, size and MIME type after an
@@ -158,6 +162,11 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	return d, nil
 }
 
+// GetWritable equals GetByID: the memory repository has no tenant scope.
+func (r *MemoryRepository) GetWritable(ctx context.Context, orgID, id string) (*Document, error) {
+	return r.GetByID(ctx, orgID, id)
+}
+
 func (r *MemoryRepository) SetStorage(_ context.Context, orgID, id, storageKey, mimeType string, size int64) (*Document, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -213,6 +222,14 @@ func (r *MemoryRepository) GetLinks(_ context.Context, orgID, docID string) ([]D
 			result = append(result, *l)
 		}
 	}
+	// Newest first, then id, like PGRepository: the offset pages of
+	// GET /documents/{id}/links need a stable order (API-02).
+	sort.Slice(result, func(i, j int) bool {
+		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			return result[i].CreatedAt.After(result[j].CreatedAt)
+		}
+		return result[i].ID > result[j].ID
+	})
 	return result, nil
 }
 

@@ -1,12 +1,17 @@
 package signup
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 )
@@ -21,9 +27,10 @@ import (
 // TestSignupCreatesOrganizationAtomically covers WP-111 (TLC-01, API-05)
 // against PostgreSQL with the application role: a verified signup creates
 // the organization with slug, default VRF, the first user as org_admin, the
-// trial entitlements and an operator_audit entry; a taken slug gets a
-// suffix; a failing IdP rolls everything back; signup_request is invisible
-// to tenant transactions.
+// trial entitlements, the default notification channel (WP-509: in-app, no
+// e-mail channel without a central SMTP server) and an operator_audit
+// entry; a taken slug gets a suffix; a failing IdP rolls everything back;
+// signup_request is invisible to tenant transactions.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL).
 func TestSignupCreatesOrganizationAtomically(t *testing.T) {
@@ -32,16 +39,17 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
 	}
 	ctx := context.Background()
-	appPool, err := database.NewPool(ctx, dsn)
+	appPool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer appPool.Close()
+	t.Cleanup(appPool.Close)
 	adminPool, err := database.NewMaintenancePool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer adminPool.Close()
+	// Closed after the cleanups below, which delete through it.
+	t.Cleanup(adminPool.Close)
 
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
@@ -146,6 +154,12 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 		t.Errorf("entitlements = %v", ents)
 	}
 
+	// Default notification channels (WP-509, F-157): the in-app channel,
+	// enabled; no e-mail channel, the installation has no central SMTP.
+	if got := channelsOf(ctx, t, adminPool, res.OrganizationID); strings.Join(got, ",") != "inapp/inapp/In-App/true" {
+		t.Errorf("notification channels = %v, want the in-app channel only", got)
+	}
+
 	// operator_audit entry without the address; the chain still verifies.
 	var (
 		kind    string
@@ -197,6 +211,10 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user WHERE email = 'eve@signup.example'`); n != 0 {
 		t.Errorf("users after rollback = %d", n)
 	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM notification_channel c JOIN organization o ON o.id = c.organization_id
+		WHERE o.name = $1`, orgName); n != 2 {
+		t.Errorf("notification channels after rollback = %d, want the 2 of the created organizations", n)
+	}
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM signup_request WHERE token_hash = $1 AND status = 'pending'`, hashToken(token3)); n != 1 {
 		t.Errorf("request is no longer pending after rollback")
 	}
@@ -227,6 +245,24 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 	}
 }
 
+// channelsOf lists the notification channels of orgID as
+// kind/provider/name/enabled.
+func channelsOf(ctx context.Context, t *testing.T, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, orgID string) []string {
+	t.Helper()
+	rows, err := q.Query(ctx, `SELECT kind || '/' || provider || '/' || name || '/' || enabled FROM notification_channel
+		WHERE organization_id = $1 ORDER BY kind, name`, orgID)
+	if err != nil {
+		t.Fatalf("notification channels: %v", err)
+	}
+	got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("notification channels: %v", err)
+	}
+	return got
+}
+
 func countRows(ctx context.Context, t *testing.T, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, sql string, args ...any) int {
@@ -241,24 +277,26 @@ func countRows(ctx context.Context, t *testing.T, q interface {
 // TestOperatorCreatesOrganizationAtomically covers WP-113 (TLC-02) against
 // PostgreSQL: an operator creates an organization with plan and limits
 // through the signup's creation chain; the operator's audit entry is written
-// in the same transaction; an explicit, taken slug is a conflict and leaves
-// nothing behind.
+// in the same transaction; with a central SMTP server the organization
+// gets the in-app and the central_smtp channel (WP-509); an explicit, taken
+// slug is a conflict and leaves nothing behind.
 func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
 	}
 	ctx := context.Background()
-	appPool, err := database.NewPool(ctx, dsn)
+	appPool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer appPool.Close()
+	t.Cleanup(appPool.Close)
 	adminPool, err := database.NewMaintenancePool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer adminPool.Close()
+	// Closed after the cleanups below, which delete through it.
+	t.Cleanup(adminPool.Close)
 
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
@@ -268,7 +306,9 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	})
 
 	accounts := &stubInviter{}
-	svc := NewService(NewPGRepository(appPool), nil, accounts, DefaultConfig())
+	// The central SMTP server also gives the IdP its mail: the first
+	// org_admin is invited.
+	svc := NewService(NewPGRepository(appPool).WithCentralSMTP(true), nil, accounts, DefaultConfig()).WithInvitationMail(true)
 	op := operator.Identity{ID: "op-wp113", Kind: "oidc"}
 	req := &operator.NewOrganization{Name: "Operator Test", Slug: slug, Plan: "pro", AdminEmail: "admin@op.example",
 		Limits: map[string]int64{entitlement.LimitMaxCIs: 7000, entitlement.LimitMaxUsers: 40}}
@@ -296,6 +336,11 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user u JOIN role_assignment ra ON ra.user_id = u.id
 		JOIN role r ON r.id = ra.role_id WHERE u.organization_id = $1 AND u.email = 'admin@op.example' AND r.name = 'org_admin'`, created.ID); n != 1 {
 		t.Errorf("org_admin users = %d", n)
+	}
+	// Default notification channels (WP-509): e-mail over the central SMTP
+	// server of the installation and in-app.
+	if got := channelsOf(ctx, t, adminPool, created.ID); strings.Join(got, ",") != "email/central_smtp/E-Mail/true,inapp/inapp/In-App/true" {
+		t.Errorf("notification channels = %v, want central_smtp and in-app", got)
 	}
 	var limits map[string]int64
 	if err = adminPool.QueryRow(ctx, `SELECT limits FROM entitlement WHERE organization_id = $1 AND feature_key = 'cmdb_core'
@@ -329,5 +374,152 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	}
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user WHERE email = 'other@op.example'`); n != 0 {
 		t.Errorf("users after conflict = %d", n)
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM notification_channel WHERE organization_id = $1`, created.ID); n != 2 {
+		t.Errorf("notification channels of the organization after a conflict = %d, want 2", n)
+	}
+}
+
+// TestSignupSlugExhaustion covers WP-591 (TLC-01, F-303) against
+// PostgreSQL with the application role: when the name's slug and slug-2 …
+// slug-20 are taken, the verification answers 201 with slug-<6 random
+// characters a-z0-9> instead of 500; Cyrillic names are transliterated;
+// names without transliterable letters get org-<suffix> each instead of
+// sharing "org"; only when every candidate is taken the verification
+// answers 409 (field organization_name), creates nothing and leaves the
+// request pending.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL).
+func TestSignupSlugExhaustion(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	appPool, err := database.NewPool(ctx, scopetest.AppDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(appPool.Close)
+	adminPool, err := database.NewMaintenancePool(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Closed after the cleanups below, which delete through it.
+	t.Cleanup(adminPool.Close)
+
+	suffix := make([]byte, 4)
+	_, _ = rand.Read(suffix)
+	tag := hex.EncodeToString(suffix)
+	orgName := "Slug Exhaustion " + tag
+	base := Slugify(orgName)
+	cyrillic := "Ромашка " + tag
+	// No letter or digit that transliterates to ASCII.
+	cjk := "東京商事"
+	var created []string
+	t.Cleanup(func() {
+		for _, id := range created {
+			_, _ = adminPool.Exec(context.Background(), `DELETE FROM organization WHERE id = $1`, id)
+		}
+		_, _ = adminPool.Exec(context.Background(), `DELETE FROM signup_request WHERE email LIKE $1`, "%@"+tag+".example")
+	})
+	occupy := func(slug string) {
+		t.Helper()
+		var id string
+		if err := adminPool.QueryRow(ctx, `INSERT INTO organization (id, name, slug) VALUES (gen_random_uuid(), $1, $2) RETURNING id::text`,
+			"occupied "+slug, slug).Scan(&id); err != nil {
+			t.Fatalf("occupy %s: %v", slug, err)
+		}
+		created = append(created, id)
+	}
+	occupy(base)
+	for n := 2; n <= 20; n++ {
+		occupy(base + "-" + strconv.Itoa(n))
+	}
+
+	mailer, accounts := &stubMailer{}, &stubAccounts{}
+	cfg := DefaultConfig()
+	cfg.VerifyURL = "https://app.example/signup/verify"
+	svc := NewService(NewPGRepository(appPool), mailer, accounts, cfg)
+	h := NewHandler(svc)
+	verify := func(name, user string) (*httptest.ResponseRecorder, string) {
+		t.Helper()
+		if err := svc.Submit(ctx, Request{OrganizationName: name, Email: user + "@" + tag + ".example", DisplayName: "Ada"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		token := tokenOf(t, mailer.link)
+		body, _ := json.Marshal(Verification{Token: token, Password: "correct horse battery"})
+		w := httptest.NewRecorder()
+		h.Verify(w, httptest.NewRequest(http.MethodPost, "/api/v1/signup/verify", bytes.NewReader(body)))
+		return w, token
+	}
+	verified := func(name string, w *httptest.ResponseRecorder) Result {
+		t.Helper()
+		var res Result
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &res) != nil {
+			t.Fatalf("%s: verify = %d %s, want 201", name, w.Code, w.Body.String())
+		}
+		created = append(created, res.OrganizationID)
+		var slug string
+		if err := adminPool.QueryRow(ctx, `SELECT slug FROM organization WHERE id = $1`, res.OrganizationID).Scan(&slug); err != nil || slug != res.OrganizationSlug {
+			t.Errorf("%s: stored slug %q (%v), answered %q", name, slug, err, res.OrganizationSlug)
+		}
+		return res
+	}
+	randomSlug := func(prefix string) *regexp.Regexp {
+		return regexp.MustCompile(`^` + regexp.QuoteMeta(prefix) + `-[a-z0-9]{6}$`)
+	}
+
+	// 20 taken candidates: 201 with base-<random>.
+	w, _ := verify(orgName, "ada")
+	if res := verified(orgName, w); !randomSlug(base).MatchString(res.OrganizationSlug) {
+		t.Errorf("slug after 20 taken candidates = %q, want %s-<6 characters a-z0-9>", res.OrganizationSlug, base)
+	}
+
+	// Cyrillic is transliterated.
+	w, _ = verify(cyrillic, "boris")
+	if res := verified(cyrillic, w); res.OrganizationSlug != "romashka-"+tag {
+		t.Errorf("Cyrillic slug = %q, want %q", res.OrganizationSlug, "romashka-"+tag)
+	}
+
+	// Without transliterable letters: org-<random>, distinct each time.
+	var cjkSlugs []string
+	for _, user := range []string{"chen", "li"} {
+		w, _ = verify(cjk, user)
+		res := verified(cjk, w)
+		if !randomSlug("org").MatchString(res.OrganizationSlug) {
+			t.Errorf("slug of %q = %q, want org-<6 characters a-z0-9>", cjk, res.OrganizationSlug)
+		}
+		cjkSlugs = append(cjkSlugs, res.OrganizationSlug)
+	}
+	if len(cjkSlugs) == 2 && cjkSlugs[0] == cjkSlugs[1] {
+		t.Errorf("two organizations share the slug %q", cjkSlugs[0])
+	}
+
+	// Real exhaustion: every random candidate is taken too → 409, nothing
+	// is created, the request stays pending.
+	orig := slugSuffix
+	t.Cleanup(func() { slugSuffix = orig })
+	taken := "zz" + tag[:4]
+	slugSuffix = func() (string, error) { return taken, nil }
+	occupy(base + "-" + taken)
+	accountsBefore := len(accounts.created)
+	orgsBefore := countRows(ctx, t, adminPool, `SELECT count(*) FROM organization WHERE name = $1`, orgName)
+	w, token := verify(orgName, "eve")
+	var problem struct {
+		Status int    `json:"status"`
+		Field  string `json:"field"`
+	}
+	if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &problem) != nil || problem.Field != "organization_name" {
+		t.Errorf("exhausted slugs: %d %s, want 409 with field organization_name", w.Code, w.Body.String())
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM organization WHERE name = $1`, orgName); n != orgsBefore {
+		t.Errorf("organizations after 409 = %d, want %d", n, orgsBefore)
+	}
+	if len(accounts.created) != accountsBefore {
+		t.Errorf("IdP accounts created despite 409: %+v", accounts.created[accountsBefore:])
+	}
+	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM signup_request WHERE token_hash = $1 AND status = 'pending'`, hashToken(token)); n != 1 {
+		t.Error("request is no longer pending after 409")
 	}
 }

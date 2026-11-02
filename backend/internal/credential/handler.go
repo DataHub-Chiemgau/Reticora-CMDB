@@ -2,6 +2,7 @@ package credential
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -71,12 +72,15 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cred, err := h.svc.Create(r.Context(), req)
-	if err == ErrInvalidKind {
-		writeError(w, http.StatusBadRequest, "invalid credential kind")
+	if errors.Is(err, ErrInvalidKind) {
+		api.WriteFieldError(w, &api.FieldError{Field: "kind", Message: "unknown credential kind", Status: http.StatusUnprocessableEntity})
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create credential")
+		// A client outside the scope (403), an unknown client (422) or a
+		// value the database refuses (400) through the sanitized
+		// contract (API-03, F-390); anything else 500.
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -91,18 +95,17 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	creds, err := h.svc.List(r.Context(), orgID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list credentials")
+	// {data, next_cursor} with limit and the signed cursor (API-02, F-075).
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
 		return
 	}
-
-	if creds == nil {
-		creds = []Credential{}
+	creds, err := h.svc.List(r.Context(), orgID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(creds)
+	api.WriteJSON(w, http.StatusOK, api.Page(creds, page))
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -113,12 +116,12 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	cred, err := h.svc.Get(r.Context(), orgID, id)
-	if err == ErrNotFound {
+	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "credential not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to get credential")
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -134,12 +137,12 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	err := h.svc.Delete(r.Context(), orgID, id)
-	if err == ErrNotFound {
+	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "credential not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete credential")
+		api.WriteRepoError(w, err)
 		return
 	}
 
@@ -157,12 +160,12 @@ func (h *Handler) rotateKeys(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.svc.RotateKeys(r.Context(), orgID)
-	if err == ErrNotFound {
+	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "no encryption key material exists for this tenant yet")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to rotate encryption keys")
+		api.WriteRepoError(w, err)
 		return
 	}
 

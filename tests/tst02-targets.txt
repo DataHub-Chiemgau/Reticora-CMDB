@@ -1,0 +1,23 @@
+# tst02-targets.txt — the target tests of the TST-02 scenarios against real
+# services (WP-208, WP-559, F-194). Each test must run with result "pass" in
+# the ci.yml job migrations: scripts/ci/db-test-summary.sh --require-pass
+# fails the job when one of them is missing from test-db.json or did not
+# pass (e.g. skip).
+#
+# Format: <package relative to backend/> <top-level test>, one per line;
+# "#" starts a comment. TestTST02ScenarioCoverage
+# (backend/internal/server/e2e_scenarios_integration_test.go) keeps this
+# list equal to its scenario table.
+internal/tenant/rls TestRLSMatrix
+internal/tenant/rls TestChannelMatrix
+internal/server TestIngestToWebhook
+internal/middleware TestIdempotencyIsAtomicAndPrincipalBound
+internal/discovery TestCollectorNATSEndpointAuthorization
+internal/discovery TestCollectorPKI
+internal/topology TestMultiImpactAgainstPostgres
+internal/entitlement TestUnlicensedCIs
+internal/entitlement TestEntitlementEnforcement
+internal/lifecycle TestOfflineDetector
+internal/jobs TestSchedulerReplicasAgainstPostgres
+internal/notify TestEmailOverSMTP
+internal/citype TestAttributeIndexJob

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 )
 
 // Fixture ids of the global row test (WP-024).
@@ -79,7 +80,7 @@ func TestGlobalRowsAreReadOnly(t *testing.T) {
 		t.Fatalf("team_member.organization_id = %q (%v), want %s", memberOrg, err, grOrgB)
 	}
 
-	pool, err := database.NewPool(ctx, dsn)
+	pool, err := database.NewPool(ctx, scopetest.AppDSN(t))
 	if err != nil {
 		t.Fatalf("application pool: %v", err)
 	}

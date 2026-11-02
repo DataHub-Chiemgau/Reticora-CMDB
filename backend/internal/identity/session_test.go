@@ -27,7 +27,7 @@ func refreshRequest(t *testing.T, h *Handler, accessToken string) *http.Request 
 	if err != nil {
 		t.Fatal(err)
 	}
-	cookie, err := h.refresh.Issue(context.Background(), &RefreshGrant{Claims: withoutTokenTimes(claims)})
+	cookie, err := h.refresh.Issue(context.Background(), &RefreshGrant{Family: claims.SessionID, Claims: withoutTokenTimes(claims)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,16 +110,18 @@ func doRefresh(h *Handler, refreshToken string) *httptest.ResponseRecorder {
 // token lives 15 minutes, carries the claims of AUT-02 with NumericDate
 // times and the key id of the signing key in its header; the refresh token
 // is an HttpOnly, Secure, SameSite=Strict cookie for the auth endpoints only.
+// WP-410 (API-04): the token carries the session id sid, the refresh family
+// started at login; a refresh keeps it, another login gets its own.
 func TestSessionTokenFollowsAUT02(t *testing.T) {
 	issuer := testSessionIssuer(t)
-	_, token, cookie := loginHandler(t, issuer, nil)
+	handler, token, cookie := loginHandler(t, issuer, nil)
 
 	header := jwtPart(t, token, 0)
 	if header["alg"] != "RS256" || header["kid"] != issuer.KeyID() || issuer.KeyID() == "" {
 		t.Errorf("JWT header %v, want RS256 with kid %q", header, issuer.KeyID())
 	}
 	claims := jwtPart(t, token, 1)
-	for _, k := range []string{"sub", "org", "scopes", "cls", "sts", "tms", "name", "email", "jti", "iat", "exp"} {
+	for _, k := range []string{"sub", "org", "scopes", "cls", "sts", "tms", "name", "email", "sid", "jti", "iat", "exp"} {
 		if _, ok := claims[k]; !ok {
 			t.Errorf("claim %q missing in %v", k, claims)
 		}
@@ -142,6 +144,34 @@ func TestSessionTokenFollowsAUT02(t *testing.T) {
 		cookie.Path != "/api/v1/auth" || cookie.MaxAge != int(RefreshTokenLifetime.Seconds()) || cookie.Value == "" {
 		t.Errorf("refresh cookie %+v", cookie)
 	}
+
+	// sid names the refresh family of the login and survives the refresh.
+	sid, _ := claims["sid"].(string)
+	grant, err := handler.refresh.lookup(context.Background(), cookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sid == "" || sid != grant.Family || sid == claims["jti"] {
+		t.Errorf("sid %q, want the refresh family %q of the login, not the token id %v", sid, grant.Family, claims["jti"])
+	}
+	w := doRefresh(handler, cookie.Value)
+	if w.Code != http.StatusOK {
+		t.Fatalf("refresh: %d %s", w.Code, w.Body.String())
+	}
+	var refreshed struct {
+		Token string `json:"token"`
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &refreshed); err != nil {
+		t.Fatal(err)
+	}
+	next := jwtPart(t, refreshed.Token, 1)
+	if next["sid"] != sid || next["jti"] == claims["jti"] {
+		t.Errorf("refreshed token: sid %v, jti %v; want sid %q and a new jti (was %v)", next["sid"], next["jti"], sid, claims["jti"])
+	}
+	_, other, _ := loginHandler(t, issuer, nil)
+	if otherSID := jwtPart(t, other, 1)["sid"]; otherSID == sid || otherSID == "" || otherSID == nil {
+		t.Errorf("another login: sid %v, want a new session id (first login %q)", otherSID, sid)
+	}
 }
 
 // TestSessionClaimsRoundTrip: the scope dimensions survive encoding (null =
@@ -152,7 +182,7 @@ func TestSessionClaimsRoundTrip(t *testing.T) {
 		Subject: "u", OrganizationID: "o", Permissions: []Permission{PermCIRead},
 		Scope: &scope, ClientScope: scope.LegacyClientScope(),
 		PermissionScopes: map[Permission]Scope{PermCIRead: {Clients: ScopeSet{IDs: []string{"c1"}}, Sites: ScopeSet{All: true}, Teams: ScopeSet{All: true}}},
-		Groups:           []string{"g"}, Name: "n", Email: "e", ID: "j",
+		Groups:           []string{"g"}, Name: "n", Email: "e", SessionID: "s", ID: "j",
 		IssuedAt: time.Unix(1700000000, 0).UTC(), ExpiresAt: time.Unix(1700000900, 0).UTC(),
 	}
 	raw, err := json.Marshal(in)

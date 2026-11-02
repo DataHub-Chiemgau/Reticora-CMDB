@@ -4,19 +4,55 @@
  * and one of its sites. Only clients and sites the server returns are
  * offered, so the choice never exceeds the user's access (row-level
  * security); a stored selection that is no longer accessible is dropped.
+ * The options load in pages of 200; a stored client or site that is not on
+ * the loaded pages is read with GET /clients/{id} or /sites/{id} and kept
+ * when the server returns it (F-340).
  */
 import { useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { fetchAPI, siteApi } from '../api/client';
+import { ApiError, fetchAPI, siteApi } from '../api/client';
 import { clientApi } from '../api/cmdb';
 import type { components } from '../api/generated/schema';
 import { useScopeStore } from '../stores/scope';
 
 type Organization = components['schemas']['Organization'];
 
+const PAGE_SIZE = 200;
+
 const selectClass =
   'rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
+const moreClass =
+  'rounded-lg px-2 py-1 text-xs text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+
+interface Page<T> {
+  data: T[] | null;
+  offset: number;
+  has_more: boolean;
+}
+
+/** nextOffset is the offset of the page after `last`, or undefined at the end. */
+function nextOffset<T>(last: Page<T>): number | undefined {
+  const rows = last.data?.length ?? 0;
+  return last.has_more && rows > 0 ? last.offset + rows : undefined;
+}
+
+/** options joins the loaded pages, each id once, and the stored row if it is not on them. */
+function options<T extends { id: string }>(pages: Page<T>[] | undefined, stored?: T): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const row of [...(pages ?? []).flatMap((p) => p.data ?? []), ...(stored ? [stored] : [])]) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
+}
+
+/** inaccessible tells whether the server refused a stored id: invalid, unknown or not visible. */
+function inaccessible(error: unknown): boolean {
+  return error instanceof ApiError && [400, 403, 404].includes(error.status);
+}
 
 export function ScopeSwitcher() {
   const { t } = useTranslation();
@@ -29,33 +65,70 @@ export function ScopeSwitcher() {
     retry: false,
     staleTime: 5 * 60_000,
   });
-  const clients = useQuery({
-    queryKey: ['scope', 'clients'],
-    queryFn: () => clientApi.list(),
+  const clients = useInfiniteQuery({
+    queryKey: ['scope', 'client-options'],
+    queryFn: ({ pageParam }) => clientApi.list({ offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: nextOffset,
     retry: false,
     staleTime: 60_000,
   });
-  const sites = useQuery({
-    queryKey: ['scope', 'sites', clientId],
-    queryFn: () => siteApi.list({ limit: 200, ...(clientId ? { client_id: clientId } : {}) }),
+  const sites = useInfiniteQuery({
+    queryKey: ['scope', 'site-options', clientId],
+    queryFn: ({ pageParam }) =>
+      siteApi.list({
+        limit: PAGE_SIZE,
+        ...(pageParam > 0 ? { offset: pageParam } : {}),
+        ...(clientId ? { client_id: clientId } : {}),
+      }),
+    initialPageParam: 0,
+    getNextPageParam: nextOffset,
     retry: false,
     staleTime: 60_000,
   });
 
-  const clientOptions = clients.data?.data ?? [];
-  const siteOptions = sites.data?.data ?? [];
+  const clientLoaded = options(clients.data?.pages).some((c) => c.id === clientId);
+  const siteLoaded = options(sites.data?.pages).some((s) => s.id === siteId);
+
+  // A stored selection beyond the loaded pages is read by id (F-340).
+  const storedClient = useQuery({
+    queryKey: ['scope', 'client', clientId],
+    queryFn: () => clientApi.get(clientId),
+    enabled: !!clientId && clients.isSuccess && !clientLoaded,
+    retry: false,
+    staleTime: 60_000,
+  });
+  const storedSite = useQuery({
+    queryKey: ['scope', 'site', siteId],
+    queryFn: () => siteApi.get(encodeURIComponent(siteId)),
+    enabled: !!siteId && sites.isSuccess && !siteLoaded,
+    retry: false,
+    staleTime: 60_000,
+  });
+  // A site belongs to one client: a stored site of another client is dropped.
+  const siteOfOtherClient =
+    !!clientId && storedSite.data?.id === siteId && storedSite.data.client_id !== clientId;
+
+  const clientOptions = options(
+    clients.data?.pages,
+    storedClient.data?.id === clientId ? storedClient.data : undefined,
+  );
+  const siteOptions = options(
+    sites.data?.pages,
+    storedSite.data?.id === siteId && !siteOfOtherClient ? storedSite.data : undefined,
+  );
 
   // Drop a stored selection the user can no longer access.
   useEffect(() => {
-    if (clientId && clients.data && !clients.data.data.some((c) => c.id === clientId)) {
+    if (clientId && !clientLoaded && inaccessible(storedClient.error)) {
       setClient('');
     }
-  }, [clientId, clients.data, setClient]);
+  }, [clientId, clientLoaded, storedClient.error, setClient]);
   useEffect(() => {
-    if (siteId && sites.data && !sites.data.data.some((s) => s.id === siteId)) {
+    if (siteId && !siteLoaded && (inaccessible(storedSite.error) || siteOfOtherClient)) {
       setSite('');
     }
-  }, [siteId, sites.data, setSite]);
+  }, [siteId, siteLoaded, storedSite.error, siteOfOtherClient, setSite]);
 
   // Lists read the scope when they fetch: refetch them on a change.
   function refresh() {
@@ -93,6 +166,16 @@ export function ScopeSwitcher() {
           </option>
         ))}
       </select>
+      {clients.hasNextPage && (
+        <button
+          type="button"
+          className={moreClass}
+          disabled={clients.isFetchingNextPage}
+          onClick={() => void clients.fetchNextPage()}
+        >
+          {t('scope.moreClients', 'Weitere Kunden laden')}
+        </button>
+      )}
       <select
         aria-label={t('scope.site', 'Standort')}
         className={selectClass}
@@ -110,6 +193,16 @@ export function ScopeSwitcher() {
           </option>
         ))}
       </select>
+      {sites.hasNextPage && (
+        <button
+          type="button"
+          className={moreClass}
+          disabled={sites.isFetchingNextPage}
+          onClick={() => void sites.fetchNextPage()}
+        >
+          {t('scope.moreSites', 'Weitere Standorte laden')}
+        </button>
+      )}
     </div>
   );
 }

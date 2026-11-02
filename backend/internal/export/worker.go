@@ -5,11 +5,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
@@ -18,8 +18,8 @@ import (
 // DefaultJobTTL is how long a completed export remains downloadable.
 const DefaultJobTTL = 24 * time.Hour
 
-// DefaultStaleAfter is how long an export may run before the worker
-// assumes its replica died and queues it again (TEC-14).
+// DefaultStaleAfter is how long a running export may go without heartbeat
+// before the worker assumes its replica died and queues it again (TEC-14).
 const DefaultStaleAfter = 15 * time.Minute
 
 // ExportBucket is the blob bucket export objects are written to.
@@ -49,28 +49,33 @@ func ObjectKey(job *Job) string {
 // JobWorker processes pending export jobs: it renders the CI set into blob
 // storage and marks the job completed with the object key and expiry. All
 // replicas share the queue through ClaimPending (FOR UPDATE SKIP LOCKED), so
-// jobs survive restarts and are never processed twice. A job whose replica
-// died while it ran is queued again after StaleAfter and resumed; only a
+// jobs survive restarts and are never processed twice. While a job runs,
+// its worker renews the heartbeat (started_at) every HeartbeatEvery; a job
+// whose replica died, and so has no heartbeat for StaleAfter, is queued
+// again and resumed, a long export of a live replica is not (F-315). Only a
 // running job can be completed, so a late original run cannot complete it
-// a second time.
+// a second time. A job whose mirrored job was cancelled (DELETE
+// /api/v1/jobs/{id}) stops before rendering or before completing (cancelled).
 type JobWorker struct {
 	Jobs   JobRepository
 	CIs    ci.Repository
 	Blobs  blob.Store
 	Bucket string
 	JobTTL time.Duration
-	// StaleAfter is how long a job may run before it is queued again.
+	// StaleAfter is how long a running job may go without heartbeat before
+	// it is queued again.
 	StaleAfter time.Duration
-	Now        func() time.Time
-	onError    func(jobID string, err error)
+	// HeartbeatEvery is how often the worker renews the heartbeat of the
+	// job it runs; zero means StaleAfter/3.
+	HeartbeatEvery time.Duration
+	Now            func() time.Time
+	onError        func(jobID string, err error)
 	// failures counts the errors of the current cycle (OPS-05).
 	failures int
 	// Tracker mirrors the export job into the generic job model (JOB-01);
-	// optional.
+	// optional. export.completed (NTF-05) is written by Jobs.CompleteJob
+	// in the transaction that completes the job (WP-550).
 	Tracker jobs.Tracker
-	// Events reports a completed export as export.completed (NTF-05);
-	// optional.
-	Events events.Emitter
 }
 
 // mirror follows the status of an export job in the generic job model; a
@@ -81,6 +86,42 @@ func (w *JobWorker) mirror(ctx context.Context, job *Job, status jobs.Status, er
 	}
 	if err := w.Tracker.Mirror(ctx, job.OrganizationID, "export_job", job.ID, status, errMsg); err != nil {
 		slog.Warn("mirror export job", "job", job.ID, "error", err)
+	}
+}
+
+// CancelledByUser is the error message of an export whose mirrored job
+// was cancelled through the job API (DELETE /api/v1/jobs/{id}, JOB-03).
+const CancelledByUser = "cancelled by user"
+
+// cancelled reports whether the mirrored job of the export was cancelled:
+// the worker's checkpoint before rendering and before completing (JOB-03,
+// F-162). A tracker without the checkpoint, or one that fails to answer,
+// lets the export go on.
+func (w *JobWorker) cancelled(ctx context.Context, job *Job) bool {
+	tracker, ok := w.Tracker.(jobs.CancelTracker)
+	if !ok {
+		return false
+	}
+	cancelled, err := tracker.IsMirrorCancelled(ctx, job.OrganizationID, "export_job", job.ID)
+	if err != nil {
+		slog.Warn("check export job for cancel", "job", job.ID, "error", err)
+		return false
+	}
+	return cancelled
+}
+
+// stop ends an export whose mirrored job was cancelled: the export job
+// fails with CancelledByUser, an object already stored (key not empty)
+// is deleted, and nothing is reported; the mirrored job stays cancelled.
+func (w *JobWorker) stop(ctx context.Context, job *Job, key string) {
+	slog.Info("export job cancelled", "job", job.ID)
+	if key != "" {
+		if err := w.Blobs.Delete(ctx, w.Bucket, key); err != nil {
+			w.report(job.ID, fmt.Errorf("delete object of cancelled export: %w", err))
+		}
+	}
+	if err := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, CancelledByUser, w.Now()); err != nil {
+		w.report(job.ID, fmt.Errorf("mark export job cancelled: %w", err))
 	}
 }
 
@@ -131,7 +172,46 @@ func (w *JobWorker) ProcessOne(ctx context.Context) bool {
 	return true
 }
 
+// keepAlive renews the heartbeat of job until the returned stop is called
+// or ctx ends (TEC-14, F-315). A failed renewal is logged; the next one
+// tries again.
+func (w *JobWorker) keepAlive(ctx context.Context, job *Job) (stop func()) {
+	every := w.HeartbeatEvery
+	if every <= 0 {
+		every = w.StaleAfter / 3
+	}
+	if every <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := w.Jobs.Heartbeat(ctx, job.OrganizationID, job.ID, w.Now()); err != nil {
+					slog.Warn("renew export job heartbeat", "job", job.ID, "error", err)
+				}
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		wg.Wait()
+	}
+}
+
 func (w *JobWorker) process(ctx context.Context, job Job) {
+	// The heartbeat runs until the job is completed or failed.
+	defer w.keepAlive(ctx, &job)()
 	w.mirror(ctx, &job, jobs.StatusRunning, "")
 	// The export runs with the scope its creator had when queueing it
 	// (EXP-01, TEN-06): the CI repository reads through database.WithTenant
@@ -139,6 +219,10 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 	// than exported org-wide.
 	if job.Scope == nil {
 		w.fail(ctx, &job, fmt.Errorf("export job has no scope snapshot"))
+		return
+	}
+	if w.cancelled(ctx, &job) {
+		w.stop(ctx, &job, "")
 		return
 	}
 	scope := job.Scope.TenantScope(job.OrganizationID, job.InitiatedBy)
@@ -160,30 +244,44 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 		return
 	}
 
+	if w.cancelled(ctx, &job) {
+		w.stop(ctx, &job, key)
+		return
+	}
 	now := w.Now()
 	if err := w.Jobs.CompleteJob(ctx, job.OrganizationID, job.ID, key, rowCount, int64(buf.Len()), now, now.Add(w.JobTTL)); err != nil {
 		w.report(job.ID, fmt.Errorf("complete export job: %w", err))
 		return
 	}
 	w.mirror(ctx, &job, jobs.StatusSucceeded, "")
-	if w.Events != nil {
-		if err := w.Events.Emit(ctx, &events.Event{OrgID: job.OrganizationID, Type: events.ExportCompleted, EntityID: job.ID,
-			Data: map[string]any{"id": job.ID, "format": job.Format, "row_count": rowCount, "initiated_by": job.InitiatedBy}}); err != nil {
-			slog.Error("report completed export", "job", job.ID, "error", err)
+	// The mirrored job names the export and its size (GET
+	// /api/v1/jobs/{id}/result, F-347).
+	if tracker, ok := w.Tracker.(jobs.ResultTracker); ok {
+		if err := tracker.MirrorResult(ctx, job.OrganizationID, "export_job", job.ID,
+			map[string]any{"export_id": job.ID, "row_count": rowCount}); err != nil {
+			slog.Warn("mirror export job result", "job", job.ID, "error", err)
 		}
 	}
 }
 
+// fail ends an export with err: the export job and its mirrored job carry
+// the sanitized message of jobs.ErrorMessage, the raw error is logged with
+// the job (report, F-372).
 func (w *JobWorker) fail(ctx context.Context, job *Job, err error) {
 	w.report(job.ID, err)
-	if ferr := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, err.Error(), w.Now()); ferr != nil {
+	if ferr := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, jobs.ErrorMessage(err), w.Now()); ferr != nil {
 		w.report(job.ID, fmt.Errorf("mark export job failed: %w", ferr))
 	}
-	w.mirror(ctx, job, jobs.StatusFailed, err.Error())
+	if w.Tracker == nil {
+		return
+	}
+	if merr := jobs.MirrorFailed(ctx, w.Tracker, job.OrganizationID, "export_job", job.ID, err); merr != nil {
+		slog.Warn("mirror export job", "job", job.ID, "error", merr)
+	}
 }
 
 // ResumeStale queues the jobs again whose replica died while they ran
-// (status running for longer than StaleAfter); it returns how many.
+// (status running without heartbeat for StaleAfter); it returns how many.
 func (w *JobWorker) ResumeStale(ctx context.Context) int {
 	if !w.Enabled() || w.StaleAfter <= 0 {
 		return 0

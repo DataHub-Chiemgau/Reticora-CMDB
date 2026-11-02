@@ -15,6 +15,8 @@ const (
 	sqlStateCheckViolation      = "23514"
 	sqlStateExclusionViolation  = "23P01"
 	sqlStateInvalidTextRepr     = "22P02"
+	sqlStateCharNotInRepertoire = "22021" // invalid byte sequence, e.g. NUL in text
+	sqlStateUntranslatableChar  = "22P05" // e.g. \u0000 in jsonb
 	sqlStateStringTooLong       = "22001"
 	sqlStateNumericOutOfRange   = "22003"
 	sqlStateInvalidDatetime     = "22007"
@@ -59,7 +61,8 @@ func ClassifyDBError(err error) (status int, title, detail string, ok bool) {
 	case sqlStateCheckViolation, sqlStateExclusionViolation:
 		return http.StatusUnprocessableEntity, "Unprocessable Entity",
 			"a field value is not allowed by the data model", true
-	case sqlStateInvalidTextRepr, sqlStateStringTooLong, sqlStateNumericOutOfRange, sqlStateInvalidDatetime:
+	case sqlStateInvalidTextRepr, sqlStateStringTooLong, sqlStateNumericOutOfRange, sqlStateInvalidDatetime,
+		sqlStateCharNotInRepertoire, sqlStateUntranslatableChar:
 		return http.StatusBadRequest, "Bad Request",
 			"a field value has an invalid format or is out of range", true
 	case sqlStateSerializationFail, sqlStateDeadlock:
@@ -73,15 +76,62 @@ func ClassifyDBError(err error) (status int, title, detail string, ok bool) {
 	}
 }
 
-// WriteRepoError reports a repository failure to the client. Recognised
-// PostgreSQL errors become a precise, sanitized RFC 7807 response; anything
-// else becomes a generic 500.
+// ErrNotFound reports an id a repository did not find: unknown, or an object
+// of another tenant, which the caller must not tell apart (404).
+var ErrNotFound = errors.New("not found")
+
+// ErrUnavailable marks a dependency the request needs that is unreachable
+// before anything was stored, e.g. the ingest queue while NATS is down
+// (OPS-06): the request is refused with 503 and Retry-After, so a client
+// keeps its data and sends it again instead of losing it.
+var ErrUnavailable = errors.New("service temporarily unavailable")
+
+// UnavailableRetryAfter is the Retry-After (seconds) of a 503 caused by an
+// unreachable dependency.
+const UnavailableRetryAfter = "5"
+
+// IsUnavailable reports ErrUnavailable and a database connection that could
+// not be established (nothing reached the database). A connection lost
+// during a statement is not one of them: the write may have committed.
+func IsUnavailable(err error) bool {
+	var connectErr *pgconn.ConnectError
+	return errors.Is(err, ErrUnavailable) || errors.As(err, &connectErr)
+}
+
+// WriteUnavailable answers 503 with Retry-After: the request was refused
+// because a dependency is unreachable and may be repeated later.
+func WriteUnavailable(w http.ResponseWriter, detail string) {
+	w.Header().Set("Retry-After", UnavailableRetryAfter)
+	WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", detail)
+}
+
+// WriteRepoError reports a repository failure to the client. ErrNotFound
+// becomes 404; a *FieldError or *ConflictError of the validation or the
+// repository becomes its field problem (WriteFieldError: 400 unless the
+// error names its status, 409 for a conflict; F-423); recognised
+// PostgreSQL errors become a precise, sanitized RFC 7807 response; an
+// unreachable dependency (IsUnavailable) becomes 503 with Retry-After;
+// anything else becomes a generic 500.
 //
 // It exists so handlers never pass err.Error() to the client: raw pgx errors
 // carry table, column and constraint names, and echoing them discloses the
 // database schema to any caller able to trigger a failed write.
 func WriteRepoError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrNotFound) {
+		WriteError(w, http.StatusNotFound, "Not Found", "the requested resource was not found")
+		return
+	}
+	// A field error carries a message written for the client
+	// (handler_errors_test checks where it is built); only the field error
+	// is written, not the text of an error wrapping it.
+	if WriteFieldError(w, err) {
+		return
+	}
 	if WriteDBError(w, err) {
+		return
+	}
+	if IsUnavailable(err) {
+		WriteUnavailable(w, "a required service is temporarily unavailable, try again later")
 		return
 	}
 	WriteError(w, http.StatusInternalServerError, "Internal Error", "the request could not be completed")

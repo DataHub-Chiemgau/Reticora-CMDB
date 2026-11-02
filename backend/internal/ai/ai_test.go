@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 )
@@ -71,7 +72,7 @@ func TestBuildPromptUsesOnlyChunks(t *testing.T) {
 
 // grantPermission wires role -> permission key -> user in the memory repo.
 func grantPermission(perms *permission.MemoryRepository, orgID, userID, key string) {
-	if _, err := perms.ReplaceRolePermissions(context.Background(), orgID, "role-1", "tester", []string{key}); err != nil {
+	if _, err := perms.ReplaceRolePermissions(context.Background(), orgID, "role-1", "tester", &identity.Principal{Permissions: identity.AllPermissions()}, []string{key}); err != nil {
 		panic(err)
 	}
 	perms.AssignRoleToUser(orgID, userID, "role-1")

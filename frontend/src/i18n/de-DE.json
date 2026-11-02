@@ -103,6 +103,13 @@
       "security": "Sicherheit & Datenschutz öffnen",
       "map": "Karte öffnen",
       "roomplan": "Raumplan öffnen"
+    },
+    "contact": {
+      "label": "Kontakt",
+      "email": "E-Mail",
+      "phone": "Telefon",
+      "role": "Rolle",
+      "back": "Zurück zur Suche"
     }
   },
   "dashboard": {
@@ -111,6 +118,17 @@
     "activeCIs": "Aktive CIs",
     "maintenanceCIs": "CIs in Wartung",
     "collectorsOnline": "Collector online",
+    "setup": {
+      "title": "Einrichtung noch nicht abgeschlossen",
+      "text": "Verbinden Sie einen Collector, damit die ersten CIs in Ihre CMDB kommen.",
+      "continue": "Einrichtung fortsetzen"
+    },
+    "reviewEscalation": {
+      "hint": "Offen seit mehr als 14 Tagen.",
+      "none": "Keine offenen Reviews älter als 14 Tage.",
+      "open": "Eskalierte Reviews anzeigen",
+      "loadError": "Die eskalierten Reviews konnten nicht geladen werden"
+    },
     "roleLabel": "Dashboard-Rolle",
     "roleHint": "Die Widget-Auswahl richtet sich nach der gewählten Rolle.",
     "roles": {
@@ -121,6 +139,7 @@
     "widgets": {
       "ciSummary": "CI-Übersicht",
       "collectors": "Collector-Status",
+      "reviewEscalation": "Eskalierte Reviews",
       "slaBreaches": "SLA-Verletzungen",
       "compliance": "Compliance-Score",
       "assets": "Inventar",
@@ -169,6 +188,15 @@
     "allStatus": "Alle Status",
     "exportCsv": "CSV exportieren",
     "exportJson": "JSON exportieren",
+    "exportJob": {
+      "progress": "{{format}}-Export: {{status}}",
+      "done": "{{format}}-Export heruntergeladen ({{rows}} Zeilen)",
+      "filtersIgnored": "Suche und Standort werden beim Export nicht angewendet; exportiert werden alle CIs mit dem gewählten Status, Typ und Kunden.",
+      "forbidden": "Export nicht erlaubt: Ihnen fehlt das Recht oder Ihr Tarif enthält den Export nicht.",
+      "unavailable": "Der Export ist derzeit nicht verfügbar. Bitte versuchen Sie es später erneut.",
+      "failed": "Der Export ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
+      "timeout": "Der Export dauert länger als erwartet. Sobald er fertig ist, steht er unter „Export“ zum Download bereit."
+    },
     "overview": "Übersicht",
     "noAttributes": "Keine Attribute hinterlegt",
     "noRelationships": "Keine Beziehungen vorhanden",
@@ -189,7 +217,31 @@
       "partial": "{{succeeded}} CIs aktualisiert, {{failed}} fehlgeschlagen",
       "failures": "Fehlgeschlagene CIs",
       "success": "Status von {{count}} CIs aktualisiert",
-      "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
+      "error": "Die Massenänderung konnte nicht vollständig angewendet werden",
+      "selectAllMatches": "Alle {{count}} Treffer des Filters auswählen",
+      "selectFirstMatches": "Die ersten {{count}} Treffer des Filters auswählen",
+      "collectError": "Die Treffer des Filters konnten nicht geladen werden",
+      "capped": "Eine Massenänderung umfasst höchstens {{max}} CIs: der Filter hat {{total}} Treffer, die ersten {{max}} sind ausgewählt.",
+      "tooMany": "Eine Massenänderung umfasst höchstens {{max}} CIs; {{count}} sind ausgewählt.",
+      "jobHint": "Ab {{count}} CIs läuft die Änderung als Job; sein Bericht erscheint hier.",
+      "jobTitle": "Massenänderung als Job",
+      "jobProgress": "Fortschritt der Massenänderung",
+      "jobState": "Job: {{status}} ({{progress}} %)",
+      "jobDone": "Job abgeschlossen: {{succeeded}} von {{total}} CIs aktualisiert, {{failed}} fehlgeschlagen",
+      "jobCancelled": "Job abgebrochen: {{succeeded}} von {{total}} CIs aktualisiert, {{failed}} fehlgeschlagen, {{skipped}} übersprungen",
+      "jobFailed": "Der Job ist fehlgeschlagen: {{error}}",
+      "jobLoadError": "Der Job konnte nicht gelesen werden",
+      "report": "Bericht je CI",
+      "reportCI": "CI",
+      "reportResult": "Ergebnis",
+      "reportCode": "HTTP-Status",
+      "reportError": "Fehler",
+      "results": {
+        "ok": "OK",
+        "error": "Fehler",
+        "skipped": "Übersprungen"
+      },
+      "closeReport": "Bericht schließen"
     },
     "overrideReason": "Begründung",
     "addInstanceField": "Instanzfeld hinzufügen",
@@ -200,11 +252,14 @@
     "diverged": "abweichend",
     "provenance": "Herkunft & Overrides",
     "noProvenance": "Noch keine Provenienz-Daten (erstellt bei der nächsten Discovery).",
+    "provenanceLoadError": "Die Herkunftsdaten konnten nicht geladen werden",
     "instanceFieldsHint": "Felder nur für dieses Gerät (z. B. iLO-IP, SAP-SID) — ohne den Typ zu ändern.",
     "overrideValue": "Wert",
     "setOverride": "Override setzen",
     "protected": "geschützt",
     "instanceFields": "Instanzfelder",
+    "instanceFieldsConflict": "Speichern abgelehnt: {{fields}} wurde inzwischen von jemand anderem geändert. Bitte die Seite neu laden und die Änderung wiederholen.",
+    "instanceFieldsPrecondition": "Speichern abgelehnt: Die Version dieses CIs ist veraltet oder unbekannt. Bitte die Seite neu laden.",
     "provenanceHint": "Discovery-Wert vs. effektiver Wert. Geschützte manuelle Overrides werden nie von Discovery überschrieben.",
     "discovered": "Discovery",
     "assetCanonical": "Asset (kanonische Daten)",
@@ -215,6 +270,9 @@
     "location": "Standort",
     "barcode": "Barcode",
     "warrantyEnd": "Garantieende",
+    "rfidTag": "RFID-Tag",
+    "purchaseDate": "Kaufdatum",
+    "invoiceNumber": "Rechnungsnummer",
     "supplier": "Lieferant",
     "healthState": {
       "ok": "Zustand: OK",
@@ -228,11 +286,20 @@
     "history": "Historie",
     "historyEmpty": "Noch keine Änderungen.",
     "historyLoadError": "Die Historie konnte nicht geladen werden.",
+    "historyAuditHint": "Audit-Einträge sind nicht enthalten; sie erfordern die Berechtigung audit:read.",
     "historySite": "Site {{site}}",
     "historySource": {
       "ci_change": "Änderung",
       "entity_change": "Historie",
-      "audit": "Audit"
+      "audit": "Audit",
+      "location_change": "Standortänderung"
+    },
+    "statuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "maintenance": "Wartung",
+      "decommissioned": "Außer Betrieb",
+      "unknown": "Unbekannt"
     }
   },
   "form": {
@@ -240,6 +307,10 @@
     "editCI": "CI bearbeiten",
     "ciDescription": "Pflegen Sie Stammdaten und Status des Configuration Items.",
     "selectPlaceholder": "Bitte auswählen",
+    "typeAttributes": "Typattribute",
+    "typesLoadFailed": "Die CI-Typen konnten nicht geladen werden.",
+    "typeSchemaLoadFailed": "Die Attribute des CI-Typs konnten nicht geladen werden.",
+    "assetManaged": "Vom Asset geführt",
     "fields": {
       "name": "Name",
       "ciType": "CI-Typ",
@@ -248,12 +319,35 @@
       "model": "Modell",
       "serialNumber": "Seriennummer",
       "managementIp": "Management-IP",
-      "firmwareVersion": "Firmware-Version"
+      "firmwareVersion": "Firmware-Version",
+      "location": "Standort"
     },
     "validation": {
       "nameRequired": "Name ist erforderlich.",
       "ciTypeRequired": "CI-Typ ist erforderlich.",
-      "serverRejected": "Bitte korrigieren Sie die markierten Felder."
+      "serverRejected": "Bitte korrigieren Sie die markierten Felder.",
+      "field": {
+        "required": "{{label}} ist erforderlich",
+        "integer": "{{label}} muss eine ganze Zahl sein",
+        "number": "{{label}} muss eine Zahl sein",
+        "boolean": "{{label}} muss ja oder nein sein",
+        "date": "{{label}} muss ein Datum im Format JJJJ-MM-TT sein",
+        "datetime": "{{label}} muss ein Zeitpunkt sein",
+        "ip": "{{label}} muss eine IP-Adresse sein",
+        "mac": "{{label}} muss eine MAC-Adresse sein",
+        "url": "{{label}} muss eine gültige URL sein",
+        "email": "{{label}} muss eine gültige E-Mail-Adresse sein",
+        "singleLine": "{{label}} muss einzeilig sein",
+        "uuid": "{{label}} muss eine UUID sein",
+        "notAllowed": "{{label}}: {{value}} ist kein zulässiger Wert",
+        "pattern": "{{label}} hat ein ungültiges Format",
+        "min": "{{label}} muss mindestens {{limit}} sein",
+        "max": "{{label}} darf höchstens {{limit}} sein",
+        "minLength": "{{label}} muss mindestens {{limit}} Zeichen lang sein",
+        "maxLength": "{{label}} darf höchstens {{limit}} Zeichen lang sein",
+        "textExpected": "{{label}} muss ein Text sein",
+        "invalid": "{{label}} ist ungültig"
+      }
     }
   },
   "discovery": {
@@ -267,12 +361,16 @@
     "enroll": {
       "button": "Collector verbinden",
       "title": "Collector verbinden",
-      "intro": "Schließen Sie einen Collector an: erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Die Infrastruktur erscheint automatisch.",
+      "intro": "Schließen Sie einen Collector an: Erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Der Collector muss den Server über Port 4222/TCP erreichen. Die Subnetze, die er meldet, erscheinen hier als Vorschläge; erst bestätigte Subnetze scannt er.",
       "label": "Bezeichnung (z. B. Standort)",
       "generate": "Code erzeugen",
       "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
       "expires": "Gültig bis",
-      "after": "Starten Sie danach den Collector neu und bestätigen Sie die vorgeschlagenen Scopes auf dieser Seite."
+      "after": "Starten Sie danach den Collector neu und bestätigen Sie die vorgeschlagenen Scopes auf dieser Seite.",
+      "client": "Kunde",
+      "clientChoose": "Kunde wählen",
+      "clientHint": "Ihr Zugriff umfasst mehrere Kunden: Wählen Sie den Kunden, an den der Collector gebunden wird.",
+      "failed": "Der Enrollment-Code wurde nicht erzeugt: {{detail}}"
     },
     "collectorStatus": {
       "pending": "Ausstehend",
@@ -280,6 +378,13 @@
       "offline": "Offline",
       "disabled": "Deaktiviert",
       "paused": "Pausiert (Lizenz)"
+    },
+    "collectorHints": {
+      "noEdge": "Keine Edge-Verbindung: Der Collector liefert Daten nur über Port 4222/TCP (mTLS), diese Verbindung steht nicht.",
+      "noEdgeCauses": "Häufige Ursachen: Port 4222/TCP in einer Firewall gesperrt, Collector nicht enrolled oder nach dem Enrollment nicht neu gestartet, Server-Zertifikat passt nicht zum Hostnamen. Siehe docs/troubleshooting-installation.md, Abschnitt „Collector delivers nothing“.",
+      "noScope": "Kein Discovery-Scope – der Collector scannt nichts. Vorgeschlagene Subnetze bestätigen oder Scope anlegen.",
+      "showSuggestions": "Vorgeschlagene Subnetze anzeigen ({{count}})",
+      "noScopeRights": "Scope anlegen erfordert die Berechtigung discovery:manage, Vorschläge bestätigen zusätzlich review:resolve."
     },
     "scopes": {
       "title": "Discovery-Scopes",
@@ -293,13 +398,12 @@
       "target": "Ziel",
       "targetPlaceholder": "z. B. 10.0.0.0/24",
       "schedule": "Zeitplan (Intervall oder Cron)",
-      "add": "Scope hinzufügen",
+      "add": "Scope anlegen",
       "enabled": "Aktiv",
       "disabled": "Inaktiv",
       "enable": "Aktivieren",
       "disable": "Deaktivieren",
       "delete": "Löschen",
-      "invalid": "Der Scope wurde abgelehnt. Prüfen Sie Ziel und Zeitplan (mindestens 5 Minuten).",
       "health": {
         "ok": "Letzter Lauf ok",
         "partial": "Teilweise fehlgeschlagen",
@@ -316,6 +420,56 @@
         "config_error": "Konfigurationsfehler",
         "upload_failed": "Upload fehlgeschlagen (gepuffert)",
         "unknown": "Unbekannter Fehler"
+      },
+      "edit": "Bearbeiten",
+      "editNamed": "Scope {{name}} bearbeiten",
+      "enableNamed": "Scope {{name}} aktivieren",
+      "disableNamed": "Scope {{name}} deaktivieren",
+      "deleteNamed": "Scope {{name}} löschen",
+      "credentialCount": "Credentials: {{count}}",
+      "form": {
+        "createTitle": "Scope anlegen für {{collector}}",
+        "editTitle": "Scope {{name}} bearbeiten",
+        "name": "Name",
+        "namePlaceholder": "Ohne Angabe: das Ziel",
+        "site": "Site",
+        "siteNone": "Site des Collectors",
+        "vrf": "VRF",
+        "vrfNone": "Keine (globales Routing)",
+        "scheduleHint": "Intervall (z. B. 24h, mindestens 5m) oder Cron-Ausdruck mit fünf Feldern. Cron in der Zeitzone der Organisation.",
+        "plugins": "Plugins",
+        "pluginsRequired": "Wählen Sie mindestens ein Plugin.",
+        "targetRequired": "Geben Sie ein Ziel an.",
+        "credentials": "Credentials",
+        "credentialsHint": "Ohne Auswahl gelten die Credentials des Clients und der Organisation.",
+        "credentialsNone": "Keine passenden Credentials vorhanden.",
+        "credentialsUnavailable": "Die Credentials konnten nicht geladen werden (Recht credential:read fehlt?). Ohne Auswahl gelten die Credentials des Clients und der Organisation."
+      },
+      "plugin": {
+        "sweep": "Ping-Sweep",
+        "snmp": "SNMP",
+        "ssh": "SSH",
+        "wmi": "WMI",
+        "ipmi": "IPMI",
+        "redfish": "Redfish",
+        "power": "USV/PDU",
+        "nas": "NAS"
+      },
+      "confirmDelete": {
+        "title": "Scope löschen?",
+        "text": "Der Scope {{name}} ({{target}}) wird gelöscht; der Collector durchsucht dieses Ziel danach nicht mehr.",
+        "confirm": "Endgültig löschen"
+      },
+      "errors": {
+        "notSaved": "Der Scope wurde nicht gespeichert. Prüfen Sie die markierten Felder.",
+        "invalidValue": "Ungültiger Wert: {{detail}}",
+        "rejected": "Der Scope wurde abgelehnt: {{detail}}",
+        "saveFailed": "Der Scope konnte nicht gespeichert werden: {{reason}}",
+        "toggleFailed": "Scope {{name}} konnte nicht umgeschaltet werden: {{reason}}",
+        "deleteFailed": "Scope {{name}} konnte nicht gelöscht werden: {{reason}}",
+        "forbidden": "Ihnen fehlt das Recht dazu (discovery:manage).",
+        "notFound": "Der Scope existiert nicht mehr.",
+        "reason": "{{detail}}"
       }
     },
     "suggestions": {
@@ -323,7 +477,8 @@
       "intro": "Diese Subnetze haben Ihre Collectors nach dem Enrollment gemeldet. Bestätigen Sie sie, damit sie inventarisiert werden.",
       "from": "gemeldet von {{collector}}",
       "accept": "Als Scope übernehmen",
-      "dismiss": "Verwerfen"
+      "dismiss": "Verwerfen",
+      "failed": "Der Vorschlag konnte nicht bearbeitet werden: {{reason}}"
     }
   },
   "webhook": {
@@ -354,6 +509,17 @@
     "noDeadLetters": "Keine Dead Letters",
     "noDeadLettersHint": "Aktuell gibt es keine endgültig fehlgeschlagenen Zustellungen.",
     "retry": "Erneut senden",
+    "readOnly": "Sie können Webhooks einsehen; Anlegen, Löschen und Testen erfordern das Recht webhook:manage.",
+    "errors": {
+      "notSaved": "Der Webhook wurde nicht gespeichert. Bitte prüfen Sie die markierten Eingaben.",
+      "egress": "Ziel vom Egress-Schutz blockiert, nicht erlaubt: {{reason}}",
+      "invalidEvent": "Unbekanntes Event: {{event}}",
+      "invalidValue": "Ungültiger Wert: {{detail}}",
+      "forbidden": "Keine Berechtigung: Für diese Aktion fehlt Ihnen das Recht webhook:manage.",
+      "notFound": "Der Webhook existiert nicht mehr. Bitte laden Sie die Seite neu.",
+      "rejected": "Vom Server abgelehnt: {{detail}}",
+      "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    },
     "status": {
       "pending": "wartend",
       "delivering": "wird zugestellt",
@@ -365,13 +531,19 @@
   "accessibility": {
     "closeModal": "Modal schließen",
     "closePanel": "Detailansicht schließen",
-    "toggleDarkMode": "Dunkelmodus umschalten",
     "commandPaletteSearch": "Befehle durchsuchen",
     "searchCIs": "Configuration Items durchsuchen",
     "filterCIStatus": "CI-Status filtern",
     "primaryNavigation": "Hauptnavigation",
     "breadcrumb": "Brotkrumen-Navigation",
     "skipToContent": "Zum Inhalt springen"
+  },
+  "theme": {
+    "toggle": "Dunkelmodus umschalten – aktuell: {{current}}, als Nächstes: {{next}}",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "system": "System",
+    "systemResolved": "System ({{theme}})"
   },
   "asset": {
     "title": "Inventar",
@@ -397,7 +569,23 @@
     "purchaseCost": "Kaufpreis",
     "invoiceNumber": "Rechnungsnummer",
     "warrantyEnd": "Garantie bis",
-    "status": "Status"
+    "status": "Status",
+    "statuses": {
+      "in_stock": "Auf Lager",
+      "assigned": "Zugewiesen",
+      "maintenance": "Wartung",
+      "retired": "Ausgemustert",
+      "disposed": "Entsorgt",
+      "lost": "Verloren"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "software": "Software",
+      "license": "Lizenz",
+      "cloud_resource": "Cloud-Ressource",
+      "accessory": "Zubehör",
+      "other": "Sonstiges"
+    }
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -407,7 +595,14 @@
     "type": "Typ",
     "assignedTo": "Zugewiesen an",
     "assignedAt": "Zugewiesen am",
-    "assetId": "Asset-ID"
+    "assetId": "Asset-ID",
+    "statuses": {
+      "active": "Aktiv",
+      "returned": "Zurückgegeben",
+      "transferred": "Transferiert",
+      "overdue": "Überfällig",
+      "cancelled": "Storniert"
+    }
   },
   "document": {
     "title": "Dokumente",
@@ -417,7 +612,16 @@
     "size": "Größe",
     "version": "Version",
     "upload": "Dokument erstellen",
-    "storageKey": "Storage-Key"
+    "categories": {
+      "general": "Allgemein",
+      "contract": "Vertrag",
+      "invoice": "Rechnung",
+      "manual": "Handbuch",
+      "diagram": "Diagramm",
+      "certificate": "Zertifikat",
+      "policy": "Richtlinie",
+      "other": "Sonstiges"
+    }
   },
   "stocktake": {
     "title": "Inventur",
@@ -449,7 +653,21 @@
     "priority": "Priorität",
     "category": "Kategorie",
     "createdAt": "Erstellt",
-    "startWork": "Bearbeiten"
+    "startWork": "Bearbeiten",
+    "statuses": {
+      "open": "Offen",
+      "in_progress": "In Bearbeitung",
+      "waiting": "Wartend",
+      "resolved": "Gelöst",
+      "closed": "Geschlossen"
+    },
+    "categories": {
+      "incident": "Störung",
+      "request": "Anfrage",
+      "problem": "Problem",
+      "change": "Änderung",
+      "task": "Aufgabe"
+    }
   },
   "userMgmt": {
     "title": "Benutzer & Teams",
@@ -461,7 +679,101 @@
     "lastLogin": "Letzter Login",
     "memberCount": "Mitglieder",
     "permissions": "Berechtigungen",
-    "type": "Typ"
+    "type": "Typ",
+    "statuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "anonymized": "Anonymisiert"
+    },
+    "deactivate": "Deaktivieren",
+    "reactivate": "Reaktivieren",
+    "delete": "Löschen",
+    "ownAccount": "Ihr Konto",
+    "confirm": {
+      "deactivateTitle": "Benutzer deaktivieren?",
+      "deactivateText": "{{name}} ({{email}}) kann sich danach nicht mehr anmelden. Laufende Sitzungen und die eigenen API-Schlüssel des Benutzers werden sofort widerrufen.",
+      "reactivateTitle": "Benutzer reaktivieren?",
+      "reactivateText": "{{name}} ({{email}}) kann sich danach wieder anmelden.",
+      "deleteTitle": "Benutzer löschen?",
+      "deleteText": "{{name}} ({{email}}) wird endgültig gelöscht. Offene Objekte des Benutzers müssen vorher an einen anderen Benutzer übergeben sein.",
+      "deleteConfirm": "Endgültig löschen"
+    },
+    "errors": {
+      "ownsOpenObjects": "{{name}} kann nicht gelöscht werden: Der Benutzer ist Owner offener Objekte (offene Tickets, aktive Zuweisungen, nicht zurückgegebene Schlüssel). Übergeben Sie diese zuerst an einen anderen Benutzer oder deaktivieren Sie den Benutzer stattdessen.",
+      "referenced": "{{name}} kann nicht gelöscht werden: Bestehende Datensätze verweisen auf den Benutzer. Deaktivieren oder anonymisieren Sie den Benutzer stattdessen.",
+      "notFound": "{{name}} gibt es nicht mehr. Laden Sie die Seite neu.",
+      "forbidden": "Sie haben keine Berechtigung, {{name}} zu ändern.",
+      "unavailable": "{{name}} wurde nicht geändert: Die Sitzungen des Benutzers konnten nicht widerrufen werden. Versuchen Sie es später erneut.",
+      "failed": "Die Aktion für {{name}} ist fehlgeschlagen (HTTP {{status}})."
+    }
+  },
+  "invitations": {
+    "title": "Einladungen",
+    "invite": "Benutzer einladen",
+    "send": "Einladung senden",
+    "email": "E-Mail",
+    "role": "Rolle",
+    "chooseRole": "Rolle wählen",
+    "scope": "Scope",
+    "scopeType": "Scope-Typ",
+    "scopeTarget": "Scope-Ziel",
+    "chooseTarget": "Kunde oder Standort wählen",
+    "scopeTypes": {
+      "org": "Organisation",
+      "client": "Kunde",
+      "site": "Standort"
+    },
+    "expires": "Gültig bis",
+    "status": "Status",
+    "statuses": {
+      "pending": "Offen",
+      "accepted": "Angenommen",
+      "expired": "Abgelaufen"
+    },
+    "renew": "Erneuern",
+    "revoke": "Widerrufen",
+    "sent": "Einladung an {{email}} gesendet, gültig bis {{expires}}.",
+    "link": "Einladungslink (wird nur jetzt angezeigt)",
+    "mailOnly": "Den Einladungslink erhält nur die eingeladene Adresse per E-Mail.",
+    "errorTitle": "Einladungen konnten nicht geladen werden",
+    "errors": {
+      "notSaved": "Die Einladung wurde nicht gesendet. Bitte prüfen Sie die markierten Felder.",
+      "emailInvalid": "Bitte geben Sie eine einzelne E-Mail-Adresse ohne Namen ein.",
+      "emailPending": "Für diese Adresse gibt es bereits eine offene Einladung. Erneuern Sie diese in der Liste.",
+      "roleInvalid": "Diese Rolle gibt es in der Organisation nicht. Wählen Sie eine Standardrolle.",
+      "scopeTypeMismatch": "Die Rolle passt nicht zum Scope-Typ: Kundenrollen werden für einen Kunden, Standortrollen für einen Standort vergeben.",
+      "scopeInvalid": "Wählen Sie einen vorhandenen Kunden bzw. Standort.",
+      "scopeRequired": "Bitte wählen Sie das Scope-Ziel.",
+      "forbidden": "Keine Berechtigung für diese Einladung.",
+      "ceiling": "Sie können nur Rollen vergeben, deren Rechte Sie im gewählten Scope selbst besitzen.",
+      "notFound": "Die Einladung gibt es nicht mehr. Die Liste wurde aktualisiert.",
+      "accepted": "Die Einladung wurde bereits angenommen und kann nicht mehr geändert werden.",
+      "unavailable": "Einladungen sind auf diesem Server nicht eingerichtet. Wenden Sie sich an den Betrieb.",
+      "mailFailed": "Die Einladungs-E-Mail konnte nicht versendet werden, es wurde nichts gespeichert oder geändert. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Betrieb.",
+      "rejected": "Der Server hat die Einladung abgelehnt: {{detail}}",
+      "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
+  },
+  "invitationAccept": {
+    "title": "Einladung annehmen",
+    "description": "Legen Sie Ihr Konto an. Rolle und Zugriffsbereich hat die einladende Person festgelegt.",
+    "displayName": "Anzeigename",
+    "password": "Passwort (mindestens {{min}} Zeichen)",
+    "submit": "Konto anlegen",
+    "toLogin": "Zur Anmeldung",
+    "errors": {
+      "notAccepted": "Das Konto wurde nicht angelegt. Bitte prüfen Sie die markierten Felder.",
+      "passwordTooShort": "Das Passwort muss mindestens {{min}} Zeichen haben.",
+      "displayNameTooLong": "Der Anzeigename darf höchstens {{max}} Zeichen haben.",
+      "missingToken": "Der Einladungslink ist unvollständig. Öffnen Sie den Link aus der E-Mail vollständig.",
+      "expired": "Dieser Einladungslink ist abgelaufen. Bitten Sie die Person, die Sie eingeladen hat, die Einladung zu erneuern.",
+      "invalid": "Dieser Einladungslink ist ungültig oder wurde bereits verwendet. Bitten Sie um eine neue Einladung.",
+      "userExists": "Für diese Adresse gibt es in der Organisation bereits ein Konto. Melden Sie sich damit an.",
+      "rateLimited": "Zu viele Versuche. Bitte warten Sie einige Minuten und versuchen Sie es dann erneut.",
+      "userLimit": "Die Organisation hat ihre Höchstzahl an Benutzern erreicht. Wenden Sie sich an die Person, die Sie eingeladen hat.",
+      "unavailable": "Die Annahme ist gerade nicht möglich. Bitte versuchen Sie es später erneut.",
+      "failed": "Die Annahme ist fehlgeschlagen: {{detail}}"
+    }
   },
   "auth": {
     "loginTitle": "Anmelden",
@@ -473,8 +785,22 @@
     "callbackTitle": "Anmeldung wird abgeschlossen",
     "callbackProgress": "Bitte warten Sie, während Ihre Sitzung geprüft wird.",
     "callbackError": "Die Anmeldung konnte nicht abgeschlossen werden.",
+    "callbackRefused": {
+      "notAdmitted": "Für die erste Anmeldung ist eine Einladung Ihrer Organisation erforderlich. Bitten Sie die Administration Ihrer Organisation um eine Einladung.",
+      "noOrganization": "Ihr Konto ist keiner Organisation zugeordnet. Wenden Sie sich an die Administration Ihrer Organisation.",
+      "userInactive": "Ihr Konto ist deaktiviert. Wenden Sie sich an die Administration Ihrer Organisation.",
+      "noRole": "Ihrem Konto ist in dieser Organisation keine Rolle zugewiesen. Bitten Sie die Administration Ihrer Organisation um Zugriff.",
+      "userLimit": "Die Organisation hat ihre Höchstzahl an Benutzern erreicht. Wenden Sie sich an die Administration Ihrer Organisation."
+    },
     "sessionExpired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
-    "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut."
+    "invitationAccepted": "Ihr Konto für {{email}} ist angelegt. Melden Sie sich jetzt an.",
+    "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut.",
+    "signupPrompt": "Noch kein Konto?",
+    "signupLink": "Konto anlegen",
+    "otherAccount": {
+      "hint": "Ist in diesem Browser noch ein anderes Konto angemeldet, etwa in einem anderen Tab, meldet die Anmeldung Sie mit diesem Konto an statt mit dem neuen. Melden Sie es dann zuerst ab oder verwenden Sie ein privates Fenster.",
+      "signOut": "Anderes Konto abmelden"
+    }
   },
   "topology": {
     "subtitle": "Beziehungen zwischen Configuration Items als Graph.",
@@ -485,6 +811,9 @@
     "empty": "Keine Topologiedaten",
     "emptyHint": "Sobald Beziehungen erfasst oder aus Discovery abgeleitet wurden, erscheinen sie hier.",
     "tooLarge": "Die Topologie umfasst mehr als 2.000 CIs. Wählen Sie einen CI-Typ, einen Standort oder ein Start-CI.",
+    "rootNotFound": "CI nicht gefunden oder nicht sichtbar",
+    "rootNotFoundHint": "Das Start-CI dieser Ansicht existiert nicht mehr oder liegt außerhalb Ihres Sichtbereichs.",
+    "showAll": "Zur Gesamtansicht",
     "allTypes": "Alle CI-Typen",
     "filterType": "Nach CI-Typ filtern",
     "filterDepth": "Traversierungstiefe",
@@ -502,7 +831,13 @@
       "noImpact": "Dieses CI hat keine abhängigen CIs — ein Ausfall hätte keine Folgen im Graphen.",
       "add": "Ausfall hinzufügen",
       "remove": "Aus Simulation entfernen",
-      "impactMany": "Fallen {{failed}} CIs ({{names}}) gemeinsam aus, sind {{count}} weitere CIs betroffen (grau dargestellt)."
+      "impactMany": "Fallen {{failed}} CIs ({{names}}) gemeinsam aus, sind {{count}} weitere CIs betroffen (grau dargestellt).",
+      "loading": "Die Auswirkung wird berechnet …",
+      "unavailable": "Die Auswirkung konnte nicht berechnet werden.",
+      "preview": "Vorschau",
+      "provisionalLoading": "Vorläufiges Ergebnis nach der Wirkrichtung der Beziehungstypen, ohne Redundanzprüfung; die Analyse des Servers läuft noch.",
+      "failedHint": "Die Analyse des Servers ist nicht verfügbar. Versuchen Sie es erneut.",
+      "tooMany": "Es können höchstens {{max}} CIs je Analyse gemeinsam ausfallen. Nehmen Sie CIs aus der Simulation heraus."
     },
     "filterRelType": "Beziehungstyp",
     "allRelTypes": "Alle Beziehungen",
@@ -537,7 +872,8 @@
     "mountsLoadError": "Die Einbauten konnten nicht geladen werden",
     "faceLabel": "Rackseite wählen",
     "faceFront": "Vorderseite",
-    "faceRear": "Rückseite"
+    "faceRear": "Rückseite",
+    "faceBoth": "Vorder- und Rückseite"
   },
   "permissions": {
     "title": "Berechtigungen",
@@ -596,7 +932,15 @@
     "noRuns": "Keine Läufe",
     "noRunsHint": "Gestartete Workflows erscheinen hier.",
     "approve": "Freigeben",
-    "reject": "Ablehnen"
+    "reject": "Ablehnen",
+    "statuses": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "waiting_approval": "Wartet auf Freigabe",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    }
   },
   "compliance": {
     "title": "Compliance",
@@ -611,7 +955,22 @@
     "emptyRulesHint": "Compliance-Regeln erscheinen hier.",
     "failures": "Fehlgeschlagene Ergebnisse",
     "noFailures": "Keine Abweichungen",
-    "noFailuresHint": "Aktuell sind keine Fehlschläge gespeichert."
+    "noFailuresHint": "Aktuell sind keine Fehlschläge gespeichert.",
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    },
+    "resultStatuses": {
+      "pass": "Bestanden",
+      "fail": "Nicht bestanden",
+      "not_applicable": "Nicht anwendbar"
+    },
+    "categories": {
+      "security": "Sicherheit",
+      "hygiene": "Datenpflege"
+    }
   },
   "iga": {
     "loading": "Identity Governance wird geladen",
@@ -643,7 +1002,37 @@
     "drift": "Drift-Funde",
     "remediate": "Beheben",
     "emptyDrift": "Kein Drift erkannt",
-    "emptyDriftHint": "Konnektor-Abgleiche erfassen verwaiste und fehlende Konten hier."
+    "emptyDriftHint": "Konnektor-Abgleiche erfassen verwaiste und fehlende Konten hier.",
+    "connectorStatuses": {
+      "active": "Aktiv",
+      "inactive": "Inaktiv",
+      "error": "Fehler"
+    },
+    "taskStatuses": {
+      "pending": "Ausstehend",
+      "running": "Läuft",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "cancelled": "Abgebrochen"
+    },
+    "requestStatuses": {
+      "pending": "Ausstehend",
+      "approved": "Genehmigt",
+      "rejected": "Abgelehnt",
+      "cancelled": "Zurückgezogen"
+    },
+    "reviewStatuses": {
+      "draft": "Entwurf",
+      "active": "Aktiv",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgebrochen"
+    },
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    }
   },
   "assistant": {
     "title": "KI-Assistent",
@@ -674,6 +1063,7 @@
     "rows": "Zeilen",
     "createdAt": "Erstellt",
     "download": "Herunterladen",
+    "downloadFailed": "Die Datei konnte nicht heruntergeladen werden.",
     "emptyTitle": "Keine Exportaufträge",
     "emptyHint": "Starten Sie einen Export, um die CI-Daten als CSV, DATEV oder JSON herunterzuladen.",
     "status_pending": "Ausstehend",
@@ -793,7 +1183,11 @@
     "positionX": "X (% von links)",
     "positionY": "Y (% von oben)",
     "applyPosition": "Position übernehmen",
-    "positionFor": "Position von {{name}}"
+    "positionFor": "Position von {{name}}",
+    "conflict": "Der Raumplan wurde zwischenzeitlich von anderer Seite geändert und neu geladen. Bitte prüfen Sie die Position und verschieben Sie das Objekt erneut.",
+    "rangeError": "Position nicht gespeichert: Die Koordinaten müssen zwischen 0 und 100 % liegen.",
+    "saveError": "Position nicht gespeichert: {{message}}",
+    "staleObject": "Position nicht gespeichert: Ein Objekt ist diesem Raum nicht mehr zugeordnet. Der Raumplan wurde neu geladen; bitte verschieben Sie das Objekt erneut."
   },
   "consumables": {
     "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",
@@ -810,7 +1204,16 @@
     "submit": "Einreichen",
     "approve": "Genehmigen",
     "reject": "Ablehnen",
-    "supplier": "Lieferant"
+    "supplier": "Lieferant",
+    "statuses": {
+      "draft": "Entwurf",
+      "submitted": "Eingereicht",
+      "approved": "Genehmigt",
+      "rejected": "Abgelehnt",
+      "ordered": "Bestellt",
+      "received": "Geliefert",
+      "cancelled": "Storniert"
+    }
   },
   "maintenance": {
     "summary": "Wartungen planen und betroffene Kunden benachrichtigen.",
@@ -823,7 +1226,33 @@
     "startsAt": "Beginn",
     "endsAt": "Ende",
     "queued": "{{count}} Benachrichtigungen vorgemerkt – Versand ausstehend",
-    "noClients": "Keine betroffenen Kunden"
+    "noClients": "Keine betroffenen Kunden",
+    "statuses": {
+      "scheduled": "Geplant",
+      "in_progress": "In Arbeit",
+      "completed": "Abgeschlossen",
+      "cancelled": "Abgebrochen"
+    },
+    "notifications": "Benachrichtigungen",
+    "noNotifications": "Keine Benachrichtigungen gespeichert",
+    "client": "Kunde",
+    "channel": "Kanal",
+    "status": "Status",
+    "time": "Zeit",
+    "searchCIs": "Betroffene CIs suchen",
+    "ciResults": "Gefundene CIs",
+    "selectedCIs": "Ausgewählte CIs",
+    "addCI": "{{name}} hinzufügen",
+    "removeCI": "{{name}} entfernen",
+    "noCIsSelected": "Ohne CI gilt die Wartung für die ganze Organisation.",
+    "channels": {
+      "webhook": "Webhook"
+    },
+    "notificationStatuses": {
+      "pending": "ausstehend",
+      "sent": "versendet",
+      "failed": "fehlgeschlagen"
+    }
   },
   "disposal": {
     "summary": "Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).",
@@ -846,7 +1275,13 @@
     "identifier": "Kennung",
     "issueTitle": "Schlüssel ausgeben",
     "assignTo": "Ausgeben an",
-    "selectUser": "Nutzer wählen"
+    "selectUser": "Nutzer wählen",
+    "statuses": {
+      "available": "Verfügbar",
+      "issued": "Ausgegeben",
+      "lost": "Verloren",
+      "retired": "Ausgemustert"
+    }
   },
   "trainings": {
     "summary": "Kurse mit Zuweisung, Fälligkeit und Nachweis.",
@@ -863,7 +1298,12 @@
     "book": "Buchen",
     "bookTitle": "Arbeitsplatz buchen",
     "startsAt": "Von",
-    "endsAt": "Bis"
+    "endsAt": "Bis",
+    "statuses": {
+      "available": "Frei",
+      "occupied": "Belegt",
+      "maintenance": "In Wartung"
+    }
   },
   "agents": {
     "summary": "Registrierte Endpoint-Agents mit Policy und Kill-Switch.",
@@ -874,7 +1314,12 @@
     "enable": "Aktivieren",
     "killSwitch": "Kill-Switch",
     "policyTitle": "Agent-Policy",
-    "intervalSeconds": "Intervall (Sekunden)"
+    "intervalSeconds": "Intervall (Sekunden)",
+    "statuses": {
+      "online": "Online",
+      "offline": "Offline",
+      "disabled": "Deaktiviert"
+    }
   },
   "findings": {
     "summary": "Patch-Posture und Schwachstellen je CI.",
@@ -885,7 +1330,13 @@
     "falsePositive": "Fehlalarm",
     "acknowledge": "Bestätigen",
     "resolve": "Lösen",
-    "markFalsePositive": "Fehlalarm"
+    "markFalsePositive": "Fehlalarm",
+    "severities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    }
   },
   "citypes": {
     "create": "Typ anlegen",
@@ -944,7 +1395,51 @@
     },
     "system": "System",
     "logicalShort": "logisch",
-    "fieldCount": "Felder: {{count}}"
+    "fieldCount": "Felder: {{count}}",
+    "editField": "Feld „{{name}}“ bearbeiten",
+    "editFieldAction": "Bearbeiten: {{name}}",
+    "editFlagsHint": "Speichern ändert die Index-Einstellungen des Felds; ein Index-Job baut den Index im Hintergrund.",
+    "flagSearchable": "durchsuchbar",
+    "flagUnique": "eindeutig",
+    "flagUniqueClient": "eindeutig je Kunde",
+    "flagErrors": {
+      "duplicates": "Eindeutigkeit nicht aktiviert: Es gibt bereits CIs mit gleichem Wert. Bereinigen Sie die Duplikate zuerst. Grund: {{detail}}",
+      "forbidden": "Keine Berechtigung, Attribute zu verwalten.",
+      "notFound": "Das Attribut existiert nicht mehr.",
+      "reason": "Grund: {{detail}}",
+      "partial": "Das Feld „{{name}}“ wurde gespeichert, die Index-Einstellungen aber nicht. {{reason}}",
+      "flagsNotSaved": "Index-Einstellungen nicht gespeichert. {{reason}}",
+      "fieldNotSaved": "Feld nicht gespeichert. {{reason}}",
+      "forbiddenPermission": "Keine Berechtigung: Ihrer Sitzung fehlt das Recht „{{permission}}“.",
+      "systemType": "Systemtypen sind schreibgeschützt und erhalten keine eigenen Felder. Klonen Sie den Typ oder legen Sie ein organisationsweites Feld an.",
+      "readOnly": "System-Attribute sind schreibgeschützt."
+    },
+    "indexJob": {
+      "scheduled": "Index-Job eingeplant",
+      "label": "Index-Job: {{status}}",
+      "status": {
+        "queued": "wartet",
+        "running": "läuft",
+        "succeeded": "abgeschlossen",
+        "failed": "fehlgeschlagen",
+        "cancelled": "abgebrochen"
+      }
+    },
+    "systemReadOnly": "Systemtyp: schreibgeschützt. Felder lassen sich hier nicht hinzufügen, und der Typ lässt sich nicht deaktivieren. Eigene Felder erfassen Sie so:",
+    "systemReadOnlyClone": "„Klonen“ legt einen eigenen Typ mit allen Feldern dieses Typs an, den Sie erweitern können. Bestehende und von der Discovery erkannte CIs behalten den Systemtyp.",
+    "systemReadOnlyOrgFields": "Organisationsweite Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und erkannte CIs.",
+    "orgFields": {
+      "title": "Organisationsweite Felder",
+      "hint": "Diese Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und von der Discovery erkannte CIs. Systemfelder sind schreibgeschützt.",
+      "add": "Neues organisationsweites Feld",
+      "editorHint": "Das Feld gilt für alle CI-Typen der Organisation. Hier angelegte organisationsweite Felder sind optional.",
+      "empty": "Keine organisationsweiten Felder definiert.",
+      "readOnly": "Nur lesbar: Zum Ändern brauchen Sie das Recht „ci_attribute:manage“.",
+      "editAction": "Organisationsweites Feld bearbeiten: {{name}}",
+      "deleteAction": "Organisationsweites Feld löschen: {{name}}",
+      "deleteConfirm": "Organisationsweites Feld „{{name}}“ löschen? Es entfällt danach bei allen CI-Typen der Organisation.",
+      "deleteFailed": "Feld „{{name}}“ nicht gelöscht. {{reason}}"
+    }
   },
   "inventory": {
     "assigned": "Zugewiesen",
@@ -979,7 +1474,12 @@
     "spofList": "Single Points of Failure:",
     "clients": "Kunden",
     "title": "Auswirkungsanalyse",
-    "compute": "Blast Radius berechnen"
+    "compute": "Blast Radius berechnen",
+    "heuristic": "Netzheuristik",
+    "heuristicList": "Möglicherweise betroffen:",
+    "heuristicHint": "Nur über eine ungerichtete Netzverbindung (connected_to) erreicht; ob der Ausfall diese CIs trifft, ist nicht sicher. Sie zählen nicht zu den betroffenen CIs, Kunden und Standorten.",
+    "heuristicMarker": "Netzheuristik",
+    "noneAffected": "Keine sicher betroffenen CIs."
   },
   "composition": {
     "inheritedHint": "Geteilte Inventardaten (Seriennummer, Kauf, Garantie, Standort) stammen vom Parent-Asset.",
@@ -999,6 +1499,7 @@
     "addChild": "Unterpunkt",
     "createRoot": "Standort anlegen",
     "empty": "Noch keine Standorte. Legen Sie zuerst einen Standort an.",
+    "nodeNotFound": "Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.",
     "client": "Mandant",
     "deleteFailed": "Löschen nicht möglich",
     "title": "Standorte & Lager",
@@ -1011,6 +1512,28 @@
       "zone": "Zone",
       "shelf": "Regal",
       "bin": "Fach"
+    },
+    "editTitle": "{{name}} bearbeiten",
+    "parent": "Übergeordneter Knoten",
+    "forbidden": "Keine Berechtigung für diese Aktion.",
+    "deleteTitle": "„{{name}}“ löschen?",
+    "deleteConfirm": "Der Knoten wird endgültig gelöscht. Solange Unterpunkte oder andere Objekte auf ihn verweisen, lehnt der Server das Löschen ab.",
+    "inUse": "noch verwendet von {{kinds}}",
+    "dependencies": {
+      "location": "Unterstandorte",
+      "ci": "CIs",
+      "asset": "Assets",
+      "quantity_item": "Mengenartikel",
+      "asset_movement": "Bewegungen",
+      "rack_mount": "Rack-Montagen",
+      "role_assignment": "Rollenzuweisungen",
+      "vlan": "VLANs",
+      "subnet": "Subnetze",
+      "collector": "Collectors",
+      "discovery_scope": "Discovery-Scopes",
+      "agent_enrollment_token": "gültige Agent-Enrollment-Tokens",
+      "collector_enrollment_code": "gültige Collector-Enrollment-Codes",
+      "ci_merge": "CI-Zusammenführungen (Tombstones)"
     }
   },
   "savedviews": {
@@ -1025,7 +1548,56 @@
     "shared": "geteilt",
     "mine": "Meine Ansichten",
     "save": "Als Ansicht speichern",
-    "namePrompt": "Name der Ansicht"
+    "namePrompt": "Name der Ansicht",
+    "forbidden": "Keine Berechtigung für diese Ansicht",
+    "forbiddenHint": "Ihnen fehlt das Leserecht für die Objekte, die diese Ansicht abfragt. Wenden Sie sich an Ihre Administration.",
+    "presentation": "Darstellung und Freigabe",
+    "sortBy": "Sortieren nach",
+    "sortDefault": "Standard (Name)",
+    "sortDir": "Richtung",
+    "asc": "Aufsteigend",
+    "desc": "Absteigend",
+    "columns": "Spalten",
+    "columnsHint": "Ohne Auswahl: Name und Zusammenfassung.",
+    "sharing": "Freigabe",
+    "shareOrg": "Für die ganze Organisation freigeben",
+    "shareRoles": "Für Rollen freigeben",
+    "rolesUnavailable": "Die Rollen können nicht geladen werden.",
+    "readOnly": "Diese Ansicht wurde mit Ihnen geteilt; Änderungen speichern Sie als eigene Ansicht.",
+    "update": "Änderungen speichern",
+    "attribute": "Attribut {{key}}",
+    "fields": {
+      "id": "ID",
+      "name": "Name",
+      "status": "Status",
+      "hostname": "Hostname",
+      "fqdn": "FQDN",
+      "serial_number": "Seriennummer",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "os_name": "Betriebssystem",
+      "os_version": "Betriebssystemversion",
+      "management_ip": "Management-IP",
+      "lifecycle_state": "Lebenszyklus",
+      "discovery_source": "Discovery-Quelle",
+      "health": "Zustand",
+      "ci_type": "CI-Typ",
+      "client_id": "Mandant (ID)",
+      "site_id": "Standort (ID)",
+      "location_id": "Ort (ID)",
+      "is_manual": "Manuell gepflegt",
+      "created_at": "Angelegt",
+      "updated_at": "Geändert",
+      "last_seen_at": "Zuletzt gesehen",
+      "asset_tag": "Inventarnummer",
+      "category": "Kategorie",
+      "supplier": "Lieferant",
+      "barcode": "Barcode",
+      "rfid_tag": "RFID-Tag",
+      "purchase_cost": "Anschaffungskosten",
+      "purchase_date": "Kaufdatum",
+      "warranty_end": "Garantieende"
+    }
   },
   "lifecycle": {
     "transitionTo": "Übergang nach",
@@ -1044,6 +1616,7 @@
     "incoming": "Quelle → dieses CI",
     "type": "Beziehungstyp",
     "targetCi": "CI-ID der Gegenstelle",
+    "ciNotFound": "Kein CI mit dieser ID gefunden.",
     "notes": "Notiz",
     "verificationState": "Prüfstatus",
     "state": {
@@ -1056,7 +1629,26 @@
   },
   "relationshipCard": {
     "suppress": "Entfernen und unterdrücken",
-    "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt."
+    "suppressHint": "Discovery-Kante: wird entfernt und von der Discovery nicht wieder angelegt.",
+    "hiddenOutside": "{{count}} außerhalb des Bereichs ausgeblendet",
+    "showAll": "Alle anzeigen",
+    "showInScope": "Nur Bereich anzeigen",
+    "outsideScope": "Außerhalb des Bereichs",
+    "suppressTitle": "Beziehung entfernen und unterdrücken",
+    "suppressConfirm": "Die Discovery-Kante {{relType}} zu {{other}} wird entfernt. Die Discovery legt sie nicht wieder an, bis die Unterdrückung aufgehoben wird.",
+    "suppressReason": "Grund",
+    "suppressReasonInvalid": "Der Grund hat höchstens 1000 Zeichen.",
+    "suppressions": "Unterdrückte Beziehungen",
+    "showSuppressions": "Unterdrückte Beziehungen anzeigen",
+    "hideSuppressions": "Unterdrückte Beziehungen ausblenden",
+    "noSuppressions": "Keine unterdrückten Beziehungen.",
+    "suppressionsLoadError": "Die unterdrückten Beziehungen konnten nicht geladen werden.",
+    "suppressedBy": "Unterdrückt von {{actor}} am {{date}}",
+    "unknownActor": "unbekannt",
+    "suppressionReason": "Grund: {{reason}}",
+    "noReason": "Kein Grund angegeben",
+    "lift": "Aufheben",
+    "liftHint": "Die Discovery legt die Kante im nächsten Zyklus wieder an."
   },
   "scope": {
     "label": "Arbeitsbereich",
@@ -1064,7 +1656,11 @@
     "client": "Kunde",
     "site": "Standort",
     "allClients": "Alle Kunden",
-    "allSites": "Alle Standorte"
+    "allSites": "Alle Standorte",
+    "moreClients": "Weitere Kunden laden",
+    "moreSites": "Weitere Standorte laden",
+    "outsideCI": "Dieses CI liegt außerhalb des gewählten Bereichs ({{scope}}).",
+    "switchToObject": "Bereich wechseln"
   },
   "reviews": {
     "title": "Review-Inbox",
@@ -1093,7 +1689,15 @@
     },
     "escalatedOnly": "Nur eskalierte",
     "escalated": "Eskaliert",
-    "selectAll": "Alle offenen auswählen",
+    "selectAll": "Alle offenen auswählen ({{count}} auf dieser Seite)",
+    "selectAllMatching": "Alle {{total}} offenen auswählen",
+    "selectAllError": "Die offenen Items konnten nicht geladen werden: {{message}}",
+    "resolveError": "Das Item konnte nicht aufgelöst werden: {{message}}",
+    "paging": {
+      "range": "{{from}}–{{to}} von {{total}}",
+      "previous": "Vorherige Seite",
+      "next": "Nächste Seite"
+    },
     "select": "„{{name}}“ auswählen",
     "bulk": {
       "label": "Sammelaktion",
@@ -1115,6 +1719,12 @@
     "observed": "Beobachtet",
     "current": "Im CI",
     "differs": "abweichend",
+    "ciType": "CI-Typ des neuen CIs",
+    "chooseCIType": "CI-Typ wählen",
+    "ciTypeHint": "Das Gerät meldete den Typ „{{name}}“, den die Organisation bei der Erfassung nicht kannte. Wählen Sie den Typ des neuen CIs.",
+    "ciTypesLoadError": "Die CI-Typen konnten nicht geladen werden.",
+    "noProfileMatch": "Das Gerät ist bereits als generisches Gerät (generic_device) erfasst. Setzen Sie den Typ am CI und verwerfen Sie dann dieses Item.",
+    "openCI": "CI öffnen",
     "loadError": "Die Review-Items konnten nicht geladen werden",
     "empty": "Keine Review-Items",
     "emptyHint": "Der Abgleich hat nichts zu entscheiden."
@@ -1125,7 +1735,33 @@
     "markRead": "Als gelesen markieren",
     "markAllRead": "Alle gelesen",
     "unread": "Ungelesen",
-    "empty": "Keine Benachrichtigungen."
+    "empty": "Keine Benachrichtigungen.",
+    "openUnknown": "Benachrichtigungen öffnen (Anzahl ungelesener nicht verfügbar)",
+    "loadError": "Die Benachrichtigungen konnten nicht geladen werden."
+  },
+  "entitlementExpiry": {
+    "title": "Ablaufende Funktionen",
+    "message": "Die Funktion „{{feature}}“ läuft am {{date}} ab (in {{days}} Tagen).",
+    "messageOneDay": "Die Funktion „{{feature}}“ läuft am {{date}} ab (in 1 Tag).",
+    "features": {
+      "discovery": "Discovery",
+      "topology": "Topologie",
+      "rack_view": "Rackansicht",
+      "export_csv": "CSV-Export",
+      "webhooks": "Webhooks",
+      "api_access": "API-Zugriff",
+      "notifications_email": "E-Mail-Benachrichtigungen",
+      "inventory": "Inventar",
+      "documents": "Dokumente",
+      "stocktake": "Inventur",
+      "ticketing": "Tickets",
+      "monitoring": "Monitoring",
+      "endpoint_agent": "Endpoint-Agent",
+      "workflow_forms": "Workflows und Formulare",
+      "compliance": "Compliance",
+      "iga": "IGA",
+      "ai": "KI-Assistent"
+    }
   },
   "jobs": {
     "title": "Jobcenter",
@@ -1146,7 +1782,14 @@
     "cancel": "Abbrechen",
     "result": "Ergebnis",
     "loadError": "Die Jobs konnten nicht geladen werden",
-    "empty": "Keine Jobs"
+    "empty": "Keine Jobs",
+    "cancelDone": "Der Job wurde abgebrochen.",
+    "cancelForbidden": "Sie dürfen diesen Job nicht abbrechen: nur sein Ersteller oder ein Benutzer mit dem Recht seiner Art.",
+    "cancelConflict": "Der Job lässt sich nicht mehr abbrechen: er ist bereits beendet oder seine Art kann im Lauf nicht abgebrochen werden.",
+    "cancelNotFound": "Der Job wurde nicht gefunden.",
+    "cancelFailed": "Der Job konnte nicht abgebrochen werden: {{error}}",
+    "partialReport": "Teilbericht",
+    "partialReportSummary": "Teilbericht: {{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen"
   },
   "provenance": {
     "show": "Herkunft von {{field}}",
@@ -1181,16 +1824,43 @@
       "email": "E-Mail-Adresse",
       "name": "Ihr Name",
       "submit": "Konto anlegen",
-      "sent": "Wir haben einen Bestätigungslink an {{email}} geschickt. Öffnen Sie ihn, um fortzufahren."
+      "sent": "Wir haben einen Bestätigungslink an {{email}} geschickt. Öffnen Sie ihn, um fortzufahren.",
+      "unavailable": "Die Registrierung ist auf diesem Server noch nicht eingerichtet: Es ist kein E-Mail-Versand (SMTP) konfiguriert. Wenden Sie sich an den Betreiber.",
+      "temporarilyUnavailable": "Die Registrierung ist gerade nicht möglich. Bitte versuchen Sie es in einigen Minuten erneut.",
+      "rateLimited": "Zu viele Versuche. Bitte warten Sie einige Minuten und versuchen Sie es dann erneut.",
+      "emailBlocked": "Diese E-Mail-Domain wird für die Registrierung nicht angenommen (z. B. Wegwerf-Adressen). Bitte verwenden Sie Ihre geschäftliche E-Mail-Adresse.",
+      "emailInvalid": "Bitte geben Sie eine gültige E-Mail-Adresse an (z. B. name@firma.de).",
+      "organizationInvalid": "Bitte geben Sie den Namen Ihrer Organisation an (höchstens 200 Zeichen).",
+      "nameTooLong": "Ihr Name darf höchstens 200 Zeichen haben.",
+      "captchaFailed": "Die automatische Sicherheitsprüfung ist fehlgeschlagen oder abgelaufen. Bitte senden Sie das Formular erneut ab.",
+      "failed": "Die Registrierung ist fehlgeschlagen: {{detail}}"
     },
     "verify": {
       "password": "Passwort festlegen (mindestens 12 Zeichen)",
+      "policy": "Mindestens {{min}} Zeichen mit Groß- und Kleinbuchstaben, einer Ziffer und einem Sonderzeichen; nicht Ihre E-Mail-Adresse.",
+      "policyNotMet": "Das Passwort erfüllt die Richtlinie noch nicht. Es fehlt: {{rules}}.",
+      "rules": {
+        "length": "mindestens {{min}} Zeichen",
+        "upper": "ein Großbuchstabe",
+        "lower": "ein Kleinbuchstabe",
+        "digit": "eine Ziffer",
+        "special": "ein Sonderzeichen"
+      },
       "submit": "Konto bestätigen",
       "done": "Ihre Organisation „{{slug}}“ ist angelegt.",
       "login": "Jetzt anmelden und fortfahren",
       "expired": "Der Bestätigungslink ist abgelaufen. Registrieren Sie sich bitte erneut.",
       "invalid": "Der Bestätigungslink ist ungültig oder wurde bereits verwendet.",
-      "trial": "Ihr Testzeitraum läuft bis {{date}}."
+      "trial": "Ihr Testzeitraum läuft bis {{date}}.",
+      "notAccepted": "Das Konto wurde nicht bestätigt. Bitte prüfen Sie das Passwort.",
+      "passwordRejected": "Das Passwort wurde nicht angenommen. Es muss der Richtlinie entsprechen und darf nicht Ihre E-Mail-Adresse sein.",
+      "accountExists": "Für diese E-Mail-Adresse gibt es bereits ein Konto. Melden Sie sich damit an oder registrieren Sie sich mit einer anderen Adresse.",
+      "organizationTaken": "Der Name der Organisation ist bereits vergeben. Bitte registrieren Sie sich mit einem anderen Namen erneut.",
+      "unavailable": "Die Bestätigung ist auf diesem Server gerade nicht möglich. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Betreiber.",
+      "failed": "Die Bestätigung ist fehlgeschlagen: {{detail}}",
+      "signedIn": "Dieser Tab ist noch als {{user}} angemeldet. Das neue Konto wird trotzdem angelegt; melden Sie sich danach hier ab, bevor Sie sich mit dem neuen Konto anmelden.",
+      "signOutFirst": "Sie sind noch als {{user}} angemeldet. Melden Sie sich zuerst ab, sonst meldet die Anmeldung Sie wieder mit diesem Konto an statt mit dem neuen. Nach der Abmeldung (der Anmeldedienst fragt eventuell noch einmal nach) melden Sie sich auf der Anmeldeseite mit dem neuen Konto an.",
+      "signOutAndSignIn": "Abmelden und mit dem neuen Konto anmelden"
     },
     "collector": {
       "hint": "Installieren Sie den Collector in Ihrem Netz und geben Sie dort einen Enrollment-Code ein.",
@@ -1203,7 +1873,8 @@
       "waiting": "Noch keine Netze gemeldet.",
       "accept": "Bestätigen",
       "dismiss": "Verwerfen",
-      "continue": "Weiter"
+      "continue": "Weiter",
+      "resolveFailed": "Der Vorschlag wurde nicht übernommen: {{message}}"
     },
     "cis": {
       "waiting": "Die erste Discovery läuft. Sobald CIs gefunden sind, geht es weiter."
@@ -1213,5 +1884,10 @@
       "text": "{{count}} CIs sind bereits in Ihrer CMDB.",
       "open": "Zur CMDB"
     }
+  },
+  "language": {
+    "label": "Sprache",
+    "de-DE": "Deutsch",
+    "en-US": "English"
   }
 }

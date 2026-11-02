@@ -134,12 +134,13 @@ func MemoryRepositories() Repositories {
 
 // PostgresRepositories returns the PostgreSQL-backed implementations. The
 // audit recorder is passed to the CI repository so history is written inside
-// the same transaction as the mutation.
+// the same transaction as the mutation; CI and relationship mutations write
+// their domain events into the outbox of their transaction (EVT-02).
 func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Repositories {
 	return Repositories{
 		CI:                ci.NewPGRepositoryWithAudit(pool, recorder).WithEvents(events.NewOutbox()),
 		EventOutbox:       true,
-		Relationship:      relationship.NewPGRepository(pool),
+		Relationship:      relationship.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Webhook:           webhook.NewPGRepository(pool),
 		WebhookDeliveries: webhook.NewPGDeliveryStore(pool),
 		Discovery:         discovery.NewPGRepository(pool),

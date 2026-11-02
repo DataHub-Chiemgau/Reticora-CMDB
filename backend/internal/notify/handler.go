@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -28,10 +33,23 @@ func NewMemoryCenter() *Center {
 
 // Handler serves the notification center of the signed-in user and the
 // channel administration (NTF-04, API-05).
-type Handler struct{ c *Center }
+type Handler struct {
+	c *Center
+	// egress validates the servers of own SMTP channels and the urls of
+	// webhook channels when they are stored (SEC-08).
+	egress egress.Options
+}
 
 // NewHandler creates the handler.
 func NewHandler(c *Center) *Handler { return &Handler{c: c} }
+
+// WithEgress sets the destination policy own SMTP servers and webhook
+// urls are validated against; the default blocks every internal
+// destination.
+func (h *Handler) WithEgress(opts egress.Options) *Handler {
+	h.egress = opts
+	return h
+}
 
 // RegisterRoutes registers the routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -57,17 +75,37 @@ func user(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	return t, true
 }
 
-func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
+// admin is the tenant of the channel administration and the delivery list.
+// Channels and deliveries belong to the organization, not to a client: a
+// channel receives the notifications of every client, and a delivery names
+// recipients of every client. Only a holder of notification:manage for the
+// whole organization administers them; the route authorization accepts any
+// scope of the permission, so a holder bound to a client, a site or a team
+// gets 403 here, before anything is read or changed (RBA-03, TEN-06,
+// F-418).
+func admin(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return t, false
+	}
+	if !identity.HoldsOrgWide(r.Context(), identity.PermNotificationManage) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden",
+			"only a holder of notification:manage for the whole organization may manage notification channels and read deliveries")
 		return t, false
 	}
 	return t, true
 }
 
 func writeError(w http.ResponseWriter, err error) {
+	var blocked *DestinationError
 	switch {
+	case errors.As(err, &blocked):
+		status := blocked.Status
+		if status == 0 {
+			status = http.StatusUnprocessableEntity
+		}
+		api.WriteFieldError(w, &api.FieldError{Field: blocked.Field, Message: blocked.Err.Error(), Status: status})
 	case errors.Is(err, ErrValidation):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 	case errors.Is(err, ErrNotFound):
@@ -141,7 +179,23 @@ func (h *Handler) GetPreferences(w http.ResponseWriter, r *http.Request) {
 		p = &Preference{}
 		_ = p.Validate()
 	}
+	p.FillSubscriptions()
+	if !h.withLocale(w, r, t, p) {
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, p)
+}
+
+// withLocale sets the user's notification language (NTF-03, F-383) in p;
+// on a failure it answers and returns false.
+func (h *Handler) withLocale(w http.ResponseWriter, r *http.Request, t tenant.TenantInfo, p *Preference) bool {
+	locale, err := h.c.Preferences.Locale(r.Context(), t.OrganizationID, t.UserID)
+	if err != nil {
+		writeError(w, err)
+		return false
+	}
+	p.Locale = &locale
+	return true
 }
 
 // PutPreferences handles PUT /api/v1/notifications/preferences.
@@ -163,6 +217,9 @@ func (h *Handler) PutPreferences(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if !h.withLocale(w, r, t, &p) {
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, p)
 }
 
@@ -172,6 +229,22 @@ const secretPlaceholder = "********"
 
 // secretKeys are the configuration keys that are never returned.
 var secretKeys = []string{"password", "secret"}
+
+// maskURL shows a URL as scheme and host only: path and query of an
+// incoming webhook carry its token, user info a password (F-154).
+func maskURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return secretPlaceholder
+	}
+	return u.Scheme + "://" + u.Host + "/" + secretPlaceholder
+}
+
+// urlPattern finds URLs in texts such as a delivery's last error.
+var urlPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]+`)
+
+// maskURLs masks every URL in text like maskURL.
+func maskURLs(text string) string { return urlPattern.ReplaceAllStringFunc(text, maskURL) }
 
 func redact(ch *Channel) *Channel {
 	out := *ch
@@ -184,12 +257,15 @@ func redact(ch *Channel) *Channel {
 			out.Config[k] = secretPlaceholder
 		}
 	}
+	if v, ok := out.Config["url"].(string); ok && v != "" && ch.Provider == ProviderWebhook {
+		out.Config["url"] = maskURL(v)
+	}
 	return &out
 }
 
 // ListChannels handles GET /api/v1/notification-channels.
 func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -216,7 +292,7 @@ type channelRequest struct {
 
 // CreateChannel handles POST /api/v1/notification-channels.
 func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -244,6 +320,10 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := ch.CheckEgress(h.egress); err != nil {
+		writeError(w, err)
+		return
+	}
 	if err := h.c.Channels.Create(r.Context(), ch); err != nil {
 		writeError(w, err)
 		return
@@ -253,7 +333,7 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 
 // GetChannel handles GET /api/v1/notification-channels/{id}.
 func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -267,9 +347,11 @@ func (h *Handler) GetChannel(w http.ResponseWriter, r *http.Request) {
 
 // UpdateChannel handles PATCH /api/v1/notification-channels/{id}: given
 // fields replace the stored ones; a configuration replaces the stored one,
-// a secret sent back as the placeholder keeps its value.
+// a secret sent back as the placeholder and a webhook url sent back masked
+// keep their value. The placeholder is refused when the configuration
+// changes where the secret goes (F-152).
 func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -294,12 +376,29 @@ func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 		ch.Enabled = *req.Enabled
 	}
 	if req.Config != nil {
+		if stored, _ := ch.Config["url"].(string); stored != "" && ch.Provider == ProviderWebhook && req.Config["url"] == maskURL(stored) {
+			req.Config["url"] = stored
+		}
+		// A caller who never saw the secret must not send it to a
+		// destination of its choice: after a change of the destination it
+		// is entered again.
+		moved := destinationChanged(ch, req.Config)
 		for _, k := range secretKeys {
-			if req.Config[k] == secretPlaceholder {
-				req.Config[k] = ch.Config[k]
+			if req.Config[k] != secretPlaceholder {
+				continue
 			}
+			if moved {
+				api.WriteFieldError(w, &api.FieldError{Field: k,
+					Message: "the destination changed (host, port, tls, username or url): enter the " + k + " again"})
+				return
+			}
+			req.Config[k] = ch.Config[k]
 		}
 		ch.Config = req.Config
+		if err = ch.CheckEgress(h.egress); err != nil {
+			writeError(w, err)
+			return
+		}
 	}
 	if err = h.c.Channels.Update(r.Context(), ch); err != nil {
 		writeError(w, err)
@@ -308,9 +407,32 @@ func (h *Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, redact(ch))
 }
 
+// destinationChanged reports whether cfg sends the secret of ch somewhere
+// else than its stored configuration: another host, port, TLS mode or user
+// (smtp), another url (webhook).
+func destinationChanged(ch *Channel, cfg map[string]any) bool {
+	switch ch.Provider {
+	case ProviderSMTP:
+		stored, _ := SMTPConfigFrom(ch.Config)
+		next, err := SMTPConfigFrom(cfg)
+		if err != nil {
+			return true
+		}
+		// Validate fills in the default port and TLS mode on both sides.
+		_ = stored.Validate()
+		_ = next.Validate()
+		return next.Host != stored.Host || next.Port != stored.Port || next.TLS != stored.TLS || next.Username != stored.Username
+	case ProviderWebhook:
+		stored, _ := ch.Config["url"].(string)
+		next, ok := cfg["url"].(string)
+		return !ok || next != stored
+	}
+	return false
+}
+
 // DeleteChannel handles DELETE /api/v1/notification-channels/{id}.
 func (h *Handler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -321,10 +443,43 @@ func (h *Handler) DeleteChannel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// deliveryView is a delivery in the list: whom, what and how it went, but
+// not the content. Body and data hold links such as an invitation's, URLs
+// in subject and error are masked (F-154).
+type deliveryView struct {
+	ID             string      `json:"id"`
+	OrganizationID string      `json:"organization_id"`
+	ChannelID      string      `json:"channel_id"`
+	Recipient      Recipient   `json:"recipient"`
+	Recipients     []Recipient `json:"recipients,omitempty"`
+	Category       string      `json:"category"`
+	Critical       bool        `json:"critical"`
+	Subject        string      `json:"subject"`
+	DedupKey       string      `json:"dedup_key,omitempty"`
+	Status         string      `json:"status"`
+	Attempts       int         `json:"attempts"`
+	MaxAttempts    int         `json:"max_attempts"`
+	NextAttemptAt  time.Time   `json:"next_attempt_at"`
+	LastError      string      `json:"last_error,omitempty"`
+	ProviderID     string      `json:"provider_id,omitempty"`
+	SentAt         *time.Time  `json:"sent_at,omitempty"`
+}
+
+func viewDelivery(d *QueuedDelivery) deliveryView {
+	v := deliveryView{ID: d.ID, OrganizationID: d.OrganizationID, ChannelID: d.ChannelID, Recipient: d.Recipient,
+		Recipients: d.Recipients, Category: d.Category, Critical: d.Critical, Subject: maskURLs(d.Subject),
+		DedupKey: d.DedupKey, Status: d.Status, Attempts: d.Attempts, MaxAttempts: d.MaxAttempts,
+		NextAttemptAt: d.NextAttemptAt, LastError: maskURLs(d.LastError), ProviderID: d.ProviderID, SentAt: d.SentAt}
+	if strings.HasPrefix(d.RecipientKey, "mail:") && v.Recipient.Email == "" {
+		v.Recipient.Email = strings.TrimPrefix(d.RecipientKey, "mail:")
+	}
+	return v
+}
+
 // ListDeliveries handles GET /api/v1/notification-deliveries: the latest
 // deliveries of the organization with their status (NTF-04).
 func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
+	t, ok := admin(w, r)
 	if !ok {
 		return
 	}
@@ -343,13 +498,9 @@ func (h *Handler) ListDeliveries(w http.ResponseWriter, r *http.Request) {
 	if hasMore {
 		items = items[:page.Limit]
 	}
-	if items == nil {
-		items = []QueuedDelivery{}
-	}
+	out := make([]deliveryView, len(items))
 	for i := range items {
-		if strings.HasPrefix(items[i].RecipientKey, "mail:") && items[i].Recipient.Email == "" {
-			items[i].Recipient.Email = strings.TrimPrefix(items[i].RecipientKey, "mail:")
-		}
+		out[i] = viewDelivery(&items[i])
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[QueuedDelivery]{Data: items, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore})
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[deliveryView]{Data: out, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore})
 }
