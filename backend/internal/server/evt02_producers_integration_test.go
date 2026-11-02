@@ -14,7 +14,11 @@
 //     failure between mutation and event) the action fails and leaves no
 //     event; the mutation is rolled back with it, so the same action
 //     succeeds afterwards with exactly one event. The table of the test is
-//     compared with events.Types: a type without a producer case fails.
+//     compared with events.Types: a type without a frame in
+//     events.Payloads needs exactly one producer case; a phase 2 type
+//     (EVT-03, WP-246) may have one until its producing work package adds
+//     it; a case of an unknown type fails (evt02CoverageProblems,
+//     TestEVT02ProducerCoverageRule without a database).
 //
 // The router is the one of audit_t6_harness_test.go with an invitation
 // accept URL and a blob store, as cmd/server/main.go wires them.
@@ -37,6 +41,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -223,6 +228,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 
 	var (
 		changed, deleted, restored, seen   string
+		statusChanged                      string
 		deletedState                       string
 		survivor, victim                   string
 		relSource, relTarget, removedEdge  string
@@ -278,6 +284,26 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				if data["id"] != entity || data["status"] != "maintenance" || len(fields) != 1 || fields[0] != "status" {
 					t.Errorf("ci.changed data: id %v, status %v, changed_fields %v; want %s, maintenance, [status]",
 						data["id"], data["status"], data["changed_fields"], entity)
+				}
+			}},
+		// A status change is its own event next to ci.changed (EVT-03,
+		// WP-707); its data follow the $def ci.status_changed.
+		{typ: events.CIStatusChanged,
+			setup: func(t *testing.T) { statusChanged = f.CI(t, f.OrgA, "", "evt02-status-changed") },
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPatch, "/api/v1/cis/"+statusChanged, `{"status":"maintenance","manufacturer":"evt02"}`)
+				answered(t, "PATCH /cis/{id}", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "CI status", ciStatus(t, statusChanged), "active")
+				}
+				return statusChanged
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				fields, _ := data["changed_fields"].([]any)
+				if data["id"] != entity || data["from"] != "active" || data["to"] != "maintenance" || data["status"] != "maintenance" ||
+					!slices.Contains(fields, any("status")) || !slices.Contains(fields, any("manufacturer")) {
+					t.Errorf("ci.status_changed data: id %v, from %v, to %v, status %v, changed_fields %v; want %s, active, maintenance, maintenance, [status manufacturer]",
+						data["id"], data["from"], data["to"], data["status"], data["changed_fields"], entity)
 				}
 			}},
 		{typ: events.CIDeleted,
@@ -658,17 +684,16 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 			data: sameID("user_id")},
 	}
 
-	// The table covers events.Types exactly: a new type without a producer
-	// case fails here.
-	var covered, known []string
+	// The table covers every type of events.Types without a frame in
+	// events.Payloads exactly once; a phase 2 type gets its case with its
+	// producing work package (WP-246). A new type without a producer case
+	// fails here.
+	var covered []string
 	for _, c := range cases {
 		covered = append(covered, c.typ)
 	}
-	known = append(known, events.Types...)
-	sort.Strings(covered)
-	sort.Strings(known)
-	if strings.Join(covered, ",") != strings.Join(known, ",") {
-		t.Fatalf("producer cases %v, event types %v: every type of events.Types needs exactly one producer case", covered, known)
+	if problems := evt02CoverageProblems(covered); len(problems) != 0 {
+		t.Fatalf("producer cases %v: %s", covered, strings.Join(problems, "; "))
 	}
 
 	refuse := evt02RefuseEvents(t, f)
@@ -861,37 +886,88 @@ func evt02Validate(schema map[string]any, raw []byte) []string {
 	if err := dec.Decode(&doc); err != nil {
 		return []string{err.Error()}
 	}
-	return evt02ValidateValue("$", schema, doc)
+	return evt02ValidateValue(schema, "$", schema, doc)
 }
 
 var (
 	evt02UUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
-func evt02ValidateValue(path string, schema map[string]any, v any) []string {
+// evt02HasType reports whether v is of the JSON type name.
+func evt02HasType(name string, v any) (ok, known bool) {
+	switch name {
+	case "object":
+		_, ok = v.(map[string]any)
+	case "array":
+		_, ok = v.([]any)
+	case "string":
+		_, ok = v.(string)
+	case "number":
+		_, ok = v.(json.Number)
+	case "integer":
+		if n, isNum := v.(json.Number); isNum {
+			_, err := n.Int64()
+			ok = err == nil
+		}
+	case "boolean":
+		_, ok = v.(bool)
+	case "null":
+		ok = v == nil
+	default:
+		return false, false
+	}
+	return ok, true
+}
+
+// evt02ValidateValue validates v against schema; root resolves $ref
+// (#/$defs/<name>).
+func evt02ValidateValue(root map[string]any, path string, schema map[string]any, v any) []string {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, path+": "+fmt.Sprintf(format, args...)) }
 	obj, isObj := v.(map[string]any)
 	for kw, rule := range schema {
 		switch kw {
-		case "$schema", "$id", "title", "description":
-		case "type":
-			ok := false
-			switch rule {
-			case "object":
-				ok = isObj
-			case "string":
-				_, ok = v.(string)
-			case "integer":
-				if n, isNum := v.(json.Number); isNum {
-					_, err := n.Int64()
-					ok = err == nil
-				}
-			default:
-				add("unsupported type %v", rule)
+		case "$schema", "$id", "title", "description", "examples", "$defs":
+		case "$ref":
+			ref, _ := rule.(string)
+			defs, _ := root["$defs"].(map[string]any)
+			target, ok := defs[strings.TrimPrefix(ref, "#/$defs/")].(map[string]any)
+			if !strings.HasPrefix(ref, "#/$defs/") || !ok {
+				add("unresolvable $ref %v", rule)
 				continue
 			}
-			if !ok {
+			problems = append(problems, evt02ValidateValue(root, path, target, v)...)
+		case "allOf":
+			for _, sub := range rule.([]any) {
+				problems = append(problems, evt02ValidateValue(root, path, sub.(map[string]any), v)...)
+			}
+		case "if":
+			if len(evt02ValidateValue(root, path, rule.(map[string]any), v)) != 0 {
+				continue
+			}
+			if then, ok := schema["then"].(map[string]any); ok {
+				problems = append(problems, evt02ValidateValue(root, path, then, v)...)
+			}
+		case "then":
+			// Evaluated with if.
+		case "const":
+			if rule != v {
+				add("%v is not %v", v, rule)
+			}
+		case "type":
+			names, isList := rule.([]any)
+			if !isList {
+				names = []any{rule}
+			}
+			matched := false
+			for _, name := range names {
+				ok, known := evt02HasType(fmt.Sprint(name), v)
+				if !known {
+					add("unsupported type %v", name)
+				}
+				matched = matched || ok
+			}
+			if !matched {
 				add("%v is not of type %v", v, rule)
 			}
 		case "required":
@@ -902,13 +978,17 @@ func evt02ValidateValue(path string, schema map[string]any, v any) []string {
 			}
 		case "additionalProperties":
 			props, _ := schema["properties"].(map[string]any)
-			if rule == false && isObj {
-				for name := range obj {
-					if _, declared := props[name]; !declared {
-						add("property %s not allowed", name)
+			switch rule {
+			case false:
+				if isObj {
+					for name := range obj {
+						if _, declared := props[name]; !declared {
+							add("property %s not allowed", name)
+						}
 					}
 				}
-			} else if rule != false {
+			case true:
+			default:
 				add("unsupported additionalProperties %v", rule)
 			}
 		case "properties":
@@ -917,8 +997,13 @@ func evt02ValidateValue(path string, schema map[string]any, v any) []string {
 			}
 			for name, sub := range rule.(map[string]any) {
 				if value, present := obj[name]; present {
-					problems = append(problems, evt02ValidateValue(path+"."+name, sub.(map[string]any), value)...)
+					problems = append(problems, evt02ValidateValue(root, path+"."+name, sub.(map[string]any), value)...)
 				}
+			}
+		case "items":
+			items, _ := v.([]any)
+			for i, item := range items {
+				problems = append(problems, evt02ValidateValue(root, fmt.Sprintf("%s[%d]", path, i), rule.(map[string]any), item)...)
 			}
 		case "dependentRequired":
 			if !isObj {
@@ -951,7 +1036,10 @@ func evt02ValidateValue(path string, schema map[string]any, v any) []string {
 				add("%v below the minimum %v", v, rule)
 			}
 		case "format":
-			s, _ := v.(string)
+			s, isString := v.(string)
+			if !isString {
+				continue
+			}
 			switch rule {
 			case "uuid":
 				if !evt02UUID.MatchString(s) {
@@ -961,6 +1049,10 @@ func evt02ValidateValue(path string, schema map[string]any, v any) []string {
 				if _, err := time.Parse(time.RFC3339Nano, s); err != nil {
 					add("%q is no date-time: %v", s, err)
 				}
+			case "date":
+				if _, err := time.Parse(time.DateOnly, s); err != nil {
+					add("%q is no date: %v", s, err)
+				}
 			default:
 				add("unsupported format %v", rule)
 			}
@@ -969,4 +1061,89 @@ func evt02ValidateValue(path string, schema map[string]any, v any) []string {
 		}
 	}
 	return problems
+}
+
+// evt02CoverageProblems checks the producer cases (their types) against
+// the register (WP-246): every type of events.Types without a frame in
+// events.Payloads has exactly one case; a phase 2 type (with a frame) may
+// have one until its producing work package adds it; every case names a
+// type of events.Types.
+func evt02CoverageProblems(covered []string) []string {
+	var problems []string
+	count := map[string]int{}
+	for _, typ := range covered {
+		count[typ]++
+		if count[typ] == 1 && !events.IsType(typ) {
+			problems = append(problems, fmt.Sprintf("case for %q, which is no type of events.Types", typ))
+		}
+	}
+	for _, typ := range events.Types {
+		_, phase2 := events.Payloads[typ]
+		switch n := count[typ]; {
+		case n > 1:
+			problems = append(problems, fmt.Sprintf("%d cases for %s, want one", n, typ))
+		case n == 0 && !phase2:
+			problems = append(problems, typ+" has no producer case")
+		}
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+// TestEVT02ProducerCoverageRule covers EVT-02 and EVT-03 (WP-551,
+// WP-246) without a database: the coverage rule of
+// TestEveryEVT02TypeHasAProducer accepts the phase 2 types without a
+// producer case, and one case for them, and fails a type of EVT-02 without
+// a case, two cases of a type and a case of an unknown type. The schema
+// validator accepts the example of every phase 2 type in an envelope with
+// entity and refuses one without entity_seq and one whose data lacks a
+// required field of the type's frame.
+func TestEVT02ProducerCoverageRule(t *testing.T) {
+	var base []string
+	for _, typ := range events.Types {
+		if _, phase2 := events.Payloads[typ]; !phase2 {
+			base = append(base, typ)
+		}
+	}
+	for name, tc := range map[string]struct {
+		cases []string
+		fails bool
+	}{
+		"phase 2 without producer":    {base, false},
+		"phase 2 with a producer":     {append(slices.Clone(base), events.StockMovement), false},
+		"type of EVT-02 without case": {base[1:], true},
+		"two cases of a type":         {append(slices.Clone(base), events.CICreated), true},
+		"two cases of a phase 2 type": {append(slices.Clone(base), events.AssetCreated, events.AssetCreated), true},
+		"unknown type":                {append(slices.Clone(base), "asset.exploded"), true},
+		"reserved type":               {append(slices.Clone(base), "maintenance.scheduled"), true},
+	} {
+		if problems := evt02CoverageProblems(tc.cases); (len(problems) != 0) != tc.fails {
+			t.Errorf("%s: problems %v, want failure %v", name, problems, tc.fails)
+		}
+	}
+
+	schema := evt02LoadSchema(t)
+	defs := schema["$defs"].(map[string]any)
+	for typ := range events.Payloads {
+		def := defs[typ].(map[string]any)
+		example := def["examples"].([]any)[0].(map[string]any)
+		envelope := map[string]any{"id": "11111111-1111-4111-8111-111111111111", "type": typ, "org_id": "22222222-2222-4222-8222-222222222222",
+			"occurred_at": "2026-11-02T10:00:00Z", "sequence": 1, "entity_id": "e-1", "entity_seq": 1, "data": example}
+		raw, _ := json.Marshal(envelope)
+		if problems := evt02Validate(schema, raw); len(problems) != 0 {
+			t.Errorf("%s: envelope with the example %s: %v", typ, raw, problems)
+		}
+		delete(envelope, "entity_id")
+		delete(envelope, "entity_seq")
+		raw, _ = json.Marshal(envelope)
+		if problems := evt02Validate(schema, raw); len(problems) != 2 {
+			t.Errorf("%s: envelope without entity gives %v, want 2 violations", typ, problems)
+		}
+		envelope["entity_id"], envelope["entity_seq"] = "e-1", 1
+		envelope["data"] = map[string]any{"extra": true}
+		raw, _ = json.Marshal(envelope)
+		if problems := evt02Validate(schema, raw); len(problems) != len(def["required"].([]any)) {
+			t.Errorf("%s: data without its required fields gives %v, want %d violations", typ, problems, len(def["required"].([]any)))
+		}
+	}
 }

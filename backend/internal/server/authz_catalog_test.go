@@ -9,6 +9,8 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
 
 // TestRoutePermissionsExistInCatalog locks the route authorization map
@@ -102,6 +104,22 @@ var unroutedKeys = map[string]string{
 	// RBA-02 grants it to org_admin; entitlements are written only on the
 	// operator path /admin/orgs/{id}/entitlements (ENT-04, F-211).
 	"entitlement:manage": "operator path only (ENT-04)",
+	// org_admin takes over and deletes shared views of other owners; the
+	// saved-views handler checks it (VIE-02, E-106, WP-307).
+	"saved_view:manage": "checked in the handler (WP-307)",
+}
+
+// unroutedUntil are the phase-2 keys of WP-245 whose first route a later
+// work package registers, with that package (E-106). A key leaves the list
+// with its first route.
+var unroutedUntil = map[string]string{
+	"contract:read":           "suppliers and contracts (WP-269)",
+	"contract:write":          "suppliers and contracts (WP-269)",
+	"import:run":              "imports (WP-301)",
+	"import:manage":           "import mapping profiles (WP-301, WP-774)",
+	"field_permission:manage": "field-permissions (WP-264, WP-726)",
+	"tag:manage":              "tags (WP-281, WP-753)",
+	"metamodel:publish":       "metamodel/drafts/{id}/publish (WP-261)",
 }
 
 // TestRBA01KeysGateTheirActions covers WP-068 and WP-363 (RBA-01): the
@@ -162,15 +180,89 @@ func TestRBA01KeysGateTheirActions(t *testing.T) {
 	}
 	for _, p := range permission.Catalogue {
 		_, exempt := unroutedKeys[p.Key]
+		_, later := unroutedUntil[p.Key]
 		switch {
-		case routed[p.Key] && exempt:
+		case exempt && later:
+			t.Errorf("catalogue key %s is listed in unroutedKeys and unroutedUntil", p.Key)
+		case routed[p.Key] && (exempt || later):
 			t.Errorf("catalogue key %s gates a route but is listed as unrouted", p.Key)
-		case !routed[p.Key] && !exempt:
-			t.Errorf("catalogue key %s gates no route and is not listed in unroutedKeys (F-199)", p.Key)
+		case !routed[p.Key] && !exempt && !later:
+			t.Errorf("catalogue key %s gates no route and is not listed in unroutedKeys or unroutedUntil (F-199)", p.Key)
 		}
 	}
-	if len(unroutedKeys) != 1 {
-		t.Errorf("unroutedKeys %v, want entitlement:manage only", unroutedKeys)
+	if len(unroutedKeys) != 2 {
+		t.Errorf("unroutedKeys %v, want entitlement:manage and saved_view:manage only", unroutedKeys)
+	}
+	for key := range unroutedUntil {
+		if !slices.Contains(p2Keys, key) {
+			t.Errorf("unroutedUntil lists %s, which is no phase-2 key of WP-245", key)
+		}
+	}
+}
+
+// p2Keys are the module and action keys of phase 2 (RBA-05, E-106).
+var p2Keys = []string{
+	"stock:read", "stock:write", "reservation:read", "reservation:write", "contract:read", "contract:write",
+	"stocktake:complete", "import:run", "import:manage", "field_permission:manage", "tag:manage",
+	"metamodel:publish", "saved_view:manage",
+}
+
+// replacedP2Keys are the keys migration 000192 replaced (WP-245, E-106).
+var replacedP2Keys = []string{"consumable:read", "consumable:write", "inventory:manage", "asset:reserve", "asset:assign"}
+
+// TestP2KeysGateTheirActions covers WP-245 (RBA-05, RBA-06, E-106): the
+// stock, reservation and stocktake routes require the phase-2 keys, the
+// action paths below assets have their own rules ahead of asset:write, the
+// E-38 successor segments lifecycle-models and templates are mapped like
+// their predecessors, no registered route requires a replaced key, and the
+// search hits and webhook events of reservations require reservation:read.
+func TestP2KeysGateTheirActions(t *testing.T) {
+	for _, tc := range []struct{ method, path, want string }{
+		{"GET", "/api/v1/consumables", "stock:read"},
+		{"POST", "/api/v1/consumables", "stock:write"},
+		{"GET", "/api/v1/inventory/items", "stock:read"},
+		{"GET", "/api/v1/inventory/availability", "stock:read"},
+		{"PATCH", "/api/v1/inventory/items/x", "stock:write"},
+		{"GET", "/api/v1/reservations", "reservation:read"},
+		{"POST", "/api/v1/reservations", "reservation:write"},
+		{"POST", "/api/v1/reservations/x/release", "reservation:write"},
+		{"POST", "/api/v1/stocktakes/x/complete", "stocktake:complete"},
+		{"PATCH", "/api/v1/stocktakes/x", "stocktake:write"},
+		{"POST", "/api/v1/assets/x/assign", "assignment:write"},
+		{"POST", "/api/v1/assets/x/return", "assignment:write"},
+		{"POST", "/api/v1/assets/x/transfer", "assignment:write"},
+		{"POST", "/api/v1/assets/x/reserve", "reservation:write"},
+		{"PATCH", "/api/v1/assets/x", "asset:write"},
+		{"GET", "/api/v1/lifecycle-models", "asset:read"},
+		{"POST", "/api/v1/lifecycle-models", "lifecycle:manage"},
+		{"PATCH", "/api/v1/lifecycle-models/x", "lifecycle:manage"},
+		{"DELETE", "/api/v1/lifecycle-models/x", "lifecycle:manage"},
+		{"GET", "/api/v1/templates", "ci:read"},
+		{"POST", "/api/v1/templates", "citype:manage"},
+		{"POST", "/api/v1/subnets/x/reservations", "ipam:write"},
+		{"GET", "/api/v1/subnets/x/reservations", "ipam:read"},
+		{"POST", "/api/v1/orders/x/receive", "order:write"},
+		{"GET", "/api/v1/stock-movements", "asset:read"},
+	} {
+		if got, access := PermissionForRoute(tc.method, tc.path); string(got) != tc.want || access != routeProtected {
+			t.Errorf("%s %s requires %q (access %v), want %q", tc.method, tc.path, got, access, tc.want)
+		}
+	}
+	for _, op := range routeTable(t, testRouter(t)) {
+		if required, _ := PermissionForRoute(op.Method, op.Path); slices.Contains(replacedP2Keys, string(required)) {
+			t.Errorf("%s %s requires the replaced key %s", op.Method, op.Path, required)
+		}
+	}
+	if got := search.ReadPermission["reservation"]; got != "reservation:read" {
+		t.Errorf(`search.ReadPermission["reservation"] = %q, want reservation:read`, got)
+	}
+	for _, event := range []string{"reservation.created", "reservation.released"} {
+		if got := webhook.EventReadPermission(event); got != "reservation:read" {
+			t.Errorf("webhook.EventReadPermission(%s) = %q, want reservation:read", event, got)
+		}
+	}
+	if got := webhook.EventReadPermission("inventory.movement"); got != "asset:read" {
+		t.Errorf("webhook.EventReadPermission(inventory.movement) = %q, want asset:read", got)
 	}
 }
 

@@ -45,6 +45,21 @@ export function useCITypes(
   });
 }
 
+/**
+ * useAllCITypes loads all pages of the CI types (ciTypeApi.listAll) for a
+ * selection; useCITypes stays the paged list of the type administration.
+ */
+export function useAllCITypes(
+  params: { include_inactive?: boolean; category?: string; search?: string } = {},
+  options: QueryControl = {},
+) {
+  return useQuery({
+    queryKey: ['ci-types', 'all', params],
+    queryFn: () => ciTypeApi.listAll(params),
+    ...options,
+  });
+}
+
 export function useCIType(
   id: string | undefined,
   { enabled = true, ...options }: QueryControl = {},

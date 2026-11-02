@@ -430,7 +430,7 @@ func TestOperatorActionsFailWithoutTheirAuditEntry(t *testing.T) {
 					t.Errorf("login %s: %d %s, want 500 without a session", login, w.Code, w.Body.String())
 				}
 			}
-			w := post(mux, "/api/v1/admin/orgs/"+org+"/entitlements", `{"feature_key":"ticketing"}`,
+			w := post(mux, "/api/v1/admin/orgs/"+org+"/entitlements", `{"feature_key":"ticketing_essential"}`,
 				map[string]string{"Authorization": "Bearer " + operatorToken})
 			if w.Code != http.StatusInternalServerError {
 				t.Errorf("grant: %d %s, want 500", w.Code, w.Body.String())
@@ -441,11 +441,11 @@ func TestOperatorActionsFailWithoutTheirAuditEntry(t *testing.T) {
 	// An Auditor without a database refuses before the change.
 	svc := entitlement.NewService(entitlement.NewMemoryRepository(), entitlement.Options{Enforce: true})
 	mux := testRouter(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, issuer, NewAuditor(nil), nil).WithEntitlements(svc))
-	if w := post(mux, "/api/v1/admin/orgs/"+org+"/entitlements", `{"feature_key":"ticketing"}`,
+	if w := post(mux, "/api/v1/admin/orgs/"+org+"/entitlements", `{"feature_key":"ticketing_essential"}`,
 		map[string]string{BreakGlassHeader: testBreakGlass}); w.Code != http.StatusInternalServerError {
 		t.Errorf("grant without audit: %d %s, want 500", w.Code, w.Body.String())
 	}
-	if svc.IsEnabled(context.Background(), org, entitlement.FeatureTicketing) {
+	if svc.IsEnabled(context.Background(), org, entitlement.FeatureTicketingEssential) {
 		t.Error("grant without audit entry took effect")
 	}
 }

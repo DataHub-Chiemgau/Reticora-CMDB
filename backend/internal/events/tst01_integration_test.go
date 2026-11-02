@@ -52,7 +52,8 @@ func TestTST01AuditChainAndOutbox(t *testing.T) {
 		if _, err := repo.Update(ctx, f.OrgA, item.ID, ci.UpdateRequest{Status: &status}); err != nil {
 			t.Fatal(err)
 		}
-		if a, o := counts(t, item.ID); a != 2 || o != 2 {
+		// A status change writes ci.changed and ci.status_changed (WP-707).
+		if a, o := counts(t, item.ID); a != 2 || o != 3 {
 			t.Errorf("audit %d, outbox %d", a, o)
 		}
 	})

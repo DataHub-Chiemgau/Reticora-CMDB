@@ -75,7 +75,7 @@ die Einzelwerte aus den Job-Logs. Fett: Schwelle verfehlt.
 | 1 | Seed-Optionen für die NFR-01-Volumina, deterministisch und begrenzt | erfüllt; Tests lokal grün (TimescaleDB 2.31.0); in den drei Läufen erzeugt der Seed die Volumina vollständig | `backend/cmd/seed` (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`); `seed_integration_test.go`: `TestSeedNFR01Volumes` (Mengen, Verteilung, Determinismus, zweiter Lauf), `TestSeedOptionsAreBounded` (Grenzen); Abschnitt „NFR-01-Volumina“ |
 | 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | erfüllt; der Job läuft in allen Läufen. Vor den K3-Nachträgen war er in drei Läufen **rot** (Punkt 11); nach WP-607 bis WP-611 hält er jedes Budget im Median und ist in einem von drei Läufen rot | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
 | 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert; seit der Ergänzung zu E-58 vom 2026-10-26 bewertet nach dem Median der drei Läufe | **erfüllt** (nach der Ergänzung zu E-58, WP-612) | Drei vollständige Läufe auf `3910aae` (Abschnitt „Nachweisläufe nach den K3-Nachträgen“); `load-evidence.yml` (Run 40320307297) bewertet ihre Archive mit `tests/load/evaluate-runs.sh`: alle Budgets gehalten, Exit 0. Die drei Läufe davor (`8ca7f4b`) verfehlten `ingest-rediscover` und `nfr01-volume`. Die Archive liegen als Artefakte der Läufe vor; ins Repository übernommen sind sie noch nicht (Retest WP-204) |
-| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); sechs offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber); die Punkte 1 und 11 sind mit WP-607 bis WP-612 (K3-Nachträge) erledigt | dieses Dokument |
+| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); vier offene Punkte (2, 7, 8, 10) haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber); die Punkte 1 und 11 sind mit WP-607 bis WP-612 (K3-Nachträge) erledigt, Punkt 6 mit WP-836, Punkt 9 mit WP-835 | dieses Dokument |
 | 5 | Retests F-279, WP-206, WP-204 | WP-206 und F-118 **bestanden**; F-279 und WP-204 **stehen aus** (Übernahme der Archive) | Abschnitt „Retests“ |
 
 ## Messumgebung und Ablauf (E-58)
@@ -542,12 +542,55 @@ der drei Klassen sind seit dem letzten Stand dieses Berichts behoben:
 - **Attributklasse (behoben, WP-435, Migration 000162):** Der Attributfilter
   der CI-Liste nutzt `reticora_attr_text` (LEAKPROOF) in Index und Filter;
   das Szenario `attr_filter` misst ihn (74,7 ms p95 im Vorlauf).
-- **Volltextsuche (offen):** `idx_ci_fts` (`to_tsvector`) bleibt unter RLS
-  unbenutzbar; die globale Suche liest `search_document` der Organisation
-  sequenziell (WP-438). Bei 10.000 Objekten hält sie das Budget (130,4 ms
-  p95 im Vorlauf); für den Headroom siehe Offene Punkte, Punkt 6.
+- **Volltextsuche (nach E-133 dokumentierter Scan, WP-836, Migration
+  000191):** `idx_ci_fts` (`to_tsvector` über `ci`) ist entfernt; keine
+  Abfrage nutzte ihn. Die globale Suche liest die gespeicherte Spalte
+  `search_document.search_vector`; `@@` (`ts_match_vq`) ist nicht leakproof,
+  `idx_search_document_fts` dient der App-Rolle daher nicht. Nach E-133
+  (Option 3) bleibt die Suche linear im Budget bis 10.000 Objekte (E-17):
+  130,4 ms p95 im Vorlauf; Planbelege und Messwerte unten.
+- **`UniqueConflicts` (nach E-133 dokumentierter Scan, WP-836):** Die
+  Eindeutigkeitsprüfung vergleicht `c.attributes ->> d.key` mit dem
+  Schlüssel aus `attribute_definition`; weder `->>` noch der Schlüssel als
+  Spalte passen zu einem Index, die App-Rolle liest die CIs der
+  Organisation und filtert.
 
-Die Lastgrenzen aus SR-04 betreffen damit nur noch die Volltextsuche.
+Katalogtest: `TestRLSIndexesAreLeakproof`
+(`backend/internal/tenant/rls/index_catalog_integration_test.go`) meldet
+jeden Index einer RLS-Tabelle mit nicht-leakproof Ausdruck, Prädikat oder
+Operatorklasse; bekannte Fälle stehen mit Grund in `rls.LeakyIndexes`
+(`docs/schema-baseline.md`, „Indizes unter RLS“). `TestIndexStatementLeakproof`
+prüft die Indizes des DDL-Jobs (`idx_attr_*` über `reticora_attr_text`) mit
+derselben Abfrage. Bezeichner laufen nach E-133 über die Bezeichnertabelle
+mit leakproof Operatoren (WP-308). Nach E-133 setzt keine Migration eine
+weitere Funktion `LEAKPROOF`.
+
+Planbelege als `reticora_app` mit RLS (`EXPLAIN (FORMAT JSON)`, Produkt-SQL;
+`TestSearchPlanUnderRLS` in `backend/internal/search/plan_integration_test.go`,
+`TestUniqueConflictsPlanUnderRLS` in
+`backend/internal/ci/attr_filter_plan_integration_test.go`). Messwerte aus
+den Integrationstests (Bestwert aus fünf Aufrufen, Datenbank lokal,
+PostgreSQL 16 ohne Last; keine `load.yml`-Läufe). Mit
+`RETICORA_PERF_BUDGET=1` prüfen die Tests das Budget von 500 ms bei 10.000
+Objekten.
+
+| Anfrage | Plan (App-Rolle) | 10.000 Objekte | 25.000 Objekte |
+|---|---|---|---|
+| `GET /search?q=` ein Treffer, org-weit | Seq Scan auf `search_document`, `@@` als Filter | 9 ms | 18 ms |
+| `GET /search?q=` ein Treffer, Client 1 | wie oben, Policy mit Client-Prädikat | 32 ms | 87 ms |
+| `GET /search?q=` alle CIs (10.000 bzw. 25.000 Treffer), org-weit | wie oben, `COUNT(*) OVER()` und Sortierung nach `ts_rank` | 66 ms | 186 ms |
+| `GET /search?q=` alle CIs, Client 1 (6.666 bzw. 16.666 Treffer) | wie oben | 54 ms | 143 ms |
+| `UniqueConflicts`, Wert eines anderen CI | Nested Loop: `attribute_definition` > Seq Scan auf `ci`, `->>` als Filter, Abbruch beim ersten Treffer | 4 ms | 5 ms |
+| `UniqueConflicts`, kein Konflikt (ganze Organisation gelesen) | wie oben | 8 ms | 17 ms |
+| Attributfilter `filter[attributes.<key>]` | Index Scan `idx_attr_*`, Indexbedingung über `reticora_attr_text` (`TestAttributeFilterUsesIndexUnderRLS`) | Szenario `attr_filter`: 74,7 ms p95 im Vorlauf | nicht gemessen |
+
+Die Volltextsuche wächst linear mit dem Bestand; bei 25.000 Objekten bleibt
+sie in diesen Messungen ohne Last unter dem Budget. Für Suche und
+Attributfilter über etwa 25.000 Objekten gilt die Einschränkung aus E-17
+(Headroom ohne Budgetzusage, Offene Punkte, Punkt 4).
+
+Die Lastgrenzen aus SR-04 betreffen damit nur noch die Volltextsuche und
+`UniqueConflicts`, beide nach E-133 als linearer Scan dokumentiert.
 
 ## ABN-02
 
@@ -571,6 +614,15 @@ Transaktion (kein N+1) und prüfen per `EXPLAIN` die Indexnutzung.
   - Gemessen in WP-335, einschließlich BEGIN, `set_config` und COMMIT: am
     Hub Topologie (Tiefe 2) 16 und Impact (Tiefe 20) 26 Statements; an den
     Ketten in Tiefe 20 Topologie 53 und Impact 63.
+  - Mehrfach-Impact (WP-840): `GET /impact?ci_ids=` liest die ausgefallenen
+    CIs in einer Abfrage (`GetByIDs`) und läuft einen Walk von allen
+    zugleich (`relationship.(*PGRepository).WalkFromMany`); jede Kante wird
+    einmal gelesen. 2, 10 und 100 ausgefallene Blätter des Hubs mit 400
+    Nachbarn kosten gleich viel (lokal 19 Statements, Stand 2026-11-02).
+    `TestMultiImpactAgainstPostgres` vergleicht die Antwort Byte für Byte mit
+    den Walks je ausgefallenem CI, dem Weg vor WP-840 (126 Antworten:
+    Organisation und Client-1-Principal, Tiefen, Kategorien, Beziehungstyp,
+    `fields=`).
 - **Impact im Worst Case** (`TestImpactWorstCase`, gleiche Datei, WP-335):
   Der Impact des Core-Switches bei 10.000 Objekten (Graph wie `cmd/seed`, mit
   Client und Site) erreicht 9.997 CIs.
@@ -583,6 +635,25 @@ Transaktion (kein N+1) und prüfen per `EXPLAIN` die Indexnutzung.
     Grenze von 250 ms erzwingt der Test nur mit `RETICORA_PERF_BUDGET=1`, weil
     Zeitgrenzen auf geteilten CI-Runnern unzuverlässig sind; `load.yml` führt
     keine Go-Tests aus.
+  - Feldwerte wie in einer per Discovery befüllten Organisation (WP-840):
+    acht entdeckte Felder je CI (80.000 Zeilen in `ci_field_value`, 24.000
+    im Graphen mit 3.000 Objekten) und 1.400 Overrides auf 12 % der CIs
+    (davon 400 auf projizierten Feldern). Die Knotenlesung liest die Overrides
+    der Organisation (`nodeOverridesByOrg`) über den partiellen Index
+    `idx_ci_field_value_override` (Migration 000195); `EXPLAIN ANALYZE` des
+    Produkt-SQL als App-Rolle unter RLS: Index Scan, 400 Zeilen, rund 3 ms.
+    Ohne den Index liest dieselbe Abfrage `ci_field_value` sequenziell, und
+    der Test schlägt fehl. Lokal (Stand 2026-11-02, PostgreSQL 16 ohne
+    TimescaleDB, `fsync=off`, keine Belege nach E-58): unverändert 17
+    Statements, kompakt 2.390.051 Byte (239 Byte je betroffenem CI),
+    bestes von 5 mit Index 149–192 ms in drei Läufen, ohne Index 206–278 ms;
+    mit `RETICORA_PERF_BUDGET=1` grün.
+  - Keine stille Kappung (WP-840): Erreicht ein Walk
+    `relationship.MaxTraversalNodes` (10.000 CIs), tragen Topologie und
+    Impact, kompakt wie vollständig, `truncated: true`. Der Test hängt zwei
+    Server an den Core-Switch (10.002 CIs) und prüft die Kennzeichnung; ohne
+    Kappung fehlt das Feld, die Antworten bleiben byteweise gleich
+    (`TestImpactLeanAgainstPostgres`).
 - **Ingest je Record und Batch**
   (`backend/internal/discovery/ingest_budget_integration_test.go`,
   `TestIngestStatementBudget`, WP-332 bis WP-334), mit dem Schreibpfad des
@@ -699,35 +770,86 @@ Auftraggeber, die Nummer wird hier nachgetragen.
 4. **Listen und Suche über etwa 25.000 Objekte (Headroom 50.000):**
    Entscheidung E-17 (Option 1): bekannte Einschränkung ohne Budgetzusage,
    Folge-WP vor GA. Die Zählung und der Index der Standardsortierung der
-   CI-Liste sind mit WP-605 (`k1n-cilist-sort`) verbessert; gemessen ist
-   über 10.000 Objekten nichts.
-5. **Knotenlesung und Mehrfach-Impact:** `ListNodes` liest ab 2.000 IDs die
-   ganze Organisation; `GET /impact?ci_ids=` traversiert je ausgefallenem
+   CI-Liste sind mit WP-605 (`k1n-cilist-sort`) verbessert. **Umgesetzt mit
+   WP-839 (`g1-scale`), Lastnachweis steht aus:** `GET /cis` und
+   `GET /search` zählen nach E-104 gedeckelt (exakt bis 10.000, gezählt über
+   höchstens 10.001 Zeilen bzw. bis zur Zeile nach der Seite; darüber
+   `total` 10.000 und `total_capped: true` in der `PaginationEnvelope`).
+   Migration 000196 legt `idx_ci_list_name` (`ci (organization_id, name,
+   id) WHERE deleted_at IS NULL`) an; die erste Seite mit `sort_by=name`
+   liest ohne Sortierung aller Treffer (lokal bei 10.000 CIs: 50 gelesene
+   CIs, Index Scan auf `idx_ci_list_name`, `TestListFiltersAgainstPostgres`).
+   `updated_at` und `status` bekommen einen Index erst, wenn die Messung ihn
+   verlangt. Aufbau des Lastnachweises im Abschnitt „Listen über 10.000
+   Objekten (WP-839)“; die drei Läufe nach E-58 stehen aus.
+5. **Knotenlesung und Mehrfach-Impact:** `ListNodes` las ab 2.000 IDs die
+   ganze Organisation; `GET /impact?ci_ids=` traversierte je ausgefallenem
    CI. Entscheidung E-17: Schwelle für 50.000 Objekte neu bewerten, Folge-WP
-   vor GA.
-6. **Volltextsuche unter RLS (Rest von SR-04):** gespeicherte
-   `tsvector`-Spalte mit Index statt `idx_ci_fts`; Katalogtest gegen neue
-   Ausdrucksindizes auf RLS-Tabellen. Folge-WP: offen, Vorschlag an den
-   Auftraggeber (Volltextsuche SR-04).
-7. **Outbox-Nummerierung:** Der Trigger aus Migration 000120
-   (`event_outbox_number()`) bestimmt `max(sequence)` je Zeile im
-   Audit-/Outbox-Sperrabschnitt (historischer Abschnitt „Verbleibende
-   Grenze“). Folge-WP: offen, Vorschlag an den Auftraggeber (Zähler je
-   Organisation, Migration).
-8. **Statistik nach Massenimport:** Nach großem Seed oder Onboarding planen
-   die Batch-Kandidatenabfragen und der RLS-Organisationsfilter über die
-   ganze Organisation, bis Autovacuum analysiert. `load.yml` führt `ANALYZE`
-   nach dem Seed aus. Folge-WP: offen, Vorschlag an den Auftraggeber
-   (`ANALYZE` nach großen Importen oder robuste Abfrageformen).
-9. **`AdoptUnlicensed`:** Die Anlage beim Anheben von `max_cis` nimmt die
-   `max_cis`-Sperre nicht; nebenläufig zum Ingest mit Spuren bleibt ein
-   kleines Fenster für eine Überschreitung (vorbestehend). Folge-WP: offen,
-   Vorschlag an den Auftraggeber (`max_cis`-Sperre bei der Übernahme).
+   vor GA. **Erledigt** mit WP-840 (`g1-graph-scale`): `GET /impact?ci_ids=`
+   liest die ausgefallenen CIs in einer Abfrage und ihre Kanten in einem
+   Walk; die Statements hängen nicht von der Zahl der CIs ab (2, 10 und 100
+   CIs gleich, Abschnitt ABN-02). Der Walk kappt nicht mehr still: Am
+   Knotenlimit von 10.000 CIs tragen Topologie und Impact `truncated: true`
+   (NFR-01, Headroom 50.000 funktionsfähig nach E-17). **Knotenlesung neu
+   bemessen mit WP-839:** `nodeOrgReadAbove` ist 5.000 statt 2.000, ohne
+   zusätzliche Anweisung je Anfrage (Messung im Abschnitt „Listen über
+   10.000 Objekten (WP-839)“); der Override-Abgleich der Organisationslesung
+   nutzt den Index aus Punkt 10. `TestTopologyQueryBudget` und
+   `TestImpactWorstCase` laufen mit 10.000 und, mit
+   `RETICORA_PERF_BUDGET=1`, mit 50.000 CIs bei unverändertem
+   Statementbudget. Den p95 über 10.000 Objekten misst WP-327 (E-17, ohne
+   Budgetzusage).
+6. **Volltextsuche unter RLS (Rest von SR-04): erledigt (WP-836).**
+   Migration 000191 entfernt `idx_ci_fts`; `ci` erhält nach E-133 keine
+   zweite `tsvector`-Spalte, die gespeicherte Spalte der Volltextsuche ist
+   `search_document.search_vector`. Volltext und `UniqueConflicts` bleiben
+   nach E-133 (Option 3) ein dokumentierter linearer Scan im Budget bis
+   10.000 Objekte (E-17); Planbelege und Messwerte bei 10.000 und 25.000
+   Objekten im Abschnitt „Umfangskorrektur SR-04“. Der Katalogtest
+   `TestRLSIndexesAreLeakproof` erkennt neue Indizes mit nicht-leakproof
+   Ausdruck oder Operatorklasse auf RLS-Tabellen.
+7. **Outbox-Nummerierung: umgesetzt mit WP-834 (`g1-outbox-seq`),
+   Kontrollmessung ausstehend.** Migration 000193 legt
+   `event_outbox_counter` an (ein Zähler je Organisation, RLS wie
+   `event_outbox`, TRUNCATE-Guard), befüllt aus `max(sequence)`;
+   `event_outbox_number()` erhöht ihn unter derselben Advisory-Sperre per
+   Upsert auf den Primärschlüssel und liest keine Events mehr.
+   `Publisher.Cleanup` darf die neueste Zeile der Organisation löschen.
+   Nachweis `TestOutboxAgainstPostgres`: parallele Schreiber lückenlos,
+   Weiterzählen nach einem Cleanup ohne verbliebene Zeile, mit 50.000
+   Events und veralteter Statistik gleiche Zeit und gleiche Puffer je
+   Insert (lokal 0,5–0,6 ms und 12–14 Puffer bei 201 bzw. 50.401 Events; der
+   Trigger aus 000120 liest lokal schon bei 3.000 Events ohne `ANALYZE`
+   etwa 220 Puffer je Insert, weil er die Outbox sequenziell liest). Offen
+   ist die Kontrollmessung (Abschnitt „Kontrollmessung WP-834“).
+8. **Statistik nach Massenimport: umgesetzt mit WP-834, Kontrollmessung
+   ausstehend.** `database.AnalyzeAfterBulk` analysiert `ci`,
+   `ci_field_value`, `search_document`, `event_outbox` und `audit_log` auf
+   eigener Verbindung als `reticora_owner`, nie parallel und clusterweit
+   höchstens einmal je 10 Minuten je Tabelle. Aufrufer: `cmd/seed` am Ende
+   und der Ingest nach dem Commit des Batch-Fensters, mit dem eine
+   Organisation 500 neue CIs erreicht (gezählt über die Fenster der
+   Instanz, weil ein Fenster höchstens 100 Records hat). Nachweis
+   `TestAnalyzeAfterBulk` (Rollenwechsel, Drosselung, Identitätsindizes nach
+   5.000 neuen CIs, kein `ANALYZE` vor dem Commit).
+9. **`AdoptUnlicensed`: erledigt (WP-835).** Die Anlage beim Anheben von
+   `max_cis` nimmt in ihrer Transaktion die `max_cis`-Sperre der
+   Organisation exklusiv und zählt darunter neu (`ci.CIAdmitter`), ebenso
+   `POST /cis`, Wiederherstellen, Unmerge und die Review-Auflösungen; die
+   Drain-Spuren zählen bei der Zulassung als Spuren in Arbeit (SR-09).
+   Nachweis: `TestIngestLanesMaxCIs` (Teiltests `adopt_unlicensed` und
+   `drain_lanes`: genau das Limit; Gegenproben ohne die Zulassung 814 statt
+   800 bzw. ohne die Drain-Spuren 700 statt 600 CIs) und
+   `TestCreateAdmission` (10 parallele Anlagen bzw. Wiederherstellungen
+   eine unter dem Limit: genau eine; Gegenprobe ohne Sperre 4 bzw. 10).
 10. **Override-Abgleich der Knotenlesung:** `ci_field_value` hat keinen
     Index für den Override-Abgleich der Organisationslesung; der Seed
-    schreibt keine Feldwerte. Folge-WP: offen, Vorschlag an den
-    Auftraggeber (partieller Index auf `ci_field_value (organization_id,
-    ci_id)` für Overrides, Budget-Fixture mit Feldwerten; Migration).
+    schreibt keine Feldwerte. **Erledigt** mit WP-840 (`g1-graph-scale`):
+    Migration 000195 legt `idx_ci_field_value_override` auf
+    `ci_field_value (organization_id, ci_id) WHERE override_at IS NOT NULL`
+    an; `TestImpactWorstCase` legt Feldwerte und Overrides einer
+    Discovery-Organisation an und belegt per `EXPLAIN ANALYZE` als App-Rolle
+    die Nutzung des Index in `nodeOverridesByOrg` (Abschnitt ABN-02).
 11. **NFR-02 auf den NFR-01-Volumina:** Mit 100.000 Beziehungen je
     Organisation verfehlen `impact` (bis 4,27 s), `impact_full` (bis 4,24 s)
     und `relationships` (bis 2,65 s) ihr Budget in allen drei Läufen, auf
@@ -759,6 +881,89 @@ Vorlauf). Kein offener Punkt: Der
 NATS-Consumer `reticora-ingest` bleibt dauerhaft bestehen (der Server legt
 ihn wieder an); leer kostet er je Ingest-Instanz einen Abruf pro Sekunde
 (`docs/betrieb/ingest-spuren.md`).
+
+## Listen über 10.000 Objekten (WP-839)
+
+E-17 und E-104, Offene Punkte 4 und 5. Stand 2026-11-02: Code, Tests und
+Lastaufbau umgesetzt; **die drei Läufe nach E-58 stehen aus**.
+
+**Aufbau des Lastnachweises.** `load.yml` hat den Job `api-large` (Auswahl
+`scenarios=api-large`, auch in `all`) als zwei Matrixeinträge nach dem
+Muster von `nfr01-volume`: `api-large-28000` und `api-large-50000`, je mit
+frischer Datenbank, Seed mit `OBJECTS` 28.000 bzw. 50.000 (Matrixfeld
+`objects`), neu aufgebautem Suchindex und `ANALYZE`. `api.js` hat das
+Szenario `list_sorted` (`GET /cis?limit=50&sort_by=name`, 2 VUs; prüft die
+Form von `total` nach E-104) und die Umgebungsvariable `LATENCY_BUDGETS`:
+
+| Job | Objekte | `LATENCY_BUDGETS` | k6-Schwellen p95 |
+|---|---:|---|---|
+| `api`, `nfr01-volume` | 10.000 | `all` | alle Budgets von NFR-02, `list_sorted` < 500 ms |
+| `api-large-28000` | 28.000 | `lists` | nur `list`, `filter`, `list_sorted` < 500 ms (einschließlich `total`) |
+| `api-large-50000` | 50.000 | `none` | keine; Messwerte ohne Budgetzusage (E-17) |
+
+Die Fehlerschwellen (`http_req_failed` 0, Bulk, Checks) gelten in jedem
+Job. `search`, Topologie und Impact sind bei 28.000 und 50.000 Objekten
+Messwerte ohne Budgetzusage. Bewertet wird im Median dreier Läufe
+(`tests/load/evaluate-runs.sh`; die zusätzlichen Jobs wertet es wie jeden
+archivierten Job aus).
+
+**Zählung nach E-104.** `GET /cis` zählt mit `SELECT COUNT(*) FROM (SELECT
+1 FROM ci WHERE … LIMIT n)`, `n` = max(10.001, Offset + Limit + 1);
+`GET /search` begrenzt die Treffer in einer Unterabfrage ebenso und zählt
+sie mit `COUNT(*) OVER()` (eine Lesung von `search_document`, E-133).
+`has_more` bleibt dadurch auch nach der Grenze richtig. Die übrigen Listen
+und `totalCount` der GraphQL-Liste zählen exakt (E-104). Die Antwort von
+`GET /search` meldet `total` weiterhin als Treffer der Seite nach der
+Rechteprüfung; sie erreicht die Grenze nie und trägt kein `total_capped`.
+
+**Knotenlesung (`nodeOrgReadAbove`).** Lokal gemessen (PostgreSQL 16 ohne
+Last, `fsync=off`, Rolle `reticora_app`, beide Anweisungen von
+`ListNodes`, 5 % der CIs mit Override, IDs zufällig, bestes von fünf;
+keine Belege nach E-58):
+
+| CIs der Organisation | IDs | Lesung nach IDs | Lesung der Organisation |
+|---:|---:|---:|---:|
+| 10.000 | 2.000 | 17 ms | 23 ms |
+| 10.000 | 5.000 | 44 ms | 23 ms |
+| 50.000 | 2.000 | 21 ms | 83 ms |
+| 50.000 | 5.000 | 49 ms | 84 ms |
+| 50.000 | 10.000 | 80 ms | 73 ms |
+
+Der Schnittpunkt liegt bei etwa einem Viertel der Organisation. Die Größe
+der Organisation ist ohne eine weitere Anweisung nicht bekannt; 5.000 hält
+den größeren der beiden Umwege für 10.000 und 50.000 Objekte am kleinsten
+(21 ms bzw. 35 ms statt 0 bzw. 62 ms mit 2.000).
+
+**Tests (lokal, ohne Last).** `TestTopologyQueryBudget`: 10.000 und
+50.000 CIs mit denselben Statementzahlen (Topologie 13 je Ebene, Impact 17,
+Tiefe 20: 50 bzw. 54); Topologie ohne Wurzel mit 2.000 Knoten 105 ms bei
+10.000 und 122 ms bei 50.000 CIs. `TestImpactWorstCase` bei 10.000
+Objekten: 17 Anweisungen, 239 Byte je CI, 85 ms (bestes von fünf); bei
+50.000 Objekten 17 Anweisungen, 239 Byte je CI, 364 ms. Dort endet die
+Traversierung bei `relationship.MaxTraversalNodes` (10.000 Knoten): Der
+Impact des Core-Switches meldet 9.999 statt 49.997 CIs. Die Kappung der
+Traversierung gehört zu WP-840; `api.js` erwartet deshalb höchstens 9.999
+betroffene CIs.
+
+## Kontrollmessung WP-834
+
+WP-834 (Outbox-Zähler je Organisation, `ANALYZE` nach Massenanlagen)
+verlangt eine Kontrollmessung: `load.yml`, Job `ingest-spool`
+(`tests/load/ingest.js`, Szenario `spool`, 4 Spuren), drei archivierte
+Läufe desselben Server-Commits, bewertet mit `tests/load/evaluate-runs.sh`
+nach der Ergänzung zu E-58 vom 2026-10-26 (Median). Kriterium: Der Abbau ab
+Sendeende liegt im Median nicht unter dem der Nachweisläufe von WP-612
+(414,7/s, Abschnitt „Läufe“).
+
+| Lauf | Lauf-ID | Server-Commit | Abbau ab Sendeende | Spool-Flush |
+|---|---|---|---:|---:|
+| K1 | ausstehend | – | – | – |
+| K2 | ausstehend | – | – | – |
+| K3 | ausstehend | – | – | – |
+
+Stand: Die Läufe stehen aus; sie laufen nach dem Merge per
+`workflow_dispatch` auf `main` (Lastnachweise laufen nicht in `ci.yml`,
+Konvention 7). Lokale Zeiten sind keine Belege nach E-58.
 
 ## Frühere Nachweisläufe (historisch)
 

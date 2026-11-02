@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000189_enrollment_code_site_restrict
+Stand: Migration 000198_composition_codes
 
 ## Prüfung
 
@@ -76,10 +76,23 @@ Ebenso der Index der Standardsortierung der CI-Liste (WP-605, NFR-02):
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_sort ON ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE deleted_at IS NULL;
 ```
 
+Ebenso der Index der CI-Liste sortiert nach Name (WP-839, E-17, Migration
+000196):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_name ON ci (organization_id, name, id) WHERE deleted_at IS NULL;
+```
+
 Ebenso der Index der Adressen einer Schnittstelle (WP-608, NFR-03):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ip_address_interface ON ip_address (interface_id) WHERE interface_id IS NOT NULL;
+```
+
+Ebenso der Override-Index der Knotenlesung (WP-840, NFR-02):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_field_value_override ON ci_field_value (organization_id, ci_id) WHERE override_at IS NOT NULL;
 ```
 
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein
@@ -315,6 +328,252 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 
 <!-- rls-known-gaps:end -->
 
+## Indizes unter RLS (SR-04, K22, WP-836)
+
+Unter `FORCE ROW LEVEL SECURITY` übernimmt der Planer für die App-Rolle
+`reticora_app` eine Bedingung nur dann als Indexbedingung vor die Policies,
+wenn alle beteiligten Funktionen leakproof sind (`pg_proc.proleakproof`).
+Sonst wertet er sie erst nach den Policies aus und liest die Tabelle. Regel K22
+für jede Tabelle mit RLS:
+
+- Kein Index, dessen Ausdruck oder Prädikat eine nicht-leakproof Funktion
+  aufruft, direkt oder als Funktion eines Operators (Beispiele: `->>`
+  (`jsonb_object_field_text`), `lower`, `to_tsvector`, `||` (`textcat`),
+  `int4pl`, Umwandlung über die Textdarstellung wie `id::text`).
+- Kein Index über eine Operatorklasse, deren Suchoperatoren für den
+  Spaltentyp alle nicht leakproof sind (`pg_opclass`, `pg_amop`). In
+  PostgreSQL 16 betrifft das u. a. `tsvector_ops` (`@@`, `ts_match_vq`),
+  `jsonb_ops` und `jsonb_path_ops` (`@>`), `array_ops` (`@>`, `&&`),
+  `range_ops`, die `ltree`-Klassen und `numeric`-Vergleiche. Leakproof sind
+  u. a. `texteq`, `uuid_eq`, `macaddr_eq`, `network_eq` und die Vergleiche auf
+  `date` und `timestamptz`.
+- Suchfelder liegen deshalb als gespeicherte Spalte mit leakproof Operator
+  (`GENERATED ALWAYS AS … STORED`, Muster 000134 `hostname_lc`), in einer
+  Seitentabelle (`ci_identity_mac`, 000161) oder in `search_document` mit dem
+  gespeicherten `search_vector`. Attributwerte vergleichen Filter und
+  Attributindizes über die LEAKPROOF-Funktion `reticora_attr_text(jsonb,
+  text)` (000162, E-73 Korrekturplan); die Indizes `idx_attr_*` sind damit
+  unter RLS nutzbar. Nach E-133 setzt keine weitere Migration eine Funktion
+  `LEAKPROOF`.
+
+Migration 000191 entfernt `idx_ci_fts` (`to_tsvector` über `ci`, 000021): Keine
+Abfrage nutzte den Ausdruck, die Volltextsuche liest
+`search_document.search_vector`. `ci` erhält keine zweite `tsvector`-Spalte.
+Volltext (`idx_search_document_fts`) und `UniqueConflicts` (Schlüssel aus
+`attribute_definition`, `c.attributes ->> d.key`) bleiben für die App-Rolle
+ein dokumentierter Scan, linear im Budget bis 10.000 Objekte (E-133 Option 3,
+E-17; `TestSearchPlanUnderRLS`, `TestUniqueConflictsPlanUnderRLS`). Der
+Attributfilter der CI-Liste hat die Indexbedingung über `reticora_attr_text`
+(`TestAttributeFilterUsesIndexUnderRLS`).
+
+`rls.LeakyIndexQuery` (`backend/internal/tenant/rls/known_gaps.go`) findet
+solche Indizes im Katalog (`pg_index.indexprs`/`indpred`, `pg_opclass`,
+`pg_amop`, `pg_proc.proleakproof`). `TestRLSIndexesAreLeakproof` verlangt,
+dass die gefundenen Indizes genau `rls.LeakyIndexes` entsprechen: Ein neuer
+Index ohne Eintrag und ein Eintrag ohne Fund lassen den Test scheitern, die
+Liste kann also nur schrumpfen. `TestIndexStatementLeakproof`
+(`backend/internal/citype`) prüft mit derselben Abfrage die Indizes des
+DDL-Jobs (`citype.IndexStatement`, `citype.KeyIndexStatement`). Die Gründe
+je Eintrag stehen in `known_gaps.go`; die Tabelle wird mit
+`RETICORA_UPDATE_SCHEMA_BASELINE=1 go test -run TestLeakyIndexesDocumented
+./internal/tenant/rls/` neu erzeugt.
+
+<!-- rls-leaky-indexes:begin -->
+
+| Index | Tabelle | Nicht leakproof |
+|---|---|---|
+| `desk_booking_no_overlap` | `desk_booking` | function tstzrange(timestamp with time zone,timestamp with time zone), operator class range_ops |
+| `idx_ci_attributes_path` | `ci` | operator class jsonb_path_ops |
+| `idx_location_path` | `location` | operator class gist_ltree_ops |
+| `idx_pii_subject_tokens` | `pii_subject` | operator class array_ops |
+| `idx_review_item_candidates` | `review_item` | operator class array_ops |
+| `idx_saved_view_shared_roles` | `saved_view` | operator class array_ops |
+| `idx_search_document_fts` | `search_document` | operator class tsvector_ops |
+| `idx_signup_request_email` | `signup_request` | function lower(text) |
+| `location_path_key` | `location` | operator class ltree_ops |
+| `rack_mount_no_overlap` | `rack_mount` | function int4pl(integer,integer), function int4range(integer,integer), function rack_face_range(text), operator class range_ops |
+| `review_item_open_override_conflict` | `review_item` | function jsonb_object_field_text(jsonb,text) |
+| `review_item_open_serial_mismatch` | `review_item` | function jsonb_object_field_text(jsonb,text) |
+| `review_item_open_unlicensed_ci` | `review_item` | function jsonb_object_field_text(jsonb,text) |
+
+<!-- rls-leaky-indexes:end -->
+
+## Objektverweise mit Organisation (SR-03, K19, WP-838)
+
+PostgreSQL prüft Fremdschlüssel ohne Row Level Security. Ein Verweis
+`REFERENCES … (id)` nimmt deshalb auch die ID eines Objekts einer fremden
+Organisation an. Verweise zwischen zwei Mandantentabellen (Tabellen in
+`public` mit `organization_id`) enthalten die Organisation:
+`(spalte, organization_id) REFERENCES ziel (id, organization_id)` (Muster
+000136, Regel K19). Ein Verweis in eine fremde Organisation scheitert dann wie
+eine unbekannte ID mit 23503. Ausgenommen sind Ziele mit globalen Zeilen
+(`organization_id` nullable, z. B. `ci_type`, E-10).
+
+Migration 000194 legt `UNIQUE (id, organization_id)` auf `location` und
+`consumable` an und stellt die Verweise `asset.ci_id`, `asset.location_id`,
+`ci.location_id`, `ticket.related_ci_id`, `ticket.related_asset_id`,
+`reservation.asset_id`, `disposal_record.asset_id`, `disposal_record.ci_id`,
+`internal_order_item.asset_id`, `internal_order_item.consumable_id`,
+`location.site_id` und `location.parent_id` um. Constraint-Namen und
+Löschverhalten bleiben (SET NULL als `ON DELETE SET NULL (spalte)`).
+Bestehende Zeilen mit einem Verweis über die Organisationsgrenze stehen danach
+in `migration_quarantine` (Migration `000194`): Nullbare Verweise sind auf NULL
+gesetzt, die ganze Zeile ist protokolliert; Reservierungen sind verschoben
+(E-26). Knoten des Standortbaums mit fremdem Eltern- oder Site-Knoten lässt
+`location_maintain` seit 000062 nicht zu; findet die Migration doch einen,
+bricht sie mit der Liste ab (Muster 000177). Die Down-Migration stellt die
+einfachen Fremdschlüssel und die Zeilen wieder her.
+
+`TestTenantReferencesCarryOrganization`
+(`backend/internal/tenant/rls/object_reference_integration_test.go`) prüft
+jeden Fremdschlüssel zwischen zwei Mandantentabellen im Katalog. Die
+verbleibenden Verweise ohne Organisation stehen mit Grund in
+`rls.ReferencesWithoutOrganization` (`known_gaps.go`): Ein neuer Verweis ohne
+Organisation und ein behobener Eintrag lassen den Test scheitern, die Liste
+kann also nur schrumpfen. Der Test schreibt außerdem als App-Rolle jede
+umgestellte Spalte mit der ID eines Objekts einer fremden Organisation
+(23503) und prüft die Fremdschlüssel bei abgeschalteten Triggern. Die Liste
+wird mit `RETICORA_UPDATE_SCHEMA_BASELINE=1 go test -run
+TestReferencesWithoutOrganizationDocumented ./internal/tenant/rls/` neu
+erzeugt. Rest von SR-03 vor GA (E-137, WP-329); Tabellen, die Phase-2-WPs
+ersetzen, folgen K19 in ihren Nachfolgern.
+
+<!-- rls-references-without-organization:begin -->
+
+| Verweis | Fremdschlüssel | Ziel | Grund |
+|---|---|---|---|
+| `agent_enrollment_token.site_id` | `agent_enrollment_token_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ai_conversation.user_id` | `ai_conversation_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ai_message.conversation_id` | `ai_message_conversation_id_fkey` | `ai_conversation` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `api_key.rotated_from` | `api_key_rotated_from_fkey` | `api_key` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `asset.parent_asset_id` | `asset_parent_asset_id_fkey` | `asset` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
+| `asset_location.asset_id` | `asset_location_asset_id_fkey` | `asset` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `asset_movement.asset_id` | `asset_movement_asset_id_fkey` | `asset` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
+| `asset_movement.from_location_id` | `asset_movement_from_location_id_fkey` | `location` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
+| `asset_movement.quantity_item_id` | `asset_movement_quantity_item_fk` | `quantity_item` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
+| `asset_movement.to_location_id` | `asset_movement_to_location_id_fkey` | `location` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
+| `assignment.asset_id` | `assignment_asset_id_fkey` | `asset` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
+| `assignment.assigned_by` | `assignment_assigned_by_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
+| `assignment.assigned_to` | `assignment_assigned_to_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
+| `assignment.ci_id` | `assignment_ci_id_fkey` | `ci` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
+| `building.id` | `building_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
+| `building.site_id` | `building_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `cable.source_interface_id` | `cable_source_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `cable.target_interface_id` | `cable_target_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci.room_id` | `ci_room_id_fkey` | `room` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci.site_id` | `ci_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_change.ci_id` | `ci_change_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_contact.ci_id` | `ci_contact_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_contact.contact_id` | `ci_contact_contact_id_fkey` | `contact` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_field_value.ci_id` | `ci_field_value_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_instance_field_definition.ci_id` | `ci_instance_field_definition_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_merge.site_id` | `ci_merge_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_relationship.source_ci_id` | `ci_relationship_source_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_relationship.source_interface_id` | `ci_relationship_source_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_relationship.target_ci_id` | `ci_relationship_target_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_relationship.target_interface_id` | `ci_relationship_target_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ci_relationship.verified_by` | `ci_relationship_verified_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `collector.site_id` | `collector_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `collector_certificate.collector_id` | `collector_certificate_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `collector_enrollment_code.used_by_collector_id` | `collector_enrollment_code_used_by_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `compliance_result.ci_id` | `compliance_result_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `compliance_result.rule_id` | `compliance_result_rule_id_fkey` | `compliance_rule` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `composition.child_asset_id` | `composition_child_asset_id_fkey` | `asset` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
+| `composition.child_ci_id` | `composition_child_ci_id_fkey` | `ci` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
+| `composition.parent_asset_id` | `composition_parent_asset_id_fkey` | `asset` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
+| `contact.pii_subject_id` | `contact_pii_subject_id_fkey` | `pii_subject` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `discovery_job.collector_id` | `discovery_job_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `discovery_result.job_id` | `discovery_result_job_id_fkey` | `discovery_job` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `discovery_result.matched_ci_id` | `discovery_result_matched_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `discovery_scope.collector_id` | `discovery_scope_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `discovery_scope.site_id` | `discovery_scope_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `document.uploaded_by` | `document_uploaded_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `document_link.document_id` | `document_link_document_id_fkey` | `document` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `endpoint_agent.ci_id` | `endpoint_agent_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `form_submission.ci_id` | `form_submission_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `form_submission.form_id` | `form_submission_form_id_fkey` | `form_def` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `form_submission.submitted_by` | `form_submission_submitted_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `form_submission.ticket_id` | `form_submission_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_request.connector_id` | `iga_access_request_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_request.decision_by` | `iga_access_request_decision_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_request.requester_id` | `iga_access_request_requester_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_request.subject_user_id` | `iga_access_request_subject_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_request.workflow_run_id` | `iga_access_request_workflow_run_id_fkey` | `workflow_run` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_review_item.connector_id` | `iga_access_review_item_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_review_item.decision_by` | `iga_access_review_item_decision_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_review_item.review_id` | `iga_access_review_item_review_id_fkey` | `iga_access_review` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_access_review_item.user_id` | `iga_access_review_item_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_connector.collector_id` | `iga_connector_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_connector.credential_id` | `iga_connector_credential_id_fkey` | `credential` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_drift_finding.connector_id` | `iga_drift_finding_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_drift_finding.remediation_task_id` | `iga_drift_finding_remediation_task_id_fkey` | `iga_provisioning_task` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_drift_finding.user_id` | `iga_drift_finding_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_provisioning_task.connector_id` | `iga_provisioning_task_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `iga_provisioning_task.user_id` | `iga_provisioning_task_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `internal_order_item.order_id` | `internal_order_item_order_id_fkey` | `internal_order` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ip_address.interface_id` | `ip_address_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ip_address.subnet_id` | `ip_address_subnet_id_fkey` | `subnet` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `maintenance_notification.maintenance_window_id` | `maintenance_notification_maintenance_window_id_fkey` | `maintenance_window` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `maintenance_window_ci.ci_id` | `maintenance_window_ci_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `maintenance_window_ci.maintenance_window_id` | `maintenance_window_ci_maintenance_window_id_fkey` | `maintenance_window` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `network_interface.ci_id` | `network_interface_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `notification_delivery.channel_id` | `notification_delivery_channel_id_fkey` | `notification_channel` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `notification_delivery.recipient_user_id` | `notification_delivery_recipient_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `notification_digest_item.channel_id` | `notification_digest_item_channel_id_fkey` | `notification_channel` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `notification_digest_item.delivery_id` | `notification_digest_item_delivery_id_fkey` | `notification_delivery` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `notification_digest_item.recipient_user_id` | `notification_digest_item_recipient_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `notification_inbox.user_id` | `notification_inbox_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `notification_preference.user_id` | `notification_preference_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `pii_subject.parent_id` | `pii_subject_parent_id_fkey` | `pii_subject` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `quantity_item.location_id` | `quantity_item_location_id_fkey` | `location` | quantity_item is dropped by WP-758 (E-40, K19); its successor references with the organization |
+| `rack.id` | `rack_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
+| `rack.room_id` | `rack_room_id_fkey` | `room` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `rack_mount.ci_id` | `rack_mount_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `rack_mount.rack_id` | `rack_mount_rack_id_fkey` | `rack` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `relationship_suppression.source_ci_id` | `relationship_suppression_source_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `relationship_suppression.target_ci_id` | `relationship_suppression_target_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `reservation.quantity_item_id` | `reservation_quantity_item_id_fkey` | `quantity_item` | quantity_item is dropped by WP-758 (E-40, K19); its successor references with the organization |
+| `role_assignment.role_id` | `role_assignment_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `role_assignment.scope_site_id` | `role_assignment_scope_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `role_assignment.user_id` | `role_assignment_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `role_permission.granted_by` | `role_permission_granted_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `role_permission.role_id` | `role_permission_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `room.building_id` | `room_building_id_fkey` | `building` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `room.id` | `room_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
+| `security_finding.ci_id` | `security_finding_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `service_account_role.role_id` | `service_account_role_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `service_account_role.scope_site_id` | `service_account_role_scope_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `site.id` | `site_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
+| `stock_movement.consumable_id` | `stock_movement_consumable_id_fkey` | `consumable` | the former stock_movement is replaced by the ledger of WP-274 (K19); the successor references with the organization |
+| `stock_scan.asset_id` | `stock_scan_asset_id_fkey` | `asset` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
+| `stock_scan.ci_id` | `stock_scan_ci_id_fkey` | `ci` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
+| `stock_scan.scanned_by` | `stock_scan_scanned_by_fkey` | `app_user` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
+| `stock_scan.stocktake_id` | `stock_scan_stocktake_id_fkey` | `stocktake` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
+| `stocktake.started_by` | `stocktake_started_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `subnet.site_id` | `subnet_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `team.lead_id` | `team_lead_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `team_member.team_id` | `team_member_team_id_fkey` | `team` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `team_member.user_id` | `team_member_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ticket.assignee_id` | `ticket_assignee_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ticket.reporter_id` | `ticket_reporter_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ticket.team_id` | `ticket_team_id_fkey` | `team` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ticket_comment.author_id` | `ticket_comment_author_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ticket_comment.ticket_id` | `ticket_comment_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ticket_sla.sla_id` | `ticket_sla_sla_id_fkey` | `sla` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `ticket_sla.ticket_id` | `ticket_sla_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `user_custom_role.custom_role_id` | `user_custom_role_custom_role_id_fkey` | `custom_role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `user_custom_role.granted_by` | `user_custom_role_granted_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `user_custom_role.user_id` | `user_custom_role_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `user_invitation.role_id` | `user_invitation_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `vlan.site_id` | `vlan_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `webhook_dead_letter.delivery_id` | `webhook_dead_letter_delivery_id_fkey` | `webhook_delivery` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `webhook_dead_letter.subscription_id` | `webhook_dead_letter_subscription_id_fkey` | `webhook_subscription` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `webhook_delivery.subscription_id` | `webhook_delivery_subscription_id_fkey` | `webhook_subscription` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `workflow_run.workflow_id` | `workflow_run_workflow_id_fkey` | `workflow_def` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+| `workflow_step.run_id` | `workflow_step_run_id_fkey` | `workflow_run` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
+
+<!-- rls-references-without-organization:end -->
+
 ## CI-Änderungen `ci_change` (AUD-03, WP-487)
 
 Nach Entscheidung E-82 (Option 2) bleibt `ci_change` feldgranular: eine Zeile
@@ -456,6 +715,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `entitlement` | ja | ja | entitlement_isolation (ALL) |
 | `entity_change` | ja | ja | entity_change_isolation (ALL) |
 | `event_outbox` | ja | ja | event_outbox_isolation (ALL), event_outbox_system_select (SELECT) |
+| `event_outbox_counter` | ja | ja | event_outbox_counter_isolation (ALL), event_outbox_counter_system_select (SELECT) |
 | `export_job` | ja | ja | export_job_isolation (ALL), export_job_system_select (SELECT) |
 | `form_def` | ja | ja | form_def_scoped_delete (DELETE), form_def_scoped_update (UPDATE), form_def_tenant_isolation (ALL) |
 | `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |

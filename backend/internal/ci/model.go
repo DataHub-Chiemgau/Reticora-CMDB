@@ -310,6 +310,11 @@ type FilterParams struct {
 	SortDir  string
 	// Filters are the filter[field][op] conditions of API-02.
 	Filters []api.Filter
+	// CappedTotal lets the count of the list stop past api.TotalCap (E-104,
+	// GET /cis): the total is then exact up to api.TotalCap and beyond it
+	// larger than api.TotalCap, which the handler reports as capped. Other
+	// callers (GraphQL) keep the exact count.
+	CappedTotal bool
 }
 
 // Change represents one persisted CI change history row.

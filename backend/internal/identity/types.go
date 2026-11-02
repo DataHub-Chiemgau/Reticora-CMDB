@@ -60,8 +60,6 @@ const (
 	PermDocumentWrite     Permission = "document:write"
 	PermStocktakeRead     Permission = "stocktake:read"
 	PermStocktakeWrite    Permission = "stocktake:write"
-	PermConsumableRead    Permission = "consumable:read"
-	PermConsumableWrite   Permission = "consumable:write"
 	PermOrderRead         Permission = "order:read"
 	PermOrderWrite        Permission = "order:write"
 	PermOrderApprove      Permission = "order:approve"
@@ -106,8 +104,6 @@ const (
 	PermCIInstanceAttributeManage Permission = "ci_instance_attribute:manage"
 	PermRelationshipTypeManage    Permission = "relationship_type:manage"
 	PermAssetMove                 Permission = "asset:move"
-	PermAssetReserve              Permission = "asset:reserve"
-	PermInventoryManage           Permission = "inventory:manage"
 	PermLifecycleManage           Permission = "lifecycle:manage"
 	PermOverrideWrite             Permission = "override:write"
 	PermSavedViewRead             Permission = "saved_view:read"
@@ -115,6 +111,23 @@ const (
 	// Special actions with their own permission (RBA-06, WP-045).
 	PermLifecycleTransition  Permission = "lifecycle:transition"
 	PermReconciliationManage Permission = "reconciliation:manage"
+
+	// Module keys of RBA-05 and the action keys of phase 2 (E-106, migration
+	// 000192). stock:* replaces consumable:* and inventory:manage,
+	// reservation:write replaces asset:reserve; there are no aliases.
+	PermStockRead             Permission = "stock:read"
+	PermStockWrite            Permission = "stock:write"
+	PermReservationRead       Permission = "reservation:read"
+	PermReservationWrite      Permission = "reservation:write"
+	PermContractRead          Permission = "contract:read"
+	PermContractWrite         Permission = "contract:write"
+	PermStocktakeComplete     Permission = "stocktake:complete"
+	PermImportRun             Permission = "import:run"
+	PermImportManage          Permission = "import:manage"
+	PermFieldPermissionManage Permission = "field_permission:manage"
+	PermTagManage             Permission = "tag:manage"
+	PermMetamodelPublish      Permission = "metamodel:publish"
+	PermSavedViewManage       Permission = "saved_view:manage"
 )
 
 // AllPermissions returns the full set of permissions the identity layer can
@@ -169,8 +182,6 @@ func allPermissions() []Permission {
 		PermDocumentWrite,
 		PermStocktakeRead,
 		PermStocktakeWrite,
-		PermConsumableRead,
-		PermConsumableWrite,
 		PermOrderRead,
 		PermOrderWrite,
 		PermOrderApprove,
@@ -212,14 +223,25 @@ func allPermissions() []Permission {
 		PermCIInstanceAttributeManage,
 		PermRelationshipTypeManage,
 		PermAssetMove,
-		PermAssetReserve,
-		PermInventoryManage,
 		PermLifecycleManage,
 		PermOverrideWrite,
 		PermSavedViewRead,
 		PermSavedViewWrite,
 		PermLifecycleTransition,
 		PermReconciliationManage,
+		PermStockRead,
+		PermStockWrite,
+		PermReservationRead,
+		PermReservationWrite,
+		PermContractRead,
+		PermContractWrite,
+		PermStocktakeComplete,
+		PermImportRun,
+		PermImportManage,
+		PermFieldPermissionManage,
+		PermTagManage,
+		PermMetamodelPublish,
+		PermSavedViewManage,
 	}
 }
 

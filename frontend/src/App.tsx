@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import type { ComponentProps } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
@@ -15,7 +16,14 @@ import { refreshSession } from './auth/session';
 import { signOut } from './auth/signOut';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
-import { useEntitlements, useModules, navFeatureFor } from './hooks/useEntitlements';
+import {
+  hasPermission,
+  navFeatureFor,
+  navPermissionFor,
+  useEntitlements,
+  useModules,
+} from './hooks/useEntitlements';
+import { useEffectivePermissions } from './api/hooks';
 import { nextThemeMode, useThemeStore } from './stores/theme';
 import type { ThemeMode } from './stores/theme';
 import { LanguageSwitch } from './components/LanguageSwitch';
@@ -161,6 +169,8 @@ function App() {
 
   // Entitlement-gated navigation: modules the tenant's plan does not include
   // are hidden instead of producing a 403 on click (progressive disclosure).
+  // Pages that need a permission (navPermissionFor) are filtered in
+  // PrimaryNavigation and PermittedCommandPalette (UI-12, WP-804).
   const { isEnabled } = useEntitlements();
   // Modules of later phases are switched off in the G1 release (WP-214):
   // their pages are hidden whatever the plan includes.
@@ -242,20 +252,11 @@ function App() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             {isAuthenticated ? (
-              <nav
-                className="flex flex-wrap gap-2"
-                aria-label={t('accessibility.primaryNavigation')}
-              >
-                {navItems.map(({ page, label }) => (
-                  <NavButton
-                    key={page}
-                    active={currentPage === page}
-                    onClick={() => handleNavigate(page)}
-                  >
-                    {label}
-                  </NavButton>
-                ))}
-              </nav>
+              <PrimaryNavigation
+                items={navItems}
+                currentPage={currentPage}
+                onNavigate={handleNavigate}
+              />
             ) : null}
             <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
               {isAuthenticated ? <NotificationCenter /> : null}
@@ -365,7 +366,7 @@ function App() {
       </main>
 
       {isAuthenticated ? (
-        <CommandPalette
+        <PermittedCommandPalette
           onNavigate={handleNavigate}
           onCreateCI={openCreateCI}
           onToggleDarkMode={cycleTheme}
@@ -470,6 +471,62 @@ function ThemeIcon({ mode }: { mode: ThemeMode }) {
       <path d="M8 21h8" />
       <path d="M12 17v4" />
     </svg>
+  );
+}
+
+/**
+ * usePermittedPage tells whether the signed-in user holds the permission a
+ * page requires (navPermissionFor, UI-12, WP-804), read from the effective
+ * rights of GET /me/permissions (with the rights of the session's IdP
+ * groups since WP-428). While the rights load or cannot be read the page
+ * counts as not permitted (fail closed like useHasPermission). Only signed-in
+ * parts of the shell call it, so the sign-in page sends no request.
+ */
+function usePermittedPage(): (page: AppPage) => boolean {
+  const permissions = useEffectivePermissions().data?.permissions;
+  return (page) => {
+    const required = navPermissionFor[page];
+    return !required || hasPermission(permissions, required);
+  };
+}
+
+/** PrimaryNavigation shows the navigation entries the user may use. */
+function PrimaryNavigation({
+  items,
+  currentPage,
+  onNavigate,
+}: {
+  items: { page: AppPage; label: string }[];
+  currentPage: AppPage;
+  onNavigate: (page: AppPage) => void;
+}) {
+  const { t } = useTranslation();
+  const isPermitted = usePermittedPage();
+  return (
+    <nav className="flex flex-wrap gap-2" aria-label={t('accessibility.primaryNavigation')}>
+      {items
+        .filter(({ page }) => isPermitted(page))
+        .map(({ page, label }) => (
+          <NavButton key={page} active={currentPage === page} onClick={() => onNavigate(page)}>
+            {label}
+          </NavButton>
+        ))}
+    </nav>
+  );
+}
+
+/**
+ * PermittedCommandPalette passes the command palette a page predicate that
+ * combines the release modules with the permission of navPermissionFor, so
+ * the palette offers the same pages as the navigation.
+ */
+function PermittedCommandPalette({
+  isPageEnabled = () => true,
+  ...props
+}: ComponentProps<typeof CommandPalette>) {
+  const isPermitted = usePermittedPage();
+  return (
+    <CommandPalette {...props} isPageEnabled={(page) => isPageEnabled(page) && isPermitted(page)} />
   );
 }
 

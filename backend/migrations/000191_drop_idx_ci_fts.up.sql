@@ -1,0 +1,22 @@
+-- Migration 000191: drop idx_ci_fts (WP-836, SR-04, K22; E-133).
+--
+-- idx_ci_fts (000021) is a GIN expression index over to_tsvector('simple',
+-- name || hostname || manufacturer || model || serial_number) on ci. No
+-- query uses the expression: the full-text search reads the stored column
+-- search_document.search_vector (000030, idx_search_document_fts). The index
+-- only cost write work on every CI. Under FORCE ROW LEVEL SECURITY the
+-- application role could not use it anyway: to_tsvector, textcat and the
+-- match operator @@ (ts_match_vq) are not leakproof. ci gets no second
+-- tsvector column; the stored column of the full-text search stays
+-- search_document.search_vector, read linearly up to 10,000 objects (E-133
+-- option 3, E-17). The migration sets no function LEAKPROOF (E-133).
+--
+-- TestRLSIndexesAreLeakproof (internal/tenant/rls) reports every index of a
+-- table with row level security whose expression or predicate calls a
+-- function that is not leakproof or whose operator class has only such
+-- operators; the documented ones are rls.LeakyIndexes.
+--
+-- The number 000191 leaves 000190 to a migration of a parallel work
+-- package of phase 2.
+
+DROP INDEX IF EXISTS idx_ci_fts;

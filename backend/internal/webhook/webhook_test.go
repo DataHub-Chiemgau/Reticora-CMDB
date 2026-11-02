@@ -6,14 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
@@ -625,6 +631,101 @@ func TestWebhookURLOnlyForManagers(t *testing.T) {
 					t.Errorf("%s: response contains %q: %s", name, secret, b)
 				}
 			}
+		}
+	}
+}
+
+// TestRegisteredTypesAreSubscribable covers EVT-03 (WP-246): ValidEvents
+// derives from the register. Every type of events.Types except webhook.dead
+// and apikey.creator_deactivated can be subscribed to, the former names
+// and deprecatedEvents as well; webhook.dead, apikey.creator_deactivated,
+// webhook.test and the reserved types of phase 3 are refused with 400.
+func TestRegisteredTypesAreSubscribable(t *testing.T) {
+	mux := chi.NewRouter()
+	NewHandler(NewMemoryRepository()).RegisterRoutes(mux)
+	create := func(event string) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(map[string]any{"name": "hook " + event, "url": "https://example.com/hook", "secret": "x", "events": []string{event}})
+		req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/webhooks", bytes.NewReader(raw)))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	want := map[string]bool{}
+	for _, typ := range events.Types {
+		if typ == events.WebhookDead || typ == events.APIKeyCreatorDeactivated {
+			continue
+		}
+		want[typ] = true
+		if w := create(typ); w.Code != http.StatusCreated {
+			t.Errorf("subscribe %s: %d %s", typ, w.Code, w.Body.String())
+		}
+	}
+	for _, names := range legacyNames {
+		for _, name := range names {
+			want[name] = true
+		}
+	}
+	for _, name := range deprecatedEvents {
+		want[name] = true
+	}
+	for _, name := range []string{"ci.updated", "relationship.deleted", "lifecycle.transitioned", "asset.movement", "inventory.movement", "discovery.completed"} {
+		if !want[name] {
+			t.Errorf("%s is not subscribable", name)
+		}
+	}
+	if !maps.Equal(want, ValidEvents) {
+		t.Errorf("ValidEvents %v, want %v", slices.Sorted(maps.Keys(ValidEvents)), slices.Sorted(maps.Keys(want)))
+	}
+	for _, event := range []string{events.WebhookDead, events.APIKeyCreatorDeactivated, TestEvent, "maintenance.scheduled", "workflow.started", "finding.created"} {
+		w := create(event)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid event") {
+			t.Errorf("subscribe %s: %d %s, want 400 invalid event", event, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestOpenAPIWebhookEventListsValidEvents covers EVT-03 (WP-246): the enum
+// WebhookEvent of api/openapi.yaml holds exactly the names of ValidEvents.
+func TestOpenAPIWebhookEventListsValidEvents(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec struct {
+		Components struct {
+			Schemas struct {
+				WebhookEvent struct {
+					Enum        []string `yaml:"enum"`
+					Description string   `yaml:"description"`
+				} `yaml:"WebhookEvent"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err = yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	enum := spec.Components.Schemas.WebhookEvent.Enum
+	got := map[string]bool{}
+	for _, name := range enum {
+		if got[name] {
+			t.Errorf("WebhookEvent lists %s twice", name)
+		}
+		got[name] = true
+	}
+	if !maps.Equal(got, ValidEvents) {
+		t.Errorf("WebhookEvent %v, ValidEvents %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(ValidEvents)))
+	}
+	description := spec.Components.Schemas.WebhookEvent.Description
+	for _, names := range legacyNames {
+		for _, name := range names {
+			if !strings.Contains(description, "`"+name+"`") {
+				t.Errorf("the description of WebhookEvent does not mark the former name %s as deprecated", name)
+			}
+		}
+	}
+	for _, name := range deprecatedEvents {
+		if !strings.Contains(description, "`"+name+"`") {
+			t.Errorf("the description of WebhookEvent does not mark %s as deprecated", name)
 		}
 	}
 }

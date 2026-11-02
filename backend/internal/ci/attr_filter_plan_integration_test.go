@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -686,6 +687,187 @@ func TestAttrTextIsLeakproof(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("plan of a call: %v", err)
+	}
+}
+
+// uniqueConflictsBudget is the NFR-02 budget of one check at 10,000 CIs.
+const uniqueConflictsBudget = 500 * time.Millisecond
+
+// uniqueScanProblem returns why the plan of the UniqueConflicts check does
+// not show the documented scan (E-133), or "": the CIs are read without an
+// attribute index (idx_attr_*), and the comparison of the attribute value
+// (c.attributes ->> d.key, the key comes from the definition) is no index
+// condition of any node.
+func uniqueScanProblem(nodes []map[string]any) string {
+	var problems []string
+	readsCI := false
+	for _, n := range nodes {
+		idx, _ := n["Index Name"].(string)
+		if strings.HasPrefix(idx, citype.IndexPrefix) {
+			problems = append(problems, "uses "+idx+": an attribute index serves the check now; replace the documented "+
+				"scan by an index check and update docs/acceptance/lasttest-g1.md")
+		}
+		if cond, _ := n["Index Cond"].(string); strings.Contains(cond, "->>") {
+			problems = append(problems, "the attribute value is the index condition of "+fmt.Sprint(n["Node Type"]))
+		}
+		if n["Relation Name"] == "ci" {
+			readsCI = true
+		}
+	}
+	if !readsCI {
+		problems = append(problems, "the plan does not read ci")
+	}
+	return strings.Join(problems, "; ")
+}
+
+// TestUniqueConflictsPlanUnderRLS covers WP-836 (NFR-02, SRC-01; SR-04,
+// E-133): the plan of the check of the unique attributes (UniqueConflicts,
+// MET-15) for the application role under row level security at 10,000 CIs
+// of a type of organization A (clients 1 and 2 and no client in turn, a
+// unique tag per organization on a global definition, a unique asset
+// number per client on a type definition, both indexed by the DDL job) and
+// CIs of organization B with the same values. The SQL is the one the
+// repository sends (pgx tracer on a copy of the application pool); it is
+// explained as reticora_app in the tenant transaction. The check compares
+// c.attributes ->> d.key with the key of the definition: jsonb_object_field_text
+// is not leakproof and the key is no literal, so neither the unique index
+// idx_attr_<id>_u nor any other index serves the comparison; the plan reads
+// the CIs of the organization and filters them (the documented scan, E-133).
+// A plan that uses an attribute index fails the test with the request to
+// tighten it. The check finds a value another CI holds (per organization,
+// per client for the client scope), not the CI's own value, not a value of
+// organization B; the time is logged (best of five), and with
+// RETICORA_PERF_BUDGET=1 each check must stay within the NFR-02 budget of
+// 500 ms.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
+//	  RETICORA_PERF_BUDGET=1 go test -count=1 -v -p 1 -run 'TestUniqueConflictsPlanUnderRLS' ./internal/ci/
+func TestUniqueConflictsPlanUnderRLS(t *testing.T) {
+	f := scopetest.Seed(t, "cf")
+	bg := context.Background()
+	orgCtx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+
+	ddl := citype.NewDDLJob(f.App, jobs.NewService(jobs.NewPGRepository(f.App)))
+	types := citype.NewPGRepository(f.App).WithIndexScheduler(ddl)
+	typ := &citype.Type{OrganizationID: f.OrgA, Key: "wp836-unique", Name: "wp836-unique", IsObservable: true}
+	if err := types.Create(orgCtx, typ); err != nil {
+		t.Fatalf("create type: %v", err)
+	}
+	tag := &citype.AttributeDefinition{Key: "wp836_tag", DataType: "text", Unique: true, UniqueScope: "org"}
+	asset := &citype.AttributeDefinition{CITypeID: typ.ID, Key: "wp836_asset", DataType: "text", Unique: true, UniqueScope: "client"}
+	for _, d := range []*citype.AttributeDefinition{tag, asset} {
+		if err := types.CreateAttributeDefinition(orgCtx, f.OrgA, d); err != nil {
+			t.Fatalf("create definition %s: %v", d.Key, err)
+		}
+	}
+	indexes := []string{citype.IndexName(tag.ID, true), citype.IndexName(asset.ID, true)}
+	t.Cleanup(func() {
+		for _, name := range indexes {
+			_, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+name)
+		}
+	})
+
+	// 10,000 CIs of the type: CI i in client 1 (i % 3 == 0), client 2
+	// (i % 3 == 1) or no client, tag T<i>, asset number A<i % 5000> (once
+	// per client: i and i + 5000 lie in different clients).
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, attributes)
+		SELECT $1, (ARRAY[$3::uuid, $4::uuid, NULL])[i % 3 + 1], $2, 'wp836-u-' || i, 'active',
+			jsonb_build_object('wp836_tag', 'T' || i, 'wp836_asset', 'A' || (i % 5000))
+		FROM generate_series(1, 10000) AS i`, f.OrgA, typ.ID, f.Client1, f.Client2); err != nil {
+		t.Fatalf("seed 10k CIs: %v", err)
+	}
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, ci_type_id, name, status, attributes)
+		SELECT $1, (SELECT id FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1), 'wp836-u-b-' || i, 'active',
+			jsonb_build_object('wp836_tag', 'TB' || i)
+		FROM generate_series(1, 50) AS i`, f.OrgB); err != nil {
+		t.Fatalf("seed CIs of organization B: %v", err)
+	}
+	for _, d := range []*citype.AttributeDefinition{tag, asset} {
+		if err := ddl.Ensure(bg, f.OrgA, d.ID); err != nil {
+			t.Fatalf("build the index of %s: %v", d.Key, err)
+		}
+	}
+	for _, name := range indexes {
+		var valid bool
+		if err := f.Admin.QueryRow(bg, `SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass($1)`, name).Scan(&valid); err != nil || !valid {
+			t.Fatalf("the DDL job did not build %s: %v", name, err)
+		}
+	}
+	if _, err := f.Admin.Exec(bg, `ANALYZE ci, attribute_definition`); err != nil {
+		t.Fatal(err)
+	}
+	// ciOf returns the id of CI n of organization A.
+	ciOf := func(n int) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci WHERE organization_id = $1 AND name = $2`, f.OrgA, fmt.Sprintf("wp836-u-%d", n)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	trace := newQueryTrace(t, f.App)
+	repo := ci.NewPGRepository(trace.pool)
+	orgWide := database.OrgWideScope(f.OrgA, f.User)
+	for _, c := range []struct {
+		name         string
+		client, ciID string
+		attrs        map[string]any
+		want         []string
+	}{
+		{"tag of another CI", "", "", map[string]any{"wp836_tag": "T4242"}, []string{tag.Key}},
+		{"own tag", "", ciOf(4242), map[string]any{"wp836_tag": "T4242"}, nil},
+		{"tag of organization B", "", "", map[string]any{"wp836_tag": "TB7"}, nil},
+		// A4242: CI 4242 in client 1, CI 9242 without client; A4244: CI 4244
+		// without client, CI 9244 in client 2; A10: CI 10 in client 2, CI
+		// 5010 in client 1.
+		{"asset number in the same client", f.Client1, "", map[string]any{"wp836_asset": "A4242"}, []string{asset.Key}},
+		{"asset number without client", "", "", map[string]any{"wp836_asset": "A4244"}, []string{asset.Key}},
+		{"asset number of other clients", f.Client1, "", map[string]any{"wp836_asset": "A4244"}, nil},
+		{"tag and asset number", f.Client2, "", map[string]any{"wp836_tag": "T17", "wp836_asset": "A10"}, []string{asset.Key, tag.Key}},
+	} {
+		var got []string
+		best := time.Duration(-1)
+		var stmts []loggedStatement
+		for range 5 {
+			start := time.Now()
+			stmts = trace.run(t, func() error {
+				var err error
+				got, err = repo.UniqueConflicts(orgCtx, f.OrgA, typ.ID, c.client, c.ciID, c.attrs)
+				return err
+			})
+			if elapsed := time.Since(start); best < 0 || elapsed < best {
+				best = elapsed
+			}
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s: conflicts %v, want %v", c.name, got, c.want)
+		}
+		var stmt *loggedStatement
+		for i := range stmts {
+			if strings.Contains(stmts[i].sql, "FROM attribute_definition d") {
+				stmt = &stmts[i]
+			}
+		}
+		if stmt == nil {
+			t.Fatalf("%s: UniqueConflicts sent no check statement", c.name)
+		}
+		if !strings.Contains(stmt.sql, "c.attributes ->> d.key") {
+			t.Fatalf("%s: the check no longer compares c.attributes ->> d.key; revisit E-133 and this test: %s", c.name, stmt.sql)
+		}
+		nodes := planNodes(t, explainInScope(t, f.App, &orgWide, *stmt))
+		if problem := uniqueScanProblem(nodes); problem != "" {
+			t.Errorf("E-133: %s: the plan of UniqueConflicts for the application role is not the documented scan: %s\n%s",
+				c.name, problem, describePlan(nodes))
+		}
+		reads := readPlan(t, analyzeAsApp(t, f.App, &orgWide, *stmt))
+		t.Logf("%s: best of 5 %v, %d rows of ci read; plan as reticora_app: %s", c.name, best.Round(time.Millisecond), reads.rows["ci"], reads.plan)
+		if os.Getenv("RETICORA_PERF_BUDGET") == "1" && best > uniqueConflictsBudget {
+			t.Errorf("NFR-02: %s: UniqueConflicts at 10,000 CIs took %v, budget %v", c.name, best, uniqueConflictsBudget)
+		}
 	}
 }
 

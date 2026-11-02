@@ -60,10 +60,15 @@ type Edge struct {
 	Source     string `json:"source,omitempty"`
 }
 
-// Graph is the topology response payload.
+// Graph is the topology response payload. Truncated is set when the walk
+// from the root reached relationship.MaxTraversalNodes and kept only the
+// CIs closest to the root (NFR-01, WP-840): the graph may then lack CIs
+// and edges within the depth. It is left out otherwise, so the answer of a
+// walk that was not cut stays as it was (API-01).
 type Graph struct {
-	Nodes []Node `json:"nodes"`
-	Edges []Edge `json:"edges"`
+	Nodes     []Node `json:"nodes"`
+	Edges     []Edge `json:"edges"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 // Handler exposes topology query endpoints.
@@ -359,16 +364,65 @@ func (h *Handler) walkedGraph(ctx context.Context, orgID string, root *ci.Item, 
 	if err != nil {
 		return nil, err
 	}
+	return h.graphOfWalk(ctx, orgID, walk, []ci.Item{*root})
+}
+
+// graphFromRoots walks the configuration graph from several distinct
+// roots, CIs the caller has read, up to depth hops (IMP-05) and returns the
+// graph with the number of each root. With the repository's walk it is one
+// walk for all roots that reads each edge once and numbers the roots 0 to
+// len(roots)-1 (relationship.Walker.WalkFromMany, WP-840); else each root
+// is walked as graphFrom does and the graphs are merged (mergeGraphs).
+func (h *Handler) graphFromRoots(ctx context.Context, orgID string, roots []ci.Item, depth int) (*ciGraph, []int32, error) {
+	numbers := make([]int32, len(roots))
+	for n := range numbers {
+		numbers[n] = int32(n)
+	}
+	if len(roots) == 1 {
+		g, err := h.graphFrom(ctx, orgID, &roots[0], depth)
+		return g, numbers, err
+	}
+	if h.walker != nil {
+		ids := make([]string, len(roots))
+		for i := range roots {
+			ids[i] = roots[i].ID
+		}
+		walk, err := h.walker.WalkFromMany(ctx, orgID, ids, depth, relationship.MaxTraversalNodes)
+		if err != nil {
+			return nil, nil, err
+		}
+		g, err := h.graphOfWalk(ctx, orgID, walk, roots)
+		return g, numbers, err
+	}
+	graphs := make([]*ciGraph, len(roots))
+	for i := range roots {
+		g, err := h.graphFrom(ctx, orgID, &roots[i], depth)
+		if err != nil {
+			return nil, nil, err
+		}
+		graphs[i] = g
+	}
+	g, numbers := mergeGraphs(graphs)
+	return g, numbers, nil
+}
+
+// graphOfWalk turns the walk from roots into a ciGraph: the roots keep the
+// numbers of the walk and their nodes from the CIs read before, the other
+// CIs are read in one query, and edges to a CI that is gone meanwhile are
+// dropped.
+func (h *Handler) graphOfWalk(ctx context.Context, orgID string, walk *relationship.Walk, roots []ci.Item) (*ciGraph, error) {
 	g := &ciGraph{ids: walk.CIs, nodes: make([]Node, len(walk.CIs)), known: make([]bool, len(walk.CIs)),
 		edges: make([]ciEdge, len(walk.Edges)), truncated: walk.Truncated}
-	g.nodes[0], g.known[0] = nodeFromItem(*root), true
+	for n := range roots {
+		g.nodes[n], g.known[n] = nodeFromItem(roots[n]), true
+	}
 	types := map[string]int32{}
 	for i := range walk.Edges {
 		e := &walk.Edges[i]
 		g.edges[i] = ciEdge{id: e.ID, source: e.SourceCI, target: e.TargetCI, relType: g.typeNumber(types, e.RelType), origin: e.Source}
 	}
-	if len(g.ids) > 1 {
-		nodes, err := h.readNodes(ctx, orgID, g.ids[1:])
+	if len(g.ids) > len(roots) {
+		nodes, err := h.readNodes(ctx, orgID, g.ids[len(roots):])
 		if err != nil {
 			return nil, err
 		}
@@ -377,7 +431,7 @@ func (h *Handler) walkedGraph(ctx context.Context, orgID string, root *ci.Item, 
 			number[id] = int32(n)
 		}
 		for i := range nodes {
-			if n, ok := number[nodes[i].ID]; ok && n != 0 {
+			if n, ok := number[nodes[i].ID]; ok && int(n) >= len(roots) {
 				g.nodes[n], g.known[n] = nodes[i], true
 			}
 		}
@@ -674,7 +728,7 @@ func (g *ciGraph) topology(ciType string) Graph {
 				RelType: g.relTypes[e.relType], Source: e.origin})
 		}
 	}
-	return Graph{Nodes: nodes, Edges: edges}
+	return Graph{Nodes: nodes, Edges: edges, Truncated: g.truncated}
 }
 
 func (h *Handler) listRelationships(ctx context.Context, orgID, ciID string) ([]relationship.Relationship, error) {

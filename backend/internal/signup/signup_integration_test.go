@@ -145,8 +145,26 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 		if key == entitlement.FeatureCMDBCore && (limits[entitlement.LimitMaxCIs] != 100 || validUntil != nil) {
 			t.Errorf("cmdb_core limits %v valid_until %v", limits, validUntil)
 		}
-		if key == entitlement.FeatureTicketing && (validUntil == nil || !validUntil.Equal(res.TrialEndsAt)) {
-			t.Errorf("ticketing valid_until = %v, want %v", validUntil, res.TrialEndsAt)
+		// WP-706 (MGT-01, E-44): the trial stores the standard plan's
+		// max_storage_mb on documents, on no other row.
+		if storage, ok := limits[entitlement.LimitMaxStorageMB]; ok != (key == entitlement.FeatureDocuments) ||
+			(ok && storage != 10000) {
+			t.Errorf("%s limits = %v, want max_storage_mb 10000 on documents only", key, limits)
+		}
+		// WP-244 (E-44): the standard-only keys end with the trial, the
+		// keys of every plan do not.
+		switch key {
+		case entitlement.FeatureTicketingStandard, entitlement.FeatureSignature, entitlement.FeatureStock,
+			entitlement.FeatureStocktakeStandard, entitlement.FeatureBarcode, entitlement.FeatureGPSStandard,
+			entitlement.FeatureWorkplace, entitlement.FeatureExportDATEV:
+			if validUntil == nil || !validUntil.Equal(res.TrialEndsAt) {
+				t.Errorf("%s valid_until = %v, want %v", key, validUntil, res.TrialEndsAt)
+			}
+		case entitlement.FeatureAssetsBasic, entitlement.FeatureDocuments, entitlement.FeatureImport,
+			entitlement.FeatureTicketingEssential:
+			if validUntil != nil {
+				t.Errorf("%s valid_until = %v, want none", key, validUntil)
+			}
 		}
 	}
 	rows.Close()
@@ -349,6 +367,16 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	}
 	if limits[entitlement.LimitMaxCIs] != 7000 || limits[entitlement.LimitMaxUsers] != 40 {
 		t.Errorf("cmdb_core limits = %v", limits)
+	}
+	// WP-706 (E-44): without an own limit the pro plan's max_storage_mb is
+	// stored on documents.
+	var documentLimits map[string]int64
+	if err = adminPool.QueryRow(ctx, `SELECT limits FROM entitlement WHERE organization_id = $1 AND feature_key = 'documents'`,
+		created.ID).Scan(&documentLimits); err != nil {
+		t.Fatalf("documents entitlement: %v", err)
+	}
+	if documentLimits[entitlement.LimitMaxStorageMB] != 50000 {
+		t.Errorf("documents limits = %v, want max_storage_mb 50000", documentLimits)
 	}
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM entitlement WHERE organization_id = $1`, created.ID); n != len(entitlement.PlanFeatures(entitlement.PlanPro)) {
 		t.Errorf("entitlements = %d", n)

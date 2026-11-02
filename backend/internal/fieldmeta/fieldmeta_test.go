@@ -3,6 +3,7 @@ package fieldmeta
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -427,4 +428,81 @@ func TestParseValidation(t *testing.T) {
 			t.Errorf("%s: no value satisfies it, accepted", raw)
 		}
 	}
+}
+
+// TestConditionalMatchesRuleConditions covers WP-715: the comparisons of
+// the rule AST are the predicates of conditional. Every case of
+// condition_cases that is a comparison or all of comparisons (pure AND)
+// gives through fieldmeta.Evaluate the result of the conformance file and
+// of rules.EvaluateCondition: visible_when, required_when, read_only_when
+// and allowed_values_when as the AND of the predicates.
+func TestConditionalMatchesRuleConditions(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/rules.conformance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		ConditionCases []struct {
+			Name      string          `json:"name"`
+			Condition json.RawMessage `json:"condition"`
+			Values    map[string]any  `json:"values"`
+			Result    bool            `json:"result"`
+		} `json:"condition_cases"`
+	}
+	if err = json.Unmarshal(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, tc := range c.ConditionCases {
+		cond, err := rules.ParseCondition(tc.Condition)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.Name, err)
+		}
+		preds, ok := predicatesOf(&cond)
+		if !ok {
+			continue
+		}
+		checked++
+		if got := rules.EvaluateCondition(&cond, tc.Values); got != tc.Result {
+			t.Errorf("%s: rules.EvaluateCondition = %v, want %v", tc.Name, got, tc.Result)
+		}
+		if err := ValidateDefinition(FieldDefinition{Name: "x", DataType: "string", Conditional: &ConditionalRules{VisibleWhen: preds}}); err != nil {
+			t.Errorf("%s: predicates refused: %v", tc.Name, err)
+		}
+		visible := Evaluate(FieldDefinition{Name: "x", Conditional: &ConditionalRules{VisibleWhen: preds}}, tc.Values)
+		if visible.Visible != tc.Result {
+			t.Errorf("%s: visible_when = %v, want %v", tc.Name, visible.Visible, tc.Result)
+		}
+		if len(preds) == 0 {
+			continue // an empty list is no condition, all of nothing holds
+		}
+		state := Evaluate(FieldDefinition{Name: "x", Conditional: &ConditionalRules{
+			RequiredWhen:      preds,
+			ReadOnlyWhen:      preds,
+			AllowedValuesWhen: &ConditionalValues{When: preds, Values: []any{"a"}},
+		}}, tc.Values)
+		if state.Required != tc.Result || state.ReadOnly != tc.Result || (state.AllowedValues != nil) != tc.Result {
+			t.Errorf("%s: fieldmeta.Evaluate = %+v, want %v", tc.Name, state, tc.Result)
+		}
+	}
+	if checked < len(rules.CompareOps) {
+		t.Errorf("only %d pure AND cases", checked)
+	}
+}
+
+// predicatesOf maps a comparison or all of comparisons onto predicates;
+// ok is false for any, not and nested logic.
+func predicatesOf(cond *rules.Rule) (preds []Predicate, ok bool) {
+	children := []rules.Rule{*cond}
+	if cond.Op == rules.OpAll {
+		children = cond.Rules
+	}
+	preds = []Predicate{}
+	for _, r := range children {
+		if !slices.Contains(rules.CompareOps, r.Op) {
+			return nil, false
+		}
+		preds = append(preds, Predicate{Field: r.Field, Op: r.Op, Value: r.Value})
+	}
+	return preds, true
 }

@@ -143,6 +143,10 @@ type FieldDefinition struct {
 	Validation      *ValidationRules  `json:"validation,omitempty"`
 	Conditional     *ConditionalRules `json:"conditional,omitempty"`
 	ReferenceTarget string            `json:"reference_target,omitempty"`
+	// MultiValue is attribute_definition.multi_value; nil means unknown (an
+	// instance definition has no such column). The composition treats two
+	// set values that differ as a data type conflict (MET-16).
+	MultiValue *bool `json:"-"`
 }
 
 // ValidationRules carries the configurable validation metadata of a field.

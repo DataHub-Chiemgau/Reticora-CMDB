@@ -49,6 +49,42 @@ func TestOpenAPIValidationRejectsInvalidJSONBody(t *testing.T) {
 	}
 }
 
+// TestOpenAPIValidationRejectsBodyAboveTheCap covers WP-778 (API-04): a
+// route with RequiresBody reads the body at most up to
+// maxIdempotentRequestBody and answers 413 above it without the handler.
+func TestOpenAPIValidationRejectsBodyAboveTheCap(t *testing.T) {
+	lowerIdempotentRequestBody(t, 64)
+	called := false
+	handler := OpenAPIValidation(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	body := `{"name":"` + strings.Repeat("r", 64) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge || called {
+		t.Fatalf("expected 413 without the handler, got %d (handler called %v)", w.Code, called)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/problem+json" {
+		t.Fatalf("expected problem response, got %q", ct)
+	}
+
+	// A body at the cap passes.
+	called = false
+	atCap := `{"name":"` + strings.Repeat("r", 64-11) + `"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/cis", strings.NewReader(atCap))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if len(atCap) != 64 || w.Code != http.StatusNoContent || !called {
+		t.Fatalf("body of %d bytes at the cap: %d (handler called %v)", len(atCap), w.Code, called)
+	}
+}
+
 func TestOpenAPIValidationAcceptsValidJSONBody(t *testing.T) {
 	handler := OpenAPIValidation(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -120,6 +156,30 @@ func TestDeprecatedOperationsCarryLifecycleHeaders(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/review-items", nil))
 	if w.Header().Get("Sunset") != "" || w.Header().Get("Deprecation") != "" {
 		t.Errorf("a current operation is marked deprecated: %v", w.Header())
+	}
+}
+
+// TestAssetMovementsAreDeprecated covers the first deprecation of the P2
+// path inventory (E-38, WP-247): GET /api/v1/assets/{id}/movements answers
+// with Deprecation, Sunset (12 months later) and the successor link to
+// GET /api/v1/stock-movements, which takes the filter asset_id.
+func TestAssetMovementsAreDeprecated(t *testing.T) {
+	h := DeprecationHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/assets/7b0c6e1a-0000-4000-8000-000000000001/movements", nil))
+	if got := w.Header().Get("Deprecation"); got != "@1793577600" {
+		t.Errorf("Deprecation %q, want @1793577600 (2026-11-02)", got)
+	}
+	if got := w.Header().Get("Sunset"); got != "Wed, 03 Nov 2027 00:00:00 GMT" {
+		t.Errorf("Sunset %q", got)
+	}
+	if got := w.Header().Get("Link"); got != `</api/v1/stock-movements>; rel="successor-version"` {
+		t.Errorf("Link %q", got)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/stock-movements", nil))
+	if w.Header().Get("Deprecation") != "" || w.Header().Get("Sunset") != "" {
+		t.Errorf("the successor is marked deprecated: %v", w.Header())
 	}
 }
 

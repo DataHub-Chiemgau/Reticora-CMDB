@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -50,14 +51,22 @@ func (r *recorder) Consume(_ context.Context, env *events.Envelope) error {
 //   - an event is written in the transaction of its mutation: a rollback
 //     leaves none;
 //   - the CI repository writes ci.created, ci.changed (with the changed
-//     fields) and ci.deleted; sequence and entity_seq count per
+//     fields), ci.status_changed for a status change (WP-707, details:
+//     TestCIStatusChangedFollowsCIChanged) and ci.deleted; sequence and
+//     entity_seq count per
 //     organization and entity without gaps, also for concurrent writers;
 //   - the publisher delivers in sequence order, marks the events published,
 //     stops an organization's batch at a failed delivery (order kept) and
 //     retries it; the stream RETICORA_EVENTS holds each event once under
 //     events.<org_id>.<type>;
-//   - cleanup removes old published events but keeps the newest ones as
-//     numbering anchors (their data: TestOutboxCleanupDropsAnchorData).
+//   - cleanup removes old published events but keeps the newest one of each
+//     entity as the anchor of entity_seq (their data:
+//     TestOutboxCleanupDropsAnchorData);
+//   - sequence comes from the organization's counter (migration 000193,
+//     WP-834, SR-08): concurrent writers of one organization number without
+//     gaps, the numbering continues after a cleanup that left no row of the
+//     organization, and with 50,000 events and stale statistics an insert
+//     costs the same time and buffers as with a handful.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestOutboxAgainstPostgres(t *testing.T) {
@@ -135,7 +144,8 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 3 || got[0].typ != events.CICreated || got[1].typ != events.CIChanged || got[2].typ != events.CIDeleted {
+	if len(got) != 4 || got[0].typ != events.CICreated || got[1].typ != events.CIChanged || got[2].typ != events.CIStatusChanged ||
+		got[3].typ != events.CIDeleted {
 		t.Fatalf("CI events: %+v", got)
 	}
 	for i, g := range got {
@@ -147,36 +157,43 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 		t.Errorf("changed fields: %v", got[1].data["changed_fields"])
 	}
 
-	// Concurrent writers: sequence without gaps or doubles.
-	var wg sync.WaitGroup
-	errs := make(chan error, 20)
-	for i := range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- inOrg(f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
-				_, appendErr := outbox.Append(ctx, tx, &events.Event{OrgID: f.OrgA, Type: events.ReviewCreated,
-					EntityID: fmt.Sprintf("review-%d", i%2), Data: map[string]int{"n": i}})
-				return appendErr
-			})
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
+	// Concurrent writers of one organization: sequence without gaps or
+	// doubles in commit order, from the organization's counter (WP-834).
+	if !t.Run("concurrent writers of one organization", func(t *testing.T) {
+		var wg sync.WaitGroup
+		errs := make(chan error, 20)
+		for i := range 20 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs <- inOrg(f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
+					_, appendErr := outbox.Append(ctx, tx, &events.Event{OrgID: f.OrgA, Type: events.ReviewCreated,
+						EntityID: fmt.Sprintf("review-%d", i%2), Data: map[string]int{"n": i}})
+					return appendErr
+				})
+			}()
 		}
-	}
-	var maxSeq, distinct int
-	var maxEntity int64
-	if err = f.Admin.QueryRow(bg, `SELECT max(sequence), count(DISTINCT sequence),
-		(SELECT max(entity_seq) FROM event_outbox WHERE organization_id = $1 AND entity_id = 'review-0')
-		FROM event_outbox WHERE organization_id = $1`, f.OrgA).Scan(&maxSeq, &distinct, &maxEntity); err != nil {
-		t.Fatal(err)
-	}
-	if maxSeq != 23 || distinct != 23 || maxEntity != 10 {
-		t.Errorf("after concurrent writers: max %d, distinct %d, review-0 entity_seq %d", maxSeq, distinct, maxEntity)
+		wg.Wait()
+		close(errs)
+		for writeErr := range errs {
+			if writeErr != nil {
+				t.Fatal(writeErr)
+			}
+		}
+		var maxSeq, distinct, minSeq int
+		var maxEntity, counter int64
+		if qErr := f.Admin.QueryRow(bg, `SELECT max(sequence), min(sequence), count(DISTINCT sequence),
+			(SELECT max(entity_seq) FROM event_outbox WHERE organization_id = $1 AND entity_id = 'review-0'),
+			(SELECT last_sequence FROM event_outbox_counter WHERE organization_id = $1)
+			FROM event_outbox WHERE organization_id = $1`, f.OrgA).Scan(&maxSeq, &minSeq, &distinct, &maxEntity, &counter); qErr != nil {
+			t.Fatal(qErr)
+		}
+		if maxSeq != 24 || minSeq != 1 || distinct != 24 || maxEntity != 10 || counter != 24 {
+			t.Errorf("after concurrent writers: sequence %d..%d, distinct %d, review-0 entity_seq %d, counter %d; want 1..24, 24, 10, 24",
+				minSeq, maxSeq, distinct, maxEntity, counter)
+		}
+	}) {
+		t.FailNow()
 	}
 
 	// The publisher.
@@ -229,8 +246,8 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := ofA()
-	if len(a) != 23 {
-		t.Fatalf("delivered: %d, want 23", len(a))
+	if len(a) != 24 {
+		t.Fatalf("delivered: %d, want 24", len(a))
 	}
 	for i := range a {
 		if a[i].Sequence != int64(i+1) {
@@ -258,7 +275,7 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 			t.Fatal(getErr)
 		}
 		var env events.Envelope
-		if err = json.Unmarshal(msg.Data, &env); err != nil || env.EntityID != item.ID || env.Sequence != 3 {
+		if err = json.Unmarshal(msg.Data, &env); err != nil || env.EntityID != item.ID || env.Sequence != 4 {
 			t.Errorf("stream message: %+v %v", env, err)
 		}
 		info, _ := stream.Info(bg)
@@ -276,18 +293,167 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 	if err = f.Admin.QueryRow(bg, `SELECT array_agg(sequence ORDER BY sequence) FROM event_outbox WHERE organization_id = $1`, f.OrgA).Scan(&left); err != nil {
 		t.Fatal(err)
 	}
-	if len(left) != 3 || left[2] != 23 {
+	if len(left) != 3 || left[2] != 24 {
 		t.Errorf("after cleanup: %v (newest of the CI, of each review and of the organization)", left)
 	}
 	if err = inOrg(f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
 		env, appendErr := outbox.Append(ctx, tx, &events.Event{OrgID: f.OrgA, Type: events.CIChanged, EntityID: item.ID})
-		if appendErr == nil && (env.Sequence != 24 || env.EntitySeq != 4) {
+		if appendErr == nil && (env.Sequence != 25 || env.EntitySeq != 5) {
 			return fmt.Errorf("numbering after cleanup: %d/%d", env.Sequence, env.EntitySeq)
 		}
 		return appendErr
 	}); err != nil {
 		t.Error(err)
 	}
+
+	// appendB appends an event without entity for organization B.
+	appendB := func(t *testing.T) *events.Envelope {
+		t.Helper()
+		var env *events.Envelope
+		if appendErr := inOrg(f.OrgB, func(ctx context.Context, tx pgx.Tx) error {
+			var e error
+			env, e = outbox.Append(ctx, tx, &events.Event{OrgID: f.OrgB, Type: events.JobFailed, Data: map[string]string{"job": "x"}})
+			return e
+		}); appendErr != nil {
+			t.Fatal(appendErr)
+		}
+		return env
+	}
+
+	// Cleanup may remove every row of an organization: the numbering
+	// continues from its counter (WP-834), not from a kept row.
+	t.Run("numbering continues after a cleanup that left no row", func(t *testing.T) {
+		for range 3 {
+			appendB(t)
+		}
+		now := events.NewPublisher(f.App, nil)
+		if _, pubErr := now.PublishPending(bg); pubErr != nil {
+			t.Fatal(pubErr)
+		}
+		later := events.NewPublisher(f.App, nil).WithClock(func() time.Time { return time.Now().UTC().Add(events.StreamMaxAge + time.Hour) })
+		if cleanErr := later.Cleanup(bg); cleanErr != nil {
+			t.Fatal(cleanErr)
+		}
+		if n := count(f.OrgB); n != 0 {
+			t.Fatalf("rows of B after the cleanup: %d, want none (no entity anchors)", n)
+		}
+		if env := appendB(t); env.Sequence != 4 {
+			t.Errorf("sequence after the cleanup removed every row: %d, want 4", env.Sequence)
+		}
+	})
+
+	// The insert time per event does not depend on the number of events:
+	// 50,000 events of B with stale statistics (no ANALYZE, autovacuum off
+	// for the outbox). Before migration 000193 the trigger aggregated
+	// max(sequence) over the organization's events in the locked section
+	// (SR-08); now it raises the counter, a primary key upsert.
+	t.Run("insert time independent of the number of events", func(t *testing.T) {
+		for _, table := range []string{"event_outbox", "event_outbox_counter"} {
+			if _, altErr := f.Admin.Exec(bg, `ALTER TABLE `+table+` SET (autovacuum_enabled = false)`); altErr != nil {
+				t.Fatal(altErr)
+			}
+			t.Cleanup(func() {
+				if _, resetErr := f.Admin.Exec(bg, `ALTER TABLE `+table+` RESET (autovacuum_enabled)`); resetErr != nil {
+					t.Errorf("reset autovacuum of %s: %v", table, resetErr)
+				}
+			})
+		}
+		before := insertCost(t, inOrg, f.OrgB, appendB)
+		// The stock is written in one statement with the numbers the trigger
+		// would give (the trigger skipped, session_replication_role =
+		// replica), and the counter follows.
+		conn, acqErr := f.Admin.Acquire(bg)
+		if acqErr != nil {
+			t.Fatal(acqErr)
+		}
+		defer conn.Release()
+		for _, stmt := range []string{`SET session_replication_role = replica`,
+			`INSERT INTO event_outbox (organization_id, sequence, type, published_at, data)
+				SELECT o.id, c.last_sequence + n, 'job.failed', now(), '{}'
+				FROM organization o JOIN event_outbox_counter c ON c.organization_id = o.id, generate_series(1, 50000) AS n
+				WHERE o.id = '` + f.OrgB + `'`,
+			`UPDATE event_outbox_counter SET last_sequence = last_sequence + 50000 WHERE organization_id = '` + f.OrgB + `'`,
+			`SET session_replication_role = origin`} {
+			if _, insErr := conn.Exec(bg, stmt); insErr != nil {
+				t.Fatal(insErr)
+			}
+		}
+		var stale float64
+		if qErr := f.Admin.QueryRow(bg, `SELECT reltuples FROM pg_class WHERE oid = 'event_outbox'::regclass`).Scan(&stale); qErr != nil {
+			t.Fatal(qErr)
+		}
+		after := insertCost(t, inOrg, f.OrgB, appendB)
+		t.Logf("insert per event: %v and %d buffers with %d events, %v and %d buffers with %d events (rows of the outbox in the statistics: %.0f)",
+			before.median, before.buffers, before.events, after.median, after.buffers, after.events, stale)
+		if after.events < 50000 {
+			t.Fatalf("events of B: %d, want at least 50,000", after.events)
+		}
+		// The trigger reads no event: the buffers of an insert stay (the
+		// indexes may grow one level).
+		if after.buffers > before.buffers+12 {
+			t.Errorf("an insert reads %d buffers with %d events and %d with %d: the numbering depends on the number of events",
+				after.buffers, after.events, before.buffers, before.events)
+		}
+		if after.median > 3*before.median+2*time.Millisecond {
+			t.Errorf("insert per event %v with %d events, %v with %d: the numbering depends on the number of events",
+				after.median, after.events, before.median, before.events)
+		}
+	})
+}
+
+// cost is what an insert into the outbox costs with a number of events of
+// the organization: the median time of an Append in its own transaction
+// and the buffers of the insert statement including the numbering trigger.
+type cost struct {
+	events  int
+	median  time.Duration
+	buffers int64
+}
+
+// insertCost measures cost for orgID: 200 appends through appendEvent and
+// the fewest buffers of five EXPLAIN ANALYZE runs of an insert (the first
+// run of a connection also compiles the trigger function), rolled back.
+func insertCost(t *testing.T, inOrg func(string, func(context.Context, pgx.Tx) error) error, orgID string,
+	appendEvent func(*testing.T) *events.Envelope) cost {
+	t.Helper()
+	var c cost
+	durations := make([]time.Duration, 200)
+	for i := range durations {
+		start := time.Now()
+		appendEvent(t)
+		durations[i] = time.Since(start)
+	}
+	slices.Sort(durations)
+	c.median = durations[len(durations)/2]
+	rollback := errors.New("rollback")
+	if err := inOrg(orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM event_outbox WHERE organization_id = $1`, orgID).Scan(&c.events); err != nil {
+			return err
+		}
+		c.buffers = -1
+		for range 5 {
+			var plan []struct {
+				Plan struct {
+					Hit  int64 `json:"Shared Hit Blocks"`
+					Read int64 `json:"Shared Read Blocks"`
+				} `json:"Plan"`
+			}
+			if err := tx.QueryRow(ctx, `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+				INSERT INTO event_outbox (organization_id, type) VALUES ($1, 'job.failed')`, orgID).Scan(&plan); err != nil {
+				return err
+			}
+			if len(plan) != 1 {
+				return fmt.Errorf("plan: %+v", plan)
+			}
+			if b := plan[0].Plan.Hit + plan[0].Plan.Read; c.buffers < 0 || b < c.buffers {
+				c.buffers = b
+			}
+		}
+		return rollback
+	}); !errors.Is(err, rollback) {
+		t.Fatal(err)
+	}
+	return c
 }
 
 // TestOutboxCleanupDropsAnchorData covers NFR-06 and EVT-01 (WP-548,
@@ -443,5 +609,100 @@ func TestOutboxCleanupDropsAnchorData(t *testing.T) {
 	if next.Sequence != 7 || next.EntitySeq != 4 || again.Sequence != 8 || again.EntitySeq != 2 || org.Sequence != 9 {
 		t.Errorf("numbering after the cleanup: CI %d/%d, invitation %d/%d, organization %d; want 7/4, 8/2, 9",
 			next.Sequence, next.EntitySeq, again.Sequence, again.EntitySeq, org.Sequence)
+	}
+}
+
+// TestCIStatusChangedFollowsCIChanged covers EVT-03 (WP-707): an update
+// through ci.PGRepository.Update whose changed fields contain status
+// writes ci.changed and, in the same transaction, ci.status_changed; the
+// entity_seq of ci.status_changed follows that of ci.changed directly, its
+// data are the CI snapshot of ci.changed with changed_fields and the old
+// and new status as from and to. A status change together with a name
+// change writes the same; a name change alone only ci.changed.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCIStatusChangedFollowsCIChanged(t *testing.T) {
+	f := scopetest.Seed(t, "98")
+	bg := context.Background()
+	repo := ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox())
+	ctx := f.OrgCtx(f.OrgA)
+	var typeID string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&typeID); err != nil {
+		t.Fatal(err)
+	}
+	item := &ci.Item{OrganizationID: f.OrgA, CITypeID: typeID, Name: "evt-status", Status: "active", Attributes: map[string]any{}}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		typ       string
+		entitySeq int64
+		data      map[string]any
+	}
+	// eventsOf returns the events of the CI after its entity_seq after.
+	eventsOf := func(t *testing.T, after int64) []row {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT type, entity_seq, data FROM event_outbox
+			WHERE organization_id = $1 AND entity_id = $2 AND entity_seq > $3 ORDER BY sequence`, f.OrgA, item.ID, after)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
+			var x row
+			scanErr := r.Scan(&x.typ, &x.entitySeq, &x.data)
+			return x, scanErr
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	ptr := func(s string) *string { return &s }
+	seq := int64(1) // ci.created
+	for _, c := range []struct {
+		name     string
+		req      ci.UpdateRequest
+		fields   []any
+		from, to string // empty: no ci.status_changed
+	}{
+		{"status", ci.UpdateRequest{Status: ptr("maintenance")}, []any{"status"}, "active", "maintenance"},
+		{"status and name", ci.UpdateRequest{Status: ptr("inactive"), Name: ptr("evt-status-renamed")}, []any{"name", "status"}, "maintenance", "inactive"},
+		{"name only", ci.UpdateRequest{Name: ptr("evt-status-again")}, []any{"name"}, "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := repo.Update(ctx, f.OrgA, item.ID, c.req); err != nil {
+				t.Fatal(err)
+			}
+			got := eventsOf(t, seq)
+			want := []string{events.CIChanged}
+			if c.to != "" {
+				want = append(want, events.CIStatusChanged)
+			}
+			var types []string
+			for _, g := range got {
+				types = append(types, g.typ)
+			}
+			if !slices.Equal(types, want) {
+				t.Fatalf("events of the update: %v, want %v", types, want)
+			}
+			for i, g := range got {
+				if g.entitySeq != seq+int64(i)+1 {
+					t.Errorf("%s: entity_seq %d, want %d", g.typ, g.entitySeq, seq+int64(i)+1)
+				}
+				fields, _ := g.data["changed_fields"].([]any)
+				slices.SortFunc(fields, func(a, b any) int { return strings.Compare(fmt.Sprint(a), fmt.Sprint(b)) })
+				if g.data["id"] != item.ID || !slices.Equal(fields, c.fields) {
+					t.Errorf("%s data: id %v, changed_fields %v; want %s and %v", g.typ, g.data["id"], g.data["changed_fields"], item.ID, c.fields)
+				}
+			}
+			if c.to != "" {
+				status := got[1].data
+				if status["from"] != c.from || status["to"] != c.to || status["status"] != c.to || status["name"] != got[0].data["name"] {
+					t.Errorf("ci.status_changed data: from %v, to %v, status %v, name %v; want %s, %s and the snapshot of ci.changed (%v)",
+						status["from"], status["to"], status["status"], status["name"], c.from, c.to, got[0].data)
+				}
+			}
+			seq += int64(len(got))
+		})
 	}
 }

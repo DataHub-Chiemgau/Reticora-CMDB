@@ -133,11 +133,26 @@ nebeneinander arbeiten.
   wenn die Records eines Geräts in verschiedenen Spuren liegen.
 - **Topologie:** Kanten zu einem Nachbarn, den eine andere Spur im selben
   Moment neu anlegt, entstehen spätestens im nächsten Discovery-Zyklus.
-- **max_cis (ENT-03):** Für Records aus der Queue zählt jede anlegende
-  Transaktion die CIs unter einer Sperre der Organisation neu: nahe am Limit
-  exklusiv (exakt), sonst geteilt. Ausnahme: Während Drain-Spuren (siehe
-  unten) Rückstand haben, kann jede von ihnen das Limit um höchstens 100
-  überschreiten.
+- **max_cis (ENT-03, SR-09):** Für Records aus der Queue zählt jede
+  anlegende Transaktion die CIs unter einer Sperre der Organisation neu: nahe
+  am Limit exklusiv (exakt), sonst geteilt. „Nahe“ heißt: weniger Spielraum
+  als (Spuren + Drain-Spuren + Altconsumer) × 100 Records in Arbeit. Seit
+  WP-835 zählen die Drain-Spuren dieser Instanz mit (siehe „Spurzahl
+  ändern“); sie überschreiten das Limit nicht mehr. Dieselbe Sperre
+  (Klasse `0x52436e74`, Schlüssel aus `backend/internal/database/advisory.go`)
+  nehmen exklusiv auch alle anderen anlegenden Pfade in der Transaktion, die
+  das CI anlegt oder reaktiviert, und zählen darunter neu (`ci.CIAdmitter`):
+  `POST /cis`, Wiederherstellen und Unmerge (`ci.Service`), die Übernahme
+  gehaltener Geräte nach einer Lizenzänderung (`AdoptUnlicensed`) und die
+  Review-Auflösungen `unlicensed_ci`, „neu“ und Reaktivierung. Ein Ingest mit
+  Spuren und eine gleichzeitige Übernahme ergeben deshalb genau das Limit
+  (`TestIngestLanesMaxCIs`, `TestCreateAdmission`). Ohne gespeichertes Limit
+  nimmt kein Pfad die Sperre. Ausnahme bleibt der HTTP-Ingest ohne Queue mit
+  einer Spur (WP-332/333): Er zählt ohne Sperre zu Beginn des Batches.
+- **Identitätssperre für andere Kanäle:** Andere Kanäle, die CIs anlegen
+  oder Geräte über Identitätsmerkmale abgleichen (Import, WP-302; K21),
+  nehmen dieselbe Sperre über `discovery.LockIdentityKeys` bzw.
+  `discovery.IdentityLocksFor` als erste Anweisung ihrer Transaktion.
 - **Konflikte zwischen Spuren:** Ein Deadlock (40P01), ein
   Serialisierungsfehler (40001) oder ein Unique-Index auf Seriennummer,
   Hardware-UUID oder Primär-MAC, den eine andere Spur oder Instanz zuerst
@@ -215,7 +230,11 @@ erhalten und werden über diesen Consumer verarbeitet (`/readyz`: Spur
   Zahl haben und die Spur in `/readyz` den Rückstand 0 zeigt, kann sie
   entfernt werden: `nats consumer rm RETICORA_INGEST reticora-ingest-lane-<n>`.
   Laufende Instanzen beenden die Drain-Spur dann ohne Fehler
-  (Log `ingest.lane.removed`).
+  (Log `ingest.lane.removed`). Jede Drain-Spur zählt bis dahin bei der
+  `max_cis`-Zulassung als Spur mit 100 Records in Arbeit (WP-835): nahe am
+  Limit läuft die Zulassung früher exklusiv, das Limit hält auch bei vollem
+  Rückstand. Eine Spur, die eine andere Instanz mit mehr Spuren neu anlegt,
+  zählt ab der nächsten Prüfung der Consumer (höchstens 30 s) mit.
 - Beim Wechsel kann ein Gerät für kurze Zeit in zwei Spuren Nachrichten haben,
   und Instanzen mit alter und neuer Spurzahl laufen nebeneinander. Weil jede
   Transaktion eines Records aus der Queue die Sperren nimmt, auch auf

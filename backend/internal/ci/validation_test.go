@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -180,6 +181,58 @@ func TestServiceCreateRejectsInvalidAttributes(t *testing.T) {
 	item.Attributes = map[string]any{"server_kind": "virtual", "hypervisor": "esx-01"}
 	if err := svc.Create(context.Background(), item); err != nil {
 		t.Fatalf("valid payload must be accepted, got %v", err)
+	}
+}
+
+// compositionConflict is a composition error as citype.CompositionError
+// reports it (MET-16), without importing citype.
+type compositionConflict struct{ key, code string }
+
+func (c compositionConflict) Error() string {
+	return "attribute " + c.key + ": no allowed value is left (MET-16)"
+}
+func (c compositionConflict) CompositionKey() string  { return c.key }
+func (c compositionConflict) CompositionCode() string { return c.code }
+
+// conflictResolver fails like a resolver whose layers cannot be composed.
+type conflictResolver struct{ err error }
+
+func (r conflictResolver) ResolveFields(context.Context, string, string, string) ([]fieldmeta.FieldDefinition, error) {
+	return nil, r.err
+}
+
+// TestResolveFieldsCompositionCode covers WP-711 (MET-16): a composition
+// conflict rejects the write with a violation of the key that carries the
+// code of the conflict, and the violation's JSON contains it.
+func TestResolveFieldsCompositionCode(t *testing.T) {
+	conflict := compositionConflict{key: "env", code: "enum-empty"}
+	_, err := resolveFields(context.Background(), conflictResolver{err: fmt.Errorf("resolve: %w", conflict)}, "org-1", "t", "")
+	ve, ok := AsValidationError(err)
+	if !ok {
+		t.Fatalf("err = %v, want a validation error", err)
+	}
+	want := Violation{Field: "env", Detail: "resolve: " + conflict.Error(), Code: "enum-empty"}
+	if len(ve.Violations) != 1 || ve.Violations[0] != want {
+		t.Fatalf("violations = %+v, want [%+v]", ve.Violations, want)
+	}
+	raw, err := json.Marshal(ve.Violations[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err = json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["code"] != "enum-empty" || got["field"] != "env" {
+		t.Errorf("violation JSON = %s, want field env and code enum-empty", raw)
+	}
+	// A violation without a code leaves the property out.
+	raw, err = json.Marshal(Violation{Field: "env", Detail: "field is required"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "code") {
+		t.Errorf("violation JSON = %s, want no code", raw)
 	}
 }
 

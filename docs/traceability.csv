@@ -1187,3 +1187,35 @@ DOD-01;[Q];B;backend/internal/traceability/traceability_test.go;WP-704
 CI-13;[B];B;backend/internal/bootstrap/cirepo_test.go;WP-833
 MET-15;B/G1;B;backend/internal/bootstrap/cirepo_test.go;WP-833
 UI-15;[P2];B;backend/internal/ci/provenance_integration_test.go;WP-850
+ENT-06;(V), [B–P4], [A];B;backend/internal/entitlement/entitlement_test.go;WP-244
+ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-244
+SRC-01;[B];B;backend/internal/search/plan_integration_test.go;WP-836
+NFR-02;[B];B;backend/internal/ci/attr_filter_plan_integration_test.go;WP-836
+REC-02;[B];B;backend/internal/tenant/rls/index_catalog_integration_test.go;WP-836
+RBA-05;[P2–P4], [A];B;backend/internal/permission/role_matrix_integration_test.go;WP-245
+RBA-06;[P2];B;backend/internal/permission/role_matrix_integration_test.go;WP-245
+NFR-03;[B], Teilumfang [P5];B;tests/load/ingest.js;WP-834
+EVT-01;[B];B;backend/internal/events/outbox_integration_test.go;WP-834
+ENT-03;[B];B;backend/internal/ci/admission_integration_test.go;WP-835
+RBA-05;[P2–P4], [A];B;backend/internal/server/modules_test.go;WP-705
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/modules_test.go;WP-705
+ABN-03;[Q], jeweilige Phase;B;backend/internal/tenant/rls/object_reference_integration_test.go;WP-838
+TEN-09;[Q];B;backend/internal/tenant/rls/object_reference_integration_test.go;WP-838
+MET-51;P2/G2;B;frontend/src/pages/CIFormModal.test.tsx;WP-804
+UI-12;[P2];B;frontend/src/components/cmdb/CIDetailSections.test.tsx;WP-804
+NFR-02;[B];B;backend/internal/topology/querybudget_integration_test.go;WP-840
+NFR-01;[B], Teilumfang [P5];B;backend/internal/topology/querybudget_integration_test.go;WP-840
+ABN-02;[Q];B;backend/internal/topology/querybudget_integration_test.go;WP-840
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/modules_test.go;WP-706
+RBA-05;[P2–P4], [A];B;backend/internal/server/modules_test.go;WP-706
+EVT-03;[P2–P3];B;backend/internal/events/types_test.go;WP-246
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/parity_test.go;WP-247
+EVT-03;[P2–P3];B;backend/internal/events/outbox_integration_test.go;WP-707
+API-04;[B];C;backend/internal/middleware/idempotency_integration_test.go;WP-778
+MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/rules/rules_test.go;WP-715
+NFR-02;[B];B;tests/load/api.js;WP-839
+NFR-01;[B], Teilumfang [P5];B;backend/internal/topology/querybudget_integration_test.go;WP-839
+API-01;[B];B;backend/internal/ci/listquery_integration_test.go;WP-839
+MET-16;B/G1, Teil P2/G2;B;backend/internal/citype/new_type_integration_test.go;WP-711
+MET-06;[P2];B;backend/internal/citype/inherit_integration_test.go;WP-248
+MET-01;B/G1, Teil P2/G2;B;backend/internal/citype/inherit_integration_test.go;WP-248

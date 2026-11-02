@@ -179,7 +179,8 @@ func (o *Options) orgSpecs() []orgSpec {
 // inserted only if missing, so a second run with the same options changes
 // nothing. After the seed transaction of an organization its CIs are indexed
 // for the search (index) and the index of its searchable attribute is built
-// (attributeIndex).
+// (attributeIndex). At the end the statistics of the grown tables are
+// refreshed (database.AnalyzeAfterBulk).
 func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error) {
 	if err := opts.Validate(); err != nil {
 		return Summary{}, err
@@ -203,6 +204,11 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 			return Summary{}, fmt.Errorf("attribute index %s: %w", slug, err)
 		}
 		summary.Orgs = append(summary.Orgs, Org{ID: o.id, Slug: slug, Admin: o.admin, APIKey: o.apiKey})
+	}
+	// The plans of the ingest and the lists need the statistics of the new
+	// rows; autovacuum analyzes only later (WP-834, SR-08).
+	if _, err := database.AnalyzeAfterBulk(ctx, pool); err != nil {
+		return Summary{}, fmt.Errorf("analyze after the seed: %w", err)
 	}
 	return summary, nil
 }

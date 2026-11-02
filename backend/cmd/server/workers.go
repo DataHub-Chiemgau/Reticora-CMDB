@@ -333,7 +333,7 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 	// Release expired reservations (spec §10); reservations belong to the
 	// inventory module (WP-214).
 	var systemJobs []jobs.Schedule
-	if d.modules.Enabled("inventory") {
+	if d.modules.Enabled(server.ModuleInventory) {
 		systemJobs = append(systemJobs, reservation.NewSweeper(d.repos.Reservation, d.dispatcher).Schedule())
 	}
 	// Retention runs per kind of data (NFR-06, AUD-09) and key rotation

@@ -2330,7 +2330,10 @@ export interface paths {
     /** List stock movements of a consumable */
     get: operations['listConsumableMovements'];
     put?: never;
-    /** Record a stock in/out movement and adjust the level atomically */
+    /**
+     * Record a stock in/out movement and adjust the level atomically
+     * @description The planned successor is POST /api/v1/stock-movements with the quantity bookings receipt and retrieval (E-38); the deprecation follows once the successor is implemented (WP-283, WP-756).
+     */
     post: operations['addConsumableMovement'];
     delete?: never;
     options?: never;
@@ -5785,7 +5788,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the movement ledger of an asset */
+    /**
+     * List the movement ledger of an asset
+     * @deprecated
+     * @description Deprecated (E-38, WP-247): the successor is GET /api/v1/stock-movements with the filter asset_id, which reads the same ledger. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
+     */
     get: operations['listAssetsIdMovements'];
     put?: never;
     post?: never;
@@ -5897,7 +5904,7 @@ export interface paths {
     head?: never;
     /**
      * Update an attribute definition
-     * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409.
+     * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409. A definition that cannot be composed with the other layers of its key (MET-16) is 422 with `field` = `key` and a `code`.
      */
     patch: operations['updateAttributeDefinition'];
     trace?: never;
@@ -5917,7 +5924,7 @@ export interface paths {
     put?: never;
     /**
      * Create a CI type
-     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01).
+     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01). `parent_type_id` makes the type a subtype of a type of the organization or a system type (MET-06): an unknown parent and one of another organization are both 422 on `parent_type_id`, as is a chain of more than 6 types; a taken key or name is 409.
      */
     post: operations['createCiTypes'];
     delete?: never;
@@ -5980,7 +5987,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Update a CI type */
+    /**
+     * Update a CI type
+     * @description `parent_type_id` moves the type below another type of the organization or a system type (MET-06); an empty string makes it a root. An unknown parent and one of another organization are both 422 on `parent_type_id`, a cycle is 409, a chain of more than 6 types (including the moved subtree) is 422, and a moved subtree whose attribute definitions cannot be composed is 422 naming the attribute key. An unknown CI type, or a system type, is 404.
+     */
     patch: operations['updateCiTypesId'];
     trace?: never;
   };
@@ -6370,10 +6380,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage quantity-based inventory items */
+    /**
+     * Manage quantity-based inventory items
+     * @description The planned successor is /api/v1/consumables (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     */
     get: operations['listInventoryItems'];
     put?: never;
-    /** Manage quantity-based inventory items */
+    /**
+     * Manage quantity-based inventory items
+     * @description The planned successor is POST /api/v1/consumables (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     */
     post: operations['createInventoryItems'];
     delete?: never;
     options?: never;
@@ -6388,15 +6404,24 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read, update or delete a quantity inventory item */
+    /**
+     * Read, update or delete a quantity inventory item
+     * @description The planned successor is /api/v1/consumables/{id} (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     */
     get: operations['getInventoryItemsId'];
     put?: never;
     post?: never;
-    /** Read, update or delete a quantity inventory item */
+    /**
+     * Read, update or delete a quantity inventory item
+     * @description The planned successor is /api/v1/consumables/{id} (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     */
     delete: operations['deleteInventoryItemsId'];
     options?: never;
     head?: never;
-    /** Read, update or delete a quantity inventory item */
+    /**
+     * Read, update or delete a quantity inventory item
+     * @description The planned successor is /api/v1/consumables/{id} (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     */
     patch: operations['updateInventoryItemsId'];
     trace?: never;
   };
@@ -6407,12 +6432,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage lifecycle definitions */
+    /**
+     * Manage lifecycle definitions
+     * @description The planned successor is /api/v1/lifecycle-models (E-38); WP-723 deprecates this G1 path with at least 12 months of notice once the successor is implemented.
+     */
     get: operations['listLifecycleDefinitions'];
     put?: never;
     /**
      * Manage lifecycle definitions
-     * @description `applies_to` is asset (default), ci or both; another value is a 422 field error. A taken key is 409.
+     * @description `applies_to` is asset (default), ci or both; another value is a 422 field error. A taken key is 409. The planned successor is /api/v1/lifecycle-models (E-38); WP-723 deprecates this G1 path with at least 12 months of notice once the successor is implemented.
      */
     post: operations['createLifecycleDefinitions'];
     delete?: never;
@@ -6428,11 +6456,17 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read or delete a lifecycle definition */
+    /**
+     * Read or delete a lifecycle definition
+     * @description The planned successor is /api/v1/lifecycle-models/{id} (E-38); WP-723 deprecates this G1 path once the successor is implemented.
+     */
     get: operations['getLifecycleDefinitionsId'];
     put?: never;
     post?: never;
-    /** Read or delete a lifecycle definition */
+    /**
+     * Read or delete a lifecycle definition
+     * @description The planned successor is /api/v1/lifecycle-models/{id} (E-38); WP-723 deprecates this G1 path once the successor is implemented.
+     */
     delete: operations['deleteLifecycleDefinitionsId'];
     options?: never;
     head?: never;
@@ -6769,6 +6803,1205 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/attribute-definitions/{id}/reindex': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rebuild the index of an attribute definition
+     * @description Planned (E-38); WP-796 implements the operation.
+     */
+    post: operations['reindexAttributeDefinition'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lifecycle-models': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List lifecycle models
+     * @description Planned (E-38); WP-723 implements the operation.
+     */
+    get: operations['listLifecycleModels'];
+    put?: never;
+    /**
+     * Create a lifecycle model
+     * @description Planned (E-38); WP-723 implements the operation.
+     */
+    post: operations['createLifecycleModel'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/lifecycle-models/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a lifecycle model
+     * @description Planned (E-38); WP-723 implements the operation.
+     */
+    get: operations['getLifecycleModel'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a lifecycle model
+     * @description Planned (E-38); WP-723 implements the operation.
+     */
+    delete: operations['deleteLifecycleModel'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a lifecycle model
+     * @description Planned (E-38); WP-723 implements the operation.
+     */
+    patch: operations['updateLifecycleModel'];
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/as-of': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Reconstruct the state of a CI at a point in time
+     * @description Planned (E-38); WP-793 implements the operation.
+     */
+    get: operations['getCIAsOf'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/form': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get the resolved form of a CI
+     * @description Planned (E-38); WP-719 implements the operation.
+     */
+    get: operations['getCIForm'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ci-types/{id}/form': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get the resolved form of a CI type
+     * @description Planned (E-38); WP-719 implements the operation.
+     */
+    get: operations['getCITypeForm'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/templates': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the templates assigned to a CI
+     * @description Planned (E-38); WP-710 implements the operation.
+     */
+    get: operations['listCITemplates'];
+    /**
+     * Replace the templates assigned to a CI
+     * @description Planned (E-38); WP-710 implements the operation.
+     */
+    put: operations['replaceCITemplates'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/instance-attributes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the instance attribute values of a CI
+     * @description Planned (E-38); WP-256 implements the operation.
+     */
+    get: operations['listCIInstanceAttributes'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/instance-attributes/{key}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Key of the instance attribute. */
+        key: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set an instance attribute value of a CI
+     * @description Planned (E-38); WP-256 implements the operation.
+     */
+    put: operations['setCIInstanceAttribute'];
+    post?: never;
+    /**
+     * Remove an instance attribute value of a CI
+     * @description Planned (E-38); WP-256 implements the operation.
+     */
+    delete: operations['deleteCIInstanceAttribute'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tags': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List tags
+     * @description Planned (E-38); WP-753 implements the operation.
+     */
+    get: operations['listTags'];
+    put?: never;
+    /**
+     * Create a tag
+     * @description Planned (E-38); WP-753 implements the operation.
+     */
+    post: operations['createTag'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tags/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a tag
+     * @description Planned (E-38); WP-753 implements the operation.
+     */
+    get: operations['getTag'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a tag
+     * @description Planned (E-38); WP-753 implements the operation.
+     */
+    delete: operations['deleteTag'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a tag
+     * @description Planned (E-38); WP-753 implements the operation.
+     */
+    patch: operations['updateTag'];
+    trace?: never;
+  };
+  '/api/v1/tags/{id}/merge': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Merge a tag into another tag
+     * @description Planned (E-38); WP-753 implements the operation.
+     */
+    post: operations['mergeTag'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/cis/{id}/tags': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace the tags of a CI
+     * @description Planned (E-38); WP-753 implements the operation.
+     */
+    put: operations['replaceCITags'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/subnets/{id}/reservations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the IP reservations of a subnet
+     * @description Planned (E-38); WP-299 implements the operation.
+     */
+    get: operations['listSubnetReservations'];
+    put?: never;
+    /**
+     * Reserve an IP address in a subnet
+     * @description Planned (E-38); WP-299 implements the operation.
+     */
+    post: operations['createSubnetReservation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/subnets/{id}/reservations/{ip_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description IP address identifier. */
+        ip_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Release an IP reservation of a subnet
+     * @description Planned (E-38); WP-299 implements the operation.
+     */
+    delete: operations['deleteSubnetReservation'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/relationships/{id}/changes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the change history of a relationship
+     * @description Planned (E-38); WP-296 implements the operation.
+     */
+    get: operations['listRelationshipChanges'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/bulk': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Run a bulk operation on assets
+     * @description Planned (E-38); WP-781 implements the operation.
+     */
+    post: operations['bulkAssets'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/assign': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Assign an asset
+     * @description Planned (E-38); WP-275 implements the operation.
+     */
+    post: operations['assignAsset'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/return': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Return an assigned asset
+     * @description Planned (E-38); WP-275 implements the operation.
+     */
+    post: operations['returnAsset'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/transfer': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Transfer an assigned asset to another assignee
+     * @description Planned (E-38); WP-275 implements the operation.
+     */
+    post: operations['transferAsset'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/reserve': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Reserve an asset
+     * @description Planned (E-38); WP-277 implements the operation.
+     */
+    post: operations['reserveAsset'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/cis': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the CIs linked to an asset
+     * @description Planned (E-38); WP-272 implements the operation.
+     */
+    get: operations['listAssetCIs'];
+    put?: never;
+    /**
+     * Link a CI to an asset
+     * @description Planned (E-38); WP-272 implements the operation.
+     */
+    post: operations['linkAssetCI'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/cis/{ci_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description CI identifier. */
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Unlink a CI from an asset
+     * @description Planned (E-38); WP-272 implements the operation.
+     */
+    delete: operations['unlinkAssetCI'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/label': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Render the label of an asset
+     * @description Planned (E-38); WP-763 implements the operation.
+     */
+    get: operations['getAssetLabel'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/as-of': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Reconstruct the state of an asset at a point in time
+     * @description Planned (E-38); WP-795 implements the operation.
+     */
+    get: operations['getAssetAsOf'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/assets/{id}/tags': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace the tags of an asset
+     * @description Planned (E-38); WP-755 implements the operation.
+     */
+    put: operations['replaceAssetTags'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/reservations/{id}/convert': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Convert a reservation into an assignment
+     * @description Planned (E-38); WP-277 implements the operation.
+     */
+    post: operations['convertReservation'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/stock-movements/{id}/signature': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Verify the signature of a movement
+     * @description Planned (E-38); WP-748 implements the operation.
+     */
+    get: operations['verifyStockMovementSignature'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/consumables/{id}/stock': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the stock levels of a consumable per bin
+     * @description Planned (E-38); WP-283 implements the operation.
+     */
+    get: operations['listConsumableStock'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/consumables/{id}/availability': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get the availability of a consumable
+     * @description Planned (E-38); WP-759 implements the operation.
+     */
+    get: operations['getConsumableAvailability'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/orders/{id}/place': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Place an approved order
+     * @description Planned (E-38); WP-286 implements the operation.
+     */
+    post: operations['placeOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/orders/{id}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel an order
+     * @description Planned (E-38); WP-286 implements the operation.
+     */
+    post: operations['cancelOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/orders/{id}/close': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Close an order
+     * @description Planned (E-38); WP-286 implements the operation.
+     */
+    post: operations['closeOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/orders/{id}/receive': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Book the goods receipt of an order
+     * @description Planned (E-38); WP-760 implements the operation.
+     */
+    post: operations['receiveOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/stocktakes/{id}/start': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a stocktake
+     * @description Planned (E-38); WP-287 implements the operation.
+     */
+    post: operations['startStocktake'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/stocktakes/{id}/items': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the expected items of a stocktake
+     * @description Planned (E-38); WP-287 implements the operation.
+     */
+    get: operations['listStocktakeItems'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/stocktakes/{id}/differences': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the differences of a stocktake
+     * @description Planned (E-38); WP-287 implements the operation.
+     */
+    get: operations['listStocktakeDifferences'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/stocktakes/{id}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel a stocktake
+     * @description Planned (E-38); WP-287 implements the operation.
+     */
+    post: operations['cancelStocktake'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/documents/usage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the storage usage of the documents
+     * @description Planned (E-38); WP-731 implements the operation.
+     */
+    get: operations['getDocumentUsage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/documents/{id}/versions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the versions of a document
+     * @description Planned (E-38); WP-731 implements the operation.
+     */
+    get: operations['listDocumentVersions'];
+    put?: never;
+    /**
+     * Upload a new version of a document
+     * @description Planned (E-38); WP-731 implements the operation.
+     */
+    post: operations['createDocumentVersion'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/documents/{id}/links/{link_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Link identifier. */
+        link_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove a link of a document
+     * @description Planned (E-38); WP-267 implements the operation.
+     */
+    delete: operations['deleteDocumentLink'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tickets/{id}/links': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the object links of a ticket
+     * @description Planned (E-38); WP-764 implements the operation.
+     */
+    get: operations['listTicketLinks'];
+    put?: never;
+    /**
+     * Link an object to a ticket
+     * @description Planned (E-38); WP-764 implements the operation.
+     */
+    post: operations['createTicketLink'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tickets/{id}/links/{link_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Link identifier. */
+        link_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove an object link of a ticket
+     * @description Planned (E-38); WP-764 implements the operation.
+     */
+    delete: operations['deleteTicketLink'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/tickets/{id}/attachments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the documents attached to a ticket
+     * @description Planned (E-38); WP-765 implements the operation.
+     */
+    get: operations['listTicketAttachments'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/import-profiles': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List import profiles
+     * @description Planned (E-38); WP-774 implements the operation.
+     */
+    get: operations['listImportProfiles'];
+    put?: never;
+    /**
+     * Create an import profile
+     * @description Planned (E-38); WP-774 implements the operation.
+     */
+    post: operations['createImportProfile'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/import-profiles/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get an import profile
+     * @description Planned (E-38); WP-774 implements the operation.
+     */
+    get: operations['getImportProfile'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete an import profile
+     * @description Planned (E-38); WP-774 implements the operation.
+     */
+    delete: operations['deleteImportProfile'];
+    options?: never;
+    head?: never;
+    /**
+     * Update an import profile
+     * @description Planned (E-38); WP-774 implements the operation.
+     */
+    patch: operations['updateImportProfile'];
+    trace?: never;
+  };
+  '/api/v1/imports': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start an import run
+     * @description Planned (E-38); WP-301 implements the operation.
+     */
+    post: operations['createImport'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/imports/preview': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview the columns of an import file
+     * @description Planned (E-38); WP-301 implements the operation.
+     */
+    post: operations['previewImport'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/imports/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get an import run
+     * @description Planned (E-38); WP-301 implements the operation.
+     */
+    get: operations['getImport'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/imports/{id}/report': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get the report of an import run
+     * @description Planned (E-38); WP-301 implements the operation.
+     */
+    get: operations['getImportReport'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -7039,6 +8272,8 @@ export interface components {
       readonly required_fields?: string[];
       version: number;
       cloned_from_id?: string;
+      /** @description Parent in the type chain (MET-06); absent for a root. The type inherits the inheritable attribute definitions of its ancestors. */
+      parent_type_id?: string;
       template_key?: string;
       lifecycle_definition_id?: string;
       capabilities: {
@@ -7076,6 +8311,11 @@ export interface components {
       category?: string;
       is_logical?: boolean;
       is_observable?: boolean;
+      /**
+       * Format: uuid
+       * @description Parent type of the organization or a system type (MET-06).
+       */
+      parent_type_id?: string;
       template_key?: string;
       lifecycle_definition_id?: string;
       capabilities?: {
@@ -7099,6 +8339,8 @@ export interface components {
       category?: string;
       is_logical?: boolean;
       is_observable?: boolean;
+      /** @description New parent type (MET-06); an empty string makes the type a root. */
+      parent_type_id?: string;
       lifecycle_definition_id?: string;
       capabilities?: {
         [key: string]: unknown;
@@ -7179,7 +8421,7 @@ export interface components {
       slug?: string;
       /** @enum {string} */
       plan: 'essential' | 'standard' | 'pro' | 'enterprise';
-      /** @description Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access). */
+      /** @description Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access, max_storage_mb on documents). Without max_storage_mb the plan default is stored (E-44: essential 1000, standard 10000, pro 50000 MiB; enterprise unlimited, no entry). */
       limits?: {
         /** Format: int64 */
         max_cis?: number;
@@ -7189,6 +8431,11 @@ export interface components {
         max_users?: number;
         /** Format: int64 */
         max_api_keys?: number;
+        /**
+         * Format: int64
+         * @description Document storage of the organization in MiB (MGT-01), stored on documents.
+         */
+        max_storage_mb?: number;
       };
       admin_email: string;
       admin_display_name?: string;
@@ -7394,6 +8641,11 @@ export interface components {
       impacted: components['schemas']['ImpactNode'][];
       count: number;
       summary: components['schemas']['ImpactSummary'];
+      /**
+       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01).
+       * @enum {boolean}
+       */
+      truncated?: true;
     };
     /** @description The answer of /api/v1/impact and /api/v1/impact/{ci_id} with fields (API-02): the properties of ImpactAnalysis, but each impacted CI carries its id and the selected fields only (ImpactNodeFields). */
     ImpactAnalysisFields: {
@@ -7408,6 +8660,11 @@ export interface components {
       impacted: components['schemas']['ImpactNodeFields'][];
       count: number;
       summary: components['schemas']['ImpactSummary'];
+      /**
+       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01).
+       * @enum {boolean}
+       */
+      truncated?: true;
     };
     BlastRadius: {
       ci_id: string;
@@ -7615,11 +8872,22 @@ export interface components {
       instance?: string;
       /** @description Request id of the failed request (equals the X-Request-ID response header). */
       trace_id: string;
-      /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client). */
+      /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client, or `key` of an attribute definition that cannot be composed, 422). */
       field?: string;
+      /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`) or `length-range-empty` (`min_length` > `max_length`). */
+      code?: string;
     };
     PaginationEnvelope: {
+      /**
+       * @description Number of matching entries. GET /api/v1/cis counts capped (E-104):
+       *     exact up to 10,000; beyond, total is 10,000 and total_capped is true.
+       */
       total: number;
+      /**
+       * @description True when the count stopped at 10,000 and more entries match (E-104,
+       *     GET /api/v1/cis). Absent or false otherwise.
+       */
+      total_capped?: boolean;
       limit: number;
       offset: number;
       has_more: boolean;
@@ -8191,14 +9459,65 @@ export interface components {
     RelationshipSuppressionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['RelationshipSuppression'][];
     };
-    /** @enum {string} */
+    /**
+     * @description A subscribable event (webhook.ValidEvents, WP-246): the registered event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2]) without `webhook.dead` and `apikey.creator_deactivated`, which notify the org_admins only. Deprecated former names, delivered under their new type: `ci.updated` (now `ci.changed`), `relationship.deleted` (now `relationship.removed`), `lifecycle.transitioned` (now `lifecycle.changed`), `inventory.movement` and `asset.movement` (now `stock.movement`). Deprecated names without an event contract (dispatched directly or never raised): `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`, `ci_attribute.changed`, `composition.created`, `composition.updated`, `composition.deleted`, `override.changed`, `reconciliation.policy_changed`, `discovery.completed`. `webhook.test` and the reserved types of phase 3 (`maintenance.scheduled`, `workflow.*`, `finding.*`) cannot be subscribed to.
+     * @enum {string}
+     */
     WebhookEvent:
       | 'ci.created'
-      | 'ci.updated'
+      | 'ci.changed'
       | 'ci.deleted'
-      | 'ci.status_changed'
+      | 'ci.restored'
+      | 'ci.merged'
+      | 'ci.offline'
+      | 'ci.online'
       | 'relationship.created'
+      | 'relationship.removed'
+      | 'collector.enrolled'
+      | 'collector.offline'
+      | 'review.created'
+      | 'review.resolved'
+      | 'export.completed'
+      | 'job.failed'
+      | 'entitlement.warning'
+      | 'entitlement.expired'
+      | 'invitation.created'
+      | 'certificate.expiring'
+      | 'ci.status_changed'
+      | 'lifecycle.changed'
+      | 'relationship.changed'
+      | 'asset.created'
+      | 'asset.changed'
+      | 'asset.deleted'
+      | 'asset.assigned'
+      | 'asset.returned'
+      | 'asset.warranty_expiring'
+      | 'contract.expiring'
+      | 'stock.movement'
+      | 'stock.below_minimum'
+      | 'reservation.created'
+      | 'reservation.released'
+      | 'reservation.expired'
+      | 'reservation.converted'
+      | 'ticket.updated'
+      | 'ticket.sla_breached'
+      | 'metamodel.published'
+      | 'document.scanned'
+      | 'import.completed'
+      | 'ci.updated'
       | 'relationship.deleted'
+      | 'lifecycle.transitioned'
+      | 'inventory.movement'
+      | 'asset.movement'
+      | 'ci_type.created'
+      | 'ci_type.updated'
+      | 'ci_type.deactivated'
+      | 'ci_attribute.changed'
+      | 'composition.created'
+      | 'composition.updated'
+      | 'composition.deleted'
+      | 'override.changed'
+      | 'reconciliation.policy_changed'
       | 'discovery.completed';
     WebhookSubscription: {
       id: string;
@@ -8569,13 +9888,13 @@ export interface components {
     };
     /** @enum {string} */
     EntitlementPlan: 'essential' | 'standard' | 'pro' | 'enterprise';
-    /** @description Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02): cmdb_core (always active), discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email. */
+    /** @description Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02): cmdb_core (always active), discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email. Phase-2 feature keys (ENT-06, E-44): assets_basic, documents, import and ticketing_essential in every plan; ticketing_standard, signature, stock, stocktake_standard, barcode, gps_standard, workplace and export_datev from standard on; internal_orders from pro on. Module keys of phases 3 and 4 (monitoring, endpoint_agent, workflow_forms, compliance) and the add-ons iga and ai. */
     Entitlement: {
       organization_id: string;
       feature_key: string;
       plan: components['schemas']['EntitlementPlan'];
       enabled: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A quota only gates when it is stored here (E-34). New organizations get the plan default of max_storage_mb stored (E-44: essential 1000, standard 10000, pro 50000; enterprise unlimited, no entry); existing organizations get none. */
       limits: {
         [key: string]: number;
       };
@@ -8588,14 +9907,14 @@ export interface components {
       feature: string;
       plan: components['schemas']['EntitlementPlan'];
       enabled: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A quota only gates when it is stored (E-34); new organizations get the plan default of max_storage_mb stored (E-44). */
       limits?: {
         [key: string]: number;
       };
     };
     GrantEntitlementRequest: {
       /**
-       * @description A feature key of ENT-02, a module key or an add-on; any other key is 422 with `field` feature_key (F-209).
+       * @description A feature key of ENT-02, a phase-2 key of ENT-06 (E-44), a module key of phases 3 and 4 or an add-on; any other key, the former keys inventory, stocktake and ticketing among them, is 422 with `field` feature_key (F-209).
        * @enum {string}
        */
       feature_key:
@@ -8607,10 +9926,19 @@ export interface components {
         | 'webhooks'
         | 'api_access'
         | 'notifications_email'
-        | 'inventory'
+        | 'assets_basic'
         | 'documents'
-        | 'stocktake'
-        | 'ticketing'
+        | 'import'
+        | 'ticketing_essential'
+        | 'ticketing_standard'
+        | 'signature'
+        | 'stock'
+        | 'stocktake_standard'
+        | 'barcode'
+        | 'gps_standard'
+        | 'workplace'
+        | 'export_datev'
+        | 'internal_orders'
         | 'monitoring'
         | 'endpoint_agent'
         | 'workflow_forms'
@@ -8620,7 +9948,7 @@ export interface components {
       plan?: components['schemas']['EntitlementPlan'];
       /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys; any other key is 422 with `field` limits (F-209). A missing quota is unlimited (E-34). */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, and max_storage_mb (MiB, on documents; MGT-01); any other key is 422 with `field` limits (F-209). A missing quota is unlimited (E-34). */
       limits?: {
         [key: string]: number;
       };
@@ -9672,6 +11000,8 @@ export interface components {
       violations: {
         field: string;
         detail: string;
+        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty` or `length-range-empty`. */
+        code?: string;
       }[];
     };
     InterfaceInUseProblem: components['schemas']['ProblemDetail'] & {
@@ -10431,6 +11761,11 @@ export interface components {
     TopologyGraph: {
       nodes: components['schemas']['TopologyNode'][];
       edges: components['schemas']['TopologyEdge'][];
+      /**
+       * @description true when the walk from root_ci_id reached the node limit (10,000 CIs) and kept only the CIs closest to the root: the graph may then lack CIs and edges within the depth (NFR-01). Absent when the walk was not cut and without a root, which answers 422 beyond 2,000 CIs.
+       * @enum {boolean}
+       */
+      truncated?: true;
     };
     /** @description The tenant (LOC-01). */
     Organization: {
@@ -26926,6 +28261,7 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -27105,6 +28441,9 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   createCiTypesIdActivate: {
@@ -29123,6 +30462,1754 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+    };
+  };
+  reindexAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Accepted; the job runs in the background, the Location header names it. The schemas come with WP-796. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listLifecycleModels: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List lifecycle models. The page follows the cursor contract (API-02); the item schema comes with WP-723. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  createLifecycleModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Created. The request and response schemas come with WP-723. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getLifecycleModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get a lifecycle model. The response schema comes with WP-723. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteLifecycleModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateLifecycleModel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Updated. The request and response schemas come with WP-723. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getCIAsOf: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reconstruct the state of a CI at a point in time. The response schema comes with WP-793. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getCIForm: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get the resolved form of a CI. The response schema comes with WP-719. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getCITypeForm: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get the resolved form of a CI type. The response schema comes with WP-719. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listCITemplates: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the templates assigned to a CI. The response schema comes with WP-710. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  replaceCITemplates: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Replaced. The request and response schemas come with WP-710. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listCIInstanceAttributes: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the instance attribute values of a CI. The page follows the cursor contract (API-02); the item schema comes with WP-256. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  setCIInstanceAttribute: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Key of the instance attribute. */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Replaced. The request and response schemas come with WP-256. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  deleteCIInstanceAttribute: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Key of the instance attribute. */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listTags: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List tags. The page follows the cursor contract (API-02); the item schema comes with WP-753. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  createTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Created. The request and response schemas come with WP-753. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get a tag. The response schema comes with WP-753. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Updated. The request and response schemas come with WP-753. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  mergeTag: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-753. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  replaceCITags: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Replaced. The request and response schemas come with WP-753. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listSubnetReservations: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the IP reservations of a subnet. The page follows the cursor contract (API-02); the item schema comes with WP-299. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  createSubnetReservation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Created. The request and response schemas come with WP-299. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  deleteSubnetReservation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description IP address identifier. */
+        ip_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listRelationshipChanges: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the change history of a relationship. The page follows the cursor contract (API-02); the item schema comes with WP-296. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  bulkAssets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Accepted; the job runs in the background, the Location header names it. The schemas come with WP-781. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  assignAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-275. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  returnAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-275. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  transferAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-275. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  reserveAsset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-277. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listAssetCIs: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the CIs linked to an asset. The page follows the cursor contract (API-02); the item schema comes with WP-272. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  linkAssetCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Created. The request and response schemas come with WP-272. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  unlinkAssetCI: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description CI identifier. */
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getAssetLabel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Render the label of an asset. The response schema comes with WP-763. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getAssetAsOf: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reconstruct the state of an asset at a point in time. The response schema comes with WP-795. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  replaceAssetTags: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Replaced. The request and response schemas come with WP-755. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  convertReservation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-277. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  verifyStockMovementSignature: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Verify the signature of a movement. The response schema comes with WP-748. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listConsumableStock: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the stock levels of a consumable per bin. The page follows the cursor contract (API-02); the item schema comes with WP-283. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getConsumableAvailability: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get the availability of a consumable. The response schema comes with WP-759. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  placeOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-286. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  cancelOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-286. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  closeOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-286. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  receiveOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-760. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  startStocktake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-287. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listStocktakeItems: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the expected items of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listStocktakeDifferences: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the differences of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  cancelStocktake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-287. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getDocumentUsage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get the storage usage of the documents. The response schema comes with WP-731. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  listDocumentVersions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the versions of a document. The page follows the cursor contract (API-02); the item schema comes with WP-731. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  createDocumentVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Created. The request and response schemas come with WP-731. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  deleteDocumentLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Link identifier. */
+        link_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listTicketLinks: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the object links of a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-764. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  createTicketLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Created. The request and response schemas come with WP-764. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  deleteTicketLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Link identifier. */
+        link_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listTicketAttachments: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List the documents attached to a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-765. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listImportProfiles: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description List import profiles. The page follows the cursor contract (API-02); the item schema comes with WP-774. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  createImportProfile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Created. The request and response schemas come with WP-774. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getImportProfile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get an import profile. The response schema comes with WP-774. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteImportProfile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted. */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateImportProfile: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Updated. The request and response schemas come with WP-774. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  createImport: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Accepted; the job runs in the background, the Location header names it. The schemas come with WP-301. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  previewImport: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Done. The request and response schemas come with WP-301. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getImport: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get an import run. The response schema comes with WP-301. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getImportReport: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Get the report of an import run. The response schema comes with WP-301. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
     };
   };
 }

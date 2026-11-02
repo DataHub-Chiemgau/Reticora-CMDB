@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant/rls"
 )
 
 // indexState is an attribute index as the catalog shows it.
@@ -838,5 +839,91 @@ func TestAttributeIndexPerKeyJob(t *testing.T) {
 	if err = ddl.Ensure(bg, orgs[1].org, oddDef.ID); err != nil || readIndex(t, f.Admin, KeyIndexName(other)).found ||
 		readIndex(t, f.Admin, KeyIndexName(odd)).found || !readIndex(t, f.Admin, keyIndex).valid {
 		t.Errorf("deletion after the lock: %v; want the unused indexes of keys dropped, the one in use kept", err)
+	}
+}
+
+// TestIndexStatementLeakproof covers WP-836 (SR-04, K22; E-73, E-133): the
+// indexes the DDL job builds are usable by the application role under row
+// level security. It creates the indexes of IndexStatement (a unique
+// definition per organization and per client, a searchable and a unique
+// type definition, a unique system definition) and of KeyIndexStatement (a
+// key of [a-z0-9_] and one with the hashed name, quote and backslash
+// included, 000164) and checks them with rls.LeakyIndexQuery, the catalog
+// query of TestRLSIndexesAreLeakproof: every statement holds the value as
+// reticora_attr_text, which is leakproof, and none is reported. Negative
+// case: the same definition built over attributes ->> key, as before
+// migration 000162 (legacyStatement), is reported with
+// jsonb_object_field_text.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestIndexStatementLeakproof(t *testing.T) {
+	f := scopetest.Seed(t, "9e")
+	bg := context.Background()
+	run := time.Now().UnixNano()
+	id := func(n int) string { return fmt.Sprintf("0836%04x-0000-4000-8000-%012x", n, run&0xffffffffffff) }
+	typeID := id(0xff)
+	plainKey, oddKey := fmt.Sprintf("wp836_key_%d", run), fmt.Sprintf(`WP836 o'dd\%d`, run)
+	defs := []*AttributeDefinition{
+		{ID: id(1), OrganizationID: f.OrgA, Key: "wp836_org", Unique: true, UniqueScope: "org"},
+		{ID: id(2), OrganizationID: f.OrgA, Key: "wp836_client", Searchable: true, Unique: true, UniqueScope: "client"},
+		{ID: id(3), OrganizationID: f.OrgA, CITypeID: typeID, Key: "wp836_type", Searchable: true},
+		{ID: id(4), OrganizationID: f.OrgA, CITypeID: typeID, Key: "wp836_type_u", Unique: true, UniqueScope: "org"},
+		{ID: id(5), Key: "wp836_system", Unique: true, UniqueScope: "org"},
+	}
+	type built struct{ name, stmt string }
+	var indexes []built
+	for _, d := range defs {
+		stmt := IndexStatement(d)
+		if stmt == "" {
+			t.Fatalf("IndexStatement(%+v) is empty", d)
+		}
+		indexes = append(indexes, built{IndexName(d.ID, d.Unique), stmt})
+	}
+	for _, key := range []string{plainKey, oddKey} {
+		indexes = append(indexes, built{KeyIndexName(key), KeyIndexStatement(key)})
+	}
+	legacy := IndexName(defs[0].ID, false) + "_legacy"
+	t.Cleanup(func() {
+		for _, x := range append(indexes, built{name: legacy}) {
+			_, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+pgx.Identifier{x.name}.Sanitize())
+		}
+	})
+	for _, x := range indexes {
+		if !strings.Contains(x.stmt, "reticora_attr_text(attributes, ") || strings.Contains(x.stmt, "->>") {
+			t.Errorf("%s does not hold the value as reticora_attr_text: %s", x.name, x.stmt)
+		}
+		if _, err := f.Admin.Exec(bg, x.stmt); err != nil {
+			t.Fatalf("%s: %v", x.stmt, err)
+		}
+		if got := readIndex(t, f.Admin, x.name); !got.valid {
+			t.Fatalf("index %s not built: %+v", x.name, got)
+		}
+	}
+	if _, err := f.Admin.Exec(bg, legacyStatement(defs[0], legacy)); err != nil {
+		t.Fatalf("legacy index: %v", err)
+	}
+
+	rows, err := f.Admin.Query(bg, rls.LeakyIndexQuery)
+	if err != nil {
+		t.Fatalf("leaky index query: %v", err)
+	}
+	reported := map[string]string{}
+	for rows.Next() {
+		var table, index, leaky string
+		if err = rows.Scan(&table, &index, &leaky); err != nil {
+			t.Fatal(err)
+		}
+		reported[index] = table + ": " + leaky
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range indexes {
+		if leaky, ok := reported[x.name]; ok {
+			t.Errorf("SR-04/K22 violated: the application role cannot use %s under row level security (%s): %s", x.name, leaky, x.stmt)
+		}
+	}
+	if got, want := reported[legacy], "ci: function jsonb_object_field_text(jsonb,text)"; got != want {
+		t.Errorf("the index over attributes ->> key is reported as %q, want %q", got, want)
 	}
 }

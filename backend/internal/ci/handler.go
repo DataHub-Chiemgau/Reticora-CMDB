@@ -109,12 +109,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SortBy:   lq.SortBy,
 		SortDir:  lq.SortDir,
 		Filters:  lq.Filters,
+		// total after E-104: exact up to api.TotalCap, beyond it capped.
+		CappedTotal: true,
 	}
 	if lq.Q != "" {
 		filter.Search = lq.Q
 	}
 
-	items, total, err := h.svc.List(r.Context(), t.OrganizationID, filter, page)
+	items, counted, err := h.svc.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -127,10 +129,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hasMore := page.Offset+page.Limit < total
+	// The count reaches past the page when more CIs follow it, also when
+	// it was capped; total shows at most api.TotalCap (E-104).
+	hasMore := page.Offset+page.Limit < counted
 	if page.Cursor != nil {
 		hasMore = len(items) == page.Limit
 	}
+	total, capped := api.CapTotal(counted)
 	next := NextCursor(items, filter, page.Limit)
 	if len(lq.Fields) > 0 {
 		data, perr := api.SelectFields(items, lq.Fields)
@@ -138,17 +143,18 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			api.WriteRepoError(w, perr)
 			return
 		}
-		api.WriteJSON(w, http.StatusOK, api.ListResponse[map[string]json.RawMessage]{Data: data, Total: total, Limit: page.Limit,
+		api.WriteJSON(w, http.StatusOK, api.ListResponse[map[string]json.RawMessage]{Data: data, Total: total, TotalCapped: capped, Limit: page.Limit,
 			Offset: page.Offset, HasMore: hasMore, NextCursor: next})
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Item]{
-		Data:       items,
-		Total:      total,
-		Limit:      page.Limit,
-		Offset:     page.Offset,
-		HasMore:    hasMore,
-		NextCursor: next,
+		Data:        items,
+		Total:       total,
+		TotalCapped: capped,
+		Limit:       page.Limit,
+		Offset:      page.Offset,
+		HasMore:     hasMore,
+		NextCursor:  next,
 	})
 }
 

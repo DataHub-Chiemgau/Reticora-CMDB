@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://reticora.io/schemas/rules.schema.json",
   "title": "Reticora rule AST",
-  "description": "The JSON rule language of the metamodel (MET-45, CH18). Phase 1 covers required, pattern, range and enum, combined with all. backend/internal/rules evaluates rules bindingly, frontend/src/rules evaluates the same rules for previews; api/rules.conformance.json holds the cases both must pass. Semantics: a value is empty when it is absent, null, a string of only whitespace or an empty array. required fails for an empty value; every other rule passes an empty value. pattern, range and enum apply to each element of an array value. String lengths count Unicode code points. Patterns use the common subset of RE2 and ECMAScript (no lookaround, no backreferences) and match anywhere unless anchored with ^ and $. Violation codes: required, pattern, pattern.type, range.min, range.max, range.type, enum.",
+  "description": "The JSON rule language of the metamodel (MET-45, CH18). The schema root is a value rule: required, pattern, range and enum, combined with all; it checks one value. $defs/condition is a condition (WP-715): comparisons of a field (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty) combined with the logic nodes all (AND), any (OR) and not (exactly one rule); it is true or false for a record. Comparisons occur only in conditions, the value operators required, pattern, range and enum only in value rules. This condition grammar is the common form of metamodel conditions, guards and filters (CH18, MET-45): the fieldmeta conditional rules (visible_when, required_when, read_only_when, allowed_values_when) map onto it without loss; savedview.Expr stays the SQL filter compiler, WP-309 maps it onto this form and adds only the filter operators (e.g. like, exists). backend/internal/rules evaluates rules and conditions bindingly, frontend/src/rules evaluates the same AST for previews; api/rules.conformance.json holds the cases both must pass. Semantics of conditions (those of fieldmeta.Predicate): field is the key of an attribute definition or of a typed CI column; an absent field is null. empty holds for an empty value (see below; also an empty object). Two empty values are equal; otherwise numbers compare by value, also when one is sent as decimal text, and strings and booleans by their text; a non-empty array or object equals nothing. in holds when the value equals one of the values. gt, gte, lt and lte compare numbers (also decimal text) and are false for anything else. contains holds for a string containing the text of value or for an array with an element equal to value. all of no rules holds, any of no rules does not. Semantics of value rules: a value is empty when it is absent, null, a string of only whitespace or an empty array. required fails for an empty value; every other rule passes an empty value. pattern, range and enum apply to each element of an array value. String lengths count Unicode code points. Patterns use the common subset of RE2 and ECMAScript (no lookaround, no backreferences) and match anywhere unless anchored with ^ and $. Violation codes: required, pattern, pattern.type, range.min, range.max, range.type, enum.",
   "$ref": "#/$defs/rule",
   "$defs": {
     "rule": {
@@ -67,6 +67,114 @@
           "items": { "type": ["string", "number", "boolean"] }
         }
       }
+    },
+    "condition": {
+      "description": "A condition (WP-715): true or false for the values of a record.",
+      "oneOf": [
+        { "$ref": "#/$defs/condition_all" },
+        { "$ref": "#/$defs/any" },
+        { "$ref": "#/$defs/not" },
+        { "$ref": "#/$defs/compare" }
+      ]
+    },
+    "condition_all": {
+      "description": "AND: every condition holds (no conditions: true).",
+      "type": "object",
+      "required": ["op", "rules"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "all" },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/condition" } }
+      }
+    },
+    "any": {
+      "description": "OR: at least one condition holds (no conditions: false).",
+      "type": "object",
+      "required": ["op", "rules"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "any" },
+        "rules": { "type": "array", "items": { "$ref": "#/$defs/condition" } }
+      }
+    },
+    "not": {
+      "description": "NOT: the one condition does not hold.",
+      "type": "object",
+      "required": ["op", "rules"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "const": "not" },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/$defs/condition" }
+        }
+      }
+    },
+    "compare": {
+      "description": "A comparison of the value of field (fieldmeta.Predicate). empty and not_empty take no value; in and not_in a non-empty array of strings, numbers and booleans; gt, gte, lt and lte a number; eq, ne and contains a string, number or boolean.",
+      "type": "object",
+      "required": ["op", "field"],
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "in",
+            "not_in",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "contains",
+            "empty",
+            "not_empty"
+          ]
+        },
+        "field": { "type": "string", "pattern": "\\S" },
+        "value": {}
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "enum": ["empty", "not_empty"] } } },
+          "then": { "not": { "required": ["value"] } }
+        },
+        {
+          "if": { "properties": { "op": { "enum": ["in", "not_in"] } } },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": ["string", "number", "boolean"] }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "op": { "enum": ["gt", "gte", "lt", "lte"] } }
+          },
+          "then": {
+            "required": ["value"],
+            "properties": { "value": { "type": "number" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "op": { "enum": ["eq", "ne", "contains"] } }
+          },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "type": ["string", "number", "boolean"] }
+            }
+          }
+        }
+      ]
     }
   }
 }

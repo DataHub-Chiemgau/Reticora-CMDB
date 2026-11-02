@@ -103,6 +103,46 @@ describe('WebhooksPage', () => {
     expect(await screen.findByText('Keine Webhooks vorhanden')).toBeInTheDocument();
   });
 
+  it('offers the subscribable types of the register only (WP-707, EVT-03)', async () => {
+    stubFetchRoutes({
+      '/me/permissions': managePermissions,
+      '/webhooks/dead-letters': paginated([]),
+      '/webhooks': paginated([
+        { ...subscription, events: ['ci.updated', 'relationship.deleted', 'discovery.completed'] },
+      ]),
+    });
+
+    renderWithProviders(<WebhooksPage />, { route: '/webhooks' });
+
+    // An existing subscription keeps showing its former and deprecated names.
+    expect(
+      await screen.findByText('ci.updated, relationship.deleted, discovery.completed'),
+    ).toBeInTheDocument();
+    for (const offered of [
+      'ci.changed',
+      'ci.status_changed',
+      'relationship.removed',
+      'stock.movement',
+      'import.completed',
+    ]) {
+      expect(screen.getByLabelText(offered)).toBeInTheDocument();
+    }
+    for (const notOffered of [
+      'ci.updated',
+      'relationship.deleted',
+      'discovery.completed',
+      'lifecycle.transitioned',
+      'asset.movement',
+      'inventory.movement',
+      'ci_type.created',
+      'webhook.dead',
+      'apikey.creator_deactivated',
+    ]) {
+      expect(screen.queryByLabelText(notOffered)).not.toBeInTheDocument();
+    }
+    expect(screen.getAllByRole('checkbox')).toHaveLength(40);
+  });
+
   it('retries a dead delivery (WHK-01)', async () => {
     const fetchMock = stubFetchRoutes({
       '/me/permissions': managePermissions,

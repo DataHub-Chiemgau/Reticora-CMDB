@@ -271,14 +271,24 @@ func TestTrialEntitlementsFollowENT07(t *testing.T) {
 	if core.ValidUntil != nil || core.Limits[entitlement.LimitMaxCIs] != 100 {
 		t.Errorf("cmdb_core = %+v, want max_cis 100 without expiry", core)
 	}
-	// Essential features stay after the trial, standard-only ones expire.
-	if byKey[entitlement.FeatureDiscovery].ValidUntil != nil || byKey[entitlement.FeatureInventory].ValidUntil != nil {
-		t.Error("an essential feature expires with the trial")
+	// Essential features stay after the trial, standard-only ones carry
+	// the end of the trial (WP-244: the matrix of E-44, unchanged
+	// TrialEntitlements).
+	for _, f := range []string{entitlement.FeatureDiscovery, entitlement.FeatureAssetsBasic, entitlement.FeatureDocuments,
+		entitlement.FeatureImport, entitlement.FeatureTicketingEssential} {
+		if e, ok := byKey[f]; !ok || e.ValidUntil != nil {
+			t.Errorf("essential feature %s: %+v, want a row without valid_until", f, e)
+		}
 	}
-	for _, f := range []string{entitlement.FeatureDocuments, entitlement.FeatureStocktake, entitlement.FeatureTicketing} {
+	for _, f := range []string{entitlement.FeatureTicketingStandard, entitlement.FeatureSignature, entitlement.FeatureStock,
+		entitlement.FeatureStocktakeStandard, entitlement.FeatureBarcode, entitlement.FeatureGPSStandard,
+		entitlement.FeatureWorkplace, entitlement.FeatureExportDATEV} {
 		if v := byKey[f].ValidUntil; v == nil || !v.Equal(ends) {
 			t.Errorf("%s valid_until = %v, want %v", f, v, ends)
 		}
+	}
+	if _, ok := byKey[entitlement.FeatureInternalOrders]; ok {
+		t.Error("the standard trial includes internal_orders")
 	}
 
 	cfg.TrialMaxCIs = 250
@@ -287,6 +297,77 @@ func TestTrialEntitlementsFollowENT07(t *testing.T) {
 		if e.FeatureKey == entitlement.FeatureCMDBCore && e.Limits[entitlement.LimitMaxCIs] != 250 {
 			t.Errorf("configured max_cis not applied: %+v", e)
 		}
+	}
+}
+
+// storageOf returns the stored max_storage_mb per feature of the rows.
+func storageOf(ents []entitlement.Entitlement) map[string]int64 {
+	out := map[string]int64{}
+	for _, e := range ents {
+		if mb, ok := e.Limits[entitlement.LimitMaxStorageMB]; ok {
+			out[e.FeatureKey] = mb
+		}
+	}
+	return out
+}
+
+// TestNewOrganizationsGetThePlanStorage covers WP-706 (MGT-01, E-44, E-34):
+// a new organization gets the max_storage_mb of its plan stored on
+// documents (1,000 / 10,000 / 50,000), enterprise gets no entry, an
+// operator's own limit wins, and the trial stores its plan's value.
+func TestNewOrganizationsGetThePlanStorage(t *testing.T) {
+	for plan, want := range map[entitlement.Plan]int64{entitlement.PlanEssential: 1000,
+		entitlement.PlanStandard: 10000, entitlement.PlanPro: 50000, entitlement.PlanEnterprise: 0} {
+		ents, err := PlanEntitlements(plan, nil)
+		if err != nil {
+			t.Fatalf("PlanEntitlements(%s): %v", plan, err)
+		}
+		got := storageOf(ents)
+		switch {
+		case want == 0 && len(got) != 0:
+			t.Errorf("%s stores max_storage_mb %v, want none (unlimited)", plan, got)
+		case want != 0 && (len(got) != 1 || got[entitlement.FeatureDocuments] != want):
+			t.Errorf("%s stores max_storage_mb %v, want documents %d", plan, got, want)
+		}
+	}
+
+	// An own limit of the operator wins, also on enterprise; other quotas
+	// leave the plan's storage in place.
+	ents, err := PlanEntitlements(entitlement.PlanStandard, map[string]int64{entitlement.LimitMaxStorageMB: 2500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storageOf(ents); len(got) != 1 || got[entitlement.FeatureDocuments] != 2500 {
+		t.Errorf("own limit: %v, want documents 2500", got)
+	}
+	ents, err = PlanEntitlements(entitlement.PlanEnterprise, map[string]int64{entitlement.LimitMaxStorageMB: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storageOf(ents); got[entitlement.FeatureDocuments] != 0 || len(got) != 1 {
+		t.Errorf("own limit on enterprise: %v, want documents 0", got)
+	}
+	ents, err = PlanEntitlements(entitlement.PlanPro, map[string]int64{entitlement.LimitMaxCIs: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storageOf(ents); got[entitlement.FeatureDocuments] != 50000 {
+		t.Errorf("pro with max_cis only: %v, want documents 50000", got)
+	}
+
+	// The trial stores the value of the trial plan.
+	cfg := DefaultConfig()
+	ends := time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
+	trial, err := TrialEntitlements(cfg, ends)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storageOf(trial); len(got) != 1 || got[entitlement.FeatureDocuments] != 10000 {
+		t.Errorf("standard trial: %v, want documents 10000", got)
+	}
+	cfg.TrialPlan = entitlement.PlanEnterprise
+	if trial, err = TrialEntitlements(cfg, ends); err != nil || len(storageOf(trial)) != 0 {
+		t.Errorf("enterprise trial: %v %v, want no max_storage_mb", storageOf(trial), err)
 	}
 }
 
@@ -371,7 +452,8 @@ func TestOperatorCreationRunsTheSignupChain(t *testing.T) {
 	svc := newTestService(repo, nil, accounts).WithInvitationMail(true)
 	op := operator.Identity{ID: "op-1", Kind: "oidc"}
 	req := &operator.NewOrganization{Name: " Acme ", Plan: "pro", AdminEmail: "admin@acme.example",
-		Limits: map[string]int64{entitlement.LimitMaxCIs: 5000, entitlement.LimitMaxCollectors: 4}}
+		Limits: map[string]int64{entitlement.LimitMaxCIs: 5000, entitlement.LimitMaxCollectors: 4,
+			entitlement.LimitMaxStorageMB: 10000}}
 	created, err := svc.CreateOrganization(context.Background(), op, req)
 	if err != nil {
 		t.Fatalf("CreateOrganization: %v", err)
@@ -397,6 +479,18 @@ func TestOperatorCreationRunsTheSignupChain(t *testing.T) {
 	}
 	if limits[entitlement.FeatureCMDBCore][entitlement.LimitMaxCIs] != 5000 || limits[entitlement.FeatureDiscovery][entitlement.LimitMaxCollectors] != 4 {
 		t.Errorf("limits = %v", limits)
+	}
+	// WP-244 (MGT-01, E-44): max_storage_mb is stored on documents only.
+	for feature, l := range limits {
+		if _, ok := l[entitlement.LimitMaxStorageMB]; ok != (feature == entitlement.FeatureDocuments) {
+			t.Errorf("max_storage_mb on %s: %v", feature, l)
+		}
+	}
+	if limits[entitlement.FeatureDocuments][entitlement.LimitMaxStorageMB] != 10000 {
+		t.Errorf("documents limits = %v, want max_storage_mb 10000", limits[entitlement.FeatureDocuments])
+	}
+	if _, err := PlanEntitlements(entitlement.PlanEssential, map[string]int64{entitlement.LimitMaxStorageMB: 1000}); err != nil {
+		t.Errorf("max_storage_mb on the essential plan: %v", err)
 	}
 
 	// Without an inviting IdP client the organization is still created.

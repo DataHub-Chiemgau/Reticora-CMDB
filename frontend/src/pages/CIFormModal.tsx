@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import type { CI, CICreateRequest, CIUpdateRequest } from '../api/client';
 import { localizedText } from '../api/cmdb';
-import { useCIType, useCITypes, useGlobalFields } from '../api/cmdbHooks';
+import { useAllCITypes, useCIType, useGlobalFields } from '../api/cmdbHooks';
 import { useCreateCI, useUpdateCI } from '../api/hooks';
 import { useLocationNames } from '../components/cmdb/CIDetailSections';
 import { DynamicForm, validateAll } from '../components/form/DynamicForm';
@@ -94,8 +94,12 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   // The types come from the metamodel (GET /ci-types: the active system types
   // and the organization's own, MET-04), read again at every opening so a type
   // created at runtime is offered without a reload or release. The option value
-  // is the type id, which POST /cis expects as ci_type_id (CI-03).
-  const ciTypes = useCITypes({ limit: 200 }, { enabled: open, staleTime: 0 });
+  // is the type id, which POST /cis expects as ci_type_id (CI-03). All pages
+  // are read (MET-51, WP-804): the first page alone hid types beyond 200.
+  const ciTypes = useAllCITypes({}, { enabled: open, staleTime: 0 });
+  // Without the type list a new CI cannot be created: the dialog offers a
+  // retry and blocks 'Create' until the types are loaded (WP-804).
+  const typesUnavailable = !isEditMode && ciTypes.isError;
   // The chosen type's schema: its attributes are rendered below the fields.
   const selectedType = useCIType(values.ci_type_id || undefined, { enabled: open, staleTime: 0 });
   // The organization-wide fields (GET /ci-fields/global, MET-13) apply to
@@ -114,7 +118,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   }, [selectedType.data, values.ci_type_id, globalFields.data]);
 
   const typeOptions = useMemo(() => {
-    const types = ciTypes.data?.data ?? [];
+    const types = ciTypes.data ?? [];
     const stored = selectedType.data;
     // Editing keeps the stored type selectable after it was deactivated.
     const offered =
@@ -325,6 +329,18 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           disabled={isEditMode}
           required
         />
+        {typesUnavailable ? (
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={ciTypes.isFetching}
+              onClick={() => void ciTypes.refetch()}
+            >
+              {t('common.retry')}
+            </Button>
+          </div>
+        ) : null}
         <Select
           label={t('form.fields.status')}
           value={values.status}
@@ -423,7 +439,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
           </Button>
-          <Button type="submit" loading={isSubmitting}>
+          <Button type="submit" loading={isSubmitting} disabled={typesUnavailable}>
             {isEditMode ? t('common.save') : t('common.create')}
           </Button>
         </div>

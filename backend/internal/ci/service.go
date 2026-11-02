@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
 
@@ -310,6 +311,13 @@ func (s *Service) GetByID(ctx context.Context, orgID, id string) (*Item, error) 
 // The type is the writer's choice (ChosenType): an ID that is no UUID is
 // refused here, the repository reads the type in the writing transaction.
 func (s *Service) Create(ctx context.Context, item *Item) error {
+	return s.activating(ctx, item.OrganizationID, func(ctx context.Context) error {
+		return s.create(ctx, item)
+	})
+}
+
+// create is Create in the transaction of activating.
+func (s *Service) create(ctx context.Context, item *Item) error {
 	if err := s.allowActive(ctx, item.OrganizationID); err != nil {
 		return err
 	}
@@ -336,14 +344,35 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 	return s.repo.Create(ctx, item)
 }
 
+// activating runs fn, which checks max_cis (allowActive) and makes a CI
+// active, in one transaction of the context's tenant scope when the
+// repository opens one (TxRunner, the PostgreSQL repository) and a limit
+// guard is set: the admission and the write commit together, so the
+// max_cis lock of the admission holds until the CI is written (WP-835,
+// SR-09). The memory repository keeps the count without a transaction.
+func (s *Service) activating(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	runner, ok := s.repo.(TxRunner)
+	if !ok || s.limit == nil {
+		return fn(ctx)
+	}
+	return runner.RunInTx(ctx, orgID, fn)
+}
+
 // allowActive checks max_cis before a CI becomes active (ENT-03): Create
 // adds one, Restore and Unmerge bring a deleted one back. Over the limit it
 // returns the entitlement error (403 entitlement-limit) and nothing is
 // written. It counts every active CI of the organization, also those
-// outside the caller's scope (CountActive, F-403).
+// outside the caller's scope (CountActive, F-403). In a transaction
+// (activating) it admits through CIAdmitter: the organization's max_cis
+// lock and the count under it, so that concurrent creations of every
+// channel at the limit admit exactly (WP-835, SR-09); without one (memory
+// repository) it counts as before.
 func (s *Service) allowActive(ctx context.Context, orgID string) error {
 	if s.limit == nil {
 		return nil
+	}
+	if database.InTx(ctx) {
+		return NewCIAdmitter(s.limit).AdmitNew(ctx, orgID, 1)
 	}
 	total, err := CountActive(ctx, s.repo, orgID)
 	if err != nil {
@@ -441,14 +470,23 @@ func (s *Service) Restore(ctx context.Context, orgID, id string) (*Item, error) 
 	if !ok {
 		return nil, errors.New("restore is not supported by this repository")
 	}
-	if err := s.allowActive(ctx, orgID); err != nil {
-		return nil, err
-	}
 	retention := s.restoreRetention
 	if retention <= 0 {
 		retention = RestoreRetention
 	}
-	return restorer.RestoreDeleted(ctx, orgID, id, retention)
+	var restored *Item
+	err := s.activating(ctx, orgID, func(ctx context.Context) error {
+		if err := s.allowActive(ctx, orgID); err != nil {
+			return err
+		}
+		var err error
+		restored, err = restorer.RestoreDeleted(ctx, orgID, id, retention)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return restored, nil
 }
 
 // Delete removes a CI after loading its prior state.

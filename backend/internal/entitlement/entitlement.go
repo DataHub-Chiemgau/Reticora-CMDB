@@ -53,25 +53,46 @@ var Phase1Features = []string{
 	FeatureExportCSV, FeatureWebhooks, FeatureAPIAccess, FeatureNotificationsEmail,
 }
 
-// Module feature keys of later phases (RBA-05, ENT-06); they gate the modules
-// already present in the code.
+// Feature keys of phase 2 (ENT-06 in the version of E-44). gps_standard
+// and workplace have no module in phase 2 (LOC-09 and MGT-06 are P4);
+// ticketing_pro, stocktake_pro, disposition, audit_extended and
+// usage_tracking are not created (their functions are P3/P4).
 const (
-	FeatureInventory     = "inventory"
-	FeatureDocuments     = "documents"
-	FeatureStocktake     = "stocktake"
-	FeatureTicketing     = "ticketing"
+	FeatureAssetsBasic        = "assets_basic"
+	FeatureDocuments          = "documents"
+	FeatureImport             = "import"
+	FeatureTicketingEssential = "ticketing_essential"
+	FeatureTicketingStandard  = "ticketing_standard"
+	FeatureSignature          = "signature"
+	FeatureStock              = "stock"
+	FeatureStocktakeStandard  = "stocktake_standard"
+	FeatureBarcode            = "barcode"
+	FeatureGPSStandard        = "gps_standard"
+	FeatureWorkplace          = "workplace"
+	FeatureExportDATEV        = "export_datev"
+	FeatureInternalOrders     = "internal_orders"
+)
+
+// Phase2Features are the feature keys of phase 2 (ENT-06, E-44), ordered
+// by the plan that includes them first.
+var Phase2Features = []string{
+	FeatureAssetsBasic, FeatureDocuments, FeatureImport, FeatureTicketingEssential,
+	FeatureTicketingStandard, FeatureSignature, FeatureStock, FeatureStocktakeStandard,
+	FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV,
+	FeatureInternalOrders,
+}
+
+// Module feature keys of phases 3 and 4 (ENT-06); they gate modules already
+// present in the code and stay in their plans (E-34).
+const (
 	FeatureMonitoring    = "monitoring"
 	FeatureEndpointAgent = "endpoint_agent"
 	FeatureWorkflowForms = "workflow_forms"
 	FeatureCompliance    = "compliance"
 )
 
-// ModuleFeatures are the module feature keys of later phases; each gates a
-// module present in the code.
-var ModuleFeatures = []string{
-	FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
-	FeatureMonitoring, FeatureEndpointAgent, FeatureWorkflowForms, FeatureCompliance,
-}
+// LaterFeatures are the module feature keys of phases 3 and 4 in use.
+var LaterFeatures = []string{FeatureMonitoring, FeatureEndpointAgent, FeatureWorkflowForms, FeatureCompliance}
 
 // Add-ons (CH14, ENT-06): IGA and AI are no part of any plan; they are
 // unlocked only by their own entitlement row.
@@ -84,21 +105,30 @@ const (
 var Addons = []string{FeatureIGA, FeatureAI}
 
 // FeatureKeys are the feature keys an entitlement row may carry (F-209):
-// the phase-1 keys of ENT-02, the module keys and the add-ons.
+// the phase-1 keys of ENT-02, the phase-2 keys of ENT-06 (E-44), the
+// module keys of phases 3 and 4 in use and the add-ons. The former keys
+// inventory, stocktake and ticketing are no feature keys any more
+// (migration 000190).
 func FeatureKeys() []string {
-	return slices.Concat(Phase1Features, ModuleFeatures, Addons)
+	return slices.Concat(Phase1Features, Phase2Features, LaterFeatures, Addons)
 }
 
-// Quotas of ENT-02, stored in limits.
+// Quotas of ENT-02 and the storage quota of MGT-01 (ENT-06, E-44), stored
+// in limits.
 const (
 	LimitMaxCIs        = "max_cis"
 	LimitMaxCollectors = "max_collectors"
 	LimitMaxUsers      = "max_users"
 	LimitMaxAPIKeys    = "max_api_keys"
+	// LimitMaxStorageMB is the document storage of the organization in MiB
+	// (2^20 bytes). Like every quota it gates only when stored (E-34); the
+	// usage check "usage + upload > limit" belongs to the document upload,
+	// not to AllowCreate.
+	LimitMaxStorageMB = "max_storage_mb"
 )
 
-// Quotas are the quota keys of ENT-02.
-var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys}
+// Quotas are the quota keys an entitlement row may carry.
+var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys, LimitMaxStorageMB}
 
 // QuotaFeature is the feature a quota belongs to: the quota is stored in the
 // limits of that feature's row, and a quota of a feature the organization is
@@ -108,29 +138,29 @@ var QuotaFeature = map[string]string{
 	LimitMaxCollectors: FeatureDiscovery,
 	LimitMaxUsers:      FeatureCMDBCore,
 	LimitMaxAPIKeys:    FeatureAPIAccess,
+	LimitMaxStorageMB:  FeatureDocuments,
 }
 
 // Sources of an entitlement row (ENT-01).
 var Sources = []string{"manual", "selfsignup", "billing", "reseller"}
 
-// planFeatures maps a plan to the features it includes (the current plans,
-// E-34): every plan includes the phase-1 features, higher plans add modules.
-// No plan includes an add-on (CH14). The proposed matrix and quotas of
-// ENT-06 (V) have no gate effect until confirmed (E-34): quotas only gate
-// when stored in the limits of a row.
-var planFeatures = map[Plan][]string{
-	PlanEssential: append(slices.Clone(Phase1Features),
-		FeatureInventory),
-	PlanStandard: append(slices.Clone(Phase1Features),
-		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing),
-	PlanPro: append(slices.Clone(Phase1Features),
-		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
-		FeatureMonitoring, FeatureWorkflowForms),
-	PlanEnterprise: append(slices.Clone(Phase1Features),
-		FeatureInventory, FeatureDocuments, FeatureStocktake, FeatureTicketing,
-		FeatureMonitoring, FeatureEndpointAgent, FeatureWorkflowForms,
-		FeatureCompliance),
-}
+// planFeatures maps a plan to the features it includes (ENT-06 in the
+// version of E-44, E-34): every plan includes the phase-1 features and
+// assets_basic, documents, import and ticketing_essential; standard adds
+// the remaining phase-2 keys but internal_orders, pro adds internal_orders,
+// monitoring and workflow_forms, enterprise endpoint_agent and compliance.
+// No plan includes an add-on (CH14). Quotas only gate when stored in the
+// limits of a row (E-34); no plan has a default quota.
+var planFeatures = func() map[Plan][]string {
+	essential := slices.Concat(Phase1Features, []string{
+		FeatureAssetsBasic, FeatureDocuments, FeatureImport, FeatureTicketingEssential})
+	standard := slices.Concat(essential, []string{
+		FeatureTicketingStandard, FeatureSignature, FeatureStock, FeatureStocktakeStandard,
+		FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV})
+	pro := slices.Concat(standard, []string{FeatureInternalOrders, FeatureMonitoring, FeatureWorkflowForms})
+	enterprise := slices.Concat(pro, []string{FeatureEndpointAgent, FeatureCompliance})
+	return map[Plan][]string{PlanEssential: essential, PlanStandard: standard, PlanPro: pro, PlanEnterprise: enterprise}
+}()
 
 // PlanFeatures returns the feature keys included in the given plan.
 func PlanFeatures(plan Plan) []string {

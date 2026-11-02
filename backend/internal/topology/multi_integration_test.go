@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,7 +27,13 @@ import (
 // stays the short form; GET /topology without a root over 2,000 CIs is
 // 422. WP-403: 100 CIs answer, 101 are 422 on ci_ids; ci_ids with a CI of
 // the other organization or, for a client-1 principal, of client 2 is 404
-// like an unknown id, only own CIs answer 200.
+// like an unknown id, only own CIs answer 200. WP-840: the analysis of
+// several CIs is one walk from all of them (WalkFromMany); its answer
+// equals the one of a walk per failed CI merged afterwards, the path
+// before WP-840, byte for byte (truncated only appears for a walk the
+// node limit cut), for the organization and a client-1
+// principal, over depths, categories, a relationship type and fields=
+// (checkMultiImpactEqualsPerRootWalks).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestMultiImpactAgainstPostgres(t *testing.T) {
@@ -172,6 +179,10 @@ func TestMultiImpactAgainstPostgres(t *testing.T) {
 		}
 	}
 
+	t.Run("equals the walks per root", func(t *testing.T) {
+		checkMultiImpactEqualsPerRootWalks(t, f, ctxOf(f.OrgA), client1)
+	})
+
 	// Over 2,000 CIs the topology without a root is 422; a type filter
 	// that narrows below the limit answers.
 	var serverType, switchType string
@@ -195,4 +206,119 @@ func TestMultiImpactAgainstPostgres(t *testing.T) {
 	if code != http.StatusOK || json.Unmarshal(body, &g) != nil || len(g.Nodes) != 1 {
 		t.Errorf("topology by type id: %d %s", code, body)
 	}
+}
+
+// perRootWalks hides the walk of the PostgreSQL repository
+// (relationship.Walker): the impact of several CIs then walks from each
+// failed CI with TraverseFrom, the walk of WalkFrom, and merges the graphs
+// (mergeGraphs), the path before WP-840.
+type perRootWalks struct {
+	relationship.Repository
+	relationship.Traverser
+	relationship.IncidentEdgeReader
+	relationship.HiddenEdgeReader
+}
+
+// checkMultiImpactEqualsPerRootWalks seeds 80 CIs of organization A with
+// overlapping neighbourhoods (WP-840): two PDUs each powered by one of four
+// supplies, every third by a second one (a redundant type, IMP-04), chains
+// of hosted_on, connected_to (heuristic, IMP-03), depends_on and the
+// projected containment; every fifth CI belongs to client 2, every seventh
+// to no client. GET /impact?ci_ids= with one walk from all failed CIs
+// answers as the walks per failed CI, for the organization and for a
+// client-1 principal (IMP-07), without truncated: the walk was not cut.
+func checkMultiImpactEqualsPerRootWalks(t *testing.T, f *scopetest.Fixture, org, client1 context.Context) {
+	bg := context.Background()
+	const n = 80
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci (id, organization_id, client_id, ci_type_id, name, status)
+		SELECT md5($1 || '/cmp/' || i)::uuid, $1::uuid,
+			CASE WHEN i % 7 = 0 THEN NULL WHEN i % 5 = 0 THEN $3::uuid ELSE $2::uuid END,
+			t.id, 'cmp-' || lpad(i::text, 2, '0'), 'active'
+		FROM generate_series(1, $4::int) AS i JOIN ci_type t ON t.organization_id IS NULL AND t.key = 'server'`,
+		f.OrgA, f.Client1, f.Client2, n); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+		SELECT $1::uuid, md5($1 || '/cmp/' || e.src)::uuid, md5($1 || '/cmp/' || e.dst)::uuid, e.rel FROM (
+			SELECT i AS src, 1 + i % 4 AS dst, 'powered_by' AS rel FROM generate_series(5, $2::int) AS i
+			UNION ALL SELECT i, 1 + (i + 1) % 4, 'powered_by' FROM generate_series(5, $2::int) AS i WHERE i % 3 = 0
+			UNION ALL SELECT i, i - 4, 'hosted_on' FROM generate_series(9, $2::int) AS i WHERE i % 2 = 0
+			UNION ALL SELECT i, i + 1, 'connected_to' FROM generate_series(1, $2::int - 1) AS i WHERE i % 6 = 0
+			UNION ALL SELECT i, i + 10, 'depends_on' FROM generate_series(1, $2::int - 10) AS i WHERE i % 9 = 0) e`,
+		f.OrgA, n); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET parent_ci_id = md5($1 || '/cmp/' || (g.i - 1))::uuid
+		FROM generate_series(2, $2::int) AS g(i) WHERE g.i % 11 = 0 AND ci.id = md5($1 || '/cmp/' || g.i)::uuid`, f.OrgA, n); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[int]string{}
+	rows, err := f.Admin.Query(bg, `SELECT i, md5($1 || '/cmp/' || i)::uuid::text FROM generate_series(1, $2::int) AS i`, f.OrgA, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var i int
+		var id string
+		if err := rows.Scan(&i, &id); err != nil {
+			t.Fatal(err)
+		}
+		ids[i] = id
+	}
+	rows.Close()
+
+	routes := func(rels relationship.Repository) *chi.Mux {
+		mux := chi.NewRouter()
+		topology.NewHandler(ci.NewPGRepository(f.App), rels).
+			WithRelationshipTypes(relationshiptype.NewPGRepository(f.App)).RegisterRoutes(mux)
+		return mux
+	}
+	repo := relationship.NewPGRepository(f.App)
+	oneWalk, perRoot := routes(repo), routes(perRootWalks{repo, repo, repo, repo})
+	call := func(mux *chi.Mux, ctx context.Context, path string) (int, string) {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
+		return w.Code, w.Body.String()
+	}
+	// Client 1 sees every CI but those of client 2 (i % 5 = 0, i % 7 != 0).
+	sets := [][]int{{1, 2}, {1, 2, 3, 4}, {6, 17, 33}, {12, 24, 36, 48, 66}, {9, 16, 49, 70, 77}, {8, 12, 7, 21, 63, 2}}
+	orgSets := append(slices.Clone(sets), []int{5, 10, 15, 22}, []int{20, 40, 61})
+	queries := []string{"", "&depth=1", "&depth=2", "&depth=3", "&categories=power", "&categories=hosting,network",
+		"&rel_type=hosted_on", "&fields=name,status,heuristic,hops,via,relay", "&fields=path&depth=4"}
+	compared := 0
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		sets [][]int
+	}{{"organization", org, orgSets}, {"client 1", client1, sets}} {
+		for _, set := range c.sets {
+			failed := make([]string, len(set))
+			for i, k := range set {
+				failed[i] = ids[k]
+			}
+			for _, q := range queries {
+				path := "/api/v1/impact?ci_ids=" + strings.Join(failed, ",") + q
+				code, got := call(oneWalk, c.ctx, path)
+				wantCode, want := call(perRoot, c.ctx, path)
+				if code != http.StatusOK || wantCode != http.StatusOK {
+					t.Fatalf("%s, CIs %v%s: %d %.300s, per root %d", c.name, set, q, code, got, wantCode)
+				}
+				if got != want {
+					t.Errorf("%s, CIs %v%s: one walk\n%s\nper root\n%s", c.name, set, q, got, want)
+				}
+				var body struct {
+					Count     int   `json:"count"`
+					Truncated *bool `json:"truncated"`
+				}
+				if err := json.Unmarshal([]byte(got), &body); err != nil || body.Truncated != nil {
+					t.Errorf("%s, CIs %v%s: truncated %v, want none (%v)", c.name, set, q, body.Truncated, err)
+				}
+				if q == "" && body.Count == 0 {
+					t.Errorf("%s, CIs %v: nothing impacted, the comparison is empty", c.name, set)
+				}
+				compared++
+			}
+		}
+	}
+	t.Logf("%d answers of one walk equal the walks per failed CI", compared)
 }

@@ -22,9 +22,13 @@ type FieldResolver interface {
 // composed (MET-16) reject the write as a violation of the attribute.
 func resolveFields(ctx context.Context, fields FieldResolver, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error) {
 	defs, err := fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
-	var conflict interface{ CompositionKey() string }
+	var conflict interface {
+		CompositionKey() string
+		CompositionCode() string
+	}
 	if errors.As(err, &conflict) {
-		return nil, &ValidationError{Violations: []Violation{{Field: conflict.CompositionKey(), Detail: err.Error()}}}
+		return nil, &ValidationError{Violations: []Violation{{Field: conflict.CompositionKey(), Detail: err.Error(),
+			Code: conflict.CompositionCode()}}}
 	}
 	return defs, err
 }
@@ -39,6 +43,9 @@ type ValidationError struct {
 type Violation struct {
 	Field  string `json:"field"`
 	Detail string `json:"detail"`
+	// Code names the failing rule in machine-readable form, e.g. the code
+	// of a composition conflict (MET-16); omitted when empty.
+	Code string `json:"code,omitempty"`
 }
 
 // validation: the violations of the field metadata (fieldmeta) and the
@@ -95,26 +102,26 @@ func validateAttributes(defs []fieldmeta.FieldDefinition, values map[string]any,
 
 		if state.ReadOnly {
 			if _, changed := incoming[def.Name]; changed && !sameValue(existing[def.Name], incoming[def.Name]) {
-				violations = append(violations, Violation{def.Name, "field is read-only in the current state"})
+				violations = append(violations, Violation{Field: def.Name, Detail: "field is read-only in the current state"})
 				continue
 			}
 		}
 
 		if state.Required && (!present || isBlank(value)) {
-			violations = append(violations, Violation{def.Name, "field is required"})
+			violations = append(violations, Violation{Field: def.Name, Detail: "field is required"})
 			continue
 		}
 		if !present || isBlank(value) {
 			continue
 		}
 		if err := fieldmeta.ValidateValue(def, value); err != nil {
-			violations = append(violations, Violation{def.Name, trimFieldPrefix(def.Name, err.Error())})
+			violations = append(violations, Violation{Field: def.Name, Detail: trimFieldPrefix(def.Name, err.Error())})
 			continue
 		}
 		if len(state.AllowedValues) > 0 && !allowedValue(state.AllowedValues, value) {
 			violations = append(violations, Violation{
-				def.Name,
-				"value is not allowed here, expected one of: " + strings.Join(state.AllowedValues, ", "),
+				Field:  def.Name,
+				Detail: "value is not allowed here, expected one of: " + strings.Join(state.AllowedValues, ", "),
 			})
 		}
 	}
@@ -349,7 +356,7 @@ func validateTypedColumns(typed map[string]any) error {
 		}
 		def := fieldmeta.FieldDefinition{Name: name, DataType: typedColumns[name]}
 		if err := fieldmeta.ValidateValue(def, value); err != nil {
-			violations = append(violations, Violation{name, trimFieldPrefix(name, err.Error())})
+			violations = append(violations, Violation{Field: name, Detail: trimFieldPrefix(name, err.Error())})
 		}
 	}
 	if len(violations) == 0 {

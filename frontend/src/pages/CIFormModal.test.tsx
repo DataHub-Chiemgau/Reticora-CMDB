@@ -134,6 +134,11 @@ function violations(...items: Array<{ field: string; detail: string }>) {
 interface BackendOptions {
   /** Answer of GET /ci-types (the active types). */
   types?: TypeFixture[];
+  /**
+   * The active types split into pages: GET /ci-types answers the page at the
+   * requested offset with has_more until the last one (overrides types).
+   */
+  pages?: TypeFixture[][];
   /** Further types GET /ci-types/{id} knows (deactivated ones). */
   hidden?: TypeFixture[];
   /** Answer of POST /cis; the default stores the body and answers 201. */
@@ -146,7 +151,8 @@ interface BackendOptions {
 
 /** Answers by exact API path; records the requests and the POST/PATCH bodies. */
 function stubBackend({
-  types = [serverType],
+  pages,
+  types = pages ? pages.flat() : [serverType],
   hidden = [],
   post,
   tree,
@@ -161,6 +167,23 @@ function stubBackend({
     const path = url.pathname.replace(/^\/api\/v1/, '');
     const method = (init?.method ?? 'GET').toUpperCase();
     requests.push(`${method} ${path}${url.search}`);
+    if (method === 'GET' && path === '/ci-types' && pages) {
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      let start = 0;
+      const index = pages.findIndex((page) => {
+        const found = start === offset;
+        start += page.length;
+        return found;
+      });
+      const page = pages[index] ?? [];
+      return json({
+        data: page,
+        total: types.length,
+        limit: 200,
+        offset,
+        has_more: index >= 0 && index < pages.length - 1,
+      });
+    }
     if (method === 'GET' && path === '/ci-types') {
       return json({ data: types, total: types.length, limit: 200, offset: 0, has_more: false });
     }
@@ -667,6 +690,72 @@ describe('CIFormModal server-side validation', () => {
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('Bitte korrigieren Sie die markierten Felder.');
     expect(within(alert).queryByText(/rack_units/)).not.toBeInTheDocument();
+  });
+
+  it('offers the types of all pages of GET /ci-types (MET-51, WP-804)', async () => {
+    const { requests, posted } = stubBackend({
+      pages: [
+        [ciType(SYSTEM_TYPE_ID, 'server', 'Server', true)],
+        [ciType(ORG_TYPE_ID, 'audit-second-page', 'Typ auf Seite zwei', false)],
+      ],
+    });
+    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
+
+    await waitFor(() => {
+      const labels = Array.from(typeSelect().options).map((o) => o.textContent ?? '');
+      expect(labels).toEqual(['Bitte auswählen', 'Server', 'Typ auf Seite zwei']);
+    });
+    expect(requests.filter((r) => r.startsWith('GET /ci-types?'))).toEqual([
+      'GET /ci-types?limit=200',
+      'GET /ci-types?limit=200&offset=1',
+    ]);
+
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-page-two' } });
+    fireEvent.change(typeSelect(), { target: { value: ORG_TYPE_ID } });
+    fireEvent.click(screen.getByRole('button', { name: /anlegen|create/i }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]?.ci_type_id).toBe(ORG_TYPE_ID);
+  });
+
+  it('offers a retry and blocks create while the types cannot be loaded (WP-804)', async () => {
+    let failing = true;
+    const { posted } = stubBackend({
+      types: [ciType(SYSTEM_TYPE_ID, 'server', 'Server', true)],
+    });
+    const backend = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const raw = typeof input === 'string' ? input : input.toString();
+        if (failing && new URL(raw, 'http://localhost').pathname.endsWith('/ci-types')) {
+          return json({ detail: 'unavailable' }, 503);
+        }
+        return backend(input, init);
+      }),
+    );
+    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
+
+    const retry = await screen.findByRole('button', { name: 'Erneut versuchen' });
+    expect(screen.getByText('Die CI-Typen konnten nicht geladen werden.')).toBeInTheDocument();
+    const create = screen.getByRole('button', { name: 'Anlegen' });
+    expect(create).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-blocked' } });
+    fireEvent.click(create);
+    expect(posted).toEqual([]);
+
+    failing = false;
+    fireEvent.click(retry);
+    await chooseType(SYSTEM_TYPE_ID);
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText('Die CI-Typen konnten nicht geladen werden.'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Anlegen' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Anlegen' }));
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]?.ci_type_id).toBe(SYSTEM_TYPE_ID);
   });
 
   it('reports types that cannot be loaded at the type field', async () => {

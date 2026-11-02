@@ -137,19 +137,77 @@ type SubscriberAccess interface {
 }
 
 // EventReadPermission is the permission needed to read the object of an
-// event; "" for events without a known object (bound subscriptions do not
-// receive them).
+// event: the read permission of the GET route of its object
+// (server/authz.go). It is "" for events without a known object (bound
+// subscriptions do not receive them) and for the lifecycle types, whose
+// payload names the object kind (EventDataReadPermission).
 func EventReadPermission(event string) string {
+	switch event {
+	case events.StockMovement:
+		// Asset and quantity movements, like the route stock-movements and
+		// inventory.movement.
+		return "asset:read"
+	case events.StockBelowMinimum:
+		// A quantity item, read on the route consumables.
+		return "stock:read"
+	}
 	prefix, _, _ := strings.Cut(event, ".")
 	switch prefix {
-	case "ci", "relationship", "ci_type", "ci_attribute", "lifecycle", "override":
+	case "ci", "relationship", "ci_type", "ci_attribute", "override":
 		return "ci:read"
-	case "asset", "inventory", "reservation", "composition":
+	case "metamodel":
+		// The metamodel reads like GET /ci-types.
+		return "ci:read"
+	case "asset", "inventory", "composition":
+		// inventory.movement carries asset and quantity movements of
+		// POST /stock-movements (asset:move) and stays with asset:read.
 		return "asset:read"
+	case "reservation":
+		// The read right of the reservations route (RBA-05, E-106).
+		return "reservation:read"
 	case "discovery", "reconciliation":
 		return "discovery:read"
+	case "contract":
+		return "contract:read"
+	case "ticket":
+		return "ticket:read"
+	case "document":
+		return "document:read"
+	case "import":
+		// The read right of the route imports (WP-301).
+		return "import:run"
 	}
 	return ""
+}
+
+// readByEntityType reports whether the payload field entity_type, not the
+// event name, decides the read permission of the event (lifecycle.*).
+func readByEntityType(event string) bool {
+	prefix, _, _ := strings.Cut(event, ".")
+	return prefix == "lifecycle"
+}
+
+// entityTypePermissions are the read permissions of the object kinds a
+// lifecycle event names in entity_type.
+var entityTypePermissions = map[string]string{
+	"ci":    "ci:read",
+	"asset": "asset:read",
+}
+
+// EventDataReadPermission is the permission needed to read the object of
+// an event with the payload body: for lifecycle.* that of its entity_type
+// ("" without a known one), else EventReadPermission.
+func EventDataReadPermission(event string, body []byte) string {
+	if !readByEntityType(event) {
+		return EventReadPermission(event)
+	}
+	var data struct {
+		EntityType string `json:"entity_type"`
+	}
+	if json.Unmarshal(body, &data) != nil {
+		return ""
+	}
+	return entityTypePermissions[data.EntityType]
 }
 
 // covers reports whether a subscription with the scope snapshot s receives
@@ -184,15 +242,15 @@ func (s *Scope) covers(objects []ObjectScope) bool {
 // E-98); then unbound subscriptions receive the event, bound ones only when
 // their service account may read its objects as well, so a binding never
 // widens the scope of the subscription's creator. objects is the resolved
-// scope of the event (eventObjects; nil: unknown).
-func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, objects []ObjectScope, sub *Subscription) bool {
+// scope of the event (eventObjects; nil: unknown), body its payload.
+func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, body []byte, objects []ObjectScope, sub *Subscription) bool {
 	if !sub.Scope.covers(objects) {
 		return false
 	}
 	if sub.ServiceAccountID == "" {
 		return true
 	}
-	permission := EventReadPermission(event)
+	permission := EventDataReadPermission(event, body)
 	if permission == "" || d.opts.Access == nil {
 		return false
 	}
@@ -305,31 +363,30 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 	}
 }
 
-// legacyNames are the former names of the events of EVT-02 that existing
-// subscriptions still use: they receive the event under its new name.
+// legacyNames are the former names of registered event types that
+// existing subscriptions still use: they receive the event under its new
+// name, once per subscription even when it names several of them.
+// lifecycle.transitioned and asset.movement had no producer;
+// inventory.movement is dispatched directly until WP-274 writes
+// stock.movement to the outbox.
 var legacyNames = map[string][]string{
 	events.CIChanged:           {"ci.updated"},
 	events.RelationshipRemoved: {"relationship.deleted"},
+	events.LifecycleChanged:    {"lifecycle.transitioned"},
+	events.StockMovement:       {"inventory.movement", "asset.movement"},
 }
 
 // Consume implements events.Consumer: the outbox publisher hands every
 // committed domain event to the subscriptions of its type and of its
-// former names (WP-136). A status-only change also reaches the
+// former names (WP-136). A status change is an event ci.status_changed of
+// its own next to ci.changed (WP-707); ci.changed no longer reaches the
 // subscriptions of ci.status_changed. A failed subscription lookup or
 // delivery persistence is returned, so the publisher keeps the event
 // pending and hands it over again (at least once, F-151); the deliveries
 // are idempotent per event and subscription, a repeated hand-off adds none
 // (WP-506).
 func (d *Dispatcher) Consume(ctx context.Context, env *events.Envelope) error {
-	aliases := append([]string(nil), legacyNames[env.Type]...)
-	if env.Type == events.CIChanged {
-		var data struct {
-			ChangedFields []string `json:"changed_fields"`
-		}
-		if json.Unmarshal(env.Data, &data) == nil && len(data.ChangedFields) == 1 && data.ChangedFields[0] == "status" {
-			aliases = append(aliases, "ci.status_changed")
-		}
-	}
+	aliases := legacyNames[env.Type]
 	var origin *eventOrigin
 	if env.ID != "" {
 		origin = &eventOrigin{id: env.ID, sequence: env.Sequence, entitySeq: env.EntitySeq}
@@ -394,7 +451,7 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 
 	var failed []error
 	for _, sub := range subs {
-		if !d.mayDeliver(ctx, orgID, event, objects, &sub) {
+		if !d.mayDeliver(ctx, orgID, event, body, objects, &sub) {
 			continue
 		}
 		job := deliveryJob{

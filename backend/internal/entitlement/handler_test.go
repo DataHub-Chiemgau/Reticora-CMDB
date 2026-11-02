@@ -22,13 +22,13 @@ func TestHandlerGrantListAndCheck(t *testing.T) {
 	h.RegisterRoutes(mux)
 
 	// The tenant API is read-only (ENT-04): writing is refused.
-	req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/entitlements", bytes.NewBufferString(`{"feature_key":"ticketing","plan":"pro"}`)))
+	req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/entitlements", bytes.NewBufferString(`{"feature_key":"ticketing_essential","plan":"pro"}`)))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("tenant write: %d, want 405", w.Code)
 	}
-	if _, err := h.service.Grant(req.Context(), Entitlement{OrganizationID: "org-1", FeatureKey: "ticketing", Plan: PlanPro, Enabled: true}); err != nil {
+	if _, err := h.service.Grant(req.Context(), Entitlement{OrganizationID: "org-1", FeatureKey: FeatureTicketingEssential, Plan: PlanPro, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -49,15 +49,15 @@ func TestHandlerGrantListAndCheck(t *testing.T) {
 	}
 	var found bool
 	for _, item := range listResp.Data {
-		if item.FeatureKey == "ticketing" && item.Enabled {
+		if item.FeatureKey == FeatureTicketingEssential && item.Enabled {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected the granted ticketing entitlement in the list: %+v", listResp)
+		t.Fatalf("expected the granted ticketing_essential entitlement in the list: %+v", listResp)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/entitlements/check/ticketing", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/entitlements/check/ticketing_essential", nil)
 	req = tenantCtx(req)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -96,7 +96,7 @@ func TestMiddlewareBlocksUnentitledModule(t *testing.T) {
 
 	if _, err := svc.Grant(req.Context(), Entitlement{
 		OrganizationID: "org-1",
-		FeatureKey:     FeatureTicketing,
+		FeatureKey:     FeatureTicketingEssential,
 		Plan:           PlanStandard,
 		Enabled:        true,
 	}); err != nil {

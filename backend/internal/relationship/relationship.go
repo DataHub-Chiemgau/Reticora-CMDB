@@ -495,14 +495,25 @@ type Traverser interface {
 // repository does not.
 type Walker interface {
 	WalkFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) (*Walk, error)
+	// WalkFromMany walks from several distinct roots at once (IMP-05,
+	// WP-840): one walk whose hop distance is the distance to the nearest
+	// root, so an edge several roots share is read once and the statements
+	// do not grow with the number of roots. Without the node limit it
+	// keeps the union of the walks from each root: a CI within maxDepth of
+	// a root, and an edge between two kept CIs that leaves a CI closer than
+	// maxDepth to some root. maxNodes bounds the whole walk (at least the
+	// roots are kept); Walk.Truncated reports a cut. The visibility is that
+	// of WalkFrom (IMP-07).
+	WalkFromMany(ctx context.Context, orgID string, rootCIIDs []string, maxDepth, maxNodes int) (*Walk, error)
 }
 
 // Walk is the result of a walk: the edges TraverseFrom returns with the
 // numbers of their CIs.
 type Walk struct {
-	// CIs holds the id of each CI the walk keeps by number: the root
-	// first, then the CIs in the order the walk reaches them. A walk from a
-	// root the caller does not see holds the root and no edge.
+	// CIs holds the id of each CI the walk keeps by number: the roots
+	// first, in the order they were given, then the CIs in the order the
+	// walk reaches them. A root the caller does not see keeps its number
+	// but no edge.
 	CIs []string
 	// Edges are the kept edges, ordered by id.
 	Edges []WalkEdge

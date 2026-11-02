@@ -186,9 +186,12 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 		{"cross-tenant: field value", true, []stmt{sq(`INSERT INTO ci_field_value (organization_id, ci_id, field_name)
 			VALUES ($1, $2, 'model')`, f.OrgA, foreign)}},
 		{"cross-tenant: CI client", true, []stmt{sq(`UPDATE ci SET client_id = $2 WHERE id = $1`, a, clientB)}},
-		// F-281: a plain owner UPDATE binds a CI without client to a room of
-		// another organization; the database derives site and room from it.
-		{"cross-tenant: CI location", false, []stmt{sq(`UPDATE ci SET location_id = $2 WHERE id = $1`, loose, roomB)}},
+		// F-281: a CI without client in a room of another organization, with
+		// the site and room the trigger derived from it. Since migration 000194
+		// (WP-838) ci_location_id_fkey carries the organization and refuses the
+		// plain owner UPDATE (checked below); such a row can only predate it.
+		{"cross-tenant: CI location", true, []stmt{sq(`UPDATE ci SET location_id = $2, room_id = $2, site_id = $3 WHERE id = $1`,
+			loose, roomB, siteB)}},
 		{"cross-tenant: CI site", true, []stmt{sq(`UPDATE ci SET site_id = $2 WHERE id = $1`, a, siteB)}},
 		{"cross-tenant: CI room", true, []stmt{sq(`UPDATE ci SET room_id = $2 WHERE id = $1`, a, roomB)}},
 		{"cross-tenant: CI type", true, []stmt{sq(`UPDATE ci SET ci_type_id = $2 WHERE id = $1`, a, typeB)}},
@@ -222,9 +225,17 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 		}
 	}
 
-	// The site and room of the F-281 case are counted as well.
+	// The plain owner UPDATE of F-281 fails since migration 000194 (WP-838);
+	// the site and room of the F-281 case are counted as well.
 	inTx(t, false, func(tx pgx.Tx) {
-		apply(t, tx, []stmt{sq(`UPDATE ci SET location_id = $2 WHERE id = $1`, loose, roomB)})
+		_, err := tx.Exec(bg, `UPDATE ci SET location_id = $2 WHERE id = $1`, loose, roomB)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23503" || pgErr.ConstraintName != "ci_location_id_fkey" {
+			t.Errorf("CI in the room of organization B: %v, want 23503 on ci_location_id_fkey", err)
+		}
+	})
+	inTx(t, true, func(tx pgx.Tx) {
+		apply(t, tx, []stmt{sq(`UPDATE ci SET location_id = $2, room_id = $2, site_id = $3 WHERE id = $1`, loose, roomB, siteB)})
 		_, counts := integrityCounts(t, tx, f.OrgA)
 		if counts["cross-tenant: CI site"] == 0 || counts["cross-tenant: CI room"] == 0 {
 			t.Errorf("CI in the room of organization B: site %d, room %d", counts["cross-tenant: CI site"], counts["cross-tenant: CI room"])

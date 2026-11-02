@@ -62,12 +62,18 @@ func migrationSection(t *testing.T, file, begin, end string) string {
 
 // dropLaterReferences drops the foreign keys of later migrations that depend
 // on the keys 000056 adds: ci_asset_id_fkey (000088), ci_parent_ci_fkey
-// (000089), ci_merged_into_fkey (000108) and ci_identity_mac_ci_fkey (000161).
+// (000089), ci_merged_into_fkey (000108), ci_identity_mac_ci_fkey (000161)
+// and the references on ci and asset of migration 000194 (WP-838).
 const dropLaterReferences = `
 	ALTER TABLE ci DROP CONSTRAINT ci_asset_id_fkey;
 	ALTER TABLE ci DROP CONSTRAINT ci_parent_ci_fkey;
 	ALTER TABLE ci DROP CONSTRAINT ci_merged_into_fkey;
-	ALTER TABLE ci_identity_mac DROP CONSTRAINT ci_identity_mac_ci_fkey;`
+	ALTER TABLE ci_identity_mac DROP CONSTRAINT ci_identity_mac_ci_fkey;
+	ALTER TABLE asset DROP CONSTRAINT asset_ci_id_fkey;
+	ALTER TABLE ticket DROP CONSTRAINT ticket_related_ci_id_fkey, DROP CONSTRAINT ticket_related_asset_id_fkey;
+	ALTER TABLE reservation DROP CONSTRAINT reservation_asset_id_fkey;
+	ALTER TABLE disposal_record DROP CONSTRAINT disposal_record_asset_id_fkey, DROP CONSTRAINT disposal_record_ci_id_fkey;
+	ALTER TABLE internal_order_item DROP CONSTRAINT internal_order_item_asset_id_fkey;`
 
 func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")

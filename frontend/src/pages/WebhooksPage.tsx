@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import type { components } from '../api/generated/schema';
 import { ApiError } from '../api/client';
 import {
   useCreateWebhook,
@@ -21,15 +22,84 @@ import { Input } from '../components/ui/Input';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ScrollRegion } from '../components/ScrollRegion';
 
-const availableEvents = [
-  'ci.created',
-  'ci.updated',
-  'ci.deleted',
-  'ci.status_changed',
-  'relationship.created',
-  'relationship.deleted',
-  'discovery.completed',
-];
+type WebhookEvent = components['schemas']['WebhookEvent'];
+
+/**
+ * eventOrigin sorts every name of the OpenAPI enum WebhookEvent, which
+ * derives from the event register (webhook.ValidEvents,
+ * backend/internal/events/types.go): `register` are the subscribable types
+ * of the register (EVT-02, NTF-05 without webhook.dead, EVT-03 P2), `former`
+ * the former names (legacyNames) and `deprecated` the names without an
+ * event contract (deprecatedEvents). The Record names each enum value
+ * exactly once, so a new type of the register fails the typecheck until it
+ * is sorted here (WP-707).
+ */
+const eventOrigin: Record<WebhookEvent, 'register' | 'former' | 'deprecated'> = {
+  'ci.created': 'register',
+  'ci.changed': 'register',
+  'ci.deleted': 'register',
+  'ci.restored': 'register',
+  'ci.merged': 'register',
+  'ci.offline': 'register',
+  'ci.online': 'register',
+  'relationship.created': 'register',
+  'relationship.removed': 'register',
+  'collector.enrolled': 'register',
+  'collector.offline': 'register',
+  'review.created': 'register',
+  'review.resolved': 'register',
+  'export.completed': 'register',
+  'job.failed': 'register',
+  'entitlement.warning': 'register',
+  'entitlement.expired': 'register',
+  'invitation.created': 'register',
+  'certificate.expiring': 'register',
+  'ci.status_changed': 'register',
+  'lifecycle.changed': 'register',
+  'relationship.changed': 'register',
+  'asset.created': 'register',
+  'asset.changed': 'register',
+  'asset.deleted': 'register',
+  'asset.assigned': 'register',
+  'asset.returned': 'register',
+  'asset.warranty_expiring': 'register',
+  'contract.expiring': 'register',
+  'stock.movement': 'register',
+  'stock.below_minimum': 'register',
+  'reservation.created': 'register',
+  'reservation.released': 'register',
+  'reservation.expired': 'register',
+  'reservation.converted': 'register',
+  'ticket.updated': 'register',
+  'ticket.sla_breached': 'register',
+  'metamodel.published': 'register',
+  'document.scanned': 'register',
+  'import.completed': 'register',
+  'ci.updated': 'former',
+  'relationship.deleted': 'former',
+  'lifecycle.transitioned': 'former',
+  'inventory.movement': 'former',
+  'asset.movement': 'former',
+  'ci_type.created': 'deprecated',
+  'ci_type.updated': 'deprecated',
+  'ci_type.deactivated': 'deprecated',
+  'ci_attribute.changed': 'deprecated',
+  'composition.created': 'deprecated',
+  'composition.updated': 'deprecated',
+  'composition.deleted': 'deprecated',
+  'override.changed': 'deprecated',
+  'reconciliation.policy_changed': 'deprecated',
+  'discovery.completed': 'deprecated',
+};
+
+/**
+ * availableEvents are the types a new subscription can choose, in the order
+ * of the register; former and deprecated names stay valid for existing
+ * subscriptions, whose list shows them unchanged, but are not offered.
+ */
+const availableEvents = (Object.keys(eventOrigin) as WebhookEvent[]).filter(
+  (event) => eventOrigin[event] === 'register',
+);
 
 type FormField = 'name' | 'url' | 'secret' | 'events';
 

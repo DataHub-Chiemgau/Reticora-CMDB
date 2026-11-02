@@ -28,6 +28,15 @@
 # 100,000 relationships in the demo organization and 500 small
 # organizations besides it (cmd/seed -interfaces-per-ci, -ips-per-ci,
 # -relationships-per-ci, -orgs); every job records what the seed holds.
+#
+# E-17 (WP-839): the jobs api-large-28000 and api-large-50000 (scenarios
+# api-large selects both) run api.js on a demo organization of 28,000 and
+# 50,000 objects (matrix objects, a fresh database, the seed and ANALYZE
+# like every job). At 28,000 objects list, filter and list_sorted keep the
+# p95 budget of 500 ms including total (LATENCY_BUDGETS=lists); the search
+# and every value at 50,000 objects, topology and impact included, are
+# measured without a budget (LATENCY_BUDGETS=none). The failure thresholds
+# hold in both. The evidence is the median of three runs (E-58).
 # The job archive gathers the k6 summaries, run records (commit, lscpu,
 # memory, configuration) and outcomes of all jobs into one artifact,
 # load-archive-<run id>, that docs/acceptance/artefakte/lasttest/<run id>/
@@ -49,7 +58,7 @@ on:
         description: "Commit, tag or branch the server, the seed and the migrations are built from (empty: the run's commit)"
         default: ""
       scenarios:
-        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume), or all"
+        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large), or all"
         default: "all"
   schedule:
     - cron: "17 2 * * *"
@@ -110,20 +119,25 @@ jobs:
         env:
           SCENARIOS: ${{ inputs.scenarios || 'all' }}
         run: |
-          all='[{"scenario":"api","script":"api.js","k6_scenario":"","seed_args":""},
-                {"scenario":"ingest","script":"ingest.js","k6_scenario":"load","seed_args":""},
-                {"scenario":"ingest-spool","script":"ingest.js","k6_scenario":"spool","seed_args":""},
-                {"scenario":"ingest-rediscover","script":"ingest.js","k6_scenario":"rediscover","seed_args":""},
+          # objects and latency_budgets: the size of the demo organization
+          # (empty: the input objects) and the p95 budgets of api.js
+          # (LATENCY_BUDGETS); group selects several jobs by one name.
+          all='[{"scenario":"api","script":"api.js","k6_scenario":"","seed_args":"","objects":"","latency_budgets":"all","group":""},
+                {"scenario":"ingest","script":"ingest.js","k6_scenario":"load","seed_args":"","objects":"","latency_budgets":"","group":""},
+                {"scenario":"ingest-spool","script":"ingest.js","k6_scenario":"spool","seed_args":"","objects":"","latency_budgets":"","group":""},
+                {"scenario":"ingest-rediscover","script":"ingest.js","k6_scenario":"rediscover","seed_args":"","objects":"","latency_budgets":"","group":""},
                 {"scenario":"nfr01-volume","script":"api.js","k6_scenario":"",
-                 "seed_args":"-interfaces-per-ci 5 -ips-per-ci 20 -relationships-per-ci 10 -orgs 500"}]'
+                 "seed_args":"-interfaces-per-ci 5 -ips-per-ci 20 -relationships-per-ci 10 -orgs 500","objects":"","latency_budgets":"all","group":""},
+                {"scenario":"api-large-28000","script":"api.js","k6_scenario":"","seed_args":"","objects":"28000","latency_budgets":"lists","group":"api-large"},
+                {"scenario":"api-large-50000","script":"api.js","k6_scenario":"","seed_args":"","objects":"50000","latency_budgets":"none","group":"api-large"}]'
           want="$(jq -cn --arg s "$SCENARIOS" '$s | gsub("\\s"; "") | split(",") | map(select(. != ""))')"
-          unknown="$(jq -rn --argjson all "$all" --argjson want "$want" '$want - ["all"] - [$all[].scenario] | join(", ")')"
+          unknown="$(jq -rn --argjson all "$all" --argjson want "$want" '$want - ["all"] - [$all[].scenario] - [$all[].group] | join(", ")')"
           if [ -n "$unknown" ] || [ "$want" = "[]" ]; then
-            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover, nfr01-volume or all"
+            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large (api-large-28000, api-large-50000) or all"
             exit 1
           fi
           matrix="$(jq -cn --argjson all "$all" --argjson want "$want" \
-            'if ($want | index("all")) then $all else [$all[] | select(.scenario as $n | $want | index($n))] end')"
+            'if ($want | index("all")) then $all else [$all[] | select(.scenario as $n | .group as $g | ($want | index($n)) or ($g != "" and ($want | index($g))))] end')"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   load:
@@ -146,7 +160,8 @@ jobs:
       # a login without SUPERUSER/BYPASSRLS (TEN-03, WP-351).
       DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora?sslmode=disable
       RUNTIME_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora?sslmode=disable
-      OBJECTS: ${{ inputs.objects || '10000' }}
+      OBJECTS: ${{ matrix.objects || inputs.objects || '10000' }}
+      LATENCY_BUDGETS: ${{ matrix.latency_budgets || 'all' }}
       DURATION: ${{ inputs.duration || '2m' }}
       SERVER_SHA: ${{ needs.prepare.outputs.server_sha }}
       SCENARIO_NAME: ${{ matrix.scenario }}
@@ -318,6 +333,7 @@ jobs:
             args+=(-e SCENARIO="$K6_SCENARIO")
           fi
           if [ "$K6_SCRIPT" = api.js ]; then
+            args+=(-e LATENCY_BUDGETS="$LATENCY_BUDGETS")
             seconds=0 rest="$DURATION"
             while [[ $rest =~ ^([0-9]+)([hms])(.*)$ ]]; do
               n=$((10#${BASH_REMATCH[1]}))
@@ -443,6 +459,7 @@ jobs:
             echo "script: $K6_SCRIPT"
             echo "k6 scenario: ${K6_SCENARIO:-default}"
             echo "objects: $OBJECTS"
+            echo "latency budgets: $LATENCY_BUDGETS"
             echo "duration: $DURATION"
             echo "seed options: ${SEED_ARGS:-none}"
             echo "ingest lanes: $INGEST_LANES"

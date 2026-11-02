@@ -387,12 +387,16 @@ deny access (fail-closed). The tenant API is read-only (`GET
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
 in `operator_audit` with the previous and the new state, in the same
 transaction: without its entry the change is rolled back (500) (ENT-04,
-E-12). Only the feature keys of ENT-02, the module keys and the add-ons and
-the quotas `max_cis`, `max_collectors`, `max_users`, `max_api_keys` are
-accepted; any other key is 422 with the field.
+E-12). Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
+the module keys of phases 3 and 4 (`monitoring`, `endpoint_agent`,
+`workflow_forms`, `compliance`) and the add-ons, and the quotas `max_cis`,
+`max_collectors`, `max_users`, `max_api_keys` and `max_storage_mb` are
+accepted (`entitlement.FeatureKeys`, `entitlement.Quotas`); any other key,
+the former keys `inventory`, `stocktake` and `ticketing` among them, is 422
+with the field.
 
 Route→feature mapping of the phase-1 features (ENT-02, ENT-05;
-`gatedRoutes`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
+`featureRules`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
 checks in the handlers where the middleware cannot see the object; F-400).
 Not entitled is 403 `feature-not-entitled`; an expired discovery license
 stops only ingest and new scans (CH21):
@@ -444,19 +448,82 @@ server (`RETICORA_SMTP_HOST`, whose settings the installer also gives the
 realm) the first org_admin is invited by the IdP's mail to set a password
 (`admin_invited`), otherwise the organization is created without an IdP
 account.
-Plan matrix (ENT-06):
+Plan matrix (ENT-06 in the version of E-44, confirmed with E-34;
+`planFeatures` in `backend/internal/entitlement/entitlement.go`):
 
 | Plan | Features |
 |------|----------|
-| essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, inventory |
-| standard | + documents, stocktake, ticketing |
-| pro | + monitoring, workflow_forms |
+| essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, assets_basic, documents, import, ticketing_essential |
+| standard | + ticketing_standard, signature, stock, stocktake_standard, barcode, gps_standard, workplace, export_datev |
+| pro | + internal_orders, monitoring, workflow_forms |
 | enterprise | + endpoint_agent, compliance |
 
 IGA (`iga`) and AI (`ai`) are add-ons (CH14): no plan includes them, only
-their own entitlement row unlocks them. The proposed matrix and quotas of
-ENT-06 (V) have no gate effect until confirmed (E-34): a quota only gates
-when it is stored in the limits of a row.
+their own entitlement row unlocks them. `gps_standard` and `workplace` have
+no module in phase 2 (LOC-09 and MGT-06 are P4); `ticketing_pro`,
+`stocktake_pro`, `disposition`, `audit_extended` and `usage_tracking` are
+not created. Quotas have no plan default (E-34): a quota only gates when it
+is stored in the limits of a row. `max_storage_mb` (MiB) is stored on
+`documents` (MGT-01). New organizations get the plan default of E-44 stored
+there (WP-706): essential 1,000, standard 10,000, pro 50,000; enterprise is
+unlimited and gets no entry. The trial stores the value of the trial plan,
+the operator creation (`POST /api/v1/admin/orgs`) the plan's value unless
+`limits.max_storage_mb` is given; existing organizations get no value, so
+for them the quota stays unlimited until the operator stores one.
+`gps_standard` gates the GPS history in the P4 module `gps`; disposal
+records (MGT-02) are the P2 module `disposal` with `assets_basic`.
+Migration 000190 moved existing
+organizations to the matrix: `inventory` → `assets_basic` (and `stock` from
+standard on), `ticketing` → `ticketing_essential` (and `ticketing_standard`
+from standard on), `stocktake` → `stocktake_standard`, keeping plan,
+enabled, limits, `valid_until` and source of the former row; every
+organization with rows got the missing phase-2 keys of its plan.
+
+**Org gate (WP-705, E-44, E-38, E-39):** the global middleware
+`entitlement.(*Service).Middleware` is `RequireFeature` of ENT-03. It reads
+one mapping table, `featureRules` in
+`backend/internal/entitlement/middleware.go`: method (optional), prefix,
+suffix (optional) → one or more feature keys. It is the only source of the
+org gate and of the module test (`TestP2ModulePrefixesAreGated` in
+`backend/internal/server/modules_test.go`: every prefix of a P2 module
+except `metamodel` (E-105) has a key). `entitlement.RequiredFeature(method,
+path)` checks suffix rules first, then method rules, then prefix rules; a
+prefix matches whole segments, a suffix the sub-path of one resource
+(`/api/v1/assets/{id}/label`, also `label.svg` and paths below it). A rule
+with several keys needs every one (`RequiredFeatures`). The enrollment
+endpoint `/api/v1/collectors/enroll` and `coreRoutes` stay ungated, a
+request with an API key needs `api_access` on every path, and an expired
+discovery license stops only `IsIngest` requests. The phase-2 mapping:
+
+| Feature | REST (middleware) |
+|---------|-------------------|
+| assets_basic | `/api/v1/assets*`, `/api/v1/assignments*`, `/api/v1/reservations*`, `/api/v1/compositions*`, `/api/v1/disposal-records*`, `/api/v1/suppliers*`, `/api/v1/contracts*`, GET `/api/v1/stock-movements*` |
+| barcode | `/api/v1/assets/{id}/label*` (together with assets_basic), `/api/v1/labels*` |
+| signature | GET `/api/v1/stock-movements/{id}/signature` |
+| gps_standard | `/api/v1/asset-locations*`, `/api/v1/assets/{id}/locations` |
+| stock | `/api/v1/consumables*`, `/api/v1/inventory/*`, POST (and every method but GET) `/api/v1/stock-movements*` |
+| stocktake_standard | `/api/v1/stocktakes*`, `/api/v1/stocktake*` |
+| internal_orders | `/api/v1/orders*` |
+| documents | `/api/v1/documents*` |
+| import | `/api/v1/imports*`, `/api/v1/import-profiles*` |
+| ticketing_essential | `/api/v1/tickets*`, POST `/api/v1/review-items/{id}/ticket` (reading the review queue stays core) |
+| ticketing_standard | `/api/v1/slas*`, `/api/v1/tickets/{id}/sla`, `/api/v1/business-calendars*` |
+| workplace | `/api/v1/desks*`, `/api/v1/desk-bookings*` |
+
+Prefixes without a route yet (`suppliers`, `contracts`, `labels`,
+`business-calendars`, `imports`, `import-profiles`) have their entry in
+advance (E-44). A sub-function below a module prefix uses the route
+middleware `(*Service).RequireFeature(key)`; a check in the handler (a
+`signature` in the body of assign, `format=datev`) uses the port
+`entitlement.Checker` (`IsEnabled(ctx, orgID, key string) bool`, implemented
+by `*Service`). A missing feature is 403 `feature-not-entitled`
+(`api.ProblemFeatureNotEntitled`), an exhausted quota 403
+`entitlement-limit` (`api.ProblemEntitlementLimit`, `AllowCreate` with
+`api.WriteEntitlementError`). The dashboard hides a widget whose module is
+off or whose feature key is not entitled (`widgetFeature` in
+`frontend/src/pages/DashboardPage.tsx`). The module keys of
+`RETICORA_MODULES` (`inventory`, `documents`, `stocktake`, `ticketing`,
+...) are release switches, not feature keys, and stay unchanged.
 
 
 **Permissions and SLA:** migration 0026 turns permissions into data instead of
@@ -537,8 +604,40 @@ the public HTTP API. Every route is registered in exactly one place —
 `chi.Walk`, loads the specification and fails if a route is undocumented **or**
 if the specification documents an operation that is not registered. The check
 runs in the normal `go test ./...` job, so the specification cannot drift away
-from the implementation in either direction. `/metrics` is the only deliberate
-exception: it is the Prometheus scrape endpoint, not part of the tenant API.
+from the implementation in either direction. It compares the profiles
+`postgres` and `no-db` in the releases "all modules", "G1" (paths without
+`x-phase`) and "G2" (`RETICORA_MODULES=P2`: paths without `x-phase` or with
+`x-phase: P2`). The deliberate exceptions are `/metrics` (the Prometheus scrape
+endpoint, not part of the tenant API), the undocumented GraphQL BFF under
+`/bff/` (GQL-01) and, as the only exception inside the contract, operations
+marked `x-status: planned` (E-38, WP-247).
+
+`x-status: planned` marks the scaffold of the Phase 2 path contract: on the
+path level it covers every operation of the path, on the operation level that
+one operation; any other value fails `speccheck.Planned`. A planned operation
+has `operationId`, tag, `summary`, path parameters, `Limit`/`Cursor` on
+collection GETs, a 2xx response with only a `description` and its errors as
+`#/components/responses/*` (problem+json with `trace_id`,
+`TestPlannedOperationsUseProblemResponses`). The parity test leaves planned
+operations out of the expectation and fails with "x-status: planned
+entfernen" as soon as a route serves one. A work package that implements a
+planned operation therefore replaces the scaffold with the request and
+response schemas of its domain, removes `x-status: planned`, deletes scaffold
+operations it does not implement and regenerates
+`backend/internal/server/testdata/route_permissions.txt`. The work package
+for each planned resource is listed in the path inventory of E-38
+(`docs/plan/phase2/entscheidungen.md`).
+
+Deprecation follows API-01 (E-25, WP-167): the operation carries
+`deprecated: true`, `x-deprecated-at`, `x-sunset` (at least 12 months later)
+and `x-successor` (a plain path, filters go into `description`). The
+middleware `OpenAPIValidation` derives the `Deprecation`, `Sunset` and
+`Link: <…>; rel="successor-version"` headers from these fields
+(`ParseDeprecations`); no handler sets them itself. An alias is a second
+registration in the domain handler (WP-168). `x-successor` must be a
+documented path with at least one operation that is not planned, and its
+`x-phase` must be empty or that of the deprecated path, so every release that
+serves the alias serves the successor too (`TestDeprecationSuccessorsAreServed`).
 
 **Pagination:** list endpoints accept `limit` (default 50, maximum 200) plus
 either `offset` for random access or `cursor` for stable forward iteration.
@@ -801,6 +900,108 @@ by `POST /api/v1/search/reindex`, which rebuilds the tenant's search index
 - `collector` — On-premise discovery collector.
 - `agent` — Endpoint agent for server/client telemetry.
 
+#### Event contract
+
+Domain events (EVT-01 to EVT-03) follow `api/events.schema.json`. The register
+is `backend/internal/events/types.go`: `events.Types` lists every event type in
+the order of the schema's `type` enum, `events.Payloads` assigns every phase 2
+type the Go struct of its data frame, and the `$defs` entry of the same name
+describes it (`TestEnvelopeMatchesSchema`, `TestPayloadFramesMatchSchema`).
+New types are added only in `types.go` and `api/events.schema.json`; the
+producing work package adds its fields to the struct and the `$def` of its
+type (both allow further fields).
+
+- **Writing:** a mutation writes its events with `Outbox.Append` (or
+  `AppendMany`) in its own transaction, as the last step after its audit
+  entry; system jobs and workers use `events.PGEmitter`. `Append` refuses a
+  type outside `events.Types`.
+- **Phase 2 frame:** the data of a phase 2 type names its object (`id`; for
+  `lifecycle.changed` `entity_type` and `entity_id`), carries `client_id` and
+  `site_id` at the top level for objects with a client or site, and its core
+  fields. Personal fields (`pii.IsPersonalKey`) carry a surrogate reference
+  `{"$pii": "<id>"}` (WP-241). The envelope of a phase 2 type always names
+  `entity_id` and `entity_seq`.
+- **Reserved (phase 3):** `maintenance.scheduled`, `workflow.*`, `finding.*`
+  (`events.Reserved`). They are no event types: the outbox refuses them and
+  webhooks cannot subscribe to them.
+
+| Type | `entity_id` | Origin | Producer |
+|---|---|---|---|
+| `ci.status_changed` | CI | EVT-03 | WP-707 |
+| `lifecycle.changed` | CI or asset (`entity_type`) | EVT-03 | WP-724 (transition service, also in the disposal path of WP-278) |
+| `relationship.changed` | relationship | EVT-03 | WP-296 |
+| `asset.created`, `asset.changed`, `asset.deleted` | asset | EVT-03 | WP-740 |
+| `asset.assigned`, `asset.returned` | asset | EVT-03 | WP-275 |
+| `asset.warranty_expiring` | asset | EVT-03 (`asset.*`) | WP-270 |
+| `contract.expiring` | contract | NTF-05 [P2] | WP-270 |
+| `stock.movement` | moved object (asset or quantity item, not the movement row, so that `entity_seq` orders the events per object) | EVT-03 | WP-274 |
+| `stock.below_minimum` | quantity item | NTF-05 [P2] | WP-285 |
+| `reservation.created`, `reservation.released`, `reservation.expired`, `reservation.converted` | reservation | EVT-03 | WP-277, for quantity items WP-284 |
+| `ticket.updated` | ticket | EVT-03 | WP-290 |
+| `ticket.sla_breached` | ticket | plan addition | WP-292 |
+| `metamodel.published` | publication (content after E-37) | EVT-03 | WP-261 |
+| `document.scanned` | document | plan addition | WP-734 |
+| `import.completed` | import run | plan addition | WP-302 |
+
+**`ci.status_changed`** (WP-707): an update of a CI
+(`ci.PGRepository.Update`, e.g. `PATCH /api/v1/cis/{id}` and the bulk status
+change) whose `changed_fields` contain `status` writes, in the same
+transaction and right after `ci.changed`, the event `ci.status_changed`; its
+`entity_seq` follows that of `ci.changed`. Its data are the CI snapshot of
+`ci.changed` with `changed_fields`, plus `from` and `to` (old and new
+status). The audit action stays as before (`ci.status_changed` for a status
+change alone, else `ci.updated`). Behaviour change for webhooks: until
+WP-707 a `ci.changed` with `changed_fields == [status]` also reached the
+subscriptions of `ci.status_changed`, delivered under
+`X-Reticora-Event`/`X-Webhook-Event: ci.changed`, and a status change
+together with other fields did not reach them. Now these subscriptions
+receive every status change exactly once as the event `ci.status_changed`,
+under `X-Reticora-Event`/`X-Webhook-Event: ci.status_changed`, also when
+further fields change at the same time; `ci.changed` no longer reaches them.
+Other status changes raise no `ci.status_changed`: the offline detector
+(`backend/internal/lifecycle/offline.go`) reports its changes
+(`active` ↔ `unknown`) only as `ci.offline`/`ci.online`, deleting
+(`decommissioned`) only as `ci.deleted`, restoring only as `ci.restored`.
+
+Until its producer is merged a phase 2 type is registered without being
+written; `TestEveryEVT02TypeHasAProducer` requires one producer case for every
+type without a frame in `events.Payloads` and accepts one for a phase 2 type.
+
+**Webhook subscriptions** (`webhook.ValidEvents`) derive from the register:
+`events.Types` without `webhook.dead` and `apikey.creator_deactivated` (both
+notify the org_admins only), the former names of `legacyNames` and the
+`deprecatedEvents`. `webhook.test` cannot be subscribed to either. The OpenAPI
+enum `WebhookEvent` lists the same names. The WebhooksPage offers new
+subscriptions only the subscribable types of the register (WP-707); former
+and deprecated names stay valid for existing subscriptions and are shown
+unchanged in their list.
+
+- **Former names** (`legacyNames`): `ci.updated` → `ci.changed`,
+  `relationship.deleted` → `relationship.removed`, `lifecycle.transitioned` →
+  `lifecycle.changed`, `inventory.movement` and `asset.movement` →
+  `stock.movement`. A subscription on a former name receives the event of the
+  new type once, under the new name. `inventory.movement` is still dispatched
+  directly by `POST /stock-movements` until WP-274 writes `stock.movement`;
+  `reservation.created`/`reservation.released` likewise until WP-277.
+- **Deprecated names without an event contract** (`deprecatedEvents`):
+  `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`,
+  `ci_attribute.changed`, `composition.created`, `composition.updated`,
+  `composition.deleted`, `override.changed` and
+  `reconciliation.policy_changed` (dispatched directly by their handlers) and
+  `discovery.completed` (never raised). They stay subscribable for existing
+  subscriptions.
+- **Bound subscriptions** (RBA-08): `webhook.EventReadPermission` assigns each
+  type the read permission of its object's GET route — `asset.*` and
+  `stock.movement` `asset:read`, `stock.below_minimum` `stock:read`,
+  `contract.*` `contract:read`, `reservation.*` `reservation:read`,
+  `ticket.*` `ticket:read`, `document.*` `document:read`, `metamodel.*`
+  `ci:read`, `import.*` `import:run`. For `lifecycle.*` the payload's
+  `entity_type` decides (`ci` → `ci:read`, `asset` → `asset:read`); without it
+  bound subscriptions do not receive the event. The scope rules
+  (`webhook/scope.go`) read `client_id`/`site_id` of the frame and resolve
+  CIs, assets and quantity items by ID; metamodel, document and import events
+  are organizational.
+
 #### GraphQL-BFF
 
 `POST /bff/graphql` (`backend/internal/graphqlbff`, GQL-01/GQL-02) is a
@@ -1048,7 +1249,7 @@ The server is configured via environment variables:
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
 - `RETICORA_AIR_GAPPED` — `true` disables every external AI call (air-gapped profile, AI-02; default `false`).
 - `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` — the CI offline detector, worker `offline_detector` (scheduler run `ci.offline_detector`, every 5 min; REC-09, LCY-05): an observable, discovered CI (not `is_manual`, source not manual/import) whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` with the event `ci.offline`, and `active` again with `ci.online` once seen; without a scope the organization's `settings.discovery.sweep_interval` (default 24 h) applies. The run changes a CI only as it read it (same status and `last_seen_at`, no other writer holding the row); a sighting the ingest writes during the run keeps the CI active, and a CI it set unknown before the sighting reached it is active again with `ci.online` (F-412). Each change is part of the CI's history and the audit log in the transaction of the change: a change set `status_changed` (source `system`, comment `ci.offline_detector`, the version stays) and the audit entry `ci.status_changed` (actor type `system`, `changes.job` `ci.offline_detector`; F-413). Default `true`. The former `RETICORA_OFFLINE_DETECTOR_ENABLED` still applies without it and is logged as deprecated (docs/ops/workers.md).
-- `RETICORA_MODULES` — the late modules (phase tag P2 and later or add-on [A]; API-06, RBA-05) this release serves (WP-214, E-03). Empty (default) switches them all off: their routes are not registered (404), their workers and system jobs do not start (alert evaluator, reservation sweeper) and the UI hides their navigation (`GET /api/v1/modules`). `all` switches every module on; otherwise a comma list of `inventory`, `documents`, `stocktake`, `ticketing` (P2), `maintenance`, `workflows`, `compliance`, `findings`, `alerting` (P3), `keys`, `trainings`, `desks`, `disposal`, `agents` (P4), `iga`, `ai` (add-ons, still gated by their entitlement). An unknown key stops the start. Their operations carry `x-phase` in `api/openapi.yaml`.
+- `RETICORA_MODULES` — the late modules (phase tag P2 and later or add-on [A]; API-06, RBA-05) this release serves (WP-214, E-03). Empty (default) switches them all off: their routes are not registered (404), their workers and system jobs do not start (alert evaluator, reservation sweeper) and the UI hides their navigation (`GET /api/v1/modules`). `all` switches every module on; otherwise a comma list of the phase value `P2` (every module with phase P2: release G2, WP-706; combinable with module keys, e.g. `P2,gps`) and the module keys `inventory`, `documents`, `import`, `stocktake`, `ticketing`, `disposal` (P2), `maintenance`, `workflows`, `compliance`, `findings`, `alerting` (P3), `keys`, `trainings`, `desks`, `gps`, `agents` (P4), `iga`, `ai` (add-ons, still gated by their entitlement). An unknown key stops the start. Their operations carry `x-phase` in `api/openapi.yaml`; the operations of P2 modules also carry the feature key of the org gate as `x-feature` (E-38). A route belongs to the module with the longest matching prefix: `/api/v1/assets/{id}/locations` (GPS history, LOC-09) belongs to `gps`, not `inventory`. The P2 resources of E-38 without a module of their own follow E-105: the metamodel resources go to the module `metamodel` with their first route (WP-250), suppliers, contracts and labels to `inventory`, business calendars and tickets from review items to `ticketing`; tags, the successors of G1 paths and the sub-paths of core resources are core without release gate (register in `backend/internal/server/modules_test.go`).
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
 - `RETICORA_S3_PUBLIC_URL` — base URL under which browsers reach the object store for signed downloads of exports and documents (`download_url`). The signature stays the one over `RETICORA_S3_ENDPOINT`; the URL names this base instead. The compose stack sets `<RETICORA_PUBLIC_BASE_URL>/objects`, which the frontend nginx forwards read-only (GET of the buckets `exports` and `reticora-documents`, `Host` of the internal endpoint) to MinIO (`frontend/objects-proxy.conf`). Empty keeps the internal endpoint in the URL, which a browser can only use if it resolves that name; from an HTTPS page an `http://` URL is blocked as mixed content (F-376). Other deployments point it at a reverse-proxy path that forwards the same way.
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).

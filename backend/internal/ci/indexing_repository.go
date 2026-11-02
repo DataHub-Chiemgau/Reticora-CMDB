@@ -144,6 +144,16 @@ func (r *indexingRepository) CountActive(ctx context.Context, orgID string) (int
 	return CountActive(ctx, r.Repository, orgID)
 }
 
+// RunInTx forwards the transaction of the max_cis admission (TxRunner,
+// WP-835); without one fn runs as it is, without a transaction, and
+// Service counts as before.
+func (r *indexingRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	if runner, ok := r.Repository.(TxRunner); ok {
+		return runner.RunInTx(ctx, orgID, fn)
+	}
+	return fn(ctx)
+}
+
 // GetByIDs forwards the batch read (NFR-02); without it every CI is read
 // on its own.
 func (r *indexingRepository) GetByIDs(ctx context.Context, orgID string, ids []string) ([]Item, error) {

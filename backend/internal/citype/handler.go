@@ -319,6 +319,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Category:                 req.Category,
 		IsLogical:                req.IsLogical,
 		IsObservable:             observableDefault(req.IsObservable, req.IsLogical),
+		ParentTypeID:             req.ParentTypeID,
 		TemplateKey:              req.TemplateKey,
 		LifecycleDefinitionID:    req.LifecycleDefinitionID,
 		Capabilities:             req.Capabilities,
@@ -353,7 +354,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+		writeTypeUpdateError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.updated", item)
@@ -595,15 +596,32 @@ func validateField(f Field) error {
 }
 
 // writeTypeError reports a failed create or clone of a CI type: a taken key
-// or name is 409 (in memory ErrConflict, in PostgreSQL 23505), every other
-// repository error goes through api.WriteRepoError, so no SQLSTATE,
-// constraint or driver text reaches the client (F-047).
+// or name is 409 (in memory ErrConflict, in PostgreSQL 23505), an error of
+// the parent or of the composition of the chain an RFC 7807 problem with
+// field parent_type_id (422, a cycle 409), every other repository error
+// goes through api.WriteRepoError, so no SQLSTATE, constraint or driver
+// text reaches the client (F-047).
 func writeTypeError(w http.ResponseWriter, err error) {
 	if errors.Is(err, ErrConflict) {
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
 		return
 	}
+	if api.WriteFieldError(w, err) {
+		return
+	}
 	api.WriteRepoError(w, err)
+}
+
+// writeTypeUpdateError reports a failed update of a CI type: an unknown
+// type (or a system type, which tenants cannot change) is 404, parent and
+// composition errors carry field parent_type_id, everything else goes
+// through api.WriteRepoError (F-047).
+func writeTypeUpdateError(w http.ResponseWriter, err error) {
+	if errors.Is(err, api.ErrNotFound) || err.Error() == "not found" {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+		return
+	}
+	writeTypeError(w, err)
 }
 
 // writeFieldDefinitionError reports a failed field upsert after the handler

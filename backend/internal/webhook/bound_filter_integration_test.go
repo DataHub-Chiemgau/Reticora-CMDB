@@ -38,9 +38,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
 
-// boundFixture is organization A with a role granting ci:read and
-// asset:read and service accounts holding it in client 1, in site 1 and
-// org-wide.
+// boundFixture is organization A with a role granting ci:read, asset:read
+// and reservation:read (the read right of reservation events since WP-245;
+// migration 000192 adds it to every holder of asset:read) and service
+// accounts holding it in client 1, in site 1 and org-wide.
 type boundFixture struct {
 	*scopetest.Fixture
 	sa1, saSite, saAll string
@@ -60,7 +61,7 @@ func newBoundFixture(t *testing.T, tag string) *boundFixture {
 	orgCtx := f.OrgCtx(f.OrgA)
 
 	readRole := f.ID()
-	if _, err := f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 't2-webhook-reader', '["ci:read", "asset:read"]')`, readRole, f.OrgA); err != nil {
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 't2-webhook-reader', '["ci:read", "asset:read", "reservation:read"]')`, readRole, f.OrgA); err != nil {
 		t.Fatal(err)
 	}
 	saRepo := user.NewPGServiceAccounts(f.App)
@@ -306,7 +307,13 @@ func TestBoundSubscriptionScopeResolution(t *testing.T) {
 		{"payload without scope and object", events.CIChanged, func() any { return map[string]any{"name": "x"} }, want{1, 0, 0, 1}},
 		{"merge without victim", events.CIMerged, func() any { return map[string]any{"survivor_id": c1} }, want{1, 0, 0, 1}},
 		{"relationship with unknown target", events.RelationshipRemoved, func() any { return f.removedPayload(c1, f.ID()) }, want{1, 0, 0, 1}},
-		{"type without scope source", "lifecycle.transitioned", func() any { return map[string]any{"ci_id": c1, "client_id": f.Client1} }, want{1, 0, 0, 1}},
+		// lifecycle.transitioned follows lifecycle.changed (WP-246): the
+		// entity_type decides the read permission, without it no bound
+		// subscription receives the event.
+		{"lifecycle without entity_type", "lifecycle.transitioned", func() any { return map[string]any{"ci_id": c1, "client_id": f.Client1} }, want{1, 0, 0, 0}},
+		{"lifecycle of an asset in site 2", events.LifecycleChanged, func() any {
+			return map[string]any{"entity_type": "asset", "entity_id": assetSite2, "to": "in_use"}
+		}, want{1, 1, 0, 1}},
 		{"not a JSON object", events.CIChanged, func() any { return []byte(`["` + c1 + `"]`) }, want{1, 0, 0, 1}},
 	}
 	for _, tc := range cases {

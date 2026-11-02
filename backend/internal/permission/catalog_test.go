@@ -95,6 +95,58 @@ func TestCatalogueHoldsTheRBA01Keys(t *testing.T) {
 	}
 }
 
+// p2Keys are the module keys of RBA-05 and the action keys of phase 2
+// (E-106, WP-245).
+var p2Keys = []string{
+	"stock:read", "stock:write", "reservation:read", "reservation:write", "contract:read", "contract:write",
+	"stocktake:complete", "import:run", "import:manage", "field_permission:manage", "tag:manage",
+	"metamodel:publish", "saved_view:manage",
+}
+
+// TestCatalogueHoldsTheP2Keys covers WP-245 (RBA-05, RBA-06, E-106): the Go
+// catalogue and the identity vocabulary hold the thirteen phase-2 keys; the
+// keys they replace (consumable:*, inventory:manage, asset:reserve) and the
+// retired asset:assign are gone, without an alias; every catalogue key is
+// in identity.AllPermissions and the other way round.
+func TestCatalogueHoldsTheP2Keys(t *testing.T) {
+	catalogue := catalogueKeys()
+	identityKeys := map[string]bool{}
+	for _, p := range identity.AllPermissions() {
+		if identityKeys[string(p)] {
+			t.Errorf("identity.AllPermissions lists %s twice", p)
+		}
+		identityKeys[string(p)] = true
+	}
+	if len(p2Keys) != 13 {
+		t.Fatalf("%d phase-2 keys, want 13", len(p2Keys))
+	}
+	for _, k := range p2Keys {
+		if !slices.Contains(catalogue, k) {
+			t.Errorf("phase-2 key %s missing from the catalogue", k)
+		}
+		if !identityKeys[k] {
+			t.Errorf("phase-2 key %s missing from identity.AllPermissions", k)
+		}
+	}
+	for _, k := range []string{"consumable:read", "consumable:write", "inventory:manage", "asset:reserve", "asset:assign"} {
+		if slices.Contains(catalogue, k) {
+			t.Errorf("catalogue still holds the replaced key %s", k)
+		}
+		if identityKeys[k] {
+			t.Errorf("identity.AllPermissions still holds the replaced key %s", k)
+		}
+	}
+	for _, k := range catalogue {
+		if !identityKeys[k] {
+			t.Errorf("catalogue key %s missing from identity.AllPermissions", k)
+		}
+		delete(identityKeys, k)
+	}
+	for k := range identityKeys {
+		t.Errorf("identity.AllPermissions holds %s, which is missing from the catalogue", k)
+	}
+}
+
 // TestSQLCatalogueEqualsGoCatalogue covers WP-068 (RBA-01): the permission
 // table the migrations seed equals the Go catalogue exactly.
 //

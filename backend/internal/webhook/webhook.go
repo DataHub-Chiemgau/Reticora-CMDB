@@ -214,48 +214,54 @@ type CreateRequest struct {
 // deliberately not part of ValidEvents so it cannot be subscribed to.
 const TestEvent = "webhook.test"
 
-// ValidEvents lists allowed webhook events.
-var ValidEvents = map[string]bool{
-	"ci.created":           true,
-	"ci.updated":           true,
-	"ci.deleted":           true,
-	"ci.status_changed":    true,
-	"relationship.created": true,
-	"relationship.deleted": true,
-	"discovery.completed":  true,
-	// Enterprise CMDB + asset/inventory extension (spec §20).
-	"ci_type.created":               true,
-	"ci_type.updated":               true,
-	"ci_type.deactivated":           true,
-	"ci_attribute.changed":          true,
-	"lifecycle.transitioned":        true,
-	"asset.movement":                true,
-	"inventory.movement":            true,
-	"reservation.created":           true,
-	"reservation.released":          true,
-	"composition.created":           true,
-	"composition.updated":           true,
-	"composition.deleted":           true,
-	"override.changed":              true,
-	"reconciliation.policy_changed": true,
-	// The domain events of EVT-02 (WP-136); ci.updated and
-	// relationship.deleted are their former names.
-	"ci.changed":           true,
-	"ci.restored":          true,
-	"ci.merged":            true,
-	"ci.offline":           true,
-	"ci.online":            true,
-	"relationship.removed": true,
-	"collector.enrolled":   true,
-	"collector.offline":    true,
-	"review.created":       true,
-	"review.resolved":      true,
-	"export.completed":     true,
-	"job.failed":           true,
-	"entitlement.warning":  true,
-	"entitlement.expired":  true,
-	"invitation.created":   true,
-	"certificate.expiring": true,
+// unsubscribable are the registered event types no subscription receives:
+// webhook.dead reports a dead subscription to the org_admins, and
+// apikey.creator_deactivated asks them to rotate keys (E-64); both are
+// notifications only.
+var unsubscribable = map[string]bool{
+	events.WebhookDead:              true,
+	events.APIKeyCreatorDeactivated: true,
+}
+
+// deprecatedEvents are the subscribable names without an event contract:
+// handlers dispatch them directly to the subscriptions, or nothing raises
+// them (discovery.completed). They stay subscribable for existing
+// subscriptions (WP-246).
+var deprecatedEvents = []string{
+	"ci_type.created",
+	"ci_type.updated",
+	"ci_type.deactivated",
+	"ci_attribute.changed",
+	"composition.created",
+	"composition.updated",
+	"composition.deleted",
+	"override.changed",
+	"reconciliation.policy_changed",
+	"discovery.completed",
+}
+
+// ValidEvents are the subscribable events, derived from the register
+// (WP-246): events.Types without the unsubscribable types, the former
+// names of legacyNames and deprecatedEvents. webhook.test (TestEvent) and
+// the reserved types of phase 3 are not subscribable.
+var ValidEvents = validEvents()
+
+func validEvents() map[string]bool {
+	valid := map[string]bool{}
+	for _, typ := range events.Types {
+		if !unsubscribable[typ] {
+			valid[typ] = true
+		}
+	}
+	for _, names := range legacyNames {
+		for _, name := range names {
+			valid[name] = true
+		}
+	}
+	for _, name := range deprecatedEvents {
+		valid[name] = true
+	}
+	return valid
 }
 
 // withheldKeys are the data keys of an event that webhook deliveries never

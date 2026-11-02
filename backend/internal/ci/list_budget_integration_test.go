@@ -515,7 +515,7 @@ func TestCINodeReadBudget(t *testing.T) {
 	t.Cleanup(pool.Close)
 	repo := ci.NewPGRepository(pool)
 	ctx := f.OrgCtx(f.OrgA)
-	// All CIs (the read of the organization, above 2,000 ids) and 100 of
+	// All CIs (the read of the organization, above 5,000 ids) and 100 of
 	// them, half of those overridden (by ids).
 	for _, c := range []struct {
 		name string

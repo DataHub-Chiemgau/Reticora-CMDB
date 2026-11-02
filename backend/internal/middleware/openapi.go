@@ -133,7 +133,11 @@ func (v *OpenAPIValidator) Middleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			body, err := io.ReadAll(r.Body)
+			body, err := readRequestBody(r)
+			if errors.Is(err, errRequestBodyTooLarge) {
+				writeRequestBodyTooLarge(w)
+				return
+			}
 			if err != nil {
 				httpx.ValidationError(w, r, "unable to read request body")
 				return

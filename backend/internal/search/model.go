@@ -42,11 +42,16 @@ type Hit struct {
 }
 
 type Result struct {
-	Data    []Hit `json:"data"`
-	Total   int   `json:"total"`
-	Limit   int   `json:"limit"`
-	Offset  int   `json:"offset"`
-	HasMore bool  `json:"has_more"`
+	Data  []Hit `json:"data"`
+	Total int   `json:"total"`
+	// TotalCapped marks a Total of the PostgreSQL index that stopped at
+	// api.TotalCap (E-104): more hits match. The handler answers total as
+	// the hits of the page the caller may read, so it never reaches the
+	// cap and the response does not carry the mark.
+	TotalCapped bool `json:"-"`
+	Limit       int  `json:"limit"`
+	Offset      int  `json:"offset"`
+	HasMore     bool `json:"has_more"`
 	// NextCursor continues after this page (API-02).
 	NextCursor string `json:"next_cursor,omitempty"`
 }
@@ -73,5 +78,5 @@ var ReadPermission = map[string]string{
 	"contact":     "contact:read",
 	"compliance":  "compliance:read",
 	"location":    "location:read",
-	"reservation": "asset:read",
+	"reservation": "reservation:read", // RBA-05, E-106 (WP-245)
 }

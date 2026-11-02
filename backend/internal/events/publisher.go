@@ -210,9 +210,10 @@ func (p *Publisher) deliver(ctx context.Context, env, revealed *Envelope) error 
 }
 
 // Cleanup removes the rows published longer than KeepPublished ago. The
-// newest row of the organization and of each entity stays as the anchor
-// the numbering continues from (sequence, entity_seq), without its data:
-// no event data outlives the retention (NFR-06).
+// newest row of each entity stays as the anchor entity_seq continues from,
+// without its data: no event data outlives the retention (NFR-06). The
+// organization's sequence continues from its counter (event_outbox_counter,
+// migration 000193, WP-834), so the organization's newest row may go.
 func (p *Publisher) Cleanup(ctx context.Context) error {
 	cutoff := p.now().Add(-p.KeepPublished())
 	var orgs []string
@@ -230,10 +231,9 @@ func (p *Publisher) Cleanup(ctx context.Context) error {
 	for _, org := range orgs {
 		scope := database.OrgWideScope(org, "")
 		if err := database.WithTenant(ctx, p.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-			// The newest event of the organization and of each entity stay:
-			// the numbering continues from them.
+			// The newest event of each entity stays: entity_seq continues
+			// from it.
 			_, err := tx.Exec(ctx, `DELETE FROM event_outbox o WHERE organization_id = $1 AND published_at < $2
-				AND sequence < (SELECT max(sequence) FROM event_outbox WHERE organization_id = $1)
 				AND (entity_id IS NULL OR entity_seq < (SELECT max(entity_seq) FROM event_outbox e
 					WHERE e.organization_id = $1 AND e.entity_id = o.entity_id))`, org, cutoff)
 			if err != nil {

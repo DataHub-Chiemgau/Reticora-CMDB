@@ -66,8 +66,6 @@ var Catalogue = []Permission{
 	{Key: "discovery:ingest", Resource: "discovery", Action: "ingest", Description: "Ingest collector discovery data"},
 	{Key: "citype:manage", Resource: "citype", Action: "manage", Description: "Manage CI types"},
 	{Key: "apikey:manage", Resource: "apikey", Action: "manage", Description: "Manage API keys"},
-	{Key: "consumable:read", Resource: "consumable", Action: "read", Description: "Read consumable stock"},
-	{Key: "consumable:write", Resource: "consumable", Action: "write", Description: "Manage consumable stock"},
 	{Key: "order:read", Resource: "order", Action: "read", Description: "Read internal orders"},
 	{Key: "order:write", Resource: "order", Action: "write", Description: "Manage internal orders"},
 	{Key: "order:approve", Resource: "order", Action: "approve", Description: "Approve internal orders"},
@@ -91,8 +89,6 @@ var Catalogue = []Permission{
 	{Key: "ci_instance_attribute:manage", Resource: "ci_instance_attribute", Action: "manage", Description: "Manage CI instance attributes"},
 	{Key: "relationship_type:manage", Resource: "relationship_type", Action: "manage", Description: "Manage relationship types"},
 	{Key: "asset:move", Resource: "asset", Action: "move", Description: "Move assets between locations"},
-	{Key: "asset:reserve", Resource: "asset", Action: "reserve", Description: "Reserve assets and inventory items"},
-	{Key: "inventory:manage", Resource: "inventory", Action: "manage", Description: "Manage inventory locations and stock"},
 	{Key: "lifecycle:manage", Resource: "lifecycle", Action: "manage", Description: "Manage lifecycle definitions and transitions"},
 	{Key: "override:write", Resource: "override", Action: "write", Description: "Create and clear manual field overrides"},
 	{Key: "saved_view:read", Resource: "saved_view", Action: "read", Description: "Read saved views"},
@@ -100,4 +96,20 @@ var Catalogue = []Permission{
 	// Special actions with their own permission (RBA-06, migration 000072).
 	{Key: "lifecycle:transition", Resource: "lifecycle", Action: "transition", Description: "Execute lifecycle transitions of CIs and assets"},
 	{Key: "reconciliation:manage", Resource: "reconciliation", Action: "manage", Description: "Manage reconciliation settings (source policy)"},
+	// Module keys of RBA-05 and the action keys of phase 2 (E-106, migration
+	// 000192): stock:* replaces consumable:* and inventory:manage,
+	// reservation:write replaces asset:reserve.
+	{Key: "stock:read", Resource: "stock", Action: "read", Description: "Read consumables, quantity items and stock"},
+	{Key: "stock:write", Resource: "stock", Action: "write", Description: "Manage consumables, quantity items and stock"},
+	{Key: "reservation:read", Resource: "reservation", Action: "read", Description: "Read reservations"},
+	{Key: "reservation:write", Resource: "reservation", Action: "write", Description: "Create and release reservations"},
+	{Key: "contract:read", Resource: "contract", Action: "read", Description: "Read contracts and suppliers"},
+	{Key: "contract:write", Resource: "contract", Action: "write", Description: "Manage contracts and suppliers"},
+	{Key: "stocktake:complete", Resource: "stocktake", Action: "complete", Description: "Complete stocktakes"},
+	{Key: "import:run", Resource: "import", Action: "run", Description: "Run imports and read import runs and mapping profiles"},
+	{Key: "import:manage", Resource: "import", Action: "manage", Description: "Manage import mapping profiles"},
+	{Key: "field_permission:manage", Resource: "field_permission", Action: "manage", Description: "Manage field permissions"},
+	{Key: "tag:manage", Resource: "tag", Action: "manage", Description: "Manage tags"},
+	{Key: "metamodel:publish", Resource: "metamodel", Action: "publish", Description: "Publish metamodel drafts and template versions"},
+	{Key: "saved_view:manage", Resource: "saved_view", Action: "manage", Description: "Manage saved views of other owners"},
 }

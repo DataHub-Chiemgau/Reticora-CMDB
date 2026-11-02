@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -534,6 +535,60 @@ type Handler struct {
 	// scopeCycles counts the scope requests that failed on the server's
 	// side (worker discovery_scopes, OPS-05); nil counts none.
 	scopeCycles *observability.Cycles
+	// analyzer refreshes the planner statistics after many new CIs
+	// (BulkAnalyzer, WP-834); bulkCreated counts the committed new CIs of
+	// the batch path per organization since its last run.
+	analyzer    BulkAnalyzer
+	bulkCreated sync.Map
+}
+
+// BulkAnalyzer refreshes the planner statistics after a mass creation
+// (database.AnalyzeAfterBulk, WP-834, SR-08). The discovery PG repository
+// implements it.
+type BulkAnalyzer interface {
+	AnalyzeAfterBulk(ctx context.Context) ([]string, error)
+}
+
+// bulkAnalyzeThreshold is the number of new CIs of an organization after
+// whose commit the ingest refreshes the statistics (WP-834).
+const bulkAnalyzeThreshold = 500
+
+// AnalyzeAfterBulk implements BulkAnalyzer with database.AnalyzeAfterBulk on
+// the repository's pool.
+func (r *PGRepository) AnalyzeAfterBulk(ctx context.Context) ([]string, error) {
+	return database.AnalyzeAfterBulk(ctx, r.pool)
+}
+
+// noteBulkCreated counts n CIs the batch path of orgID created in the
+// context transaction. After the commit of the window with which the
+// organization's new CIs reach bulkAnalyzeThreshold, the statistics are
+// refreshed (database.AfterCommit, K20; WP-834): until autovacuum catches
+// up, the batch candidate queries plan over the whole organization. A
+// window holds at most ingestBatch records, so the count spans the windows
+// of this instance; a rollback drops the window's count with its
+// callback. AnalyzeAfterBulk runs at most every ten minutes across the
+// cluster and never twice at once.
+func (h *Handler) noteBulkCreated(ctx context.Context, orgID string, n int) {
+	if h.analyzer == nil || n <= 0 {
+		return
+	}
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		v, _ := h.bulkCreated.LoadOrStore(orgID, new(atomic.Int64))
+		counter, _ := v.(*atomic.Int64)
+		if counter == nil || counter.Add(int64(n)) < bulkAnalyzeThreshold {
+			return
+		}
+		counter.Store(0)
+		tables, err := h.analyzer.AnalyzeAfterBulk(ctx)
+		if err != nil {
+			slog.WarnContext(ctx, "analyze after new CIs failed", "event", "ingest.analyze", "organization_id", orgID, "error", err)
+			return
+		}
+		if len(tables) > 0 {
+			slog.InfoContext(ctx, "statistics refreshed after new CIs", "event", "ingest.analyze", "organization_id", orgID,
+				"tables", tables)
+		}
+	})
 }
 
 // CITypeLookup resolves a CI type name or UUID to the canonical ci_type id.
@@ -567,6 +622,9 @@ func NewHandler(repo Repository, ciRepo ci.Repository, relRepo ...relationship.R
 	}
 	if runner, ok := repo.(TxRunner); ok {
 		h.tx = runner
+	}
+	if analyzer, ok := repo.(BulkAnalyzer); ok {
+		h.analyzer = analyzer
 	}
 	if len(relRepo) > 0 {
 		h.relRepo = relRepo[0]
@@ -2067,6 +2125,7 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 	if err := h.recordDiscoveredBatch(ctx, orgID, provenance); err != nil {
 		return err
 	}
+	h.noteBulkCreated(ctx, orgID, len(pending)-len(refused))
 	for p := range pending {
 		if refused[p] {
 			continue

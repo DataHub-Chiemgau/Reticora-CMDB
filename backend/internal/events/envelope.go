@@ -1,4 +1,4 @@
-// Package events is the domain event contract of EVT-01/EVT-02: every
+// Package events is the domain event contract of EVT-01 to EVT-03: every
 // mutation writes its event into the transactional outbox (event_outbox)
 // of its own transaction; the publisher delivers the events in order to
 // the NATS stream RETICORA_EVENTS (events.<org_id>.<type>) and to the
@@ -40,51 +40,3 @@ const (
 	StreamMaxAge         = 30 * 24 * time.Hour
 	StreamMaxBytes int64 = 10 << 30
 )
-
-// Event types of EVT-02, and those NTF-05 notifies of besides.
-const (
-	CICreated           = "ci.created"
-	CIChanged           = "ci.changed"
-	CIDeleted           = "ci.deleted"
-	CIRestored          = "ci.restored"
-	CIMerged            = "ci.merged"
-	CIOffline           = "ci.offline"
-	CIOnline            = "ci.online"
-	RelationshipCreated = "relationship.created"
-	RelationshipRemoved = "relationship.removed"
-	CollectorEnrolled   = "collector.enrolled"
-	CollectorOffline    = "collector.offline"
-	ReviewCreated       = "review.created"
-	ReviewResolved      = "review.resolved"
-	ExportCompleted     = "export.completed"
-	JobFailed           = "job.failed"
-	EntitlementWarning  = "entitlement.warning"
-	// Further notification events of NTF-05 (WP-140).
-	EntitlementExpired  = "entitlement.expired"
-	InvitationCreated   = "invitation.created"
-	WebhookDead         = "webhook.dead"
-	CertificateExpiring = "certificate.expiring"
-	// APIKeyCreatorDeactivated: the user who created service-account keys
-	// was deactivated or anonymized; the keys stay valid and the org_admins
-	// are asked to rotate them (TLC-04, decision E-64 option 2).
-	APIKeyCreatorDeactivated = "apikey.creator_deactivated"
-)
-
-// Types lists the event types.
-var Types = []string{
-	CICreated, CIChanged, CIDeleted, CIRestored, CIMerged, CIOffline, CIOnline,
-	RelationshipCreated, RelationshipRemoved, CollectorEnrolled, CollectorOffline,
-	ReviewCreated, ReviewResolved, ExportCompleted, JobFailed, EntitlementWarning,
-	EntitlementExpired, InvitationCreated, WebhookDead, CertificateExpiring,
-	APIKeyCreatorDeactivated,
-}
-
-// IsType reports whether t is an event type of EVT-02.
-func IsType(t string) bool {
-	for _, known := range Types {
-		if known == t {
-			return true
-		}
-	}
-	return false
-}

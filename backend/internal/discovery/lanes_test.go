@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
@@ -185,7 +186,7 @@ func TestIngestLockSpace(t *testing.T) {
 	if k := identityOrgLockKey("ORG-1"); k != 1243962943 {
 		t.Errorf("organization identity key of org-1: %d, want 1243962943", k)
 	}
-	if k := ingestLockKey(ciCountLockNamespace + "org-1"); k != 522053624 {
+	if k := database.CICountLockKey("org-1"); k != 522053624 {
 		t.Errorf("max_cis key of org-1: %d, want 522053624", k)
 	}
 	classes := map[int32]string{
@@ -218,6 +219,28 @@ func TestIngestLockSpace(t *testing.T) {
 	}
 	if !strings.Contains(identityLockSQL, "pg_advisory_xact_lock(s.c, s.k)") {
 		t.Errorf("identity keys not locked in their class: %s", identityLockSQL)
+	}
+
+	// One lock space for every channel (WP-835, K21): the statements,
+	// classes and keys of the ingest are those of database/advisory.go,
+	// which ci.CIAdmitter takes too, and the identity locks other channels
+	// take are the ingest's.
+	if identityLockSQL != database.IdentityLockSQL || ciCountLockSQL != database.CICountLockSQL ||
+		ciCountLockClass != database.CICountLockClass || database.CICountLockKey("ORG-1") != 522053624 {
+		t.Error("the ingest locks differ from those of database/advisory.go")
+	}
+	item := &IngestItem{SerialNumber: "SN-1", ManagementIP: "10.0.0.1"}
+	if got, want := IdentityLocksFor("org-1", nil, item), identityLocks("org-1", &IdentityContext{}, item); !slices.Equal(got.Keys, want.Keys) ||
+		got.Org != want.Org || got.Exclusive || len(got.Keys) != 2 {
+		t.Errorf("exported identity locks %+v, want the ingest's %+v", got, want)
+	}
+	// Outside a transaction the lock fails closed; without a key there is
+	// nothing to lock.
+	if err := LockIdentityKeys(context.Background(), "org-1", nil, item); !errors.Is(err, database.ErrNoLockTx) {
+		t.Errorf("identity lock without a transaction: %v, want ErrNoLockTx", err)
+	}
+	if err := LockIdentityKeys(context.Background(), "org-1", nil, &IngestItem{Hostname: "localhost"}); err != nil {
+		t.Errorf("identity lock of a record without identity keys: %v, want nil", err)
 	}
 }
 

@@ -2,8 +2,6 @@ package discovery
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"hash/fnv"
 	"log/slog"
@@ -229,37 +227,20 @@ type IdentityLocks struct {
 // (identityLockLimit+1) identity locks.
 const identityLockLimit = 256
 
-// Lock classes of the ingest locks. They use the two-argument form of the
-// advisory locks, pg_advisory_xact_lock(class, key), whose lock tag never
-// equals the tag of a one-argument (bigint) lock: the scheduler's leader
-// and job locks, the location tree and the operator audit stay out of
-// reach of keys derived from what a tenant reports. Their classes differ
-// from those of the audit chain (0x52657469), the event outbox (0x45766e74)
-// and its publisher (0x45766e75), and from each other, so the organization's
-// identity lock, taken before the keys, is never one of them.
+// Lock classes of the ingest locks: two-argument advisory locks of classes
+// of their own, defined with their keys and statements in
+// database/advisory.go, which every channel that creates CIs shares
+// (ci.CIAdmitter, WP-835, K21).
 const (
-	identityOrgLockClass int32 = 0x52496f72 // "RIor"
-	identityKeyLockClass int32 = 0x52496b79 // "RIky"
-	ciCountLockClass     int32 = 0x52436e74 // "RCnt"
+	identityOrgLockClass = database.IdentityOrgLockClass
+	identityKeyLockClass = database.IdentityKeyLockClass
+	ciCountLockClass     = database.CICountLockClass
 )
-
-// identityLockNamespace prefixes every hashed identity key and the
-// organization's identity lock.
-const identityLockNamespace = "reticora/ingest-identity\x00"
-
-// ingestLockKey is the key of text within its lock class: the first four
-// bytes of its SHA-256. A tenant cannot choose a value whose key equals a
-// given one at less than about 2^32 hashes, and two values that share a key
-// only serialize their transactions, as one value would.
-func ingestLockKey(text string) int32 {
-	sum := sha256.Sum256([]byte(text))
-	return int32(binary.BigEndian.Uint32(sum[:4])) //nolint:gosec // the bits of the hash
-}
 
 // identityOrgLockKey is the advisory lock key of an organization's identity
 // lock in identityOrgLockClass.
 func identityOrgLockKey(orgID string) int32 {
-	return ingestLockKey(identityLockNamespace + strings.ToLower(orgID))
+	return database.IdentityOrgLockKey(orgID)
 }
 
 // identityLocks returns the identity locks of a transaction that processes
@@ -286,10 +267,9 @@ func identityLockKeys(orgID string, ic *IdentityContext, items ...*IngestItem) [
 	if ic == nil {
 		ic = &IdentityContext{}
 	}
-	org := strings.ToLower(orgID)
 	var keys []int32
 	add := func(kind, value string) {
-		keys = append(keys, ingestLockKey(identityLockNamespace+org+"\x00"+kind+"\x00"+value))
+		keys = append(keys, database.IdentityValueLockKey(orgID, kind, value))
 	}
 	for _, item := range items {
 		if usableSerial(item.SerialNumber) {
@@ -307,6 +287,31 @@ func identityLockKeys(orgID string, ic *IdentityContext, items ...*IngestItem) [
 	}
 	slices.Sort(keys)
 	return slices.Compact(keys)
+}
+
+// IdentityLocksFor returns the identity locks (E-56) a transaction of
+// another channel that creates CIs or matches devices by their identity
+// (import, WP-302, K21) takes for items, the same as the ingest's: the
+// organization's lock shared with the keys of items (identityLockKeys), or
+// exclusive without keys over identityLockLimit. ic is the VRF context of
+// the management IPs; nil is the default VRF.
+func IdentityLocksFor(orgID string, ic *IdentityContext, items ...*IngestItem) IdentityLocks {
+	if ic == nil {
+		ic = &IdentityContext{}
+	}
+	return identityLocks(orgID, ic, items...)
+}
+
+// LockIdentityKeys takes the identity locks of items (IdentityLocksFor) in
+// the context transaction, as its first statement, for another channel than
+// the ingest (WP-302, K21). Items without an identity key lock nothing;
+// without a context transaction it fails (database.ErrNoLockTx).
+func LockIdentityKeys(ctx context.Context, orgID string, ic *IdentityContext, items ...*IngestItem) error {
+	locks := IdentityLocksFor(orgID, ic, items...)
+	if !locks.Exclusive && len(locks.Keys) == 0 {
+		return nil
+	}
+	return database.LockIdentities(ctx, orgID, locks.Org, locks.Exclusive, locks.Keys, 0)
 }
 
 // lockIdentities takes the identity locks of items in the context
@@ -369,6 +374,38 @@ type CICountLocker interface {
 	LockCICount(ctx context.Context, orgID string, exclusive bool) (int64, error)
 }
 
+// drainLaneCounter is an ingest queue that drains the lanes a configuration
+// with more lanes left behind (NATSIngestQueue).
+type drainLaneCounter interface {
+	DrainLanes() int
+}
+
+// drainLanes is the number of lanes the handler's queue drains besides its
+// own (0 without a queue that drains).
+func (h *Handler) drainLanes() int {
+	if q, ok := h.queue.(drainLaneCounter); ok {
+		return max(q.DrainLanes(), 0)
+	}
+	return 0
+}
+
+// DrainLanes is the number of lane consumers beyond RETICORA_INGEST_LANES
+// the queue drains (discover): each holds up to ingestBatch
+// unacknowledged messages, which the max_cis admission counts in flight.
+// A lane another instance adds is counted from the next discovery on (at
+// most laneRefresh later).
+func (q *NATSIngestQueue) DrainLanes() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, lc := range q.consumers {
+		if !lc.own {
+			n++
+		}
+	}
+	return n
+}
+
 // errNearLimit makes a transaction that admitted new CIs under the shared
 // max_cis lock start again under the exclusive one: its count showed that
 // the lanes together could pass the limit.
@@ -386,10 +423,11 @@ var errNearLimit = errors.New("ingest: max_cis headroom below the creations the 
 // it: a record is acknowledged only after its transaction committed, and the
 // lane consumers and the former consumer hold at most ingestBatch
 // unacknowledged messages each across all instances (MaxAckPending), so at
-// most (lanes+1)·ingestBatch creations are in flight. A shared holder whose
-// count shows less headroom rolls back and starts again exclusively
-// (errNearLimit). Lanes being drained after a lane count was lowered are not
-// counted: until they are empty, each may add up to ingestBatch.
+// most (lanes+drain lanes+1)·ingestBatch creations are in flight. A shared
+// holder whose count shows less headroom rolls back and starts again
+// exclusively (errNearLimit). Lanes being drained after a lane count was lowered
+// (drainLanes) have a consumer and a MaxAckPending of their own until they
+// are empty, so each counts as a lane (WP-835, SR-09).
 func (h *Handler) admissionCount(ctx context.Context, orgID string, frame *batchFrame, snapshot int64) (int64, error) {
 	if !frame.locking || h.limits == nil || !database.InTx(ctx) {
 		return snapshot, nil
@@ -405,7 +443,7 @@ func (h *Handler) admissionCount(ctx context.Context, orgID string, frame *batch
 	if err := h.limits.AllowCreate(ctx, orgID, entitlement.LimitMaxCIs, math.MaxInt64); !errors.As(err, &exceeded) {
 		return snapshot, nil
 	}
-	inFlight := int64(max(h.ingestLanes, 1)+1) * ingestBatch
+	inFlight := int64(max(h.ingestLanes, 1)+h.drainLanes()+1) * ingestBatch
 	exclusive := frame.limitExclusive || snapshot+inFlight > exceeded.Limit
 	count, err := locker.LockCICount(ctx, orgID, exclusive)
 	if err != nil {

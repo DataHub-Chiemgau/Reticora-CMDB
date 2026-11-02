@@ -132,6 +132,14 @@ tags:
     description: Governed LLM/RAG assistant
   - name: Locations
     description: Canonical location tree (sites, buildings, rooms, racks, warehouses, zones, shelves, bins)
+  - name: Metamodel
+    description: Lifecycle models, forms, templates and indexing of the metamodel
+  - name: Tags
+    description: Tag catalog and the tags of CIs and assets
+  - name: Import
+    description: Import profiles and import runs of CSV/XLSX files
+  - name: IPAM
+    description: Subnets, IP addresses and IP reservations
 
 paths:
   /healthz:
@@ -2771,6 +2779,7 @@ paths:
 
   /api/v1/assets:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssets
       tags: [Assets]
@@ -2843,6 +2852,7 @@ paths:
 
   /api/v1/assets/{id}:
     x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2909,6 +2919,7 @@ paths:
 
   /api/v1/assignments:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssignments
       tags: [Assignments]
@@ -2971,6 +2982,7 @@ paths:
 
   /api/v1/assignments/{id}:
     x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3002,6 +3014,7 @@ paths:
 
   /api/v1/documents:
     x-phase: P2
+    x-feature: documents
     get:
       operationId: listDocuments
       tags: [Documents]
@@ -3059,6 +3072,7 @@ paths:
 
   /api/v1/documents/{id}:
     x-phase: P2
+    x-feature: documents
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3115,6 +3129,7 @@ paths:
 
   /api/v1/orders:
     x-phase: P2
+    x-feature: internal_orders
     get:
       operationId: listOrders
       tags: [Orders]
@@ -3163,6 +3178,7 @@ paths:
 
   /api/v1/orders/{id}:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3217,6 +3233,7 @@ paths:
 
   /api/v1/orders/{id}/submit:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3237,6 +3254,7 @@ paths:
 
   /api/v1/orders/{id}/approve:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3257,6 +3275,7 @@ paths:
 
   /api/v1/orders/{id}/reject:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3277,6 +3296,7 @@ paths:
 
   /api/v1/orders/{id}/items:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3439,7 +3459,8 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/disposal-records:
-    x-phase: P4
+    x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listDisposalRecords
       tags: [Disposal]
@@ -3489,7 +3510,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/disposal-records/{id}:
-    x-phase: P4
+    x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3962,6 +3984,7 @@ paths:
 
   /api/v1/assets/{id}/label.svg:
     x-phase: P2
+    x-feature: barcode
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: base_url
@@ -3983,7 +4006,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/asset-locations:
-    x-phase: P2
+    x-phase: P4
     post:
       operationId: recordAssetLocation
       tags: [Assets]
@@ -4007,7 +4030,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/assets/{id}/locations:
-    x-phase: P2
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4363,6 +4386,7 @@ paths:
 
   /api/v1/consumables:
     x-phase: P2
+    x-feature: stock
     get:
       operationId: listConsumables
       tags: [Consumables]
@@ -4415,6 +4439,7 @@ paths:
 
   /api/v1/consumables/{id}:
     x-phase: P2
+    x-feature: stock
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4469,6 +4494,7 @@ paths:
 
   /api/v1/consumables/{id}/movements:
     x-phase: P2
+    x-feature: stock
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4492,6 +4518,10 @@ paths:
       operationId: addConsumableMovement
       tags: [Consumables]
       summary: Record a stock in/out movement and adjust the level atomically
+      description: >-
+        The planned successor is POST /api/v1/stock-movements with the
+        quantity bookings receipt and retrieval (E-38); the deprecation
+        follows once the successor is implemented (WP-283, WP-756).
       requestBody:
         required: true
         content:
@@ -4512,6 +4542,7 @@ paths:
 
   /api/v1/stocktakes:
     x-phase: P2
+    x-feature: stocktake_standard
     get:
       operationId: listStocktakes
       tags: [Stocktake]
@@ -4570,6 +4601,7 @@ paths:
 
   /api/v1/stocktakes/{id}:
     x-phase: P2
+    x-feature: stocktake_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4642,6 +4674,7 @@ paths:
 
   /api/v1/stocktakes/{id}/scans:
     x-phase: P2
+    x-feature: stocktake_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4689,6 +4722,7 @@ paths:
 
   /api/v1/stocktakes/{id}/difference:
     x-phase: P2
+    x-feature: stocktake_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4714,6 +4748,7 @@ paths:
 
   /api/v1/stocktakes/{id}/complete:
     x-phase: P2
+    x-feature: stocktake_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -4762,6 +4797,7 @@ paths:
 
   /api/v1/tickets:
     x-phase: P2
+    x-feature: ticketing_essential
     get:
       operationId: listTickets
       tags: [Tickets]
@@ -4842,6 +4878,7 @@ paths:
 
   /api/v1/tickets/{id}:
     x-phase: P2
+    x-feature: ticketing_essential
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4906,6 +4943,7 @@ paths:
 
   /api/v1/tickets/{id}/comments:
     x-phase: P2
+    x-feature: ticketing_essential
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -8425,6 +8463,7 @@ paths:
 
   /api/v1/assignments/{id}/return:
     x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -8459,6 +8498,7 @@ paths:
 
   /api/v1/assignments/{id}/transfer:
     x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -9163,6 +9203,7 @@ paths:
 
   /api/v1/documents/{id}/content:
     x-phase: P2
+    x-feature: documents
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     put:
@@ -9243,6 +9284,7 @@ paths:
 
   /api/v1/documents/{id}/links:
     x-phase: P2
+    x-feature: documents
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -10456,6 +10498,7 @@ paths:
 
   /api/v1/slas:
     x-phase: P2
+    x-feature: ticketing_standard
     get:
       operationId: listSLAPolicies
       tags: [SLA]
@@ -10520,6 +10563,7 @@ paths:
 
   /api/v1/slas/breaches:
     x-phase: P2
+    x-feature: ticketing_standard
     get:
       operationId: listSLABreaches
       tags: [SLA]
@@ -10547,6 +10591,7 @@ paths:
 
   /api/v1/slas/{id}:
     x-phase: P2
+    x-feature: ticketing_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -10611,6 +10656,7 @@ paths:
 
   /api/v1/tickets/{id}/sla:
     x-phase: P2
+    x-feature: ticketing_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -11866,6 +11912,7 @@ paths:
 
   /api/v1/assets/{id}/children:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssetsIdChildren
       summary: List child composition entries of a parent asset
@@ -11877,6 +11924,7 @@ paths:
 
   /api/v1/assets/{id}/lifecycle-transitions:
     x-phase: P2
+    x-feature: assets_basic
     post:
       operationId: createAssetsIdLifecycleTransitions
       summary: Execute a lifecycle transition on an asset
@@ -11894,9 +11942,19 @@ paths:
 
   /api/v1/assets/{id}/movements:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssetsIdMovements
+      deprecated: true
+      x-deprecated-at: '2026-11-02'
+      x-sunset: '2027-11-03'
+      x-successor: '/api/v1/stock-movements'
       summary: List the movement ledger of an asset
+      description: >-
+        Deprecated (E-38, WP-247): the successor is GET
+        /api/v1/stock-movements with the filter asset_id, which reads the
+        same ledger. The path answers until x-sunset with the Deprecation,
+        Sunset and successor-version Link headers.
       responses:
         '200':
           description: List the movement ledger of an asset
@@ -11907,6 +11965,7 @@ paths:
 
   /api/v1/assets/{id}/state:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssetsIdState
       summary: Reconstruct asset state at a point in time
@@ -12092,7 +12151,8 @@ paths:
         read-only (403). Changing `searchable`, `unique` or `unique_scope`
         queues an `attribute.index` job that builds the index concurrently
         (DB-04); making an attribute unique while active CIs share a value is
-        409.
+        409. A definition that cannot be composed with the other layers of
+        its key (MET-16) is 422 with `field` = `key` and a `code`.
       requestBody:
         required: true
         content:
@@ -12116,6 +12176,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
@@ -12154,7 +12216,10 @@ paths:
         `display_name` is a map of languages (de, en); a missing language
         takes the other one or the name, a plain string is accepted for both.
         `is_observable` defaults to true for physical and false for logical
-        types (MET-01).
+        types (MET-01). `parent_type_id` makes the type a subtype of a type
+        of the organization or a system type (MET-06): an unknown parent and
+        one of another organization are both 422 on `parent_type_id`, as is
+        a chain of more than 6 types; a taken key or name is 409.
       requestBody:
         required: true
         content:
@@ -12236,6 +12301,14 @@ paths:
     patch:
       operationId: updateCiTypesId
       summary: Update a CI type
+      description: >-
+        `parent_type_id` moves the type below another type of the
+        organization or a system type (MET-06); an empty string makes it a
+        root. An unknown parent and one of another organization are both 422
+        on `parent_type_id`, a cycle is 409, a chain of more than 6 types
+        (including the moved subtree) is 422, and a moved subtree whose
+        attribute definitions cannot be composed is 422 naming the attribute
+        key. An unknown CI type, or a system type, is 404.
       requestBody:
         required: true
         content:
@@ -12253,6 +12326,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-types/{id}/activate:
     post:
@@ -12610,6 +12689,7 @@ paths:
 
   /api/v1/compositions:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listCompositions
       summary: Manage parent-asset/child composition links
@@ -12629,6 +12709,7 @@ paths:
 
   /api/v1/compositions/{id}:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: getCompositionsId
       summary: Read, update or delete a composition link
@@ -12810,6 +12891,7 @@ paths:
 
   /api/v1/inventory/availability:
     x-phase: P2
+    x-feature: stock
     get:
       operationId: listInventoryAvailability
       summary: Query inventory availability projections
@@ -12821,9 +12903,13 @@ paths:
 
   /api/v1/inventory/items:
     x-phase: P2
+    x-feature: stock
     get:
       operationId: listInventoryItems
       summary: Manage quantity-based inventory items
+      description: >-
+        The planned successor is /api/v1/consumables (E-38); the deprecation
+        follows once the successor is implemented (WP-283, WP-757).
       responses:
         '200':
           description: Manage quantity-based inventory items
@@ -12832,6 +12918,10 @@ paths:
     post:
       operationId: createInventoryItems
       summary: Manage quantity-based inventory items
+      description: >-
+        The planned successor is POST /api/v1/consumables (E-38); the
+        deprecation follows once the successor is implemented (WP-283,
+        WP-757).
       responses:
         '201':
           description: Manage quantity-based inventory items
@@ -12851,9 +12941,14 @@ paths:
 
   /api/v1/inventory/items/{id}:
     x-phase: P2
+    x-feature: stock
     get:
       operationId: getInventoryItemsId
       summary: Read, update or delete a quantity inventory item
+      description: >-
+        The planned successor is /api/v1/consumables/{id} (E-38); the
+        deprecation follows once the successor is implemented (WP-283,
+        WP-757).
       responses:
         '200':
           description: Read, update or delete a quantity inventory item
@@ -12864,6 +12959,10 @@ paths:
     patch:
       operationId: updateInventoryItemsId
       summary: Read, update or delete a quantity inventory item
+      description: >-
+        The planned successor is /api/v1/consumables/{id} (E-38); the
+        deprecation follows once the successor is implemented (WP-283,
+        WP-757).
       responses:
         '200':
           description: Read, update or delete a quantity inventory item
@@ -12878,6 +12977,10 @@ paths:
     delete:
       operationId: deleteInventoryItemsId
       summary: Read, update or delete a quantity inventory item
+      description: >-
+        The planned successor is /api/v1/consumables/{id} (E-38); the
+        deprecation follows once the successor is implemented (WP-283,
+        WP-757).
       responses:
         '204':
           description: Read, update or delete a quantity inventory item
@@ -12890,6 +12993,10 @@ paths:
     get:
       operationId: listLifecycleDefinitions
       summary: Manage lifecycle definitions
+      description: >-
+        The planned successor is /api/v1/lifecycle-models (E-38); WP-723
+        deprecates this G1 path with at least 12 months of notice once the
+        successor is implemented.
       responses:
         '200':
           description: Manage lifecycle definitions
@@ -12900,7 +13007,9 @@ paths:
       summary: Manage lifecycle definitions
       description: >-
         `applies_to` is asset (default), ci or both; another value is a 422
-        field error. A taken key is 409.
+        field error. A taken key is 409. The planned successor is
+        /api/v1/lifecycle-models (E-38); WP-723 deprecates this G1 path with
+        at least 12 months of notice once the successor is implemented.
       responses:
         '201':
           description: Manage lifecycle definitions
@@ -12917,6 +13026,9 @@ paths:
     get:
       operationId: getLifecycleDefinitionsId
       summary: Read or delete a lifecycle definition
+      description: >-
+        The planned successor is /api/v1/lifecycle-models/{id} (E-38);
+        WP-723 deprecates this G1 path once the successor is implemented.
       responses:
         '200':
           description: Read or delete a lifecycle definition
@@ -12925,6 +13037,9 @@ paths:
     delete:
       operationId: deleteLifecycleDefinitionsId
       summary: Read or delete a lifecycle definition
+      description: >-
+        The planned successor is /api/v1/lifecycle-models/{id} (E-38);
+        WP-723 deprecates this G1 path once the successor is implemented.
       responses:
         '204':
           description: Read or delete a lifecycle definition
@@ -13208,6 +13323,7 @@ paths:
 
   /api/v1/reservations:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listReservations
       summary: Manage inventory reservations
@@ -13237,6 +13353,7 @@ paths:
 
   /api/v1/reservations/{id}:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: getReservationsId
       summary: Read a reservation
@@ -13250,6 +13367,7 @@ paths:
 
   /api/v1/reservations/{id}/release:
     x-phase: P2
+    x-feature: assets_basic
     post:
       operationId: createReservationsIdRelease
       summary: Release a reservation
@@ -13393,6 +13511,7 @@ paths:
 
   /api/v1/stock-movements:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listStockMovements
       summary: List and record inventory movements (append-only ledger)
@@ -13402,6 +13521,7 @@ paths:
         '401':
           description: Unauthorized
     post:
+      x-feature: stock
       operationId: createStockMovements
       summary: List and record inventory movements (append-only ledger)
       responses:
@@ -13424,6 +13544,7 @@ paths:
 
   /api/v1/inventory/items/{id}/convert:
     x-phase: P2
+    x-feature: stock
     post:
       operationId: convertInventoryItemToAsset
       summary: Convert one unit of a quantity item into a serialized asset
@@ -13523,6 +13644,1417 @@ paths:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+
+  # Scaffold of the P2 path contract (E-38, WP-247): x-status: planned,
+  # no route yet; the work package named in description implements it.
+  /api/v1/attribute-definitions/{id}/reindex:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: reindexAttributeDefinition
+      tags: [Metamodel]
+      summary: Rebuild the index of an attribute definition
+      description: Planned (E-38); WP-796 implements the operation.
+      responses:
+        '202':
+          description: Accepted; the job runs in the background, the Location header names it. The schemas come with WP-796.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/lifecycle-models:
+    x-status: planned
+    get:
+      operationId: listLifecycleModels
+      tags: [Metamodel]
+      summary: List lifecycle models
+      description: Planned (E-38); WP-723 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List lifecycle models. The page follows the cursor contract (API-02); the item schema comes with WP-723.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createLifecycleModel
+      tags: [Metamodel]
+      summary: Create a lifecycle model
+      description: Planned (E-38); WP-723 implements the operation.
+      responses:
+        '201':
+          description: Created. The request and response schemas come with WP-723.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/lifecycle-models/{id}:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getLifecycleModel
+      tags: [Metamodel]
+      summary: Get a lifecycle model
+      description: Planned (E-38); WP-723 implements the operation.
+      responses:
+        '200':
+          description: Get a lifecycle model. The response schema comes with WP-723.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateLifecycleModel
+      tags: [Metamodel]
+      summary: Update a lifecycle model
+      description: Planned (E-38); WP-723 implements the operation.
+      responses:
+        '200':
+          description: Updated. The request and response schemas come with WP-723.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      operationId: deleteLifecycleModel
+      tags: [Metamodel]
+      summary: Delete a lifecycle model
+      description: Planned (E-38); WP-723 implements the operation.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cis/{id}/as-of:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCIAsOf
+      tags: [CIs]
+      summary: Reconstruct the state of a CI at a point in time
+      description: Planned (E-38); WP-793 implements the operation.
+      responses:
+        '200':
+          description: Reconstruct the state of a CI at a point in time. The response schema comes with WP-793.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cis/{id}/form:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCIForm
+      tags: [Metamodel]
+      summary: Get the resolved form of a CI
+      description: Planned (E-38); WP-719 implements the operation.
+      responses:
+        '200':
+          description: Get the resolved form of a CI. The response schema comes with WP-719.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/ci-types/{id}/form:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCITypeForm
+      tags: [Metamodel]
+      summary: Get the resolved form of a CI type
+      description: Planned (E-38); WP-719 implements the operation.
+      responses:
+        '200':
+          description: Get the resolved form of a CI type. The response schema comes with WP-719.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cis/{id}/templates:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCITemplates
+      tags: [Metamodel]
+      summary: List the templates assigned to a CI
+      description: Planned (E-38); WP-710 implements the operation.
+      responses:
+        '200':
+          description: List the templates assigned to a CI. The response schema comes with WP-710.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: replaceCITemplates
+      tags: [Metamodel]
+      summary: Replace the templates assigned to a CI
+      description: Planned (E-38); WP-710 implements the operation.
+      responses:
+        '200':
+          description: Replaced. The request and response schemas come with WP-710.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/cis/{id}/instance-attributes:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCIInstanceAttributes
+      tags: [CIs]
+      summary: List the instance attribute values of a CI
+      description: Planned (E-38); WP-256 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the instance attribute values of a CI. The page follows the cursor contract (API-02); the item schema comes with WP-256.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cis/{id}/instance-attributes/{key}:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Key of the instance attribute.
+    put:
+      operationId: setCIInstanceAttribute
+      tags: [CIs]
+      summary: Set an instance attribute value of a CI
+      description: Planned (E-38); WP-256 implements the operation.
+      responses:
+        '200':
+          description: Replaced. The request and response schemas come with WP-256.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      operationId: deleteCIInstanceAttribute
+      tags: [CIs]
+      summary: Remove an instance attribute value of a CI
+      description: Planned (E-38); WP-256 implements the operation.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/tags:
+    x-status: planned
+    get:
+      operationId: listTags
+      tags: [Tags]
+      summary: List tags
+      description: Planned (E-38); WP-753 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List tags. The page follows the cursor contract (API-02); the item schema comes with WP-753.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createTag
+      tags: [Tags]
+      summary: Create a tag
+      description: Planned (E-38); WP-753 implements the operation.
+      responses:
+        '201':
+          description: Created. The request and response schemas come with WP-753.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/tags/{id}:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getTag
+      tags: [Tags]
+      summary: Get a tag
+      description: Planned (E-38); WP-753 implements the operation.
+      responses:
+        '200':
+          description: Get a tag. The response schema comes with WP-753.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateTag
+      tags: [Tags]
+      summary: Update a tag
+      description: Planned (E-38); WP-753 implements the operation.
+      responses:
+        '200':
+          description: Updated. The request and response schemas come with WP-753.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      operationId: deleteTag
+      tags: [Tags]
+      summary: Delete a tag
+      description: Planned (E-38); WP-753 implements the operation.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/tags/{id}/merge:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: mergeTag
+      tags: [Tags]
+      summary: Merge a tag into another tag
+      description: Planned (E-38); WP-753 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-753.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/cis/{id}/tags:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    put:
+      operationId: replaceCITags
+      tags: [Tags]
+      summary: Replace the tags of a CI
+      description: Planned (E-38); WP-753 implements the operation.
+      responses:
+        '200':
+          description: Replaced. The request and response schemas come with WP-753.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/subnets/{id}/reservations:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listSubnetReservations
+      tags: [IPAM]
+      summary: List the IP reservations of a subnet
+      description: Planned (E-38); WP-299 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the IP reservations of a subnet. The page follows the cursor contract (API-02); the item schema comes with WP-299.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createSubnetReservation
+      tags: [IPAM]
+      summary: Reserve an IP address in a subnet
+      description: Planned (E-38); WP-299 implements the operation.
+      responses:
+        '201':
+          description: Created. The request and response schemas come with WP-299.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/subnets/{id}/reservations/{ip_id}:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: ip_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: IP address identifier.
+    delete:
+      operationId: deleteSubnetReservation
+      tags: [IPAM]
+      summary: Release an IP reservation of a subnet
+      description: Planned (E-38); WP-299 implements the operation.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/relationships/{id}/changes:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listRelationshipChanges
+      tags: [Relationships]
+      summary: List the change history of a relationship
+      description: Planned (E-38); WP-296 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the change history of a relationship. The page follows the cursor contract (API-02); the item schema comes with WP-296.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/assets/bulk:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    post:
+      operationId: bulkAssets
+      tags: [Assets]
+      summary: Run a bulk operation on assets
+      description: Planned (E-38); WP-781 implements the operation.
+      responses:
+        '202':
+          description: Accepted; the job runs in the background, the Location header names it. The schemas come with WP-781.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/assets/{id}/assign:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: assignAsset
+      tags: [Assignments]
+      summary: Assign an asset
+      description: Planned (E-38); WP-275 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-275.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/assets/{id}/return:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: returnAsset
+      tags: [Assignments]
+      summary: Return an assigned asset
+      description: Planned (E-38); WP-275 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-275.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/assets/{id}/transfer:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: transferAsset
+      tags: [Assignments]
+      summary: Transfer an assigned asset to another assignee
+      description: Planned (E-38); WP-275 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-275.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/assets/{id}/reserve:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: reserveAsset
+      tags: [Assets]
+      summary: Reserve an asset
+      description: Planned (E-38); WP-277 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-277.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/assets/{id}/cis:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listAssetCIs
+      tags: [Assets]
+      summary: List the CIs linked to an asset
+      description: Planned (E-38); WP-272 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the CIs linked to an asset. The page follows the cursor contract (API-02); the item schema comes with WP-272.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: linkAssetCI
+      tags: [Assets]
+      summary: Link a CI to an asset
+      description: Planned (E-38); WP-272 implements the operation.
+      responses:
+        '201':
+          description: Created. The request and response schemas come with WP-272.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/assets/{id}/cis/{ci_id}:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: ci_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: CI identifier.
+    delete:
+      operationId: unlinkAssetCI
+      tags: [Assets]
+      summary: Unlink a CI from an asset
+      description: Planned (E-38); WP-272 implements the operation.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/assets/{id}/label:
+    x-phase: P2
+    x-feature: barcode
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAssetLabel
+      tags: [Assets]
+      summary: Render the label of an asset
+      description: Planned (E-38); WP-763 implements the operation.
+      responses:
+        '200':
+          description: Render the label of an asset. The response schema comes with WP-763.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/assets/{id}/as-of:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAssetAsOf
+      tags: [Assets]
+      summary: Reconstruct the state of an asset at a point in time
+      description: Planned (E-38); WP-795 implements the operation.
+      responses:
+        '200':
+          description: Reconstruct the state of an asset at a point in time. The response schema comes with WP-795.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/assets/{id}/tags:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    put:
+      operationId: replaceAssetTags
+      tags: [Tags]
+      summary: Replace the tags of an asset
+      description: Planned (E-38); WP-755 implements the operation.
+      responses:
+        '200':
+          description: Replaced. The request and response schemas come with WP-755.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/reservations/{id}/convert:
+    x-phase: P2
+    x-feature: assets_basic
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: convertReservation
+      tags: [Assets]
+      summary: Convert a reservation into an assignment
+      description: Planned (E-38); WP-277 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-277.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/stock-movements/{id}/signature:
+    x-phase: P2
+    x-feature: signature
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: verifyStockMovementSignature
+      tags: [Assets]
+      summary: Verify the signature of a movement
+      description: Planned (E-38); WP-748 implements the operation.
+      responses:
+        '200':
+          description: Verify the signature of a movement. The response schema comes with WP-748.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/consumables/{id}/stock:
+    x-phase: P2
+    x-feature: stock
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listConsumableStock
+      tags: [Consumables]
+      summary: List the stock levels of a consumable per bin
+      description: Planned (E-38); WP-283 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the stock levels of a consumable per bin. The page follows the cursor contract (API-02); the item schema comes with WP-283.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/consumables/{id}/availability:
+    x-phase: P2
+    x-feature: stock
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getConsumableAvailability
+      tags: [Consumables]
+      summary: Get the availability of a consumable
+      description: Planned (E-38); WP-759 implements the operation.
+      responses:
+        '200':
+          description: Get the availability of a consumable. The response schema comes with WP-759.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/{id}/place:
+    x-phase: P2
+    x-feature: internal_orders
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: placeOrder
+      tags: [Stocktake]
+      summary: Place an approved order
+      description: Planned (E-38); WP-286 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-286.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/orders/{id}/cancel:
+    x-phase: P2
+    x-feature: internal_orders
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: cancelOrder
+      tags: [Stocktake]
+      summary: Cancel an order
+      description: Planned (E-38); WP-286 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-286.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/orders/{id}/close:
+    x-phase: P2
+    x-feature: internal_orders
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: closeOrder
+      tags: [Stocktake]
+      summary: Close an order
+      description: Planned (E-38); WP-286 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-286.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/orders/{id}/receive:
+    x-phase: P2
+    x-feature: internal_orders
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: receiveOrder
+      tags: [Stocktake]
+      summary: Book the goods receipt of an order
+      description: Planned (E-38); WP-760 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-760.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/stocktakes/{id}/start:
+    x-phase: P2
+    x-feature: stocktake_standard
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: startStocktake
+      tags: [Stocktake]
+      summary: Start a stocktake
+      description: Planned (E-38); WP-287 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-287.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/stocktakes/{id}/items:
+    x-phase: P2
+    x-feature: stocktake_standard
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listStocktakeItems
+      tags: [Stocktake]
+      summary: List the expected items of a stocktake
+      description: Planned (E-38); WP-287 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the expected items of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/stocktakes/{id}/differences:
+    x-phase: P2
+    x-feature: stocktake_standard
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listStocktakeDifferences
+      tags: [Stocktake]
+      summary: List the differences of a stocktake
+      description: Planned (E-38); WP-287 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the differences of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/stocktakes/{id}/cancel:
+    x-phase: P2
+    x-feature: stocktake_standard
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: cancelStocktake
+      tags: [Stocktake]
+      summary: Cancel a stocktake
+      description: Planned (E-38); WP-287 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-287.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/documents/usage:
+    x-phase: P2
+    x-feature: documents
+    x-status: planned
+    get:
+      operationId: getDocumentUsage
+      tags: [Documents]
+      summary: Get the storage usage of the documents
+      description: Planned (E-38); WP-731 implements the operation.
+      responses:
+        '200':
+          description: Get the storage usage of the documents. The response schema comes with WP-731.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/documents/{id}/versions:
+    x-phase: P2
+    x-feature: documents
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listDocumentVersions
+      tags: [Documents]
+      summary: List the versions of a document
+      description: Planned (E-38); WP-731 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the versions of a document. The page follows the cursor contract (API-02); the item schema comes with WP-731.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createDocumentVersion
+      tags: [Documents]
+      summary: Upload a new version of a document
+      description: Planned (E-38); WP-731 implements the operation.
+      responses:
+        '201':
+          description: Created. The request and response schemas come with WP-731.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/documents/{id}/links/{link_id}:
+    x-phase: P2
+    x-feature: documents
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: link_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Link identifier.
+    delete:
+      operationId: deleteDocumentLink
+      tags: [Documents]
+      summary: Remove a link of a document
+      description: Planned (E-38); WP-267 implements the operation.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/tickets/{id}/links:
+    x-phase: P2
+    x-feature: ticketing_essential
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listTicketLinks
+      tags: [Tickets]
+      summary: List the object links of a ticket
+      description: Planned (E-38); WP-764 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the object links of a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-764.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createTicketLink
+      tags: [Tickets]
+      summary: Link an object to a ticket
+      description: Planned (E-38); WP-764 implements the operation.
+      responses:
+        '201':
+          description: Created. The request and response schemas come with WP-764.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/tickets/{id}/links/{link_id}:
+    x-phase: P2
+    x-feature: ticketing_essential
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: link_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Link identifier.
+    delete:
+      operationId: deleteTicketLink
+      tags: [Tickets]
+      summary: Remove an object link of a ticket
+      description: Planned (E-38); WP-764 implements the operation.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/tickets/{id}/attachments:
+    x-phase: P2
+    x-feature: ticketing_essential
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listTicketAttachments
+      tags: [Tickets]
+      summary: List the documents attached to a ticket
+      description: Planned (E-38); WP-765 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the documents attached to a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-765.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/import-profiles:
+    x-phase: P2
+    x-feature: import
+    x-status: planned
+    get:
+      operationId: listImportProfiles
+      tags: [Import]
+      summary: List import profiles
+      description: Planned (E-38); WP-774 implements the operation.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List import profiles. The page follows the cursor contract (API-02); the item schema comes with WP-774.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createImportProfile
+      tags: [Import]
+      summary: Create an import profile
+      description: Planned (E-38); WP-774 implements the operation.
+      responses:
+        '201':
+          description: Created. The request and response schemas come with WP-774.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/import-profiles/{id}:
+    x-phase: P2
+    x-feature: import
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getImportProfile
+      tags: [Import]
+      summary: Get an import profile
+      description: Planned (E-38); WP-774 implements the operation.
+      responses:
+        '200':
+          description: Get an import profile. The response schema comes with WP-774.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateImportProfile
+      tags: [Import]
+      summary: Update an import profile
+      description: Planned (E-38); WP-774 implements the operation.
+      responses:
+        '200':
+          description: Updated. The request and response schemas come with WP-774.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      operationId: deleteImportProfile
+      tags: [Import]
+      summary: Delete an import profile
+      description: Planned (E-38); WP-774 implements the operation.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/imports:
+    x-phase: P2
+    x-feature: import
+    x-status: planned
+    post:
+      operationId: createImport
+      tags: [Import]
+      summary: Start an import run
+      description: Planned (E-38); WP-301 implements the operation.
+      responses:
+        '202':
+          description: Accepted; the job runs in the background, the Location header names it. The schemas come with WP-301.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/imports/preview:
+    x-phase: P2
+    x-feature: import
+    x-status: planned
+    post:
+      operationId: previewImport
+      tags: [Import]
+      summary: Preview the columns of an import file
+      description: Planned (E-38); WP-301 implements the operation.
+      responses:
+        '200':
+          description: Done. The request and response schemas come with WP-301.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/imports/{id}:
+    x-phase: P2
+    x-feature: import
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getImport
+      tags: [Import]
+      summary: Get an import run
+      description: Planned (E-38); WP-301 implements the operation.
+      responses:
+        '200':
+          description: Get an import run. The response schema comes with WP-301.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/imports/{id}/report:
+    x-phase: P2
+    x-feature: import
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getImportReport
+      tags: [Import]
+      summary: Get the report of an import run
+      description: Planned (E-38); WP-301 implements the operation.
+      responses:
+        '200':
+          description: Get the report of an import run. The response schema comes with WP-301.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
 components:
   securitySchemes:
@@ -14290,6 +15822,9 @@ components:
           items: { type: string }
         version: { type: integer }
         cloned_from_id: { type: string }
+        parent_type_id:
+          type: string
+          description: Parent in the type chain (MET-06); absent for a root. The type inherits the inheritable attribute definitions of its ancestors.
         template_key: { type: string }
         lifecycle_definition_id: { type: string }
         capabilities: { type: object, additionalProperties: true }
@@ -14338,6 +15873,10 @@ components:
         category: { type: string }
         is_logical: { type: boolean }
         is_observable: { type: boolean }
+        parent_type_id:
+          type: string
+          format: uuid
+          description: Parent type of the organization or a system type (MET-06).
         template_key: { type: string }
         lifecycle_definition_id: { type: string }
         capabilities: { type: object, additionalProperties: true }
@@ -14367,6 +15906,9 @@ components:
         category: { type: string }
         is_logical: { type: boolean }
         is_observable: { type: boolean }
+        parent_type_id:
+          type: string
+          description: New parent type (MET-06); an empty string makes the type a root.
         lifecycle_definition_id: { type: string }
         capabilities: { type: object, additionalProperties: true }
         allowed_relationship_types:
@@ -14461,13 +16003,23 @@ components:
         plan: { type: string, enum: [essential, standard, pro, enterprise] }
         limits:
           type: object
-          description: Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access).
+          description: >-
+            Quotas stored in the limits of their feature's entitlement (max_cis
+            and max_users on cmdb_core, max_collectors on discovery,
+            max_api_keys on api_access, max_storage_mb on documents). Without
+            max_storage_mb the plan default is stored (E-44: essential 1000,
+            standard 10000, pro 50000 MiB; enterprise unlimited, no entry).
           additionalProperties: false
           properties:
             max_cis: { type: integer, format: int64, minimum: 0 }
             max_collectors: { type: integer, format: int64, minimum: 0 }
             max_users: { type: integer, format: int64, minimum: 0 }
             max_api_keys: { type: integer, format: int64, minimum: 0 }
+            max_storage_mb:
+              type: integer
+              format: int64
+              minimum: 0
+              description: Document storage of the organization in MiB (MGT-01), stored on documents.
         admin_email: { type: string, maxLength: 254 }
         admin_display_name: { type: string, maxLength: 200 }
     OperatorCreatedOrganization:
@@ -14755,6 +16307,15 @@ components:
         count: { type: integer }
         summary:
           $ref: '#/components/schemas/ImpactSummary'
+        truncated:
+          type: boolean
+          enum: [true]
+          description: >-
+            true when the walk from the failed CIs reached the node limit
+            (10,000 CIs) and kept only the CIs closest to them: the impacted
+            CIs may then be incomplete (NFR-01). Returned with and without
+            fields (E-57); absent when the walk was not cut, so that answer
+            stays as before (API-01).
     ImpactAnalysisFields:
       type: object
       description: >-
@@ -14783,6 +16344,15 @@ components:
         count: { type: integer }
         summary:
           $ref: '#/components/schemas/ImpactSummary'
+        truncated:
+          type: boolean
+          enum: [true]
+          description: >-
+            true when the walk from the failed CIs reached the node limit
+            (10,000 CIs) and kept only the CIs closest to them: the impacted
+            CIs may then be incomplete (NFR-01). Returned with and without
+            fields (E-57); absent when the walk was not cut, so that answer
+            stays as before (API-01).
     BlastRadius:
       type: object
       required: [ci_id, affected_cis, affected_count, heuristic_count]
@@ -15092,7 +16662,19 @@ components:
           description: Request id of the failed request (equals the X-Request-ID response header).
         field:
           type: string
-          description: Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client).
+          description: >-
+            Request field a 400, 409 or 422 refers to (e.g. the unique `name`
+            of a client, or `key` of an attribute definition that cannot be
+            composed, 422).
+        code:
+          type: string
+          description: >-
+            Machine-readable code of the failing rule, set where one is
+            defined. A composition conflict of attribute definitions (MET-16,
+            422 with `field` = `key`) carries `datatype-conflict` (data type,
+            reference target or `multi_value` differ), `enum-empty` (no
+            allowed value is left), `range-empty` (`min` > `max`) or
+            `length-range-empty` (`min_length` > `max_length`).
 
     PaginationEnvelope:
       type: object
@@ -15100,6 +16682,14 @@ components:
       properties:
         total:
           type: integer
+          description: |
+            Number of matching entries. GET /api/v1/cis counts capped (E-104):
+            exact up to 10,000; beyond, total is 10,000 and total_capped is true.
+        total_capped:
+          type: boolean
+          description: |
+            True when the count stopped at 10,000 and more entries match (E-104,
+            GET /api/v1/cis). Absent or false otherwise.
         limit:
           type: integer
         offset:
@@ -16136,7 +17726,80 @@ components:
 
     WebhookEvent:
       type: string
-      enum: [ci.created, ci.updated, ci.deleted, ci.status_changed, relationship.created, relationship.deleted, discovery.completed]
+      description: >-
+        A subscribable event (webhook.ValidEvents, WP-246): the registered
+        event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2])
+        without `webhook.dead` and `apikey.creator_deactivated`, which
+        notify the org_admins only. Deprecated former names, delivered under
+        their new type: `ci.updated` (now `ci.changed`),
+        `relationship.deleted` (now `relationship.removed`),
+        `lifecycle.transitioned` (now `lifecycle.changed`),
+        `inventory.movement` and `asset.movement` (now `stock.movement`).
+        Deprecated names without an event contract (dispatched directly or
+        never raised): `ci_type.created`, `ci_type.updated`,
+        `ci_type.deactivated`, `ci_attribute.changed`,
+        `composition.created`, `composition.updated`,
+        `composition.deleted`, `override.changed`,
+        `reconciliation.policy_changed`, `discovery.completed`.
+        `webhook.test` and the reserved types of phase 3
+        (`maintenance.scheduled`, `workflow.*`, `finding.*`) cannot be
+        subscribed to.
+      enum:
+        - ci.created
+        - ci.changed
+        - ci.deleted
+        - ci.restored
+        - ci.merged
+        - ci.offline
+        - ci.online
+        - relationship.created
+        - relationship.removed
+        - collector.enrolled
+        - collector.offline
+        - review.created
+        - review.resolved
+        - export.completed
+        - job.failed
+        - entitlement.warning
+        - entitlement.expired
+        - invitation.created
+        - certificate.expiring
+        - ci.status_changed
+        - lifecycle.changed
+        - relationship.changed
+        - asset.created
+        - asset.changed
+        - asset.deleted
+        - asset.assigned
+        - asset.returned
+        - asset.warranty_expiring
+        - contract.expiring
+        - stock.movement
+        - stock.below_minimum
+        - reservation.created
+        - reservation.released
+        - reservation.expired
+        - reservation.converted
+        - ticket.updated
+        - ticket.sla_breached
+        - metamodel.published
+        - document.scanned
+        - import.completed
+        - ci.updated
+        - relationship.deleted
+        - lifecycle.transitioned
+        - inventory.movement
+        - asset.movement
+        - ci_type.created
+        - ci_type.updated
+        - ci_type.deactivated
+        - ci_attribute.changed
+        - composition.created
+        - composition.updated
+        - composition.deleted
+        - override.changed
+        - reconciliation.policy_changed
+        - discovery.completed
 
     WebhookSubscription:
       type: object
@@ -16806,7 +18469,13 @@ components:
       description: >-
         Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02):
         cmdb_core (always active), discovery, topology, rack_view, export_csv,
-        webhooks, api_access, notifications_email.
+        webhooks, api_access, notifications_email. Phase-2 feature keys
+        (ENT-06, E-44): assets_basic, documents, import and
+        ticketing_essential in every plan; ticketing_standard, signature,
+        stock, stocktake_standard, barcode, gps_standard, workplace and
+        export_datev from standard on; internal_orders from pro on. Module
+        keys of phases 3 and 4 (monitoring, endpoint_agent, workflow_forms,
+        compliance) and the add-ons iga and ai.
       required: [organization_id, feature_key, plan, enabled, limits, source]
       properties:
         organization_id:
@@ -16821,7 +18490,11 @@ components:
           type: object
           description: >-
             Named quotas (ENT-02): max_cis, max_collectors, max_users,
-            max_api_keys. A missing quota uses the plan default.
+            max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A
+            quota only gates when it is stored here (E-34). New organizations
+            get the plan default of max_storage_mb stored (E-44: essential
+            1000, standard 10000, pro 50000; enterprise unlimited, no entry);
+            existing organizations get none.
           additionalProperties:
             type: integer
             format: int64
@@ -16847,7 +18520,9 @@ components:
           type: object
           description: >-
             Named quotas (ENT-02): max_cis, max_collectors, max_users,
-            max_api_keys. A missing quota uses the plan default.
+            max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A
+            quota only gates when it is stored (E-34); new organizations get
+            the plan default of max_storage_mb stored (E-44).
           additionalProperties:
             type: integer
             format: int64
@@ -16860,8 +18535,10 @@ components:
         feature_key:
           type: string
           description: >-
-            A feature key of ENT-02, a module key or an add-on; any other key
-            is 422 with `field` feature_key (F-209).
+            A feature key of ENT-02, a phase-2 key of ENT-06 (E-44), a module
+            key of phases 3 and 4 or an add-on; any other key, the former
+            keys inventory, stocktake and ticketing among them, is 422 with
+            `field` feature_key (F-209).
           enum:
             - cmdb_core
             - discovery
@@ -16871,10 +18548,19 @@ components:
             - webhooks
             - api_access
             - notifications_email
-            - inventory
+            - assets_basic
             - documents
-            - stocktake
-            - ticketing
+            - import
+            - ticketing_essential
+            - ticketing_standard
+            - signature
+            - stock
+            - stocktake_standard
+            - barcode
+            - gps_standard
+            - workplace
+            - export_datev
+            - internal_orders
             - monitoring
             - endpoint_agent
             - workflow_forms
@@ -16890,10 +18576,11 @@ components:
           type: object
           description: >-
             Named quotas (ENT-02): max_cis, max_collectors, max_users,
-            max_api_keys; any other key is 422 with `field` limits (F-209).
-            A missing quota is unlimited (E-34).
+            max_api_keys, and max_storage_mb (MiB, on documents; MGT-01);
+            any other key is 422 with `field` limits (F-209). A missing quota
+            is unlimited (E-34).
           propertyNames:
-            enum: [max_cis, max_collectors, max_users, max_api_keys]
+            enum: [max_cis, max_collectors, max_users, max_api_keys, max_storage_mb]
           additionalProperties:
             type: integer
             format: int64
@@ -18511,6 +20198,13 @@ components:
                 properties:
                   field: { type: string }
                   detail: { type: string }
+                  code:
+                    type: string
+                    description: >-
+                      Machine-readable code of the violation, set where one
+                      is defined: a composition conflict of the attribute
+                      definitions (MET-16) carries `datatype-conflict`,
+                      `enum-empty`, `range-empty` or `length-range-empty`.
     InterfaceInUseProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'
@@ -19724,6 +21418,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TopologyEdge'
+        truncated:
+          type: boolean
+          enum: [true]
+          description: >-
+            true when the walk from root_ci_id reached the node limit
+            (10,000 CIs) and kept only the CIs closest to the root: the
+            graph may then lack CIs and edges within the depth (NFR-01).
+            Absent when the walk was not cut and without a root, which
+            answers 422 beyond 2,000 CIs.
 
     Organization:
       type: object

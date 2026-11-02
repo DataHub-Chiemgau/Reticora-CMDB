@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
@@ -81,38 +82,69 @@ func TestComposeRules(t *testing.T) {
 }
 
 func TestComposeConflicts(t *testing.T) {
-	for name, tc := range map[string]struct{ base, top fieldmeta.FieldDefinition }{
+	yes, no := true, false
+	for name, tc := range map[string]struct {
+		base, top fieldmeta.FieldDefinition
+		code      string
+	}{
 		"data type": {
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeText},
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger},
+			CodeDatatypeConflict,
 		},
 		"reference target": {
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeUser},
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeReference, ReferenceTarget: "team"},
+			CodeDatatypeConflict,
+		},
+		"multi_value": {
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeText, MultiValue: &yes},
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeText, MultiValue: &no},
+			CodeDatatypeConflict,
 		},
 		"empty value set": {
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeEnum, EnumValues: []string{"a"}},
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeEnum, EnumValues: []string{"b"}},
+			CodeEnumEmpty,
 		},
 		"empty range": {
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeDecimal, Validation: &fieldmeta.ValidationRules{Max: f64(5)}},
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeDecimal, Validation: &fieldmeta.ValidationRules{Min: f64(6)}},
+			CodeRangeEmpty,
 		},
 		"empty length range": {
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeText, Validation: &fieldmeta.ValidationRules{MinLength: intp(4)}},
 			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeText, Validation: &fieldmeta.ValidationRules{MaxLength: intp(3)}},
+			CodeLengthRangeEmpty,
 		},
 	} {
 		_, err := Compose([]fieldmeta.FieldDefinition{tc.base}, []fieldmeta.FieldDefinition{tc.top})
 		var conflict *CompositionError
 		if !errors.As(err, &conflict) || conflict.Key != "k" {
 			t.Errorf("%s: err = %v, want a composition error of k", name, err)
+			continue
+		}
+		if conflict.Code != tc.code || conflict.CompositionCode() != tc.code {
+			t.Errorf("%s: code = %q, want %q", name, conflict.CompositionCode(), tc.code)
+		}
+		if !strings.HasSuffix(err.Error(), "(MET-16)") || !strings.HasPrefix(err.Error(), "attribute k: ") {
+			t.Errorf("%s: message = %q", name, err.Error())
 		}
 	}
 	// The specific reference names name their target.
 	if _, err := Compose([]fieldmeta.FieldDefinition{{Name: "k", DataType: fieldmeta.TypeCIRef}},
 		[]fieldmeta.FieldDefinition{{Name: "k", DataType: fieldmeta.TypeReference}}); err != nil {
 		t.Errorf("ci_ref and reference to ci: %v", err)
+	}
+	// An instance definition does not know multi_value (nil): it is no
+	// conflict and takes the value of the type attribute below.
+	got, err := Compose([]fieldmeta.FieldDefinition{{Name: "k", DataType: fieldmeta.TypeText, MultiValue: &yes}},
+		[]fieldmeta.FieldDefinition{{Name: "k", DataType: fieldmeta.TypeText}})
+	if err != nil {
+		t.Fatalf("instance over a multi-valued type attribute: %v", err)
+	}
+	if got[0].MultiValue == nil || !*got[0].MultiValue {
+		t.Errorf("composed multi_value = %v, want true", got[0].MultiValue)
 	}
 }
 
@@ -123,8 +155,8 @@ func (l layeredLister) ListGlobalFields(context.Context, string) ([]Field, error
 	return []Field{l.system, l.org}, nil
 }
 
-func (l layeredLister) ListFields(context.Context, string, string) ([]Field, error) {
-	return []Field{l.typed}, nil
+func (l layeredLister) TypeChain(_ context.Context, _, typeID string) ([]Type, error) {
+	return []Type{{ID: typeID, Fields: []Field{l.typed}}}, nil
 }
 
 func (l layeredLister) ListInstanceFields(context.Context, string, string) ([]InstanceField, error) {
