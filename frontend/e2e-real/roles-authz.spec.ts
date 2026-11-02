@@ -504,11 +504,14 @@ test('04 an expired invitation is refused with 410 and can be renewed for seven 
   expect(accepted.status, JSON.stringify(accepted.body)).toBe(201);
 });
 
-test('05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung")', async ({
+test('05 an invitation sends the invitee exactly one e-mail (NTF-05 event "Einladung")', async ({
   request,
 }) => {
-  // The tenant gets an e-mail channel over the installation's SMTP first, so
-  // a missing channel cannot be the reason for a missing mail.
+  // The acceptance creates a verified IdP account (Keycloak admin client), so
+  // the server mails the link straight to the invited address over its
+  // central SMTP server, never over a notification channel of the tenant
+  // (TLC-03). A second e-mail channel next to the default one of the signup
+  // (F-157) therefore must not add a copy.
   const channel = await adminCall<{ id: string }>(request, 'POST', '/notification-channels', {
     name: `authz-mail-${run}`,
     kind: 'email',
@@ -523,21 +526,21 @@ test('05 an invitation sends the invitee an e-mail (NTF-05 event "Einladung")', 
   expect(mail, `invitation e-mail to ${address} in the mail catcher`).not.toBeNull();
   expect(`${mail!.Subject} ${mail!.Text ?? ''}`).toMatch(/einladung|invit/i);
   expect(mail!.Text ?? mail!.HTML ?? '').toContain(state().admin!.org);
+  // Outbox and notifier (5 s cycle) would have sent a copy per e-mail channel
+  // by now; the direct mail stays the only one.
+  await new Promise((resolve) => setTimeout(resolve, 15_000));
+  expect(
+    await invitationTokens(request, address),
+    'invitation e-mails to the address',
+  ).toHaveLength(1);
 });
 
 test('05b the admin invites in the UI; the mailed link opens the accept page, creates the account and works only once', async ({
   browser,
   request,
 }) => {
-  // The invitation mail goes over the organization's e-mail channels (NTF-05).
-  const channel = await adminCall<{ id: string }>(request, 'POST', '/notification-channels', {
-    name: `authz-mail-ui-${run}`,
-    kind: 'email',
-    provider: 'central_smtp',
-    config: {},
-    enabled: true,
-  });
-  expect(channel.status, JSON.stringify(channel.body)).toBe(201);
+  // The invitation mail goes straight to the invited address over the
+  // installation's SMTP server, whatever channels the tenant has (TLC-03).
   // Two clients: the invitee is scoped to the first and must not see the second.
   const clientName = `Invite Nord ${run}`;
   const otherName = `Invite Süd ${run}`;

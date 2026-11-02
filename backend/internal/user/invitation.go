@@ -21,6 +21,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -28,8 +29,15 @@ import (
 // predefined role and scope; the invitation is valid for InvitationTTL and
 // accepted once, atomically, which creates the app_user with that role.
 // Expired invitations can be renewed. Only the SHA-256 hash of the token is
-// stored; the token is shown once, on issue and on renewal, and goes to the
-// invitee in the link of the invitation mail (invitation.created, NTF-05).
+// stored; the token goes to the invitee in the link of the invitation mail
+// (NTF-05). With an IdP admin client (InvitationHandler.WithAccounts) the
+// acceptance creates a verified IdP account of the address, so the token
+// reaches that mailbox only: issue and renewal send the mail straight over
+// the central SMTP server (InvitationDelivery.Mailer), and neither their
+// response nor the event invitation.created carries it. Without the client
+// the response of issue and renewal shows the token once, and the
+// notifier mails the link of invitation.created over the organization's
+// e-mail channels.
 
 // InvitationTTL is the validity of an invitation (TLC-03).
 const InvitationTTL = 7 * 24 * time.Hour
@@ -46,7 +54,16 @@ var (
 	ErrInvitationPending = errors.New("a pending invitation for this address exists; renew it instead")
 	// ErrInvitationUserExists: the organization already has a user with the address.
 	ErrInvitationUserExists = errors.New("the organization already has a user with this e-mail address")
+	// ErrInvitationMail: the central SMTP server did not take the
+	// invitation mail; the issue or renewal was rolled back.
+	ErrInvitationMail = errors.New("the invitation e-mail could not be sent")
 )
+
+// invitationMailTimeout bounds the send of an invitation mail. It runs
+// inside the transaction of the issue or renewal and stays below the
+// server's write timeout (15 s, cmd/server), so a slow SMTP server ends in
+// ErrInvitationMail rather than in a lost response.
+const invitationMailTimeout = 10 * time.Second
 
 // Invitation statuses, derived from accepted_at and expires_at.
 const (
@@ -68,7 +85,8 @@ type Invitation struct {
 	ExpiresAt      time.Time  `json:"expires_at"`
 	AcceptedAt     *time.Time `json:"accepted_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
-	// Token is set only in the response of issue and renewal.
+	// Token is set only in the response of issue and renewal, and only
+	// without an IdP admin client (InvitationHandler.tokenInResponse).
 	Token string `json:"token,omitempty"`
 }
 
@@ -93,21 +111,43 @@ type InvitationAccounts interface {
 	DeleteAccount(ctx context.Context, id string) error
 }
 
+// InvitationMailer sends the invitation mail straight to the invited
+// address; the server uses notify.InvitationMailer over the central SMTP
+// server of the installation (TEC-13).
+type InvitationMailer interface {
+	SendInvitation(ctx context.Context, mail *notify.InvitationMail) error
+}
+
+// InvitationDelivery is how an issue or renewal delivers the acceptance
+// link of its token (NTF-05).
+type InvitationDelivery struct {
+	// Link is the acceptance link of the token.
+	Link string
+	// Mailer, when set, sends the invitation mail straight to the invited
+	// address, as the last step of the transaction: when the SMTP server
+	// does not take it, the issue or renewal rolls back (ErrInvitationMail).
+	// The event invitation.created then carries no link, so no channel of
+	// the organization (e.g. its own SMTP server) and no other consumer of
+	// the event gets the token. Without Mailer the event carries the link,
+	// and the notifier mails it over the organization's e-mail channels.
+	Mailer InvitationMailer
+}
+
 // InvitationRepository persists invitations.
 type InvitationRepository interface {
 	// IssueInvitation stores the invitation if caller may grant its role in
 	// its scope (grant ceiling, GrantCeilingError), and in the same
-	// transaction the event invitation.created with link, the acceptance
-	// link of the token.
-	IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash, link string) error
+	// transaction the event invitation.created; delivery delivers the
+	// acceptance link of the token.
+	IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash string, delivery InvitationDelivery) error
 	// ListInvitations returns a page newest first on (created_at, id), at
 	// most one invitation more than the limit, and the number of
 	// invitations (API-02, see api.NewestFirstSQL).
 	ListInvitations(ctx context.Context, orgID string, page api.PaginationParams) ([]Invitation, int, error)
 	// RenewInvitation checks the grant ceiling against caller, the renewing
 	// principal, not against the original issuer; like IssueInvitation it
-	// appends invitation.created with the link of the new token.
-	RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash, link string, expiresAt time.Time) (*Invitation, error)
+	// appends invitation.created and delivers the link of the new token.
+	RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash string, delivery InvitationDelivery, expiresAt time.Time) (*Invitation, error)
 	RevokeInvitation(ctx context.Context, orgID, id string) error
 	// AcceptInvitation consumes the invitation of tokenHash atomically and
 	// once, creates the user with the invited role and scope, and runs
@@ -228,26 +268,67 @@ func recordInvitationAudit(ctx context.Context, tx pgx.Tx, orgID, actor, id, act
 	return nil
 }
 
-// appendInvitationCreated appends invitation.created for inv in tx, the
-// transaction of the issue or renewal: the notification mails link and
-// expiry to the invitee (NTF-05). The address travels as a vault surrogate
-// (SEC-05); webhook deliveries leave out the link (webhook.go).
-func appendInvitationCreated(ctx context.Context, tx pgx.Tx, inv *Invitation, link string) error {
-	var orgName string
-	if err := tx.QueryRow(ctx, `SELECT name FROM organization WHERE id = $1`, inv.OrganizationID).Scan(&orgName); err != nil {
-		return fmt.Errorf("read organization name: %w", err)
+// deliverInvitation appends invitation.created for inv in tx, the
+// transaction of the issue or renewal, and delivers link and expiry to the
+// invitee (NTF-05, InvitationDelivery). Without a mailer the event carries
+// the link and its notification mails it over the organization's e-mail
+// channels. With one the event leaves the link out, and the mailer sends it
+// straight to the invited address as the last step: a refused send rolls
+// the issue or renewal back. Should the commit fail after the send, the
+// mailed link names no stored token, and the acceptance answers 404. The
+// address travels as a vault surrogate (SEC-05); webhook deliveries leave
+// out the link (webhook.go).
+func deliverInvitation(ctx context.Context, tx pgx.Tx, inv *Invitation, delivery InvitationDelivery) error {
+	var org invitationOrganization
+	if err := tx.QueryRow(ctx, `SELECT name, locale, COALESCE(settings->'branding'->>'sender_name', '')
+		FROM organization WHERE id = $1`, inv.OrganizationID).Scan(&org.Name, &org.Locale, &org.SenderName); err != nil {
+		return fmt.Errorf("read organization: %w", err)
 	}
-	_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: inv.OrganizationID, Type: events.InvitationCreated, EntityID: inv.ID,
-		Data: map[string]any{"id": inv.ID, "email": inv.Email, "organization_name": orgName,
-			"expires_at": inv.ExpiresAt.UTC().Format(time.RFC3339), "link": link}})
-	return err
+	if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: inv.OrganizationID, Type: events.InvitationCreated,
+		EntityID: inv.ID, Data: delivery.eventData(inv, org.Name)}); err != nil {
+		return err
+	}
+	return delivery.send(ctx, inv, org)
+}
+
+// invitationOrganization is the organization of an invitation as its mail
+// names it: name, locale (LOC-01) and settings.branding.sender_name.
+type invitationOrganization struct {
+	Name, Locale, SenderName string
+}
+
+// eventData is the data of invitation.created for inv: the link only
+// without a mailer, when the notifier mails it over the organization's
+// e-mail channels.
+func (d InvitationDelivery) eventData(inv *Invitation, orgName string) map[string]any {
+	data := map[string]any{"id": inv.ID, "email": inv.Email, "organization_name": orgName,
+		"expires_at": inv.ExpiresAt.UTC().Format(time.RFC3339)}
+	if d.Mailer == nil {
+		data["link"] = d.Link
+	}
+	return data
+}
+
+// send sends the invitation mail of inv straight to the invited address
+// when d has a mailer; a refused send is ErrInvitationMail.
+func (d InvitationDelivery) send(ctx context.Context, inv *Invitation, org invitationOrganization) error {
+	if d.Mailer == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, invitationMailTimeout)
+	defer cancel()
+	if err := d.Mailer.SendInvitation(ctx, &notify.InvitationMail{To: inv.Email, Link: d.Link, ExpiresAt: inv.ExpiresAt,
+		OrganizationName: org.Name, Locale: org.Locale, SenderName: org.SenderName}); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvitationMail, err)
+	}
+	return nil
 }
 
 // IssueInvitation implements InvitationRepository. The role and the scope
 // must exist in the organization and be visible to the issuer (RLS), the
 // role must fit the scope, and the issuer must hold user:manage and the
 // role's permissions in a scope covering it (checkInvitationTargets).
-func (r *PGInvitations) IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash, link string) error {
+func (r *PGInvitations) IssueInvitation(ctx context.Context, caller *identity.Principal, inv *Invitation, tokenHash string, delivery InvitationDelivery) error {
 	if err := validateInvitation(inv); err != nil {
 		return err
 	}
@@ -277,7 +358,7 @@ func (r *PGInvitations) IssueInvitation(ctx context.Context, caller *identity.Pr
 			map[string]any{"role_id": inv.RoleID, "scope_type": inv.ScopeType, "scope_id": inv.ScopeID}); err != nil {
 			return err
 		}
-		return appendInvitationCreated(ctx, tx, inv, link)
+		return deliverInvitation(ctx, tx, inv, delivery)
 	})
 }
 
@@ -336,10 +417,11 @@ func (r *PGInvitations) ListInvitations(ctx context.Context, orgID string, page 
 
 // RenewInvitation implements InvitationRepository: a pending or expired
 // invitation gets a new token and a new validity; the old token stops
-// working, the invitee gets a mail with the new link. The renewing
+// working, the invitee gets a mail with the new link (deliverInvitation; a
+// refused direct send keeps the old token and expiry). The renewing
 // principal must hold user:manage and the role's permissions in a scope
 // covering the invitation's scope (grant ceiling).
-func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash, link string, expiresAt time.Time) (*Invitation, error) {
+func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash string, delivery InvitationDelivery, expiresAt time.Time) (*Invitation, error) {
 	if !isUUID(id) {
 		return nil, ErrInvitationNotFound
 	}
@@ -376,7 +458,7 @@ func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, c
 			map[string]any{"expires_at": expiresAt.UTC().Format(time.RFC3339)}); aerr != nil {
 			return aerr
 		}
-		return appendInvitationCreated(ctx, tx, inv, link)
+		return deliverInvitation(ctx, tx, inv, delivery)
 	})
 	if err != nil {
 		return nil, err

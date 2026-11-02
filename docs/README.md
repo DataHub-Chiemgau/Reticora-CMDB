@@ -394,16 +394,24 @@ Users join an organization by invitation (`/api/v1/invitations`, TLC-03,
 `user:manage`): an invitation names the address, a role and its scope
 (org, client or site within the issuer's own scope), is valid for seven
 days and stores only the hash of its token, which the invitee receives by
-mail as link (`invitation.created`, NTF-05).
+mail as link (NTF-05).
 `POST /api/v1/invitations/accept` (public, pre-auth limit) consumes it
 atomically and once and creates the user with that role. With the Keycloak
 admin client, which the server wires for invitations only together with the
 central SMTP server (`RETICORA_SMTP_HOST`), the accepting person's password
 creates a verified IdP account of the address; the token therefore reaches
-the invited mailbox only, and the responses of issue and renewal leave it
-out. Without that client the response shows the token once, and the invitee
-signs in with an existing IdP account of the address, which the first login
-links.
+the invited mailbox only. Issue and renewal send the invitation mail
+straight to the invited address over the central SMTP server, in their
+transaction and never over a notification channel of the organization (an
+organization's own SMTP server could pass the link to its administrators;
+organizations without an e-mail channel, like the default organization of
+an installation, get it as well); neither their response nor
+`invitation.created` carries the token or the link. When the SMTP server
+does not take the mail, nothing is stored or renewed and the API answers
+503 ("the invitation e-mail could not be sent"). Without that client the
+response shows the token once, the organization's e-mail channels mail the
+link of `invitation.created`, and the invitee signs in with an existing IdP
+account of the address, which the first login links.
 Expired invitations are renewed with a new token; pending ones can be
 revoked. Every step is audited.
 Operators create organizations with plan and limits through

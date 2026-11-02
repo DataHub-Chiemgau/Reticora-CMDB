@@ -360,7 +360,7 @@ func TestOutboxCleanupDropsAnchorData(t *testing.T) {
 	link := user.InvitationLink(acceptURL, token)
 	inv := &user.Invitation{OrganizationID: f.OrgA, Email: "anchor-invitee@example.org", RoleID: viewerRole,
 		InvitedBy: issuer, ExpiresAt: time.Now().UTC().Add(user.InvitationTTL)}
-	if err = user.NewPGInvitations(f.App).IssueInvitation(issueCtx, &caller, inv, tokenHash, link); err != nil {
+	if err = user.NewPGInvitations(f.App).IssueInvitation(issueCtx, &caller, inv, tokenHash, user.InvitationDelivery{Link: link}); err != nil {
 		t.Fatalf("issue invitation: %v", err)
 	}
 

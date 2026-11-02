@@ -441,7 +441,7 @@ func TestInvitationAcceptanceOrgAdminRequiresMFA(t *testing.T) {
 	m := newMFAFixture(t, "7d")
 	accounts := &recordingAccounts{}
 	mux := chi.NewRouter()
-	NewInvitationHandler(NewPGInvitations(m.App)).WithAccounts(accounts).RegisterRoutes(mux)
+	NewInvitationHandler(NewPGInvitations(m.App)).WithAccounts(accounts, &recordingMailer{}).RegisterRoutes(mux)
 	accept := func(email, roleID string) (*httptest.ResponseRecorder, string) {
 		token, hash, err := NewInvitationToken(m.OrgA)
 		if err != nil {

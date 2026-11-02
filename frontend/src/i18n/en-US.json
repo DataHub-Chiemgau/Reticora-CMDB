@@ -746,6 +746,7 @@
       "notFound": "The invitation no longer exists. The list has been refreshed.",
       "accepted": "The invitation has already been accepted and can no longer be changed.",
       "unavailable": "Invitations are not set up on this server. Contact your operations team.",
+      "mailFailed": "The invitation email could not be sent; nothing was saved or changed. Please try again later or contact your operations team.",
       "rejected": "The server rejected the invitation: {{detail}}",
       "failed": "The action failed: {{detail}}"
     }

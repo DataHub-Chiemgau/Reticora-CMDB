@@ -28,6 +28,8 @@ type Subscription struct {
 	// Personal notifications carry a credential of their recipients (the
 	// invitation link): they reach the recipients only, no webhook channel.
 	Personal bool
+	// Audience names the recipients of an event; nil: the event notifies
+	// nobody.
 	Audience func(data map[string]any) *Audience
 }
 
@@ -75,8 +77,16 @@ var Subscriptions = map[string]Subscription{
 	events.InvitationCreated: {
 		// The link holds the acceptance token: whoever reads it can accept
 		// the invitation (F-041), so it goes to the invitee's address only.
+		// Where the acceptance creates a verified IdP account (IdP admin
+		// client), the event carries no link: the issue or renewal already
+		// sent the mail straight over the central SMTP server
+		// (InvitationMailer), and no channel of the organization, not even
+		// its own SMTP server, gets a copy.
 		Category: "invitation", Critical: true, Personal: true,
 		Audience: func(d map[string]any) *Audience {
+			if str(d, "link") == "" {
+				return nil
+			}
 			return &Audience{Direct: []Recipient{{Email: str(d, "email")}}}
 		},
 	},
@@ -153,7 +163,11 @@ func (c *EventConsumer) Consume(ctx context.Context, env *events.Envelope) error
 			return fmt.Errorf("decode %s: %w", env.Type, err)
 		}
 	}
-	recipients, err := c.resolver.Resolve(ctx, env.OrgID, sub.Audience(data))
+	audience := sub.Audience(data)
+	if audience == nil {
+		return nil
+	}
+	recipients, err := c.resolver.Resolve(ctx, env.OrgID, audience)
 	if err != nil {
 		return err
 	}

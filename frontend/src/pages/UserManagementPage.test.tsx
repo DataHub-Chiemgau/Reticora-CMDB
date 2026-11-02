@@ -370,6 +370,52 @@ describe('UserManagementPage invitations', () => {
     ).toBeInTheDocument();
   });
 
+  it('reports an invitation mail the server could not send apart from a missing setup (503)', async () => {
+    // With the IdP admin client the server mails the link straight over its
+    // central SMTP server; when that refuses the mail, the issue stores
+    // nothing and the renewal keeps the old link.
+    let issues = 0;
+    stubUserApi(managePermissions.permissions, (url, method) => {
+      expect(method).toBe('POST');
+      issues += url.endsWith('/renew') ? 0 : 1;
+      return problem(503, {
+        title: 'Service Unavailable',
+        detail:
+          issues > 1 ? 'invitations not configured' : 'the invitation e-mail could not be sent',
+      });
+    });
+    renderWithProviders(<UserManagementPage />, { route: '/users' });
+    await openInvitations();
+
+    await fillInvite('lost@example.invalid', ROLE_VIEWER);
+    fireEvent.click(screen.getByRole('button', { name: 'Einladung senden' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die Einladungs-E-Mail konnte nicht versendet werden, es wurde nichts gespeichert oder geändert.',
+    );
+    expect(screen.getByLabelText('E-Mail')).toHaveValue('lost@example.invalid');
+    expect(screen.queryByRole('status')).toBeNull();
+
+    const row = screen.getByText('new@example.invalid').closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Erneuern' }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          /^new@example\.invalid: Die Einladungs-E-Mail konnte nicht versendet werden/,
+        ),
+      ).toBeInTheDocument(),
+    );
+
+    // Another 503 is still the missing setup.
+    fireEvent.click(screen.getByRole('button', { name: 'Einladung senden' }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'Einladungen sind auf diesem Server nicht eingerichtet. Wenden Sie sich an den Betrieb.',
+        ),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it('renews an invitation and shows the new link', async () => {
     const fetchMock = stubUserApi(managePermissions.permissions, (url, method) => {
       expect(method).toBe('POST');

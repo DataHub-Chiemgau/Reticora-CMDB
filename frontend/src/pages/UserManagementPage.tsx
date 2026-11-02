@@ -407,10 +407,18 @@ function fieldMessage(field: InviteField, status: number, t: TFunction): string 
 }
 
 /**
+ * INVITATION_MAIL_FAILED_DETAIL is the problem detail of an issue or renewal
+ * whose invitation mail the central SMTP server did not take
+ * (user.ErrInvitationMail): nothing was stored or changed.
+ */
+const INVITATION_MAIL_FAILED_DETAIL = 'the invitation e-mail could not be sent';
+
+/**
  * describeRefusal turns a failed invitation request into localized messages
  * (F-142): a field problem (400, 409, 422) goes to its input, the grant
- * ceiling (403) to the role, an accepted invitation (409 on renew or revoke)
- * and a missing configuration (503) to the summary.
+ * ceiling (403) to the role, an accepted invitation (409 on renew or revoke),
+ * an invitation mail the server could not send and a missing configuration
+ * (both 503) to the summary.
  */
 function describeRefusal(error: unknown, t: TFunction): RefusalView {
   if (!(error instanceof ApiError)) {
@@ -435,7 +443,9 @@ function describeRefusal(error: unknown, t: TFunction): RefusalView {
     case 409:
       return { message: t('invitations.errors.accepted'), fields: {} };
     case 503:
-      return { message: t('invitations.errors.unavailable'), fields: {} };
+      return error.detail === INVITATION_MAIL_FAILED_DETAIL
+        ? { message: t('invitations.errors.mailFailed'), fields: {} }
+        : { message: t('invitations.errors.unavailable'), fields: {} };
     case 400:
     case 422:
       return { message: t('invitations.errors.rejected', { detail: error.message }), fields: {} };
@@ -549,7 +559,8 @@ function InvitationsTab({ search }: { search: string }) {
                 {t('invitations.sent', { email: sent.email, expires: formatDate(sent.expires_at) })}
               </p>
               {/* Where the acceptance creates the IdP account, the server
-                  returns no token: the link reaches the invited mailbox only. */}
+                  returns no token: it has mailed the link straight to the
+                  invited address (a refused mail is a 503, nothing stored). */}
               {sent.token ? (
                 <Input
                   label={t('invitations.link')}

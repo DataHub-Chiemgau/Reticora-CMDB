@@ -865,3 +865,21 @@ func TestInvitationAccountsNeedTheCentralSMTPServer(t *testing.T) {
 		t.Errorf("without admin client the log says %v", records)
 	}
 }
+
+// TestInvitationMailerNeedsTheCentralSMTPServer: the invitation mailer,
+// which the handler needs to wire the accounts client (WithAccounts), sends
+// over the central SMTP server; without that server it is a nil interface,
+// not a mailer without sender, so issue and renewal keep the link in their
+// response.
+func TestInvitationMailerNeedsTheCentralSMTPServer(t *testing.T) {
+	if got := invitationMailer(nil); got != nil {
+		t.Errorf("no central SMTP: invitation mailer %#v, want none", got)
+	}
+	sender, err := notify.NewSMTPSender(&notify.SMTPConfig{Host: "smtp.example.com", From: "noreply@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := invitationMailer(sender).(notify.InvitationMailer); !ok || got.Sender != sender {
+		t.Errorf("central SMTP: invitation mailer %#v, want notify.InvitationMailer over the central sender", got)
+	}
+}

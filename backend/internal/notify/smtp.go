@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
@@ -437,5 +438,44 @@ func (s SignupMailer) SendSignupVerification(ctx context.Context, to, organizati
 		Body: "Bitte bestätigen Sie die Registrierung von " + organizationName + ":\n" + link +
 			"\n\nPlease confirm the registration of " + organizationName + ":\n" + link + "\n",
 	})
+	return err
+}
+
+// InvitationMail is the invitation mail of an issue or renewal (TLC-03,
+// NTF-05): the acceptance link for the invited address and its expiry, with
+// the organization's name, locale (LOC-01) and settings.branding.sender_name
+// (NTF-03).
+type InvitationMail struct {
+	To               string
+	Link             string
+	ExpiresAt        time.Time
+	OrganizationName string
+	Locale           string
+	SenderName       string
+}
+
+// InvitationMailer sends the invitation mail straight to the invited
+// address over the central SMTP server of the installation, like the
+// verification e-mail of the self-signup (user.InvitationMailer). Its link
+// holds the acceptance token, and with the IdP admin client the acceptance
+// creates a verified IdP account of the address: the mail therefore never
+// goes over a channel of the organization, whose own SMTP server (provider
+// smtp) the organization's administrators choose and could read. It is no
+// notification: channels, preferences, digests and notifications_email do
+// not apply. The text is the template of invitation.created in the
+// organization's language (the invitee has no account, so no language of
+// their own), branded like the organization's e-mails: sender name, subject
+// prefix and footer.
+type InvitationMailer struct {
+	Sender *SMTPSender
+}
+
+// SendInvitation implements user.InvitationMailer.
+func (m InvitationMailer) SendInvitation(ctx context.Context, inv *InvitationMail) error {
+	brand := newBranding(inv.OrganizationName, inv.Locale, inv.SenderName)
+	locale := TemplateLocale("", brand.Locale)
+	text := brand.Mail(locale, Render(events.InvitationCreated, locale, map[string]any{
+		"organization_name": inv.OrganizationName, "expires_at": inv.ExpiresAt.UTC().Format(time.RFC3339), "link": inv.Link}))
+	_, err := m.Sender.Send(ctx, &Mail{FromName: brand.SenderName, To: []string{inv.To}, Subject: text.Subject, Body: text.Body})
 	return err
 }

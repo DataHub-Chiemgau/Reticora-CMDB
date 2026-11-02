@@ -746,6 +746,7 @@
       "notFound": "Die Einladung gibt es nicht mehr. Die Liste wurde aktualisiert.",
       "accepted": "Die Einladung wurde bereits angenommen und kann nicht mehr geändert werden.",
       "unavailable": "Einladungen sind auf diesem Server nicht eingerichtet. Wenden Sie sich an den Betrieb.",
+      "mailFailed": "Die Einladungs-E-Mail konnte nicht versendet werden, es wurde nichts gespeichert oder geändert. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Betrieb.",
       "rejected": "Der Server hat die Einladung abgelehnt: {{detail}}",
       "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
     }

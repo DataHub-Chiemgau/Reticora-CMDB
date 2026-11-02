@@ -333,7 +333,8 @@ export async function invitationTokens(
  * invitationToken waits for the invitation e-mail to `email` and returns the token of its
  * accept link. This stack creates the invitee's IdP account on acceptance (Keycloak admin
  * client and central SMTP server), so issue and renewal return no token: only the invited
- * mailbox gets it, and the specs read it from the mail catcher like the invitee. `known`
+ * mailbox gets it, sent straight over the central SMTP server (the mail catcher) before
+ * the response, and the specs read it from the mail catcher like the invitee. `known`
  * are tokens to skip, those of earlier invitations to the address or the one a renewal
  * replaced; the newest other token is returned.
  */

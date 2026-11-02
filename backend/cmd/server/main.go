@@ -542,6 +542,7 @@ func main() {
 		SignupProtection:     signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts:  invitationAccounts(cfg, smtpSender != nil),
+		InvitationMailer:    invitationMailer(smtpSender),
 		InvitationAcceptURL: invitationAcceptURL(cfg),
 		MFA:                 mfa,
 		CollectorCA:         collectorPKI,
@@ -968,12 +969,12 @@ func keycloakAccounts(cfg *config.Config) *signup.KeycloakAccounts {
 // (TLC-03); nil leaves the account to the IdP. That account is created with
 // a verified address and the password of the acceptance, so with it the
 // token reaches the invitee's mailbox only: issue and renewal leave it out
-// of their response (InvitationHandler.WithAccounts). centralSMTP reports
-// whether the installation has the central SMTP server that delivers the
-// invitation mail. Without it the client is not wired, since the invitee
-// would get neither mail nor link: the inviter gets the link in the
-// response as before, and the invitee signs in with an existing IdP account
-// of the address, which the first login links.
+// of their response, and invitationMailer sends the mail straight over the
+// central SMTP server (InvitationHandler.WithAccounts). centralSMTP reports
+// whether the installation has that server. Without it the client is not
+// wired, since the invitee would get neither mail nor link: the inviter
+// gets the link in the response as before, and the invitee signs in with
+// an existing IdP account of the address, which the first login links.
 func invitationAccounts(cfg *config.Config, centralSMTP bool) user.InvitationAccounts {
 	if !centralSMTP {
 		if cfg.KeycloakAdminClientID != "" {
@@ -985,6 +986,16 @@ func invitationAccounts(cfg *config.Config, centralSMTP bool) user.InvitationAcc
 		return kc
 	}
 	return nil
+}
+
+// invitationMailer sends the invitation mail straight to the invited
+// address over the central SMTP server, never over a channel of the
+// organization; nil without that server.
+func invitationMailer(smtpSender *notify.SMTPSender) user.InvitationMailer {
+	if smtpSender == nil {
+		return nil
+	}
+	return notify.InvitationMailer{Sender: smtpSender}
 }
 
 // invitationAcceptURL is the page the link of the invitation mail opens;
