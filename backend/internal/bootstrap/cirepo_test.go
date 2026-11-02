@@ -2,6 +2,8 @@ package bootstrap_test
 
 import (
 	"context"
+	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
@@ -143,4 +145,120 @@ func TestNewCIRepositoryWiresAIOnlyWithModule(t *testing.T) {
 			t.Errorf("AI repository without search backend: %d UpsertChunk, want 1", aiRepo.upserts)
 		}
 	})
+}
+
+// ciRestorer is the reactivation interface the discovery review expects of
+// the CI repository (discovery.ciRestorer, unexported there).
+type ciRestorer interface {
+	Restore(ctx context.Context, orgID, id string) (*ci.Item, error)
+}
+
+// chainExceptions names the exported methods of *ci.PGRepository the
+// decorator chain does not offer, with the reason. Every other method must
+// reach the callers through the chain.
+var chainExceptions = map[string]string{
+	"WithEvents": "builder used while wiring the repositories (server.PostgresRepositories), before the chain is built",
+}
+
+// TestCIRepositoryChainForwardsOptionalInterfaces is the regression guard of
+// SR-11 (WP-833, CI-13, MET-15): the CI repository chain cmd/server builds
+// with bootstrap.NewCIRepository (search and AI decorator, module ai) on
+// *ci.PGRepository offers every optional interface callers find by type
+// assertion and every exported method of *ci.PGRepository, with the same
+// signature. Only the method set is checked; no database is used. A Phase-2
+// WP that gives *ci.PGRepository a method forwards it in
+// internal/ci/indexing_repository.go or names an exception in
+// chainExceptions.
+func TestCIRepositoryChainForwardsOptionalInterfaces(t *testing.T) {
+	modules, err := server.ParseModules("ai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := ci.NewPGRepository(nil)
+	chain := bootstrap.NewCIRepository(base, &fakeSearchBackend{}, &fakeAIRepository{}, &embeddingProvider{}, consenting{}, modules)
+
+	// The chain holds both decorators around the PostgreSQL repository:
+	// the search decorator inside, the AI decorator outermost.
+	if depth, inner := decoratorDepth(chain); depth != 2 || inner != reflect.TypeOf(base) {
+		t.Fatalf("chain: %d decorators around %v, want 2 around %T", depth, inner, base)
+	}
+
+	for _, tc := range []struct {
+		name string
+		has  func(ci.Repository) bool
+	}{
+		{"Restore (discovery.ciRestorer)", func(r ci.Repository) bool { _, ok := r.(ciRestorer); return ok }},
+		{"ci.UniqueChecker", func(r ci.Repository) bool { _, ok := r.(ci.UniqueChecker); return ok }},
+		{"ci.BatchCreator", func(r ci.Repository) bool { _, ok := r.(ci.BatchCreator); return ok }},
+		{"ci.NodeReader", func(r ci.Repository) bool { _, ok := r.(ci.NodeReader); return ok }},
+		{"ci.BatchReader", func(r ci.Repository) bool { _, ok := r.(ci.BatchReader); return ok }},
+		{"ci.TypeChanger", func(r ci.Repository) bool { _, ok := r.(ci.TypeChanger); return ok }},
+		{"ci.RecordUpdater", func(r ci.Repository) bool { _, ok := r.(ci.RecordUpdater); return ok }},
+		{"ci.Merger", func(r ci.Repository) bool { _, ok := r.(ci.Merger); return ok }},
+		{"ci.Unmerger", func(r ci.Repository) bool { _, ok := r.(ci.Unmerger); return ok }},
+		{"ci.TombstoneReader", func(r ci.Repository) bool { _, ok := r.(ci.TombstoneReader); return ok }},
+		{"ci.Restorer", func(r ci.Repository) bool { _, ok := r.(ci.Restorer); return ok }},
+		{"ci.ChangeReader", func(r ci.Repository) bool { _, ok := r.(ci.ChangeReader); return ok }},
+		{"ci.ActiveCounter", func(r ci.Repository) bool { _, ok := r.(ci.ActiveCounter); return ok }},
+	} {
+		if !tc.has(base) {
+			t.Errorf("%s: *ci.PGRepository does not implement it; update this test", tc.name)
+			continue
+		}
+		if !tc.has(chain) {
+			t.Errorf("%s: the chain of bootstrap.NewCIRepository hides it (SR-11); forward it in internal/ci/indexing_repository.go", tc.name)
+		}
+	}
+
+	baseValue, chainValue := reflect.ValueOf(base), reflect.ValueOf(chain)
+	baseType := baseValue.Type()
+	var missing []string
+	for i := range baseType.NumMethod() {
+		name := baseType.Method(i).Name
+		if _, excepted := chainExceptions[name]; excepted {
+			if chainValue.MethodByName(name).IsValid() {
+				t.Errorf("%s: the chain offers it; remove the exception from chainExceptions", name)
+			}
+			continue
+		}
+		forwarded := chainValue.MethodByName(name)
+		if !forwarded.IsValid() {
+			missing = append(missing, name)
+			continue
+		}
+		if want, got := baseValue.Method(i).Type(), forwarded.Type(); want != got {
+			t.Errorf("%s: the chain offers %v, *ci.PGRepository %v", name, got, want)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("the chain of bootstrap.NewCIRepository hides methods of *ci.PGRepository (SR-11): %v; "+
+			"forward them in internal/ci/indexing_repository.go or name an exception in chainExceptions", missing)
+	}
+	var stale []string
+	for name := range chainExceptions {
+		if _, ok := baseType.MethodByName(name); !ok {
+			stale = append(stale, name)
+		}
+	}
+	sort.Strings(stale)
+	if len(stale) > 0 {
+		t.Errorf("chainExceptions names methods *ci.PGRepository no longer has: %v", stale)
+	}
+}
+
+// decoratorDepth unwraps the decorators of the chain through their embedded
+// ci.Repository (first field) and returns their number and the type of the
+// innermost repository.
+func decoratorDepth(repo ci.Repository) (int, reflect.Type) {
+	depth := 0
+	v := reflect.ValueOf(repo)
+	for v.Kind() == reflect.Pointer && v.Elem().Kind() == reflect.Struct && v.Elem().NumField() > 0 {
+		field := v.Elem().Type().Field(0)
+		if !field.Anonymous || field.Type != reflect.TypeOf((*ci.Repository)(nil)).Elem() {
+			break
+		}
+		v = v.Elem().Field(0).Elem()
+		depth++
+	}
+	return depth, v.Type()
 }
