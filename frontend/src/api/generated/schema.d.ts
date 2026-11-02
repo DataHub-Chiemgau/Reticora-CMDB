@@ -9836,6 +9836,7 @@ export interface components {
     };
     ExportJobFilters: {
       status?: string;
+      /** @description CI type id; includes the subtypes (MET-06), as the parameter ci_type_id of the CI list. */
       ci_type_id?: string;
       client_id?: string;
     };
@@ -13103,6 +13104,7 @@ export interface components {
     /** @description Sort direction. */
     SortDir: 'asc' | 'desc';
     CIStatus: components['schemas']['CIStatus'];
+    /** @description CI type id to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. The same holds for filter[ci_type_id] and filter[ci_type_id][in] (the union of the subtrees). An attribute filter then also follows the inheritable definitions of the ancestors of the named types. */
     CITypeID: string;
     ClientID: string;
     SiteID: string;
@@ -13742,6 +13744,7 @@ export interface operations {
         /** @description Sort direction. */
         sort_dir?: components['parameters']['SortDir'];
         status?: components['parameters']['CIStatus'];
+        /** @description CI type id to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. The same holds for filter[ci_type_id] and filter[ci_type_id][in] (the union of the subtrees). An attribute filter then also follows the inheritable definitions of the ancestors of the named types. */
         ci_type_id?: components['parameters']['CITypeID'];
         client_id?: components['parameters']['ClientID'];
         site_id?: components['parameters']['SiteID'];
@@ -15203,6 +15206,7 @@ export interface operations {
       query?: {
         format?: 'csv' | 'json' | 'datev';
         status?: components['parameters']['CIStatus'];
+        /** @description CI type id to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. The same holds for filter[ci_type_id] and filter[ci_type_id][in] (the union of the subtrees). An attribute filter then also follows the inheritable definitions of the ancestors of the named types. */
         ci_type_id?: components['parameters']['CITypeID'];
         client_id?: components['parameters']['ClientID'];
       };
@@ -19372,7 +19376,7 @@ export interface operations {
       query?: {
         client_id?: string;
         site_id?: string;
-        /** @description CI type id (ci.ci_type_id) to filter by. */
+        /** @description CI type id (ci.ci_type_id) to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. With root_ci_id the root is always kept. */
         ci_type?: string;
         /** @description When set, returns a subgraph reachable from this CI (a UUID). A CI the caller does not see is 404. */
         root_ci_id?: string;

@@ -776,24 +776,64 @@ func (r *PGRepository) scheduleIndex(ctx context.Context, orgID string, before, 
 
 // checkUniqueValuesTx refuses to make an attribute unique while CIs share
 // a value of it in the scope (MET-15); the unique index could not be built.
+// A type definition with inheritable covers the subtree of its type, one
+// without the type (MET-06, WP-708), so a unique definition is checked
+// also when inheritable changes (409 on inheritable).
 func checkUniqueValuesTx(ctx context.Context, tx pgx.Tx, before, d *AttributeDefinition) error {
-	if !d.Unique || (before != nil && before.Unique && before.UniqueScope == d.UniqueScope) {
+	if !d.Unique {
 		return nil
+	}
+	field := "unique"
+	if before != nil && before.Unique && before.UniqueScope == d.UniqueScope {
+		if before.Inheritable == d.Inheritable || d.CITypeID == "" {
+			return nil
+		}
+		field = "inheritable"
 	}
 	var duplicate bool
 	err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM ci
 			WHERE deleted_at IS NULL AND attributes ->> $1 IS NOT NULL
-			  AND ($2::uuid IS NULL OR ci_type_id = $2::uuid)
+			  AND ($2::uuid IS NULL
+			       OR (NOT $4 AND ci_type_id = $2::uuid)
+			       OR ($4 AND ci_type_id IN (SELECT s.id FROM ci_type_subtree($2::uuid) s)))
 			GROUP BY organization_id, CASE WHEN $3 = 'client' THEN client_id END, attributes ->> $1
-			HAVING count(*) > 1)`, d.Key, nilIfEmpty(d.CITypeID), d.UniqueScope).Scan(&duplicate)
+			HAVING count(*) > 1)`, d.Key, nilIfEmpty(d.CITypeID), d.UniqueScope, d.Inheritable).Scan(&duplicate)
 	if err != nil {
 		return fmt.Errorf("check attribute values: %w", err)
 	}
 	if duplicate {
-		return &api.FieldError{Field: "unique", Message: "CIs already share a value of this attribute; resolve the duplicates first",
+		return &api.FieldError{Field: field, Message: "CIs already share a value of this attribute; resolve the duplicates first",
 			Status: http.StatusConflict}
+	}
+	return nil
+}
+
+// checkInheritedUniqueTx refuses a parent change of the type id that
+// brings CIs with the same value of an inherited unique attribute into one
+// subtree (MET-06, MET-15, WP-708): the unique, inheritable definitions of
+// the new ancestors, checked over the subtree of their type after the
+// change (409 on parent_type_id).
+func checkInheritedUniqueTx(ctx context.Context, tx pgx.Tx, id string) error {
+	var duplicate bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM attribute_definition d
+			JOIN ci_type_ancestors($1::uuid) a ON a.id = d.ci_type_id
+			WHERE d.is_unique AND d.inheritable AND d.ci_type_id <> $1::uuid
+			  AND EXISTS (
+				SELECT 1 FROM ci c
+				WHERE c.deleted_at IS NULL AND c.attributes ->> d.key IS NOT NULL
+				  AND c.ci_type_id IN (SELECT s.id FROM ci_type_subtree(d.ci_type_id) s)
+				GROUP BY c.organization_id, CASE WHEN d.unique_scope = 'client' THEN c.client_id END, c.attributes ->> d.key
+				HAVING count(*) > 1))`, id).Scan(&duplicate)
+	if err != nil {
+		return fmt.Errorf("check inherited unique attributes: %w", err)
+	}
+	if duplicate {
+		return &api.FieldError{Field: "parent_type_id", Status: http.StatusConflict,
+			Message: "CIs of the type and of the new parent's subtree share a value of an inherited unique attribute; resolve the duplicates first"}
 	}
 	return nil
 }

@@ -87,6 +87,9 @@ type Handler struct {
 	// application and their subtypes, IMP-08); without it the service
 	// impact chain has no services.
 	ciTypes citype.Repository
+	// subtypes supplies the subtree of a CI type for the type filter of a
+	// walk from a root (MET-06, WP-708); without it the type must match.
+	subtypes TypeSubtrees
 }
 
 // WithCITypes lets the impact name the affected services and their single
@@ -94,6 +97,19 @@ type Handler struct {
 // the organization once to tell the services by type and type chain.
 func (h *Handler) WithCITypes(types citype.Repository) *Handler {
 	h.ciTypes = types
+	return h
+}
+
+// TypeSubtrees reads the subtree of a CI type: the type and every
+// descendant the organization sees (citype.Repository.TypeSubtree).
+type TypeSubtrees interface {
+	TypeSubtree(ctx context.Context, orgID, id string) ([]citype.Type, error)
+}
+
+// WithTypeSubtrees lets the type filter of a walk from a root include the
+// subtypes (MET-06, WP-708).
+func (h *Handler) WithTypeSubtrees(t TypeSubtrees) *Handler {
+	h.subtypes = t
 	return h
 }
 
@@ -207,7 +223,7 @@ func (h *Handler) GetNeighbors(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, g.topology(""))
+	api.WriteJSON(w, http.StatusOK, g.topology(nil))
 }
 
 // GetImpact handles GET /api/v1/topology/cis/{id}/impact
@@ -328,8 +344,9 @@ func (h *Handler) edgesAmong(ctx context.Context, orgID string, ids []string) ([
 }
 
 // buildFromRoot walks the configuration graph from rootCIID up to depth hops.
-// When ciType is non-empty, non-root nodes not matching the type are dropped
-// along with any edges that dangle as a result.
+// When ciType is non-empty, non-root nodes not of the type or one of its
+// subtypes (MET-06, WP-708; the type alone without TypeSubtrees) are
+// dropped along with any edges that dangle as a result.
 func (h *Handler) buildFromRoot(ctx context.Context, orgID, rootCIID string, depth int, ciType string) (Graph, error) {
 	root, err := h.root(ctx, orgID, rootCIID)
 	if err != nil {
@@ -339,7 +356,20 @@ func (h *Handler) buildFromRoot(ctx context.Context, orgID, rootCIID string, dep
 	if err != nil {
 		return Graph{}, err
 	}
-	return g.topology(ciType), nil
+	var types map[string]bool
+	if ciType != "" {
+		types = map[string]bool{ciType: true}
+		if h.subtypes != nil {
+			subtree, serr := h.subtypes.TypeSubtree(ctx, orgID, ciType)
+			if serr != nil {
+				return Graph{}, serr
+			}
+			for i := range subtree {
+				types[subtree[i].ID] = true
+			}
+		}
+	}
+	return g.topology(types), nil
 }
 
 // graphFrom walks the configuration graph from root, a CI the caller has
@@ -721,13 +751,13 @@ func (g *ciGraph) incidentTo(n int32) []int32 {
 }
 
 // topology is the graph as GET /topology answers it: the known CIs in the
-// order of their numbers, of type ciType when it is set (the root always),
-// and the edges between two of them, ordered by id.
-func (g *ciGraph) topology(ciType string) Graph {
+// order of their numbers, of one of the types when they are set (the root
+// always), and the edges between two of them, ordered by id.
+func (g *ciGraph) topology(types map[string]bool) Graph {
 	included := make([]bool, len(g.ids))
 	nodes := make([]Node, 0, len(g.ids))
 	for n := range g.ids {
-		if !g.known[n] || (ciType != "" && n != 0 && g.nodes[n].CIType != ciType) {
+		if !g.known[n] || (types != nil && n != 0 && !types[g.nodes[n].CIType]) {
 			continue
 		}
 		included[n] = true

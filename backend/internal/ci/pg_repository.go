@@ -205,25 +205,61 @@ func withoutSort(ctx context.Context, tx pgx.Tx, restore bool, fn func() error) 
 	return ferr
 }
 
+// typeScope returns the CI types the type filters of a list query name
+// (namedTypes): per group the union of the subtrees of its types as the
+// organization sees them (ci_type_subtree), the intersection of the
+// groups. A value that is no UUID fails as the comparison with ci_type_id
+// did before (22P02, 400).
+func typeScope(ctx context.Context, tx pgx.Tx, groups [][]string) ([]string, error) {
+	var ids []string
+	var group []int32
+	for g, values := range groups {
+		for _, v := range values {
+			ids = append(ids, v)
+			group = append(group, int32(g)) //nolint:gosec // one group per type parameter
+		}
+	}
+	rows, err := tx.Query(ctx, `SELECT s.id::text FROM unnest($1::uuid[], $2::int[]) AS n(id, g), LATERAL ci_type_subtree(n.id) s
+		GROUP BY s.id HAVING count(DISTINCT n.g) = $3 ORDER BY 1`, ids, group, len(groups))
+	if err != nil {
+		return nil, fmt.Errorf("ci type subtrees: %w", err)
+	}
+	types, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("ci type subtrees: %w", err)
+	}
+	return types, nil
+}
+
 // attributeFilterOf checks that an attribute may be filtered (API-02) and
 // returns its filter kind and the CI types the filter is restricted to (nil
 // for none). The definitions of a CI's type decide (WP-566, F-216): a
-// definition of the type and the global ones (of the organization and the
+// definition of the type, the inheritable definitions of its ancestors
+// (MET-06, WP-708) and the global ones (of the organization and the
 // system; row level security hides those of other organizations) apply to
 // it, and the attribute is searchable for the type when one of them is.
-// types are the CI types the query names (named), else every type
-// counts. The attribute must be defined for one of them (else 422) and
-// searchable for one (else 400 with a hint); the searchable definitions
-// give the kind, and when they compare differently (integer in one type,
-// text in another) the filter is 400 with the hint to name the type. The
-// hits are restricted to the types the attribute is searchable for unless
-// a searchable global definition covers every type or every named type is
-// one of them, so a filter on a type definition keeps the query shape that
-// its index (partial on the type, WP-435) serves.
+// types are the CI types the query names (named) with their subtypes
+// (typeScope), as the type filter includes them, else every type counts.
+// The attribute must be defined for one of them (else 422) and searchable
+// for one (else 400 with a hint); the searchable definitions give the
+// kind, and when they compare differently (integer in one type, text in
+// another) the filter is 400 with the hint to name the type. The hits are
+// restricted to the types the attribute is searchable for (a type
+// definition with inheritable covers the subtree of its type, WP-708)
+// unless a searchable global definition covers every type. The
+// restriction is the list of types of the definitions, so a filter on a
+// type definition keeps the query shape whose predicate the index of the
+// definition (partial on the type or on its subtree, WP-435, WP-708)
+// proves in a custom plan, also when the named types are a part of it.
 func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string, types []string, named bool) (kind string, restrict []string, err error) {
-	query, args := `SELECT COALESCE(ci_type_id::text, ''), data_type, searchable FROM attribute_definition WHERE key = $1`, []any{key}
+	const covers = `CASE WHEN d.ci_type_id IS NULL OR NOT d.searchable THEN '{}'::text[]
+			WHEN d.inheritable THEN ARRAY(SELECT s.id::text FROM ci_type_subtree(d.ci_type_id) s)
+			ELSE ARRAY[d.ci_type_id::text] END`
+	query, args := `SELECT COALESCE(d.ci_type_id::text, ''), d.data_type, d.searchable, `+covers+`
+		FROM attribute_definition d WHERE d.key = $1`, []any{key}
 	if named {
-		query += ` AND (ci_type_id IS NULL OR ci_type_id::text = ANY($2::text[]))`
+		query += ` AND (d.ci_type_id IS NULL OR d.ci_type_id = ANY($2::uuid[])
+			OR (d.inheritable AND d.ci_type_id IN (SELECT a.id FROM unnest($2::uuid[]) AS n(id), LATERAL ci_type_ancestors(n.id) a)))`
 		args = append(args, types)
 	}
 	rows, err := tx.Query(ctx, query, args...)
@@ -234,9 +270,10 @@ func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string,
 		typeID, dataType string
 		searchable       bool
 		defined, global  bool
-		kinds, typed     []string
+		kinds, covered   []string
+		subtree          []string
 	)
-	if _, err = pgx.ForEachRow(rows, []any{&typeID, &dataType, &searchable}, func() error {
+	if _, err = pgx.ForEachRow(rows, []any{&typeID, &dataType, &searchable, &subtree}, func() error {
 		defined = true
 		if !searchable {
 			return nil
@@ -246,8 +283,11 @@ func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string,
 		}
 		if typeID == "" {
 			global = true
-		} else {
-			typed = append(typed, typeID)
+		}
+		for _, t := range subtree {
+			if !slices.Contains(covered, t) {
+				covered = append(covered, t)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -267,10 +307,11 @@ func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string,
 		return "", nil, &api.FieldError{Field: field,
 			Message: fmt.Sprintf("attribute %q has different data types in the CI types that make it searchable; give ci_type_id to filter on it", key)}
 	}
-	if global || (named && len(typed) == len(types)) {
+	if global {
 		return kinds[0], nil, nil
 	}
-	return kinds[0], typed, nil
+	slices.Sort(covered)
+	return kinds[0], covered, nil
 }
 
 // indexedSort are the sort columns whose order an index of the list holds
@@ -296,9 +337,22 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			args = append(args, filter.Status)
 			argPos++
 		}
-		if filter.TypeID != "" {
-			whereParts = append(whereParts, fmt.Sprintf("ci_type_id = $%d", argPos))
-			args = append(args, filter.TypeID)
+		// The type filters (ci_type_id, filter[ci_type_id] with exact or in)
+		// include the subtypes (MET-06, WP-708). The subtrees are read
+		// first and compared as a parameter: the planner estimates the
+		// list of types from the statistics of ci_type_id and reads the
+		// CIs of rare types through idx_ci_org_type, where it took a
+		// semi-join with ci_type_subtree for a match of every CI and read
+		// the whole organization in the sort order.
+		groups, typesNamed := filter.namedTypes()
+		var types []string
+		if typesNamed {
+			var serr error
+			if types, serr = typeScope(ctx, tx, groups); serr != nil {
+				return serr
+			}
+			whereParts = append(whereParts, fmt.Sprintf("ci_type_id = ANY($%d::uuid[])", argPos))
+			args = append(args, types)
 			argPos++
 		}
 		if filter.ClientID != "" {
@@ -322,8 +376,10 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			argPos++
 		}
 		orgNamed := false
-		types, typesNamed := filter.namedTypes()
 		for _, f := range filter.Filters {
+			if f.Field == "ci_type_id" && (f.Op == api.OpExact || f.Op == api.OpIn) {
+				continue // in the type filter above
+			}
 			expr := filterColumns[f.Field].expr
 			if key, ok := f.Attribute(); ok {
 				kind, restrict, err := attributeFilterOf(ctx, tx, f, key, types, typesNamed)
@@ -2381,9 +2437,11 @@ func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error)
 }
 
 // UniqueConflicts implements UniqueChecker: the unique attributes of the
-// CI type and the global ones whose value another active CI of the
-// organization (scope org) or of the same client (scope client) holds.
-// Soft-deleted CIs do not count (MET-15).
+// CI type, the inheritable ones of its ancestors and the global ones whose
+// value another active CI of the organization (scope org) or of the same
+// client (scope client) holds. A type definition with inheritable compares
+// with the CIs of the subtree of its type, one without only with the CIs
+// of the type (MET-06, WP-708). Soft-deleted CIs do not count (MET-15).
 //
 // The check covers the CIs the caller does not see (F-421): for a caller
 // restricted in the client or site scope it runs in an own transaction,
@@ -2406,14 +2464,18 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 	check := func(ctx context.Context, tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx, `
 			SELECT d.key FROM attribute_definition d
-			WHERE d.is_unique AND (d.ci_type_id = $2::uuid OR d.ci_type_id IS NULL)
+			WHERE d.is_unique
+			  AND (d.ci_type_id = $2::uuid OR d.ci_type_id IS NULL
+			       OR (d.inheritable AND d.ci_type_id IN (SELECT a.id FROM ci_type_ancestors($2::uuid) a)))
 			  AND (d.organization_id = $1::uuid OR d.organization_id IS NULL)
 			  AND $5::jsonb ->> d.key IS NOT NULL
 			  AND EXISTS (
 				SELECT 1 FROM ci c
 				WHERE c.organization_id = $1::uuid AND c.deleted_at IS NULL
 				  AND ($4::uuid IS NULL OR c.id <> $4::uuid)
-				  AND (d.ci_type_id IS NULL OR c.ci_type_id = d.ci_type_id)
+				  AND (d.ci_type_id IS NULL
+				       OR (NOT d.inheritable AND c.ci_type_id = d.ci_type_id)
+				       OR (d.inheritable AND c.ci_type_id IN (SELECT s.id FROM ci_type_subtree(d.ci_type_id) s)))
 				  AND (d.unique_scope = 'org' OR c.client_id IS NOT DISTINCT FROM $3::uuid)
 				  AND c.attributes ->> d.key = $5::jsonb ->> d.key)
 			ORDER BY d.key`, orgID, ciTypeID, nilIfEmpty(clientID), nilIfEmpty(ciID), raw)

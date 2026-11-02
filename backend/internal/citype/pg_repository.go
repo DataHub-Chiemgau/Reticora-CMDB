@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -140,11 +142,15 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Type, er
 // Create inserts a new type with its field definitions. A parent is
 // checked by trg_ci_type_parent_guard (MET-06); its errors and a chain that
 // cannot be composed are reported on parent_type_id.
+//
+// A new subtype widens the subtree of its ancestors: the indexes of their
+// indexed, inheritable definitions are rebuilt with it (WP-708).
 func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 	if typ.ParentTypeID != "" && !api.IsUUID(typ.ParentTypeID) {
 		return errParentUnknown()
 	}
-	return database.WithRequestTenant(ctx, r.pool, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	var reindex []string
+	err := database.WithRequestTenant(ctx, r.pool, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if typ.Key == "" {
 			typ.Key = slugify(typ.Name)
 		}
@@ -182,9 +188,50 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 			if err := checkSubtreeCompositionTx(ctx, tx, typ.ID); err != nil {
 				return err
 			}
+			var ierr error
+			if reindex, ierr = inheritedIndexedTx(ctx, tx, typ.OrganizationID, typ.ID); ierr != nil {
+				return ierr
+			}
 		}
 		return recordMetamodelAudit(ctx, tx, typ.OrganizationID, "ci_type.created", "ci_type", typ.ID, nil, typ)
 	})
+	if err == nil {
+		r.scheduleIndexes(ctx, typ.OrganizationID, reindex)
+	}
+	return err
+}
+
+// inheritedIndexedTx returns the indexed (searchable or unique),
+// inheritable definitions of the organization on the ancestors of the type
+// id: their indexes cover the subtree of their type (IndexStatement), which
+// the type belongs to (WP-708).
+func inheritedIndexedTx(ctx context.Context, tx pgx.Tx, orgID, id string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT d.id::text FROM ci_type_ancestors($1::uuid) a
+		JOIN attribute_definition d ON d.ci_type_id = a.id
+		WHERE a.id <> $1::uuid AND d.inheritable AND (d.searchable OR d.is_unique) AND d.organization_id = $2::uuid
+		ORDER BY 1`, id, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("read inherited attribute indexes: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("read inherited attribute indexes: %w", err)
+	}
+	return ids, nil
+}
+
+// scheduleIndexes starts the index jobs of the definitions ids after a
+// change of the type tree (WP-708). The change is stored already; a job
+// that cannot be queued is logged, as in scheduleIndex.
+func (r *PGRepository) scheduleIndexes(ctx context.Context, orgID string, ids []string) {
+	if r.indexes == nil {
+		return
+	}
+	for _, id := range ids {
+		if err := r.indexes.ScheduleIndex(context.WithoutCancel(ctx), orgID, id); err != nil {
+			slog.Error("schedule attribute index job", "definition", id, "error", err)
+		}
+	}
 }
 
 // typeParentErrors maps the constraints of trg_ci_type_parent_guard and
@@ -222,12 +269,17 @@ func typeDBError(err error) error {
 // trg_ci_type_parent_guard and regenerates the moved subtree; the subtree
 // must stay composable with the organization's global attributes as well
 // (MET-06, MET-16). Parent errors are reported on parent_type_id, an
-// unknown or system type is "not found".
+// unknown or system type is "not found". CIs of the moved subtree and of
+// the new ancestors' subtrees must not share a value of an inherited unique
+// attribute (409 on parent_type_id); the indexes of the indexed,
+// inheritable definitions of the former and the new ancestors are rebuilt
+// over their changed subtrees (WP-708).
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
 	if !api.IsUUID(id) {
 		return nil, fmt.Errorf("not found")
 	}
 	var out *Type
+	var reindex []string
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
 		args := []any{id}
@@ -292,6 +344,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 				return errParentUnknown()
 			}
 			add("parent_type_id", nilIfEmpty(*req.ParentTypeID))
+			if reindex, err = inheritedIndexedTx(ctx, tx, orgID, id); err != nil {
+				return err
+			}
 		}
 		if len(sets) == 0 {
 			t, err := scanType(tx.QueryRow(ctx,
@@ -320,6 +375,18 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 			if cerr := checkSubtreeCompositionTx(ctx, tx, id); cerr != nil {
 				return cerr
 			}
+			if uerr := checkInheritedUniqueTx(ctx, tx, id); uerr != nil {
+				return uerr
+			}
+			gained, ierr := inheritedIndexedTx(ctx, tx, orgID, id)
+			if ierr != nil {
+				return ierr
+			}
+			for _, d := range gained {
+				if !slices.Contains(reindex, d) {
+					reindex = append(reindex, d)
+				}
+			}
 			// RETURNING precedes the regeneration of trg_ci_type_parent_regenerate.
 			if t, err = scanType(tx.QueryRow(ctx,
 				fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1", typeSelectColumns), id)); err != nil {
@@ -334,6 +401,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 		out = t
 		return recordMetamodelAudit(ctx, tx, orgID, "ci_type.updated", "ci_type", id, before, t)
 	})
+	if err == nil {
+		r.scheduleIndexes(ctx, orgID, reindex)
+	}
 	return out, err
 }
 

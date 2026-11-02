@@ -5805,7 +5805,11 @@ paths:
             type: string
         - name: ci_type
           in: query
-          description: CI type id (ci.ci_type_id) to filter by.
+          description: >-
+            CI type id (ci.ci_type_id) to filter by. The filter includes the
+            subtypes (MET-06): CIs of the type and of every type below it
+            (parent_type_id) the caller sees. With root_ci_id the root is
+            always kept.
           schema:
             type: string
         - name: root_ci_id
@@ -15249,6 +15253,13 @@ components:
     CITypeID:
       name: ci_type_id
       in: query
+      description: >-
+        CI type id to filter by. The filter includes the subtypes (MET-06):
+        CIs of the type and of every type below it (parent_type_id) the
+        caller sees. The same holds for filter[ci_type_id] and
+        filter[ci_type_id][in] (the union of the subtrees). An attribute
+        filter then also follows the inheritable definitions of the
+        ancestors of the named types.
       schema:
         type: string
     ClientID:
@@ -18431,6 +18442,7 @@ components:
           type: string
         ci_type_id:
           type: string
+          description: CI type id; includes the subtypes (MET-06), as the parameter ci_type_id of the CI list.
         client_id:
           type: string
 
