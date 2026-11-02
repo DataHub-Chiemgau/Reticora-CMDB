@@ -727,3 +727,159 @@ func TestDispatcherConsumeReturnsHandOffErrors(t *testing.T) {
 		_ = d.Shutdown(context.Background())
 	}
 }
+
+// deliverOnce dispatches one event to the given subscriptions (Consume of
+// env when set, else Dispatch) and returns the X-Webhook-Event headers of
+// the deliveries per subscription name.
+func deliverOnce(t *testing.T, subs []Subscription, opts DispatcherOptions, env *events.Envelope, event string, payload any) map[string][]string {
+	t.Helper()
+	var mu sync.Mutex
+	got := map[string][]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		mu.Lock()
+		got[name] = append(got[name], r.Header.Get("X-Webhook-Event"))
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	repo := NewMemoryRepository()
+	for _, sub := range subs {
+		sub.OrganizationID, sub.URL, sub.Secret, sub.IsActive = "org-1", server.URL+"/"+sub.Name, "secret", true
+		if err := repo.Create(context.Background(), &sub); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts.PollInterval = -1
+	d := NewDispatcher(repo, server.Client(), opts)
+	if env != nil {
+		if err := d.Consume(context.Background(), env); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		d.Dispatch(context.Background(), "org-1", event, payload)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = d.Shutdown(ctx)
+	mu.Lock()
+	defer mu.Unlock()
+	return got
+}
+
+// TestLegacyNamesReceiveTheNewTypeOnce covers EVT-03 (WP-246): the
+// subscriptions of inventory.movement and asset.movement receive a
+// stock.movement of the outbox once, also one naming both former names
+// and the new type; those of lifecycle.transitioned a lifecycle.changed.
+// The delivery carries the new type.
+func TestLegacyNamesReceiveTheNewTypeOnce(t *testing.T) {
+	subs := []Subscription{
+		{Name: "inventory", Events: []string{"inventory.movement"}},
+		{Name: "asset", Events: []string{"asset.movement"}},
+		{Name: "all", Events: []string{"inventory.movement", "asset.movement", events.StockMovement}},
+		{Name: "stock", Events: []string{events.StockMovement}},
+		{Name: "lifecycle", Events: []string{"lifecycle.transitioned"}},
+		{Name: "both", Events: []string{"lifecycle.transitioned", events.LifecycleChanged}},
+	}
+	got := deliverOnce(t, subs, DispatcherOptions{}, &events.Envelope{ID: "e-1", Type: events.StockMovement, OrgID: "org-1",
+		EntityID: "q-1", EntitySeq: 1, Data: json.RawMessage(`{"id":"m-1","item_kind":"quantity_item","quantity_item_id":"q-1","movement_type":"issue"}`)}, "", nil)
+	want := map[string][]string{"inventory": {"stock.movement"}, "asset": {"stock.movement"}, "all": {"stock.movement"}, "stock": {"stock.movement"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("stock.movement delivered %v, want %v", got, want)
+	}
+	got = deliverOnce(t, subs, DispatcherOptions{}, &events.Envelope{ID: "e-2", Type: events.LifecycleChanged, OrgID: "org-1",
+		EntityID: "a-1", EntitySeq: 1, Data: json.RawMessage(`{"entity_type":"asset","entity_id":"a-1","to":"in_use"}`)}, "", nil)
+	want = map[string][]string{"lifecycle": {"lifecycle.changed"}, "both": {"lifecycle.changed"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("lifecycle.changed delivered %v, want %v", got, want)
+	}
+}
+
+// TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission covers EVT-03
+// and RBA-08 (WP-246): per phase 2 type a subscription bound to an account
+// holding the read permission of the type's object receives the event, one
+// bound to an account holding every other permission does not.
+// stock.movement needs asset:read, stock.below_minimum stock:read; the
+// entity_type of lifecycle.changed decides between ci:read and asset:read,
+// and without entity_type no bound subscription receives it.
+func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
+	const ci1, asset1, item1 = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"
+	objects := fakeResolver{ci1: {ClientID: "c1"}, asset1: {ClientID: "c1"}, item1: {ClientID: "c1"}}
+	permissions := []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read"}
+	want := map[string]string{
+		events.CIStatusChanged: "ci:read", events.RelationshipChanged: "ci:read",
+		events.AssetCreated: "asset:read", events.AssetChanged: "asset:read", events.AssetDeleted: "asset:read",
+		events.AssetAssigned: "asset:read", events.AssetReturned: "asset:read", events.AssetWarrantyExpiring: "asset:read",
+		events.ContractExpiring: "contract:read", events.StockMovement: "asset:read", events.StockBelowMinimum: "stock:read",
+		events.ReservationCreated: "reservation:read", events.ReservationReleased: "reservation:read",
+		events.ReservationExpired: "reservation:read", events.ReservationConverted: "reservation:read",
+		events.TicketUpdated: "ticket:read", events.TicketSLABreached: "ticket:read", events.MetamodelPublished: "ci:read",
+		events.DocumentScanned: "document:read", events.ImportCompleted: "import:run",
+	}
+	type deliveryCase struct {
+		event      string
+		payload    map[string]any
+		permission string
+	}
+	cases := []deliveryCase{
+		{events.LifecycleChanged, map[string]any{"entity_type": "ci", "entity_id": ci1, "to": "retired"}, "ci:read"},
+		{events.LifecycleChanged, map[string]any{"entity_type": "asset", "entity_id": asset1, "to": "in_use"}, "asset:read"},
+	}
+	for typ := range events.Payloads {
+		if typ == events.LifecycleChanged {
+			continue
+		}
+		payload := map[string]any{"id": asset1, "client_id": "c1"}
+		switch typ {
+		case events.RelationshipChanged:
+			payload = map[string]any{"id": "r", "source_ci_id": ci1, "target_ci_id": ci1}
+		case events.StockMovement:
+			payload = map[string]any{"id": "m", "item_kind": "quantity_item", "quantity_item_id": item1, "movement_type": "issue"}
+		case events.ReservationCreated, events.ReservationReleased, events.ReservationExpired, events.ReservationConverted:
+			payload = map[string]any{"id": "r", "item_kind": "asset", "asset_id": asset1}
+		case events.MetamodelPublished, events.DocumentScanned, events.ImportCompleted:
+			payload = map[string]any{"id": "x"}
+		}
+		if EventReadPermission(typ) != want[typ] {
+			t.Errorf("EventReadPermission(%s) = %q, want %q", typ, EventReadPermission(typ), want[typ])
+		}
+		cases = append(cases, deliveryCase{typ, payload, want[typ]})
+	}
+	for _, c := range cases {
+		access := fakeAccess{}
+		for _, p := range permissions {
+			account := "sa-without"
+			if p == c.permission {
+				account = "sa-with"
+			}
+			access[account+"|"+p+"|c1"], access[account+"|"+p+"|"] = true, true
+		}
+		got := deliverOnce(t, []Subscription{
+			{Name: "unbound", Events: []string{c.event}},
+			{Name: "with", Events: []string{c.event}, ServiceAccountID: "sa-with"},
+			{Name: "without", Events: []string{c.event}, ServiceAccountID: "sa-without"},
+		}, DispatcherOptions{Access: access, Objects: objects}, nil, c.event, c.payload)
+		if len(got["unbound"]) != 1 || len(got["with"]) != 1 || len(got["without"]) != 0 {
+			t.Errorf("%s %v (needs %s): delivered %v, want the unbound subscription and the one with the permission", c.event, c.payload, c.permission, got)
+		}
+	}
+
+	// Without entity_type the read permission is unknown: bound
+	// subscriptions receive nothing, even with every permission.
+	all := fakeAccess{}
+	for _, p := range permissions {
+		all["sa-all|"+p+"|c1"], all["sa-all|"+p+"|"], all["sa-all|"+p+"|*"] = true, true, true
+	}
+	got := deliverOnce(t, []Subscription{
+		{Name: "unbound", Events: []string{events.LifecycleChanged}},
+		{Name: "bound", Events: []string{events.LifecycleChanged}, ServiceAccountID: "sa-all"},
+	}, DispatcherOptions{Access: all, Objects: objects}, nil, events.LifecycleChanged, map[string]any{"entity_id": ci1, "client_id": "c1", "to": "x"})
+	if len(got["unbound"]) != 1 || len(got["bound"]) != 0 {
+		t.Errorf("lifecycle.changed without entity_type delivered %v, want the unbound subscription only", got)
+	}
+	if EventDataReadPermission(events.LifecycleChanged, []byte(`{"entity_type":"location"}`)) != "" ||
+		EventDataReadPermission(events.LifecycleChanged, []byte(`[]`)) != "" ||
+		EventDataReadPermission("lifecycle.transitioned", []byte(`{"entity_type":"asset"}`)) != "asset:read" {
+		t.Error("lifecycle read permission by entity_type")
+	}
+}

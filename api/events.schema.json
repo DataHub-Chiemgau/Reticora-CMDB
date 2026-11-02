@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://reticora.io/schemas/events.schema.json",
   "title": "Reticora domain event",
-  "description": "Envelope of the domain events of EVT-01/EVT-02, published on the NATS stream RETICORA_EVENTS under events.<org_id>.<type> and delivered to webhook subscriptions. Delivery is at least once: a consumer recognizes a repeated event by its id and processes the events of one entity in entity_seq order.",
+  "description": "Envelope of the domain events of EVT-01 to EVT-03, published on the NATS stream RETICORA_EVENTS under events.<org_id>.<type> and delivered to webhook subscriptions. Delivery is at least once: a consumer recognizes a repeated event by its id and processes the events of one entity in entity_seq order. A phase 2 type (EVT-03) names its entity, and its data follows its $defs entry.",
   "type": "object",
   "required": ["id", "type", "org_id", "occurred_at", "sequence", "data"],
   "additionalProperties": false,
@@ -35,7 +35,28 @@
         "invitation.created",
         "webhook.dead",
         "certificate.expiring",
-        "apikey.creator_deactivated"
+        "apikey.creator_deactivated",
+        "ci.status_changed",
+        "lifecycle.changed",
+        "relationship.changed",
+        "asset.created",
+        "asset.changed",
+        "asset.deleted",
+        "asset.assigned",
+        "asset.returned",
+        "asset.warranty_expiring",
+        "contract.expiring",
+        "stock.movement",
+        "stock.below_minimum",
+        "reservation.created",
+        "reservation.released",
+        "reservation.expired",
+        "reservation.converted",
+        "ticket.updated",
+        "ticket.sla_breached",
+        "metamodel.published",
+        "document.scanned",
+        "import.completed"
       ]
     },
     "org_id": {
@@ -63,11 +84,1066 @@
     },
     "data": {
       "type": "object",
-      "description": "The event data; for ci.* the CI, for ci.changed with changed_fields."
+      "description": "The event data; for ci.* the CI, for ci.changed with changed_fields; for a phase 2 type the frame of its $defs entry."
     }
   },
   "dependentRequired": {
     "entity_id": ["entity_seq"],
     "entity_seq": ["entity_id"]
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ci.status_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ci.status_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "lifecycle.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/lifecycle.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "relationship.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/relationship.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.created"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/asset.created"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/asset.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.deleted"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/asset.deleted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.assigned"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/asset.assigned"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.returned"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/asset.returned"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asset.warranty_expiring"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/asset.warranty_expiring"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "contract.expiring"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/contract.expiring"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "stock.movement"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/stock.movement"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "stock.below_minimum"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/stock.below_minimum"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "reservation.created"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/reservation.created"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "reservation.released"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/reservation.released"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "reservation.expired"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/reservation.expired"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "reservation.converted"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/reservation.converted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ticket.updated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ticket.updated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ticket.sla_breached"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ticket.sla_breached"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "metamodel.published"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/metamodel.published"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "document.scanned"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/document.scanned"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "import.completed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/import.completed"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "pii": {
+      "description": "Surrogate reference of a personal value (SEC-05, WP-241): data fields named after pii.IsPersonalKey carry it instead of the value.",
+      "type": "object",
+      "required": ["$pii"],
+      "additionalProperties": false,
+      "properties": {
+        "$pii": {
+          "type": "string"
+        }
+      }
+    },
+    "ci.status_changed": {
+      "description": "Data frame of ci.status_changed. entity_id: the CI. Origin: EVT-03. Producer: WP-707. The data is the CI snapshot of ci.changed with from and to. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "changed_fields", "from", "to"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "changed_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The changed fields, status among them (as in ci.changed)."
+        },
+        "from": {
+          "type": "string",
+          "description": "Status before the change."
+        },
+        "to": {
+          "type": "string",
+          "description": "Status after the change."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "changed_fields": ["status"],
+          "from": "active",
+          "to": "maintenance"
+        }
+      ]
+    },
+    "lifecycle.changed": {
+      "description": "Data frame of lifecycle.changed. entity_id: the CI or asset (entity_type). Origin: EVT-03. Producer: WP-724 (transition service, also in the disposal path of WP-278). The fields follow lifecycle.TransitionResult. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["entity_type", "entity_id", "to"],
+      "additionalProperties": true,
+      "properties": {
+        "entity_type": {
+          "type": "string",
+          "enum": ["ci", "asset"],
+          "description": "Object kind of entity_id."
+        },
+        "entity_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI or asset."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "from": {
+          "type": "string",
+          "description": "State before the transition; absent for the initial state."
+        },
+        "to": {
+          "type": "string",
+          "description": "State after the transition."
+        }
+      },
+      "examples": [
+        {
+          "entity_type": "asset",
+          "entity_id": "22222222-2222-4222-8222-222222222222",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "from": "in_stock",
+          "to": "in_use"
+        }
+      ]
+    },
+    "relationship.changed": {
+      "description": "Data frame of relationship.changed. entity_id: the relationship. Origin: EVT-03. Producer: WP-296. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "source_ci_id", "target_ci_id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The relationship."
+        },
+        "source_ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Source CI."
+        },
+        "target_ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Target CI."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "source_ci_id": "11111111-1111-4111-8111-111111111111",
+          "target_ci_id": "77777777-7777-4777-8777-777777777777"
+        }
+      ]
+    },
+    "asset.created": {
+      "description": "Data frame of asset.created. entity_id: the asset. Origin: EVT-03. Producer: WP-740. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The asset."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "asset.changed": {
+      "description": "Data frame of asset.changed. entity_id: the asset. Origin: EVT-03. Producer: WP-740. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The asset."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "asset.deleted": {
+      "description": "Data frame of asset.deleted. entity_id: the asset. Origin: EVT-03. Producer: WP-740. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The asset."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "asset.assigned": {
+      "description": "Data frame of asset.assigned. entity_id: the asset. Origin: EVT-03. Producer: WP-275. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The asset."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333"
+        }
+      ]
+    },
+    "asset.returned": {
+      "description": "Data frame of asset.returned. entity_id: the asset. Origin: EVT-03. Producer: WP-275. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The asset."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333"
+        }
+      ]
+    },
+    "asset.warranty_expiring": {
+      "description": "Data frame of asset.warranty_expiring. entity_id: the asset. Origin: EVT-03 (asset.*). Producer: WP-270. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "expires_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The asset."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date",
+          "description": "End of the warranty."
+        }
+      },
+      "examples": [
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "expires_at": "2026-12-31"
+        }
+      ]
+    },
+    "contract.expiring": {
+      "description": "Data frame of contract.expiring. entity_id: the contract. Origin: NTF-05 [P2]. Producer: WP-270. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "expires_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The contract."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the contract; absent without client."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date",
+          "description": "End date of the contract."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "expires_at": "2026-12-31"
+        }
+      ]
+    },
+    "stock.movement": {
+      "description": "Data frame of stock.movement. entity_id: the moved object (asset or quantity item, not the movement row, so that entity_seq orders the events per object). Origin: EVT-03. Producer: WP-274. The fields follow movement.Movement. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "item_kind", "movement_type"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The movement."
+        },
+        "item_kind": {
+          "type": "string",
+          "enum": ["asset", "quantity_item"],
+          "description": "Kind of the moved object."
+        },
+        "asset_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The moved asset (item_kind asset)."
+        },
+        "quantity_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The moved quantity item (item_kind quantity_item)."
+        },
+        "movement_type": {
+          "type": "string",
+          "description": "Kind of the movement."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "Moved quantity of a quantity item."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "item_kind": "quantity_item",
+          "quantity_item_id": "55555555-5555-4555-8555-555555555555",
+          "movement_type": "issue",
+          "quantity": 5
+        }
+      ]
+    },
+    "stock.below_minimum": {
+      "description": "Data frame of stock.below_minimum. entity_id: the quantity item. Origin: NTF-05 [P2]. Producer: WP-285. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The quantity item."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "55555555-5555-4555-8555-555555555555",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "reservation.created": {
+      "description": "Data frame of reservation.created. entity_id: the reservation. Origin: EVT-03. Producer: WP-277, for quantity items WP-284. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "item_kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reservation."
+        },
+        "item_kind": {
+          "type": "string",
+          "enum": ["asset", "quantity_item"],
+          "description": "Kind of the reserved object."
+        },
+        "asset_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved asset (item_kind asset)."
+        },
+        "quantity_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved quantity item (item_kind quantity_item)."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "item_kind": "asset",
+          "asset_id": "22222222-2222-4222-8222-222222222222"
+        }
+      ]
+    },
+    "reservation.released": {
+      "description": "Data frame of reservation.released. entity_id: the reservation. Origin: EVT-03. Producer: WP-277, for quantity items WP-284. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "item_kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reservation."
+        },
+        "item_kind": {
+          "type": "string",
+          "enum": ["asset", "quantity_item"],
+          "description": "Kind of the reserved object."
+        },
+        "asset_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved asset (item_kind asset)."
+        },
+        "quantity_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved quantity item (item_kind quantity_item)."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "item_kind": "asset",
+          "asset_id": "22222222-2222-4222-8222-222222222222"
+        }
+      ]
+    },
+    "reservation.expired": {
+      "description": "Data frame of reservation.expired. entity_id: the reservation. Origin: EVT-03. Producer: WP-277, for quantity items WP-284. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "item_kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reservation."
+        },
+        "item_kind": {
+          "type": "string",
+          "enum": ["asset", "quantity_item"],
+          "description": "Kind of the reserved object."
+        },
+        "asset_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved asset (item_kind asset)."
+        },
+        "quantity_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved quantity item (item_kind quantity_item)."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "item_kind": "asset",
+          "asset_id": "22222222-2222-4222-8222-222222222222"
+        }
+      ]
+    },
+    "reservation.converted": {
+      "description": "Data frame of reservation.converted. entity_id: the reservation. Origin: EVT-03. Producer: WP-277, for quantity items WP-284. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id", "item_kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reservation."
+        },
+        "item_kind": {
+          "type": "string",
+          "enum": ["asset", "quantity_item"],
+          "description": "Kind of the reserved object."
+        },
+        "asset_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved asset (item_kind asset)."
+        },
+        "quantity_item_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved quantity item (item_kind quantity_item)."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "item_kind": "asset",
+          "asset_id": "22222222-2222-4222-8222-222222222222"
+        }
+      ]
+    },
+    "ticket.updated": {
+      "description": "Data frame of ticket.updated. entity_id: the ticket. Origin: EVT-03. Producer: WP-290. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The ticket."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "ticket.sla_breached": {
+      "description": "Data frame of ticket.sla_breached. entity_id: the ticket. Origin: plan addition. Producer: WP-292. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The ticket."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666",
+          "client_id": "33333333-3333-4333-8333-333333333333"
+        }
+      ]
+    },
+    "metamodel.published": {
+      "description": "Data frame of metamodel.published. entity_id: the publication. Origin: EVT-03. Producer: WP-261. Its content follows decision E-37. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The publication."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666"
+        }
+      ]
+    },
+    "document.scanned": {
+      "description": "Data frame of document.scanned. entity_id: the document. Origin: plan addition. Producer: WP-734. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The document."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666"
+        }
+      ]
+    },
+    "import.completed": {
+      "description": "Data frame of import.completed. entity_id: the import run. Origin: plan addition. Producer: WP-302. The producer adds its fields to this definition (additionalProperties).",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The import run."
+        }
+      },
+      "examples": [
+        {
+          "id": "66666666-6666-4666-8666-666666666666"
+        }
+      ]
+    }
   }
 }

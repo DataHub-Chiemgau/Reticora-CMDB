@@ -9,9 +9,10 @@ import (
 	"testing"
 )
 
-// TestEnvelopeMatchesSchema covers EVT-01 and EVT-02 (WP-136): the
-// envelope's JSON fields, the required ones and the event types are those
-// of api/events.schema.json.
+// TestEnvelopeMatchesSchema covers EVT-01 and EVT-02 (WP-136) and EVT-03
+// (WP-246): the envelope's JSON fields, the required ones and the event
+// types of the register in types.go, in its order, are those of
+// api/events.schema.json.
 func TestEnvelopeMatchesSchema(t *testing.T) {
 	raw, err := os.ReadFile("../../../api/events.schema.json")
 	if err != nil {
@@ -50,7 +51,8 @@ func TestEnvelopeMatchesSchema(t *testing.T) {
 		t.Errorf("types %v, schema %v", Types, schema.Properties["type"].Enum)
 	}
 	env := Envelope{OrgID: "o-1", Type: CIChanged}
-	if env.Subject() != "events.o-1.ci.changed" || IsType("ci.updated") || !IsType(JobFailed) {
+	if env.Subject() != "events.o-1.ci.changed" || IsType("ci.updated") || !IsType(JobFailed) || !IsType(StockMovement) ||
+		IsType("maintenance.scheduled") {
 		t.Error("subject or types")
 	}
 }

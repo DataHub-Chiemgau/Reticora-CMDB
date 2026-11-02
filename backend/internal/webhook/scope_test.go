@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // TestEventScopeResolution covers WP-356 (RBA-08): every subscribable event
@@ -63,14 +64,18 @@ func TestEventScopeResolution(t *testing.T) {
 		{"ci_attribute.changed", `{"name":"rack"}`, result{objects: shared}},
 		{"ci_attribute.changed", `{"ci_id":"` + ci1 + `","name":"rack"}`, result{refs: []ObjectRef{ref(ObjectCI, ci1)}}},
 		{"ci_attribute.changed", `{"ci_id":"","name":"rack"}`, unknown},
-		{"lifecycle.transitioned", `{"ci_id":"` + ci1 + `","client_id":"c1"}`, unknown},
+		// lifecycle.transitioned follows lifecycle.changed (WP-246).
+		{"lifecycle.transitioned", `{"ci_id":"` + ci1 + `"}`, unknown},
+		{"lifecycle.transitioned", `{"entity_type":"ci","entity_id":"` + ci1 + `"}`, result{refs: []ObjectRef{ref(ObjectCI, ci1)}}},
 		{"override.changed", `{"id":"f","ci_id":"` + ci1 + `","field_name":"name"}`, result{refs: []ObjectRef{ref(ObjectCI, ci1)}}},
 		{"override.changed", `{"id":"f"}`, unknown},
 		{"reconciliation.policy_changed", `{"id":"p","priorities":["manual"]}`, result{objects: shared}},
 		// A workflow's send_webhook payload under an organizational type.
 		{"reconciliation.policy_changed", `{"run_id":"r","context":{"client_id":"c2"}}`, unknown},
 		{"ci_type.created", `{"id":""}`, unknown},
-		{"asset.movement", `{"asset_id":"` + asset1 + `","client_id":"c1"}`, unknown},
+		// asset.movement and inventory.movement follow stock.movement.
+		{"asset.movement", `{"asset_id":"` + asset1 + `","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"asset.movement", `{"id":"m"}`, unknown},
 		{"inventory.movement", `{"id":"m","item_kind":"asset","asset_id":"` + asset1 + `"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1)}}},
 		{"inventory.movement", `{"id":"m","item_kind":"quantity_item","quantity_item_id":"` + item1 + `"}`, result{refs: []ObjectRef{ref(ObjectQuantityItem, item1)}}},
 		{"inventory.movement", `{"id":"m"}`, unknown},
@@ -81,6 +86,35 @@ func TestEventScopeResolution(t *testing.T) {
 		{"composition.updated", `{"id":"c","child_ci_id":"` + ci1 + `"}`, unknown},
 		{"composition.deleted", `{"id":"c"}`, unknown},
 		{"discovery.completed", `{"run_id":"r","client_id":"c1"}`, unknown},
+		// The phase 2 types (EVT-03, WP-246): the payload frame's
+		// client_id/site_id, else CIs, assets and quantity items by ID.
+		{"lifecycle.changed", `{"entity_type":"asset","entity_id":"` + asset1 + `","to":"in_use"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1)}}},
+		{"lifecycle.changed", `{"entity_type":"ci","entity_id":"` + ci1 + `","client_id":"c1","to":"retired"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"lifecycle.changed", `{"entity_type":"location","entity_id":"` + ci1 + `"}`, unknown},
+		{"lifecycle.changed", `{"entity_type":"asset"}`, unknown},
+		{"relationship.changed", `{"id":"r","source_ci_id":"` + ci1 + `","target_ci_id":"` + ci2 + `"}`, result{refs: []ObjectRef{ref(ObjectCI, ci1), ref(ObjectCI, ci2)}}},
+		{"asset.created", `{"id":"` + asset1 + `","client_id":"c1","site_id":"s1"}`, result{objects: []ObjectScope{{ClientID: "c1", SiteID: "s1"}}}},
+		{"asset.changed", `{"id":"` + asset1 + `"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1)}}},
+		{"asset.deleted", `{"id":"` + asset1 + `","client_id":null}`, result{objects: shared}},
+		{"asset.assigned", `{"id":"` + asset1 + `","site_id":"s1"}`, result{objects: []ObjectScope{{SiteID: "s1"}}}},
+		{"asset.returned", `{"id":"` + asset1 + `"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1)}}},
+		{"asset.warranty_expiring", `{"id":"` + asset1 + `","client_id":"c2","expires_at":"2026-12-31"}`, result{objects: []ObjectScope{{ClientID: "c2"}}}},
+		{"asset.warranty_expiring", `{"expires_at":"2026-12-31"}`, unknown},
+		{"contract.expiring", `{"id":"k","client_id":"c1","expires_at":"2026-12-31"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"contract.expiring", `{"id":"k","expires_at":"2026-12-31"}`, unknown},
+		{"stock.movement", `{"id":"m","item_kind":"quantity_item","quantity_item_id":"` + item1 + `","movement_type":"issue"}`, result{refs: []ObjectRef{ref(ObjectQuantityItem, item1)}}},
+		{"stock.movement", `{"id":"m","item_kind":"asset","asset_id":"` + asset1 + `","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"stock.below_minimum", `{"id":"` + item1 + `"}`, result{refs: []ObjectRef{ref(ObjectQuantityItem, item1)}}},
+		{"stock.below_minimum", `{"id":"` + item1 + `","site_id":"s1"}`, result{objects: []ObjectScope{{SiteID: "s1"}}}},
+		{"reservation.expired", `{"id":"r","item_kind":"asset","asset_id":"` + asset1 + `"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1)}}},
+		{"reservation.converted", `{"id":"r","item_kind":"quantity_item","quantity_item_id":"` + item1 + `"}`, result{refs: []ObjectRef{ref(ObjectQuantityItem, item1)}}},
+		{"ticket.updated", `{"id":"t","client_id":"c1","site_id":"s1"}`, result{objects: []ObjectScope{{ClientID: "c1", SiteID: "s1"}}}},
+		{"ticket.updated", `{"id":"t"}`, unknown},
+		{"ticket.sla_breached", `{"id":"t","client_id":"c2"}`, result{objects: []ObjectScope{{ClientID: "c2"}}}},
+		{"metamodel.published", `{"id":"p"}`, result{objects: shared}},
+		{"document.scanned", `{"id":"d"}`, result{objects: shared}},
+		{"import.completed", `{"id":"i"}`, result{objects: shared}},
+		{"import.completed", `{}`, unknown},
 		// Payloads that are no JSON object.
 		{"ci.created", `["` + ci1 + `"]`, unknown},
 		{"ci_type.created", `null`, unknown},
@@ -101,7 +135,7 @@ func TestEventScopeResolution(t *testing.T) {
 	// rule and a case; every rule names a subscribable type.
 	var missing []string
 	for event := range ValidEvents {
-		if EventReadPermission(event) == "" {
+		if !hasReadPermission(event) {
 			continue
 		}
 		if _, ok := scopeRules[event]; !ok {
@@ -112,7 +146,7 @@ func TestEventScopeResolution(t *testing.T) {
 		}
 	}
 	for event := range scopeRules {
-		if !ValidEvents[event] || EventReadPermission(event) == "" {
+		if !ValidEvents[event] || !hasReadPermission(event) {
 			missing = append(missing, event+" (rule for a type that is not subscribable with a read permission)")
 		}
 	}
@@ -120,6 +154,12 @@ func TestEventScopeResolution(t *testing.T) {
 	if len(missing) > 0 {
 		t.Errorf("scope resolution incomplete:\n%s", strings.Join(missing, "\n"))
 	}
+}
+
+// hasReadPermission reports whether the event has a read permission, by
+// its name or by the entity_type of its payload (lifecycle.*).
+func hasReadPermission(event string) bool {
+	return EventReadPermission(event) != "" || readByEntityType(event)
 }
 
 // fakeResolver resolves the CIs it knows.
@@ -197,7 +237,8 @@ func TestDispatcherDeliversEventsOfUnknownScopeOnlyOrgWide(t *testing.T) {
 		{"no scope, no object", objects, "ci.changed", map[string]any{"name": "x"}, map[string]int{"unbound": 1, "orgwide": 1}},
 		{"unknown object", objects, "ci.changed", map[string]any{"id": "44444444-4444-4444-8444-444444444444"}, map[string]int{"unbound": 1, "orgwide": 1}},
 		{"no resolver", nil, "ci.changed", map[string]any{"id": ciC1}, map[string]int{"unbound": 1, "orgwide": 1}},
-		{"not resolvable type", objects, "lifecycle.transitioned", map[string]any{"ci_id": ciC1, "client_id": "c1"}, map[string]int{"unbound": 1, "orgwide": 1}},
+		{"not resolvable payload", objects, "lifecycle.transitioned", map[string]any{"entity_type": "ci", "ci_id": ciC1}, map[string]int{"unbound": 1, "orgwide": 1}},
+		{"lifecycle without entity_type", objects, "lifecycle.changed", map[string]any{"entity_id": ciC1, "client_id": "c1"}, map[string]int{"unbound": 1}},
 		{"resolved client 1", objects, "ci.changed", map[string]any{"id": ciC1}, map[string]int{"unbound": 1, "client1": 1, "orgwide": 1}},
 		{"resolved without client", objects, "ci.changed", map[string]any{"id": ciShared}, map[string]int{"unbound": 1, "client1": 1, "orgwide": 1}},
 		{"merge across clients", objects, "ci.merged", map[string]any{"survivor_id": ciC1, "victim_id": ciC2}, map[string]int{"unbound": 1, "orgwide": 1}},
@@ -296,12 +337,87 @@ func TestDispatcherDeliversWithinTheScopeSnapshot(t *testing.T) {
 		{"merge of client 1 with a CI without client", "ci.merged", map[string]any{"survivor_id": ciC1, "victim_id": ciShared}, orgWideAnd()},
 		{"organizational", "ci_type.created", map[string]any{"id": "t"}, orgWideAnd()},
 		{"unknown CI", "ci.changed", map[string]any{"id": "66666666-6666-4666-8666-666666666666"}, orgWideAnd()},
-		{"not resolvable type", "lifecycle.transitioned", map[string]any{"ci_id": ciC1, "client_id": "c1"}, orgWideAnd()},
+		{"not resolvable type", "composition.deleted", map[string]any{"id": ciC1, "client_id": "c1"}, orgWideAnd()},
 		{"event without scope rule", "workflow.custom", map[string]any{"id": ciC1, "client_id": "c1"}, orgWideAnd()},
 	} {
 		if g := run(tc.event, tc.payload); !reflect.DeepEqual(g, tc.want) {
 			raw, _ := json.Marshal(tc.payload)
 			t.Errorf("%s: %s %s delivered %v, want %v", tc.name, tc.event, raw, g, tc.want)
+		}
+	}
+}
+
+// TestP2EventsReachBoundSubscriptionsInScope covers EVT-03 and RBA-08
+// (WP-246): per phase 2 type an event about an object of client 1 reaches
+// a subscription with a client-1 snapshot bound to a client-1 account,
+// one about an object of client 2 does not; the unbound org-wide
+// subscription receives both. Objects of the whole organization
+// (metamodel, document, import) reach both subscriptions.
+func TestP2EventsReachBoundSubscriptionsInScope(t *testing.T) {
+	const ci1, ci2 = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+	const asset1, asset2 = "33333333-3333-4333-8333-333333333333", "44444444-4444-4444-8444-444444444444"
+	const item1, item2 = "55555555-5555-4555-8555-555555555555", "66666666-6666-4666-8666-666666666666"
+	objects := fakeResolver{ci1: {ClientID: "c1"}, ci2: {ClientID: "c2"}, asset1: {ClientID: "c1"}, asset2: {ClientID: "c2"},
+		item1: {ClientID: "c1", SiteID: "s1"}, item2: {ClientID: "c2", SiteID: "s2"}}
+	access := fakeAccess{}
+	for _, p := range []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read"} {
+		access["sa-c1|"+p+"|c1"], access["sa-c1|"+p+"|"] = true, true
+	}
+	byClient := func(client string) map[string]map[string]any {
+		ci, asset, item := ci1, asset1, item1
+		if client == "c2" {
+			ci, asset, item = ci2, asset2, item2
+		}
+		frame := map[string]any{"id": "x", "client_id": client}
+		reservation := map[string]any{"id": "r", "item_kind": "quantity_item", "quantity_item_id": item}
+		return map[string]map[string]any{
+			"ci.status_changed":       {"id": ci, "changed_fields": []string{"status"}, "from": "a", "to": "b"},
+			"lifecycle.changed":       {"entity_type": "asset", "entity_id": asset, "to": "in_use"},
+			"relationship.changed":    {"id": "r", "source_ci_id": ci1, "target_ci_id": ci},
+			"asset.created":           {"id": asset, "client_id": client},
+			"asset.changed":           {"id": asset},
+			"asset.deleted":           {"id": asset, "client_id": client},
+			"asset.assigned":          {"id": asset},
+			"asset.returned":          {"id": asset},
+			"asset.warranty_expiring": {"id": asset, "expires_at": "2026-12-31"},
+			"contract.expiring":       {"id": "k", "client_id": client, "expires_at": "2026-12-31"},
+			"stock.movement":          {"id": "m", "item_kind": "asset", "asset_id": asset, "movement_type": "issue"},
+			"stock.below_minimum":     {"id": item},
+			"reservation.created":     reservation,
+			"reservation.released":    reservation,
+			"reservation.expired":     reservation,
+			"reservation.converted":   reservation,
+			"ticket.updated":          frame,
+			"ticket.sla_breached":     frame,
+		}
+	}
+	organizational := map[string]bool{"metamodel.published": true, "document.scanned": true, "import.completed": true}
+	in, out := byClient("c1"), byClient("c2")
+	for typ := range events.Payloads {
+		subs := []Subscription{
+			{Name: "unbound", Events: []string{typ}},
+			{Name: "client1", Events: []string{typ}, ServiceAccountID: "sa-c1", Scope: &Scope{Clients: []string{"c1"}}},
+		}
+		opts := DispatcherOptions{Access: access, Objects: objects}
+		if organizational[typ] {
+			// Organizational objects reach org-wide snapshots only (E-98),
+			// and a bound org-wide subscription of a client-1 account.
+			subs[1].Scope = nil
+			got := deliverOnce(t, subs, opts, nil, typ, map[string]any{"id": "x"})
+			if len(got["unbound"]) != 1 || len(got["client1"]) != 1 {
+				t.Errorf("%s: delivered %v, want both subscriptions", typ, got)
+			}
+			continue
+		}
+		if in[typ] == nil {
+			t.Errorf("%s: no case", typ)
+			continue
+		}
+		if got := deliverOnce(t, subs, opts, nil, typ, in[typ]); len(got["unbound"]) != 1 || len(got["client1"]) != 1 {
+			t.Errorf("%s about client 1 %v: delivered %v, want both subscriptions", typ, in[typ], got)
+		}
+		if got := deliverOnce(t, subs, opts, nil, typ, out[typ]); len(got["unbound"]) != 1 || len(got["client1"]) != 0 {
+			t.Errorf("%s about client 2 %v: delivered %v, want the unbound subscription only", typ, out[typ], got)
 		}
 	}
 }

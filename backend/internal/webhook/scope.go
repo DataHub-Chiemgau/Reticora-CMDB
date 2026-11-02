@@ -67,6 +67,9 @@ type scopeRule struct {
 	// refs are the objects of the event; every present ID must resolve and
 	// a field that is not optional must be present.
 	refs []refField
+	// entity: the payload names its object by entity_type (ci, asset) and
+	// entity_id (lifecycle.changed); both must be present.
+	entity bool
 	// orgWide: without any of refs the event is about metadata of the
 	// organization (CI types, attribute definitions, source policies),
 	// which every reader of the permission may read. The payload must name
@@ -84,10 +87,26 @@ var (
 		{field: "quantity_item_id", kind: ObjectQuantityItem, optional: true},
 	}}
 	notResolvable = scopeRule{}
+
+	// The phase 2 types (EVT-03, WP-246) read client_id/site_id of their
+	// payload frame (api/events.schema.json) and resolve only CIs, assets
+	// and quantity items; for objects of other kinds (contract, ticket)
+	// without client_id/site_id the scope is unknown until the producing
+	// work package adds the kind to the resolver.
+	assetByID          = scopeRule{payload: true, refs: []refField{{field: "id", kind: ObjectAsset}}}
+	quantityItemByID   = scopeRule{payload: true, refs: []refField{{field: "id", kind: ObjectQuantityItem}}}
+	payloadScope       = scopeRule{payload: true}
+	lifecycleEntity    = scopeRule{payload: true, entity: true}
+	stockMovement      = scopeRule{payload: true, refs: inventoryObject.refs}
+	reservationObjects = scopeRule{payload: true, refs: inventoryObject.refs}
 )
 
+// entityKinds are the object kinds of entity_type (lifecycle.changed).
+var entityKinds = map[string]ObjectKind{"ci": ObjectCI, "asset": ObjectAsset}
+
 // scopeRules holds the scope source of every subscribable event type that
-// EventReadPermission assigns a read permission (TestEventScopeResolution).
+// EventReadPermission assigns a read permission, or whose payload names it
+// (lifecycle; TestEventScopeResolution).
 var scopeRules = map[string]scopeRule{
 	"ci.created":        ciByID,
 	"ci.updated":        ciByID,
@@ -103,6 +122,7 @@ var scopeRules = map[string]scopeRule{
 	"relationship.created": ciRelationship,
 	"relationship.removed": ciRelationship,
 	"relationship.deleted": ciRelationship,
+	"relationship.changed": ciRelationship,
 
 	"ci_type.created":     organizational,
 	"ci_type.updated":     organizational,
@@ -113,9 +133,18 @@ var scopeRules = map[string]scopeRule{
 	"override.changed":              {refs: []refField{{field: "ci_id", kind: ObjectCI}}},
 	"reconciliation.policy_changed": organizational,
 
-	"inventory.movement":   inventoryObject,
-	"reservation.created":  inventoryObject,
-	"reservation.released": inventoryObject,
+	// The former names inventory.movement and asset.movement follow
+	// stock.movement, lifecycle.transitioned follows lifecycle.changed.
+	"stock.movement":         stockMovement,
+	"inventory.movement":     stockMovement,
+	"asset.movement":         stockMovement,
+	"lifecycle.changed":      lifecycleEntity,
+	"lifecycle.transitioned": lifecycleEntity,
+
+	"reservation.created":   reservationObjects,
+	"reservation.released":  reservationObjects,
+	"reservation.expired":   reservationObjects,
+	"reservation.converted": reservationObjects,
 	// composition.deleted carries only the ID of the deleted link and is
 	// therefore not resolvable.
 	"composition.created": {refs: []refField{
@@ -130,10 +159,24 @@ var scopeRules = map[string]scopeRule{
 	}},
 	"composition.deleted": notResolvable,
 
-	// No emitter defines their payload: not resolvable.
-	"lifecycle.transitioned": notResolvable,
-	"asset.movement":         notResolvable,
-	"discovery.completed":    notResolvable,
+	"asset.created":           assetByID,
+	"asset.changed":           assetByID,
+	"asset.deleted":           assetByID,
+	"asset.assigned":          assetByID,
+	"asset.returned":          assetByID,
+	"asset.warranty_expiring": assetByID,
+	"stock.below_minimum":     quantityItemByID,
+	// Contracts carry a client, tickets a client and a site.
+	"contract.expiring":   payloadScope,
+	"ticket.updated":      payloadScope,
+	"ticket.sla_breached": payloadScope,
+	// Objects of the whole organization.
+	"metamodel.published": organizational,
+	"document.scanned":    organizational,
+	"import.completed":    organizational,
+
+	// No emitter defines its payload: not resolvable.
+	"discovery.completed": notResolvable,
 }
 
 // eventObjects returns the scope of every object of the event, nil when it
@@ -179,6 +222,14 @@ func payloadObjects(event string, body []byte) (objects []ObjectScope, refs []Ob
 			return []ObjectScope{{ClientID: clientID, SiteID: siteID}}, nil
 		}
 	}
+	if rule.entity {
+		kind, known := entityKinds[stringField(fields, "entity_type")]
+		id := stringField(fields, "entity_id")
+		if !known || id == "" {
+			return nil, nil
+		}
+		return nil, []ObjectRef{{Kind: kind, ID: id}}
+	}
 	for _, ref := range rule.refs {
 		raw, present := fields[ref.field]
 		if !present {
@@ -204,8 +255,16 @@ func payloadObjects(event string, body []byte) (objects []ObjectScope, refs []Ob
 
 // nonEmptyString reports whether the field is a non-empty string.
 func nonEmptyString(fields map[string]json.RawMessage, name string) bool {
+	return stringField(fields, name) != ""
+}
+
+// stringField reads a string field; "" when it is missing or no string.
+func stringField(fields map[string]json.RawMessage, name string) string {
 	var s string
-	return json.Unmarshal(fields[name], &s) == nil && s != ""
+	if json.Unmarshal(fields[name], &s) != nil {
+		return ""
+	}
+	return s
 }
 
 // optionalString reads a string or null field; a missing field is "".

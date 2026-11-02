@@ -868,6 +868,85 @@ by `POST /api/v1/search/reindex`, which rebuilds the tenant's search index
 - `collector` — On-premise discovery collector.
 - `agent` — Endpoint agent for server/client telemetry.
 
+#### Event contract
+
+Domain events (EVT-01 to EVT-03) follow `api/events.schema.json`. The register
+is `backend/internal/events/types.go`: `events.Types` lists every event type in
+the order of the schema's `type` enum, `events.Payloads` assigns every phase 2
+type the Go struct of its data frame, and the `$defs` entry of the same name
+describes it (`TestEnvelopeMatchesSchema`, `TestPayloadFramesMatchSchema`).
+New types are added only in `types.go` and `api/events.schema.json`; the
+producing work package adds its fields to the struct and the `$def` of its
+type (both allow further fields).
+
+- **Writing:** a mutation writes its events with `Outbox.Append` (or
+  `AppendMany`) in its own transaction, as the last step after its audit
+  entry; system jobs and workers use `events.PGEmitter`. `Append` refuses a
+  type outside `events.Types`.
+- **Phase 2 frame:** the data of a phase 2 type names its object (`id`; for
+  `lifecycle.changed` `entity_type` and `entity_id`), carries `client_id` and
+  `site_id` at the top level for objects with a client or site, and its core
+  fields. Personal fields (`pii.IsPersonalKey`) carry a surrogate reference
+  `{"$pii": "<id>"}` (WP-241). The envelope of a phase 2 type always names
+  `entity_id` and `entity_seq`.
+- **Reserved (phase 3):** `maintenance.scheduled`, `workflow.*`, `finding.*`
+  (`events.Reserved`). They are no event types: the outbox refuses them and
+  webhooks cannot subscribe to them.
+
+| Type | `entity_id` | Origin | Producer |
+|---|---|---|---|
+| `ci.status_changed` | CI | EVT-03 | WP-707 |
+| `lifecycle.changed` | CI or asset (`entity_type`) | EVT-03 | WP-724 (transition service, also in the disposal path of WP-278) |
+| `relationship.changed` | relationship | EVT-03 | WP-296 |
+| `asset.created`, `asset.changed`, `asset.deleted` | asset | EVT-03 | WP-740 |
+| `asset.assigned`, `asset.returned` | asset | EVT-03 | WP-275 |
+| `asset.warranty_expiring` | asset | EVT-03 (`asset.*`) | WP-270 |
+| `contract.expiring` | contract | NTF-05 [P2] | WP-270 |
+| `stock.movement` | moved object (asset or quantity item, not the movement row, so that `entity_seq` orders the events per object) | EVT-03 | WP-274 |
+| `stock.below_minimum` | quantity item | NTF-05 [P2] | WP-285 |
+| `reservation.created`, `reservation.released`, `reservation.expired`, `reservation.converted` | reservation | EVT-03 | WP-277, for quantity items WP-284 |
+| `ticket.updated` | ticket | EVT-03 | WP-290 |
+| `ticket.sla_breached` | ticket | plan addition | WP-292 |
+| `metamodel.published` | publication (content after E-37) | EVT-03 | WP-261 |
+| `document.scanned` | document | plan addition | WP-734 |
+| `import.completed` | import run | plan addition | WP-302 |
+
+Until its producer is merged a phase 2 type is registered without being
+written; `TestEveryEVT02TypeHasAProducer` requires one producer case for every
+type without a frame in `events.Payloads` and accepts one for a phase 2 type.
+
+**Webhook subscriptions** (`webhook.ValidEvents`) derive from the register:
+`events.Types` without `webhook.dead` and `apikey.creator_deactivated` (both
+notify the org_admins only), the former names of `legacyNames` and the
+`deprecatedEvents`. `webhook.test` cannot be subscribed to either. The OpenAPI
+enum `WebhookEvent` lists the same names.
+
+- **Former names** (`legacyNames`): `ci.updated` → `ci.changed`,
+  `relationship.deleted` → `relationship.removed`, `lifecycle.transitioned` →
+  `lifecycle.changed`, `inventory.movement` and `asset.movement` →
+  `stock.movement`. A subscription on a former name receives the event of the
+  new type once, under the new name. `inventory.movement` is still dispatched
+  directly by `POST /stock-movements` until WP-274 writes `stock.movement`;
+  `reservation.created`/`reservation.released` likewise until WP-277.
+- **Deprecated names without an event contract** (`deprecatedEvents`):
+  `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`,
+  `ci_attribute.changed`, `composition.created`, `composition.updated`,
+  `composition.deleted`, `override.changed` and
+  `reconciliation.policy_changed` (dispatched directly by their handlers) and
+  `discovery.completed` (never raised). They stay subscribable for existing
+  subscriptions.
+- **Bound subscriptions** (RBA-08): `webhook.EventReadPermission` assigns each
+  type the read permission of its object's GET route — `asset.*` and
+  `stock.movement` `asset:read`, `stock.below_minimum` `stock:read`,
+  `contract.*` `contract:read`, `reservation.*` `reservation:read`,
+  `ticket.*` `ticket:read`, `document.*` `document:read`, `metamodel.*`
+  `ci:read`, `import.*` `import:run`. For `lifecycle.*` the payload's
+  `entity_type` decides (`ci` → `ci:read`, `asset` → `asset:read`); without it
+  bound subscriptions do not receive the event. The scope rules
+  (`webhook/scope.go`) read `client_id`/`site_id` of the frame and resolve
+  CIs, assets and quantity items by ID; metamodel, document and import events
+  are organizational.
+
 #### GraphQL-BFF
 
 `POST /bff/graphql` (`backend/internal/graphqlbff`, GQL-01/GQL-02) is a

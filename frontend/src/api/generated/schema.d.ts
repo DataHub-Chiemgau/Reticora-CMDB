@@ -8206,14 +8206,65 @@ export interface components {
     RelationshipSuppressionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['RelationshipSuppression'][];
     };
-    /** @enum {string} */
+    /**
+     * @description A subscribable event (webhook.ValidEvents, WP-246): the registered event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2]) without `webhook.dead` and `apikey.creator_deactivated`, which notify the org_admins only. Deprecated former names, delivered under their new type: `ci.updated` (now `ci.changed`), `relationship.deleted` (now `relationship.removed`), `lifecycle.transitioned` (now `lifecycle.changed`), `inventory.movement` and `asset.movement` (now `stock.movement`). Deprecated names without an event contract (dispatched directly or never raised): `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`, `ci_attribute.changed`, `composition.created`, `composition.updated`, `composition.deleted`, `override.changed`, `reconciliation.policy_changed`, `discovery.completed`. `webhook.test` and the reserved types of phase 3 (`maintenance.scheduled`, `workflow.*`, `finding.*`) cannot be subscribed to.
+     * @enum {string}
+     */
     WebhookEvent:
       | 'ci.created'
-      | 'ci.updated'
+      | 'ci.changed'
       | 'ci.deleted'
-      | 'ci.status_changed'
+      | 'ci.restored'
+      | 'ci.merged'
+      | 'ci.offline'
+      | 'ci.online'
       | 'relationship.created'
+      | 'relationship.removed'
+      | 'collector.enrolled'
+      | 'collector.offline'
+      | 'review.created'
+      | 'review.resolved'
+      | 'export.completed'
+      | 'job.failed'
+      | 'entitlement.warning'
+      | 'entitlement.expired'
+      | 'invitation.created'
+      | 'certificate.expiring'
+      | 'ci.status_changed'
+      | 'lifecycle.changed'
+      | 'relationship.changed'
+      | 'asset.created'
+      | 'asset.changed'
+      | 'asset.deleted'
+      | 'asset.assigned'
+      | 'asset.returned'
+      | 'asset.warranty_expiring'
+      | 'contract.expiring'
+      | 'stock.movement'
+      | 'stock.below_minimum'
+      | 'reservation.created'
+      | 'reservation.released'
+      | 'reservation.expired'
+      | 'reservation.converted'
+      | 'ticket.updated'
+      | 'ticket.sla_breached'
+      | 'metamodel.published'
+      | 'document.scanned'
+      | 'import.completed'
+      | 'ci.updated'
       | 'relationship.deleted'
+      | 'lifecycle.transitioned'
+      | 'inventory.movement'
+      | 'asset.movement'
+      | 'ci_type.created'
+      | 'ci_type.updated'
+      | 'ci_type.deactivated'
+      | 'ci_attribute.changed'
+      | 'composition.created'
+      | 'composition.updated'
+      | 'composition.deleted'
+      | 'override.changed'
+      | 'reconciliation.policy_changed'
       | 'discovery.completed';
     WebhookSubscription: {
       id: string;
