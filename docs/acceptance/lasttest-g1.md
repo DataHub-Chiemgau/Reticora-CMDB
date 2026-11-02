@@ -757,16 +757,30 @@ Auftraggeber, die Nummer wird hier nachgetragen.
    Objekten im Abschnitt „Umfangskorrektur SR-04“. Der Katalogtest
    `TestRLSIndexesAreLeakproof` erkennt neue Indizes mit nicht-leakproof
    Ausdruck oder Operatorklasse auf RLS-Tabellen.
-7. **Outbox-Nummerierung:** Der Trigger aus Migration 000120
-   (`event_outbox_number()`) bestimmt `max(sequence)` je Zeile im
-   Audit-/Outbox-Sperrabschnitt (historischer Abschnitt „Verbleibende
-   Grenze“). Folge-WP: offen, Vorschlag an den Auftraggeber (Zähler je
-   Organisation, Migration).
-8. **Statistik nach Massenimport:** Nach großem Seed oder Onboarding planen
-   die Batch-Kandidatenabfragen und der RLS-Organisationsfilter über die
-   ganze Organisation, bis Autovacuum analysiert. `load.yml` führt `ANALYZE`
-   nach dem Seed aus. Folge-WP: offen, Vorschlag an den Auftraggeber
-   (`ANALYZE` nach großen Importen oder robuste Abfrageformen).
+7. **Outbox-Nummerierung: umgesetzt mit WP-834 (`g1-outbox-seq`),
+   Kontrollmessung ausstehend.** Migration 000193 legt
+   `event_outbox_counter` an (ein Zähler je Organisation, RLS wie
+   `event_outbox`, TRUNCATE-Guard), befüllt aus `max(sequence)`;
+   `event_outbox_number()` erhöht ihn unter derselben Advisory-Sperre per
+   Upsert auf den Primärschlüssel und liest keine Events mehr.
+   `Publisher.Cleanup` darf die neueste Zeile der Organisation löschen.
+   Nachweis `TestOutboxAgainstPostgres`: parallele Schreiber lückenlos,
+   Weiterzählen nach einem Cleanup ohne verbliebene Zeile, mit 50.000
+   Events und veralteter Statistik gleiche Zeit und gleiche Puffer je
+   Insert (lokal 0,5–0,6 ms und 12–14 Puffer bei 201 bzw. 50.401 Events; der
+   Trigger aus 000120 liest lokal schon bei 3.000 Events ohne `ANALYZE`
+   etwa 220 Puffer je Insert, weil er die Outbox sequenziell liest). Offen
+   ist die Kontrollmessung (Abschnitt „Kontrollmessung WP-834“).
+8. **Statistik nach Massenimport: umgesetzt mit WP-834, Kontrollmessung
+   ausstehend.** `database.AnalyzeAfterBulk` analysiert `ci`,
+   `ci_field_value`, `search_document`, `event_outbox` und `audit_log` auf
+   eigener Verbindung als `reticora_owner`, nie parallel und clusterweit
+   höchstens einmal je 10 Minuten je Tabelle. Aufrufer: `cmd/seed` am Ende
+   und der Ingest nach dem Commit des Batch-Fensters, mit dem eine
+   Organisation 500 neue CIs erreicht (gezählt über die Fenster der
+   Instanz, weil ein Fenster höchstens 100 Records hat). Nachweis
+   `TestAnalyzeAfterBulk` (Rollenwechsel, Drosselung, Identitätsindizes nach
+   5.000 neuen CIs, kein `ANALYZE` vor dem Commit).
 9. **`AdoptUnlicensed`:** Die Anlage beim Anheben von `max_cis` nimmt die
    `max_cis`-Sperre nicht; nebenläufig zum Ingest mit Spuren bleibt ein
    kleines Fenster für eine Überschreitung (vorbestehend). Folge-WP: offen,
@@ -807,6 +821,26 @@ Vorlauf). Kein offener Punkt: Der
 NATS-Consumer `reticora-ingest` bleibt dauerhaft bestehen (der Server legt
 ihn wieder an); leer kostet er je Ingest-Instanz einen Abruf pro Sekunde
 (`docs/betrieb/ingest-spuren.md`).
+
+## Kontrollmessung WP-834
+
+WP-834 (Outbox-Zähler je Organisation, `ANALYZE` nach Massenanlagen)
+verlangt eine Kontrollmessung: `load.yml`, Job `ingest-spool`
+(`tests/load/ingest.js`, Szenario `spool`, 4 Spuren), drei archivierte
+Läufe desselben Server-Commits, bewertet mit `tests/load/evaluate-runs.sh`
+nach der Ergänzung zu E-58 vom 2026-10-26 (Median). Kriterium: Der Abbau ab
+Sendeende liegt im Median nicht unter dem der Nachweisläufe von WP-612
+(414,7/s, Abschnitt „Läufe“).
+
+| Lauf | Lauf-ID | Server-Commit | Abbau ab Sendeende | Spool-Flush |
+|---|---|---|---:|---:|
+| K1 | ausstehend | – | – | – |
+| K2 | ausstehend | – | – | – |
+| K3 | ausstehend | – | – | – |
+
+Stand: Die Läufe stehen aus; sie laufen nach dem Merge per
+`workflow_dispatch` auf `main` (Lastnachweise laufen nicht in `ci.yml`,
+Konvention 7). Lokale Zeiten sind keine Belege nach E-58.
 
 ## Frühere Nachweisläufe (historisch)
 
