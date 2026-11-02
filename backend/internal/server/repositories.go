@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
@@ -72,6 +74,8 @@ func MemoryRepositories() Repositories {
 	}
 	lifecycleStates := lifecycle.NewMemoryStateStore()
 	cis := ci.NewMemoryRepository()
+	users := user.NewMemoryRepository()
+	serviceAccounts := user.NewMemoryServiceAccounts()
 	return Repositories{
 		CI: cis,
 		// Graph walks pass only through visible, not deleted CIs (IMP-07),
@@ -87,7 +91,17 @@ func MemoryRepositories() Repositories {
 		Movement:          movement.NewMemoryRepository(),
 		Reservation:       reservation.NewMemoryRepository(),
 		Composition:       composition.NewMemoryRepository(),
-		Override:          override.NewMemoryRepository(),
+		// The provenance names override authors as PostgreSQL does from
+		// app_user and service_account (UI-15, WP-850).
+		Override: override.NewMemoryRepository().WithAuthorNames(func(ctx context.Context, orgID, id string) (string, bool) {
+			if u, err := users.GetUser(ctx, orgID, id); err == nil && u.DisplayName != "" {
+				return u.DisplayName, true
+			}
+			if sa, err := serviceAccounts.GetServiceAccount(ctx, orgID, id); err == nil && sa.Name != "" {
+				return sa.Name, true
+			}
+			return "", false
+		}),
 		History:           history.NewMemoryRepository(),
 		SavedView:         savedview.NewMemoryRepository(),
 		FilterQuery:       nil, // memory mode: query engine requires SQL; endpoint reports 501
@@ -108,7 +122,7 @@ func MemoryRepositories() Repositories {
 		Agent:             agent.NewMemoryRepository(),
 		Security:          security.NewMemoryRepository(),
 		Ticket:            ticket.NewMemoryRepository(),
-		User:              user.NewMemoryRepository(),
+		User:              users,
 		Credential:        credential.NewMemoryRepository(),
 		Entitlement:       entitlement.NewMemoryRepository(),
 		TenantHierarchy:   tenantapi.NewMemoryRepository(),
@@ -118,7 +132,7 @@ func MemoryRepositories() Repositories {
 		Metrics:           monitoring.NewMemoryMetricStore(),
 		Permission:        permission.NewMemoryRepository(),
 		APIKeys:           identity.NewMemoryAPIKeyStore(),
-		ServiceAccounts:   user.NewMemoryServiceAccounts(),
+		ServiceAccounts:   serviceAccounts,
 		SLA:               sla.NewMemoryRepository(),
 		Form:              form.NewMemoryRepository(),
 		Workflow:          workflow.NewMemoryRepository(),

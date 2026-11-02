@@ -10239,7 +10239,10 @@ export interface components {
       recorded_at?: string;
       /** Format: date-time */
       observed_at?: string;
+      /** @description Id of the user or service account that set the override. */
       override_author?: string;
+      /** @description Display name of the override author (UI-15, REC-10): the display name of a user, the name of a service account. Resolved on read under the reader's tenant scope and never stored; absent when the author is unknown, deleted or not visible to the reader. */
+      override_author_name?: string;
       override_reason?: string;
       protected?: boolean;
       discovered_value?: unknown;

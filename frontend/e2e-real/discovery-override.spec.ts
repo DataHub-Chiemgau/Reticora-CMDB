@@ -56,8 +56,9 @@ import {
  *      WP-060 (OVR-01: OpenAPI provenance fields)
  *  D03 manual override through the "Override setzen" dialog: required reason, value
  *      persisted with author/time/reason, effective value in detail and list, tooltip,
- *      structural columns refused ...................................... WP-057 (OVR-01, CI-04), WP-060 (OVR-01, CI-10),
- *      WP-198 (REC-10)
+ *      structural columns refused; the tooltip names the author by display name
+ *      (F-349) ...................................................... WP-057 (OVR-01, CI-04), WP-060 (OVR-01, CI-10),
+ *      WP-198 (REC-10), WP-850 (UI-15)
  *  D04 discovery runs again: the manual values (override dialog and edit form) are NOT
  *      overwritten; the deviating observation is kept (_observed, provenance) and surfaced
  *      as exactly one override_conflict per field, also in the review inbox diff
@@ -148,6 +149,7 @@ interface Provenance {
   recorded_at?: string;
   observed_at?: string;
   override_author?: string;
+  override_author_name?: string;
   override_reason?: string;
   protected?: boolean;
   discovered_value?: unknown;
@@ -811,6 +813,13 @@ test.describe('Discovery → reconciliation → override protection → review',
     await dialog.getByRole('button', { name: 'Abbrechen' }).click();
     await expect(dialog).toBeHidden();
 
+    // F-349 (UI-15, WP-850): the display name of the signed-in author, from the user API.
+    const meUser = await api<{ display_name: string }>(w.rq, w.token, 'GET', `/users/${w.me}`);
+    expect(meUser.status).toBe(200);
+    const myName = meUser.body.display_name;
+    expect(myName, 'display name of the author').not.toBe('');
+    expect(myName).not.toBe(w.me);
+
     const before = Date.now() - 1_000;
     await setOverrideUI(page, 'model', value, reason);
 
@@ -823,6 +832,8 @@ test.describe('Discovery → reconciliation → override protection → review',
       reason: 'override',
       override_reason: reason,
       override_author: w.me,
+      // F-349 (UI-15, WP-850): the server names the author by display name.
+      override_author_name: myName,
       protected: true,
       discovered_value: SIM.switchModel,
       discovered_source: SIM.switchSource,
@@ -847,7 +858,8 @@ test.describe('Discovery → reconciliation → override protection → review',
     const tip = await tooltip(page, 'model');
     await expect(tip).toContainText('Manueller Override');
     await expect(tooltipValue(tip, 'Begründung')).toHaveText(reason);
-    await expect(tooltipValue(tip, 'Autor')).not.toHaveText('—');
+    // F-349 (UI-15, WP-850): the author by display name, not the raw user id.
+    await expect(tooltipValue(tip, 'Autor')).toHaveText(myName);
     await expect(tooltipValue(tip, 'Überdeckt')).toContainText(SIM.switchModel);
     await expect(tooltipValue(tip, 'Erfasst')).toHaveText(/\d{1,2}\.\d{1,2}\.\d{4}/);
 

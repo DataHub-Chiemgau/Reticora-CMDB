@@ -50,5 +50,5 @@ jobs:
           git push -f origin "$branch"
           gh pr create --base main --head "$branch" \
             --title "Wegwerf-Domains aktualisiert ($(date -u +%Y-%m))" \
-            --body "Monatliche Aktualisierung von backend/internal/signup/disposable/blocklist.conf aus disposable-email-domains (CC0, E-33)." \
+            --body "$(printf '%s\n\n%s' '**Arbeitspakete:** keine' 'Monatliche Aktualisierung von backend/internal/signup/disposable/blocklist.conf aus disposable-email-domains (CC0, E-33).')" \
             || echo "pull request already exists"

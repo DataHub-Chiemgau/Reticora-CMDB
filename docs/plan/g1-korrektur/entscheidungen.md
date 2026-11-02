@@ -51,7 +51,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-99](#e-99) | Auswahl der Oberflächensprache (GLO-10, UI-18) | entschieden (Auftraggeber 2026-10-27): Option 1 | WP-523 |
 | [E-100](#e-100) | Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-649 |
 | [E-101](#e-101) | WP-332 AK 3: Rahmen und Ledger eines Ingest-Batches in einer oder in zwei Transaktionen (NFR-03) | entschieden: Option 1 (Auftraggeber, 2026-11-02) | WP-657 |
-| [E-102](#e-102) | Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432) | offen; Übergangsregel: Empfehlung (Option 1) | WP-703 |
+| [E-102](#e-102) | Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432) | entschieden: Option 1 (Auftraggeber, 2026-11-02) | WP-703 |
 
 ## E-59
 
@@ -1095,7 +1095,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432)
 
-**Status:** offen; Übergangsregel: Empfehlung (Option 1)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-11-02)
 
 **Frage:** Ein Collector meldet für ein Gerät einen Wert eines eindeutigen Attributs (z. B. Seriennummer), den bereits ein anderes aktives CI hält. Über die API ist das 409 (WP-692, WP-700), beim Ingest empfängt aber kein Mensch die Antwort. Bis WP-703 entstand ohne Unique-Index ein Duplikat; mit Index scheiterte der Datensatz als vorübergehender Fehler (500, `retryable`), das Gerät fehlte und die Neuzustellung lief endlos. Die Anforderungen (MET-15, DIS-*, REC-*) legen das Verhalten nicht fest. Wie soll der Ingest einen vergebenen Wert behandeln?
 
@@ -1108,7 +1108,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1 für G1. Sie nutzt einen bestehenden Mechanismus, verliert kein Gerät, erzeugt kein Duplikat und hält das Statement-Budget (NFR-03, `TestIngestStatementBudget` unverändert). Option 3 ist fachlich die vollständigste und kann nach G1 folgen; Option 4 verliert Geräte.
 
-**Übergangsregel:** bis zur Entscheidung gilt Option 1 (Code von WP-703, `TestIngestUniqueAttributes`).
+**Übergangsregel:** bis zur Entscheidung galt Option 1 (Code von WP-703, `TestIngestUniqueAttributes`).
+
+**Umsetzung:** Der Auftraggeber hat am 2026-11-02 angewiesen, alle offenen Entscheidungen nach ihrer Empfehlung zu treffen; damit gilt Option 1. WP-703 hat sie umgesetzt (`TestIngestUniqueAttributes`); keine weitere Änderung. Option 3 (Review-Eintrag für den Konflikt) bleibt eine Möglichkeit nach G1.
 
 **Betroffene IDs:** MET-15, DIS-01
 

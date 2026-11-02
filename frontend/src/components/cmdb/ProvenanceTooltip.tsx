@@ -1,7 +1,7 @@
 /**
  * ProvenanceTooltip — where the shown value of a field comes from (REC-10):
  * source, rank, when it was recorded and observed, and why it was chosen
- * (override with author and reason, the highest-ranked source, the asset or
+ * (override with author – by display name, else the id – and reason, the highest-ranked source, the asset or
  * the CI record). It opens on hover and on keyboard focus.
  */
 import { useId, useState } from 'react';
@@ -64,7 +64,8 @@ export function ProvenanceTooltip({ provenance }: { provenance: CIFieldProvenanc
                 <dt className="text-muted">{t('provenance.overrideReason')}</dt>
                 <dd>{provenance.override_reason || '—'}</dd>
                 <dt className="text-muted">{t('provenance.overrideAuthor')}</dt>
-                <dd>{provenance.override_author || '—'}</dd>
+                {/* The display name the server resolves (UI-15); the id when it has none. */}
+                <dd>{provenance.override_author_name || provenance.override_author || '—'}</dd>
                 <dt className="text-muted">{t('provenance.covers')}</dt>
                 <dd>
                   {fieldValueText(t, provenance.field, provenance.discovered_value, display)}

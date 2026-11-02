@@ -26,7 +26,8 @@ const overridden: CIFieldProvenance = {
   rank: 100,
   reason: 'override',
   recorded_at: '2026-10-14T09:00:00Z',
-  override_author: 'anna',
+  override_author: '0b7c2f0e-5d2a-4c1e-9f3a-6e1d8b2a4c55',
+  override_author_name: 'Anna Admin',
   override_reason: 'Typenschild abgelesen',
   protected: true,
   discovered_value: 'C9300-48P',
@@ -77,8 +78,24 @@ describe('ProvenanceTooltip', () => {
     const tooltip = screen.getByRole('tooltip');
     expect(within(tooltip).getByText('Manueller Override')).toBeInTheDocument();
     expect(within(tooltip).getByText('Typenschild abgelesen')).toBeInTheDocument();
-    expect(within(tooltip).getByText('anna')).toBeInTheDocument();
     expect(within(tooltip).getByText('C9300-48P (redfish)')).toBeInTheDocument();
+  });
+
+  // F-349 (UI-15, WP-850): the author by display name, not by the raw id.
+  it('names the override author by display name instead of the id', () => {
+    renderWithProviders(<ProvenanceTooltip provenance={overridden} />);
+    fireEvent.focus(screen.getByRole('button'));
+    const author = within(screen.getByRole('tooltip')).getByText('Autor').nextElementSibling;
+    expect(author).toHaveTextContent(/^Anna Admin$/);
+    expect(screen.queryByText(overridden.override_author!)).toBeNull();
+  });
+
+  it('falls back to the author id when the server resolves no name', () => {
+    const unnamed: CIFieldProvenance = { ...overridden, override_author_name: undefined };
+    renderWithProviders(<ProvenanceTooltip provenance={unnamed} />);
+    fireEvent.focus(screen.getByRole('button'));
+    const author = within(screen.getByRole('tooltip')).getByText('Autor').nextElementSibling;
+    expect(author).toHaveTextContent(overridden.override_author!);
   });
 
   it('marks a value of the CI record', () => {
