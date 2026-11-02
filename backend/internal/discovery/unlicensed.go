@@ -329,10 +329,19 @@ func toMap(v any) (map[string]any, error) {
 // the CIs as ci.Service.Create does, every active CI of the organization
 // whatever the resolver's scope (ci.CountActive, F-403); over the limit it
 // returns the entitlement error (403 entitlement-limit) and the item stays
-// open.
+// open. In the transaction that locks the item, creates or reactivates the
+// CI and resolves the item (adoptUnlicensed, the review resolution) it
+// admits through ci.CIAdmitter: the organization's max_cis lock, which the
+// ingest lanes take too, and the count under it, so that AdoptUnlicensed
+// after a grant and the ingest at the same time never pass the limit
+// (WP-835, SR-09). Without a transaction (memory repository) it counts as
+// before.
 func (h *Handler) allowActiveCI(ctx context.Context, orgID string) error {
 	if h.limits == nil {
 		return nil
+	}
+	if database.InTx(ctx) {
+		return ci.NewCIAdmitter(h.limits).AdmitNew(ctx, orgID, 1)
 	}
 	total, err := ci.CountActive(ctx, h.ciRepo, orgID)
 	if err != nil {

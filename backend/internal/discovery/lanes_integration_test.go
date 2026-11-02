@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -656,6 +657,136 @@ func TestIngestLanesMaxCIs(t *testing.T) {
 			t.Errorf("limit %d, %d rounds of 4 x 100 devices (one lane from the queue: %v): %d CIs and %d unlicensed_ci, want %d and %d",
 				c.limit, c.rounds, c.queued, cis, held, c.wantCIs, c.wantHeldOpen)
 		}
+	}
+
+	activeCIs := func(orgID string) int64 {
+		t.Helper()
+		cis, _ := counts(orgID)
+		return int64(cis)
+	}
+	t.Run("adopt_unlicensed", func(t *testing.T) { maxCIsAdoptNextToLanes(t, f, activeCIs) })
+	t.Run("drain_lanes", func(t *testing.T) { maxCIsDrainLanes(t, f, activeCIs) })
+}
+
+// limitRecords returns 100 new server records of a lane, each with a serial
+// number and a management IP of its own (two identity keys).
+func limitRecords(prefix string, lane, net int) []plugins.DeviceRecord {
+	recs := make([]plugins.DeviceRecord, 100)
+	for i := range recs {
+		serial := fmt.Sprintf("%s-%d-%03d", prefix, lane, i)
+		recs[i] = plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: serial, Serial: serial,
+			IP: fmt.Sprintf("10.%d.%d.%d", net, lane, i)}, time.Now().Add(-time.Minute))
+	}
+	return recs
+}
+
+// maxCIsAdoptNextToLanes (WP-835, SR-09): AdoptUnlicensed after a grant runs
+// next to an ingest with four lanes. The organization holds 300 devices as
+// unlicensed_ci (TestIngestLanesMaxCIs); the limit is raised by 300 while
+// four lanes bring 4 x 100 new devices. The adoption creates its CIs under
+// the organization's max_cis lock of the lanes (ci.CIAdmitter), so the
+// organization ends with exactly the limit. Before WP-835 it counted
+// without the lock while the lanes held admitted creations (the pause after
+// the admission) and passed the limit.
+func maxCIsAdoptNextToLanes(t *testing.T, f *scopetest.Fixture, active func(string) int64) {
+	ctx := lanesCtx(f, f.OrgB)
+	limit := fixedLimit{active(f.OrgB) + 300}
+	lanes := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).
+		WithLimits(limit).WithIngestLanes(4)
+	// The lanes hold their admitted creations for a moment before they
+	// insert them.
+	discovery.SetBeforeCreate(lanes, func(context.Context) { time.Sleep(50 * time.Millisecond) })
+	adopter := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).WithLimits(limit)
+
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	for lane := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := discovery.ProcessInLane(ctx, lanes, f.OrgB, lane, limitRecords("ADOPT", lane, 60)...); err != nil {
+				t.Errorf("lane %d: %v", lane, err)
+			}
+		}()
+	}
+	adopted := 0
+	var adoptWG sync.WaitGroup
+	adoptWG.Add(1)
+	go func() {
+		defer adoptWG.Done()
+		for {
+			n, err := adopter.AdoptUnlicensed(ctx, f.OrgB)
+			if err != nil {
+				t.Errorf("AdoptUnlicensed: %v", err)
+				return
+			}
+			adopted += n
+			select {
+			case <-done:
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
+	wg.Wait()
+	close(done)
+	adoptWG.Wait()
+	if n := active(f.OrgB); n != limit.limit {
+		t.Errorf("ingest with 4 lanes and AdoptUnlicensed at once (%d adopted), headroom 300: %d CIs, want exactly the limit %d",
+			adopted, n, limit.limit)
+	}
+}
+
+// drainingQueue is an ingest queue that drains lanes a configuration with
+// more lanes left behind (NATSIngestQueue.DrainLanes).
+type drainingQueue struct{ drain int }
+
+func (drainingQueue) Publish(context.Context, []discovery.IngestMessage) error {
+	return errors.New("not published")
+}
+
+func (q drainingQueue) DrainLanes() int { return q.drain }
+
+// maxCIsDrainLanes (WP-835, SR-09): the lane count went from 4 to 2 with a
+// full backlog. Each of four instances (two lanes, two drain lanes) works on
+// a batch of 100 new devices at once; the max_cis headroom is 300. The drain
+// lanes count as lanes in flight (admissionCount), so the batches are
+// admitted under the exclusive lock and no CI passes the limit. Before
+// WP-835 the admission counted (2+1) x 100 in flight: all four batches
+// passed under the shared lock with the same count and the organization
+// ended 100 over the limit.
+func maxCIsDrainLanes(t *testing.T, f *scopetest.Fixture, active func(string) int64) {
+	ctx := lanesCtx(f, f.OrgA)
+	limit := fixedLimit{active(f.OrgA) + 300}
+	// Every batch waits after its admission until all four are admitted,
+	// at most half a second: admitted side by side under the shared lock
+	// they all insert, one after the other under the exclusive lock they
+	// wait in vain.
+	var arrived atomic.Int32
+	admitted := func(context.Context) {
+		arrived.Add(1)
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for arrived.Load() < 4 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	var wg sync.WaitGroup
+	for i := range 4 {
+		h := discovery.NewHandler(discovery.NewPGRepository(f.App), ci.NewPGRepository(f.App)).
+			WithLimits(limit).WithIngestLanes(2).WithIngestQueue(drainingQueue{drain: 2})
+		discovery.SetBeforeCreate(h, admitted)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := discovery.ProcessInLane(ctx, h, f.OrgA, i, limitRecords("DRAIN", i, 70)...); err != nil {
+				t.Errorf("lane %d: %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	if n := active(f.OrgA); n != limit.limit {
+		t.Errorf("lane count 4 -> 2 with a full backlog, four batches of 100 at once, headroom 300: %d CIs, want exactly the limit %d",
+			n, limit.limit)
 	}
 }
 

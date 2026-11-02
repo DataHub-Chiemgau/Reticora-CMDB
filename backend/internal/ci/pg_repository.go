@@ -435,7 +435,18 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 	return items, total, err
 }
 
-var _ ActiveCounter = (*PGRepository)(nil)
+var (
+	_ ActiveCounter = (*PGRepository)(nil)
+	_ TxRunner      = (*PGRepository)(nil)
+)
+
+// RunInTx implements TxRunner (as discovery.PGRepository.RunInTx does): fn
+// runs in one transaction of the context's tenant scope, which every
+// repository call with fn's context joins. Service admits max_cis and
+// writes in it (WP-835).
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
 
 // CountActive implements ActiveCounter: the number of active CIs of the
 // organization, also of the clients and sites outside the caller's scope

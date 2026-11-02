@@ -75,7 +75,7 @@ die Einzelwerte aus den Job-Logs. Fett: Schwelle verfehlt.
 | 1 | Seed-Optionen für die NFR-01-Volumina, deterministisch und begrenzt | erfüllt; Tests lokal grün (TimescaleDB 2.31.0); in den drei Läufen erzeugt der Seed die Volumina vollständig | `backend/cmd/seed` (`-interfaces-per-ci`, `-ips-per-ci`, `-relationships-per-ci`, `-orgs`); `seed_integration_test.go`: `TestSeedNFR01Volumes` (Mengen, Verteilung, Determinismus, zweiter Lauf), `TestSeedOptionsAreBounded` (Grenzen); Abschnitt „NFR-01-Volumina“ |
 | 2 | `load.yml`-Job `nfr01-volume` mit `api.js` und den NFR-02-Schwellen | erfüllt; der Job läuft in allen Läufen. Vor den K3-Nachträgen war er in drei Läufen **rot** (Punkt 11); nach WP-607 bis WP-611 hält er jedes Budget im Median und ist in einem von drei Läufen rot | `.github/workflows/load.yml` (Matrix-Eintrag `nfr01-volume`, Schritt „Seeded volumes (NFR-01)“) |
 | 3 | Drei aufeinanderfolgende vollständige `load.yml`-Läufe mit exit 0, archiviert; seit der Ergänzung zu E-58 vom 2026-10-26 bewertet nach dem Median der drei Läufe | **erfüllt** (nach der Ergänzung zu E-58, WP-612) | Drei vollständige Läufe auf `3910aae` (Abschnitt „Nachweisläufe nach den K3-Nachträgen“); `load-evidence.yml` (Run 40320307297) bewertet ihre Archive mit `tests/load/evaluate-runs.sh`: alle Budgets gehalten, Exit 0. Die drei Läufe davor (`8ca7f4b`) verfehlten `ingest-rediscover` und `nfr01-volume`. Die Archive liegen als Artefakte der Läufe vor; ins Repository übernommen sind sie noch nicht (Retest WP-204) |
-| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); sechs offene Punkte haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber); die Punkte 1 und 11 sind mit WP-607 bis WP-612 (K3-Nachträge) erledigt | dieses Dokument |
+| 4 | Bericht: p95 je Budget aus den drei Läufen, 200 Records/s und Max-Drain gegenüber 1.000 Records/s [P5], NFR-01-Volumina gemessen, Umfangskorrektur SR-04, offene Punkte mit Folge-WP oder Entscheidung | Werte der drei Läufe eingetragen; CPU und RAM je Lauf stehen nur im Archiv (**steht aus**); vier offene Punkte (2, 7, 8, 10) haben noch keine Folge-WP-Nummer (Vorschlag an den Auftraggeber); die Punkte 1 und 11 sind mit WP-607 bis WP-612 (K3-Nachträge) erledigt, Punkt 6 mit WP-836, Punkt 9 mit WP-835 | dieses Dokument |
 | 5 | Retests F-279, WP-206, WP-204 | WP-206 und F-118 **bestanden**; F-279 und WP-204 **stehen aus** (Übernahme der Archive) | Abschnitt „Retests“ |
 
 ## Messumgebung und Ablauf (E-58)
@@ -781,10 +781,16 @@ Auftraggeber, die Nummer wird hier nachgetragen.
    Instanz, weil ein Fenster höchstens 100 Records hat). Nachweis
    `TestAnalyzeAfterBulk` (Rollenwechsel, Drosselung, Identitätsindizes nach
    5.000 neuen CIs, kein `ANALYZE` vor dem Commit).
-9. **`AdoptUnlicensed`:** Die Anlage beim Anheben von `max_cis` nimmt die
-   `max_cis`-Sperre nicht; nebenläufig zum Ingest mit Spuren bleibt ein
-   kleines Fenster für eine Überschreitung (vorbestehend). Folge-WP: offen,
-   Vorschlag an den Auftraggeber (`max_cis`-Sperre bei der Übernahme).
+9. **`AdoptUnlicensed`: erledigt (WP-835).** Die Anlage beim Anheben von
+   `max_cis` nimmt in ihrer Transaktion die `max_cis`-Sperre der
+   Organisation exklusiv und zählt darunter neu (`ci.CIAdmitter`), ebenso
+   `POST /cis`, Wiederherstellen, Unmerge und die Review-Auflösungen; die
+   Drain-Spuren zählen bei der Zulassung als Spuren in Arbeit (SR-09).
+   Nachweis: `TestIngestLanesMaxCIs` (Teiltests `adopt_unlicensed` und
+   `drain_lanes`: genau das Limit; Gegenproben ohne die Zulassung 814 statt
+   800 bzw. ohne die Drain-Spuren 700 statt 600 CIs) und
+   `TestCreateAdmission` (10 parallele Anlagen bzw. Wiederherstellungen
+   eine unter dem Limit: genau eine; Gegenprobe ohne Sperre 4 bzw. 10).
 10. **Override-Abgleich der Knotenlesung:** `ci_field_value` hat keinen
     Index für den Override-Abgleich der Organisationslesung; der Seed
     schreibt keine Feldwerte. Folge-WP: offen, Vorschlag an den
