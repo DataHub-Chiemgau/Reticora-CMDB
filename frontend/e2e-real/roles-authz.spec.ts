@@ -4,6 +4,8 @@ import {
   BASE,
   KEYCLOAK,
   api,
+  invitationToken,
+  invitationTokens,
   keycloakAdminToken,
   keycloakLogin,
   signupTenant,
@@ -203,19 +205,28 @@ async function signIn(browser: Browser, account: { email: string; password: stri
   return { context, page, token };
 }
 
-/** issue issues an invitation as the administrator and checks the 201 contract. */
+/**
+ * issue issues an invitation as the administrator and checks the 201 contract. The
+ * acceptance creates a verified IdP account of the address, so the response carries no
+ * token: only the invited mailbox gets it (TLC-03). The returned invitation holds the
+ * token of its mail, read from the mail catcher like the invitee does.
+ */
 async function issue(
   request: Parameters<typeof api>[0],
   address: string,
   roleName: string,
 ): Promise<Invitation> {
+  const known = await invitationTokens(request, address);
   const res = await adminCall<Invitation>(request, 'POST', '/invitations', {
     email: address,
     role_id: state().roles![roleName],
   });
   expect(res.status, `issue invitation: ${JSON.stringify(res.body)}`).toBe(201);
-  expect(res.body.token, 'the token is returned once on issue').toBeTruthy();
-  return res.body;
+  expect(
+    res.body.token,
+    'the token reaches the invited mailbox only, not the issuer',
+  ).toBeUndefined();
+  return { ...res.body, token: await invitationToken(request, address, known) };
 }
 
 /**
@@ -418,11 +429,13 @@ test('03 revoked invitations and the old token of a renewed invitation are refus
   const original = await issue(request, renewedAddress, 'viewer');
   const renewed = await adminCall<Invitation>(request, 'POST', `/invitations/${original.id}/renew`);
   expect(renewed.status).toBe(200);
-  expect(renewed.body.token).toBeTruthy();
-  expect(renewed.body.token).not.toBe(original.token);
+  expect(renewed.body.token, 'the new token reaches the invited mailbox only').toBeUndefined();
+  // The renewal mails the new link.
+  const renewedToken = await invitationToken(request, renewedAddress, [original.token!]);
+  expect(renewedToken).not.toBe(original.token);
   const oldToken = await acceptInvitation(request, original.token!, password('renewed'));
   expect(oldToken.status, 'old token after renewal').toBe(404);
-  const newToken = await acceptInvitation(request, renewed.body.token!, password('renewed'));
+  const newToken = await acceptInvitation(request, renewedToken, password('renewed'));
   expect(newToken.status, JSON.stringify(newToken.body)).toBe(201);
 
   // An accepted invitation stays as a record: neither revocable nor renewable (409).
@@ -482,7 +495,12 @@ test('04 an expired invitation is refused with 410 and can be renewed for seven 
   expect(renewed.body.status).toBe('pending');
   const validity = Date.parse(renewed.body.expires_at) - before;
   expect(validity).toBeGreaterThan(7 * 24 * 3600_000 - 5 * 60_000);
-  const accepted = await acceptInvitation(request, renewed.body.token!, password('expired'));
+  expect(renewed.body.token, 'the new token reaches the invited mailbox only').toBeUndefined();
+  const accepted = await acceptInvitation(
+    request,
+    await invitationToken(request, address, [inv.token!]),
+    password('expired'),
+  );
   expect(accepted.status, JSON.stringify(accepted.body)).toBe(201);
 });
 
@@ -546,6 +564,11 @@ test('05b the admin invites in the UI; the mailed link opens the accept page, cr
   await main.getByLabel('Scope-Ziel').selectOption({ label: clientName });
   await main.getByRole('button', { name: 'Einladung senden' }).click();
   await expect(main.getByRole('status')).toContainText(`Einladung an ${address} gesendet`);
+  // The acceptance creates the IdP account: the link reaches the invited mailbox only.
+  await expect(main.getByRole('status')).toContainText(
+    'Den Einladungslink erhält nur die eingeladene Adresse per E-Mail.',
+  );
+  await expect(main.getByLabel('Einladungslink (wird nur jetzt angezeigt)')).toHaveCount(0);
   const pendingRow = main.getByRole('row', { name: new RegExp(address.replace(/[.+]/g, '\\$&')) });
   await expect(pendingRow).toContainText('viewer');
   await expect(pendingRow).toContainText(`Kunde: ${clientName}`);

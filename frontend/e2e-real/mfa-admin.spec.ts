@@ -1,5 +1,5 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
-import { BASE, api, sessionToken, signupTenant, stamp } from './support/stack';
+import { BASE, api, invitationToken, sessionToken, signupTenant, stamp } from './support/stack';
 import { keycloakOtp, totp } from '../e2e/support/totp';
 
 /*
@@ -115,13 +115,18 @@ async function inviteAndAccept(
   role: string,
   account: Credentials,
 ) {
-  const inv = await api<{ token: string }>(request, tenant.token!, 'POST', '/invitations', {
+  const inv = await api<{ token?: string }>(request, tenant.token!, 'POST', '/invitations', {
     email: account.email,
     role_id: tenant.roles![role],
   });
   expect(inv.status, `issue ${role} invitation: ${JSON.stringify(inv.body)}`).toBe(201);
+  expect(inv.body.token, 'the token reaches the invited mailbox only').toBeUndefined();
   const res = await request.post(`${BASE}/api/v1/invitations/accept`, {
-    data: { token: inv.body.token, password: account.password, display_name: `Audit ${role}` },
+    data: {
+      token: await invitationToken(request, account.email),
+      password: account.password,
+      display_name: `Audit ${role}`,
+    },
     failOnStatusCode: false,
   });
   const body = (await res.json()) as { user_id: string; account_created: boolean };

@@ -9061,11 +9061,16 @@ paths:
       tags: [Users]
       summary: Invite an address with a predefined role and scope (TLC-03)
       description: >-
-        The invitation is valid for seven days. The response carries the
-        token once; only its hash is stored. Role and scope must exist in
-        the organization (422 otherwise); a client role (scope client) is
-        invited with scope_type client only, a site role with scope_type
-        site only, an organization role with any scope_type (422 field
+        The invitation is valid for seven days; only the hash of its token
+        is stored. The response carries the token once, and only when the
+        acceptance creates no IdP account: with the IdP admin client, which
+        the server wires for invitations only with a central SMTP server
+        (RETICORA_SMTP_HOST), the acceptance creates a verified account of
+        the invited address, so the token reaches the invitee by the
+        invitation mail only and never the issuer. Role and scope must
+        exist in the organization (422 otherwise); a client role (scope
+        client) is invited with scope_type client only, a site role with
+        scope_type site only, an organization role with any scope_type (422 field
         scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the
         issuer must hold user:manage and every permission of the role in a
         scope covering the invitation's scope (a client covers its sites,
@@ -9086,7 +9091,9 @@ paths:
               $ref: '#/components/schemas/InvitationRequest'
       responses:
         '201':
-          description: Invitation issued, with its token
+          description: >-
+            Invitation issued; with its token only when the acceptance
+            creates no IdP account (no IdP admin client)
           content:
             application/json:
               schema:
@@ -9173,11 +9180,15 @@ paths:
         user:manage and every permission of the invited role in a scope
         covering the invitation's scope (403 otherwise, nothing changes).
         Like the issue, the renewal mails the invitee the new link and
-        expiry (invitation.created); without RETICORA_INVITATION_ACCEPT_URL
-        it answers 503 (invitations not configured). Requires user:manage.
+        expiry (invitation.created), and the response carries the new token
+        only when the acceptance creates no IdP account (no IdP admin
+        client); without RETICORA_INVITATION_ACCEPT_URL it answers 503
+        (invitations not configured). Requires user:manage.
       responses:
         '200':
-          description: Invitation renewed, with its new token
+          description: >-
+            Invitation renewed; with its new token only when the acceptance
+            creates no IdP account (no IdP admin client)
           content:
             application/json:
               schema:
@@ -14014,7 +14025,11 @@ components:
         created_at: { type: string, format: date-time }
         token:
           type: string
-          description: Only in the response of issue and renewal; shown once.
+          description: >-
+            Only in the response of issue and renewal, shown once, and only
+            when the acceptance creates no IdP account (no IdP admin
+            client); otherwise the token reaches the invitee by the
+            invitation mail only.
     InvitationListResponse:
       type: object
       required: [data, total, limit]

@@ -731,6 +731,7 @@
     "revoke": "Widerrufen",
     "sent": "Einladung an {{email}} gesendet, gültig bis {{expires}}.",
     "link": "Einladungslink (wird nur jetzt angezeigt)",
+    "mailOnly": "Den Einladungslink erhält nur die eingeladene Adresse per E-Mail.",
     "errorTitle": "Einladungen konnten nicht geladen werden",
     "errors": {
       "notSaved": "Die Einladung wurde nicht gesendet. Bitte prüfen Sie die markierten Felder.",

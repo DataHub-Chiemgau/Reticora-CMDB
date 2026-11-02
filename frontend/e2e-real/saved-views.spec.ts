@@ -7,7 +7,15 @@ import {
   type Page,
   type Response,
 } from '@playwright/test';
-import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support/stack';
+import {
+  api,
+  invitationToken,
+  signupTenant,
+  stamp,
+  uiLogin,
+  BASE,
+  type Account,
+} from './support/stack';
 
 /*
  * Saved views with sort, columns and role sharing on the real stack (WP-555, VIE-01, F-336;
@@ -108,14 +116,15 @@ async function ok<T>(
 async function invite(roleId: string, label: string): Promise<User> {
   const s = stamp();
   const user = { email: `svr-${label}-${s}@audit-e2e.de`, password: `Audit-${label}-${s}!aA` };
-  const invitation = await ok<{ token?: string }>('POST', '/invitations', {
+  await ok('POST', '/invitations', {
     email: user.email,
     role_id: roleId,
     scope_type: 'org',
   });
-  expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+  // The token reaches the invited mailbox only: the server creates the IdP account.
+  const inviteToken = await invitationToken(w.rq, user.email);
   const accept = await w.rq.post(`${BASE}/api/v1/invitations/accept`, {
-    data: { token: invitation.token, password: user.password, display_name: `Views ${label}` },
+    data: { token: inviteToken, password: user.password, display_name: `Views ${label}` },
     failOnStatusCode: false,
   });
   expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

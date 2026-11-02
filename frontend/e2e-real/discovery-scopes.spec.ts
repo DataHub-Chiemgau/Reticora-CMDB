@@ -6,7 +6,7 @@ import {
   type Page,
   type Response,
 } from '@playwright/test';
-import { api, signupTenant, stamp, uiLogin, BASE } from './support/stack';
+import { api, invitationToken, signupTenant, stamp, uiLogin, BASE } from './support/stack';
 
 /*
  * Discovery scopes maintained in the UI on the real stack (WP-496, F-107, F-267), nothing
@@ -204,15 +204,16 @@ test.describe('Discovery scopes: the scope form sets every field of DIS-09', () 
     // acceptance, and the viewer assignment is removed. He holds exactly discovery:read for
     // client B, as D4 requires.
     w.foreign = { email: `scopes-b-${s}@audit-e2e.de`, password: `Audit-b-${s}!aA` };
-    const invitation = await ok<{ token?: string }>('POST', '/invitations', {
+    await ok('POST', '/invitations', {
       email: w.foreign.email,
       role_id: viewerRole,
       scope_type: 'client',
       scope_id: w.clientB.id,
     });
-    expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+    // The token reaches the invited mailbox only: the server creates the IdP account.
+    const inviteToken = await invitationToken(rq, w.foreign.email);
     const accept = await rq.post(`${BASE}/api/v1/invitations/accept`, {
-      data: { token: invitation.token, password: w.foreign.password, display_name: 'Client B' },
+      data: { token: inviteToken, password: w.foreign.password, display_name: 'Client B' },
       failOnStatusCode: false,
     });
     expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

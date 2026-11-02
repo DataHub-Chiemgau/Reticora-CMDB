@@ -7,7 +7,15 @@ import {
   type Page,
 } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { api, signupTenant, stamp, uiLogin, BASE, DATABASE_URL } from './support/stack';
+import {
+  api,
+  invitationToken,
+  signupTenant,
+  stamp,
+  uiLogin,
+  BASE,
+  DATABASE_URL,
+} from './support/stack';
 
 /*
  * Job center on the real stack (WP-521, UI-16; F-162 UI part, F-347, JOB-03), nothing mocked:
@@ -181,14 +189,15 @@ async function invite(
 ): Promise<User> {
   const email = `jc-${label}-${s}@audit-e2e.de`;
   const password = `Audit-${label}-${s}!aA`;
-  const invitation = await ok<{ token?: string }>(admin.token, 'POST', '/invitations', {
+  await ok(admin.token, 'POST', '/invitations', {
     email,
     role_id: roleId,
     ...scope,
   });
-  expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+  // The token reaches the invited mailbox only: the server creates the IdP account.
+  const inviteToken = await invitationToken(rq, email);
   const accept = await rq.post(`${BASE}/api/v1/invitations/accept`, {
-    data: { token: invitation.token, password, display_name: `Jobcenter ${label}` },
+    data: { token: inviteToken, password, display_name: `Jobcenter ${label}` },
     failOnStatusCode: false,
   });
   expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

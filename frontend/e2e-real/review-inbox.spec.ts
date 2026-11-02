@@ -7,7 +7,7 @@ import {
   type BrowserContext,
   type Page,
 } from '@playwright/test';
-import { api, signupTenant, stamp, uiLogin, BASE } from './support/stack';
+import { api, invitationToken, signupTenant, stamp, uiLogin, BASE } from './support/stack';
 
 /*
  * Review inbox on the real stack (WP-557, UI-16; open proof of WP-196): merge and new
@@ -173,14 +173,15 @@ function waitForResolve(page: Page, id: string) {
 async function invite(roleId: string, label: string) {
   const s = stamp();
   const user = { email: `ri-${label}-${s}@audit-e2e.de`, password: `Audit-${label}-${s}!aA` };
-  const invitation = await ok<{ token?: string }>('POST', '/invitations', {
+  await ok('POST', '/invitations', {
     email: user.email,
     role_id: roleId,
     scope_type: 'org',
   });
-  expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+  // The token reaches the invited mailbox only: the server creates the IdP account.
+  const inviteToken = await invitationToken(w.rq, user.email);
   const accept = await w.rq.post(`${BASE}/api/v1/invitations/accept`, {
-    data: { token: invitation.token, password: user.password, display_name: `Review ${label}` },
+    data: { token: inviteToken, password: user.password, display_name: `Review ${label}` },
     failOnStatusCode: false,
   });
   expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

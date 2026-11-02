@@ -7,7 +7,15 @@ import {
   type Page,
   type Response,
 } from '@playwright/test';
-import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support/stack';
+import {
+  api,
+  invitationToken,
+  signupTenant,
+  stamp,
+  uiLogin,
+  BASE,
+  type Account,
+} from './support/stack';
 
 /*
  * Saved views run by read-only roles on the real stack (WP-460, F-055; open proof of WP-034),
@@ -84,15 +92,16 @@ async function ok<T>(
 async function invite(roleId: string, label: string): Promise<User> {
   const s = stamp();
   const user = { email: `sv-${label}-${s}@audit-e2e.de`, password: `Audit-${label}-${s}!aA` };
-  const invitation = await ok<{ token?: string }>('POST', '/invitations', {
+  await ok('POST', '/invitations', {
     email: user.email,
     role_id: roleId,
     scope_type: 'org',
   });
-  expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+  // The token reaches the invited mailbox only: the server creates the IdP account.
+  const inviteToken = await invitationToken(w.rq, user.email);
   const accept = await w.rq.post(`${BASE}/api/v1/invitations/accept`, {
     data: {
-      token: invitation.token,
+      token: inviteToken,
       password: user.password,
       display_name: `Saved views ${label}`,
     },

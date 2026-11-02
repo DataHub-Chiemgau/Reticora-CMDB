@@ -548,6 +548,8 @@ function InvitationsTab({ search }: { search: string }) {
               <p>
                 {t('invitations.sent', { email: sent.email, expires: formatDate(sent.expires_at) })}
               </p>
+              {/* Where the acceptance creates the IdP account, the server
+                  returns no token: the link reaches the invited mailbox only. */}
               {sent.token ? (
                 <Input
                   label={t('invitations.link')}
@@ -555,7 +557,9 @@ function InvitationsTab({ search }: { search: string }) {
                   value={invitationLink(sent.token)}
                   onFocus={(event) => event.target.select()}
                 />
-              ) : null}
+              ) : (
+                <p>{t('invitations.mailOnly')}</p>
+              )}
             </div>
           ) : null}
           <div className="grid gap-4 md:grid-cols-2">

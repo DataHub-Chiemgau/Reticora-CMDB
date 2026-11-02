@@ -52,7 +52,11 @@ func (h *InvitationHandler) WithAcceptURL(raw string) *InvitationHandler {
 }
 
 // WithAccounts lets the acceptance create the IdP account with the given
-// password (Keycloak admin client).
+// password (Keycloak admin client). That account is created with a verified
+// address, so the token is a proof of the mailbox: with an accounts client,
+// issue and renewal leave the token out of their response, and only the
+// invitation mail carries it. Wire it only where that mail is delivered
+// (central SMTP).
 func (h *InvitationHandler) WithAccounts(a InvitationAccounts) *InvitationHandler {
 	h.accounts = a
 	return h
@@ -161,9 +165,10 @@ func invitingPrincipal(w http.ResponseWriter, r *http.Request) (*identity.Princi
 	return &p, true
 }
 
-// Issue creates an invitation valid for seven days. The response carries
-// the token once; only its hash is stored. The invitee gets the link with
-// the token by mail (invitation.created in the issue's transaction). The
+// Issue creates an invitation valid for seven days; only the hash of its
+// token is stored. The invitee gets the link with the token by mail
+// (invitation.created in the issue's transaction). The response carries the
+// token once, and only without an accounts client (tokenInResponse). The
 // issuer must hold user:manage and the permissions of the role in a scope
 // covering the invitation's scope (403 otherwise).
 func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
@@ -200,13 +205,14 @@ func (h *InvitationHandler) Issue(w http.ResponseWriter, r *http.Request) {
 		writeInvitationError(w, r, err)
 		return
 	}
-	inv.Token = token
+	h.tokenInResponse(inv, token)
 	api.WriteJSON(w, http.StatusCreated, inv)
 }
 
 // Renew gives a pending or expired invitation a new token and seven more
-// days; the invitee gets a mail with the new link. The grant ceiling
-// applies to the renewing principal, not to the original issuer.
+// days; the invitee gets a mail with the new link, the response carries the
+// token like the issue's (tokenInResponse). The grant ceiling applies to
+// the renewing principal, not to the original issuer.
 func (h *InvitationHandler) Renew(w http.ResponseWriter, r *http.Request) {
 	if h.unconfigured(w) {
 		return
@@ -226,8 +232,25 @@ func (h *InvitationHandler) Renew(w http.ResponseWriter, r *http.Request) {
 		writeInvitationError(w, r, err)
 		return
 	}
-	inv.Token = token
+	h.tokenInResponse(inv, token)
 	api.WriteJSON(w, http.StatusOK, inv)
+}
+
+// tokenInResponse puts the token of an issue or renewal into its response
+// only when the acceptance cannot create an IdP account. With an accounts
+// client the acceptance creates a verified, password-bearing account of the
+// invited address, so whoever holds the token owns that address at the IdP:
+// the token must reach the invitee's mailbox only, not the inviter, or any
+// org_admin could invite an address it does not control and accept the
+// invitation itself. Without an accounts client the acceptance creates no
+// IdP account: the user signs in with an existing IdP account of the
+// address, which the first login links, so the link in the inviter's hands
+// (without central SMTP often the only way to pass it on) creates no
+// account for an address nobody proved.
+func (h *InvitationHandler) tokenInResponse(inv *Invitation, token string) {
+	if h.accounts == nil {
+		inv.Token = token
+	}
 }
 
 // Revoke deletes a pending or expired invitation.

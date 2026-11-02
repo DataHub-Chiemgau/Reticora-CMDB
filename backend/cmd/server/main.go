@@ -541,7 +541,7 @@ func main() {
 		Events:               emitterOf(auditPool),
 		SignupProtection:     signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
-		InvitationAccounts:  invitationAccounts(cfg),
+		InvitationAccounts:  invitationAccounts(cfg, smtpSender != nil),
 		InvitationAcceptURL: invitationAcceptURL(cfg),
 		MFA:                 mfa,
 		CollectorCA:         collectorPKI,
@@ -965,8 +965,22 @@ func keycloakAccounts(cfg *config.Config) *signup.KeycloakAccounts {
 }
 
 // invitationAccounts lets accepted invitations create their IdP account
-// (TLC-03); nil leaves the account to the IdP.
-func invitationAccounts(cfg *config.Config) user.InvitationAccounts {
+// (TLC-03); nil leaves the account to the IdP. That account is created with
+// a verified address and the password of the acceptance, so with it the
+// token reaches the invitee's mailbox only: issue and renewal leave it out
+// of their response (InvitationHandler.WithAccounts). centralSMTP reports
+// whether the installation has the central SMTP server that delivers the
+// invitation mail. Without it the client is not wired, since the invitee
+// would get neither mail nor link: the inviter gets the link in the
+// response as before, and the invitee signs in with an existing IdP account
+// of the address, which the first login links.
+func invitationAccounts(cfg *config.Config, centralSMTP bool) user.InvitationAccounts {
+	if !centralSMTP {
+		if cfg.KeycloakAdminClientID != "" {
+			slog.Info("no central SMTP server (RETICORA_SMTP_HOST): accepted invitations create no IdP account, the invitee signs in with an existing one")
+		}
+		return nil
+	}
 	if kc := keycloakAccounts(cfg); kc != nil {
 		return kc
 	}

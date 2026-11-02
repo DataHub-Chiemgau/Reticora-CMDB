@@ -4314,7 +4314,7 @@ export interface paths {
     put?: never;
     /**
      * Invite an address with a predefined role and scope (TLC-03)
-     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a client role (scope client) is invited with scope_type client only, a site role with scope_type site only, an organization role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the issuer must hold user:manage and every permission of the role in a scope covering the invitation's scope (a client covers its sites, site.client_id); otherwise 403, nothing is stored or audited. A pending invitation for the same address is a conflict (renew it instead). In the same transaction the event invitation.created (NTF-05) mails the invitee the organization name, the expiry and the link RETICORA_INVITATION_ACCEPT_URL?token=<token>; a refused issue (403, 409, 422) creates no event. Webhook deliveries of the event leave out the link. Without RETICORA_INVITATION_ACCEPT_URL the server answers 503 (invitations not configured), like the signup without verification page. Requires user:manage.
+     * @description The invitation is valid for seven days; only the hash of its token is stored. The response carries the token once, and only when the acceptance creates no IdP account: with the IdP admin client, which the server wires for invitations only with a central SMTP server (RETICORA_SMTP_HOST), the acceptance creates a verified account of the invited address, so the token reaches the invitee by the invitation mail only and never the issuer. Role and scope must exist in the organization (422 otherwise); a client role (scope client) is invited with scope_type client only, a site role with scope_type site only, an organization role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the issuer must hold user:manage and every permission of the role in a scope covering the invitation's scope (a client covers its sites, site.client_id); otherwise 403, nothing is stored or audited. A pending invitation for the same address is a conflict (renew it instead). In the same transaction the event invitation.created (NTF-05) mails the invitee the organization name, the expiry and the link RETICORA_INVITATION_ACCEPT_URL?token=<token>; a refused issue (403, 409, 422) creates no event. Webhook deliveries of the event leave out the link. Without RETICORA_INVITATION_ACCEPT_URL the server answers 503 (invitations not configured), like the signup without verification page. Requires user:manage.
      */
     post: operations['issueInvitation'];
     delete?: never;
@@ -4357,7 +4357,7 @@ export interface paths {
     put?: never;
     /**
      * Renew a pending or expired invitation (TLC-03)
-     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. The grant ceiling of the issue applies to the renewing principal, not to the original issuer: it must hold user:manage and every permission of the invited role in a scope covering the invitation's scope (403 otherwise, nothing changes). Like the issue, the renewal mails the invitee the new link and expiry (invitation.created); without RETICORA_INVITATION_ACCEPT_URL it answers 503 (invitations not configured). Requires user:manage.
+     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. The grant ceiling of the issue applies to the renewing principal, not to the original issuer: it must hold user:manage and every permission of the invited role in a scope covering the invitation's scope (403 otherwise, nothing changes). Like the issue, the renewal mails the invitee the new link and expiry (invitation.created), and the response carries the new token only when the acceptance creates no IdP account (no IdP admin client); without RETICORA_INVITATION_ACCEPT_URL it answers 503 (invitations not configured). Requires user:manage.
      */
     post: operations['renewInvitation'];
     delete?: never;
@@ -7126,7 +7126,7 @@ export interface components {
       accepted_at?: string;
       /** Format: date-time */
       created_at: string;
-      /** @description Only in the response of issue and renewal; shown once. */
+      /** @description Only in the response of issue and renewal, shown once, and only when the acceptance creates no IdP account (no IdP admin client); otherwise the token reaches the invitee by the invitation mail only. */
       token?: string;
     };
     InvitationListResponse: {
@@ -21983,7 +21983,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Invitation issued, with its token */
+      /** @description Invitation issued; with its token only when the acceptance creates no IdP account (no IdP admin client) */
       201: {
         headers: {
           [name: string]: unknown;
@@ -22052,7 +22052,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Invitation renewed, with its new token */
+      /** @description Invitation renewed; with its new token only when the acceptance creates no IdP account (no IdP admin client) */
       200: {
         headers: {
           [name: string]: unknown;

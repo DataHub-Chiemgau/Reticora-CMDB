@@ -731,6 +731,7 @@
     "revoke": "Revoke",
     "sent": "Invitation sent to {{email}}, valid until {{expires}}.",
     "link": "Invitation link (shown only now)",
+    "mailOnly": "Only the invited address receives the invitation link, by email.",
     "errorTitle": "Invitations could not be loaded",
     "errors": {
       "notSaved": "The invitation was not sent. Please check the marked fields.",

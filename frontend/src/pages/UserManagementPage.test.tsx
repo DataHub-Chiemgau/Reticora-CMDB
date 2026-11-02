@@ -271,6 +271,42 @@ describe('UserManagementPage invitations', () => {
     );
   });
 
+  it('shows no link when the server mails the token to the invitee only', async () => {
+    // With the IdP admin client the acceptance creates a verified account,
+    // so issue and renewal return no token (it reaches the mailbox only).
+    stubUserApi(managePermissions.permissions, (url, method, body) => {
+      expect(method).toBe('POST');
+      if (url.endsWith('/renew')) return json(pending);
+      return json(
+        { ...pending, id: 'inv-4', email: (body as { email: string }).email, scope_type: 'org' },
+        201,
+      );
+    });
+    renderWithProviders(<UserManagementPage />, { route: '/users' });
+    await openInvitations();
+
+    await fillInvite('victim@example.invalid', ROLE_VIEWER);
+    fireEvent.click(screen.getByRole('button', { name: 'Einladung senden' }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('Einladung an victim@example.invalid gesendet');
+    expect(status).toHaveTextContent(
+      'Den Einladungslink erhält nur die eingeladene Adresse per E-Mail.',
+    );
+    expect(screen.queryByLabelText('Einladungslink (wird nur jetzt angezeigt)')).toBeNull();
+
+    const row = screen.getByText('new@example.invalid').closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Erneuern' }));
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Einladung an new@example.invalid gesendet',
+      ),
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Den Einladungslink erhält nur die eingeladene Adresse per E-Mail.',
+    );
+    expect(screen.queryByLabelText('Einladungslink (wird nur jetzt angezeigt)')).toBeNull();
+  });
+
   it('shows a 409 for a pending address at the e-mail field and keeps the input', async () => {
     stubUserApi(managePermissions.permissions, () =>
       problem(409, {

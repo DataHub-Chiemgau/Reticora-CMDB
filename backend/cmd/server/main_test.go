@@ -822,3 +822,46 @@ func TestMissingSignupPrerequisitesNamesABrokenAdminClient(t *testing.T) {
 		t.Errorf("complete prerequisites: missing = %v", got)
 	}
 }
+
+// TestInvitationAccountsNeedTheCentralSMTPServer: an accepted invitation
+// creates a verified IdP account only where the invitation mail is
+// delivered. With the admin client the handler sends the token to the
+// invitee's mailbox only (no token in the issue response), so without the
+// central SMTP server the client is not wired: the inviter keeps the link
+// of the response, and the acceptance links an existing IdP account at the
+// first login instead of creating one for an address nobody proved.
+func TestInvitationAccountsNeedTheCentralSMTPServer(t *testing.T) {
+	withClient := &config.Config{
+		OIDCIssuerURL:             "https://id.example.com/realms/reticora",
+		KeycloakAdminClientID:     "reticora-server-admin",
+		KeycloakAdminClientSecret: "kc-admin-client-secret-value",
+	}
+	const noSMTPMsg = "no central SMTP server (RETICORA_SMTP_HOST): accepted invitations create no IdP account, the invitee signs in with an existing one"
+
+	logs := captureLog(t)
+	if got := invitationAccounts(withClient, true); got == nil {
+		t.Error("admin client and central SMTP: no accounts client for invitations")
+	}
+	if records := logRecords(t, logs, noSMTPMsg); len(records) != 0 {
+		t.Errorf("with central SMTP the log says %v", records)
+	}
+
+	logs = captureLog(t)
+	if got := invitationAccounts(withClient, false); got != nil {
+		t.Errorf("admin client without central SMTP: accounts client %T wired, want none", got)
+	}
+	if records := logRecords(t, logs, noSMTPMsg); len(records) != 1 || records[0]["level"] != "INFO" {
+		t.Errorf("without central SMTP: records %v, want one INFO %q", records, noSMTPMsg)
+	}
+
+	logs = captureLog(t)
+	if got := invitationAccounts(&config.Config{OIDCIssuerURL: withClient.OIDCIssuerURL}, true); got != nil {
+		t.Errorf("no admin client: accounts client %T wired, want none", got)
+	}
+	if got := invitationAccounts(&config.Config{OIDCIssuerURL: withClient.OIDCIssuerURL}, false); got != nil {
+		t.Errorf("neither admin client nor central SMTP: accounts client %T wired", got)
+	}
+	if records := logRecords(t, logs, noSMTPMsg); len(records) != 0 {
+		t.Errorf("without admin client the log says %v", records)
+	}
+}
