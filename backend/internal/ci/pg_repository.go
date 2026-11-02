@@ -2303,8 +2303,11 @@ func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error)
 		return err
 	}
 	defID := hexID[0:8] + "-" + hexID[8:12] + "-" + hexID[12:16] + "-" + hexID[16:20] + "-" + hexID[20:]
+	// The violation aborted the writing transaction; when the caller's
+	// transaction carried it (the max_cis admission of Restore, WP-835),
+	// the lookup must not join it and reads in an own one.
 	var key string
-	if lerr := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	if lerr := database.WithRequestTenant(database.WithoutTx(ctx), r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT key FROM attribute_definition WHERE id = $1`, defID).Scan(&key)
 	}); lerr == nil {
 		ue.Fields = []string{key}
