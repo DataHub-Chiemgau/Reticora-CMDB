@@ -46,7 +46,7 @@ func TestEntitlementsAreWrittenByOperatorsOnly(t *testing.T) {
 	audit := &memoryAudit{}
 	mux := testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, issuer, nil, nil).WithEntitlements(svc), audit))
 	path := "/api/v1/admin/orgs/" + org + "/entitlements"
-	body := `{"feature_key":"ticketing","plan":"standard","limits":{"max_cis":2500},"source":"billing"}`
+	body := `{"feature_key":"ticketing_essential","plan":"standard","limits":{"max_cis":2500},"source":"billing"}`
 
 	// Tenant API: no write route, whatever the permissions.
 	tenantMux := chi.NewRouter()
@@ -70,7 +70,7 @@ func TestEntitlementsAreWrittenByOperatorsOnly(t *testing.T) {
 	if w = post(mux, path, body, map[string]string{"Authorization": "Bearer " + tenantToken}); w.Code != http.StatusUnauthorized {
 		t.Fatalf("tenant session on the operator path: %d, want 401", w.Code)
 	}
-	if svc.IsEnabled(context.Background(), org, entitlement.FeatureTicketing) {
+	if svc.IsEnabled(context.Background(), org, entitlement.FeatureTicketingEssential) {
 		t.Fatal("refused write changed the entitlement")
 	}
 
@@ -82,13 +82,13 @@ func TestEntitlementsAreWrittenByOperatorsOnly(t *testing.T) {
 	if w = post(mux, path, body, auth); w.Code != http.StatusOK {
 		t.Fatalf("operator grant: %d %s", w.Code, w.Body.String())
 	}
-	if !svc.IsEnabled(context.Background(), org, entitlement.FeatureTicketing) {
+	if !svc.IsEnabled(context.Background(), org, entitlement.FeatureTicketingEssential) {
 		t.Error("operator grant not effective")
 	}
 	if w = post(mux, path, `{"feature_key":"cmdb_core","enabled":false}`, auth); w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("disabling cmdb_core: %d, want 422", w.Code)
 	}
-	if w = get(mux, path, auth); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"feature_key":"ticketing"`) {
+	if w = get(mux, path, auth); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"feature_key":"ticketing_essential"`) {
 		t.Errorf("operator list: %d %s", w.Code, w.Body.String())
 	}
 
@@ -151,10 +151,13 @@ func (b *syncBuffer) String() string {
 }
 
 // TestOperatorGrantRefusesUnknownKeys covers WP-564 (ENT-04, ENT-02, F-209)
-// at the HTTP boundary: a feature key outside ENT-02, the module keys and
-// the add-ons, or a quota key outside max_cis, max_collectors, max_users
-// and max_api_keys is 422 with the field named; nothing is stored. Every
-// known key is accepted, and the specification lists exactly these keys.
+// and WP-244 (ENT-06, E-44) at the HTTP boundary: a feature key outside
+// FeatureKeys (ENT-02, the phase-2 keys, the module keys of phases 3 and 4
+// and the add-ons; the former keys inventory, stocktake and ticketing
+// among them), or a quota key outside Quotas (max_cis, max_collectors,
+// max_users, max_api_keys, max_storage_mb) is 422 with the field named;
+// nothing is stored. Every known key is accepted, max_storage_mb on
+// documents, and the specification lists exactly these keys.
 func TestOperatorGrantRefusesUnknownKeys(t *testing.T) {
 	const org = "11111111-1111-4111-8111-111111111111"
 	svc := entitlement.NewService(entitlement.NewMemoryRepository(), entitlement.Options{Enforce: true})
@@ -165,7 +168,10 @@ func TestOperatorGrantRefusesUnknownKeys(t *testing.T) {
 
 	for name, tc := range map[string]struct{ body, field string }{
 		"feature key with a hyphen": {`{"feature_key":"rack-view"}`, "feature_key"},
-		"unknown feature key":       {`{"feature_key":"export_datev"}`, "feature_key"},
+		"unknown feature key":       {`{"feature_key":"ticketing_pro"}`, "feature_key"},
+		"former key inventory":      {`{"feature_key":"inventory"}`, "feature_key"},
+		"former key stocktake":      {`{"feature_key":"stocktake"}`, "feature_key"},
+		"former key ticketing":      {`{"feature_key":"ticketing"}`, "feature_key"},
 		"feature key in upper case": {`{"feature_key":"Discovery"}`, "feature_key"},
 		"quota typo":                {`{"feature_key":"rack_view","limits":{"max_cis_typo":5}}`, "limits"},
 		"quota of another name":     {`{"feature_key":"discovery","limits":{"collectors":5}}`, "limits"},

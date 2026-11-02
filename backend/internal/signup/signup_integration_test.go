@@ -145,8 +145,20 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 		if key == entitlement.FeatureCMDBCore && (limits[entitlement.LimitMaxCIs] != 100 || validUntil != nil) {
 			t.Errorf("cmdb_core limits %v valid_until %v", limits, validUntil)
 		}
-		if key == entitlement.FeatureTicketing && (validUntil == nil || !validUntil.Equal(res.TrialEndsAt)) {
-			t.Errorf("ticketing valid_until = %v, want %v", validUntil, res.TrialEndsAt)
+		// WP-244 (E-44): the standard-only keys end with the trial, the
+		// keys of every plan do not.
+		switch key {
+		case entitlement.FeatureTicketingStandard, entitlement.FeatureSignature, entitlement.FeatureStock,
+			entitlement.FeatureStocktakeStandard, entitlement.FeatureBarcode, entitlement.FeatureGPSStandard,
+			entitlement.FeatureWorkplace, entitlement.FeatureExportDATEV:
+			if validUntil == nil || !validUntil.Equal(res.TrialEndsAt) {
+				t.Errorf("%s valid_until = %v, want %v", key, validUntil, res.TrialEndsAt)
+			}
+		case entitlement.FeatureAssetsBasic, entitlement.FeatureDocuments, entitlement.FeatureImport,
+			entitlement.FeatureTicketingEssential:
+			if validUntil != nil {
+				t.Errorf("%s valid_until = %v, want none", key, validUntil)
+			}
 		}
 	}
 	rows.Close()

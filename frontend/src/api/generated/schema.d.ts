@@ -8595,7 +8595,7 @@ export interface components {
     };
     GrantEntitlementRequest: {
       /**
-       * @description A feature key of ENT-02, a module key or an add-on; any other key is 422 with `field` feature_key (F-209).
+       * @description A feature key of ENT-02, a phase-2 key of ENT-06 (E-44), a module key of phases 3 and 4 or an add-on; any other key, the former keys inventory, stocktake and ticketing among them, is 422 with `field` feature_key (F-209).
        * @enum {string}
        */
       feature_key:
@@ -8607,10 +8607,19 @@ export interface components {
         | 'webhooks'
         | 'api_access'
         | 'notifications_email'
-        | 'inventory'
+        | 'assets_basic'
         | 'documents'
-        | 'stocktake'
-        | 'ticketing'
+        | 'import'
+        | 'ticketing_essential'
+        | 'ticketing_standard'
+        | 'signature'
+        | 'stock'
+        | 'stocktake_standard'
+        | 'barcode'
+        | 'gps_standard'
+        | 'workplace'
+        | 'export_datev'
+        | 'internal_orders'
         | 'monitoring'
         | 'endpoint_agent'
         | 'workflow_forms'
@@ -8620,7 +8629,7 @@ export interface components {
       plan?: components['schemas']['EntitlementPlan'];
       /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys; any other key is 422 with `field` limits (F-209). A missing quota is unlimited (E-34). */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, and max_storage_mb (MiB, on documents; MGT-01); any other key is 422 with `field` limits (F-209). A missing quota is unlimited (E-34). */
       limits?: {
         [key: string]: number;
       };

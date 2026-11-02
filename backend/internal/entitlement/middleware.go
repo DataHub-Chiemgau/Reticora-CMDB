@@ -17,7 +17,8 @@ import (
 // users, auth, audit and the entitlement API itself), among them the
 // location tree and the review queue; writes of rack nodes of the tree and
 // the resolution of scope_suggested items check their feature in the
-// handler (F-400). docs/README.md lists the mapping.
+// handler (F-400). The phase-2 modules use the keys of ENT-06 (E-44,
+// WP-244); docs/README.md lists the mapping.
 var gatedRoutes = []struct {
 	prefix  string
 	feature string
@@ -29,24 +30,24 @@ var gatedRoutes = []struct {
 	{"/api/v1/discovery-scopes", FeatureDiscovery},
 	{"/api/v1/collectors", FeatureDiscovery},
 	{"/api/v1/credentials", FeatureDiscovery},
-	{"/api/v1/assets", FeatureInventory},
-	{"/api/v1/assignments", FeatureInventory},
+	{"/api/v1/assets", FeatureAssetsBasic},
+	{"/api/v1/assignments", FeatureAssetsBasic},
 	{"/api/v1/documents", FeatureDocuments},
-	{"/api/v1/stocktakes", FeatureStocktake},
-	{"/api/v1/stocktake", FeatureStocktake},
-	{"/api/v1/consumables", FeatureStocktake},
-	{"/api/v1/orders", FeatureWorkflowForms},
+	{"/api/v1/stocktakes", FeatureStocktakeStandard},
+	{"/api/v1/stocktake", FeatureStocktakeStandard},
+	{"/api/v1/consumables", FeatureStock},
+	{"/api/v1/orders", FeatureInternalOrders},
 	{"/api/v1/maintenance-windows", FeatureMonitoring},
-	{"/api/v1/disposal-records", FeatureCompliance},
+	{"/api/v1/disposal-records", FeatureAssetsBasic},
 	{"/api/v1/keys", FeatureCompliance},
 	{"/api/v1/trainings", FeatureWorkflowForms},
 	{"/api/v1/training-assignments", FeatureWorkflowForms},
-	{"/api/v1/desks", FeatureInventory},
-	{"/api/v1/asset-locations", FeatureInventory},
+	{"/api/v1/desks", FeatureWorkplace},
+	{"/api/v1/asset-locations", FeatureGPSStandard},
 	{"/api/v1/agents", FeatureEndpointAgent},
 	{"/api/v1/security", FeatureCompliance},
-	{"/api/v1/desk-bookings", FeatureInventory},
-	{"/api/v1/tickets", FeatureTicketing},
+	{"/api/v1/desk-bookings", FeatureWorkplace},
+	{"/api/v1/tickets", FeatureTicketingEssential},
 	{"/api/v1/webhooks", FeatureWebhooks},
 	// Racks, their layout and the mounts are the rack_view feature (ENT-02,
 	// ENT-05, F-070).

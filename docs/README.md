@@ -387,9 +387,13 @@ deny access (fail-closed). The tenant API is read-only (`GET
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
 in `operator_audit` with the previous and the new state, in the same
 transaction: without its entry the change is rolled back (500) (ENT-04,
-E-12). Only the feature keys of ENT-02, the module keys and the add-ons and
-the quotas `max_cis`, `max_collectors`, `max_users`, `max_api_keys` are
-accepted; any other key is 422 with the field.
+E-12). Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
+the module keys of phases 3 and 4 (`monitoring`, `endpoint_agent`,
+`workflow_forms`, `compliance`) and the add-ons, and the quotas `max_cis`,
+`max_collectors`, `max_users`, `max_api_keys` and `max_storage_mb` are
+accepted (`entitlement.FeatureKeys`, `entitlement.Quotas`); any other key,
+the former keys `inventory`, `stocktake` and `ticketing` among them, is 422
+with the field.
 
 Route→feature mapping of the phase-1 features (ENT-02, ENT-05;
 `gatedRoutes`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
@@ -444,19 +448,38 @@ server (`RETICORA_SMTP_HOST`, whose settings the installer also gives the
 realm) the first org_admin is invited by the IdP's mail to set a password
 (`admin_invited`), otherwise the organization is created without an IdP
 account.
-Plan matrix (ENT-06):
+Plan matrix (ENT-06 in the version of E-44, confirmed with E-34;
+`planFeatures` in `backend/internal/entitlement/entitlement.go`):
 
 | Plan | Features |
 |------|----------|
-| essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, inventory |
-| standard | + documents, stocktake, ticketing |
-| pro | + monitoring, workflow_forms |
+| essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, assets_basic, documents, import, ticketing_essential |
+| standard | + ticketing_standard, signature, stock, stocktake_standard, barcode, gps_standard, workplace, export_datev |
+| pro | + internal_orders, monitoring, workflow_forms |
 | enterprise | + endpoint_agent, compliance |
 
 IGA (`iga`) and AI (`ai`) are add-ons (CH14): no plan includes them, only
-their own entitlement row unlocks them. The proposed matrix and quotas of
-ENT-06 (V) have no gate effect until confirmed (E-34): a quota only gates
-when it is stored in the limits of a row.
+their own entitlement row unlocks them. `gps_standard` and `workplace` have
+no module in phase 2 (LOC-09 and MGT-06 are P4); `ticketing_pro`,
+`stocktake_pro`, `disposition`, `audit_extended` and `usage_tracking` are
+not created. Quotas have no plan default (E-34): a quota only gates when it
+is stored in the limits of a row. `max_storage_mb` (MiB) is stored on
+`documents` (MGT-01); the catalog's tiers 1,000 / 10,000 / 50,000 /
+unlimited are no default either. Migration 000190 moved existing
+organizations to the matrix: `inventory` → `assets_basic` (and `stock` from
+standard on), `ticketing` → `ticketing_essential` (and `ticketing_standard`
+from standard on), `stocktake` → `stocktake_standard`, keeping plan,
+enabled, limits, `valid_until` and source of the former row; every
+organization with rows got the missing phase-2 keys of its plan. The middleware gates the
+phase-2 modules with these keys: `/api/v1/assets*`, `/api/v1/assignments*`
+and `/api/v1/disposal-records*` with `assets_basic`, `/api/v1/consumables*`
+with `stock`, `/api/v1/stocktakes*` and `/api/v1/stocktake*` with
+`stocktake_standard`, `/api/v1/orders*` with `internal_orders`,
+`/api/v1/documents*` with `documents`, `/api/v1/tickets*` with
+`ticketing_essential`, `/api/v1/desks*` and `/api/v1/desk-bookings*` with
+`workplace`, `/api/v1/asset-locations*` with `gps_standard`. The module keys
+of `RETICORA_MODULES` (`inventory`, `documents`, `stocktake`, `ticketing`,
+...) are release switches, not feature keys, and stay unchanged.
 
 
 **Permissions and SLA:** migration 0026 turns permissions into data instead of

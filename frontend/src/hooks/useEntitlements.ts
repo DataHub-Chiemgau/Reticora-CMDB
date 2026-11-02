@@ -70,6 +70,10 @@ export function useModules() {
 /**
  * navFeatureFor maps a navigation page to the entitlement feature that gates
  * it. Pages without a mapping are always available (core CMDB surface).
+ * Every value is a feature key the server knows (entitlement.FeatureKeys):
+ * isEnabled reports an unknown key as not entitled, which would hide the
+ * page for every organization. The phase-2 pages use the keys of ENT-06
+ * (E-44, E-39).
  */
 export const navFeatureFor: Record<string, string | undefined> = {
   dashboard: undefined,
@@ -79,25 +83,25 @@ export const navFeatureFor: Record<string, string | undefined> = {
   roomplan: 'rack_view',
   racks: 'rack_view',
   discovery: 'discovery',
-  assets: 'inventory',
-  assignments: 'inventory',
+  assets: 'assets_basic',
+  assignments: 'assets_basic',
   documents: 'documents',
-  stocktake: 'stocktake',
-  consumables: 'stocktake',
-  orders: 'workflow_forms',
+  stocktake: 'stocktake_standard',
+  consumables: 'stock',
+  orders: 'internal_orders',
   maintenance: 'monitoring',
-  disposal: 'compliance',
+  disposal: 'assets_basic',
   keys: 'compliance',
   trainings: 'workflow_forms',
-  desks: 'inventory',
+  desks: 'workplace',
   agents: 'endpoint_agent',
   findings: 'compliance',
   reviews: undefined,
   jobs: undefined,
-  tickets: 'ticketing',
+  tickets: 'ticketing_essential',
   users: undefined,
   permissions: undefined,
-  slas: 'ticketing',
+  slas: 'ticketing_standard',
   forms: 'workflow_forms',
   workflows: 'workflow_forms',
   compliance: 'compliance',
@@ -108,11 +112,11 @@ export const navFeatureFor: Record<string, string | undefined> = {
   monitoring: 'monitoring',
   audit: undefined,
   security: undefined,
-  // Enterprise CMDB + asset/inventory extension. ci-types and saved-views are
-  // core (admin/self-service); locations and inventory follow the inventory
-  // entitlement.
+  // Enterprise CMDB + asset/inventory extension. ci-types, saved-views and
+  // the location tree are core (G1; /api/v1/locations is ungated on the
+  // server); the inventory page follows stock.
   'ci-types': undefined,
-  locations: 'inventory',
-  inventory: 'inventory',
+  locations: undefined,
+  inventory: 'stock',
   'saved-views': undefined,
 };

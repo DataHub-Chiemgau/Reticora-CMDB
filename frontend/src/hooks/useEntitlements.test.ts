@@ -7,7 +7,73 @@ import { navFeatureFor, useModules } from './useEntitlements';
 import { useAuthStore } from '../auth/authStore';
 import { createTestQueryClient, stubFetchRoutes } from '../test/utils';
 
+/**
+ * The feature keys the server accepts (entitlement.FeatureKeys in
+ * backend/internal/entitlement/entitlement.go): the phase-1 keys of ENT-02,
+ * the phase-2 keys of ENT-06 (E-44), the module keys of phases 3 and 4 and
+ * the add-ons.
+ */
+const FEATURE_KEYS = [
+  'cmdb_core',
+  'discovery',
+  'topology',
+  'rack_view',
+  'export_csv',
+  'webhooks',
+  'api_access',
+  'notifications_email',
+  'assets_basic',
+  'documents',
+  'import',
+  'ticketing_essential',
+  'ticketing_standard',
+  'signature',
+  'stock',
+  'stocktake_standard',
+  'barcode',
+  'gps_standard',
+  'workplace',
+  'export_datev',
+  'internal_orders',
+  'monitoring',
+  'endpoint_agent',
+  'workflow_forms',
+  'compliance',
+  'iga',
+  'ai',
+];
+
 describe('navFeatureFor', () => {
+  it('uses only feature keys the server knows (WP-244)', () => {
+    for (const [page, feature] of Object.entries(navFeatureFor)) {
+      if (feature !== undefined) {
+        expect(FEATURE_KEYS, page).toContain(feature);
+      }
+    }
+    for (const former of ['inventory', 'stocktake', 'ticketing']) {
+      expect(Object.values(navFeatureFor)).not.toContain(former);
+    }
+  });
+
+  it('gates the phase-2 pages with the keys of ENT-06 (E-44, E-39)', () => {
+    expect(navFeatureFor.assets).toBe('assets_basic');
+    expect(navFeatureFor.assignments).toBe('assets_basic');
+    expect(navFeatureFor.disposal).toBe('assets_basic');
+    expect(navFeatureFor.consumables).toBe('stock');
+    expect(navFeatureFor.inventory).toBe('stock');
+    expect(navFeatureFor.stocktake).toBe('stocktake_standard');
+    expect(navFeatureFor.orders).toBe('internal_orders');
+    expect(navFeatureFor.tickets).toBe('ticketing_essential');
+    expect(navFeatureFor.slas).toBe('ticketing_standard');
+    expect(navFeatureFor.desks).toBe('workplace');
+    expect(navFeatureFor.documents).toBe('documents');
+  });
+
+  it('leaves the location tree ungated (G1 core)', () => {
+    expect('locations' in navFeatureFor).toBe(true);
+    expect(navFeatureFor.locations).toBeUndefined();
+  });
+
   it('leaves core CMDB surface ungated', () => {
     for (const page of ['dashboard', 'cmdb', 'users', 'permissions', 'audit', 'security']) {
       expect(navFeatureFor[page], page).toBeUndefined();
@@ -15,7 +81,7 @@ describe('navFeatureFor', () => {
   });
 
   it('gates add-on modules behind their entitlement feature', () => {
-    expect(navFeatureFor.tickets).toBe('ticketing');
+    expect(navFeatureFor.tickets).toBe('ticketing_essential');
     expect(navFeatureFor.iga).toBe('iga');
     expect(navFeatureFor.monitoring).toBe('monitoring');
     expect(navFeatureFor.workflows).toBe('workflow_forms');

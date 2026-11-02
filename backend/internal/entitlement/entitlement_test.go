@@ -30,8 +30,8 @@ func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	if !svc.IsEnabled(ctx, "org-1", FeatureDiscovery) {
 		t.Error("expected discovery to be part of the essential plan")
 	}
-	if svc.IsEnabled(ctx, "org-1", FeatureTicketing) {
-		t.Error("expected ticketing to be excluded from the essential plan")
+	if svc.IsEnabled(ctx, "org-1", FeatureTicketingStandard) {
+		t.Error("expected ticketing_standard to be excluded from the essential plan")
 	}
 	if svc.IsEnabled(ctx, "org-2", FeatureDiscovery) || !svc.IsEnabled(ctx, "org-2", FeatureCMDBCore) {
 		t.Error("organization without rows: want only cmdb_core")
@@ -42,14 +42,15 @@ func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	if added, err := svc.Provision(ctx, "org-1", PlanEssential); len(added) != 0 || err != nil {
 		t.Errorf("second provisioning: %v, %v; want no change", added, err)
 	}
-	if svc.IsEnabled(ctx, "org-1", FeatureTicketing) {
+	if svc.IsEnabled(ctx, "org-1", FeatureTicketingStandard) {
 		t.Error("second provisioning changed the plan")
 	}
 	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureExportCSV, Plan: PlanEssential}); err != nil {
 		t.Fatal(err)
 	}
 	added, err := svc.Provision(ctx, "org-1", PlanStandard)
-	if err != nil || !slices.Equal(added, []string{FeatureDocuments, FeatureStocktake, FeatureTicketing}) {
+	if err != nil || !slices.Equal(added, []string{FeatureTicketingStandard, FeatureSignature, FeatureStock,
+		FeatureStocktakeStandard, FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV}) {
 		t.Errorf("provisioning a larger plan: %v, %v; want only the missing features", added, err)
 	}
 	if svc.IsEnabled(ctx, "org-1", FeatureExportCSV) {
@@ -63,18 +64,18 @@ func TestGrantEnablesFeatureForSingleTenant(t *testing.T) {
 
 	if _, err := svc.Grant(ctx, Entitlement{
 		OrganizationID: "org-1",
-		FeatureKey:     FeatureTicketing,
+		FeatureKey:     FeatureTicketingStandard,
 		Plan:           PlanStandard,
 		Enabled:        true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if !svc.IsEnabled(ctx, "org-1", FeatureTicketing) {
-		t.Error("expected ticketing to be enabled for org-1")
+	if !svc.IsEnabled(ctx, "org-1", FeatureTicketingStandard) {
+		t.Error("expected ticketing_standard to be enabled for org-1")
 	}
-	if svc.IsEnabled(ctx, "org-2", FeatureTicketing) {
-		t.Error("expected ticketing to stay disabled for org-2")
+	if svc.IsEnabled(ctx, "org-2", FeatureTicketingStandard) {
+		t.Error("expected ticketing_standard to stay disabled for org-2")
 	}
 }
 
@@ -206,11 +207,29 @@ func TestEnforcementDisabledAllowsEverything(t *testing.T) {
 
 func TestRequiredFeatureMapping(t *testing.T) {
 	cases := map[string]string{
-		"/api/v1/tickets":            FeatureTicketing,
-		"/api/v1/tickets/abc":        FeatureTicketing,
-		"/api/v1/discovery/jobs":     FeatureDiscovery,
-		"/api/v1/webhooks":           FeatureWebhooks,
-		"/api/v1/monitoring/metrics": FeatureMonitoring,
+		// WP-244 (ENT-06, E-44): the modules of phase 2 use the keys of
+		// ENT-06.
+		"/api/v1/tickets":                 FeatureTicketingEssential,
+		"/api/v1/tickets/abc":             FeatureTicketingEssential,
+		"/api/v1/assets":                  FeatureAssetsBasic,
+		"/api/v1/assets/a1":               FeatureAssetsBasic,
+		"/api/v1/assignments":             FeatureAssetsBasic,
+		"/api/v1/disposal-records":        FeatureAssetsBasic,
+		"/api/v1/disposal-records/d1":     FeatureAssetsBasic,
+		"/api/v1/consumables":             FeatureStock,
+		"/api/v1/stocktakes":              FeatureStocktakeStandard,
+		"/api/v1/stocktakes/s1/complete":  FeatureStocktakeStandard,
+		"/api/v1/stocktake/scan":          FeatureStocktakeStandard,
+		"/api/v1/orders":                  FeatureInternalOrders,
+		"/api/v1/orders/o1":               FeatureInternalOrders,
+		"/api/v1/documents":               FeatureDocuments,
+		"/api/v1/desks":                   FeatureWorkplace,
+		"/api/v1/desk-bookings":           FeatureWorkplace,
+		"/api/v1/asset-locations":         FeatureGPSStandard,
+		"/api/v1/asset-locations/a1/path": FeatureGPSStandard,
+		"/api/v1/discovery/jobs":          FeatureDiscovery,
+		"/api/v1/webhooks":                FeatureWebhooks,
+		"/api/v1/monitoring/metrics":      FeatureMonitoring,
 		// WP-072 (ENT-05): ingest alias, exports and topology.
 		"/api/v1/ingest/bulk":               FeatureDiscovery,
 		"/api/v1/discovery/ingest":          FeatureDiscovery,
@@ -268,7 +287,7 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 			}
 		}
 	}
-	if len(Quotas) != 4 || Quotas[0] != "max_cis" || Quotas[1] != "max_collectors" || Quotas[2] != "max_users" || Quotas[3] != "max_api_keys" {
+	if !slices.Equal(Quotas, []string{"max_cis", "max_collectors", "max_users", "max_api_keys", "max_storage_mb"}) {
 		t.Errorf("quotas %v", Quotas)
 	}
 
@@ -311,23 +330,28 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 	}
 }
 
-// TestGrantAcceptsOnlyENT02Keys covers WP-564 (ENT-02, F-209): Grant stores
-// only the feature keys of ENT-02, the module keys and the add-ons, and only
-// the quotas max_cis, max_collectors, max_users and max_api_keys; any other
-// key is a ValidationError naming the field, and nothing is stored.
+// TestGrantAcceptsOnlyENT02Keys covers WP-564 (ENT-02, F-209) and WP-244
+// (ENT-06, E-44): Grant stores only the feature keys of ENT-02, the
+// phase-2 keys of ENT-06, the module keys of phases 3 and 4 in use and the
+// add-ons, and only the quotas max_cis, max_collectors, max_users,
+// max_api_keys and max_storage_mb; any other key, the former keys
+// inventory, stocktake and ticketing among them, is a ValidationError
+// naming the field, and nothing is stored.
 func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 	ctx := context.Background()
 	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
 
 	keys := FeatureKeys()
-	for _, f := range slices.Concat(Phase1Features, Addons, []string{"inventory", "documents", "stocktake", "ticketing",
+	for _, f := range slices.Concat(Phase1Features, Addons, []string{"assets_basic", "documents", "import",
+		"ticketing_essential", "ticketing_standard", "signature", "stock", "stocktake_standard", "barcode",
+		"gps_standard", "workplace", "export_datev", "internal_orders",
 		"monitoring", "endpoint_agent", "workflow_forms", "compliance"}) {
 		if !slices.Contains(keys, f) {
 			t.Errorf("FeatureKeys lacks %s", f)
 		}
 	}
-	if len(keys) != 18 {
-		t.Errorf("FeatureKeys %v, want the 8 keys of ENT-02, 8 module keys and 2 add-ons", keys)
+	if len(keys) != 27 {
+		t.Errorf("FeatureKeys %v, want the 8 keys of ENT-02, 13 keys of phase 2, 4 module keys of phases 3 and 4 and 2 add-ons", keys)
 	}
 	for _, plan := range []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise} {
 		for _, f := range PlanFeatures(plan) {
@@ -342,7 +366,10 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 		field string
 	}{
 		"feature key with a hyphen": {Entitlement{FeatureKey: "rack-view", Enabled: true}, "feature_key"},
-		"feature key of phase 2":    {Entitlement{FeatureKey: "export_datev", Enabled: true}, "feature_key"},
+		"feature key not created":   {Entitlement{FeatureKey: "ticketing_pro", Enabled: true}, "feature_key"},
+		"former key inventory":      {Entitlement{FeatureKey: "inventory", Enabled: true}, "feature_key"},
+		"former key stocktake":      {Entitlement{FeatureKey: "stocktake", Enabled: true}, "feature_key"},
+		"former key ticketing":      {Entitlement{FeatureKey: "ticketing", Enabled: true}, "feature_key"},
 		"feature key in upper case": {Entitlement{FeatureKey: "Discovery", Enabled: true}, "feature_key"},
 		"feature key with a space":  {Entitlement{FeatureKey: "discovery ", Enabled: true}, "feature_key"},
 		"empty feature key":         {Entitlement{FeatureKey: " ", Enabled: true}, "feature_key"},
@@ -373,6 +400,95 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 			t.Errorf("quota %s: %v", quota, err)
 		}
 	}
+}
+
+// TestPlanMatrixFollowsE44 covers WP-244 (ENT-06 in the version of E-44,
+// E-34, E-39, CH14): every plan includes assets_basic, documents, import
+// and ticketing_essential; standard adds ticketing_standard, signature,
+// stock, stocktake_standard, barcode, gps_standard, workplace and
+// export_datev (essential has no stock); pro adds internal_orders,
+// monitoring and workflow_forms; enterprise endpoint_agent and compliance.
+// No plan includes an add-on, a former key or a key not created in
+// phase 2.
+func TestPlanMatrixFollowsE44(t *testing.T) {
+	essential := slices.Concat(Phase1Features, []string{"assets_basic", "documents", "import", "ticketing_essential"})
+	standard := slices.Concat(essential, []string{"ticketing_standard", "signature", "stock", "stocktake_standard",
+		"barcode", "gps_standard", "workplace", "export_datev"})
+	pro := slices.Concat(standard, []string{"internal_orders", "monitoring", "workflow_forms"})
+	enterprise := slices.Concat(pro, []string{"endpoint_agent", "compliance"})
+	for plan, want := range map[Plan][]string{PlanEssential: essential, PlanStandard: standard, PlanPro: pro, PlanEnterprise: enterprise} {
+		got := PlanFeatures(plan)
+		if !slices.Equal(sorted(got), sorted(want)) {
+			t.Errorf("plan %s: %v, want %v", plan, got, want)
+		}
+		for _, f := range slices.Concat(Addons, []string{"inventory", "stocktake", "ticketing", "ticketing_pro",
+			"stocktake_pro", "disposition", "audit_extended", "usage_tracking"}) {
+			if slices.Contains(got, f) {
+				t.Errorf("plan %s includes %s", plan, f)
+			}
+		}
+	}
+	if slices.Contains(PlanFeatures(PlanEssential), FeatureStock) {
+		t.Error("essential includes stock")
+	}
+	for _, f := range []string{FeatureTicketingStandard, FeatureStocktakeStandard} {
+		if !slices.Contains(PlanFeatures(PlanStandard), f) {
+			t.Errorf("standard lacks %s", f)
+		}
+	}
+	if slices.Contains(PlanFeatures(PlanStandard), FeatureInternalOrders) || !slices.Contains(PlanFeatures(PlanPro), FeatureInternalOrders) {
+		t.Error("internal_orders: want it from pro on")
+	}
+	// The phase-2 keys in the order of the plans.
+	if !slices.Equal(Phase2Features, []string{"assets_basic", "documents", "import", "ticketing_essential",
+		"ticketing_standard", "signature", "stock", "stocktake_standard", "barcode", "gps_standard", "workplace",
+		"export_datev", "internal_orders"}) {
+		t.Errorf("Phase2Features %v", Phase2Features)
+	}
+	// An unknown plan provisions the essential plan.
+	if !slices.Equal(PlanFeatures("trial"), PlanFeatures(PlanEssential)) {
+		t.Errorf("unknown plan: %v", PlanFeatures("trial"))
+	}
+}
+
+// TestStorageQuotaBelongsToDocuments covers WP-244 (MGT-01, ENT-06, E-34,
+// E-44): max_storage_mb is a quota of documents (QuotaFeature); it has no
+// plan default and gates only when it is stored in the limits of the
+// documents row.
+func TestStorageQuotaBelongsToDocuments(t *testing.T) {
+	ctx := context.Background()
+	if LimitMaxStorageMB != "max_storage_mb" || QuotaFeature[LimitMaxStorageMB] != FeatureDocuments {
+		t.Fatalf("max_storage_mb belongs to %q, want documents", QuotaFeature[LimitMaxStorageMB])
+	}
+	for _, plan := range []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise} {
+		svc := testService(t, plan)
+		if got, err := svc.Quota(ctx, "org-1", LimitMaxStorageMB); err != nil || got != nil {
+			t.Errorf("plan %s: max_storage_mb %v, %v; want unlimited without a stored limit", plan, deref(got), err)
+		}
+	}
+	svc := testService(t, PlanEssential)
+	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDocuments, Plan: PlanEssential,
+		Enabled: true, Limits: map[string]int64{LimitMaxStorageMB: 1000}}); err != nil {
+		t.Fatalf("max_storage_mb on documents: %v", err)
+	}
+	if got, err := svc.Quota(ctx, "org-1", LimitMaxStorageMB); err != nil || got == nil || *got != 1000 {
+		t.Errorf("stored max_storage_mb %v, %v; want 1000", deref(got), err)
+	}
+	// Without documents the quota allows nothing.
+	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDocuments, Plan: PlanEssential,
+		Limits: map[string]int64{LimitMaxStorageMB: 1000}}); err != nil {
+		t.Fatal(err)
+	}
+	var notEntitled *FeatureNotEntitledError
+	if err := svc.AllowCreate(ctx, "org-1", LimitMaxStorageMB, 0); !errors.As(err, &notEntitled) || notEntitled.FeatureKey != FeatureDocuments {
+		t.Errorf("max_storage_mb without documents: %v, want feature-not-entitled documents", err)
+	}
+}
+
+func sorted(s []string) []string {
+	out := slices.Clone(s)
+	slices.Sort(out)
+	return out
 }
 
 func deref(v *int64) any {

@@ -95,23 +95,37 @@ interface Deviation {
 export const KNOWN_DEVIATIONS: Record<string, Deviation[]> = {};
 
 // Every product module is licensed in the mocked tenant, so the navigation
-// and the command palette show all pages.
+// and the command palette show all pages: every key of the plan matrix
+// (ENT-06 in the version of E-44) and the add-ons, as the server's
+// entitlement.FeatureKeys (WP-244).
 const FEATURES = [
-  'ai',
-  'compliance',
+  'cmdb_core',
   'discovery',
-  'documents',
-  'endpoint_agent',
-  'export_csv',
-  'iga',
-  'inventory',
-  'monitoring',
-  'rack_view',
-  'stocktake',
-  'ticketing',
   'topology',
+  'rack_view',
+  'export_csv',
   'webhooks',
+  'api_access',
+  'notifications_email',
+  'assets_basic',
+  'documents',
+  'import',
+  'ticketing_essential',
+  'ticketing_standard',
+  'signature',
+  'stock',
+  'stocktake_standard',
+  'barcode',
+  'gps_standard',
+  'workplace',
+  'export_datev',
+  'internal_orders',
+  'monitoring',
+  'endpoint_agent',
   'workflow_forms',
+  'compliance',
+  'iga',
+  'ai',
 ];
 
 export const ORG_ID = '00000000-0000-0000-0000-0000000000aa';
