@@ -121,6 +121,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"lifecycle-transitions": identity.PermAssetRead,
 	"lifecycle-models":      identity.PermAssetRead, // E-38 successor of lifecycle-definitions (E-106)
 	"templates":             identity.PermCIRead,    // metamodel templates read like ci-types (E-38, E-106)
+	"attribute-sets":        identity.PermCIRead,    // attribute sets read like ci-types (WP-250, E-106)
 	"locations":             identity.PermLocationRead,
 	"stock-movements":       identity.PermAssetRead,
 	"inventory":             identity.PermStockRead, // inventory items and availability are stock (E-106)
@@ -209,6 +210,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"lifecycle-transitions": identity.PermLifecycleManage,
 	"lifecycle-models":      identity.PermLifecycleManage,
 	"templates":             identity.PermCITypeManage, // metamodel resources write like ci-types (E-106)
+	"attribute-sets":        identity.PermCITypeManage, // like ci-types (WP-250, E-106)
 	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
@@ -600,6 +602,10 @@ var domainRecordedRoutes = map[string]string{
 	"POST /api/v1/attribute-definitions":               "citype.PGRepository",
 	"PATCH /api/v1/attribute-definitions/{id}":         "citype.PGRepository",
 	"DELETE /api/v1/attribute-definitions/{id}":        "citype.PGRepository",
+	"POST /api/v1/attribute-sets":                      "citype.PGRepository",
+	"PATCH /api/v1/attribute-sets/{id}":                "citype.PGRepository",
+	"DELETE /api/v1/attribute-sets/{id}":               "citype.PGRepository",
+	"PUT /api/v1/ci-types/{id}/attribute-sets":         "citype.PGRepository",
 	// Locations and rack placement (DOD-01).
 	"POST /api/v1/locations":                   "locations.PGRepository",
 	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",

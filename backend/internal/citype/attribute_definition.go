@@ -22,17 +22,20 @@ import (
 
 // AttributeDefinition is one row of attribute_definition (MET-10, DB-03):
 // the single source of attribute validation and indexing. A definition
-// belongs to a CI type (scope "type") or applies to every type of the
-// organization (scope "global", no CI type); organization_id NULL marks a
-// read-only system definition. ci_type.attribute_schema is generated from
+// belongs to a CI type (scope "type"), to an attribute set (scope "set",
+// WP-250) or applies to every type of the organization (scope "global", no
+// CI type and no set); organization_id NULL marks a read-only system
+// definition. ci_type.attribute_schema is generated from
 // the type's definitions by the database. Validation is the rule AST of
 // MET-45 (api/rules.schema.json), evaluated bindingly by internal/rules; a
 // legacy structure in a request or a stored row is translated into it
 // (WP-589), and a required rule makes the definition required.
 type AttributeDefinition struct {
-	ID             string        `json:"id"`
-	OrganizationID string        `json:"organization_id,omitempty"`
-	CITypeID       string        `json:"ci_type_id,omitempty"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id,omitempty"`
+	CITypeID       string `json:"ci_type_id,omitempty"`
+	// AttributeSetID names the set of a set attribute (scope "set").
+	AttributeSetID string        `json:"attribute_set_id,omitempty"`
 	Scope          string        `json:"scope"`
 	Key            string        `json:"key"`
 	DisplayName    LocalizedText `json:"display_name"`
@@ -58,8 +61,8 @@ type AttributeDefinition struct {
 	UpdatedAt       time.Time                   `json:"updated_at"`
 }
 
-// AttributeDefinitionPatch changes a definition; key, CI type and scope
-// are immutable. Validation is a rule AST or the legacy structure (see
+// AttributeDefinitionPatch changes a definition; key, CI type, attribute
+// set and scope are immutable. Validation is a rule AST or the legacy structure (see
 // fieldmeta.ParseValidation); null or {} removes the rules.
 type AttributeDefinitionPatch struct {
 	DisplayName     LocalizedText               `json:"display_name,omitempty"`
@@ -83,8 +86,9 @@ type AttributeDefinitionPatch struct {
 
 // AttributeFilter narrows the definition list.
 type AttributeFilter struct {
-	CITypeID string
-	Scope    string
+	CITypeID       string
+	AttributeSetID string
+	Scope          string
 }
 
 // Attribute definition errors.
@@ -260,18 +264,21 @@ func setBool(dst, v *bool) {
 
 // attributeFields maps database constraints onto request fields.
 var attributeFields = map[string]string{
-	"attribute_definition_ci_type_id_key_key":   "key",
-	"attribute_definition_global_key":           "key",
-	"attribute_definition_display_name_i18n":    "display_name",
-	"attribute_definition_unique_scope_check":   "unique_scope",
-	"attribute_definition_scope_check":          "scope",
-	"attribute_definition_ci_type_id_fkey":      "ci_type_id",
-	"attribute_definition_scope_type_check":     "ci_type_id",
-	"attribute_definition_system_global_key":    "key",
-	"attribute_definition_organization_id_fkey": "organization_id",
+	"attribute_definition_ci_type_id_key_key":       "key",
+	"attribute_definition_global_key":               "key",
+	"attribute_definition_display_name_i18n":        "display_name",
+	"attribute_definition_unique_scope_check":       "unique_scope",
+	"attribute_definition_scope_check":              "scope",
+	"attribute_definition_ci_type_id_fkey":          "ci_type_id",
+	"attribute_definition_scope_type_check":         "ci_type_id",
+	"attribute_definition_system_global_key":        "key",
+	"attribute_definition_organization_id_fkey":     "organization_id",
+	"attribute_definition_attribute_set_id_fkey":    "attribute_set_id",
+	"attribute_definition_attribute_set_id_key_key": "key",
 }
 
-const attributeColumns = `id::text, COALESCE(organization_id::text, ''), COALESCE(ci_type_id::text, ''), scope, key,
+const attributeColumns = `id::text, COALESCE(organization_id::text, ''), COALESCE(ci_type_id::text, ''),
+	COALESCE(attribute_set_id::text, ''), scope, key,
 	display_name, COALESCE(description, ''), data_type, required, default_value, enum_values,
 	multi_value, searchable, is_unique, unique_scope, inheritable, validation, conditional,
 	COALESCE(reference_target, ''), COALESCE(group_name, ''), sort_order, COALESCE(unit, ''),
@@ -282,7 +289,7 @@ func scanAttribute(row pgx.Row) (*AttributeDefinition, error) {
 		d                                                      AttributeDefinition
 		displayName, def, enumRaw, validationRaw, conditionRaw []byte
 	)
-	if err := row.Scan(&d.ID, &d.OrganizationID, &d.CITypeID, &d.Scope, &d.Key, &displayName, &d.Description,
+	if err := row.Scan(&d.ID, &d.OrganizationID, &d.CITypeID, &d.AttributeSetID, &d.Scope, &d.Key, &displayName, &d.Description,
 		&d.DataType, &d.Required, &def, &enumRaw, &d.MultiValue, &d.Searchable, &d.Unique, &d.UniqueScope,
 		&d.Inheritable, &validationRaw, &conditionRaw, &d.ReferenceTarget, &d.Group, &d.Order, &d.Unit,
 		&d.CreatedAt, &d.UpdatedAt); err != nil {
@@ -334,20 +341,21 @@ func attributeArgs(d *AttributeDefinition) []any {
 }
 
 // insertAttributeTx inserts a definition; a type-scoped definition takes
-// the organization of its type (trigger), a global one orgID.
+// the organization of its type, a set attribute that of its set
+// (trigger), a global one orgID.
 func insertAttributeTx(ctx context.Context, tx pgx.Tx, orgID string, d *AttributeDefinition) error {
-	args := append([]any{nilIfEmpty(d.CITypeID), orgID, d.Scope, d.Key}, attributeArgs(d)...)
+	args := append([]any{nilIfEmpty(d.CITypeID), nilIfEmpty(d.AttributeSetID), orgID, d.Scope, d.Key}, attributeArgs(d)...)
 	created, err := scanAttribute(tx.QueryRow(ctx, `INSERT INTO attribute_definition (
-			ci_type_id, organization_id, scope, key, display_name, description, data_type, required,
-			default_value, enum_values, multi_value, searchable, is_unique, unique_scope, inheritable,
+			ci_type_id, attribute_set_id, organization_id, scope, key, display_name, description, data_type,
+			required, default_value, enum_values, multi_value, searchable, is_unique, unique_scope, inheritable,
 			validation, conditional, reference_target, group_name, sort_order, unit)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 		RETURNING `+attributeColumns, args...))
 	if err != nil {
 		return attributeDBError(err)
 	}
 	*d = *created
-	return checkCompositionTx(ctx, tx, d.Key)
+	return checkDefinitionCompositionTx(ctx, tx, d)
 }
 
 func updateAttributeTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) error {
@@ -362,6 +370,16 @@ func updateAttributeTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) e
 		return attributeDBError(err)
 	}
 	*d = *updated
+	return checkDefinitionCompositionTx(ctx, tx, d)
+}
+
+// checkDefinitionCompositionTx runs checkCompositionTx for a written
+// definition. A set attribute enters no composition until WP-709 adds the
+// set layer, so it is skipped.
+func checkDefinitionCompositionTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) error {
+	if d.Scope == ScopeSet {
+		return nil
+	}
 	return checkCompositionTx(ctx, tx, d.Key)
 }
 
@@ -388,6 +406,7 @@ func attributeDBError(err error) error {
 // that defines the key and every type in its subtree (ci_type_subtree).
 // The database checks the materialized schemas (system base and chain)
 // itself; this adds the organization's layer. A conflict is a 422 on key.
+// Set attributes are no layer of it until WP-709 (checkDefinitionCompositionTx).
 func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
 	rows, err := tx.Query(ctx, `SELECT DISTINCT s.id::text FROM attribute_definition a
 		CROSS JOIN LATERAL ci_type_subtree(a.ci_type_id) s
@@ -440,7 +459,7 @@ func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID string) er
 func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key string) error {
 	collect := func(row pgx.CollectableRow) (*AttributeDefinition, error) { return scanAttribute(row) }
 	rows, err := tx.Query(ctx, `SELECT `+attributeColumns+` FROM attribute_definition
-		WHERE ci_type_id IS NULL AND ($1 = '' OR key = $1) ORDER BY sort_order, key`, key)
+		WHERE scope = 'global' AND ($1 = '' OR key = $1) ORDER BY sort_order, key`, key)
 	if err != nil {
 		return fmt.Errorf("read global definitions: %w", err)
 	}
@@ -540,6 +559,89 @@ func checkAttributeType(ctx context.Context, tx pgx.Tx, typeID string) error {
 	return nil
 }
 
+// errSetNotAssignable refuses a set of an assignment or of a new set
+// attribute: 422 on attribute_set_id.
+func errSetNotAssignable(message string) error {
+	return &api.FieldError{Field: "attribute_set_id", Message: message, Status: http.StatusUnprocessableEntity}
+}
+
+// checkAttributeSetOfDefinition resolves the set of a new set attribute
+// (WP-250): a set the organization does not see is a 422 on
+// attribute_set_id, a system set is read-only (403).
+func checkAttributeSetOfDefinition(ctx context.Context, tx pgx.Tx, setID string) error {
+	if !api.IsUUID(setID) {
+		return errSetNotAssignable("attribute set not found")
+	}
+	var org string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(organization_id::text, '') FROM attribute_set WHERE id = $1`, setID).Scan(&org)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return errSetNotAssignable("attribute set not found")
+	case err != nil:
+		return fmt.Errorf("read attribute set: %w", err)
+	case org == "":
+		return ErrAttributeSetReadOnly
+	}
+	return nil
+}
+
+// checkSetAssignmentTx checks the new set list of a type (WP-250) and
+// returns the current one: the type is a type of the organization (an
+// unknown type is a 422 on ci_type_id; a system type is one too, because
+// its materialized schema is shared by every organization, E-108); every
+// set is listed once at its own position (0 or more) and is visible to the
+// organization (its own or a system set), and a set that is not assigned
+// yet is active; otherwise a 422 on attribute_set_id or position. WP-709
+// adds the composition check of the type with its sets.
+func checkSetAssignmentTx(ctx context.Context, tx pgx.Tx, typeID string, sets []AttributeSetAssignment) (*TypeAttributeSets, error) {
+	if !api.IsUUID(typeID) {
+		return nil, &api.FieldError{Field: "ci_type_id", Message: "ci type not found", Status: http.StatusUnprocessableEntity}
+	}
+	org, found, err := ciTypeOrganizationTx(ctx, tx, typeID)
+	switch {
+	case err != nil:
+		return nil, err
+	case !found:
+		return nil, &api.FieldError{Field: "ci_type_id", Message: "ci type not found", Status: http.StatusUnprocessableEntity}
+	case org == "":
+		return nil, &api.FieldError{Field: "ci_type_id", Message: "system ci types cannot get attribute sets",
+			Status: http.StatusUnprocessableEntity}
+	}
+	current, err := typeAttributeSetsTx(ctx, tx, typeID)
+	if err != nil {
+		return nil, err
+	}
+	assigned := map[string]bool{}
+	for _, a := range current.AttributeSets {
+		assigned[a.AttributeSetID] = true
+	}
+	listed, positions := map[string]bool{}, map[int]bool{}
+	for _, a := range sets {
+		if !api.IsUUID(a.AttributeSetID) {
+			return nil, errSetNotAssignable("attribute set not found")
+		}
+		if listed[a.AttributeSetID] {
+			return nil, errSetNotAssignable("attribute set listed twice")
+		}
+		if a.Position < 0 || positions[a.Position] {
+			return nil, &api.FieldError{Field: "position", Message: "each set needs its own position (0 or more)",
+				Status: http.StatusUnprocessableEntity}
+		}
+		listed[a.AttributeSetID], positions[a.Position] = true, true
+		var active bool
+		err = tx.QueryRow(ctx, `SELECT is_active FROM attribute_set WHERE id = $1`, a.AttributeSetID).Scan(&active)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return nil, errSetNotAssignable("attribute set not found")
+		case err != nil:
+			return nil, fmt.Errorf("read attribute set: %w", err)
+		case !active && !assigned[a.AttributeSetID]:
+			return nil, errSetNotAssignable("an inactive attribute set cannot be assigned")
+		}
+	}
+	return current, nil
+}
+
 // checkFieldType resolves the CI type of the legacy field upsert (PUT
 // /ci-types/{id}/fields): an unknown type is the documented 404 of the path
 // ("not found", see writeFieldDefinitionError), a system type the 422 of
@@ -603,6 +705,10 @@ func attributeFilterSQL(filter AttributeFilter) (where string, args []any) {
 	if filter.CITypeID != "" {
 		args = append(args, filter.CITypeID)
 		conditions = append(conditions, fmt.Sprintf("ci_type_id::text = $%d", len(args)))
+	}
+	if filter.AttributeSetID != "" {
+		args = append(args, filter.AttributeSetID)
+		conditions = append(conditions, fmt.Sprintf("attribute_set_id::text = $%d", len(args)))
 	}
 	if filter.Scope != "" {
 		args = append(args, filter.Scope)
@@ -672,11 +778,20 @@ func (r *PGRepository) GetAttributeDefinition(ctx context.Context, orgID, id str
 	return out, err
 }
 
-// CreateAttributeDefinition implements AttributeDefinitionStore.
+// CreateAttributeDefinition implements AttributeDefinitionStore: without
+// CI type and set the definition is global, with attribute_set_id a set
+// attribute (WP-250) of a set of the organization.
 func (r *PGRepository) CreateAttributeDefinition(ctx context.Context, orgID string, d *AttributeDefinition) error {
-	d.Scope = "global"
-	if d.CITypeID != "" {
+	switch {
+	case d.CITypeID != "" && d.AttributeSetID != "":
+		return &api.FieldError{Field: "attribute_set_id", Message: "a definition belongs to a ci type or to an attribute set, not both",
+			Status: http.StatusUnprocessableEntity}
+	case d.AttributeSetID != "":
+		d.Scope = ScopeSet
+	case d.CITypeID != "":
 		d.Scope = "type"
+	default:
+		d.Scope = "global"
 	}
 	if err := d.Validate(); err != nil {
 		return err
@@ -684,6 +799,11 @@ func (r *PGRepository) CreateAttributeDefinition(ctx context.Context, orgID stri
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if d.CITypeID != "" {
 			if err := checkAttributeType(ctx, tx, d.CITypeID); err != nil {
+				return err
+			}
+		}
+		if d.AttributeSetID != "" {
+			if err := checkAttributeSetOfDefinition(ctx, tx, d.AttributeSetID); err != nil {
 				return err
 			}
 		}

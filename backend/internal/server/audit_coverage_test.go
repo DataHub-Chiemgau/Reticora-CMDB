@@ -408,6 +408,7 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/locations", `{"kind":"site","name":"a5-location","client_id":"<client>"}`},
 	{"POST /api/v1/ci-types", `{"key":"a5_type","name":"a5 type"}`},
 	{"POST /api/v1/attribute-definitions", `{"ci_type_id":"<id:/api/v1/ci-types>","key":"a5_attr","data_type":"string"}`},
+	{"POST /api/v1/attribute-sets", `{"key":"a5_set"}`},
 	{"POST /api/v1/cis", `{"ci_type_id":"<citype>","name":"a5-ci","client_id":"<client>"}`},
 	{"POST /api/v1/assets", `{"asset_tag":"a5-asset","name":"a5-asset","client_id":"<client>"}`},
 	{"POST /api/v1/contacts", `{"name":"a5 contact","email":"a5-contact@example.com"}`},

@@ -36,6 +36,9 @@ const (
 	// ModuleInventory is the inventory module (assets, reservations,
 	// stock; P2); its reservation sweeper runs only while it is on.
 	ModuleInventory = "inventory"
+	// ModuleMetamodel is the metamodel module of phase 2 (attribute sets,
+	// templates, rules, layouts, drafts; E-105). It has no feature key.
+	ModuleMetamodel = "metamodel"
 )
 
 // PhaseP2 is the phase value of RETICORA_MODULES that switches on every
@@ -51,6 +54,13 @@ var LateModules = []Module{
 		"/api/v1/stock-movements", "/api/v1/compositions", "/api/v1/inventory",
 	}, Nav: []string{"assets", "assignments", "inventory"}},
 	{Key: "documents", Phase: "P2", Prefixes: []string{"/api/v1/documents"}, Nav: []string{"documents"}},
+	// Metamodel extensions of phase 2 (E-105): attribute sets (WP-250);
+	// templates, rules, layouts, drafts and field permissions add their
+	// prefixes with their first route. No feature key (cmdb_core, E-44);
+	// the page follows with WP-313.
+	{Key: ModuleMetamodel, Phase: "P2", Prefixes: []string{
+		"/api/v1/attribute-sets", "/api/v1/ci-types/{id}/attribute-sets",
+	}, Nav: []string{"metamodel"}},
 	// Import of CSV/XLSX files (IMP-IO-01, E-105; feature key import).
 	{Key: "import", Phase: "P2", Prefixes: []string{"/api/v1/imports", "/api/v1/import-profiles"}, Nav: []string{"import"}},
 	{Key: "stocktake", Phase: "P2", Prefixes: []string{"/api/v1/stocktakes", "/api/v1/consumables", "/api/v1/orders"},

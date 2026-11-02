@@ -12074,12 +12074,14 @@ paths:
       description: >-
         The single source of attribute validation and indexing (DB-03): the
         organization's definitions and the read-only system definitions
-        (`is_system`). Filters: `ci_type_id`, `scope` (type, global). Pages
+        (`is_system`). Filters: `ci_type_id`, `attribute_set_id`, `scope`
+        (type, global, set). Pages
         newest first on (created_at, id) (API-02, F-215): `limit` (default
         50, at most 200) and the signed keyset `cursor` from `next_cursor`.
       parameters:
         - { name: ci_type_id, in: query, schema: { type: string } }
-        - { name: scope, in: query, schema: { type: string, enum: [type, global] } }
+        - { name: attribute_set_id, in: query, schema: { type: string } }
+        - { name: scope, in: query, schema: { type: string, enum: [type, global, set] } }
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Cursor'
@@ -12101,7 +12103,12 @@ paths:
       summary: Create an attribute definition (MET-10)
       description: >-
         Without `ci_type_id` the definition is global (every type of the
-        organization). Creating, changing or deleting a type's definition
+        organization); with `attribute_set_id` it is an attribute of that
+        set (scope `set`, WP-250): a set the organization does not see is
+        422 with `field` = `attribute_set_id`, a system set 403. Set
+        attributes do not enter the composition before WP-709; a searchable
+        or unique one is indexed and checked organization-wide like a
+        global attribute. Creating, changing or deleting a type's definition
         regenerates the type's `attribute_schema` and raises its
         `schema_version`. Requires ci_attribute:manage.
       requestBody:
@@ -12198,6 +12205,151 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/attribute-sets:
+    x-phase: P2
+    get:
+      operationId: listAttributeSets
+      tags: [Metamodel]
+      summary: List attribute sets (MET-16)
+      description: >-
+        The organization's attribute sets and the read-only system sets
+        (`is_system`, WP-250). Pages newest first on (created_at, id)
+        (API-02): `limit` (default 50, at most 200) and the signed keyset
+        `cursor` from `next_cursor`. Requires ci:read. Until WP-709 a set
+        does not enter the composition of its types.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Attribute sets, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeSetListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createAttributeSet
+      tags: [Metamodel]
+      summary: Create an attribute set (MET-16)
+      description: >-
+        A set of the organization; its attributes are attribute definitions
+        with `attribute_set_id` (scope `set`, POST
+        /api/v1/attribute-definitions). The key is unique within the
+        organization (409). Requires citype:manage; audited as
+        `attribute_set.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttributeSetCreate'
+      responses:
+        '201':
+          description: Attribute set created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeSet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/attribute-sets/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAttributeSet
+      tags: [Metamodel]
+      summary: Read an attribute set
+      responses:
+        '200':
+          description: Attribute set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeSet'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateAttributeSet
+      tags: [Metamodel]
+      summary: Update an attribute set
+      description: >-
+        Display name, description and `is_active`; the key is immutable.
+        System sets are read-only (403). An inactive set keeps its
+        assignments but cannot be assigned anew. Requires citype:manage;
+        audited as `attribute_set.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttributeSetPatch'
+      responses:
+        '200':
+          description: Attribute set updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeSet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteAttributeSet
+      tags: [Metamodel]
+      summary: Delete an attribute set
+      description: >-
+        A set assigned to a CI type is 409 (`urn:reticora:problem:conflict`).
+        Otherwise its set attributes are deleted first, each audited as
+        `attribute_definition.deleted`, and the indexes of searchable or
+        unique ones are released by a job (DB-04). System sets are
+        read-only (403). Requires citype:manage; audited as
+        `attribute_set.deleted`.
+      responses:
+        '204':
+          description: Attribute set deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -12482,6 +12634,71 @@ paths:
           description: List the version lineage of a CI type
         '401':
           description: Unauthorized
+
+  /api/v1/ci-types/{id}/attribute-sets:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCiTypeAttributeSets
+      tags: [Metamodel]
+      summary: Read the attribute sets of a CI type (MET-16)
+      description: >-
+        The assignment document of the type: its sets ordered by
+        `position`. It has no data array and is no list. Requires ci:read.
+      responses:
+        '200':
+          description: Assignment document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CITypeAttributeSets'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: replaceCiTypeAttributeSets
+      tags: [Metamodel]
+      summary: Replace the attribute sets of a CI type (MET-16)
+      description: >-
+        The ordered list replaces the type's sets as a whole; until WP-260
+        the change applies at once. The type must be a type of the
+        organization (an unknown or a system type is 422 with `field` =
+        `ci_type_id`); every set is listed once at its own `position` and
+        is a set of the organization or a system set, and a set not yet
+        assigned must be active (422 with `field` = `attribute_set_id` or
+        `position`). Until WP-709 the sets do not enter the composition,
+        the materialized schema or `schema_version` of the type. Requires
+        citype:manage; audited as `ci_type.attribute_sets_changed` with the
+        ordered list before and after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CITypeAttributeSets'
+      responses:
+        '200':
+          description: Assignment document after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CITypeAttributeSets'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/cis/{id}/blast-radius:
     get:
@@ -15521,8 +15738,9 @@ components:
       properties:
         id: { type: string }
         organization_id: { type: string, description: Empty for system definitions. }
-        ci_type_id: { type: string, description: Empty for global definitions. }
-        scope: { type: string, enum: [type, global] }
+        ci_type_id: { type: string, description: Empty for global and set definitions. }
+        attribute_set_id: { type: string, description: The set of a set attribute (scope set); empty otherwise. }
+        scope: { type: string, enum: [type, global, set] }
         key: { type: string }
         display_name:
           $ref: '#/components/schemas/LocalizedText'
@@ -15631,7 +15849,8 @@ components:
       required: [key, data_type]
       additionalProperties: false
       properties:
-        ci_type_id: { type: string, description: Omitted for a global definition. }
+        ci_type_id: { type: string, description: Omitted for a global or set definition. }
+        attribute_set_id: { type: string, description: 'The set of a set attribute (WP-250); not together with ci_type_id. Immutable like key and ci_type_id.' }
         key: { type: string, minLength: 1, maxLength: 100, description: 'The reserved namespaces _overrides, _observed, _provenance and _instance are no keys (GLO-13): 400 with field key; the other definition checks name their own field (data_type, reference_target, validation, conditional, default; F-408).' }
         display_name:
           oneOf:
@@ -15656,6 +15875,73 @@ components:
         group: { type: string }
         order: { type: integer }
         unit: { type: string }
+    AttributeSet:
+      type: object
+      description: >-
+        A named, reusable group of attribute definitions (MET-16, WP-250).
+        Its attributes are attribute definitions with scope `set`.
+      required: [id, key, display_name, is_system, is_active, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system sets. }
+        key: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_system: { type: boolean, description: A read-only system set. }
+        is_active: { type: boolean, description: An inactive set cannot be assigned anew. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AttributeSetCreate:
+      type: object
+      required: [key]
+      additionalProperties: false
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100, description: Unique within the organization. }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_active: { type: boolean, default: true }
+    AttributeSetPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_active: { type: boolean }
+    AttributeSetListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttributeSet'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    CITypeAttributeSets:
+      type: object
+      description: >-
+        The attribute sets of a CI type ordered by position (WP-250). In a
+        PUT, ci_type_id may be omitted; it must match the path otherwise.
+      required: [attribute_sets]
+      properties:
+        ci_type_id: { type: string }
+        attribute_sets:
+          type: array
+          items:
+            type: object
+            required: [attribute_set_id, position]
+            additionalProperties: false
+            properties:
+              attribute_set_id: { type: string }
+              position: { type: integer, minimum: 0, description: Unique within the type; the list is ordered by it. }
     AttributeDefinitionPatch:
       type: object
       additionalProperties: false

@@ -48,7 +48,8 @@ func TestG1DefaultSwitchesLateModulesOff(t *testing.T) {
 
 	mux := testRouterWithModules(t, &audit.Handler{}, g1)
 	for _, path := range []string{"/api/v1/tickets", "/api/v1/assets", "/api/v1/workflows", "/api/v1/monitoring/alerts",
-		"/api/v1/agents", "/api/v1/iga/connectors", "/scim/v2/Users", "/api/v1/ai/conversations"} {
+		"/api/v1/agents", "/api/v1/iga/connectors", "/scim/v2/Users", "/api/v1/ai/conversations",
+		"/api/v1/attribute-sets", "/api/v1/ci-types/c0de0000-0000-4000-8000-000000000001/attribute-sets"} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusNotFound {
@@ -197,23 +198,25 @@ func TestLateRoutesAreMarkedInSpecification(t *testing.T) {
 // its own (E-105), and GET /api/v1/modules lists gps with nav [], not null.
 func TestModulePhasesFollowE44(t *testing.T) {
 	for key, phase := range map[string]string{"disposal": "P2", "gps": "P4", "import": "P2", ModuleInventory: "P2",
-		"documents": "P2", "stocktake": "P2", "ticketing": "P2"} {
+		"documents": "P2", "stocktake": "P2", "ticketing": "P2", ModuleMetamodel: "P2"} {
 		if m, ok := moduleByKey(key); !ok || m.Phase != phase {
 			t.Errorf("module %s: %+v, want phase %s", key, m, phase)
 		}
 	}
 	for route, want := range map[string]string{
-		"/api/v1/assets/{id}/locations":      "gps",
-		"/api/v1/assets/{assetID}/locations": "gps",
-		"/api/v1/asset-locations":            "gps",
-		"/api/v1/assets/{id}":                ModuleInventory,
-		"/api/v1/assets":                     ModuleInventory,
-		"/api/v1/assets/{id}/label.svg":      ModuleInventory,
-		"/api/v1/assets/locations":           ModuleInventory,
-		"/api/v1/assets/{id}/locationsx":     ModuleInventory,
-		"/api/v1/disposal-records/{id}":      "disposal",
-		"/api/v1/imports/{id}/report":        "import",
-		"/api/v1/import-profiles":            "import",
+		"/api/v1/assets/{id}/locations":        "gps",
+		"/api/v1/assets/{assetID}/locations":   "gps",
+		"/api/v1/asset-locations":              "gps",
+		"/api/v1/assets/{id}":                  ModuleInventory,
+		"/api/v1/assets":                       ModuleInventory,
+		"/api/v1/assets/{id}/label.svg":        ModuleInventory,
+		"/api/v1/assets/locations":             ModuleInventory,
+		"/api/v1/assets/{id}/locationsx":       ModuleInventory,
+		"/api/v1/disposal-records/{id}":        "disposal",
+		"/api/v1/imports/{id}/report":          "import",
+		"/api/v1/import-profiles":              "import",
+		"/api/v1/attribute-sets/{id}":          ModuleMetamodel,
+		"/api/v1/ci-types/{id}/attribute-sets": ModuleMetamodel,
 	} {
 		if m, ok := ModuleForRoute(route); !ok || m.Key != want {
 			t.Errorf("ModuleForRoute(%s) = %s (%v), want %s", route, m.Key, ok, want)
@@ -282,14 +285,16 @@ type e38Resource struct {
 // e38Register lists the P2 resources of E-38 (sections (a) to (c)) that
 // have no prefix of their own in the G1 release, after E-105.
 var e38Register = []e38Resource{
-	// Metamodel (MET-*): the module metamodel, created by WP-250.
-	{path: "/api/v1/attribute-sets", module: "metamodel", owner: "WP-250"},
-	{path: "/api/v1/ci-types/{id}/attribute-sets", module: "metamodel", owner: "WP-250"},
-	{path: "/api/v1/templates", module: "metamodel", owner: "WP-250"},
-	{path: "/api/v1/rules", module: "metamodel", owner: "WP-250"},
-	{path: "/api/v1/layouts", module: "metamodel", owner: "WP-250"},
-	{path: "/api/v1/metamodel/drafts", module: "metamodel", owner: "WP-250"},
-	{path: "/api/v1/field-permissions", module: "metamodel", owner: "WP-250"},
+	// Metamodel (MET-*): the module metamodel, created by WP-250 with the
+	// attribute sets; the other resources add their prefixes with their
+	// first route.
+	{path: "/api/v1/attribute-sets", module: ModuleMetamodel},
+	{path: "/api/v1/ci-types/{id}/attribute-sets", module: ModuleMetamodel},
+	{path: "/api/v1/templates", module: ModuleMetamodel, owner: "WP-251"},
+	{path: "/api/v1/rules", module: ModuleMetamodel, owner: "WP-716"},
+	{path: "/api/v1/layouts", module: ModuleMetamodel, owner: "WP-259"},
+	{path: "/api/v1/metamodel/drafts", module: ModuleMetamodel, owner: "WP-721"},
+	{path: "/api/v1/field-permissions", module: ModuleMetamodel, owner: "WP-726"},
 	// New prefixes of existing modules, set with their first route.
 	{path: "/api/v1/suppliers", module: ModuleInventory, owner: "WP-736"},
 	{path: "/api/v1/contracts", module: ModuleInventory, owner: "WP-269"},
@@ -473,7 +478,7 @@ func TestAddonsAreNotImpliedByPlan(t *testing.T) {
 func TestP2ModulePrefixesAreGated(t *testing.T) {
 	p2 := 0
 	for _, m := range LateModules {
-		if m.Phase != "P2" || m.Key == "metamodel" {
+		if m.Phase != "P2" || m.Key == ModuleMetamodel {
 			continue
 		}
 		p2++

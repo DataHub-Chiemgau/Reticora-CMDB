@@ -5871,13 +5871,13 @@ export interface paths {
     };
     /**
      * List attribute definitions (MET-10)
-     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global). Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `attribute_set_id`, `scope` (type, global, set). Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listAttributeDefinitions'];
     put?: never;
     /**
      * Create an attribute definition (MET-10)
-     * @description Without `ci_type_id` the definition is global (every type of the organization). Creating, changing or deleting a type's definition regenerates the type's `attribute_schema` and raises its `schema_version`. Requires ci_attribute:manage.
+     * @description Without `ci_type_id` the definition is global (every type of the organization); with `attribute_set_id` it is an attribute of that set (scope `set`, WP-250): a set the organization does not see is 422 with `field` = `attribute_set_id`, a system set 403. Set attributes do not enter the composition before WP-709; a searchable or unique one is indexed and checked organization-wide like a global attribute. Creating, changing or deleting a type's definition regenerates the type's `attribute_schema` and raises its `schema_version`. Requires ci_attribute:manage.
      */
     post: operations['createAttributeDefinition'];
     delete?: never;
@@ -5909,6 +5909,58 @@ export interface paths {
      * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409. A definition that cannot be composed with the other layers of its key (MET-16) is 422 with `field` = `key` and a `code`.
      */
     patch: operations['updateAttributeDefinition'];
+    trace?: never;
+  };
+  '/api/v1/attribute-sets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List attribute sets (MET-16)
+     * @description The organization's attribute sets and the read-only system sets (`is_system`, WP-250). Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires ci:read. Until WP-709 a set does not enter the composition of its types.
+     */
+    get: operations['listAttributeSets'];
+    put?: never;
+    /**
+     * Create an attribute set (MET-16)
+     * @description A set of the organization; its attributes are attribute definitions with `attribute_set_id` (scope `set`, POST /api/v1/attribute-definitions). The key is unique within the organization (409). Requires citype:manage; audited as `attribute_set.created`.
+     */
+    post: operations['createAttributeSet'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/attribute-sets/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Read an attribute set */
+    get: operations['getAttributeSet'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete an attribute set
+     * @description A set assigned to a CI type is 409 (`urn:reticora:problem:conflict`). Otherwise its set attributes are deleted first, each audited as `attribute_definition.deleted`, and the indexes of searchable or unique ones are released by a job (DB-04). System sets are read-only (403). Requires citype:manage; audited as `attribute_set.deleted`.
+     */
+    delete: operations['deleteAttributeSet'];
+    options?: never;
+    head?: never;
+    /**
+     * Update an attribute set
+     * @description Display name, description and `is_active`; the key is immutable. System sets are read-only (403). An inactive set keeps its assignments but cannot be assigned anew. Requires citype:manage; audited as `attribute_set.updated`.
+     */
+    patch: operations['updateAttributeSet'];
     trace?: never;
   };
   '/api/v1/ci-types': {
@@ -6104,6 +6156,33 @@ export interface paths {
     /** List the version lineage of a CI type */
     get: operations['listCiTypesIdVersions'];
     put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ci-types/{id}/attribute-sets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read the attribute sets of a CI type (MET-16)
+     * @description The assignment document of the type: its sets ordered by `position`. It has no data array and is no list. Requires ci:read.
+     */
+    get: operations['getCiTypeAttributeSets'];
+    /**
+     * Replace the attribute sets of a CI type (MET-16)
+     * @description The ordered list replaces the type's sets as a whole; until WP-260 the change applies at once. The type must be a type of the organization (an unknown or a system type is 422 with `field` = `ci_type_id`); every set is listed once at its own `position` and is a set of the organization or a system set, and a set not yet assigned must be active (422 with `field` = `attribute_set_id` or `position`). Until WP-709 the sets do not enter the composition, the materialized schema or `schema_version` of the type. Requires citype:manage; audited as `ci_type.attribute_sets_changed` with the ordered list before and after.
+     */
+    put: operations['replaceCiTypeAttributeSets'];
     post?: never;
     delete?: never;
     options?: never;
@@ -8021,10 +8100,12 @@ export interface components {
       id: string;
       /** @description Empty for system definitions. */
       organization_id?: string;
-      /** @description Empty for global definitions. */
+      /** @description Empty for global and set definitions. */
       ci_type_id?: string;
+      /** @description The set of a set attribute (scope set); empty otherwise. */
+      attribute_set_id?: string;
       /** @enum {string} */
-      scope: 'type' | 'global';
+      scope: 'type' | 'global' | 'set';
       key: string;
       display_name: components['schemas']['LocalizedText'];
       description?: string;
@@ -8082,8 +8163,10 @@ export interface components {
       has_more?: boolean;
     };
     AttributeDefinitionCreate: {
-      /** @description Omitted for a global definition. */
+      /** @description Omitted for a global or set definition. */
       ci_type_id?: string;
+      /** @description The set of a set attribute (WP-250); not together with ci_type_id. Immutable like key and ci_type_id. */
+      attribute_set_id?: string;
       /** @description The reserved namespaces _overrides, _observed, _provenance and _instance are no keys (GLO-13): 400 with field key; the other definition checks name their own field (data_type, reference_target, validation, conditional, default; F-408). */
       key: string;
       display_name?: components['schemas']['LocalizedText'] | string;
@@ -8108,6 +8191,54 @@ export interface components {
       group?: string;
       order?: number;
       unit?: string;
+    };
+    /** @description A named, reusable group of attribute definitions (MET-16, WP-250). Its attributes are attribute definitions with scope `set`. */
+    AttributeSet: {
+      id: string;
+      /** @description Empty for system sets. */
+      organization_id?: string;
+      key: string;
+      display_name: components['schemas']['LocalizedText'];
+      description?: string;
+      /** @description A read-only system set. */
+      is_system: boolean;
+      /** @description An inactive set cannot be assigned anew. */
+      is_active: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AttributeSetCreate: {
+      /** @description Unique within the organization. */
+      key: string;
+      display_name?: components['schemas']['LocalizedText'];
+      description?: string;
+      /** @default true */
+      is_active: boolean;
+    };
+    AttributeSetPatch: {
+      display_name?: components['schemas']['LocalizedText'];
+      description?: string;
+      is_active?: boolean;
+    };
+    AttributeSetListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['AttributeSet'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    /** @description The attribute sets of a CI type ordered by position (WP-250). In a PUT, ci_type_id may be omitted; it must match the path otherwise. */
+    CITypeAttributeSets: {
+      ci_type_id?: string;
+      attribute_sets: {
+        attribute_set_id: string;
+        /** @description Unique within the type; the list is ordered by it. */
+        position: number;
+      }[];
     };
     AttributeDefinitionPatch: {
       display_name?: components['schemas']['LocalizedText'] | string;
@@ -28194,7 +28325,8 @@ export interface operations {
     parameters: {
       query?: {
         ci_type_id?: string;
-        scope?: 'type' | 'global';
+        attribute_set_id?: string;
+        scope?: 'type' | 'global' | 'set';
         /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
@@ -28343,6 +28475,160 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listAttributeSets: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute sets, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeSetListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createAttributeSet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AttributeSetCreate'];
+      };
+    };
+    responses: {
+      /** @description Attribute set created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeSet'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getAttributeSet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute set */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeSet'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteAttributeSet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute set deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateAttributeSet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AttributeSetPatch'];
+      };
+    };
+    responses: {
+      /** @description Attribute set updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeSet'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -28721,6 +29007,65 @@ export interface operations {
         };
         content?: never;
       };
+    };
+  };
+  getCiTypeAttributeSets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Assignment document */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CITypeAttributeSets'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  replaceCiTypeAttributeSets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CITypeAttributeSets'];
+      };
+    };
+    responses: {
+      /** @description Assignment document after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CITypeAttributeSets'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listCisIdBlastRadius: {

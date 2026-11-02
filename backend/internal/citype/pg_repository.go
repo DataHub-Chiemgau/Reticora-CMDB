@@ -702,6 +702,7 @@ type attributeRowJSON struct {
 	ID              string          `json:"id"`
 	OrganizationID  *string         `json:"organization_id"`
 	CITypeID        *string         `json:"ci_type_id"`
+	AttributeSetID  *string         `json:"attribute_set_id"`
 	Scope           string          `json:"scope"`
 	Key             string          `json:"key"`
 	DisplayName     json.RawMessage `json:"display_name"`
@@ -740,7 +741,8 @@ func attributesFromJSON(raw []byte) ([]AttributeDefinition, error) {
 	for i := range rows {
 		row := &rows[i]
 		d := AttributeDefinition{
-			ID: row.ID, OrganizationID: str(row.OrganizationID), CITypeID: str(row.CITypeID), Scope: row.Scope,
+			ID: row.ID, OrganizationID: str(row.OrganizationID), CITypeID: str(row.CITypeID),
+			AttributeSetID: str(row.AttributeSetID), Scope: row.Scope,
 			Key: row.Key, Description: str(row.Description), DataType: row.DataType, Required: row.Required,
 			MultiValue: row.MultiValue, Searchable: row.Searchable, Unique: row.IsUnique, UniqueScope: row.UniqueScope,
 			Inheritable: row.Inheritable, ReferenceTarget: str(row.ReferenceTarget), Group: str(row.GroupName),
@@ -879,13 +881,14 @@ func upsertFieldTx(ctx context.Context, tx pgx.Tx, orgID, typeID string, req *Up
 }
 
 // findAttributeTx returns the definition of key on typeID (empty: global
-// of the organization).
+// of the organization, scope "global"; set attributes are no global
+// definitions, WP-250).
 func findAttributeTx(ctx context.Context, tx pgx.Tx, typeID, key string) (*AttributeDefinition, error) {
 	query := `SELECT ` + attributeColumns + ` FROM attribute_definition WHERE ci_type_id::text = $1 AND key = $2`
 	args := []any{typeID, key}
 	if typeID == "" {
 		query = `SELECT ` + attributeColumns + ` FROM attribute_definition
-			WHERE ci_type_id IS NULL AND organization_id IS NOT NULL AND key = $1`
+			WHERE scope = 'global' AND organization_id IS NOT NULL AND key = $1`
 		args = []any{key}
 	}
 	d, err := scanAttribute(tx.QueryRow(ctx, query, args...))
@@ -927,13 +930,13 @@ func listFieldsTx(ctx context.Context, tx pgx.Tx, typeID string) ([]Field, error
 	return listFieldsScopeTx(ctx, tx, typeID, "type")
 }
 
-// listFieldsScopeTx lists the fields of a type, or the global fields when
-// scope is "global".
+// listFieldsScopeTx lists the fields of a type, or the global fields
+// (scope "global", without set attributes, WP-250) when scope is "global".
 func listFieldsScopeTx(ctx context.Context, tx pgx.Tx, typeID, scope string) ([]Field, error) {
 	query := `SELECT ` + attributeColumns + ` FROM attribute_definition WHERE ci_type_id::text = $1 ORDER BY sort_order ASC, key ASC`
 	args := []any{typeID}
 	if scope == "global" {
-		query = `SELECT ` + attributeColumns + ` FROM attribute_definition WHERE ci_type_id IS NULL ORDER BY sort_order ASC, key ASC`
+		query = `SELECT ` + attributeColumns + ` FROM attribute_definition WHERE scope = 'global' ORDER BY sort_order ASC, key ASC`
 		args = nil
 	}
 	rows, err := tx.Query(ctx, query, args...)
@@ -1304,6 +1307,10 @@ func isNilPointer(v any) bool {
 	case *Type:
 		return p == nil
 	case *AttributeDefinition:
+		return p == nil
+	case *AttributeSet:
+		return p == nil
+	case *TypeAttributeSets:
 		return p == nil
 	}
 	return false
