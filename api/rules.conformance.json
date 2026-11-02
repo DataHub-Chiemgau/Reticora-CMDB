@@ -1,5 +1,5 @@
 {
-  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case: rule must be valid and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all.",
+  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon.",
   "version": 1,
   "cases": [
     {
@@ -487,6 +487,1010 @@
         "op": "required",
         "message": "x"
       }
+    }
+  ],
+  "condition_cases": [
+    {
+      "name": "eq: equal text",
+      "condition": {
+        "op": "eq",
+        "field": "status",
+        "value": "active"
+      },
+      "values": {
+        "status": "active"
+      },
+      "result": true
+    },
+    {
+      "name": "eq: other text",
+      "condition": {
+        "op": "eq",
+        "field": "status",
+        "value": "active"
+      },
+      "values": {
+        "status": "retired"
+      },
+      "result": false
+    },
+    {
+      "name": "eq: number sent as text",
+      "condition": {
+        "op": "eq",
+        "field": "cpu_count",
+        "value": 4
+      },
+      "values": {
+        "cpu_count": "4"
+      },
+      "result": true
+    },
+    {
+      "name": "eq: numbers by value",
+      "condition": {
+        "op": "eq",
+        "field": "ram_gb",
+        "value": 16
+      },
+      "values": {
+        "ram_gb": 16.0
+      },
+      "result": true
+    },
+    {
+      "name": "eq: boolean",
+      "condition": {
+        "op": "eq",
+        "field": "managed",
+        "value": true
+      },
+      "values": {
+        "managed": true
+      },
+      "result": true
+    },
+    {
+      "name": "eq: boolean against its text",
+      "condition": {
+        "op": "eq",
+        "field": "managed",
+        "value": "true"
+      },
+      "values": {
+        "managed": true
+      },
+      "result": true
+    },
+    {
+      "name": "eq: missing field",
+      "condition": {
+        "op": "eq",
+        "field": "status",
+        "value": "active"
+      },
+      "values": {},
+      "result": false
+    },
+    {
+      "name": "eq: whitespace equals empty",
+      "condition": {
+        "op": "eq",
+        "field": "note",
+        "value": ""
+      },
+      "values": {
+        "note": "  "
+      },
+      "result": true
+    },
+    {
+      "name": "ne: other text",
+      "condition": {
+        "op": "ne",
+        "field": "status",
+        "value": "active"
+      },
+      "values": {
+        "status": "retired"
+      },
+      "result": true
+    },
+    {
+      "name": "ne: equal text",
+      "condition": {
+        "op": "ne",
+        "field": "status",
+        "value": "active"
+      },
+      "values": {
+        "status": "active"
+      },
+      "result": false
+    },
+    {
+      "name": "ne: missing field",
+      "condition": {
+        "op": "ne",
+        "field": "status",
+        "value": "active"
+      },
+      "values": {},
+      "result": true
+    },
+    {
+      "name": "in: one of the values",
+      "condition": {
+        "op": "in",
+        "field": "env",
+        "value": ["test", "prod"]
+      },
+      "values": {
+        "env": "prod"
+      },
+      "result": true
+    },
+    {
+      "name": "in: none of the values",
+      "condition": {
+        "op": "in",
+        "field": "env",
+        "value": ["test", "prod"]
+      },
+      "values": {
+        "env": "dev"
+      },
+      "result": false
+    },
+    {
+      "name": "in: number sent as text",
+      "condition": {
+        "op": "in",
+        "field": "tier",
+        "value": [1, 2]
+      },
+      "values": {
+        "tier": "2"
+      },
+      "result": true
+    },
+    {
+      "name": "in: missing field",
+      "condition": {
+        "op": "in",
+        "field": "env",
+        "value": ["test"]
+      },
+      "values": {},
+      "result": false
+    },
+    {
+      "name": "not_in: none of the values",
+      "condition": {
+        "op": "not_in",
+        "field": "env",
+        "value": ["test", "prod"]
+      },
+      "values": {
+        "env": "dev"
+      },
+      "result": true
+    },
+    {
+      "name": "not_in: one of the values",
+      "condition": {
+        "op": "not_in",
+        "field": "env",
+        "value": ["test", "prod"]
+      },
+      "values": {
+        "env": "test"
+      },
+      "result": false
+    },
+    {
+      "name": "gt: above",
+      "condition": {
+        "op": "gt",
+        "field": "cpu_count",
+        "value": 4
+      },
+      "values": {
+        "cpu_count": 8
+      },
+      "result": true
+    },
+    {
+      "name": "gt: equal",
+      "condition": {
+        "op": "gt",
+        "field": "cpu_count",
+        "value": 4
+      },
+      "values": {
+        "cpu_count": 4
+      },
+      "result": false
+    },
+    {
+      "name": "gt: missing field",
+      "condition": {
+        "op": "gt",
+        "field": "cpu_count",
+        "value": 4
+      },
+      "values": {},
+      "result": false
+    },
+    {
+      "name": "gte: equal",
+      "condition": {
+        "op": "gte",
+        "field": "cpu_count",
+        "value": 4
+      },
+      "values": {
+        "cpu_count": 4
+      },
+      "result": true
+    },
+    {
+      "name": "gte: below",
+      "condition": {
+        "op": "gte",
+        "field": "cpu_count",
+        "value": 4
+      },
+      "values": {
+        "cpu_count": 2
+      },
+      "result": false
+    },
+    {
+      "name": "lt: number sent as text",
+      "condition": {
+        "op": "lt",
+        "field": "ram_gb",
+        "value": 10
+      },
+      "values": {
+        "ram_gb": "3.5"
+      },
+      "result": true
+    },
+    {
+      "name": "lt: equal",
+      "condition": {
+        "op": "lt",
+        "field": "ram_gb",
+        "value": 10
+      },
+      "values": {
+        "ram_gb": 10
+      },
+      "result": false
+    },
+    {
+      "name": "lte: equal",
+      "condition": {
+        "op": "lte",
+        "field": "ram_gb",
+        "value": 10
+      },
+      "values": {
+        "ram_gb": 10
+      },
+      "result": true
+    },
+    {
+      "name": "lte: text is no number",
+      "condition": {
+        "op": "lte",
+        "field": "ram_gb",
+        "value": 10
+      },
+      "values": {
+        "ram_gb": "many"
+      },
+      "result": false
+    },
+    {
+      "name": "contains: text contains text",
+      "condition": {
+        "op": "contains",
+        "field": "hostname",
+        "value": "prod"
+      },
+      "values": {
+        "hostname": "web-prod-01"
+      },
+      "result": true
+    },
+    {
+      "name": "contains: text contains number",
+      "condition": {
+        "op": "contains",
+        "field": "hostname",
+        "value": 1
+      },
+      "values": {
+        "hostname": "web-01"
+      },
+      "result": true
+    },
+    {
+      "name": "contains: text does not contain",
+      "condition": {
+        "op": "contains",
+        "field": "hostname",
+        "value": "prod"
+      },
+      "values": {
+        "hostname": "web-test-01"
+      },
+      "result": false
+    },
+    {
+      "name": "contains: array element",
+      "condition": {
+        "op": "contains",
+        "field": "disks",
+        "value": "ssd"
+      },
+      "values": {
+        "disks": ["hdd", "ssd"]
+      },
+      "result": true
+    },
+    {
+      "name": "contains: array without element",
+      "condition": {
+        "op": "contains",
+        "field": "disks",
+        "value": "nvme"
+      },
+      "values": {
+        "disks": ["hdd", "ssd"]
+      },
+      "result": false
+    },
+    {
+      "name": "contains: missing field",
+      "condition": {
+        "op": "contains",
+        "field": "hostname",
+        "value": "prod"
+      },
+      "values": {},
+      "result": false
+    },
+    {
+      "name": "empty: missing field",
+      "condition": {
+        "op": "empty",
+        "field": "owner"
+      },
+      "values": {},
+      "result": true
+    },
+    {
+      "name": "empty: null",
+      "condition": {
+        "op": "empty",
+        "field": "owner"
+      },
+      "values": {
+        "owner": null
+      },
+      "result": true
+    },
+    {
+      "name": "empty: whitespace text",
+      "condition": {
+        "op": "empty",
+        "field": "owner"
+      },
+      "values": {
+        "owner": "   "
+      },
+      "result": true
+    },
+    {
+      "name": "empty: empty array",
+      "condition": {
+        "op": "empty",
+        "field": "owner"
+      },
+      "values": {
+        "owner": []
+      },
+      "result": true
+    },
+    {
+      "name": "empty: empty object",
+      "condition": {
+        "op": "empty",
+        "field": "owner"
+      },
+      "values": {
+        "owner": {}
+      },
+      "result": true
+    },
+    {
+      "name": "empty: zero is a value",
+      "condition": {
+        "op": "empty",
+        "field": "owner"
+      },
+      "values": {
+        "owner": 0
+      },
+      "result": false
+    },
+    {
+      "name": "not_empty: text",
+      "condition": {
+        "op": "not_empty",
+        "field": "owner"
+      },
+      "values": {
+        "owner": "ops"
+      },
+      "result": true
+    },
+    {
+      "name": "not_empty: false is a value",
+      "condition": {
+        "op": "not_empty",
+        "field": "owner"
+      },
+      "values": {
+        "owner": false
+      },
+      "result": true
+    },
+    {
+      "name": "not_empty: missing field",
+      "condition": {
+        "op": "not_empty",
+        "field": "owner"
+      },
+      "values": {},
+      "result": false
+    },
+    {
+      "name": "all: every comparison holds",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "status",
+            "value": "active"
+          },
+          {
+            "op": "gt",
+            "field": "cpu_count",
+            "value": 2
+          }
+        ]
+      },
+      "values": {
+        "status": "active",
+        "cpu_count": 4
+      },
+      "result": true
+    },
+    {
+      "name": "all: one comparison fails",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "status",
+            "value": "active"
+          },
+          {
+            "op": "gt",
+            "field": "cpu_count",
+            "value": 2
+          }
+        ]
+      },
+      "values": {
+        "status": "active",
+        "cpu_count": 1
+      },
+      "result": false
+    },
+    {
+      "name": "all: no rules hold",
+      "condition": {
+        "op": "all",
+        "rules": []
+      },
+      "values": {
+        "status": "active"
+      },
+      "result": true
+    },
+    {
+      "name": "any: one comparison holds",
+      "condition": {
+        "op": "any",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "env",
+            "value": "prod"
+          },
+          {
+            "op": "eq",
+            "field": "env",
+            "value": "test"
+          }
+        ]
+      },
+      "values": {
+        "env": "test"
+      },
+      "result": true
+    },
+    {
+      "name": "any: no comparison holds",
+      "condition": {
+        "op": "any",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "env",
+            "value": "prod"
+          },
+          {
+            "op": "eq",
+            "field": "env",
+            "value": "test"
+          }
+        ]
+      },
+      "values": {
+        "env": "dev"
+      },
+      "result": false
+    },
+    {
+      "name": "any: no rules do not hold",
+      "condition": {
+        "op": "any",
+        "rules": []
+      },
+      "values": {
+        "env": "dev"
+      },
+      "result": false
+    },
+    {
+      "name": "not: negates a holding comparison",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "env",
+            "value": "prod"
+          }
+        ]
+      },
+      "values": {
+        "env": "prod"
+      },
+      "result": false
+    },
+    {
+      "name": "not: negates a failing comparison",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "env",
+            "value": "prod"
+          }
+        ]
+      },
+      "values": {
+        "env": "dev"
+      },
+      "result": true
+    },
+    {
+      "name": "not: missing field is empty",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "not_empty",
+            "field": "owner"
+          }
+        ]
+      },
+      "values": {},
+      "result": true
+    },
+    {
+      "name": "nested: all of any and not, holds",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "any",
+            "rules": [
+              {
+                "op": "eq",
+                "field": "env",
+                "value": "prod"
+              },
+              {
+                "op": "in",
+                "field": "tier",
+                "value": [1, 2]
+              }
+            ]
+          },
+          {
+            "op": "not",
+            "rules": [
+              {
+                "op": "empty",
+                "field": "owner"
+              }
+            ]
+          }
+        ]
+      },
+      "values": {
+        "env": "dev",
+        "tier": 1,
+        "owner": "ops"
+      },
+      "result": true
+    },
+    {
+      "name": "nested: all of any and not, the not fails",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "any",
+            "rules": [
+              {
+                "op": "eq",
+                "field": "env",
+                "value": "prod"
+              },
+              {
+                "op": "in",
+                "field": "tier",
+                "value": [1, 2]
+              }
+            ]
+          },
+          {
+            "op": "not",
+            "rules": [
+              {
+                "op": "empty",
+                "field": "owner"
+              }
+            ]
+          }
+        ]
+      },
+      "values": {
+        "env": "prod",
+        "tier": 3
+      },
+      "result": false
+    },
+    {
+      "name": "nested: not of any of all",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "any",
+            "rules": [
+              {
+                "op": "all",
+                "rules": [
+                  {
+                    "op": "eq",
+                    "field": "env",
+                    "value": "prod"
+                  },
+                  {
+                    "op": "gte",
+                    "field": "cpu_count",
+                    "value": 8
+                  }
+                ]
+              },
+              {
+                "op": "contains",
+                "field": "disks",
+                "value": "nvme"
+              }
+            ]
+          }
+        ]
+      },
+      "values": {
+        "env": "prod",
+        "cpu_count": 4,
+        "disks": ["ssd"]
+      },
+      "result": true
+    }
+  ],
+  "invalid_conditions": [
+    {
+      "name": "invalid: not an object",
+      "condition": "eq",
+      "path": "condition"
+    },
+    {
+      "name": "invalid: unknown operator",
+      "condition": {
+        "op": "xor",
+        "rules": []
+      },
+      "path": "op"
+    },
+    {
+      "name": "invalid: missing operator",
+      "condition": {
+        "field": "env",
+        "value": "prod"
+      },
+      "path": "op"
+    },
+    {
+      "name": "invalid: value operator in a condition",
+      "condition": {
+        "op": "required"
+      },
+      "path": "op"
+    },
+    {
+      "name": "invalid: nested value operator",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "pattern",
+            "pattern": "x"
+          }
+        ]
+      },
+      "path": "rules[0].op"
+    },
+    {
+      "name": "invalid: comparison without field",
+      "condition": {
+        "op": "eq",
+        "value": "prod"
+      },
+      "path": "field"
+    },
+    {
+      "name": "invalid: field of only whitespace",
+      "condition": {
+        "op": "eq",
+        "field": "  ",
+        "value": "prod"
+      },
+      "path": "field"
+    },
+    {
+      "name": "invalid: field is no text",
+      "condition": {
+        "op": "eq",
+        "field": 1,
+        "value": "prod"
+      },
+      "path": "field"
+    },
+    {
+      "name": "invalid: eq without value",
+      "condition": {
+        "op": "eq",
+        "field": "env"
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: eq with null",
+      "condition": {
+        "op": "eq",
+        "field": "env",
+        "value": null
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: eq with an object",
+      "condition": {
+        "op": "eq",
+        "field": "env",
+        "value": {
+          "a": 1
+        }
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: contains with an array",
+      "condition": {
+        "op": "contains",
+        "field": "disks",
+        "value": ["ssd"]
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: empty with value",
+      "condition": {
+        "op": "empty",
+        "field": "owner",
+        "value": ""
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: in without an array",
+      "condition": {
+        "op": "in",
+        "field": "env",
+        "value": "prod"
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: in with an empty array",
+      "condition": {
+        "op": "in",
+        "field": "env",
+        "value": []
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: in with an object",
+      "condition": {
+        "op": "in",
+        "field": "env",
+        "value": [
+          "prod",
+          {
+            "a": 1
+          }
+        ]
+      },
+      "path": "value[1]"
+    },
+    {
+      "name": "invalid: gt with text",
+      "condition": {
+        "op": "gt",
+        "field": "cpu_count",
+        "value": "4"
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: not with two rules",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "empty",
+            "field": "owner"
+          },
+          {
+            "op": "empty",
+            "field": "env"
+          }
+        ]
+      },
+      "path": "rules"
+    },
+    {
+      "name": "invalid: not without rules",
+      "condition": {
+        "op": "not",
+        "rules": []
+      },
+      "path": "rules"
+    },
+    {
+      "name": "invalid: any without rules",
+      "condition": {
+        "op": "any"
+      },
+      "path": "rules"
+    },
+    {
+      "name": "invalid: rules are no array",
+      "condition": {
+        "op": "all",
+        "rules": {
+          "op": "empty",
+          "field": "x"
+        }
+      },
+      "path": "rules"
+    },
+    {
+      "name": "invalid: unknown property",
+      "condition": {
+        "op": "eq",
+        "field": "env",
+        "value": "prod",
+        "message": "x"
+      },
+      "path": "message"
+    },
+    {
+      "name": "invalid: value property in a comparison",
+      "condition": {
+        "op": "eq",
+        "field": "env",
+        "value": "prod",
+        "values": ["prod"]
+      },
+      "path": "values"
+    },
+    {
+      "name": "invalid: nested unknown property",
+      "condition": {
+        "op": "any",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "env",
+            "value": "prod"
+          },
+          {
+            "op": "empty",
+            "fild": "owner"
+          }
+        ]
+      },
+      "path": "rules[1].fild"
+    },
+    {
+      "name": "invalid: nested comparison without field",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "env",
+            "value": "prod"
+          },
+          {
+            "op": "not",
+            "rules": [
+              {
+                "op": "empty"
+              }
+            ]
+          }
+        ]
+      },
+      "path": "rules[1].rules[0].field"
     }
   ]
 }
