@@ -50,7 +50,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-98](#e-98) | Webhook-Abos und der Scope ihres Erzeugers (TEN-09) | entschieden: Option B (Auftraggeber, 2026-10-25) | WP-601 |
 | [E-99](#e-99) | Auswahl der Oberflächensprache (GLO-10, UI-18) | entschieden (Auftraggeber 2026-10-27): Option 1 | WP-523 |
 | [E-100](#e-100) | Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-649 |
-| [E-101](#e-101) | WP-332 AK 3: Rahmen und Ledger eines Ingest-Batches in einer oder in zwei Transaktionen (NFR-03) | offen; Übergangsregel: Empfehlung (Option 1) | WP-657 |
+| [E-101](#e-101) | WP-332 AK 3: Rahmen und Ledger eines Ingest-Batches in einer oder in zwei Transaktionen (NFR-03) | entschieden: Option 1 (Auftraggeber, 2026-11-02) | WP-657 |
 | [E-102](#e-102) | Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432) | offen; Übergangsregel: Empfehlung (Option 1) | WP-703 |
 
 ## E-59
@@ -1070,7 +1070,7 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Thema:** WP-332 AK 3: Rahmen und Ledger eines Ingest-Batches in einer oder in zwei Transaktionen (NFR-03)
 
-**Status:** offen; Übergangsregel: Empfehlung (Option 1)
+**Status:** entschieden: Option 1 (Auftraggeber, 2026-11-02)
 
 **Frage:** WP-332 (`nfr03-tx`) verlangt in AK 3: „Rahmen und Ledger eines Batches laufen in einer Transaktion“. Gebaut und gemessen sind zwei Transaktionen je Batch: Der Rahmen (Ledger lesen, Typ-Lookup, VRF) läuft kurz vor den Records, der Ledger (ein `unnest`-INSERT) nach den Records; zusammen 8 Statements in 2 Transaktionen, unabhängig von der Batchgröße (`TestIngestStatementBudget`, `docs/acceptance/lasttest-g1.md`). Die Wiederholungsprüfung (K7) hat die Abweichung als F-386 (P3) erfasst. Der Ledger darf nur Records nennen, deren eigene Transaktion committet hat, und der Rahmen muss ihn vor den Records lesen; eine gemeinsame Transaktion bliebe deshalb über den ganzen Batch auf einer zweiten Pool-Verbindung offen. Ein Prototyp (WP-657) hängt damit bei einem Pool mit einer Verbindung bis zum Timeout (500 nach 10 s statt 202 nach 107 ms), zwei Organisationen auf einem Pool mit zwei Verbindungen in 5 von 5 Runden; die bestehenden Suiten fangen das nicht. Funktional wirkt die Abweichung nicht: Die Budgets halten, und eine Neuzustellung nach verlorenem Ledger-Schreibvorgang wendet idempotent an (gemessen: 0 neue CIs, 0 neue `ci_change`). Soll der Plantext an den gebauten Entwurf angeglichen werden?
 
@@ -1082,7 +1082,9 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Empfehlung:** Option 1. Die Trennung folgt aus der Ledger-Semantik (REC-01) und hält den Verbindungsbedarf des Ingest bei einer Verbindung je Batch (WP-334, `processingSlots`); NFR-03 ist mit zwei Transaktionen erfüllt. Option 2 kostet rund 2 PT für 2 Statements je Batch, Option 3 bricht die Sperrreihenfolge.
 
-**Übergangsregel:** bis zur Entscheidung gilt Option 1: Code und `TestIngestStatementBudget` bleiben unverändert; WP-332 bleibt in der Wiederholungsprüfung wegen F-386 TEILWEISE BESTANDEN, bis die Entscheidung den Plantext angleicht (WP-657).
+**Übergangsregel:** bis zur Entscheidung galt Option 1: Code und `TestIngestStatementBudget` blieben unverändert; WP-332 blieb in der Wiederholungsprüfung wegen F-386 TEILWEISE BESTANDEN.
+
+**Umsetzung:** Der Auftraggeber hat am 2026-11-02 Option 1 nach der Empfehlung gewählt. WP-657 gleicht WP-332 AK 3 im Phase-1-Plan an den Entwurf an und verweist in `docs/acceptance/lasttest-g1.md` auf diese Entscheidung. Code und `TestIngestStatementBudget` bleiben unverändert (Rahmen 8 Statements in 2 Transaktionen je Batch). F-386 ist damit geschlossen.
 
 **Betroffene IDs:** NFR-03
 
