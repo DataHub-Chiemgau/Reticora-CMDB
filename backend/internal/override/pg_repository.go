@@ -149,8 +149,8 @@ func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]Fie
 			values = append(values, fv)
 		}
 		rows.Close()
-		if err = rows.Err(); err != nil {
-			return err
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return rowsErr
 		}
 		names, err := authorNamesTx(ctx, tx, values)
 		if err != nil {
