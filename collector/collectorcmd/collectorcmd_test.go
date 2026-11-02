@@ -1146,8 +1146,19 @@ func TestEnrollCommand(t *testing.T) {
 	if !handled || code != 0 {
 		t.Fatalf("enroll exit %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), colID) || !strings.Contains(stdout.String(), path) {
+	if !strings.Contains(stdout.String(), colID) || !strings.Contains(stdout.String(), path) ||
+		!strings.Contains(stdout.String(), "a running collector picks the identity up") {
 		t.Errorf("output = %s", stdout.String())
+	}
+	// Re-enrolled, a running collector keeps its old identity until it is
+	// restarted (it picks up only its first one, waitForEnrollment).
+	stdout.Reset()
+	if _, code = runCommand(context.Background(), []string{"enroll", "--server", srv.URL, "--code", "ABCD-EFGH", "--name", "site-a"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("re-enroll exit %d: %s", code, stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "replaces the identity stored there before") ||
+		!strings.Contains(out, "a running collector keeps the old identity\nuntil it is restarted") || strings.Contains(out, "picks the identity up") {
+		t.Errorf("re-enroll output = %s, want the restart required", out)
 	}
 	cfg := loadCollectorConfig()
 	if cfg.ServerURL != srv.URL || cfg.CollectorID != colID || cfg.OrganizationID != orgID || cfg.CredentialsPath != path {
@@ -1261,6 +1272,22 @@ func quarantined(t *testing.T, spoolDir string) int {
 		t.Fatal(err)
 	}
 	return len(entries)
+}
+
+// backdateSpool rewinds the modification time (the spool's age) of every
+// spooled batch.
+func backdateSpool(t *testing.T, spoolDir string, age time.Duration) {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(spoolDir, "*.json"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no spooled batches (%v)", err)
+	}
+	stale := time.Now().Add(-age)
+	for _, f := range files {
+		if err = os.Chtimes(f, stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // TestSpoolPoisonBatchIsQuarantined covers F-085 (COL-05): a batch the

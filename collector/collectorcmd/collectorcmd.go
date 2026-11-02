@@ -862,12 +862,26 @@ func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.Device
 }
 
 // spoolPayloads persists payloads in their order with the source time of
-// their run (partSourceTime).
+// their run (partSourceTime). When the spool is full, the payloads after
+// the refused one are not spooled either (a later one could fit and
+// overtake it): the spool counted the refused one, they are counted as
+// lost too (NFR-04: every loss is counted).
 func (u *uploader) spoolPayloads(ctx context.Context, payloads []recordsPayload, sourceTime time.Time) error {
 	for i, p := range payloads {
-		if err := u.spoolResults(ctx, p.data, partSourceTime(sourceTime, i)); err != nil {
-			return err
+		err := u.spoolResults(ctx, p.data, partSourceTime(sourceTime, i))
+		if err == nil {
+			continue
 		}
+		if rest := payloads[i+1:]; errors.Is(err, buffer.ErrSpoolFull) && len(rest) > 0 {
+			loss := buffer.Loss{Messages: len(rest), Reason: buffer.LossSpoolFull}
+			for _, q := range rest {
+				loss.Bytes += int64(len(q.data))
+			}
+			if lossErr := u.spool.RecordLoss(ctx, loss); lossErr != nil {
+				err = fmt.Errorf("%w; %w", err, lossErr)
+			}
+		}
+		return err
 	}
 	return nil
 }

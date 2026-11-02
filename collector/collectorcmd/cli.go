@@ -98,16 +98,27 @@ func runEnroll(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "--ca-file: %v\n", err)
 		return 1
 	}
+	// A running collector picks up an identity only while it waits for its
+	// first one (waitForEnrollment); one that runs with an identity keeps it
+	// until it is restarted.
+	_, prevErr := (&keystore.FileStore{Path: *path}).Load(ctx)
+	reenrolled := !errors.Is(prevErr, keystore.ErrNotFound)
 	creds, err := enrollAndStore(ctx, client, serverURL, enrollCode, *name, *path)
 	if err != nil {
 		fmt.Fprintln(stderr, strings.ReplaceAll(err.Error(), enrollCode, "[redacted]"))
 		return 1
 	}
-	fmt.Fprintf(stdout, "Collector %q enrolled as %s.\nIdentity stored in %s.\n"+
-		"Start or restart the collector (systemctl restart reticora-collector); a running collector picks the identity up\n"+
-		"within %s. It connects to %s (4222/TCP outbound) and reports its local subnets and RETICORA_SCAN_SUBNETS;\n"+
+	replaced, apply := "", fmt.Sprintf("Start or restart the collector (systemctl restart reticora-collector); "+
+		"a running collector picks the identity up\nwithin %s.", natsEnrollPoll)
+	if reenrolled {
+		replaced = "; it replaces the identity stored there before"
+		apply = "Restart the collector (systemctl restart reticora-collector): a running collector keeps the old identity\n" +
+			"until it is restarted."
+	}
+	fmt.Fprintf(stdout, "Collector %q enrolled as %s.\nIdentity stored in %s%s.\n"+
+		"%s It connects to %s (4222/TCP outbound) and reports its local subnets and RETICORA_SCAN_SUBNETS;\n"+
 		"confirm them as discovery scopes on the Discovery page: nothing is discovered before.\n",
-		*name, creds.DeviceID, *path, natsEnrollPoll, natsEndpoint(serverURL))
+		*name, creds.DeviceID, *path, replaced, apply, natsEndpoint(serverURL))
 	return 0
 }
 

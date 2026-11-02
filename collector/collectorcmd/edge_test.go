@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 )
 
 // withEdge replaces the edge requester for one test.
@@ -221,15 +222,22 @@ func TestOversizedRecordRunIsSplitForTheEdge(t *testing.T) {
 // limit) is replaced by its parts, which the flush delivers in order ahead
 // of the later batches; the batch is acknowledged, nothing is lost and
 // nothing goes to the HTTP path. Also when the known limit lets it pass
-// (the edge's limit is smaller), it is halved until it fits.
+// (the edge's limit is smaller), it is halved until it fits, and the
+// records keep their order. Also when the spool's free space is smaller
+// than the batch: the parts take its space, so the split neither waits
+// for room (spool_full) nor drops the batch, even one older than the
+// minimum retention (size_limit), and the batches behind it flow.
 func TestSpooledOversizedBatchIsSplit(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		knownLimit int
-		ordered    bool
+		nearCap    bool
+		age        time.Duration
 	}{
-		{"known edge limit", 4096, true},
-		{"edge limit smaller than known", defaultRecordPayloadLimit, false},
+		{"known edge limit", 4096, false, 0},
+		{"edge limit smaller than known", defaultRecordPayloadLimit, false, 0},
+		{"spool near its size limit", 4096, true, 0},
+		{"spool near its size limit, batch older than the retention", defaultRecordPayloadLimit, true, 25 * time.Hour},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := captureLogs(t)
@@ -251,19 +259,21 @@ func TestSpooledOversizedBatchIsSplit(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if tc.age > 0 {
+				backdateSpool(t, spoolDir, tc.age)
+			}
+			if tc.nearCap {
+				stats, _ := up.spool.Stats(ctx)
+				up.spool.MaxBytes = stats.Bytes + 2000
+				if msgs, _ := up.spool.PeekBatch(ctx, 1); len(msgs) != 1 || len(msgs[0].Payload) <= 2000 {
+					t.Fatalf("control: the head batch must not fit the free space of the spool")
+				}
+			}
 			up.flushSpool(ctx)
 
 			took, sizes := edge.took()
-			want := append(namesOf(old), namesOf(later)...)
-			if tc.ordered && !slices.Equal(took, want) {
+			if want := append(namesOf(old), namesOf(later)...); !slices.Equal(took, want) {
 				t.Errorf("delivered %v, want the 60 old records in order, then the later batch", took)
-			}
-			if !tc.ordered {
-				head := slices.Clone(took[:min(len(took), len(old))])
-				slices.Sort(head)
-				if len(took) != len(want) || !slices.Equal(head, namesOf(old)) || !slices.Equal(took[len(old):], namesOf(later)) {
-					t.Errorf("delivered %v, want the 60 old records (any order within the run), then the later batch", took)
-				}
 			}
 			if len(sizes) == 0 || slices.Max(sizes) > 4096 {
 				t.Errorf("payload sizes %v", sizes)
@@ -447,6 +457,43 @@ func TestHTTPFallback401KeepsBatchesForTheEdge(t *testing.T) {
 	_ = up.uploadRecords(ctx, namedRecords("third", 1))
 	if n := len(logLines(t, logs, unauthenticated)); n != 2 {
 		t.Errorf("unauthenticated warnings = %d, want 2 (one per edge outage)", n)
+	}
+}
+
+// TestSpoolFullInASplitRunCountsEveryPayload: when the spool fills up
+// while the payloads of a run are spooled (no edge, the HTTP path answers
+// 401), the payloads after the refused one are counted as lost too: each
+// payload is either in the spool or counted (NFR-04). Before, only the
+// refused payload was counted.
+func TestSpoolFullInASplitRunCountsEveryPayload(t *testing.T) {
+	const limit = 4096
+	withRecordLimit(t, limit)
+	withEdge(t, func(context.Context, string, []byte) ([]byte, error) { return nil, errNoEdge })
+	srv, _ := unauthenticatedAPI(t)
+	ctx := context.Background()
+	cfg := testConfig(srv.URL, t.TempDir())
+	cfg.SpoolMaxBytes = 12000
+	up, err := newUploader(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := namedRecords("run", 100)
+	raws, err := marshalRecords(records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloads, _ := splitRecords(raws, limit, true)
+	if err = up.uploadRecords(ctx, records); !errors.Is(err, buffer.ErrSpoolFull) {
+		t.Fatalf("upload: %v, want the full spool reported", err)
+	}
+	spooled, _ := up.spool.Len(ctx)
+	stats, _ := up.spool.Stats(ctx)
+	if spooled == 0 || spooled > len(payloads)-2 {
+		t.Fatalf("control: %d of %d payloads spooled, want the spool full with at least two payloads left", spooled, len(payloads))
+	}
+	if total := spooled + int(stats.DroppedMessages); total != len(payloads) || stats.DroppedBytes == 0 {
+		t.Errorf("%d payloads spooled and %d counted as lost (%d bytes), want all %d payloads accounted for",
+			spooled, stats.DroppedMessages, stats.DroppedBytes, len(payloads))
 	}
 }
 

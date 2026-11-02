@@ -494,13 +494,14 @@ func natsFailureHint(err error, host string, refusal bool) (hint string, certifi
 			"or set RETICORA_NATS_TLS_SERVER_NAME", hostErr.Host), true
 	case errors.As(err, &authErr):
 		return "the edge certificate is not signed by the collector CA of this enrollment: the collector was enrolled with another " +
-			"server or CA; re-enroll it (reticora-collector enroll --server <url> --code <code>)", true
+			"server or CA; re-enroll it (reticora-collector enroll --server <url> --code <code>), " +
+			"then restart it (systemctl restart reticora-collector)", true
 	case errors.As(err, &certErr):
 		return "the edge certificate is not accepted (" + certErr.Error() + "); check the clock of the collector host " +
 			"and the edge certificate of the server", true
 	case badAlert:
 		return "the endpoint refused the collector certificate: the collector is disabled, its certificate revoked or it was " +
-			"enrolled with another installation; re-enroll it", false
+			"enrolled with another installation; re-enroll it, then restart it (systemctl restart reticora-collector)", false
 	case refusal:
 		return "the endpoint refused the collector (authorization): the collector is disabled or unknown, " +
 			"or the authorization service of the server is unavailable", false

@@ -177,12 +177,17 @@ func (u *uploader) quarantineOversized(ctx context.Context, p recordsPayload, so
 }
 
 // splitSpooledBatch replaces the spooled batch msg, which the edge refused
-// as too large, by its parts with its source time (partSourceTime), so they
-// keep their order and their place ahead of every later batch (COL-05).
-// The parts are stored before msg is acknowledged: a crash in between
-// delivers records twice, which the server deduplicates, but loses none. A
-// batch that cannot be split (a single record the edge refused) is
-// quarantined and counted as lost.
+// as too large, by its parts with its source time (partSourceTime) in one
+// step of the spool (buffer.DiskBuffer.Replace): the parts take the place
+// of msg, so they keep their order and their place ahead of every later
+// batch (COL-05), also when msg is itself a part. They take its space too,
+// so the spool's size limit does not apply to them: a split never fails
+// for a full spool, counts no loss and drops no batch, not even msg, to
+// make room. msg is removed only once all parts are stored: a crash in
+// between delivers records twice, which the server deduplicates, but loses
+// none. The records no edge message can carry are quarantined and counted
+// as lost after the split. A batch that cannot be split (a single record
+// the edge refused) is quarantined and counted as lost.
 func (u *uploader) splitSpooledBatch(ctx context.Context, msg *buffer.Message) error {
 	limit, known := recordPayloadLimit()
 	payloads, oversized, ok := splitSpooledRecords(msg.Payload, limit, known)
@@ -194,25 +199,16 @@ func (u *uploader) splitSpooledBatch(ctx context.Context, msg *buffer.Message) e
 			"event", "collector.record.oversized", "message_id", msg.ID, "bytes", len(msg.Payload), "limit", limit)
 		return nil
 	}
-	ids := make([]string, 0, len(payloads))
+	parts := make([]buffer.Message, len(payloads))
 	for i, p := range payloads {
-		id, err := u.spool.Enqueue(ctx, buffer.Message{Topic: spoolTopic, Payload: p.data, CreatedAt: partSourceTime(msg.CreatedAt, i)})
-		if err != nil {
-			// The batch stays whole; the parts stored so far are removed.
-			if len(ids) > 0 {
-				if aerr := u.spool.Ack(ctx, ids); aerr != nil {
-					err = errors.Join(err, aerr)
-				}
-			}
-			return fmt.Errorf("split the oversized spooled batch: %w", err)
-		}
-		ids = append(ids, id)
+		parts[i] = buffer.Message{Topic: spoolTopic, Payload: p.data, CreatedAt: partSourceTime(msg.CreatedAt, i)}
+	}
+	if _, err := u.spool.Replace(ctx, msg.ID, parts); err != nil {
+		// The batch stays in the spool and is split again on the next flush.
+		return fmt.Errorf("split the oversized spooled batch: %w", err)
 	}
 	for _, p := range oversized {
 		u.quarantineOversized(ctx, p, msg.CreatedAt, limit)
-	}
-	if err := u.spool.Ack(ctx, []string{msg.ID}); err != nil {
-		return fmt.Errorf("acknowledge the split spooled batch: %w", err)
 	}
 	slog.Info("spooled batch split for the edge's maximum message size", "event", "collector.spool.split",
 		"message_id", msg.ID, "parts", len(payloads), "oversized_records", len(oversized), "limit", limit)
