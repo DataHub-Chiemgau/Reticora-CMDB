@@ -1,138 +1,262 @@
 # Entscheidungen – Phase 2 (Verwaltung, G2)
 
-Stand: 2026-10-13. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../entscheidungen.md) (E-01 bis E-36). Jede Entscheidung nennt Status, Festlegung bzw. Übergangsregel, Frage, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. „Vorläufig entschieden“ bedeutet: Die WPs starten nach der Empfehlung; widerspricht der Auftraggeber, wird das betroffene WP vor Beginn angepasst.
+Stand: 2026-11-02 (Abgleich mit main `a01e95db` nach dem Korrekturplan; Beschluss des Auftraggebers vom 2026-10-28). Gehört zu [`implementierungsplan.md`](implementierungsplan.md) und setzt [`../entscheidungen.md`](../entscheidungen.md) fort. E-Nummern sind über alle drei Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58 sowie die Aufgaben A-01 bis A-14. Der Korrekturplan belegt E-59 bis E-102 ([`../g1-korrektur/entscheidungen.md`](../g1-korrektur/entscheidungen.md), hier mit dem Zusatz „(Korrekturplan)“ zitiert). Diese Datei führt E-37 bis E-55 und E-103 bis E-143 sowie die Aufgaben A-15 bis A-53. Neue Entscheidungen erhalten die nächste freie Nummer über alle drei Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 und 2 (Stand dieser Fassung: E-144 und A-54). Jede Entscheidung nennt Status, Festlegung, Frage, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Seit dem Beschluss vom 2026-10-28 sind alle Entscheidungen dieser Datei entschieden. Die Festlegung ist die verbindliche Regel; Frage, Optionen und Quelle bleiben als Dokumentation.
+
+**Nachtrag vom 2026-10-19 (Abgleich nach Gate G1):** Gate G1 ist seit 2026-10-15 mit Freigabe des Auftraggebers bestanden (`docs/acceptance/g1-gate.md`). In Phase 1 sind seitdem E-17, E-56, E-57 und E-58 entschieden; E-02 und E-35 bleiben offen, bis die erklärten Lieferungen vorliegen. Jede Entscheidung dieser Datei ist gegen den Code geprüft. Neu gefasst sind vor allem E-38 (Pfadinventar nach dem Bestand, Alias nur für G1-Pfade, Regeln für `x-phase` und `x-feature`), E-40 (Altledger und Übergangsspalte), E-43 (Auflösung über mehrere Rollen), E-44 (Zuordnung der Routen in `gatedRoutes`, Module `disposal`, `desks` und GPS, Limits, Trial), E-48 (keine Ausnahme nach Audit-Status N/P; die Stufe `P2` zählt nur Zeilen aus Phase-2-WPs), E-53 (`duplicate_ip` besteht seit WP-088), E-54 (zwei AST-Arten) und E-55 (Pflichtfelder je Methode). Neu aufgenommen sind E-103 bis E-107 und aus der Konsolidierung der WP-Neufassungen E-108 bis E-143. Die Aufgaben A-12 bis A-19 heißen jetzt A-15 bis A-22, weil Phase 1 A-12 bis A-14 belegt; neu sind A-23 bis A-53. Stand jetzt: 60 Entscheidungen, davon 30 vorläufig entschieden und 30 offen.
+
+**Nachtrag vom 2026-10-28 (Beschluss des Auftraggebers):** Der Auftraggeber hat alle 60 Entscheidungen dieser Datei nach ihrer Empfehlung entschieden. Verlangte die Empfehlung eine Lieferung oder Bestätigung, gilt der Beschluss als Bestätigung. Fehlt eine Lieferung, ist die bisherige Übergangsregel die endgültige Regel. Alle Aufgaben dieser Datei sind erledigt, außer A-28: Die Konsolidierung von Teil 03 ist Arbeit im Plan (WP-832), keine Lieferung. Außerdem sind die Nachweise B3 (Pentest-Befundliste), B4 (v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b)) und B6 (Subprozessorenliste) gestrichen: Die Erklärung des Auftraggebers vom 2026-10-15 gilt als Nachweis für G1 und G2 ([E-103](#e-103)). Nichts davon wird nachgereicht, und kein WP gleicht mit v2-Texten ab. Weiter nachzuweisen sind nur der CI-Lauf auf dem Release-Kandidaten und der nächtliche `load.yml`-Lauf (WP-831). In Phase 1 sind damit [E-02](../entscheidungen.md#e-02) und [E-35](../entscheidungen.md#e-35) entschieden, weil die Erklärung die Lieferung ersetzt; A-02, A-07 und A-11 sind ohne Nachreichung erledigt. Nach Empfehlung entschieden sind dort auch E-11, E-13, E-16 und E-34. Stand jetzt: 60 Entscheidungen, alle entschieden.
+
+**Nachtrag vom 2026-11-02 (Abgleich mit main `a01e95db`):** Der Korrekturplan belegt E-59 bis E-102. Die bisherigen Nummern E-59 bis E-99 dieser Datei heißen deshalb E-103 bis E-143; Inhalt und Status ändern sich nicht. Überholt ist die Aussage des Nachtrags vom 2026-10-19, G1 sei bestanden: `docs/acceptance/g1-gate.md` lautet auf main „Ergebnis: offen“. Phase 2 beginnt nach E-59 (Korrekturplan, Option 1) erst mit dem GO von WP-600 (`k-gate`). Der Beschluss vom 2026-10-28 löst E-76 (Korrekturplan, Option 2: „Erklärung ersetzt keinen Nachweis“, Lieferungen A-02, A-07 und A-11 vor GA) für B3, B4 und B6 ab; die Liefer-WPs WP-453, WP-454, WP-455 und WP-457 des Korrekturplans sind gegenstandslos. Den CI-Lauf und den `load.yml`-Lauf auf dem Release-Kandidaten liefern WP-595 und WP-600 des Korrekturplans. Stand jetzt: 60 Entscheidungen, alle entschieden.
 
 ## Übersicht
 
 | Nr. | Thema | Status | Betroffene WPs |
 |---|---|---|---|
-| [E-37](#e-37) | Fehlende Metamodell-Texte MET-20, MET-30 bis MET-34, MET-40 bis MET-44 (Sets, Templates, Regeln, berechnete Attribute) | offen (Übergangsregel gilt) | WP-250, WP-251, WP-257, WP-258, WP-261 |
-| [E-38](#e-38) | API-06: REST-Ressourcennamen der Phase 2 und Umstellung abweichender Bestandspfade | vorläufig entschieden (Übergangsregel: Tabelle unten) | WP-247, WP-250, WP-251, WP-257, WP-259, WP-260, WP-263, WP-267, WP-269, WP-281, WP-283, WP-301, WP-312 |
-| [E-39](#e-39) | TKT-01/ENT-06: Abgrenzung Ticketing Essential und Standard | offen (Empfehlung als Übergangsregel) | WP-290, WP-292, WP-321 |
-| [E-40](#e-40) | Mengenartikel: `consumable` und `quantity_item` zu einem Modell zusammenführen | vorläufig entschieden (Option 1) | WP-283, WP-284 |
-| [E-41](#e-41) | Lieferantenstammdaten (`supplier_id` in AST-01 und MGT-12) | vorläufig entschieden (Option 1) | WP-269, WP-271, WP-283, WP-286 |
-| [E-42](#e-42) | SEC-09: Betrieb des Malware-Scans (ClamAV) und Verhalten bei Ausfall | vorläufig entschieden (Option 1) | WP-268 |
-| [E-43](#e-43) | RBA-07: Granularität der Feldrechte in Phase 2 (Ebenen Objekttyp, Objekt, Attribut, Relation, Aktion, Mandant, Standort, Team) | vorläufig entschieden (Option 1) | WP-264, WP-265, WP-266 |
-| [E-44](#e-44) | ENT-06 (V): Feature-Keys der Phase 2 und Paketzuordnung | offen (Empfehlung als Übergangsregel; ergänzt E-34) | WP-244, WP-267, WP-276, WP-286, WP-288, WP-289, WP-290, WP-310 |
-| [E-45](#e-45) | Epic-Zuordnung und Traceability-Epics der Phase 2 | vorläufig entschieden (Option 1) | WP-245 |
-| [E-46](#e-46) | Verschobene Phase-1-WPs (WP-215 bis WP-239) durch Phase-2-WPs ersetzen | vorläufig entschieden (Option 1) | WP-243 |
-| [E-47](#e-47) | TKT-03 [O] und CH17: Ticket-Provider-Schnittstelle in Phase 2 | offen | WP-293 |
-| [E-48](#e-48) | Traceability-Vollständigkeit für [P2] (Erweiterung von E-30) | vorläufig entschieden (Option 1) | WP-243, WP-331 |
-| [E-49](#e-49) | IMP-IO-01: Import-Dateiformate, Bibliotheken und Grenzen | vorläufig entschieden (Option 1) | WP-301, WP-302 |
-| [E-50](#e-50) | EXP-01: DATEV-Exportformat für die Anlagenbuchhaltung | offen (Übergangsregel gilt) | WP-310 |
-| [E-51](#e-51) | AST-02: Art der digitalen Unterschrift bei Übergaben | vorläufig entschieden (Option 1) | WP-276, WP-318 |
-| [E-52](#e-52) | INV-03: Barcode-Symbologie, Etikettenvorlagen und Bibliotheken | vorläufig entschieden (Option 1) | WP-289, WP-318, WP-320 |
-| [E-53](#e-53) | NET-06/NET-09: Review-Typ `duplicate_ip` als Erweiterung des Review-Modells (REC-08) | vorläufig entschieden (Option 1) | WP-299, WP-300 |
-| [E-54](#e-54) | MET-50/CH18: Technische Basis für Form Builder und Klick-Builder | vorläufig entschieden (Option 1) | WP-313, WP-315, WP-316 |
-| [E-55](#e-55) | MGT-02: Norm und Nachweiskriterien für die Entsorgungsdokumentation | offen (Übergangsregel gilt) | WP-278, WP-321 |
+| [E-37](#e-37) | Fehlende Metamodell-Texte MET-20, MET-30 bis MET-34, MET-40 bis MET-44 (Sets, Templates, Regeln, berechnete Attribute) | entschieden (2026-10-28, Empfehlung: Option 1 mit Option 2; die Texte werden nicht geliefert, daher gilt Option 2 als Regel, angepasst 2026-11-02) | WP-243, WP-246, WP-832, WP-250, WP-709, WP-251, WP-710, WP-252, WP-253, WP-712, WP-257, WP-715, WP-716, WP-258, WP-717, WP-718, WP-261, WP-721, WP-262, WP-722, WP-307, WP-797, WP-314, WP-799, WP-800, WP-801, WP-802, WP-325, WP-326, WP-330, WP-331 |
+| [E-38](#e-38) | API-06: REST-Ressourcen der Phase 2 und Ablösung abweichender Bestandspfade | entschieden (2026-10-28, Option 1: Pfadinventar, angepasst 2026-11-02) | WP-705, WP-706, WP-245, WP-247, WP-250, WP-251, WP-710, WP-712, WP-256, WP-716, WP-259, WP-719, WP-260, WP-720, WP-261, WP-721, WP-262, WP-722, WP-723, WP-796, WP-726, WP-267, WP-731, WP-811, WP-269, WP-736, WP-272, WP-742, WP-274, WP-275, WP-746, WP-747, WP-748, WP-277, WP-750, WP-753, WP-755, WP-283, WP-756, WP-757, WP-284, WP-758, WP-759, WP-286, WP-760, WP-287, WP-761, WP-762, WP-763, WP-847, WP-848, WP-849, WP-764, WP-765, WP-291, WP-292, WP-768, WP-296, WP-299, WP-301, WP-774, WP-303, WP-781, WP-305, WP-311, WP-793, WP-795, WP-797, WP-314, WP-798, WP-799, WP-800, WP-316, WP-803, WP-318, WP-806, WP-808, WP-809, WP-320, WP-812, WP-813, WP-321, WP-815, WP-846, WP-331 |
+| [E-39](#e-39) | TKT-01/ENT-06: Abgrenzung Ticketing Essential und Standard | entschieden (2026-10-28, Option 1) | WP-244, WP-705, WP-290, WP-764, WP-765, WP-291, WP-766, WP-767, WP-292, WP-768, WP-769, WP-814, WP-815, WP-820, WP-331 |
+| [E-40](#e-40) | Mengenartikel: `consumable` und `quantity_item` zu einem Modell zusammenführen | entschieden (2026-10-28, Option 1, angepasst 2026-11-02) | WP-274, WP-744, WP-750, WP-283, WP-756, WP-757, WP-284, WP-758, WP-759, WP-760, WP-844, WP-320, WP-819 |
+| [E-41](#e-41) | Lieferantenstammdaten (`supplier_id` in AST-01 und MGT-12) | entschieden (2026-10-28, Option 1) | WP-269, WP-736, WP-271, WP-738, WP-283, WP-286, WP-808, WP-812, WP-819 |
+| [E-42](#e-42) | SEC-09: Betrieb des Malware-Scans (ClamAV) und Verhalten bei Ausfall | entschieden (2026-10-28, Option 1) | WP-731, WP-733, WP-734, WP-735, WP-301, WP-321, WP-820, WP-329, WP-829 |
+| [E-43](#e-43) | RBA-07: Granularität und Auflösung der Feldrechte in Phase 2 | entschieden (2026-10-28, Option 1; Audit-Log ohne Projektion, `audit:read` legt alle Feldwerte offen, angepasst 2026-11-02) | WP-264, WP-725, WP-726, WP-265, WP-727, WP-728, WP-266, WP-729, WP-730, WP-770, WP-269, WP-765, WP-296, WP-308, WP-787, WP-788, WP-309, WP-311, WP-792, WP-793, WP-325, WP-819, WP-326 |
+| [E-44](#e-44) | ENT-06 (V): Feature-Keys der Phase 2, Paketzuordnung und Zuordnung der Routen | entschieden (2026-10-28, Option 1; ergänzt E-34, angepasst 2026-11-02) | WP-244, WP-705, WP-706, WP-247, WP-251, WP-731, WP-268, WP-269, WP-736, WP-270, WP-276, WP-748, WP-278, WP-751, WP-283, WP-756, WP-759, WP-286, WP-288, WP-762, WP-763, WP-849, WP-290, WP-291, WP-768, WP-769, WP-774, WP-788, WP-309, WP-790, WP-311, WP-318, WP-806, WP-807, WP-808, WP-320, WP-812, WP-813, WP-321, WP-814, WP-815, WP-322, WP-324, WP-325, WP-326, WP-329, WP-331 |
+| [E-45](#e-45) | Epic-Zuordnung und Traceability-Epics der Phase 2 | entschieden (2026-10-28, Option 1) | WP-243, WP-831, WP-832 |
+| [E-46](#e-46) | Verschobene Phase-1-WPs (WP-215 bis WP-239) durch Phase-2-WPs ersetzen | entschieden (2026-10-28, Option 1, angepasst 2026-11-02) | WP-243, WP-804, WP-317, WP-329, WP-331 |
+| [E-47](#e-47) | TKT-03 [O] und CH17: Ticket-Provider-Schnittstelle in Phase 2 | entschieden (2026-10-28, Option 1) | WP-293 |
+| [E-48](#e-48) | Traceability-Vollständigkeit für [P2] (Erweiterung von E-30) | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-243, WP-331 |
+| [E-49](#e-49) | IMP-IO-01: Import-Dateiformate, Bibliotheken und Grenzen | entschieden (2026-10-28, Option 1) | WP-301, WP-774, WP-302, WP-775, WP-303, WP-322, WP-823, WP-329, WP-829 |
+| [E-50](#e-50) | EXP-01: DATEV-Exportformat für die Anlagenbuchhaltung | entschieden (2026-10-28, Option 1; das Default-Mapping ist das Zielformat; angepasst 2026-11-02) | WP-310, WP-790, WP-791, WP-326, WP-331 |
+| [E-51](#e-51) | AST-02: Art der digitalen Unterschrift bei Übergaben | entschieden (2026-10-28, Option 1; Altsignaturen nach (a) übernommen; angepasst 2026-11-02) | WP-744, WP-276, WP-748, WP-749, WP-843, WP-807 |
+| [E-52](#e-52) | INV-03: Barcode-Symbologie, Etikettenvorlagen und Bibliotheken | entschieden (2026-10-28, Option 1) | WP-289, WP-762, WP-763, WP-849, WP-807, WP-813, WP-329 |
+| [E-53](#e-53) | NET-06/NET-09: Auflösungen des Review-Typs `duplicate_ip` | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-299, WP-772, WP-300, WP-773 |
+| [E-54](#e-54) | MET-50/CH18: Technische Basis für Form Builder und Klick-Builder | entschieden (2026-10-28, Option 1) | WP-715, WP-789, WP-797, WP-314, WP-800, WP-315, WP-801, WP-802, WP-316, WP-329 |
+| [E-55](#e-55) | MGT-02: Norm und Nachweiskriterien für die Entsorgungsdokumentation | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-751, WP-815, WP-331 |
+| [E-103](#e-103) | Fortgeltung der in G1 durch Erklärung abgenommenen Punkte (B3 Pentest-Befundliste, B4 v2-Texte, B6 Subprozessoren) für G2 | entschieden (2026-10-28, Beschluss des Auftraggebers: Die Erklärung vom 2026-10-15 gilt als Nachweis für G1 und G2; die Nachweise B3, B4 und B6 sind gestrichen; angepasst 2026-11-02) | WP-831, WP-329, WP-330, WP-331 |
+| [E-104](#e-104) | Form von `total` in Listen über etwa 25.000 Objekten (Folge aus E-17) | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-839, WP-740, WP-274, WP-789, WP-319, WP-327, WP-331 |
+| [E-105](#e-105) | Release-Gate für P2-Funktionen ohne eigenes Modul (Metamodell, Tags, Feldrechte, Verträge/Lieferanten, Import) | entschieden (2026-10-28, Option 1) | WP-705, WP-706, WP-247, WP-248, WP-250, WP-251, WP-710, WP-712, WP-713, WP-255, WP-256, WP-716, WP-258, WP-718, WP-259, WP-719, WP-260, WP-720, WP-261, WP-721, WP-262, WP-722, WP-723, WP-726, WP-269, WP-736, WP-270, WP-273, WP-281, WP-753, WP-762, WP-763, WP-849, WP-291, WP-768, WP-296, WP-299, WP-301, WP-774, WP-775, WP-776, WP-304, WP-780, WP-788, WP-790, WP-792, WP-797, WP-314, WP-798, WP-799, WP-800, WP-801, WP-316, WP-317, WP-807, WP-808, WP-322, WP-817, WP-822, WP-329, WP-331, WP-830 |
+| [E-106](#e-106) | RBA-05/RBA-06: Rechteschlüssel der Phase 2 und Rollenmatrix der Standardrollen | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-245, WP-250, WP-251, WP-256, WP-716, WP-259, WP-719, WP-260, WP-720, WP-261, WP-721, WP-723, WP-726, WP-269, WP-736, WP-277, WP-753, WP-283, WP-756, WP-284, WP-285, WP-286, WP-760, WP-761, WP-845, WP-768, WP-301, WP-774, WP-307, WP-792, WP-316, WP-803, WP-808, WP-320, WP-812, WP-813, WP-322, WP-817, WP-323, WP-325, WP-329, WP-330 |
+| [E-107](#e-107) | Admin-Oberfläche für Feldrechte und Lifecycle-Modelle in Phase 2 | entschieden (2026-10-28, Option 2) | WP-723, WP-726, WP-313, WP-331 |
+| [E-108](#e-108) | MET-16: Materialisierung org-spezifischer Kompositionsebenen an Systemtypen | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-250, WP-709, WP-251, WP-710, WP-252, WP-255, WP-261, WP-326 |
+| [E-109](#e-109) | DIS-02: Zuordnung des Systemtemplates aus `attributes.system_template` beim Ingest | entschieden (2026-10-28, Option 3; Option 1 erst mit einem Katalogstand, der MET-30 bis MET-34 liefert; angepasst 2026-11-02) | WP-251, WP-710 |
+| [E-110](#e-110) | RBA-03/VIE-01: IdP-gemappte Standardrollen in rollengebundener Konfiguration (Layouts, geteilte Views) | entschieden (2026-10-28, Option 1 als Ziel; bis WP-725 gilt Option 2; angepasst 2026-11-02) | WP-259, WP-719, WP-725, WP-307 |
+| [E-111](#e-111) | MET-53: Versionsbindung der Template-Bestandteile (Katalogregeln und Layouts) | entschieden (2026-10-28, Option 1) | WP-251, WP-716, WP-259, WP-260, WP-261, WP-316 |
+| [E-112](#e-112) | MET-53/API-06: Verweise auf Items desselben Metamodell-Drafts | entschieden (2026-10-28, Option 1) | WP-260, WP-261, WP-722 |
+| [E-113](#e-113) | UI-11/MET-53: Lesesicht eines Drafts in den Metamodell-Editoren und in der Formular-Vorschau | entschieden (2026-10-28, Option 3; angepasst 2026-11-02) | WP-719, WP-260, WP-720, WP-314, WP-798, WP-316, WP-803, WP-330 |
+| [E-114](#e-114) | MET-45: Ablösung der attributgebundenen Regeln neben dem Regelkatalog | entschieden (2026-10-28, Option 3; angepasst 2026-11-02) | WP-257, WP-716, WP-801, WP-802 |
+| [E-115](#e-115) | RBA-07/MET-53: Import von Feldrechten aus dem Metamodell-Export | entschieden (2026-10-28, Option 3) | WP-722, WP-726 |
+| [E-116](#e-116) | LCY-02: Bindung des Lifecycle-Modells `software` an Systemtypen | entschieden (2026-10-28, Option 1) | WP-263, WP-723 |
+| [E-117](#e-117) | Kategorie und Icon der globalen Systemtypen | entschieden (2026-10-28, Option 1) | WP-248, WP-313, WP-317 |
+| [E-118](#e-118) | MGT-01/NFR-05/NFR-06: Endgültiges Löschen von Dokumentinhalten im versionierten Bucket | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-732 |
+| [E-119](#e-119) | MGT-12: Verantwortliche am Vertrag und Wertebereich von `contract.kind` | entschieden (2026-10-28, Option 2) | WP-269, WP-270, WP-808 |
+| [E-120](#e-120) | AST-01/LCY-02: Zustand und Altfelder am Asset (Backfill `lifecycle_state`, Ablösung von `status`, Freitext `location` und Spiegelspalten) | entschieden (2026-10-28, Option 1) | WP-263, WP-271, WP-738, WP-739, WP-278, WP-279, WP-287, WP-848, WP-319 |
+| [E-121](#e-121) | AST-01/NFR-06: Lösch- und Archivsemantik für Assets | entschieden (2026-10-28, Option 2) | WP-740, WP-274, WP-744, WP-781 |
+| [E-122](#e-122) | AST-01/AST-04: Benennung des Primär-CI (`primary_ci_id`) | entschieden (2026-10-28, Option 2) | WP-738, WP-739, WP-272 |
+| [E-123](#e-123) | AST-05: Vorgabe für `child_mode` und Löschen mit Konfigurationskindern | entschieden (2026-10-28, Option 1) | WP-273 |
+| [E-124](#e-124) | SEC-05/Konvention 16: Nutzerverweise in Tabellen der Phase 2 | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-264, WP-271, WP-744, WP-745, WP-276, WP-280 |
+| [E-125](#e-125) | API-01: Verschärfungen an G1-Routen (`attributes.tags`, Beziehungstypen) | entschieden (2026-10-28, Option 3; angepasst 2026-11-02) | WP-281, WP-753, WP-294 |
+| [E-126](#e-126) | API-02: Operator `all` für Mengenfelder | entschieden (2026-10-28, Option 1) | WP-754 |
+| [E-127](#e-127) | TKT-01: Ticket-Tags und Tag-Katalog | entschieden (2026-10-28, Option 1) | WP-764 |
+| [E-128](#e-128) | STK-01/TEN-05: Gesamtbestand von Mengenartikeln über Scopes | entschieden (2026-10-28, Option 1: (a) ja, (b) nein) | WP-283, WP-756, WP-285 |
+| [E-129](#e-129) | NTF-04 [B]: Digest bei Benachrichtigungen | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-831, WP-331 |
+| [E-130](#e-130) | STK-05: Benachrichtigung des Antragstellers bei Statuswechsel einer Bestellung | entschieden (2026-10-28, Option 2) | WP-286 |
+| [E-131](#e-131) | IMP: Transit über Subnetze und VLANs im Impact | entschieden (2026-10-28, Option 1) | WP-298 |
+| [E-132](#e-132) | BLK-02: Semantik der Bulk-Aktionen Archivierung, Template-Wechsel und Zuweisung | entschieden (2026-10-28, Option 1) | WP-304, WP-780, WP-781 |
+| [E-133](#e-133) | SR-04/NFR-02: Indexnutzung nicht-leakproof Operatoren unter RLS (Volltext, Attributfilter, Eindeutigkeit) | entschieden (2026-10-28, Option 2 für Bezeichner und Attributgleichheit, Option 3 für Volltext; angepasst 2026-11-02: Attributgleichheit nach E-73 (Korrekturplan)) | WP-836, WP-839, WP-718, WP-266, WP-308, WP-309, WP-327, WP-824 |
+| [E-134](#e-134) | SRC-02: Durchsuchbarkeit von `asset.custom_fields` und Wirkung von `searchable` | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-308, WP-786 |
+| [E-135](#e-135) | INV-03: Auslieferung des Batch-Etiketten-PDFs an den Browser | entschieden (2026-10-28, Option 2; angepasst 2026-11-02) | WP-763, WP-813 |
+| [E-136](#e-136) | ABN-01 (c) [Q]: Ausführungsform der Metamodell-Abnahme | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-324, WP-330 |
+| [E-137](#e-137) | Termin der G1-Restbefunde ohne Phase-2-WP (Rest von SR-03, SR-10) | entschieden (2026-10-28, Option 2; angepasst 2026-11-02) | WP-838, WP-329 |
+| [E-138](#e-138) | RBA-05/STK-03: Recht für die Umwandlung von Mengenreservierungen (`reservations/<id>/convert`) | entschieden (2026-10-28, Option 1) | WP-277, WP-759 |
+| [E-139](#e-139) | ENT-06/INV-03: Entitlement `barcode` an den Barcode-Feldern von Assets und Standorten | entschieden (2026-10-28, Option 2) | WP-289, WP-762 |
+| [E-140](#e-140) | RBA-07: Feldrechte an Kanten (Scope beider Enden, Objektart) | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-770 |
+| [E-141](#e-141) | API-01/EXP-01: Formatwert `datev` des Exports und seine Sperre | entschieden (2026-10-28, Option 1) | WP-310, WP-790, WP-791, WP-326 |
+| [E-142](#e-142) | AST-07: Schreibpfad für den Standortwechsel serieller Assets | entschieden (2026-10-28, Option 1) | WP-274, WP-756, WP-806, WP-809 |
+| [E-143](#e-143) | TKT-01/E-39: Datenquelle der Queue-Ansicht „meine Teams“ | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-290, WP-769, WP-814 |
 
 ### Weiter gültige Entscheidungen aus Phase 1
 
 | Nr. | Thema | Status | Bedeutung für Phase 2 |
 |---|---|---|---|
-| [E-02](../entscheidungen.md#e-02) | Fehlende v2-Originaltexte | offen | Betrifft in Phase 2 nur den [A]-Anteil von UI-14 (Self-Service, Access-Reviews) und ABN-01 (a)/(b); keine Blockade für P2-WPs. |
-| [E-03](../entscheidungen.md#e-03) | Spätphasen-Module im G1-Release deaktiviert | entschieden | WP-244 stellt die Modul-Gates auf Entitlements um; P2-Module werden im G2-Release freigeschaltet, P3+/[A] bleiben aus. |
-| [E-04](../entscheidungen.md#e-04) | Teil 03 als Quelle; Indexnamen `idx_attr_<id>` | entschieden | Metamodell-Befunde werden weiter aus Teil 03 zitiert; N/P-Texte siehe E-37. |
-| [E-11](../entscheidungen.md#e-11) | Team-Scope als Schnittmenge | vorläufig | Gilt für Teamzuweisungen, Ticket-Teams und Feldrechte-Scopes. |
-| [E-17](../entscheidungen.md#e-17) | Skalierungsziel CH15 | offen | Lastbudgets der Performance-Sanity (WP-327) nutzen 10.000 Objekte. |
-| [E-25](../entscheidungen.md#e-25) | API-05-Pfade wörtlich mit Deprecation/Sunset | entschieden | Vorbild für E-38. |
-| [E-30](../entscheidungen.md#e-30) | Traceability stufenweise blockierend | entschieden | Erweitert durch E-48. |
-| [E-34](../entscheidungen.md#e-34) | ENT-06 (V)/SIM-01 Planmatrix | vorläufig | Ergänzt durch E-44. |
-| [E-36](../entscheidungen.md#e-36) | DB-05: contract in Phase 2 | entschieden | WP-269 liefert die Vertragszeile. |
+| [E-02](../entscheidungen.md#e-02) | Fehlende v2-Originaltexte (Verweise „wie v2“, „V §…“) | entschieden | Entschieden am 2026-10-28: Die Erklärung des Auftraggebers vom 2026-10-15 ersetzt die v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b) (B4, A-02 erledigt). Sie gilt nach E-103 auch für G2. Nichts wird nachgereicht, und kein WP gleicht mit v2-Texten ab. WP-330 führt (a)/(b) in der Spalte „Status G2“ von `docs/acceptance/abn-01.md` mit diesem Nachweis. Das löst E-76 (Korrekturplan, Option 2) in diesem Punkt ab; die Liefer-WPs WP-455 und WP-457 des Korrekturplans sind gegenstandslos. Den [A]-Anteil von UI-14 (Self-Service, Access-Reviews) umfasst B4 nicht; er liegt außerhalb von Phase 2, und für ihn gilt die Regel aus E-02: keine erfundenen Funktionen (A-22 erledigt). Keine Blockade für P2-WPs. |
+| [E-03](../entscheidungen.md#e-03) | Umgang mit vorhandenem Code späterer Phasen im G1-Release | entschieden | `LateModules` (`backend/internal/server/modules.go`, WP-214) bleibt die Release-Einheit. WP-244, WP-705 und WP-706 stellen Schlüssel, Org-Gate und Release-Gate um: `disposal` wird P2, das neue Modul `gps` (GPS-Verlauf, LOC-09) bleibt als P4 abgeschaltet, P3, P4 und [A] bleiben aus. WP-830 macht G2 zum Standard von `RETICORA_MODULES` (leer = alle Module mit Phase P2); das G1-Verhalten bleibt als Testprofil. Prüfungen gegen den Release-Standard (WP-329, WP-331) setzen WP-830 voraus. Das Release-Gate neuer P2-Funktionen ohne eigenes Modul regelt E-105. |
+| [E-04](../entscheidungen.md#e-04) | Teilbericht 03 nicht konsolidiert; N/P-IDs des Metamodells | entschieden | Metamodell-Befunde werden weiter aus Teil 03 zitiert; Indexnamen `idx_attr_<id>`; N/P-Texte siehe E-37. A-03 (Konsolidierung von Teil 03, seit G1 überfällig) übernimmt WP-832 (M2.0b, A-28), Voraussetzung von WP-331: GATE-01 für G2 braucht die Critical-Befunde LOC-10, LOC-11, MET-14, X-SCOPE und X-MANUAL, die nur in Teil 03 stehen. Mit Abschluss des WP sind A-03 und A-28 erledigt; den Text zu DB-01 fordert nach dem Beschluss vom 2026-10-28 niemand mehr an (E-37). Auf main a01e95db hat `docs/audit/befunde.csv` weiter keine Zeile aus Teil 03. Zweite maschinell geprüfte Befundquelle ist seit WP-699 `audit/g1-reaudit/FINDINGS.md` (Regel `reaudit_coverage` in `tests/rep01-structure.test.sh`). |
+| [E-10](../entscheidungen.md#e-10) | Tabellen ohne Org-Spalte und globale Katalogzeilen | entschieden | Neue Tabellen der Phase 2 erhalten eine Org-Spalte mit RLS. Globale Systemzeilen (Systemtypen, Systemtemplates, Systemsets, Lifecycle-Seeds) sind für die App-Rolle schreibgeschützt. Deshalb lassen sich Systemtypen (`ci_type.organization_id` NULL) nicht deaktivieren: 403 mit dem neuen Fehler `citype.ErrTypeReadOnly` aus WP-249. Eine Organisation ersetzt sie durch Klonen. Ein Ausblenden je Organisation gibt es nicht. |
+| [E-11](../entscheidungen.md#e-11) | Semantik des Team-Scopes | entschieden | Es gilt die Schnittmenge nach TEN-05: Zeilen ohne Team bleiben für team-gescopte Rollen sichtbar, aber nicht schreibbar. Das gilt für Ticket-Teams, Teamzuweisungen, `document_link.team_id` (WP-267) und in Phase 2 auch für den CI- und Asset-Owner. `ci.owner_team_id` und `asset.owner_team_id` (WP-271, WP-280) sind die Team-Spalte; legt ein team-gescopter Principal an, ist ein `owner_team_id` aus seinem Scope Pflicht. Team-beschränkte Principals legen keine Dokument-Links auf Ziele ohne Team (CI, Asset, Location) an. CI-Kindtabellen (`ci_change`, `ci_contact`, `ci_field_value`, `network_interface`, `ip_address` …) erben den Team-Scope in Phase 2 nicht. In den Feldrechten (E-43) wirkt Team nur über `object_grant` mit Team als Empfänger. Rollenzuweisungen kennen seit WP-391 einen Team-Scope (`role_assignment.scope_team_id`, `user_custom_role.scope_type` `team`, Migration 000150); `identity.Grant.Teams` wird befüllt. Zuweisungen verknüpfen die Dimensionen nach E-70 (Korrekturplan, Option 1): Vereinigung je Dimension, die Dimensionen per AND. `team_id_organization_key` besteht seit 000150. Am 2026-10-28 nach Empfehlung bestätigt, mit den Phase-2-Zusätzen (A-31 erledigt). |
+| [E-13](../entscheidungen.md#e-13) | RBA-02-Rollenmatrix und AUT-04-Schlüsselformat | entschieden | Rechte werden nur erweitert, wo Katalog oder Entscheidung sie tragen. Für Phase 2 gilt eine Ausnahme: Über den RBA-02-Text hinaus legt E-106 die neuen Schlüssel (RBA-05, Aktionsschlüssel), ihre Routen und die P2-Zeilen der Rollenmatrix fest. Grundlage ist WP-245. Seit WP-363 (000147) ist `ci_type:manage` in `citype:manage` aufgegangen. Ausgemustert sind `asset:assign`, `credential:decrypt`, `credential:write`, `permission:write`, `role:write`, `user:write` und `webhook:write`. |
+| [E-17](../entscheidungen.md#e-17) | CH15: Skalierungsziel bestätigen | entschieden | Entschieden am 2026-10-15 (Option 1): Budgets aus NFR-02 und NFR-03 bei 10.000 Objekten (CI + Asset) je Organisation; Headroom 50.000 funktionsfähig ohne Budgetzusage. Listen und Suche über etwa 25.000 Objekten sind eine bekannte Einschränkung; Folge-WPs sind WP-839 (Form von `total` nach E-104) und WP-840, beide vor WP-327. Die Standardsortierung und Zählung der CI-Liste hat WP-605 mit `idx_ci_list_sort` (000156) verbessert. Messbasis von WP-821 und WP-327; WP-822 misst konservativ mit 10.000 CIs und 10.000 Assets (20.000 Objekte nach NFR-01). |
+| [E-23](../entscheidungen.md#e-23) | Abgrenzung GLO-13 (reservierte Namensräume) zu CI-10 (Speichermodell) | entschieden | Instanzattribute liegen in `attributes._instance` (WP-256). Die vier Namensräume sind auch als Schlüssel von Sets, Templates und Regeln unzulässig. |
+| [E-25](../entscheidungen.md#e-25) | API-05/JOB: verbindliche Pfade, Revert, Snapshot | entschieden | Vorbild für E-38: Alias mit `deprecated`, `x-deprecated-at`, `x-sunset` (mindestens 12 Monate) und `x-successor` für Pfade, die im G1-Release ausgeliefert sind. `jobs/<id>/revert` besteht und vermerkt den Revert am Job (`job.reverted_at`, `job.reverted_by`, 000175, WP-553); Phase 2 ergänzt den Reverter für Bulk-Jobs (WP-305). |
+| [E-30](../entscheidungen.md#e-30) | Traceability-Prüfung: ab wann blockierend? | entschieden | [B]/[Q] blockieren seit WP-213 in jedem Lauf; erweitert durch E-48 um die Stufe `P2` für G2. Seit WP-336 liest die Prüfung auch den Korrekturplan. Seit WP-450 zählen nur Zeilen mit Testdatei (`IsTestFile`), sonst `AllowedEvidence` oder `docs/acceptance/g1-ausnahmen.csv`. WP-243 nimmt diesen Plan als dritten auf. |
+| [E-34](../entscheidungen.md#e-34) | ENT-06 (V)/SIM-01: Planmatrix und Demo-Plan | entschieden | Entschieden am 2026-10-28 (Option 1, Planmatrix bestätigt), ergänzt durch E-44: Die Matrix aus E-44 ersetzt für die P2-Schlüssel die Ist-Pläne. Limits und das neue `max_storage_mb` folgen der Festlegung von E-44 (WP-244, WP-706, WP-731). |
+| [E-35](../entscheidungen.md#e-35) | NFR-09: Inhalt der Subprozessorenliste | entschieden | Entschieden am 2026-10-28: Die Erklärung des Auftraggebers vom 2026-10-15 ersetzt die Subprozessorenliste (B6, A-11 erledigt). Sie gilt nach E-103 auch für G2, auch für die neuen Datenkategorien der Phase 2 (Dokumentenspeicher, Unterschriften, Entsorgungsnachweise, Importdateien). Die Liste wird nicht nachgereicht. Das löst E-76 (Korrekturplan, Option 2) in diesem Punkt ab; das Liefer-WP WP-454 des Korrekturplans ist gegenstandslos. |
+| [E-36](../entscheidungen.md#e-36) | DB-05: Zeilen für Vertrag, installierte Software und Health-Findings | entschieden | WP-269 liefert die Vertragszeile von DB-05; WP-737 macht den Vertrag zum Referenz- und Linkziel. WP-280 spiegelt den Owner nach DB-05 vom Asset ans CI; der Findings-Anteil von Health bleibt [P3] (LCY-06), installierte Software kommt mit dem Agent [P4]. |
+| [E-56](../entscheidungen.md#e-56) | NFR-03: Reihenfolge der Verarbeitung bei parallelen Ingest-Spuren | entschieden | Jeder Pfad der Phase 2, der CIs anlegt oder über Identitätsmerkmale abgleicht, nimmt die Identitäts- und `max_cis`-Sperre und zählt in der Transaktion neu (K21, WP-835). Das ist der Import (WP-302, über ihn auch WP-303). WP-304, WP-272 und WP-300 legen keine CIs an; Interface-IPs sind keine Identitätssperren. Audit und Outbox schreiben zuletzt vor dem Commit. Seit WP-608 schreibt die Batch-Transaktion eines Fensters auch die Updates bekannter Geräte (Ergänzung vom 2026-10-26); Ingest-Erweiterungen der Phase 2 laufen in dieser Transaktion. Den Outbox-Zähler je Organisation liefert WP-834 (`docs/betrieb/ingest-spuren.md`). |
+| [E-57](../entscheidungen.md#e-57) | Impact-Antwort: kompakte Form und API-01 | entschieden | Erweiterungen von Impact und Topologie (WP-294, WP-297, WP-298) sind additiv und im Sparse-Fieldset `fields=` verfügbar; die Standardform bleibt. Die Oberfläche fragt die kompakte Form über `fields=` an (`IMPACT_RESULT_FIELDS` in `frontend/src/api/cmdb.ts`). Die Budgets `impact` und `impact_full` aus WP-335 gelten weiter (K23). Option C nur nach 12 Monaten Deprecation. |
+| [E-58](../entscheidungen.md#e-58) | Referenzumgebung des G1-Lasttests (SR-06) | entschieden | Entschieden für G1 (Option 1); GATE-03 gilt nur für G1. WP-327 übernimmt das Nachweisprotokoll als Festlegung dieses Plans: `load.yml`, ein Job je Szenario mit frischem Seed und `ANALYZE`, 4 Spuren, 4 vCPU. Nach der Ergänzung vom 2026-10-26 gilt ein Budget als gehalten, wenn der Median dreier archivierter Läufe desselben Server-Commits im Budget liegt. Ein Job gilt als verfehlt, wenn er in mindestens zwei von drei Läufen rot ist (`tests/load/evaluate-runs.sh`, `.github/workflows/load-evidence.yml`). Dedizierter Referenzhost vor GA (SR-06). |
+| [E-28](../entscheidungen.md#e-28) | Pentest: Dienstleister, Umfang, Termin; NFR-08 | entschieden | B3 ist durch die Erklärung des Auftraggebers vom 2026-10-15 nachgewiesen. Nach dem Beschluss vom 2026-10-28 ersetzt sie Zusammenfassung und Befundliste (A-07 erledigt) und gilt nach E-103 auch für G2. Nichts wird nachgereicht. Das löst E-76 (Korrekturplan, Option 2) in diesem Punkt ab; das Liefer-WP WP-453 des Korrekturplans ist gegenstandslos. WP-329 vermerkt diesen Nachweis in der Nachverfolgung G1. |
 
 ## E-37
 
 **Thema:** Fehlende Metamodell-Texte MET-20, MET-30 bis MET-34, MET-40 bis MET-44 (Sets, Templates, Regeln, berechnete Attribute)
 
-**Status:** offen (Übergangsregel gilt)
+**Status:** entschieden (2026-10-28, Empfehlung: Option 1 mit Option 2; die Texte werden nicht geliefert, daher gilt Option 2 als Regel, angepasst 2026-11-02)
 
-**Festlegung:** Keine Festlegung möglich: Die Texte kann nur der Auftraggeber liefern (Aufgabe A-03 aus E-04, bisher nicht erledigt). Übergangsregel: Die WPs WP-250, WP-251, WP-257 und WP-258 setzen nur die Bestandteile um, die aus den vorliegenden Querverweisen folgen (MET-10 „validation (JSON-AST)“ und „computed (MET-44)“, MET-16 „Attribute Sets (in definierter Reihenfolge)“ und „Templates (in definierter Reihenfolge)“, MET-45 Regelsprache, MET-53 „Draft → Test → Publish für Typen, Templates, Sets, Regeln, Layouts“, UI-11 „Sets, Templates, Regeln (Klick-Builder)“, API-06 „Sets, Templates/Versionen, Regeln“, VIE-02 „Garantie läuft bald ab (MET-44)“, JOB-02 „Computed-Attribute-Refresh“, ABN-01 (c) „Attribute Set zuordnen; zwei Templates kombinieren; Regel im Klick-Builder definieren; Template-Version migrieren, Overrides bleiben erhalten“). Die N/P-IDs erhalten erst nach Lieferung Traceability-Zeilen; bis dahin tragen die WPs die verweisenden IDs (MET-16, MET-10, MET-53, UI-11).
+**Festlegung:** Beschluss des Auftraggebers vom 2026-10-28: Die Texte MET-20, MET-30 bis MET-34 und MET-40 bis MET-44 werden nicht geliefert. Option 2 ist die verbindliche Regel für Phase 2. Die Metamodell-WPs setzen nur die Bestandteile um, die aus den vorliegenden Querverweisen folgen: MET-10 „validation (JSON-AST)“ und „computed (MET-44)“, MET-16 „Attribute Sets (in definierter Reihenfolge)“ und „Templates (in definierter Reihenfolge)“, MET-45 Regelsprache, MET-53 „Draft → Test → Publish für Typen, Templates, Sets, Regeln, Layouts“, UI-11 „Sets, Templates, Regeln (Klick-Builder)“, API-06 „Sets, Templates/Versionen, Regeln“, VIE-02 „Garantie läuft bald ab (MET-44)“, JOB-02 „Computed-Attribute-Refresh“ und ABN-01 (c) „Attribute Set zuordnen; zwei Templates kombinieren; Regel im Klick-Builder definieren; Template-Version migrieren, Overrides bleiben erhalten“. Daraus folgt:
 
-**Aufgabe:** Wortlaut, Tag/Gate und Testziel für MET-20, MET-30 bis MET-34 und MET-40 bis MET-44 nachliefern. Zuständig: Auftraggeber/Product Owner. Termin: vor WP-250 (`met-sets`), spätestens vor WP-261 (`met-publish`).
+- Attribute Sets (WP-250, WP-709, Set-Editor WP-797) folgen nur MET-16 (Reihenfolge nach der Typkette), MET-53 und ABN-01 (c). Overrides und Versionen je Set sind nicht Bestandteil.
+- Templates führen keine eigenen Attributschlüssel ein. Template-Versionen enthalten nur einengende Overrides vorhandener Definitionen des Typs, seiner Typkette oder globaler Definitionen (`scope = 'global'`) in Reihenfolge, keine Sets (WP-251, WP-314). Systemtemplates tragen die Katalogschlüssel, auf die der Ingest seit WP-581 (F-263) die `systemTemplate`-Werte der mitgelieferten Collector-Profile abbildet (DIS-02, `collector/profiles/data/*.yaml`; `discovery.SystemTemplateKey` in `backend/internal/discovery/system_template.go`). Das sind `physical_server`, `switch`, `router`, `firewall`, `access_point`, `ups`, `pdu`, `hypervisor` und `storage`. Am CI steht im Attribut `system_template` nur ein Katalogschlüssel. Werte, die schon Katalogschlüssel sind (etwa aus Profilen in `RETICORA_PROFILES_DIR`), übernimmt der Ingest unverändert, unbekannte verwirft er. Systemtemplates entstehen nur für die 9 Zielschlüssel der mitgelieferten Profile. Typ eines Systemtemplates ist der System-Typ der Profile, die auf den Schlüssel abbilden (`physical_server` → `server`). `storage` stammt aus Profilen der Typen `nas` und `storage_array` und hängt am Typ `storage_array` (Planannahme; `nas` erhält kein Systemtemplate). Systemtemplates bleiben ohne Items. Eigene Template-Schlüssel wären ein neuer Auftrag. Sie würden `attribute_definition` um den scope `template` erweitern. Das ändert `attribute_definition_scope_check` (aus 000055 als `ci_type_attribute_scope_check`, in 000105 umbenannt; von WP-250 um `set` erweitert) und `attribute_definition_scope_type_check` (000105). Außerdem schließt es die Template-Definitionen aus `generate_attribute_schema` und aus der Typebene in `ResolveFields` aus.
+- Die Template-Migration je CI (WP-253, WP-712) stützt sich nur auf ABN-01 (c) und MET-16.
+- Der Regelkatalog (WP-716, WP-257, Oberfläche WP-801) kommt ohne Warnstufe `severity` aus: Jede aktive Katalogregel blockiert mit 422. Ein nicht blockierender Warnkanal ist nicht Bestandteil der Phase 2. Die Bedingungsgrammatik (WP-715) folgt MET-45.
+- Berechnete Attribute (WP-258, WP-717, WP-718, Ausdrucksmodus WP-802) folgen MET-10, VIE-02 und JOB-02. „Garantie läuft bald ab“ setzt WP-307 über das berechnete CI-Attribut `warranty_days_left` (`entity_kind` `ci`) mit `lte` 30 um; die Schwelle 30 Tage ist eine Planannahme ohne Katalogwert.
+- `metamodel.published`: WP-246 legt nur den Rahmen-`$def` fest. Die Fachfelder ergänzt WP-261 nach den Modellen aus WP-250, WP-251, WP-257 und WP-258; dasselbe gilt für das Format v2 von Export und Import (WP-262, WP-722).
+- WP-330 prüft in ABN-01 (c) nur die aus dieser Regel abgeleiteten Bestandteile.
+- Die N/P-IDs tragen in `docs/plan/phase2/abdeckung.csv` den Tag „nicht geliefert“ und `abschluss_wp` „–“. Sie erhalten keine Traceability-Zeilen und sind von der Vollständigkeit ausgenommen (E-48). Die WPs tragen die verweisenden IDs (MET-10, MET-16, MET-45, MET-53, UI-11).
+- DB-01 (ebenfalls A-03) hat keinen Text und in Phase 2 kein WP (A-28, E-04).
 
-**Frage:** Elf Metamodell-IDs sind nur in der Vollständigkeitsliste enthalten; der Wortlaut fehlt (Audit Teil 03). Sie betreffen vermutlich Attribute Sets, Templates mit Versionen, den Regelkatalog und berechnete Attribute – Kernbestandteile der Phase 2.
+**Aufgabe:** **erledigt 2026-10-28** A-15: Der Beschluss des Auftraggebers ersetzt die Lieferung. Die Texte MET-20, MET-30 bis MET-34 und MET-40 bis MET-44 werden nicht nachgeliefert; Option 2 gilt als Regel.
+
+**Frage:** Elf Metamodell-IDs sind nur in der Vollständigkeitsliste enthalten; der Wortlaut fehlt (Audit Teil 03). Sie betreffen vermutlich Attribute Sets, Templates mit Versionen, den Regelkatalog und berechnete Attribute, also Kernbestandteile der Phase 2. Der Katalog nennt MET-44 nur als Querverweis.
 
 **Optionen:**
 
 1. Texte nachliefern; die WPs prüfen ihre Akzeptanzkriterien vor Beginn gegen den Text.
 2. Umsetzung ausschließlich nach den Querverweisen (Übergangsregel); die IDs bleiben N/P und zählen nicht für GATE-02.
-3. Phase 2 ohne Sets/Templates/Regeln/computed ausliefern (verletzt MET-16, MET-53, UI-11, ABN-01 c).
+3. Phase 2 ohne Sets, Templates, Regeln und berechnete Attribute ausliefern (verletzt MET-16, MET-53, UI-11 und ABN-01 c).
 
-**Empfehlung:** Option 1 mit Option 2 als Übergangsregel. Option 3 scheidet aus, weil MET-16, MET-53 und ABN-01 (c) die Bestandteile verbindlich verlangen.
+**Empfehlung:** Option 1 mit Option 2 als Übergangsregel. Option 3 scheidet aus, weil MET-16, MET-53 und ABN-01 (c) die Bestandteile verbindlich verlangen. Die Einschränkungen der Übergangsregel (keine eigenen Template-Schlüssel, keine Overrides je Set, keine Warnstufe) halten die Modelle offen für die Texte.
 
-**Blockiert / Auswirkung:** Akzeptanzkriterien von WP-250, WP-251, WP-257, WP-258, WP-261, WP-313 bis WP-316; GATE-02 für die N/P-IDs.
+**Blockiert / Auswirkung:** Die Regel bestimmt die Akzeptanzkriterien von WP-250, WP-709, WP-251, WP-710, WP-252, WP-253, WP-712, WP-715, WP-716, WP-257, WP-258, WP-717, WP-718, WP-721, WP-261, WP-262, WP-722, WP-246, WP-307, WP-797, WP-314, WP-799, WP-800, WP-801, WP-802, WP-325, WP-326 und WP-330. Die N/P-IDs sind dauerhaft von GATE-02 ausgenommen (E-48, WP-243, WP-331). Kein WP wartet auf Texte.
 
-**Quelle:** docs/audit/03-datenmodell-standorte-metamodell.md:61–71; docs/plan/entscheidungen.md#e-04
+**Quelle:** docs/audit/03-datenmodell-standorte-metamodell.md:61–71; docs/plan/entscheidungen.md#e-04 (A-03); docs/plan/phase2/abdeckung.csv (MET-20 bis MET-44); collector/profiles/profiles.go (`SystemTemplate`, `RETICORA_PROFILES_DIR`); backend/internal/discovery/system_template.go (`profileTemplates`, `SystemTemplateKey`, WP-581); backend/internal/citype/templates.go (`Templates`); backend/migrations/000055_cmdb_extensions.up.sql (`ci_type_attribute_scope_check`); backend/migrations/000105_attribute_definition.up.sql (`attribute_definition_scope_check`, `attribute_definition_scope_type_check`)
 
-**Betroffene IDs:** API-06, AUD-07, EVT-03, JOB-02, MET-10, MET-16, MET-20, MET-30, MET-31, MET-32, MET-33, MET-34, MET-40, MET-41, MET-42, MET-43, MET-44, MET-53
+**Betroffene IDs:** ABN-01, API-06, API-09, AUD-07, DIS-08, DOD-01, EVT-03, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, JOB-02, JOB-04, MET-06, MET-10, MET-16, MET-20, MET-30, MET-31, MET-32, MET-33, MET-34, MET-40, MET-41, MET-42, MET-43, MET-44, MET-45, MET-53, MET-54, OPS-06, OVR-03, SEQ-01, SIM-01, TEN-09, TST-01, TST-04, UI-11, VIE-02
 
-**Betroffene WPs:** WP-250 (`met-sets`), WP-251 (`met-templates`), WP-257 (`met-rules`), WP-258 (`met-computed`), WP-261 (`met-publish`)
+**Betroffene WPs:** WP-243 (`p2-trace`), WP-246 (`p2-events`), WP-832 (`g1-befunde-teil03`), WP-250 (`met-sets`), WP-709 (`met-sets-compose`), WP-251 (`met-templates`), WP-710 (`met-ci-templates`), WP-252 (`met-compose-rules`), WP-253 (`met-migrate`), WP-712 (`met-migrate-job`), WP-257 (`met-rules`), WP-715 (`met-rules-ast`), WP-716 (`met-rules-catalog`), WP-258 (`met-computed`), WP-717 (`met-computed-write`), WP-718 (`met-computed-refresh`), WP-261 (`met-publish`), WP-721 (`met-test`), WP-262 (`met-export-all`), WP-722 (`met-import`), WP-307 (`vie-shared`), WP-797 (`ui-meta-sets`), WP-314 (`ui-meta-templates-publish`), WP-799 (`ui-meta-drafts-publish`), WP-800 (`ui-meta-ci-templates-migrate`), WP-801 (`ui-rule-catalog`), WP-802 (`ui-rule-computed`), WP-325 (`g2-seed`), WP-326 (`g2-tst01`), WP-330 (`g2-abnahme`), WP-331 (`g2-gate`)
 
 ## E-38
 
-**Thema:** API-06: REST-Ressourcennamen der Phase 2 und Umstellung abweichender Bestandspfade
+**Thema:** API-06: REST-Ressourcen der Phase 2 und Ablösung abweichender Bestandspfade
 
-**Status:** vorläufig entschieden (Übergangsregel: Tabelle unten)
+**Status:** entschieden (2026-10-28, Option 1: Pfadinventar, angepasst 2026-11-02)
 
-**Festlegung:** Die Ressourcen der Phase 2 erhalten folgende Pfade unter `/api/v1` (englische Plural-Substantive wie API-05): `attribute-sets`, `templates` und `templates/{id}/versions`, `rules`, `layouts`, `metamodel/drafts` mit `…/test` und `…/publish`, `tags`, `lifecycle-models` (ersetzt `lifecycle-definitions`), `assets` mit `…/cis`, `…/assign`, `…/return`, `…/transfer`, `…/reserve`, `…/label`, `assignments` (Projektion, nur lesend), `reservations`, `stock-movements` (einzige Bewegungshistorie, lesend; schreibend nur `receipt`, `transfer`, `correction`, `retrieval` für Mengenartikel), `suppliers`, `contracts`, `consumables` mit `…/stock` und `…/availability` (ersetzt `inventory/items`), `orders` mit `…/receive`, `stocktakes` mit `…/items`, `…/scans`, `…/differences`, `…/complete`, `labels/lookup`, `documents` mit `…/versions` und `…/links`, `disposal-records`, `tickets` mit `…/comments`, `…/links`, `business-calendars`, `slas`, `import-profiles`, `imports` mit `…/report`, `field-permissions`, `subnets/{id}/reservations` (wörtlich NET-09), `cis/{id}/as-of` und `assets/{id}/as-of` (AUD-08), `jobs/{id}/revert` (wörtlich JOB-03), `cis/{id}/form` und `ci-types/{id}/form` (aufgelöstes Formular), `cis/{id}/instance-attributes`. Abweichende Bestandspfade (`inventory/items*`, `lifecycle-definitions*`, `ci-types/templates`, `assets/{id}/movements`, `consumables/{id}/movements`) bleiben für mindestens 12 Monate als Alias mit `Deprecation`- und `Sunset`-Header (E-25). Deaktivierte oder noch nicht freigegebene Pfade tragen `x-phase: P2` und `x-feature`.
+**Festlegung:** Verbindliches Pfadinventar (Option 1, vom Auftraggeber am 2026-10-28 bestätigt) nach dem Stand von main `a01e95db` (für die P2-Pfade seit `3a9669a` unverändert) und den Neufassungen der WPs. Alle Pfade liegen unter `/api/v1`; Pfadparameter sind hier als `<id>` geschrieben. Ressourcen sind englische Plural-Substantive wie in API-05. WP-247 trägt das Inventar als Tabelle in diese Entscheidung ein: je Zeile Klasse, „im G1-Release ausgeliefert“ (ohne `x-phase`) und das zuständige WP.
 
-**Aufgabe:** Tabelle bestätigen oder Abweichungen benennen. Zuständig: Product Owner. Termin: vor WP-247 (`p2-paths`).
+**(a) Besteht und bleibt.** Phase 2 ergänzt hier nur Felder, Operationen oder Verhalten.
+- G1-Pfade ohne `x-phase`: `jobs/<id>/revert` (JOB-03 [B], WP-182, E-25; Phase 2 liefert nur den Reverter der Jobart `ci.bulk` in WP-305); `ci-types/templates` (Katalog der Typvorlagen mit Schema `CIType`, `backend/internal/citype/templates.go`; kein Template nach MET-16, weder Alias noch Vorgänger von `templates`); `ci-types/export` (Format v2 nur als Opt-in `format_version=2`, die v1-Antwort bleibt; WP-262); `cis/<id>/field-definitions*` (Definitionen der Instanzattribute nach MET-14, WP-045; ohne Umbenennung und ohne Alias, die Werte liegen unter `cis/<id>/instance-attributes`, siehe (c)); `history/snapshots` und `history/<entityType>/<id>`; `cis/<id>/lifecycle-transitions` (neu `GET` mit den erlaubten Übergängen, WP-723); `attribute-definitions` (neu die Aktion `…/<id>/reindex`, siehe (c)).
+- P2-Pfade mit `x-phase: P2`: `assets`, `assets/<id>`, `assets/<id>/lifecycle-transitions` (neu `GET`, WP-723), `assets/<id>/children` (ab WP-742 die Kind-CIs aus `ci.parent_ci_id` mit `child_mode`, neue Antwortform, cursor-paginiert), `assignments` und `assignments/<id>` nur lesend (Projektion aus `stock_movement`; die Zuweisungen eines Assets liefert `assignments?asset_id=`, ein Pfad `assets/<id>/assignments` entsteht nicht; WP-746), `reservations` (`POST` bleibt neben `assets/<id>/reserve`, beide über denselben Dienst, WP-277), `reservations/<id>`, `reservations/<id>/release`, `stock-movements` (`GET` mit Filtern; `POST` für Mengenbuchungen und den Asset-Umzug `transfer`, siehe Regel „Schreibseite der Bewegungen“), `consumables`, `consumables/<id>`, `orders`, `orders/<id>`, `orders/<id>/submit|approve|reject`, `orders/<id>/items` (nur im Status `draft`, bucht nie; der Wareneingang läuft über `orders/<id>/receive`, WP-286), `stocktakes`, `stocktakes/<id>`, `stocktakes/<id>/scans`, `stocktakes/<id>/complete`, `documents` (neu Listenfilter `entity_type` und `entity_id`, kein neuer Pfad; `POST` nimmt nach E-61 (Korrekturplan, Option 1) optionale `links` an und legt Dokument und Links atomar an, für client- oder site-gescopte Principals ist mindestens ein sichtbarer Link Pflicht, heute antwortet der Handler ihnen mit 403; beides WP-811), `documents/<id>`, `documents/<id>/content` (`GET` liefert die aktuelle Version oder `?version=n`; `PUT` bleibt als kompatibler Upload neben `POST documents/<id>/versions`, WP-731), `documents/<id>/links`, `tickets`, `tickets/<id>`, `tickets/<id>/comments`, `tickets/<id>/sla` und `slas/breaches` (additive Felder, WP-292), `slas`, `slas/<id>`.
+- `disposal-records` und `disposal-records/<id>` tragen heute `x-phase: P4`; das Modul `disposal` wird P2 (MGT-02 [P2], E-44, WP-706).
 
-**Frage:** API-06 nennt die Ressourcen der Phase 2 nur als deutsche Sammelbegriffe („Sets, Templates/Versionen, Regeln, Layouts, Publish, Tags, Lifecycles, Assets, Verträge, Lager, Stocktake, Reservierungen, Bewegungen, Tickets, Dokumente, Importe“). Der Bestand nutzt teilweise andere Pfade.
+**(b) Besteht und wird ersetzt.**
+- G1-Pfade (ohne `x-phase`, im G1-Release ausgeliefert) bleiben mindestens 12 Monate als Alias mit `deprecated: true`, `x-deprecated-at`, `x-sunset` und `x-successor` in `api/openapi.yaml` (E-25, WP-167; Header über `ParseDeprecations` und `writeDeprecation` in `backend/internal/middleware/openapi.go`, Alias durch Doppelregistrierung im Fach-Handler nach WP-168). Die Abkündigung liefert das WP, das den Nachfolger liefert:
+  - `lifecycle-definitions*` → `lifecycle-models*` (WP-723; die Tabellen behalten ihre Namen, das ci-type-DTO führt `lifecycle_model_id` neben dem veralteten `lifecycle_definition_id`)
+  - `cis/<id>/state?at=` → `cis/<id>/as-of?at=` (WP-793; derselbe Handler)
+  - `cis/<id>/parent` → `cis/<id>` mit `parent_ci_id` (WP-742; die Antwort bleibt bis zum Sunset kompatibel)
+  Der Nachfolger eines G1-Pfads trägt kein `x-phase`, solange der Alias ausgeliefert wird.
+- P2-Pfade (mit `x-phase: P2`, im G1-Release nie registriert, E-03) brauchen keinen Alias. Ruft das Frontend einen solchen Pfad bis zu einem späteren WP noch auf, führt ihn das liefernde WP als deprecated Alias. Dann gelten dieselben Felder wie bei G1-Aliasen, denn `ParseDeprecations` verlangt für jede Abkündigung `x-sunset` ≥ 12 Monate (`TestDeprecationsNeedTwelveMonthsNotice`). Das liefernde WP stellt `frontend/src/api/client.ts` bzw. `frontend/src/api/cmdb.ts` um oder nennt das Oberflächen-WP, das es tut. Ausnahme: `assets/<id>/movements` hat keine Aufrufer im Frontend (`inventoryApi.assetMovements` entfällt). WP-247 kündigt den Pfad trotzdem schon ab, weil sein Nachfolger `stock-movements?asset_id=` heute ausgeliefert wird.
+  - Mit deprecated Alias: `assets/<id>/movements` → `stock-movements?asset_id=` (WP-247); `consumables/<id>/movements` → `stock-movements?consumable_id=` und `POST stock-movements` (WP-756; `in` → `receipt`, `out` → `retrieval`); `inventory/items*` → `consumables*` und `consumables/<id>/stock` (WP-757; die Antwortform `QuantityItem` bleibt); `inventory/availability` → `consumables/<id>/availability` für Mengenartikel und `active_reservation` in `GET assets/<id>` für Assets (WP-759, WP-750); `stocktakes/<id>/difference` → `stocktakes/<id>/differences` (WP-287); `assets/<id>/state?at=` → `assets/<id>/as-of?at=` (WP-795). Bis zum Sunset von `inventory/items*` gelten `quantity_item_id` und `item_kind: quantity_item` als deprecated Eingabe- bzw. Filteraliase an `reservations`, `stock-movements` und `inventory/availability` (WP-757, WP-284).
+  - Ohne Alias: `POST assignments`, `DELETE assignments/<id>` und `assignments/<id>/return|transfer` → `assets/<id>/assign|return|transfer` (WP-275, Entfernen in WP-746); `assets/<id>/label.svg` → `assets/<id>/label?format=svg|pdf` (WP-763); `compositions*` entfällt (WP-742).
+  - `inventory/items/<id>/convert` hat keinen Nachfolger (keine Katalogfunktion; ein serielles Asset entsteht über `POST assets` oder den Wareneingang). Der Pfad arbeitet ab WP-757 auf `consumable`. Er trägt keine Abkündigung, weil `x-successor` einen Nachfolger verlangt, und entfällt mit dem Sunset von `inventory/items*`. Nach WP-320 ruft das Frontend ihn nicht mehr auf.
+  - `inventory/availability` liefert bis zum Sunset die org-weiten Asset-Buckets für den Tab „Verfügbarkeit“ der InventoryPage (WP-320). Phase 2 legt für die org-weite Asset-Verfügbarkeit keinen Nachfolger an. Der Tab entfällt mit dem Sunset, wie `inventory/items/<id>/convert`.
+
+**(c) Neu.** WP-247 legt jede neue Operation als Gerüst an; das genannte WP implementiert sie.
+- Metamodell: `attribute-sets` und `ci-types/<id>/attribute-sets` (`GET`/`PUT`, geordnete Liste; WP-250); `templates` mit `…/clone`, `…/versions`, `…/versions/<version>` (`PUT`) und `…/versions/<version>/publish` (WP-251) sowie `…/migrations` (`POST`, 202 mit `Location: /api/v1/jobs/<id>`, Job `template.migrate`, WP-712); `cis/<id>/templates` (WP-710); `rules` (WP-716); `layouts` (WP-259); `cis/<id>/form` und `ci-types/<id>/form` (WP-719); `metamodel/drafts` mit `…/items` und `…/items/<item_id>` (WP-260), `…/test` (`POST` startet den Lauf, `GET` liefert den Bericht, WP-721) und `…/publish` (WP-261); der Query-Parameter `draft` (Antwort 202) an den Schreibrouten von `ci-types`, `ci-fields`, `attribute-definitions`, `attribute-sets`, `templates`, `rules` und `layouts`, Ausnahmen in `metamodel.DraftExemptRoutes` (WP-720); `metamodel/import` (legt einen Draft an; der Export bleibt `ci-types/export`, WP-722); `attribute-definitions/<id>/reindex` (WP-796); die Nachfolger `lifecycle-models` (WP-723) und `cis/<id>/as-of` (WP-793) aus (b); `cis/<id>/instance-attributes` (Werte-Ressource: `GET` Liste, `PUT`/`DELETE` je Schlüssel, WP-256).
+- Tags und Feldrechte: `tags` mit `…/<id>/merge` und `PUT cis/<id>/tags` (WP-753); `PUT assets/<id>/tags` (WP-755); `field-permissions` mit `…/object-grants` und `…/sensitive-fields` (WP-726).
+- Assets und Verträge: `assets/<id>/cis` und `assets/<id>/cis/<ci_id>` (WP-272); `assets/<id>/assign`, `…/return`, `…/transfer` (WP-275); `assets/<id>/reserve` und `reservations/<id>/convert` (WP-277); `assets/<id>/label` (WP-763); `assets/<id>/as-of` (WP-795); `assets/bulk` (`POST`, BLK-02, WP-781; `cis/bulk` bleibt Bestand aus WP-181); `stock-movements/<id>/signature` (`GET`, Verifikation, WP-748); `suppliers` (WP-736); `contracts` (WP-269).
+- Lager und Inventur: `consumables/<id>/stock` (WP-283); `consumables/<id>/availability` (WP-759); `orders/<id>/place|cancel|close` (WP-286); `orders/<id>/receive` (WP-760); `stocktakes/<id>/start`, `…/items`, `…/differences` und `…/cancel` (WP-287); `labels/lookup` (WP-762); `labels/batch` und `labels/batch/<job_id>/download` (WP-763).
+- Dokumente: `documents/<id>/versions` (`GET`, `POST`) und `documents/usage` (WP-731); `DELETE documents/<id>/links/<link_id>` (WP-267).
+- Tickets: `tickets/<id>/links` mit `…/<link_id>` (WP-764); `tickets/<id>/attachments` (`GET`, Dokumente über `document_link`, WP-765); `business-calendars` (WP-768); `review-items/<id>/ticket` (`POST`, kein Alias unter `discovery/review-items`, WP-291).
+- Import: `import-profiles` (WP-774); `imports` mit `POST`, `…/<id>` und `…/<id>/report` sowie `imports/preview` (`POST` mit `document_id` und optional `sheet`, synchrone Spaltenvorschau ohne Job) (WP-301). `imports` hat keine Sammel-GET-, PATCH- oder DELETE-Operation: Die Liste läuft über `jobs?kind=import.run`, der Abbruch über `DELETE jobs/<id>`.
+- Netz und Graph: `subnets/<id>/reservations` (wörtlich NET-09) und `subnets/<id>/reservations/<ip_id>` (WP-299); `relationships/<id>/changes` (WP-296).
+
+**(d) Nicht Phase 2:** `asset-locations` und `assets/<id>/locations` sind der GPS-Verlauf (`backend/internal/location`, LOC-09 [P4]), nicht AST-07. Sie wechseln in ein eigenes P4-Modul und bleiben im G2-Release abgeschaltet (E-44, WP-706).
+
+**Regeln.**
+- Gerüst: WP-247 legt jede neue Operation aus (c) in `api/openapi.yaml` mit `x-status: planned` an (Pfad- oder Operationsebene). Gelesen wird der Wert von `speccheck.Planned`, das WP-247 neu anlegt; ein anderer Wert ist ein Fehler. `TestRoutesAndSpecificationAreInParity` nimmt geplante Operationen aus dem Abgleich und schlägt fehl, wenn eine geplante Operation registriert ist. Das liefernde WP ersetzt das Gerüst durch die Fachschemas, entfernt `x-status: planned` und streicht nicht umgesetzte Gerüstoperationen. Bestandspfade bekommen kein Gerüst. Zum G2-Release trägt keine Operation mehr `x-status: planned`; WP-331 prüft das.
+- `x-phase: P2` tragen genau die Pfade unter einem Präfix eines P2-Moduls in `LateModules` (`backend/internal/server/modules.go`, `TestLateRoutesAreMarkedInSpecification` in `modules_test.go`), auch im Gerüst. Die Module der neuen Präfixe legt E-105 fest (Option 1): `metamodel` mit `attribute-sets`, `ci-types/<id>/attribute-sets`, `templates`, `rules`, `layouts`, `metamodel` und `field-permissions`; `import` mit `imports` und `import-profiles`; `suppliers`, `contracts` und `labels` bei `inventory`; `business-calendars` und `review-items/<id>/ticket` bei `ticketing`. Die übrigen Unterpfade von Kernressourcen (`cis/<id>/…`, die übrigen `ci-types/<id>/…`, `attribute-definitions/<id>/reindex`, `subnets/<id>/reservations`, `relationships/<id>/changes`) sind Kern und tragen kein `x-phase`. Die Zuordnung setzt das Fach-WP mit der ersten Route um (`metamodel` ab WP-250). Die Nachfolger von G1-Pfaden (`lifecycle-models`, `cis/<id>/as-of`) und `cis/<id>/instance-attributes` bleiben ohne `x-phase`, solange ihr G1-Gegenstück ohne `x-phase` ausgeliefert wird. `templates` ist kein Nachfolger eines G1-Pfads und folgt E-105 wie `attribute-sets`.
+- `x-feature` gibt es bisher weder in `api/openapi.yaml` noch in `speccheck` (K12). Phase 2 setzt es nur an Pfaden mit `x-phase`, denen `entitlement.RequiredFeature` einen Feature-Key zuordnet. Heute ist das `RequiredFeature(path)` über `gatedRoutes` und `gatedSuffixes` in `backend/internal/entitlement/middleware.go`. Ab WP-705 ist es `RequiredFeature(method, path)` über die Zuordnungstabelle mit Methoden- und Suffixregeln. `x-feature` steht auf Pfadebene. Wo eine Methodenregel für eine Operation einen anderen Schlüssel festlegt, steht es zusätzlich auf Operationsebene (`POST stock-movements` → `stock`). WP-247 setzt den Wert am Gerüst; WP-706 prüft ihn je Operation gegen `RequiredFeature`. Pfade ohne Feature-Key tragen kein `x-feature`.
+- Für jede Operation mit `deprecated: true` ist `x-successor` ein dokumentierter Pfad mit mindestens einer nicht geplanten Operation, dessen `x-phase` leer oder gleich der des Alias ist (`TestDeprecationSuccessorsAreServed` in WP-247).
+- Schreibseite der Bewegungen: Eine Operation trägt genau ein Recht (`PermissionForRoute` in `backend/internal/server/authz.go`) und einen Feature-Key. Deshalb trägt `POST stock-movements` ab WP-756 das Recht `stock:write` und das Feature `stock` und bucht Mengenartikel (`receipt`, `retrieval`, `correction`, `transfer`). Den Standortwechsel eines seriellen Assets bucht dieselbe Route als `transfer` mit `asset_id`; der Handler prüft dafür zusätzlich `asset:move` (E-142, Option 1). Andere Arten mit `asset_id` ergeben 422. `assignment`, `return`, `reservation`, `release` und `disposal` entstehen nur in ihren Fachpfaden (422 `movement-type-reserved`). Vor WP-756 nimmt `POST stock-movements` Asset-Bewegungen mit `asset:move` an (WP-274). Den Feature-Key `stock` verlangt die Route ab WP-705. Organisationen ohne `stock` buchen über diese Route deshalb ab WP-705 keine Bewegungen, auch keinen Asset-Umzug. Die Oberfläche für das Verschieben folgt E-142 (WP-806).
+- Felder an G1-Antworten ändern sich nur additiv (API-01, E-57), etwa `CIAssetFacts` in `GET cis/<id>`. Ein umbenanntes Feld bleibt mindestens 12 Monate als `deprecated` neben dem neuen.
+- Ereignisse: Die abonnierbaren Altnamen `inventory.movement` und `asset.movement` bleiben als veraltete Aliase von `stock.movement` in `webhook.ValidEvents`, mit derselben Frist wie Pfade; `composition.*` wird als veraltet markiert (WP-742).
+- Jede neue oder geänderte Operation ändert `backend/internal/server/testdata/route_permissions.txt`; neue Listen sind cursor-paginiert (K6).
+
+**Aufgabe:** **erledigt 2026-10-28** A-16: Der Beschluss des Auftraggebers bestätigt das Pfadinventar. P2-Bestandspfade ohne G1-Auslieferung entfallen ohne Alias, die deprecated P2-Aliase bleiben bis zum `x-sunset`. `cis/<id>/state` und `assets/<id>/state` gehen auf `…/as-of`. `inventory/items/<id>/convert` und der Tab „Verfügbarkeit“ entfallen mit dem Sunset von `inventory/items*` bzw. `inventory/availability`. `cis/<id>/field-definitions` bleibt neben `cis/<id>/instance-attributes`, `ci-types/templates` bleibt Katalog der Typvorlagen, die additiven Bestandspfade bleiben.
+
+**Frage:** API-06 nennt die Ressourcen der Phase 2 nur als deutsche Sammelbegriffe („Sets, Templates/Versionen, Regeln, Layouts, Publish, Tags, Lifecycles, Assets, Verträge, Lager, Stocktake, Reservierungen, Bewegungen, Tickets, Dokumente, Importe“). Der Bestand führt 48 Pfade mit `x-phase: P2` aus Phase 1 (WP-214), die teils andere Namen tragen, sowie G1-Pfade, deren Nachfolger Phase 2 liefert. Welche Pfade gelten, und wie werden abweichende Bestandspfade abgelöst?
 
 **Optionen:**
 
-1. Tabelle wie oben (konsistent mit API-05 und E-25).
-2. Bestandspfade beibehalten und nur neue Ressourcen ergänzen (inkonsistente Benennung, verletzt E-25-Logik für API-06).
-3. Andere Benennung durch den Auftraggeber.
+1. Pfadinventar wie oben: englische Plural-Substantive wie API-05; Alias mit Deprecation und Sunset für G1-Pfade (E-25); nie freigegebene P2-Pfade entfallen ohne Alias, außer das Frontend nutzt sie bis zu einem späteren WP (dann deprecated Alias mit Sunset ≥ 12 Monate).
+2. Alle abweichenden Bestandspfade 12 Monate als Alias führen, auch die nie freigegebenen P2-Pfade (Mehraufwand ohne externe Nutzer).
+3. Bestandspfade beibehalten und nur neue Ressourcen ergänzen (uneinheitliche Benennung, widerspricht der Logik von E-25 für API-06).
+4. Andere Benennung durch den Auftraggeber.
 
-**Empfehlung:** Option 1.
+**Empfehlung:** Option 1. Die P2-Bestandspfade waren im G1-Release nie registriert (E-03, `RETICORA_MODULES` leer); externe Nutzer gibt es nur für G1-Pfade. Ein Einschalten der P2-Module per `RETICORA_MODULES` vor G2 ist nicht unterstützt; die Release-Notes der Phase 2 vermerken das (WP-331). P2-Aliase mit Sunset entstehen nur, wo die eigene Oberfläche den Pfad bis zu einem späteren WP noch aufruft. Dazu kommt `assets/<id>/movements`, dessen Nachfolger schon ausgeliefert wird (WP-247).
 
-**Blockiert / Auswirkung:** WP-247 und alle WPs mit neuen Routen; Frontend-Clientgenerierung.
+**Blockiert / Auswirkung:** Das Inventar ist für WP-247, WP-706, WP-705, WP-331 und alle WPs mit neuen oder ersetzten Routen, u. a. WP-250, WP-251, WP-710, WP-712, WP-256, WP-716, WP-259, WP-719, WP-260, WP-720, WP-721, WP-261, WP-722, WP-262, WP-796, WP-723, WP-726, WP-753, WP-755, WP-272, WP-742, WP-274, WP-275, WP-746, WP-747, WP-277, WP-750, WP-748, WP-736, WP-269, WP-283, WP-756, WP-757, WP-284, WP-759, WP-286, WP-760, WP-287, WP-761, WP-762, WP-763, WP-267, WP-731, WP-811 (auch `links` im `POST documents` nach E-61 (Korrekturplan)), WP-321, WP-764, WP-765, WP-291, WP-292, WP-768, WP-299, WP-296, WP-774, WP-301, WP-781, WP-305, WP-793 und WP-795; die Oberflächen-WPs der M2.9; `frontend/src/api/client.ts`, `frontend/src/api/cmdb.ts`, `frontend/src/api/generated/schema.d.ts` verbindlich. WP-247 startet ohne weitere Freigabe.
 
-**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:12–14; docs/plan/entscheidungen.md#e-25
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:4 (API-01), :14 (API-06); docs/plan/entscheidungen.md#e-25; api/openapi.yaml (`x-phase`, `deprecated`, `x-successor`); backend/internal/server/modules.go (`LateModules`), modules_test.go (`TestLateRoutesAreMarkedInSpecification`); backend/internal/server/authz.go (`PermissionForRoute`, `writePermissionOverrides`, `routeRules`); backend/internal/server/parity_test.go; backend/internal/api/speccheck/speccheck.go; backend/internal/entitlement/middleware.go (`RequiredFeature`, `gatedRoutes`, `gatedSuffixes`); backend/internal/middleware/openapi.go (`ParseDeprecations`), openapi_test.go (`TestDeprecationsNeedTwelveMonthsNotice`); backend/internal/movement/handler.go; backend/internal/citype/templates.go; backend/internal/document/handler.go (`Create`, Übergangsregel aus WP-341); docs/plan/g1-korrektur/entscheidungen.md#e-61; backend/internal/location/handler.go; frontend/src/api/cmdb.ts, frontend/src/api/client.ts
 
-**Betroffene IDs:** API-06, API-09, AUD-07, AUD-08, CI-08, DB-05, GQL-03, IMP-IO-01, JOB-04, LCY-02, MET-01, MET-10, MET-16, MET-50, MET-52, MET-53, MGT-01, MGT-12, STK-01, STK-02, STK-03
+**Betroffene IDs:** API-06, API-09, AST-01, AST-02, AST-03, AST-04, AST-05, AST-06, AST-07, AUD-07, AUD-08, BLK-01, BLK-02, CI-08, DIS-08, DOD-01, EVT-03, GATE-01, GATE-02, GATE-05, GLO-11, GQL-03, IMP-IO-01, INS-01, INS-04, INV-01, INV-03, JOB-03, JOB-04, LCY-02, MET-14, MET-16, MET-50, MET-52, MET-53, MET-54, MGT-01, MGT-12, NET-09, OPS-06, RBA-05, RBA-06, REL-09, SEQ-01, STK-01, STK-02, STK-03, STK-04, STK-05, TEN-02, TEN-09, TKT-01, TKT-02, TST-04, UI-11, UI-14, UI-15
 
-**Betroffene WPs:** WP-247 (`p2-paths`), WP-250 (`met-sets`), WP-251 (`met-templates`), WP-257 (`met-rules`), WP-259 (`met-layouts`), WP-260 (`met-drafts`), WP-263 (`met-lifecycle-models`), WP-267 (`doc-model`), WP-269 (`ast-supplier-contract`), WP-281 (`ci-tags`), WP-283 (`stk-consumable-model`), WP-301 (`io-import-model`), WP-312 (`aud-snapshot`)
+**Betroffene WPs:** WP-705 (`p2-feature-gates`), WP-706 (`p2-module-gates`), WP-245 (`p2-permissions`), WP-247 (`p2-paths`), WP-250 (`met-sets`), WP-251 (`met-templates`), WP-710 (`met-ci-templates`), WP-712 (`met-migrate-job`), WP-256 (`met-instance`), WP-716 (`met-rules-catalog`), WP-259 (`met-layouts`), WP-719 (`met-form`), WP-260 (`met-drafts`), WP-720 (`met-drafts-capture`), WP-261 (`met-publish`), WP-721 (`met-test`), WP-262 (`met-export-all`), WP-722 (`met-import`), WP-723 (`met-lifecycle-model-api`), WP-796 (`met-index-status`), WP-726 (`fr-admin`), WP-267 (`doc-model`), WP-731 (`doc-versions`), WP-811 (`doc-entity-filter`), WP-269 (`ast-supplier-contract`), WP-736 (`ast-supplier`), WP-272 (`ast-ci-link`), WP-742 (`ast-composition-legacy`), WP-274 (`ast-movement`), WP-275 (`ast-assignment`), WP-746 (`ast-assignment-paths`), WP-747 (`ast-assignment-projection`), WP-748 (`ast-signature-verify`), WP-277 (`ast-reservation`), WP-750 (`ast-reservation-scope`), WP-753 (`ci-tags-api`), WP-755 (`ast-tags`), WP-283 (`stk-consumable-model`), WP-756 (`stk-stock-bookings`), WP-757 (`stk-quantity-item-merge`), WP-284 (`stk-availability`), WP-758 (`stk-quantity-item-drop`), WP-759 (`stk-availability-api`), WP-286 (`stk-orders`), WP-760 (`stk-orders-receive`), WP-287 (`inv-stocktake`), WP-761 (`inv-stocktake-complete`), WP-762 (`inv-lookup`), WP-763 (`inv-labels`), WP-847 (`stk-orders-target`), WP-848 (`inv-stocktake-area`), WP-849 (`inv-labels-render`), WP-764 (`tkt-links`), WP-765 (`tkt-attachments`), WP-291 (`tkt-from-review`), WP-292 (`tkt-sla-calendar`), WP-768 (`tkt-sla-calendar-api`), WP-296 (`rel-history`), WP-299 (`net-ip-reservation`), WP-301 (`io-import-model`), WP-774 (`io-import-profile`), WP-303 (`io-import-api`), WP-781 (`blk-ops-assets`), WP-305 (`blk-undo`), WP-311 (`gql-aggregates`), WP-793 (`aud-as-of-ci`), WP-795 (`aud-snapshot-asset`), WP-797 (`ui-meta-sets`), WP-314 (`ui-meta-templates-publish`), WP-798 (`ui-meta-draft-context`), WP-799 (`ui-meta-drafts-publish`), WP-800 (`ui-meta-ci-templates-migrate`), WP-316 (`ui-form-builder`), WP-803 (`ui-form-preview`), WP-318 (`ui-pickers-flows`), WP-806 (`ui-flows-stock`), WP-808 (`ui-contracts-suppliers`), WP-809 (`ui-asset-detail`), WP-320 (`ui-stock-orders-stocktake`), WP-812 (`ui-orders`), WP-813 (`ui-stocktake-labels`), WP-321 (`ui-documents-tickets`), WP-815 (`ui-sla-calendar-disposal`), WP-846 (`stk-alias-deprecation`), WP-331 (`g2-gate`)
 
 ## E-39
 
 **Thema:** TKT-01/ENT-06: Abgrenzung Ticketing Essential und Standard
 
-**Status:** offen (Empfehlung als Übergangsregel)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Keine Festlegung möglich; der Katalog nennt nur die Paketstufen. Übergangsregel: Essential = Tickets mit Status, Priorität, Assignee (Nutzer), CI-/Asset-/Standortbezug, Kommentaren, Tags, Anhängen und Tickets aus Reviews; Standard = zusätzlich Team-Queues, SLA mit Business-Kalender und Feiertagen (TKT-02), Eskalationsbenachrichtigung bei SLA-Verletzung. Pro [P4] bleibt außerhalb.
+**Festlegung:** Option 1, vom Auftraggeber am 2026-10-28 bestätigt. Der Katalog nennt nur die Paketstufen; die Abgrenzung lautet:
 
-**Aufgabe:** Funktionsmatrix Essential/Standard bestätigen. Zuständig: Product Owner. Termin: vor WP-290 (`tkt-core`).
+- Essential (`ticketing_essential`) umfasst Tickets mit Status, Priorität, Zuweisung an Nutzer und an `team_id` samt Listenfilter `team_id` (Bestand: Team-Prädikat der Ticket-Policy seit WP-029, Migration 000065; es greift seit WP-391 mit team-gescopten Rollenzuweisungen, Migration 000150, E-70 (Korrekturplan); WP-290), Objektbezug zu CI, Asset, Standort, Vertrag und Review-Item (WP-764), Kommentaren, Tags, Anhängen (WP-765) und Tickets aus Reviews (WP-291, WP-766, WP-767).
+- Standard (`ticketing_standard`) umfasst zusätzlich SLA mit Business-Kalender und Feiertagen (TKT-02, WP-292, WP-768) sowie „Team-Queues“. Darunter fallen nur die Eskalation an Assignee und Teamleiter bei SLA-Verletzung (WP-769) und die Queue-Ansicht „meine Teams“.
+- `slas`, `tickets/<id>/sla` und `business-calendars` sind an `ticketing_standard` gebunden. Die Zuordnung liefert WP-705 in der Routentabelle des Pakets `entitlement`. Sie ersetzt `gatedRoutes` und `gatedSuffixes` und prüft Suffixregeln vor Präfixregeln. Heute trifft `RequiredFeature` für `tickets/<id>/sla` zuerst das Präfix `/api/v1/tickets` (`ticketing`); Suffixregeln gibt es nur unter `/api/v1/cis/`. Die Schlüssel legt WP-244 an. In den Ticket-Hooks prüft `sla.TicketHooks` das Feature über einen `entitlement.Checker` (WP-769). Ein Gate für `team_id` gibt es nicht. Die Oberfläche zeigt SLA-Abschnitt und Kalenderpflege nur bei `ticketing_standard` (WP-814, WP-815).
+- Die Datenquelle der Queue-Ansicht „meine Teams“ regelt E-143 (Filter `team_id=mine` an `GET /api/v1/tickets`, Ansicht hinter `ticketing_standard` in WP-814).
+- Die Prioritäten bleiben `low`, `medium`, `high` und `critical` wie im Bestand (`ticket_priority_check` in 000013, `sla_priority_check` in 000026, Standardwert `medium` in `backend/internal/ticket/handler.go`). Pro [P4] bleibt außerhalb.
 
-**Frage:** TKT-01 verlangt „Ticketing Essential und Standard“ und ENT-06 führt `ticketing_essential` (alle Pakete) und `ticketing_standard` (ab Standard) als getrennte Schlüssel, ohne die Funktionsgrenze zu benennen.
+Die wörtliche Lesart (Teamzuweisung gehört zu Standard, Option 3) ist verworfen. Ein Gate für `team_id` an `POST`/`PATCH /api/v1/tickets` und im Listenfilter entsteht nicht; WP-290 bleibt dabei.
+
+**Aufgabe:** **erledigt 2026-10-28** A-17: Der Beschluss des Auftraggebers bestätigt die Funktionsmatrix nach Option 1 (Teamzuweisung und Filter `team_id` Essential; SLA, Kalender, Eskalation und Queue-Ansicht „meine Teams“ Standard) und die Prioritäten `low`, `medium`, `high`, `critical`.
+
+**Frage:** TKT-01 verlangt „Ticketing Essential und Standard“, und ENT-06 führt `ticketing_essential` (alle Pakete) und `ticketing_standard` (ab Standard) als getrennte Schlüssel, ohne die Funktionsgrenze zu benennen. Unklar ist besonders, ob „Team-Queues“ die bestehende Teamzuweisung (`ticket.team_id`, WP-029) einschließt. Prioritätswerte nennt der Katalog nicht.
 
 **Optionen:**
 
-1. Übergangsregel wie oben.
-2. Standard umfasst nur SLA (TKT-02), alles andere Essential.
-3. Andere Abgrenzung durch den Auftraggeber.
+1. Übergangsregel wie oben: Teamzuweisung und Filter `team_id` sind Essential; Standard sind SLA, Kalender, Eskalation und die Queue-Ansicht „meine Teams“.
+2. Standard umfasst nur SLA (TKT-02); Eskalation und Team-Queues sind Essential.
+3. Wörtliche Lesart: Teamzuweisung gehört zu Standard; Gate für `team_id` am Ticket und im Listenfilter.
+4. Andere Abgrenzung durch den Auftraggeber.
 
-**Empfehlung:** Option 1; sie ordnet TKT-02 eindeutig dem Standard-Schlüssel zu und hält Essential ohne Kalenderpflege nutzbar.
+**Empfehlung:** Option 1. Sie ordnet TKT-02 eindeutig dem Standard-Schlüssel zu und hält Essential ohne Kalenderpflege nutzbar. Die Teamzuweisung besteht mit RLS-Team-Scope und braucht kein Feld-Gate. Die Prioritäten bleiben, weil eine Umbenennung die SLA-Zuordnung je Priorität und den API-Vertrag (API-01) bräche.
 
-**Blockiert / Auswirkung:** WP-244, WP-290, WP-292, WP-321.
+**Blockiert / Auswirkung:** Die Abgrenzung gilt für WP-244, WP-705, WP-290, WP-764, WP-765, WP-291, WP-766, WP-767, WP-292, WP-768, WP-769, WP-814, WP-815, WP-820, WP-331. WP-290 startet ohne Gate für `team_id`.
 
-**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:66–68; docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:97–106
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:66–68; docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:97–106; backend/migrations/000013_phase2_tickets.up.sql; backend/migrations/000026_permissions_sla.up.sql; backend/migrations/000065_team_scope_policies.up.sql; backend/migrations/000150_role_assignment_team_scope.up.sql; backend/internal/ticket/handler.go (Filter `team_id`); backend/internal/entitlement/middleware.go (`gatedRoutes`, `gatedSuffixes`, `RequiredFeature`); backend/internal/sla/handler.go (`TicketHooks`)
 
-**Betroffene IDs:** TKT-01, TKT-02, UI-14
+**Betroffene IDs:** API-06, DIS-08, DOD-01, ENT-02, ENT-06, EVT-03, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, OPS-06, RBA-05, SEQ-01, SIM-01, TEN-09, TKT-01, TKT-02, TST-04, UI-14
 
-**Betroffene WPs:** WP-290 (`tkt-core`), WP-292 (`tkt-sla-calendar`), WP-321 (`ui-documents-tickets`)
+**Betroffene WPs:** WP-244 (`p2-entitlements`), WP-705 (`p2-feature-gates`), WP-290 (`tkt-core`), WP-764 (`tkt-links`), WP-765 (`tkt-attachments`), WP-291 (`tkt-from-review`), WP-766 (`tkt-from-review-service`), WP-767 (`tkt-from-review-resolve`), WP-292 (`tkt-sla-calendar`), WP-768 (`tkt-sla-calendar-api`), WP-769 (`tkt-sla-breach`), WP-814 (`ui-tickets`), WP-815 (`ui-sla-calendar-disposal`), WP-820 (`g2-seed-tickets-docs`), WP-331 (`g2-gate`)
 
 ## E-40
 
 **Thema:** Mengenartikel: `consumable` und `quantity_item` zu einem Modell zusammenführen
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1, angepasst 2026-11-02)
 
-**Festlegung:** Option 1: Ein Modell `consumable` (STK-01) mit Bestand pro Bin in `stock_level`; `quantity_item` und `inventory/items*` werden per Datenmigration übernommen und als deprecated Alias geführt (E-25). Reservierungen von Mengenartikeln referenzieren `consumable_id`.
+**Festlegung:** Option 1 (vom Auftraggeber am 2026-10-28 bestätigt): Ein Modell `consumable` (STK-01) mit Bestand pro Bin in `stock_level` (CHECK ≥ 0). Dazu gilt:
 
-**Frage:** Der Bestand führt zwei Tabellen und Routen für Mengenartikel (`consumable` aus Migration 000045, `quantity_item` aus 000055) mit teils widersprüchlicher Semantik (Audit STK-03/STK-05). Der Katalog kennt nur `consumable`.
+- Altledger: Der Name `stock_movement` bezeichnet heute das veränderbare Consumable-Ledger aus 000045 (`direction` in/out, ON DELETE CASCADE). WP-744 benennt es in `stock_movement_legacy` um, legt das kanonische append-only Ledger `stock_movement` an und übernimmt die Zeilen ID-gleich (`in` → `receipt`, `out` → `retrieval`) sowie die Zeilen aus `asset_movement` (000055). Danach entfallen `stock_movement_legacy` und `asset_movement`.
+- Übergang: Bis zur Übernahme von `quantity_item` führt das Ledger die Spalte `quantity_item_id` mit `item_kind` `quantity_item`. `POST /api/v1/stock-movements` nimmt Mengenbuchungen auf `quantity_item` bis dahin mit `receipt`, `retrieval`, `correction` und `transfer` an (WP-274, WP-756).
+- Reihenfolge: WP-283 → WP-756 → WP-757 → WP-284 (`reservation.consumable_id`) → WP-758.
+- Bestand aus `consumable`: Der Freitext `consumable.location` lässt sich keinem Bin zuordnen. Jeder Wert `stock_level <> 0` geht mit Menge und Altstandort nach `migration_quarantine` (reason `stock_without_bin`, bei negativem Wert `negative_stock`; Muster E-26). Der Betreiber bucht ihn per `correction` in einen Bin (WP-283).
+- Übernahme von `quantity_item` (WP-757): ID-gleich nach `consumable`, damit Bewegungen, Reservierungen und Bestellpositionen gültig bleiben. Bestand in einem Bin mit verträglichem Client ergibt eine `stock_level`-Zeile. Bestand an einem anderen Standort, ohne Standort oder im Bin eines fremden Clients geht in die Quarantäne (`stock_without_bin`, `bin_client_mismatch`); negative Mengen werden 0 (`negative_stock`). Bei SKU-Kollision wird `sku = NULL` gesetzt (`sku_conflict`), nicht leere `attributes` werden abgelegt (`attributes_dropped`). Dasselbe WP schreibt die Übergangsspalte auf `consumable_id` um und entfernt sie. Die Tabelle `quantity_item` bleibt bestehen.
+- Reservierungen (WP-284): `consumable_id` und Bin (`location_id`), Fremdschlüssel mit `organization_id` (K19). Reservierungen ohne eindeutigen Bin gehen nach `migration_quarantine` (`reservation_without_bin`). Bei Altüberreservierung werden die jüngsten aktiven Reservierungen freigegeben und kopiert (`over_reservation`). Client und Site einer Mengenreservierung sind die des Bins (`stock_level.client_id`, `stock_level.site_id`).
+- Site-Scope (WP-392, WP-393): `asset` und `quantity_item` tragen seit Migration 000151 `site_id` aus ihrem Standort (`derive_location_site()`, Site-Prädikat in den Policies). Die Übernahme von `quantity_item` (WP-757) und der Drop (WP-758) bauen darauf auf. Jede neue Tabelle mit `location_id` oder `ci_id` (`stock_level`, `stock_movement`, `reservation` mit Bin) trägt `client_id` und `site_id` oder steht begründet in `DerivedScopeTables` (`RuleLocatedScope`, `backend/internal/tenant/rls/known_gaps.go`, `TestRLSCatalog`). `reservation` erhält deshalb neben `client_id` auch `site_id`: bei Assets aus `asset.site_id` (WP-750), bei Mengenartikeln aus dem Bin (WP-284). Nur so bleibt die Site-Grenze erhalten, wenn WP-750 die Anwendungsprüfung `reservationVisible` durch die Policy ersetzt.
+- WP-758 löscht `quantity_item` ohne CASCADE erst, wenn kein Fremdschlüssel mehr darauf zeigt, und sichert vorher jede Zeile in `migration_quarantine`.
+- Für die Altpfade `inventory/items*` gilt E-38.
+
+**Frage:** Der Bestand führt zwei Tabellen und Routen für Mengenartikel (`consumable` aus 000045, `quantity_item` aus 000055) mit teils widersprüchlicher Semantik (Audit STK-03/STK-05) und zwei Buchungspfade (`consumables/<id>/movements` auf das alte `stock_movement`, `stock-movements` auf `asset_movement`). Der Katalog kennt nur `consumable`.
 
 **Optionen:**
 
@@ -140,131 +264,166 @@ Stand: 2026-10-13. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 2. Beide behalten und synchron halten.
 3. `quantity_item` behalten und umbenennen.
 
-**Empfehlung:** Option 1.
+**Empfehlung:** Option 1. Die ID-gleiche Übernahme und die Quarantäne vermeiden stillen Datenverlust (PRI-10).
 
-**Blockiert / Auswirkung:** WP-283, WP-284, WP-286, WP-289, WP-320.
+**Blockiert / Auswirkung:** WP-744, WP-274, WP-283, WP-756, WP-757, WP-284, WP-750 (`site_id` an `reservation`), WP-759, WP-758, WP-760, WP-320, WP-819.
 
-**Quelle:** docs/audit/09-module-phase2plus.md:38–40; docs/audit/00-schema-ist.md:114–138
+**Quelle:** docs/audit/09-module-phase2plus.md:38–40; docs/audit/00-schema-ist.md:114–138; backend/migrations/000045_consumables.up.sql; backend/migrations/000055_cmdb_extensions.up.sql (`asset_movement`, `quantity_item`, `reservation`); backend/migrations/000151_asset_site_scope.up.sql; backend/migrations/000152_located_site_scope.up.sql; backend/internal/tenant/rls/known_gaps.go (`RuleLocatedScope`, `DerivedScopeTables`); backend/internal/reservation/pg_repository.go (`reservationVisible`)
 
-**Betroffene IDs:** API-06, STK-01, STK-02, STK-03
+**Betroffene IDs:** API-06, AST-07, EVT-03, SIM-01, STK-01, STK-02, STK-03, STK-04, STK-05, TEN-02, UI-14
 
-**Betroffene WPs:** WP-283 (`stk-consumable-model`), WP-284 (`stk-availability`)
+**Betroffene WPs:** WP-274 (`ast-movement`), WP-744 (`ast-movement-ledger`), WP-750 (`ast-reservation-scope`), WP-283 (`stk-consumable-model`), WP-756 (`stk-stock-bookings`), WP-757 (`stk-quantity-item-merge`), WP-284 (`stk-availability`), WP-758 (`stk-quantity-item-drop`), WP-759 (`stk-availability-api`), WP-760 (`stk-orders-receive`), WP-844 (`stk-quantity-item-refs`), WP-320 (`ui-stock-orders-stocktake`), WP-819 (`g2-seed-assets-stock`)
 
 ## E-41
 
 **Thema:** Lieferantenstammdaten (`supplier_id` in AST-01 und MGT-12)
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Option 1: Eigene Mandantentabelle `supplier(org, client nullable, name unique pro Org, external_ref, contact_surrogate, notes)` mit REST `suppliers`; Assets und Verträge referenzieren sie per Fremdschlüssel; der bisherige Freitext `asset.supplier` wird per Migration in Lieferantenzeilen überführt.
+**Festlegung:** Option 1 (vom Auftraggeber am 2026-10-28 bestätigt): Eigene Mandantentabelle `supplier(organization_id, client_id NULL, name, external_ref, contact_id NULL, notes, version)` mit `UNIQUE (organization_id, name)` als Spalten-Constraint (kein Ausdrucksindex, K22), `UNIQUE (id, organization_id)` und REST `suppliers` mit ETag aus `version` (WP-736). `client_id` verweist mit Organisation auf `client` (K19). `contact_id` verweist über `(contact_id, organization_id)` auf `contact (id, organization_id)` mit `ON DELETE SET NULL (contact_id)`; `contact` erhält dafür `UNIQUE (id, organization_id)` (Muster `client_id_organization_key` in 000136), sofern WP-838 ihn nicht schon anlegt. Name, Telefon und E-Mail der Kontaktperson liegen im PII-Vault (`pii_subject`, WP-242) und kommen über `contacts`; das Lieferanten-DTO führt nur `contact_id`. Der Lieferant ist eine Organisation; `supplier.name` ist keine PII, und Lieferanten sind keine Kontakte.
 
-**Frage:** AST-01 und MGT-12 verlangen `supplier_id`, der Katalog definiert aber keine Lieferantentabelle. Der Bestand speichert Lieferanten als Freitext.
+Verträge (WP-269), Assets (WP-271), Mengenartikel (WP-283) und Bestellungen (WP-286) referenzieren `supplier` per Fremdschlüssel mit Organisation; ein verwendeter Lieferant lässt sich nicht löschen (422). Den Freitext überführen die Verbraucher mit `INSERT … ON CONFLICT (organization_id, name) DO NOTHING` in org-weite Zeilen (`client_id` NULL): `asset.supplier` (000009) in WP-271, `internal_order.supplier` (000046) in WP-286. `asset.supplier` bleibt als abgekündigter Spiegel von `supplier.name` (WP-738) und entfällt aus der Asset-API (WP-739). Das Bestellfeld `supplier` nimmt als abgekündigter Alias nur den Namen eines bestehenden Lieferanten an (sonst 422), bis die Bestellseite umgestellt ist (WP-812). Lieferanten entstehen nur über `suppliers`; gepflegt werden sie in WP-808.
+
+**Frage:** AST-01 und MGT-12 verlangen `supplier_id`, der Katalog definiert aber keine Lieferantentabelle. Der Bestand speichert Lieferanten als Freitext in `asset.supplier` und `internal_order.supplier`.
 
 **Optionen:**
 
-1. Eigene Tabelle `supplier` (minimal).
+1. Eigene Tabelle `supplier` (minimal), Kontaktperson als Verweis auf `contact`.
 2. Lieferant als `contact` mit Rolle vendor (AUD-02).
 3. Freitext beibehalten (verletzt AST-01).
 
-**Empfehlung:** Option 1; Kontakte bleiben Personen (PII-Vault), Lieferanten sind Organisationen.
+**Empfehlung:** Option 1. Kontakte bleiben Personen (PII-Vault), Lieferanten sind Organisationen. Ein eigenes Surrogat am Lieferanten würde Vault-Auflösung, Blind-Index und Crypto-Shredding doppeln.
 
-**Blockiert / Auswirkung:** WP-269, WP-271, WP-283, WP-286, WP-319.
+**Blockiert / Auswirkung:** WP-736, WP-269, WP-271, WP-738, WP-283, WP-286, WP-808, WP-812, WP-819.
 
-**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:4,62
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:4, :62; backend/migrations/000009_phase2_assets.up.sql:17; backend/migrations/000016_contacts.up.sql; backend/migrations/000046_internal_orders.up.sql:11; backend/migrations/000124_pii_subject.up.sql; backend/migrations/000136_client_reference_organization.up.sql
 
-**Betroffene IDs:** API-06, AST-01, CI-01, DB-05, MGT-12, STK-01, STK-02, STK-03, STK-05
+**Betroffene IDs:** API-06, AST-01, DB-05, MGT-12, SIM-01, STK-01, STK-02, STK-03, STK-05, UI-14
 
-**Betroffene WPs:** WP-269 (`ast-supplier-contract`), WP-271 (`ast-core`), WP-283 (`stk-consumable-model`), WP-286 (`stk-orders`)
+**Betroffene WPs:** WP-269 (`ast-supplier-contract`), WP-736 (`ast-supplier`), WP-271 (`ast-core`), WP-738 (`ast-field-names-db`), WP-283 (`stk-consumable-model`), WP-286 (`stk-orders`), WP-808 (`ui-contracts-suppliers`), WP-812 (`ui-orders`), WP-819 (`g2-seed-assets-stock`)
 
 ## E-42
 
 **Thema:** SEC-09: Betrieb des Malware-Scans (ClamAV) und Verhalten bei Ausfall
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Option 1: `clamd` als eigener Dienst (Compose-Service bzw. Kubernetes-Deployment, Signaturaktualisierung über freshclam; im Air-Gapped-Profil Offline-Signaturbundle). Uploads sind bis zum Scanergebnis `pending_scan` und nicht abrufbar; fällt der Scanner aus, bleibt der Status erhalten (fail-closed), eine Betriebsmetrik und ein Alarm (WP-103) melden den Rückstau. Befunde führen zu Quarantäne, Benachrichtigung und Audit.
+**Festlegung:** Option 1 (vom Auftraggeber am 2026-10-28 bestätigt): `clamd` als eigener, optionaler Dienst: Kustomize-Komponente `deploy/k8s/base/components/clamav` (Muster `components/opensearch`, eingebunden im Overlay `prod`) bzw. Dienst `clamd` mit Compose-Profil `documents` in `deploy/docker-compose/docker-compose.yml`; der Server erhält `RETICORA_CLAMD_ADDR` (WP-735). Signaturen kommen über freshclam, im Air-Gapped-Profil über ein Offline-Signaturbundle. Dazu gilt:
 
-**Frage:** SEC-09 verlangt einen Malware-Scan mit ClamAV und Quarantäne, sagt aber nichts zu Betrieb und Ausfallverhalten.
+- Jede Dokumentversion trägt `scan_status` an `document_version` (`pending_scan`, `clean`, `infected`, `scan_failed`; Standard `pending_scan`, WP-731, WP-733). Abrufbar ist nur `clean`; sonst antwortet der Download mit 409 (`document-pending-scan` bzw. `document-quarantined`). Ein neuer Link auf ein `infected`-Dokument ergibt ebenfalls 409.
+- Der Scan ist die Jobart `document.scan` (clamd INSTREAM) über die Work-Queue (WP-130), eingereiht nach dem Commit des Uploads (K20, WP-734). Status, Audit und Ereignis `document.scanned` schreibt der Job in einer Transaktion. Nach dem letzten Versuch setzt er `scan_failed`. Der Sweep `document.scan_sweep` (alle 15 Minuten) reiht `pending_scan` und `scan_failed` ohne offenen Job neu ein; so werden auch Inhalte aus Phase 1 mit gesetztem `storage_key` nachgescannt.
+- Fail-closed gilt auch ohne Job-Queue (kein `RETICORA_NATS_URL` oder `--no-db`): Die Version bleibt `pending_scan`. Außerhalb von `development` bricht der Serverstart ab, wenn das Modul `documents` aktiv ist und `RETICORA_CLAMD_ADDR` oder die Job-Queue fehlt (OPS-01).
+- Ein Befund setzt den Status `infected` (Quarantäne als Status), benachrichtigt Uploader und `org_admin` und schreibt das Audit `document.quarantined`. Blob und `document_link` bleiben bestehen. Rückstau und Fehlerrate melden die Alarme `ReticoraDocumentScanBacklog` und `ReticoraDocumentScanFailing` (WP-735).
+- Das Größenlimit von SEC-09 (Default 50 MB) setzt die neue Variable `RETICORA_DOCUMENT_MAX_UPLOAD_MB` (Standard 50 = 52.428.800 Byte, WP-268); heute gilt fest 25 MiB (`maxDocumentUpload` in `backend/internal/document/handler.go`). Heute fehlt `client_max_body_size` im ganzen Repository; nginx lässt daher nur 1 MiB durch. WP-735 setzt `client_max_body_size 51m` im `http`-Block von `frontend/nginx.conf`.
+
+**Frage:** SEC-09 verlangt einen Malware-Scan mit ClamAV und Quarantäne, sagt aber nichts zu Betrieb, Ausfallverhalten und Bestandsdaten.
 
 **Optionen:**
 
-1. clamd als Dienst, fail-closed.
+1. clamd als optionaler Dienst, fail-closed.
 2. clamd als Dienst, fail-open mit nachträglichem Scan.
-3. Externer Scan-Dienst (verletzt EU-Residenz, wenn nicht EU).
+3. Externer Scan-Dienst (verletzt die EU-Residenz, wenn nicht in der EU).
 
-**Empfehlung:** Option 1; fail-open würde ungeprüfte Dateien an Nutzer ausliefern.
+**Empfehlung:** Option 1. Fail-open würde ungeprüfte Dateien an Nutzer ausliefern. Optional, weil clamd nur für Dokumente und Importdateien (E-49) gebraucht wird; beide gehören zu P2-Modulen (`documents`, `import` nach E-105), die im G1-Standard abgeschaltet sind.
 
-**Blockiert / Auswirkung:** WP-268, Deploy-Manifeste, Sizing-Doku.
+**Blockiert / Auswirkung:** WP-731, WP-733, WP-734, WP-735, WP-268 (Größenlimit), WP-301 (Datei nur bei `clean`), WP-321 (Anzeige des Scanstatus), WP-820, WP-329, WP-829; Deploy-Manifeste und Sizing-Doku.
 
-**Quelle:** docs/spec/katalog-v3/06-audit-sicherheit-events.md:40; docs/spec/katalog-v3/01-installation-stack.md (INS-08 Air-Gapped)
+**Quelle:** docs/spec/katalog-v3/06-audit-sicherheit-events.md:40 (SEC-09); docs/spec/katalog-v3/01-installation-stack.md (INS-08 Air-Gapped); deploy/k8s/base/components/; backend/internal/document/handler.go (`maxDocumentUpload`); backend/cmd/server/main.go (`jobQueue` nur mit `RETICORA_NATS_URL`); frontend/nginx.conf
 
-**Betroffene IDs:** MGT-01, SEC-09
+**Betroffene IDs:** API-06, API-09, IMP-IO-01, INS-01, JOB-04, MGT-01, OPS-06, SEC-09, SEC-11, SIM-01, UI-14
 
-**Betroffene WPs:** WP-268 (`doc-upload-security`)
+**Betroffene WPs:** WP-731 (`doc-versions`), WP-733 (`doc-scan-status`), WP-734 (`doc-scan-job`), WP-735 (`doc-scan-ops`), WP-301 (`io-import-model`), WP-321 (`ui-documents-tickets`), WP-820 (`g2-seed-tickets-docs`), WP-329 (`g2-security`), WP-829 (`g2-security-tests`)
 
 ## E-43
 
-**Thema:** RBA-07: Granularität der Feldrechte in Phase 2 (Ebenen Objekttyp, Objekt, Attribut, Relation, Aktion, Mandant, Standort, Team)
+**Thema:** RBA-07: Granularität und Auflösung der Feldrechte in Phase 2
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1; Audit-Log ohne Projektion, `audit:read` legt alle Feldwerte offen, angepasst 2026-11-02)
 
-**Festlegung:** Option 1: Grants `field_grant(role, object_kind, ci_type (inkl. Untertypen), attribute | relationship_type | action, level none|read|write)`; die Ebenen Mandant, Standort und Team kommen aus dem Scope der Rollenzuweisung (RBA-03, CH11) und werden nicht erneut modelliert; die Ebene Objekt wird über `object_grant(role | team, object_id, level)` als Ausnahme je Einzelobjekt abgebildet. Auflösung: spezifischster Grant gewinnt, bei gleicher Spezifität gewinnt `none` (deny), Standard ohne Grant ist `write` für Rollen mit Schreibrecht und `read` für Leserollen; als `sensitive` markierte Attribute sind ohne ausdrücklichen Grant `none`.
+**Festlegung:** Option 1 (vom Auftraggeber am 2026-10-28 bestätigt, einschließlich der Präzisierungen) mit drei Tabellen (WP-264): `field_grant(Rolle | Custom-Rolle, object_kind, ci_type (inkl. Untertypen), field_key | relationship_type | action, level none|read|write)`, `object_grant(Rolle | Custom-Rolle | Team, object_kind, object_id, level)` als Ausnahme je Einzelobjekt und die Mandantentabelle `field_sensitivity(object_kind, ci_type, field_key)`. `attribute_definition` erhält kein Kennzeichen `sensitive`; so lassen sich auch System-Attributdefinitionen und typisierte Spalten markieren.
 
-**Frage:** RBA-07 zählt acht Ebenen auf, ohne Auflösungsregeln. Eine vollständige Matrix über alle Ebenen wäre in Phase 2 nicht in 0,5–2-PT-Paketen umsetzbar und für Nutzer kaum verständlich.
+- **Feldbezug** über Schlüssel statt Attribut-IDs (`ParseFieldKey`): `core.<spalte>` aus einer festen Liste je Objektart, `attributes.<key>` und beim CI `_instance.<key>`. Die `core.`-Liste des CI entspricht genau den projizierbaren Fachspalten (`ci.typedFields` ohne `name` und `status`: `manufacturer`, `model`, `serial_number`, `hardware_uuid`, `management_ip`, `primary_mac`, `hostname`, `fqdn`, `os_name`, `os_version`, `firmware_version`, `sys_object_id`).
+- **Ebenen Mandant, Standort, Team:** Mandant, Standort und Team gelten je Rollenzuweisung (`Grant.Clients`/`Grant.Sites`/`Grant.Teams` aus `role_assignment`, `user_custom_role` und `service_account_role`); ein Grant wirkt nur auf Objekte im Scope seiner Zuweisung. Den Team-Scope der Rollenzuweisungen gibt es seit WP-391 (Migration 000150: `role_assignment.scope_team_id`, `user_custom_role.scope_type` team; `service_account_role` kennt nur Client und Site). Eine Team-Zuweisung begrenzt nur Objekte mit Teambezug (heute `ticket.team_id`, ab WP-280 `owner_team_id`); Objekte ohne Team begrenzt sie nicht (Team-Prädikat aus 000065, E-11). Die Sichtbarkeit über mehrere Zuweisungen folgt E-70 (Korrekturplan): Vereinigung je Dimension, Dimensionen per AND. `object_grant` mit Team als Empfänger bleibt die Ausnahme je Einzelobjekt.
+- **Auflösung je Rolle:** `object_grant` (der Rolle oder eines Teams des Principals) vor `field_grant` mit Typ und Feld (der nächste Typ der Typkette gewinnt, ein Grant am Untertyp also gegen den Obertyp) vor `field_grant` mit Feld ohne Typ vor `field_grant` nur mit Typ bzw. Objektart vor dem Standard: `write` mit `<kind>:write`, `read` mit `<kind>:read`, sonst `none`. Bei Gleichstand innerhalb einer Rolle gewinnt `none`. Das Level einer Rolle ist höchstens ihr Objektrecht.
+- **Über mehrere Rollen** gilt das höchste Level (Vereinigung nach RBA-03), zusätzlich begrenzt durch `Principal.Permissions` (Schnitt der API-Keys nach AUT-04). Ein `none` sperrt ein Feld also nur, wenn keine andere Rolle des Principals es lesen darf.
+- **Sensitivität:** Ein Feld aus `field_sensitivity` (Markierung am Typ, an einem Obertyp oder ohne Typ; ein Untertyp kann sie nicht aufheben) ist `none`, solange keine Rolle des Principals einen `field_grant` mit genau diesem `field_key` hat. Typ-Grants und `object_grant` heben sie nicht auf.
+- **Aktionen:** Aktion ist der Rechteschlüssel der Route; sie kennt nur `none` und `write` und ist ohne Grant erlaubt, wenn die Rolle das Recht hält. Auf den CI-Routen (WP-728): `ci:delete` für `DELETE cis/<id>`, `restore`, `merge`, `unmerge` und den Job-Revert von `ci.merge`; `ci:write` für `POST /cis`, `PATCH`, `type` und Bulk `set_status`; `ci_instance_attribute:manage` für `instance-attributes`; `override:write` für Overrides; `lifecycle:transition` für `lifecycle-transitions`. `none` ergibt 403 mit `action`. Andere Objektarten setzen Aktionen nach Konvention 11 in ihren WPs durch.
+- **object_grant** setzt Feld- und Aktionslevel des Objekts: `none` blendet die projizierbaren Felder aus und sperrt die Aktionen, `read` sperrt das Schreiben. Die Sichtbarkeit des Objekts ändert er nicht; sie regeln RLS und Scope, Listen und `total` bleiben. Soll `none` ein Objekt verbergen, braucht es ein eigenes WP mit `backend/internal/ci/pg_repository.go` (SQL-Prädikat, `total`).
+- **Strukturfelder** des CI unterliegen keinen Feldrechten: `id`, `organization_id`, `ci_type_id`, `client_id`, `location_id`, `site_id`, `room_id`, `parent_ci_id`, `asset_id`, `merged_into_id`, `name`, `status`, `lifecycle_state`, `health`, `health_updated_at`, `discovery_source`, `first_seen_at`, `last_seen_at`, `is_manual`, `version`, `schema_version`, `deleted_at`, `created_at`, `updated_at`. `version` und ETag steigen auch bei Änderungen unsichtbarer Felder.
+- **Listenfilter:** Ein Filter auf ein projizierbares Feld ergibt 403 mit `fields` und ohne `total`, wenn das Feld für mindestens einen abgefragten Typ in mindestens einem Zuweisungs-Scope (Client, Standort, Team) des Principals nicht lesbar ist oder der Principal ein `object_grant` mit `none` für CIs hat. Die Regel ist konservativ, weil Scope- und Objektausnahmen nicht im SQL-Filter abgebildet sind; sie gilt auch für die strukturierte Abfrage (WP-729). `fields=` ist eine Auswahl und kein Fehler. `sort` ist nur auf Strukturfeldern erlaubt.
+- **Suche:** Für Objektarten mit Feldrechten (ci, asset, document, ticket) zählen bei eingeschränkter Policy nur Titel und lesbare Felder, auch für `summary`, `highlights`, `score` und `total`. Im Hybrid-Betrieb beantwortet PostgreSQL solche Abfragen; reines OpenSearch ohne PostgreSQL liefert bis TEC-12 [P5] keine Treffer (fail-closed).
+- **Webhooks:** Gebundene Subscriptions erhalten Payloads nach der Policy ihres Service-Accounts. Ungebundene Subscriptions erhalten Payloads nach der Standardregel ohne Rolle: Als sensibel markierte Felder fehlen, rollenbezogene Grants greifen nicht. Feldgenau einschränken lässt sich nur über gebundene Service-Accounts. Eine Bindungspflicht wird nicht eingeführt. Unabhängig davon stellt der Dispatcher nur Ereignisse zu, deren Objekte im Scope des Erzeugers der Subscription liegen; ein gebundener Service-Account erweitert diesen Scope nicht (E-98 (Korrekturplan), Option B, WP-601, `mayDeliver`).
+- **Kanäle:** Projiziert werden CI-REST, GraphQL, Topologie und Impact, `/cis/<id>/changes`, `/cis/<id>/state` und ihr Nachfolger `/cis/<id>/as-of`, `/history/ci/<id>`, der Snapshot-Job, Suche, strukturierte Abfrage, Export und Webhooks. Ohne Feldrechte bleiben das Audit-Log (`/api/v1/audit-log`, `audit:read`), Review-Payloads (`discovery:read`, GraphQL `reviewInbox`), `GET /api/v1/reconciliation/conflicts` (`discovery:read`) sowie Ingest und Reconciliation ohne Principal. Auf Relationsebene setzt WP-770 die Regeln in REST durch.
+- **Audit-Log und Historie:** `audit:read` ist ein Prüferrecht und legt alle Feldwerte offen; von den Standardrollen hält es nur org_admin. Das Audit-Log wird nicht projiziert. Für die Historie gilt E-78 (Korrekturplan, Option 1, umgesetzt in WP-475): `GET /api/v1/history/<entityType>/<id>` verlangt das Leserecht der Entität (Routenrecht `ci:read`, je Entitätstyp `readPermissions` in `backend/internal/history/handler.go`); die Audit-Einträge eines CI enthält die Antwort nur mit `audit:read` (`audit_included`). `POST /api/v1/history/snapshots` bleibt bei `audit:read`. Damit lesen alle Rollen mit `ci:read` die Änderungshistorie. Ihre Projektion nach WP-727 schützt deshalb Werte und ist Teil der Sicherheitsprüfung (WP-329). GraphQL `ciHistory` folgt denselben Rechten (WP-792). Nur für Inhaber von `audit:read` schützt die Projektion nichts, weil das Audit-Log dieselben Werte offenlegt.
+
+**Aufgabe:** **erledigt 2026-10-28** A-30: Der Beschluss des Auftraggebers bestätigt die Präzisierungen (Team über `object_grant`, Sensitivität in `field_sensitivity`, konservative Listenfilter-Regel, `object_grant` ohne Wirkung auf die Sichtbarkeit, Webhooks ohne Service-Account nach der Standardregel ohne Rolle) und entscheidet die Teilfrage Audit-Log nach der Empfehlung: `audit:read` legt alle Feldwerte offen, das Audit-Log wird nicht projiziert. Angepasst 2026-11-02: Team wirkt zusätzlich über team-gescopte Rollenzuweisungen (WP-391, E-70 (Korrekturplan)); die Rechte der Historie folgen E-78 (Korrekturplan, WP-475).
+
+**Frage:** RBA-07 zählt acht Ebenen auf, ohne Auflösungsregeln. Offen sind die Wirkung über mehrere Rollen (RBA-03: Rechte sind die Vereinigung aller Rollen), die Bedeutung von Aktionen und Objektausnahmen und welche Felder überhaupt projizierbar sind, ohne Pflichtfelder der API zu entfernen (API-01). Dazu kommen die Ebene Team, obwohl Rollenzuweisungen keinen Team-Scope tragen, Listenfilter als Wert-Orakel und die Frage, ob das Audit-Log projiziert wird oder `audit:read` alle Feldwerte offenlegt. Eine vollständige Matrix über alle Ebenen wäre in Paketen von 0,5 bis 2 PT nicht umsetzbar und für Nutzer kaum verständlich.
 
 **Optionen:**
 
-1. Wie oben (Rolle × Typ × Attribut/Relation/Aktion, Scope aus der Rollenzuweisung, Objektausnahmen).
+1. Wie oben: Rolle × Typ × Feld/Relation/Aktion, Mandant und Standort aus der Rollenzuweisung, Team und Einzelobjekt über `object_grant`, Sensitivität je Mandant, Vereinigung über Rollen; Audit-Log ohne Projektion.
 2. Nur Rolle × Attribut.
 3. Vollständige achtdimensionale Matrix.
 
-**Empfehlung:** Option 1; sie deckt alle genannten Ebenen mit zwei Tabellen ab und bleibt in RLS erzwingbar.
+**Empfehlung:** Option 1. Sie deckt alle genannten Ebenen mit drei Tabellen ab, bleibt mit RBA-03 vereinbar und ändert keine Pflichtfelder der API. Beim Audit-Log empfiehlt sich: `audit:read` ist ein Prüferrecht und legt alle Feldwerte offen. Eine Projektion des generischen Audit-Logs wäre eigener Aufwand für alle Objektarten.
 
-**Blockiert / Auswirkung:** WP-264 bis WP-266, WP-310, WP-311.
+**Blockiert / Auswirkung:** Die Regeln gelten für WP-264, WP-725, WP-726, WP-265, WP-727, WP-728, WP-266, WP-729, WP-730, WP-770, WP-311 und WP-326. Die Regeln wenden außerdem an: die Suche (WP-308, WP-787, WP-788, WP-309), WP-296, WP-792 und WP-793 (Rechte der Historie nach E-78 (Korrekturplan)), WP-765, WP-269 sowie die Seeds WP-325 und WP-819. Die TST-01-Prüfliste übernimmt die Auflösungsfälle aus WP-264: Gleichstand → `none` innerhalb einer Rolle, höchstes Level über mehrere Rollen, Sensitivität aus `field_sensitivity` nur über `field_grant` mit `field_key` aufhebbar, Grant am Obertyp gilt für Untertypen, Grant am Untertyp gewinnt, Team-Zuweisung begrenzt nur Objekte mit Team. RBA-07 PASS im Ausstieg von M2.2 setzt WP-728 voraus. Andere Objektarten wenden die Regeln nach Konvention 11 in ihren WPs an.
 
-**Quelle:** docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:74–82
+**Quelle:** docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:66, :74 (RBA-03, RBA-07); backend/internal/identity/principal.go (`ResolveAccess`, `Grant.Teams`); backend/internal/permission/pg_repository.go (`AccessGrants` mit `scope_team_id`); backend/migrations/000014_phase2_users_teams_roles.up.sql (`scope_type`); backend/migrations/000082_service_accounts.up.sql (`service_account_role`); backend/migrations/000150_role_assignment_team_scope.up.sql (WP-391); docs/plan/g1-korrektur/entscheidungen.md#e-70, #e-78, #e-98; backend/internal/history/handler.go (`List`, `readPermissions`); backend/internal/ci/provenance.go (`typedFields`); backend/internal/ci/handler.go (Aktionsrouten); backend/internal/webhook/dispatcher.go (`mayDeliver`); backend/internal/server/authz.go (`history`: `ci:read`, Snapshots `audit:read`); backend/internal/server/testdata/route_permissions.txt (`GET /api/v1/history/{entityType}/{id}` mit `ci:read`, `POST /api/v1/history/snapshots` und `audit-log` mit `audit:read`)
 
-**Betroffene IDs:** API-06, GQL-04, MET-10, RBA-07, SRC-01, TST-01
+**Betroffene IDs:** API-06, AUD-07, AUD-08, EVT-03, GQL-03, GQL-04, MET-06, MET-10, MET-45, MET-54, MGT-12, RBA-07, REL-09, SIM-01, SRC-01, SRC-02, SRC-03, TKT-01, TST-01
 
-**Betroffene WPs:** WP-264 (`fr-model`), WP-265 (`fr-rest-gql`), WP-266 (`fr-search-export-webhooks`)
+**Betroffene WPs:** WP-264 (`fr-model`), WP-725 (`fr-principal-roles`), WP-726 (`fr-admin`), WP-265 (`fr-rest-gql`), WP-727 (`fr-gql-graph`), WP-728 (`fr-actions`), WP-266 (`fr-search-export-webhooks`), WP-729 (`fr-query-export`), WP-730 (`fr-webhooks-matrix`), WP-770 (`rel-attributes-grants`), WP-269 (`ast-supplier-contract`), WP-765 (`tkt-attachments`), WP-296 (`rel-history`), WP-308 (`src-fields`), WP-787 (`src-fields-opensearch`), WP-788 (`src-fields-users-tags`), WP-309 (`src-ast-assets`), WP-311 (`gql-aggregates`), WP-792 (`gql-ci-aggregates`), WP-793 (`aud-as-of-ci`), WP-325 (`g2-seed`), WP-819 (`g2-seed-assets-stock`), WP-326 (`g2-tst01`)
 
 ## E-44
 
-**Thema:** ENT-06 (V): Feature-Keys der Phase 2 und Paketzuordnung
+**Thema:** ENT-06 (V): Feature-Keys der Phase 2, Paketzuordnung und Zuordnung der Routen
 
-**Status:** offen (Empfehlung als Übergangsregel; ergänzt E-34)
+**Status:** entschieden (2026-10-28, Option 1; ergänzt E-34, angepasst 2026-11-02)
 
-**Festlegung:** Übergangsregel: Schlüssel und Pakete wie in der ENT-06-Tabelle: `assets_basic`, `documents`, `import`, `ticketing_essential` in allen Paketen; `ticketing_standard`, `signature`, `stock`, `stocktake_standard`, `barcode`, `export_datev` ab Standard; `internal_orders` ab Pro. `gps_standard` und `workplace` werden als Schlüssel angelegt, haben in Phase 2 aber kein Modul (MGT-06 Arbeitsplatzverwaltung ist [P4]; GPS gehört zu Mobil [P4]). Die Bestandsschlüssel `inventory`, `ticketing`, `stocktake` werden per Datenmigration auf die neuen Schlüssel abgebildet. Limits: `max_storage_mb` (documents) 1.000 / 10.000 / 50.000 / unbegrenzt (V).
+**Festlegung:** Option 1, vom Auftraggeber am 2026-10-28 bestätigt (ENT-06 (V) gilt damit als bestätigt):
 
-**Aufgabe:** Paketmatrix der Phase 2 und das Speicherlimit bestätigen. Zuständig: Product Owner/Vertrieb. Termin: vor WP-244 (`p2-entitlements`).
+- **Schlüssel und Pakete (ENT-06):** `assets_basic`, `documents`, `import` und `ticketing_essential` in allen Paketen; `ticketing_standard`, `signature`, `stock`, `stocktake_standard`, `barcode` und `export_datev` ab Standard; `internal_orders` ab Pro. `gps_standard` und `workplace` werden angelegt (ab Standard), haben in Phase 2 aber kein Modul (LOC-09 und MGT-06 sind [P4]). `ticketing_pro`, `stocktake_pro`, `disposition`, `audit_extended` und `usage_tracking` (ENT-06 [P2–P4]) legt Phase 2 nicht an: Ihre Funktionen liegen in P3/P4 (TKT-01 Pro und INV-02 Pro [P4], `disposition` gehört zu MGT-08 [P4]). `planFeatures` in `backend/internal/entitlement/entitlement.go` folgt dieser Matrix. `Validate` lehnt seit WP-564 Schlüssel außerhalb von `FeatureKeys()` (`Phase1Features`, `ModuleFeatures`, `Addons`) und Limits außerhalb von `Quotas` mit 422 ab. WP-244 nimmt die P2-Schlüssel in `FeatureKeys()` auf und streicht dort die Altschlüssel `inventory`, `ticketing` und `stocktake`; nicht angelegte Schlüssel bleiben abgelehnt.
+- **Routen:** Einzige Quelle ist die Zuordnungstabelle in `backend/internal/entitlement/middleware.go` (WP-705; sie ersetzt `gatedRoutes` und `gatedSuffixes`): Methode optional, Präfix, Suffix optional → ein oder mehrere Feature-Keys. Methoden- und Suffixregeln gehen den Präfixregeln vor; verlangt eine Regel mehrere Schlüssel, fordert die Middleware jeden. Die Modulschlüssel von `RETICORA_MODULES` bleiben. Zuordnung: `assets`, `assignments`, `reservations`, GET `stock-movements`, `compositions` (bis zum Wegfall), `disposal-records`, `suppliers` und `contracts` → `assets_basic`; `consumables`, `inventory` (bis zum Wegfall) und POST `stock-movements` (Mengenbuchungen und Asset-Umzug `transfer`, E-38) → `stock`; GET `stock-movements/<id>/signature` → `signature`; `assets/<id>/label` → `assets_basic` und `barcode`; `labels` → `barcode`; `stocktakes` und `stocktake` → `stocktake_standard`; `orders` → `internal_orders` (bisher `workflow_forms`); `documents` → `documents`; `tickets` und POST `review-items/<id>/ticket` → `ticketing_essential` (GET `review-items*` bleibt als G1-Kern ungegatet); `slas`, `tickets/<id>/sla` und `business-calendars` → `ticketing_standard` (E-39); `imports` und `import-profiles` → `import`; `desks` und `desk-bookings` (Modul `desks`, P4) → `workplace` (bisher `inventory`); `asset-locations` und `assets/<id>/locations` (GPS-Verlauf, LOC-09 [P4]) → `gps_standard`, in einem eigenen P4-Modul `gps`, das im G2-Release abgeschaltet bleibt (`x-phase` wechselt von P2 auf P4). Die Sonderregeln des Bestands bleiben: `collectors/enroll` ohne Feature, der Alias `discovery/review-items` als Kern (`coreRoutes`), `discovery-scopes` → `discovery` (WP-671, F-400); Rack-Knoten unter `locations` (`rack_view`) und die Auflösung von `scope_suggested` (`discovery`) prüft der Handler (WP-671); eine Anfrage mit API-Key verlangt auf jeder Route zusätzlich `api_access` (WP-471).
+- **Entsorgung:** Das Modul `disposal` (MGT-02 [P2], `/api/v1/disposal-records`) wird P2 mit `assets_basic` in allen Paketen (bisher P4 mit `compliance`); `x-phase` an `disposal-records` wechselt auf P2. Die frühere P4-Einstufung setzte RBA-05 „disposition“ mit `disposal:*` gleich; der ENT-06-Schlüssel `disposition` gehört zu MGT-08 [P4].
+- **Teilfunktionen ohne eigenen Pfad** prüft der Handler bzw. Dienst über `entitlement.Checker` (WP-705): `signature` im Body von assign, return und transfer (WP-276); `stock` bei Mengenreservierungen und ihrer Umwandlung über `/reservations` (WP-284, WP-759); `ticketing_standard` für die automatische SLA-Anwendung der Ticket-Hooks und den Lauf `sla.check` je Organisation (WP-769); `ticketing_essential` für den Ticketbezug an Review-Items (WP-291); `assets_basic` zusammen mit dem Modul `inventory` für Asset-Bezüge in `POST /api/v1/search/query` und in gespeicherten Sichten (`entity_kind` asset, `asset.*`), der Pfad selbst bleibt ungegatet (WP-309); dieselbe Bedingung mit `asset:read` gilt für die Asset-Felder der GraphQL-BFF (WP-311, ENT-05); `export_datev` und `assets_basic` zusammen mit Modul `inventory` und `asset:read` für den Formatwert `datev` auf `POST /api/v1/exports`, `POST /api/v1/export/jobs` und `GET /api/v1/export/cis` (WP-790), ohne Pfad-Gate. Der veröffentlichte Formatwert `datev` bleibt und wird gesperrt; Umstellung und Sperre gelten als Korrektur (E-141, Option 1). Den Umfang der Team-Queues regelt E-39. Fehlt das Feature: 403 `feature-not-entitled`; Limit überschritten: 403 `entitlement-limit`.
+- **Kern ohne Feature-Key** (`cmdb_core`): Metamodell (Sets, Templates, Regeln, Layouts, Drafts, Lifecycle-Modelle), Tags, Feldrechte, IP-Reservierungen, Kantenhistorie und der Zustand zum Zeitpunkt T an CIs (AUD-08). Ihr Release-Gate regelt E-105.
+- **Datenmigration (WP-244):** `inventory` → `assets_basic`, `ticketing` → `ticketing_essential`, `stocktake` → `stocktake_standard`; `plan`, `enabled`, `limits`, `valid_until` und `source` bleiben. Kopien `stock` aus `inventory` und `ticketing_standard` aus `ticketing` nur für Organisationen ab Standard. Jede Organisation mit Entitlement-Zeilen erhält die fehlenden Schlüssel ihres Plans (Essential also `documents` und `import`) per `INSERT … SELECT … ON CONFLICT DO NOTHING`. Zur Laufzeit ergänzt `Service.Provision` fehlende Planschlüssel seit WP-470 auch bei Organisationen mit Teilzeilen (`InsertMissing`, `ProvisionOrganizations`). `navFeatureFor` in `frontend/src/hooks/useEntitlements.ts` und der E2E-Mock `frontend/e2e/support/backend.ts` folgen den neuen Schlüsseln; neue Seiten: `contracts` und `suppliers` → `assets_basic`, `import` → `import`; `locations`, `tags` und die Metamodell-Seiten hängen an keinem Feature-Key. Die Demo-Org des Seeds erhält die Schlüssel über `entitlement.PlanFeatures(entitlement.PlanPro)` (`backend/cmd/seed/seed.go`), also einschließlich `internal_orders` (WP-325).
+- **Limits:** `max_storage_mb` (Schlüssel `documents`) wird in MiB (2^20 Byte) ausgewertet; Staffel 1.000 / 10.000 / 50.000 / unbegrenzt (Katalogwert, bestätigt). Die Staffel ist kein Plandefault: Ein Limit wirkt nur, wenn es in `limits` gespeichert ist (E-34). `max_storage_mb` kommt in `Quotas` und `QuotaFeature` (→ `documents`), sonst lehnt `Validate` es mit 422 ab. Das Größenlimit je Datei ist ein Betriebsparameter (E-42), kein Entitlement.
+- **Trial:** WP-244 übernimmt `valid_until` und `source` der Quellzeilen unverändert. Nach CH21 stoppt `valid_until` nur `discovery`; Standard-Funktionen der Phase 2 enden nicht mit dem Trial. Ein Trial-Downgrade nach ENT-07 („danach Essential-Limits“) ist nicht Bestandteil der Phase 2.
+- **Verhältnis zu E-34:** Diese Matrix ersetzt für die P2-Schlüssel die Ist-Pläne aus E-34. WP-244 startet ohne weitere Freigabe.
 
-**Frage:** ENT-06 ist mit (V) „zu bestätigen“ markiert; `gps_standard` und `workplace` sind P2 getaggt, obwohl die zugehörigen Module in P4 liegen; ein Speicherlimit pro Org (MGT-01) ist nicht beziffert.
+**Aufgabe:** **erledigt 2026-10-28** A-18: Der Beschluss des Auftraggebers bestätigt Paketmatrix, Routenzuordnung mit Methoden- und Mehrfachregeln, die Nichtanlage der Pro-Schlüssel, das Speicherlimit (Staffel ohne Plandefault), das DATEV-Gate (E-141) und die Trial-Wirkung (`valid_until` stoppt nur `discovery`).
+
+**Frage:** ENT-06 ist mit (V) „zu bestätigen“ markiert. `gps_standard` und `workplace` sind P2 getaggt, obwohl die zugehörigen Module in P4 liegen; `ticketing_pro`, `stocktake_pro`, `disposition`, `audit_extended` und `usage_tracking` stehen als [P2–P4] in der Matrix, ihre Funktionen aber in P3/P4. Ein Speicherlimit pro Organisation (MGT-01) ist nicht beziffert. Der Bestand ordnet Routen anders zu: `orders` hängt an `workflow_forms`, `disposal-records` an `compliance`, `desks` und der GPS-Verlauf an `inventory`; `reservations`, `stock-movements`, `compositions`, `inventory` und `slas` sind ungeprüft. `RequiredFeature` kennt weder Methode noch mehrere Schlüssel. Teilfunktionen ohne eigenen Pfad (Signatur im Body, Mengenreservierung, DATEV-Format, Asset-Bezüge in der Suche) lassen sich nicht über Präfixe gaten. Für Lieferanten, Verträge, Metamodell, Tags und Feldrechte nennt ENT-06 keinen Schlüssel.
 
 **Optionen:**
 
 1. Übergangsregel wie oben.
-2. `gps_standard`/`workplace` erst in Phase 4 anlegen.
-3. Andere Matrix durch den Auftraggeber.
+2. `gps_standard` und `workplace` erst in Phase 4 anlegen; `desks` behält bis dahin einen P2-Schlüssel.
+3. `ticketing_pro` und `stocktake_pro` schon in Phase 2 ohne Modul anlegen (Pro und Enterprise), wie `gps_standard`.
+4. Andere Matrix durch den Auftraggeber.
 
-**Empfehlung:** Option 1; Schlüssel ohne Modul schaden nicht und halten die Matrix katalogtreu.
+**Empfehlung:** Option 1. Schlüssel ohne Modul schaden nicht und halten die Matrix katalogtreu, solange sie zu einer P2-Einstufung gehören; Pro-Schlüssel ohne P2-Funktion würden nur tote Grants erzeugen. Die Zuordnung je Präfix, Methode und Suffix entspricht der bestehenden Middleware; ein Modul umfasst mehrere Schlüssel (z. B. `stocktake` mit `stock`, `stocktake_standard` und `internal_orders`).
 
-**Blockiert / Auswirkung:** WP-244 und alle Modul-WPs mit `RequireFeature`.
+**Blockiert / Auswirkung:** Die Matrix gilt für WP-244, WP-705, WP-706, WP-247, WP-731 (`max_storage_mb`), WP-268 (Dateigröße kein Entitlement), WP-251 (kein Schlüssel), WP-736, WP-269, WP-270, WP-276, WP-748, WP-751, WP-278, WP-283, WP-756, WP-284, WP-759, WP-286, WP-288, WP-762, WP-763, WP-290, WP-291, WP-768, WP-769, WP-774, WP-309, WP-311, WP-790, Oberflächen (WP-318, WP-806, WP-807, WP-808, WP-320, WP-812, WP-813, WP-321, WP-814, WP-815, WP-322), WP-324, WP-325, WP-326, WP-329, WP-331.
 
-**Quelle:** docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:97–106; docs/plan/entscheidungen.md#e-34
+**Quelle:** docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:91–112 (ENT-03 bis ENT-07); docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:54 (LOC-09); docs/spec/katalog-v3/09-module-phase2plus.md:34 (INV-02), :66 (TKT-01); docs/audit/02-mandanten-auth-entitlements.md:432 (RBA-05); docs/plan/entscheidungen.md#e-34; backend/internal/entitlement/middleware.go (`gatedRoutes`, `coreRoutes`, `gatedSuffixes`, `RequiredFeature`, `Middleware`); backend/internal/entitlement/entitlement.go (`planFeatures`, `PlanFeatures`, `FeatureKeys`, `Validate`, `Quotas`, `QuotaFeature`, `Provision`); backend/internal/entitlement/pg_repository.go (`InsertMissing`); backend/internal/locations/handler.go (`rack_view`); backend/internal/discovery/scope_handler.go (`scope_suggested`); backend/cmd/seed/seed.go (`PlanFeatures(entitlement.PlanPro)`); backend/internal/server/modules.go
 
-**Betroffene IDs:** API-06, AST-02, ENT-02, ENT-06, EXP-01, INV-02, INV-03, MGT-01, RBA-05, STK-05, TKT-01, TST-01
+**Betroffene IDs:** API-01, API-06, AST-02, AST-07, AUD-07, DIS-08, DOD-01, ENT-02, ENT-05, ENT-06, EVT-03, GATE-01, GATE-02, GATE-05, GLO-11, GQL-03, IMP-IO-01, INS-01, INS-04, INV-02, INV-03, MET-06, MET-16, MET-45, MET-53, MGT-01, MGT-02, MGT-12, NTF-05, OPS-06, RBA-05, SEC-09, SEC-11, SEQ-01, SIM-01, SRC-02, SRC-03, STK-01, STK-02, STK-03, STK-05, TEN-09, TKT-01, TKT-02, TST-01, TST-03, TST-04, UI-11, UI-14, UI-15
 
-**Betroffene WPs:** WP-244 (`p2-entitlements`), WP-267 (`doc-model`), WP-276 (`ast-signature`), WP-286 (`stk-orders`), WP-288 (`inv-standard`), WP-289 (`inv-barcode`), WP-290 (`tkt-core`), WP-310 (`exp-datev`)
+**Betroffene WPs:** WP-244 (`p2-entitlements`), WP-705 (`p2-feature-gates`), WP-706 (`p2-module-gates`), WP-247 (`p2-paths`), WP-251 (`met-templates`), WP-731 (`doc-versions`), WP-268 (`doc-upload-security`), WP-269 (`ast-supplier-contract`), WP-736 (`ast-supplier`), WP-270 (`ast-contract-expiry`), WP-276 (`ast-signature`), WP-748 (`ast-signature-verify`), WP-278 (`ast-disposal`), WP-751 (`ast-disposal-record`), WP-283 (`stk-consumable-model`), WP-756 (`stk-stock-bookings`), WP-759 (`stk-availability-api`), WP-286 (`stk-orders`), WP-288 (`inv-standard`), WP-762 (`inv-lookup`), WP-763 (`inv-labels`), WP-849 (`inv-labels-render`), WP-290 (`tkt-core`), WP-291 (`tkt-from-review`), WP-768 (`tkt-sla-calendar-api`), WP-769 (`tkt-sla-breach`), WP-774 (`io-import-profile`), WP-788 (`src-fields-users-tags`), WP-309 (`src-ast-assets`), WP-790 (`exp-datev-gate`), WP-311 (`gql-aggregates`), WP-318 (`ui-pickers-flows`), WP-806 (`ui-flows-stock`), WP-807 (`ui-flows-scan`), WP-808 (`ui-contracts-suppliers`), WP-320 (`ui-stock-orders-stocktake`), WP-812 (`ui-orders`), WP-813 (`ui-stocktake-labels`), WP-321 (`ui-documents-tickets`), WP-814 (`ui-tickets`), WP-815 (`ui-sla-calendar-disposal`), WP-322 (`ui-import-bulk-views`), WP-324 (`ui-e2e-p2`), WP-325 (`g2-seed`), WP-326 (`g2-tst01`), WP-329 (`g2-security`), WP-331 (`g2-gate`)
 
 ## E-45
 
 **Thema:** Epic-Zuordnung und Traceability-Epics der Phase 2
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Option 1 nach Katalogabschnitt 46: Datenmodell, Metamodell, Rechte, Module (Abschnitte 9–18, 23–27) und Graph tragen Epic **B**; API, Import/Export, GraphQL und Frontend (Abschnitte 34–38) tragen **C**; Seed, Tests, Abnahme und Gate tragen **G2** (analog LT/G1 in Phase 1). Die Spalte `epic` in `docs/traceability.csv` folgt dem Feld „Epic (Traceability)“ des WP-Blocks.
+**Festlegung:** Option 1 (vom Auftraggeber am 2026-10-28 bestätigt) nach Katalogabschnitt 46: Datenmodell, Metamodell, Rechte, Module (Abschnitte 9–18, 23–27) und Graph tragen Epic **B**. API, Import/Export, GraphQL und Frontend (Abschnitte 34–38) tragen **C**, also auch WP-247 (API-06, Abschnitt 35). Seed, Tests, Abnahme und Gate tragen **G2** (analog LT/G1 in Phase 1). Die G1-Folgearbeiten im Meilenstein M2.0b tragen **B**; ausgenommen sind WP-831 und WP-832, die Gate-Nachweise für G2 liefern (GATE-01, GATE-02) und **G2** tragen. Die Spalte `epic` in `docs/traceability.csv` folgt dem Feld „Epic (Traceability)“ des WP-Blocks; die Traceability-Prüfung vergleicht beide (`epicField` in `backend/internal/traceability/traceability.go`, für alle Pläne in `PlanFiles`: heute Phase-1-Plan und Korrekturplan seit WP-336, den Phase-2-Plan ergänzt WP-243).
 
-**Frage:** Der Katalog ordnet Phase-2-Module „B (Phase 2)“ zu, nennt aber keine Epics für Oberflächen und Qualitätssicherung der Phase 2.
+**Frage:** Der Katalog ordnet Phase-2-Module „B (Phase 2)“ zu, nennt aber keine Epics für Oberflächen und Qualitätssicherung der Phase 2 und keine für die Folgearbeiten aus G1.
 
 **Optionen:**
 
@@ -274,60 +433,61 @@ Stand: 2026-10-13. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1 (konsistent mit E-06 und dem Phase-1-Plan).
 
-**Blockiert / Auswirkung:** Alle Traceability-Zeilen der Phase 2.
+**Blockiert / Auswirkung:** Alle Traceability-Zeilen der Phase 2; WP-243 (Prüfung des Epics je Zeile), WP-831 und WP-832 (Epic G2).
 
-**Quelle:** docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:105–117; docs/plan/entscheidungen.md#e-06
+**Quelle:** docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:105–117; docs/plan/entscheidungen.md#e-06; backend/internal/traceability/traceability.go (`epicField`, `PlanFiles`)
 
-**Betroffene IDs:** RBA-05, RBA-06
+**Betroffene IDs:** DOD-01, GATE-01, GLO-11, SEC-11
 
-**Betroffene WPs:** WP-245 (`p2-permissions`)
+**Betroffene WPs:** WP-243 (`p2-trace`), WP-831 (`g1-nachweise`), WP-832 (`g1-befunde-teil03`)
 
 ## E-46
 
 **Thema:** Verschobene Phase-1-WPs (WP-215 bis WP-239) durch Phase-2-WPs ersetzen
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1, angepasst 2026-11-02)
 
-**Festlegung:** Option 1: Die nach E-03 verschobenen WPs mit [P2]-IDs werden durch neue WPs dieses Plans ersetzt (Tabelle „Verschobene Arbeitspakete“); ihre Blöcke im Phase-1-Plan bleiben unverändert, werden aber nicht mehr als PR-Nummer verwendet. WPs mit ausschließlich P3/P4/[A]-IDs bleiben verschoben.
+**Festlegung:** Option 1 (vom Auftraggeber am 2026-10-28 bestätigt): Die nach E-03 verschobenen WPs mit [P2]-IDs werden durch WPs dieses Plans ersetzt (Tabelle „Verschobene Arbeitspakete“). Ihre Blöcke im Phase-1-Plan bleiben unverändert, sind aber keine gültige PR-Nummer mehr. WP-243 setzt das durch: WP-Blöcke mit der Kopfzeile „**G1-Umfang:** nein, verschoben (E-03)“ sind weder in `TRACEABILITY_WPS` noch in der Spalte `wp` von `docs/traceability.csv` zulässig. Maßgeblich ist die Kopfzeile, nicht das Epic; WP-214 bleibt gültig. Die Sperre gilt für alle 25 Blöcke WP-215 bis WP-239, auch für die weiter verschobenen WP-219, WP-220, WP-228 und WP-230 bis WP-234 mit ausschließlich P3-, P4- oder [A]-IDs; eine spätere Phase ersetzt sie ebenso durch neue Nummern. Teile verschobener WPs hat Phase 1 schon umgesetzt; die Tabelle nennt sie: WP-215 (Lifecycle-Graph aus der Datenbank, WP-122), WP-216 (Review-Typ `duplicate_ip`, WP-088), WP-218 (SPOF der direkten Abhängigen, WP-179), WP-222 (`ci.asset_id` und `serial_mismatch`, WP-077; `parent_ci_id`, WP-079), WP-223 (Ablauf je Organisation, WP-022 und WP-131) und WP-238 (bis auf Zweigfilter und Traceability, WP-026 und WP-053); den Frontend-Teil von WP-239 ersetzen WP-317 und WP-804. WP-331 belegt über die Tabelle die Audit-Critical-Reste AST-01, AST-05, MGT-02 und SRC-03 (GATE-01) und die 21 verschobenen Audit-High-Befunde mit P2-Anteil (GATE-02) mit dem ersetzenden WP. Neue oder geteilte WPs erhalten Nummern ab WP-704 ohne Suffix (K26). WP-336 bis WP-703 vergibt der Korrekturplan (`docs/plan/g1-korrektur/implementierungsplan.md`, seit WP-336 in `PlanFiles`); davon stehen nur die Lint-WPs WP-613 bis WP-629 (M2.11, Nachtrag WP-499) in diesem Plan.
 
-**Frage:** Die verschobenen WPs haben Voraussetzungen und Dateilisten aus der Zeit vor Phase 1 und decken ihre IDs nur teilweise (meist nur den Befund, nicht die ganze Anforderung).
+**Frage:** Die verschobenen WPs haben Voraussetzungen und Dateilisten aus der Zeit vor Phase 1 und decken ihre IDs nur teilweise (meist nur den Befund, nicht die ganze Anforderung). Ihre Blöcke und Traceability-Zeilen stehen weiter im Phase-1-Plan.
 
 **Optionen:**
 
-1. Ersetzen durch neue WPs (dieser Plan).
+1. Ersetzen durch WPs dieses Plans; die Prüfung lehnt verschobene Nummern ab.
 2. Verschobene WPs unverändert ausführen und Lücken mit Zusatz-WPs schließen.
 3. Verschobene Blöcke im Phase-1-Plan umschreiben (ändert ein eingefrorenes Dokument).
 
 **Empfehlung:** Option 1.
 
-**Blockiert / Auswirkung:** PR-Nummern, Traceability-Prüfung (WP-243), Tabelle der verschobenen WPs.
+**Blockiert / Auswirkung:** PR-Nummern, Traceability-Prüfung (WP-243), Tabelle der verschobenen WPs, WP-317 und WP-804 (Ersatz WP-239), GATE-01 und GATE-02 in WP-331 und WP-329.
 
-**Quelle:** docs/plan/implementierungsplan.md#m-s--high-befunde-späterer-phasen-nach-e-03
+**Quelle:** docs/plan/implementierungsplan.md (Meilenstein M-S, Kopfzeilen „G1-Umfang“); docs/plan/phase2/implementierungsplan.md (Tabelle „Verschobene Arbeitspakete“); docs/plan/entscheidungen.md#e-03; docs/plan/g1-korrektur/implementierungsplan.md (WP-336 bis WP-703); backend/internal/traceability/traceability.go (`PlanFiles`, `wpPattern`)
 
-**Betroffene IDs:** DOD-01, GLO-11
+**Betroffene IDs:** DIS-08, DOD-01, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, MET-51, OPS-06, SEC-11, SEQ-01, TEN-09, TST-03, TST-04, UI-12
 
-**Betroffene WPs:** WP-243 (`p2-trace`)
+**Betroffene WPs:** WP-243 (`p2-trace`), WP-804 (`ui-create-typeid`), WP-317 (`ui-guided-create`), WP-329 (`g2-security`), WP-331 (`g2-gate`)
 
 ## E-47
 
 **Thema:** TKT-03 [O] und CH17: Ticket-Provider-Schnittstelle in Phase 2
 
-**Status:** offen
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Keine Festlegung: [O]-Punkte beeinflussen kein Gate (GATE-05); CH17 (S) sieht die Schnittstelle aber ausdrücklich vor. Der Plan enthält WP-293 (`tkt-provider`, 1,0 PT) als optionales WP ohne Gate-Wirkung; ob es in Phase 2 ausgeführt wird, entscheidet der Auftraggeber.
+**Festlegung:** Option 1. WP-293 wird in Phase 2 ausgeführt (M2.6, 2,0 PT). Das WP behält „G2-Umfang: optional“ und hat keine Gate-Wirkung, weil TKT-03 [O] ist (GATE-05). CH17 (S) ist damit erfüllt. Voraussetzungen sind WP-290, WP-764 (`ticket_link`), WP-766 (`ticket.Service`) und WP-769. Verbindliche Lesart von TKT-03: „alle Objekte tragen generische external_ref“ meint in Phase 2 Ticket und Ticketkommentar. CI, Asset, Standort, Vertrag und `ticket_link` erhalten kein `external_ref`. Für die Vollständigkeit nach E-48 zählt TKT-03 nicht.
 
-**Aufgabe:** Entscheiden, ob WP-293 in Phase 2 ausgeführt wird. Zuständig: Product Owner. Termin: vor M2.6.
+**Aufgabe:** **erledigt 2026-10-28** Beschluss des Auftraggebers: WP-293 wird in Phase 2 ausgeführt, ohne Gate-Wirkung; die Lesart von `external_ref` (Ticket und Ticketkommentar) ist bestätigt (A-19).
 
-**Frage:** Soll die minimale Provider-Schnittstelle (Interface create/update/comment/link/status_sync, interner Referenz-Provider, generische `external_ref`) jetzt angelegt werden, obwohl TKT-03 [O] ist?
+**Frage:** Soll die minimale Provider-Schnittstelle (Interface create/update/comment/link/status_sync, interner Referenz-Provider, generische `external_ref`) jetzt angelegt werden, obwohl TKT-03 [O] ist? Und meint „alle Objekte tragen generische external_ref“ in Phase 2 nur Ticket und Ticketkommentar?
 
 **Optionen:**
 
-1. Ja, als optionales WP in Phase 2 (geringer Aufwand, erfüllt CH17).
-2. Nein, Backlog.
+1. Ja, als optionales WP in Phase 2 mit `external_ref` an Ticket und Ticketkommentar (erfüllt CH17).
+2. Ja, mit `external_ref` an allen Objektarten (CI, Asset, Standort, Vertrag; deutlich mehr Aufwand).
+3. Nein, Backlog.
 
-**Empfehlung:** Option 1.
+**Empfehlung:** Option 1. Die Schnittstelle betrifft nur den Ticketfluss; `external_ref` an weiteren Objektarten hat ohne externen Provider keinen Abnehmer.
 
-**Blockiert / Auswirkung:** WP-293.
+**Blockiert / Auswirkung:** WP-293 wird in M2.6 ausgeführt; `external_ref` nur an Ticket und Ticketkommentar. WP-331 prüft weiter „G2-Umfang: optional“ und führt TKT-03 ohne Gate-Wirkung. WP-243 nimmt TKT-03 von der Stufe P2 aus (E-48).
 
 **Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:70; docs/spec/katalog-v3/00-grundlagen.md (CH17)
 
@@ -339,25 +499,36 @@ Stand: 2026-10-13. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** Traceability-Vollständigkeit für [P2] (Erweiterung von E-30)
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
 
-**Festlegung:** Option 1: Die Prüfung liest beide Pläne und beide Abdeckungsdateien; `TRACEABILITY_REQUIRE_COMPLETE` nimmt eine Tag-Liste (z. B. `B,Q` ab G1, `B,Q,P2` ab G2); fehlende IDs anderer Tags werden weiterhin nur berichtet. IDs mit Status N/P in `abdeckung.csv` (Spalte `status`) sind von der Vollständigkeit ausgenommen, bis ihr Text vorliegt (E-37).
+**Festlegung:** Option 1, angepasst an den Stand nach WP-213 und an den Korrekturplan (WP-336, WP-450, E-76 (Korrekturplan)):
 
-**Frage:** E-30 regelt nur Phase 1. Ohne Erweiterung würde die Prüfung entweder alle [P3]/[P4]/[A]-IDs blockieren oder [P2] nie verlangen.
+- Fehlende [B]/[Q]-IDs blockieren seit WP-213 in jedem Lauf (`MissingForGate`, `backend/internal/traceability/traceability_test.go`), außer sie stehen in `docs/acceptance/g1-ausnahmen.csv` (`ExceptionsFile`, `NewGateReport`; E-76 (Korrekturplan), WP-450). Daran ändert Phase 2 nichts. Die Ausnahmeliste nimmt nur [B]/[Q]-IDs auf (`ValidateExceptions`); für die Stufe `P2` gibt es keine Ausnahmeliste.
+- `TRACEABILITY_REQUIRE_COMPLETE` nimmt eine kommagetrennte Stufenliste. `B` und `Q` sind zulässig und wirkungslos; `P2` macht die Phase-2-Vollständigkeit blockierend; `1` bleibt Alias für „alle [B]/[Pn]/[A]“ (`docs/acceptance/g1-gate.md`); leer heißt nur berichten; jeder unbekannte Wert (auch `P3`) ist ein Testfehler. WP-331 setzt im CI-Job `traceability` den Wert `B,Q,P2`. Die Prüfung liest alle Pläne aus `PlanFiles` (heute Phase-1-Plan und Korrekturplan seit WP-336; WP-243 ergänzt den Phase-2-Plan) und beide Abdeckungsdateien. Eine WP-Nummer in mehreren Plänen meldet `MergePlans` als Fehler.
+- Die Stufe `P2` verlangt für jede ID aus `docs/plan/phase2/abdeckung.csv` eine Zeile, deren `wp` ihr `abschluss_wp` ist. Zeilen anderer WPs, insbesondere aus Phase 1, zählen nicht; liegt `abschluss_wp` im Phase-1-Plan (heute SRC-04 mit WP-034), genügt dessen Zeile. Zusätzlich verlangt die Stufe über `CheckWorkPackages` alle Planzeilen aller nicht optionalen WPs des Phase-2-Plans.
+- Jede Zeile der Phase 2 nennt eine Testdatei (`IsTestFile`); `AllowedEvidence` bleibt auf die Zeilen des Phase-1-Plans beschränkt.
+- In jedem Lauf blockierend prüft ein Konsistenztest, dass jede Katalog-ID mit P2-Anteil in einer der Schreibweisen des Katalogs (z. B. `[P2]`, `P2/G2`, `B/G1, Teil P2/G2`, `[P2–P3]`, `[P2–P4, A]`) in der Phase-2-Abdeckung steht und jedes `abschluss_wp` „–“ oder ein WP mit einer Traceability-Zeile dieser ID ist.
+- Ausgenommen sind nur IDs ohne Wortlaut nach E-37 (Tag „nicht geliefert“, `abschluss_wp` „–“: MET-20, MET-30 bis MET-34, MET-40 bis MET-44) und WPs mit „**G2-Umfang:** optional“ samt den IDs, die sie abschließen (WP-293, TKT-03 [O]).
+- Der Audit-Status N/P (Spalte `status`) ist kein Ausnahmegrund und wirkt nie auf `MissingForGate`. AUT-05, AUT-06, NET-04, NFR-08, GATE-01, GATE-04, GATE-05 und SEQ-01 bleiben Pflicht. AUT-05, AUT-06, NET-04 und NFR-08 haben keine Traceability-Zeile; sie erfüllen die Prüfung über ihre Zeilen der Art `erklaerung` in `g1-ausnahmen.csv`, die nach E-103 als Nachweis gelten. GATE-04 steht dort mit Art `np` (GA-Regel).
+- Fehlende IDs anderer Tags ([P3], [P4], [A]) werden weiter nur berichtet.
+- Änderungen an Abdeckung und Plänen bringt ein Planungs-PR ein („Arbeitspakete: keine“).
+
+**Frage:** E-30 regelt nur Phase 1. Seit WP-213 ist die Stufe [B]/[Q] fest verdrahtet. Ohne Erweiterung würde die Prüfung entweder alle [P3]/[P4]/[A]-IDs blockieren oder [P2] nie verlangen. Eine Zählung „irgendeine Zeile je ID“ wäre für 44 der 93 IDs der Phase-2-Abdeckung mit `abschluss_wp` im Phase-2-Plan schon durch Phase-1-Zeilen erfüllt. Eine Ausnahme nach Audit-Status N/P träfe acht [B]/[Q]-IDs mit G1-Nachweis.
 
 **Optionen:**
 
-1. Tag-Liste wie oben.
-2. Blockierend für alle [B]/[Pn]/[A] ab G2 (nicht erfüllbar).
-3. Nie blockierend für [P2].
+1. Phasenstufe `P2` über `abschluss_wp` und die Planzeilen der Phase-2-WPs wie oben.
+2. `TRACEABILITY_REQUIRE_COMPLETE=1` ab G2: alle [B]/[Pn]/[A] blockierend (nicht erfüllbar, weil [P3]/[P4]/[A]-IDs keine Zeilen haben).
+3. Ausnahme nach Audit-Status N/P (Fassung vom 2026-10-13; nimmt [B]/[Q]-IDs mit Wortlaut aus).
+4. Nie blockierend für [P2].
 
-**Empfehlung:** Option 1.
+**Empfehlung:** Option 1. Sie belegt GATE-02 für G2 mit Phase-2-Arbeit und lässt den G1-Nachweis unberührt.
 
-**Blockiert / Auswirkung:** WP-243, WP-331.
+**Blockiert / Auswirkung:** WP-243 (Stufenliste, Phase-2-Plan als dritter Eintrag in `PlanFiles`, Prüfung über `abschluss_wp` und Planzeilen, Konsistenztest; Ausnahmeliste und `AllowedEvidence` bleiben unverändert); WP-331 (CI-Job `traceability` mit `B,Q,P2`, blockierend ab G2).
 
-**Quelle:** docs/plan/entscheidungen.md#e-30; backend/internal/traceability/traceability.go
+**Quelle:** docs/plan/entscheidungen.md#e-30; docs/plan/g1-korrektur/entscheidungen.md#e-59, #e-76; backend/internal/traceability/traceability.go (`requiredTag`, `gateTag`, `MissingForGate`, `PlanFiles`, `MergePlans`, `IsTestFile`, `AllowedEvidence`, `ExceptionsFile`, `ValidateExceptions`, `NewGateReport`); backend/internal/traceability/traceability_test.go (`RequireCompleteEnv`); docs/acceptance/g1-ausnahmen.csv; docs/plan/phase2/abdeckung.csv; .github/workflows/ci.yml (Job `traceability`)
 
-**Betroffene IDs:** DOD-01, GATE-01, GATE-02, GATE-05, GLO-11, SEQ-01
+**Betroffene IDs:** DIS-08, DOD-01, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, OPS-06, SEQ-01, TEN-09, TST-04
 
 **Betroffene WPs:** WP-243 (`p2-trace`), WP-331 (`g2-gate`)
 
@@ -365,9 +536,16 @@ Stand: 2026-10-13. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Thema:** IMP-IO-01: Import-Dateiformate, Bibliotheken und Grenzen
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Option 1: CSV (UTF-8 mit/ohne BOM, Trennzeichen automatisch: Semikolon, Komma, Tab) und Excel `.xlsx` (Bibliothek `github.com/xuri/excelize/v2`, nur das erste bzw. ein benanntes Blatt); JSON-Zeilen über die API. Grenzen: 50 MB Datei (SEC-09), 50.000 Zeilen je Import, 5.000 Zeilen je API-Aufruf; größere Dateien werden abgelehnt (422). `.xls` und `.ods` werden nicht unterstützt.
+**Festlegung:** Option 1: CSV (UTF-8 mit oder ohne BOM; Trennzeichen automatisch aus der Kopfzeile: Semikolon, Komma, Tab) und Excel `.xlsx` (Bibliothek `github.com/xuri/excelize/v2`, nur das erste oder ein benanntes Blatt); JSON-Zeilen über die API (WP-303). `.xls` und `.ods` werden nicht unterstützt. Grenzen:
+
+- Datei: höchstens 50 MB = 52.428.800 Byte (wie der Default von `RETICORA_DOCUMENT_MAX_UPLOAD_MB`, E-42). Größe und Format prüft `POST /api/v1/imports` beim Start; sonst 422 (`import-file-too-large`, `import-format-unsupported`).
+- Zeilen: höchstens 50.000 Datenzeilen je Import. Der Lauf prüft die Grenze in einem Zähldurchgang des Parsers vor der ersten Schreibung; darüber endet der Job mit `failed` und Code `import-row-limit` und schreibt nichts (WP-301, WP-775).
+- Schutz gegen Speicherüberlauf: XLSX entpackt höchstens 200 MiB (`UnzipSizeLimit`); über 500 Spalten oder über 1 MiB je Zeile ergeben `import-file-too-complex`.
+- API: höchstens 5.000 Zeilen (sonst 422) und 16 MiB Body (sonst 413) je Aufruf.
+
+Die Datei kommt als Dokument (WP-301) und wird erst nach dem Scanergebnis `clean` gelesen (E-42). Der Dry Run ist ein eigener Parameter `dry_run` neben `mode` (`create_missing`, `update_existing`, `both`; WP-775). Jede Zeile läuft in einer eigenen Transaktion der Organisation (`database.WithRequestTenantTx`, K20); ein Dry Run setzt sie zurück. Jede angelegte oder geänderte CI-Zeile nimmt die Identitäts- und `max_cis`-Sperre aus E-56 und zählt in der Transaktion neu (K21, WP-302, WP-835).
 
 **Frage:** IMP-IO-01 nennt „CSV, Excel, API“ ohne Formate, Bibliotheken und Grenzen.
 
@@ -375,77 +553,97 @@ Stand: 2026-10-13. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 1. Wie oben.
 2. Nur CSV und API.
-3. Zusätzlich .xls/.ods.
+3. Zusätzlich `.xls` und `.ods`.
 
 **Empfehlung:** Option 1.
 
-**Blockiert / Auswirkung:** WP-301 bis WP-303, Abhängigkeitsscan (neue Bibliothek).
+**Blockiert / Auswirkung:** Formate und Grenzen gelten für WP-301, WP-774, WP-775, WP-302, WP-303 und WP-322; WP-823 misst gegen die Zeilengrenzen; WP-329 und WP-829 prüfen Parser und neue Bibliothek `github.com/xuri/excelize/v2` (Abhängigkeitsscan).
 
-**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:52
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:52; docs/betrieb/ingest-spuren.md
 
-**Betroffene IDs:** API-06, API-09, IMP-IO-01, JOB-04
+**Betroffene IDs:** ABN-02, API-06, API-09, IMP-IO-01, JOB-01, JOB-04, NFR-03, SEC-11, TST-03, UI-11, UI-14
 
-**Betroffene WPs:** WP-301 (`io-import-model`), WP-302 (`io-import-run`)
+**Betroffene WPs:** WP-301 (`io-import-model`), WP-774 (`io-import-profile`), WP-302 (`io-import-run`), WP-775 (`io-import-pipeline`), WP-303 (`io-import-api`), WP-322 (`ui-import-bulk-views`), WP-823 (`g2-perf-writes`), WP-329 (`g2-security`), WP-829 (`g2-security-tests`)
 
 ## E-50
 
 **Thema:** EXP-01: DATEV-Exportformat für die Anlagenbuchhaltung
 
-**Status:** offen (Übergangsregel gilt)
+**Status:** entschieden (2026-10-28, Option 1; das Default-Mapping ist das Zielformat; angepasst 2026-11-02)
 
-**Festlegung:** Keine Festlegung möglich: Das konkrete DATEV-Zielformat (Anlagenbuchführung-Importschnittstelle ASCII mit Semikolon, Windows-1252, Kopfzeile nach DATEV-Vorgabe) und die Pflichtfelder muss die Buchhaltung des Auftraggebers bestätigen. Übergangsregel: WP-310 implementiert ein Default-Mapping der Asset-Felder (inventory_no, name, manufacturer/model, purchase_date, purchase_price, currency, supplier, cost_center, warranty_until, location, lifecycle_state) auf eine konfigurierbare Spaltenliste mit Kopfzeile, Semikolon und Windows-1252; das Zielformat ist als Mapping-Datei austauschbar.
+**Festlegung:** Option 1. Der Beschluss des Auftraggebers vom 2026-10-28 bestätigt das Default-Mapping als DATEV-Zielformat für die Anlagenbuchhaltung. Eine Schnittstellenbeschreibung der Buchhaltung wird nicht nachgereicht. WP-310 rendert `format: datev` auf `POST /api/v1/exports` und `POST /api/v1/export/jobs` aus Asset-Daten im Stil der DATEV-Importschnittstelle für die Anlagenbuchführung (ASCII mit Semikolon, Windows-1252):
 
-**Aufgabe:** DATEV-Zielformat (Schnittstellenbeschreibung, Pflichtspalten, Beispiel) liefern. Zuständig: Auftraggeber/Buchhaltung. Termin: vor WP-310 (`exp-datev`).
+- Default-Mapping als eingebettete Datei `export/datev_mapping.json` (je Spalte Kopfzeilentext, Quellfeld, Pflicht, Format) mit den Quellfeldern `inventory_no`, `name`, `manufacturer`, `model`, `purchase_date`, `purchase_price`, `currency` (leer → `organization.currency`), `supplier` (Name aus `supplier` nach E-41), `cost_center`, `warranty_until`, `location` und `lifecycle_state`. Ein Vertragsfeld gehört nicht zum Default.
+- Org-Override in `organization.settings.datev_mapping`; ein ungültiger Override setzt den Job mit Meldung auf `failed`. Abweichende Vorgaben einer Buchhaltung setzt die Organisation über diesen Override um. Eine Änderung des Defaults betrifft nur `export/datev_mapping.json` und die Formatfälle.
+- Format: Windows-1252, Semikolon, CRLF, Kopfzeile aus dem Mapping, Beträge mit Dezimalkomma ohne Tausenderpunkt, Datum `TT.MM.JJJJ`.
+- Formelschutz: Jede Textzelle läuft wie im bestehenden CSV- und DATEV-Layout durch `neutralizeFormula` (F-338, WP-593, `backend/internal/export/export.go`), auch im Fehlerreport. Betrags- und Datumszellen erzeugt die Formatfunktion des Mappings; sie sind davon ausgenommen, damit ein negativer Betrag nicht mit `'` beginnt.
+- Zeilen mit fehlendem Pflichtfeld oder nicht kodierbaren Zeichen stehen nicht in der Datei, sondern im Fehlerreport `<org>/<job>.errors.csv` (UTF-8 mit BOM), abrufbar über `error_report_url`; die Exportseite zeigt ihn an (WP-791). Der Bericht liegt wie die Exportdatei im Bucket `exports` (`export.ExportBucket`), den der Proxy für signierte Downloads ausliefert (`frontend/objects-proxy.conf`, WP-647).
+- Gate: Entitlements `export_datev` und `assets_basic` (ab Standard, E-44), Recht `asset:read` und Modul `inventory` (WP-790); Feldrechte nach E-43.
+
+Den Formatwert regelt E-141: `datev` bleibt Formatwert; Umstellung auf Asset-Daten und Sperre gelten als Korrektur. `GET /api/v1/export/cis?format=datev` liefert bis zum Sunset 2027-10-15 das CI-Layout, aber nur hinter dem Gate (WP-790).
+
+**Aufgabe:** **erledigt 2026-10-28** Beschluss des Auftraggebers: Das Default-Mapping aus E-50 gilt als bestätigtes DATEV-Zielformat; eine Lieferung von Schnittstellenbeschreibung, Pflichtspalten und Beispiel entfällt (A-20). Die Formatfälle in WP-326 prüfen das Default-Mapping; eine Nachprüfung nach Lieferung entfällt.
 
 **Frage:** EXP-01 verlangt „DATEV-Mapping mit Default für die Anlagenbuchhaltung (Assets)“, ohne das Format zu nennen.
 
 **Optionen:**
 
-1. Format nachliefern; Default-Mapping wie Übergangsregel.
+1. Format nachliefern; Default-Mapping wie in der Übergangsregel.
 2. Generischer Semikolon-Export mit DATEV-ähnlicher Kopfzeile ohne Nachweis.
 
-**Empfehlung:** Option 1.
+**Empfehlung:** Option 1. Das Mapping ist als Datei austauschbar; nach Lieferung ändert sich nur `export/datev_mapping.json` und die Formatfälle.
 
-**Blockiert / Auswirkung:** WP-310, Unit-Tests DATEV (TST-01).
+**Blockiert / Auswirkung:** WP-310 setzt das Default-Mapping als endgültiges Format um, mit Formelschutz für Textzellen in Datei und Fehlerreport und dem Fehlerreport im Bucket `exports`; die Bestätigung des Zielformats durch die Buchhaltung ist kein offener Punkt mehr. WP-790 setzt Gate und Formatwert nach E-141 um. WP-791 zeigt den Fehlerreport. WP-326 prüft die Formatfälle gegen das Default-Mapping (TST-01), ohne Nachprüfung. WP-331 führt EXP-01 nicht mehr unter „PASS unter Übergangsregel“.
 
-**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:50
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:50; backend/internal/export/export.go (`format=datev`, `writeCells`, `neutralizeFormula`); backend/internal/export/worker.go (`ExportBucket`); frontend/objects-proxy.conf; backend/internal/tenantapi/model.go (`Settings`)
 
-**Betroffene IDs:** ENT-02, EXP-01, TST-01
+**Betroffene IDs:** API-01, DIS-08, DOD-01, ENT-02, ENT-05, EXP-01, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, MET-06, MET-45, OPS-06, SEQ-01, TEN-09, TST-01, TST-04
 
-**Betroffene WPs:** WP-310 (`exp-datev`)
+**Betroffene WPs:** WP-310 (`exp-datev`), WP-790 (`exp-datev-gate`), WP-791 (`exp-datev-ui`), WP-326 (`g2-tst01`), WP-331 (`g2-gate`)
 
 ## E-51
 
 **Thema:** AST-02: Art der digitalen Unterschrift bei Übergaben
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1; Altsignaturen nach (a) übernommen; angepasst 2026-11-02)
 
-**Festlegung:** Option 1: Einfache elektronische Signatur: Unterschriftsbild (PNG, Canvas) als Dokument mit Link auf die Bewegung, SHA-256 des Bildes und des Bewegungsdatensatzes in `stock_movement.signature_hash`, Unterzeichner als Surrogat, Zeitstempel; Bewegungen sind append-only. Qualifizierte Signaturen (eIDAS) sind nicht Bestandteil.
+**Festlegung:** Option 1: Einfache elektronische Signatur (WP-276):
 
-**Frage:** AST-02 verlangt „digitale Unterschrift ab Paket Standard“, ohne Verfahren.
+- Eingabe `SignatureInput` an `POST /api/v1/assets/{id}/assign|return|transfer`: PNG aus Canvas (`image_png_base64`, dekodiert höchstens 512 KiB) und optional `signer` mit genau einem von `user_id`, `contact_id` oder `name`. Das OpenAPI-Schema `Signature` (`image_base64`, `object_key`, `signer_name`, `signed_at`, `method` touchscreen/drawn/typed) entfällt; `typed` entfällt, weil es kein Bild ist. `Signature` steht nur in `CreateAssignmentRequest` und `ReturnAssignmentRequest` der nie freigegebenen P2-Pfade `assignments*` (E-38); API-01 ist deshalb nicht berührt.
+- Das Bild wird als Dokument der Kategorie `signature` mit Link auf die Bewegung gespeichert (`document_link` mit `entity_type` `stock_movement`; Zieltyp in CHECK und Trigger aus WP-744, Registry in WP-276).
+- Unterzeichner: eine Nutzer-ID in `stock_movement.signer_user_id` (pseudonymer Schlüssel nach WP-241; ohne `signer` der Halter der Bewegung) oder ein Vault-Subjekt in `signer_surrogate` (Kontakt über `pii_subject_id` oder neues Subjekt der Art `person`, WP-242; bei übernommenen Altsignaturen das vorhandene Subjekt der Art `value` aus WP-656). Ledger, Dokument, Audit und Ereignisse enthalten keinen Klartextnamen. Zeitpunkt ist `occurred_at` (Serverzeit).
+- `stock_movement.signature_hash` = SHA-256 über PNG-Bytes, Trennbyte 0x00 und das kanonische JSON der Bewegung mit fester Schlüsselreihenfolge (`occurred_at` in UTC auf Mikrosekunden). Die reine Funktion `movement.SignatureHash` nutzen Schreibpfad, Verifikation und Altdatenlauf. Bewegungen sind append-only.
+- Nachweis (WP-748): Verifikation über `GET /api/v1/stock-movements/{id}/signature`; Dokumente der Kategorie `signature` sind gesperrt (409 bei Änderung, Löschung und weiteren Links).
+- Ohne Entitlement `signature` (ab Standard, E-44) antwortet die API mit 403 `feature-not-entitled`, ohne Bewegung, Dokument oder Blob.
+- Altsignaturen aus `assignment.checkout_signature` und `assignment.return_signature` (000047) werden übernommen (a). Seit WP-656 speichern sie `signer_name` als Surrogat-Referenz auf ein Vault-Subjekt der Art `value` (`pii.SealValueTx`, `backend/internal/assignment/signature.go`); `pii.backfill` hat Bestandsklartexte überführt, Klartext gibt es nur ohne Vault. WP-747 archiviert die Signaturen vor dem Drop von `assignment` unverändert in der Sicherungstabelle `assignment_signature_legacy` mit Verweis auf die übernommene Bewegung; `signature_hash` bleibt dort NULL. Der Drop läuft als SQL ohne `pii.DeleteTx`, damit die Vault-Subjekte erhalten bleiben; ein Löschen über das Repository würde sie schreddern (`shred`). WP-749 legt die Signaturen im Systemlauf `signature.migrate` als Dokument an der Bewegung ab, übernimmt die Surrogat-Referenz in `signer_surrogate` und versiegelt nur einen verbliebenen Klartextnamen über `pii.SealValueTx` im Vault. Personenbezogene Werte in Bestandsaudits versiegelt der Lauf nur über `audit_seal_pii` (000188, WP-680). Ein Verzicht auf die Übernahme (b) ist ausgeschlossen.
+- Qualifizierte Signaturen (eIDAS) sind nicht Bestandteil.
+
+**Aufgabe:** **erledigt 2026-10-28** Beschluss des Auftraggebers: Die Übernahme der Altsignaturen aus 000047 ist bestätigt (a). WP-749 wird ausgeführt; WP-747 legt die Sicherungstabelle `assignment_signature_legacy` an (A-53).
+
+**Frage:** AST-02 verlangt „digitale Unterschrift ab Paket Standard“, ohne Verfahren. Der Bestand speichert Unterschriften als JSON an `assignment`, mit Klartextnamen. Sollen die Altsignaturen aus 000047 übernommen werden?
 
 **Optionen:**
 
 1. Einfache elektronische Signatur wie oben.
-2. Fortgeschrittene/qualifizierte Signatur über externen Vertrauensdienst.
+2. Fortgeschrittene oder qualifizierte Signatur über einen externen Vertrauensdienst.
 
-**Empfehlung:** Option 1; Option 2 würde einen Subprozessor und eigenes Entitlement verlangen.
+**Empfehlung:** Option 1. Option 2 würde einen Subprozessor und ein eigenes Entitlement verlangen. Für die Altsignaturen (a): Die Übernahme kostet ein WP (1,5 PT) und vermeidet den stillen Verlust von Nachweisen (PRI-10).
 
-**Blockiert / Auswirkung:** WP-276, WP-267 (Link-Art stock_movement), WP-318.
+**Blockiert / Auswirkung:** WP-276 (Eingabe, Ablage, Hash, Entitlement), WP-748 (Verifikation, Sperre), WP-749 wird ausgeführt (Systemlauf `signature.migrate`; übernimmt die Surrogat-Referenzen aus WP-656 und versiegelt nur verbliebene Klartextnamen), WP-747 legt die Sicherungstabelle `assignment_signature_legacy` an und entfernt `assignment` per SQL, ohne die Vault-Subjekte zu schreddern, WP-744 (Spalte `signature_hash`, Linkziel `stock_movement`), WP-807 (Unterschriftsfeld in den Übergabedialogen).
 
-**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:6
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:6; backend/migrations/000047_assignment_signature.up.sql; backend/internal/assignment/model.go (`Signature`); backend/internal/assignment/signature.go (`sealSignature`, `shred`; WP-656); backend/internal/pii/surrogate.go (`SealValueTx`, `KindValue`); backend/internal/jobs/pii_backfill.go (`pii.backfill`); backend/migrations/000188_audit_seal_append_only.up.sql; api/openapi.yaml (`Signature`, `CreateAssignmentRequest`, `ReturnAssignmentRequest`)
 
-**Betroffene IDs:** AST-02, UI-15
+**Betroffene IDs:** AST-02, AST-07, INV-03, STK-04, UI-15
 
-**Betroffene WPs:** WP-276 (`ast-signature`), WP-318 (`ui-pickers-flows`)
+**Betroffene WPs:** WP-744 (`ast-movement-ledger`), WP-276 (`ast-signature`), WP-748 (`ast-signature-verify`), WP-749 (`ast-signature-legacy`), WP-843 (`ast-assignment-drop`), WP-807 (`ui-flows-scan`)
 
 ## E-52
 
 **Thema:** INV-03: Barcode-Symbologie, Etikettenvorlagen und Bibliotheken
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Option 1: Code128 und QR über `github.com/boombuler/barcode` (SVG/PNG), PDF-Etiketten über `github.com/go-pdf/fpdf` mit drei festen Vorlagen (Asset-Etikett 50×25 mm, Bin-Etikett 100×50 mm, A4-Bogen 24 Etiketten); Barcode-Inhalt ist die Inventarnummer bzw. ein `reticora:`-URN mit Objektart und ID; Kamera-Scan im Browser über `BarcodeDetector` mit `@zxing/browser` als Fallback.
+**Festlegung:** Option 1: Code128 und QR über `github.com/boombuler/barcode` (SVG/PNG), PDF-Etiketten über `github.com/go-pdf/fpdf` mit drei festen Vorlagen: `asset_50x25` (Asset-Etikett 50×25 mm), `bin_100x50` (Bin-Etikett 100×50 mm) und `a4_24` (A4-Bogen mit 24 Etiketten) (WP-763). Die Tests dekodieren die PNG-Ausgabe mit `github.com/makiuchi-d/gozxing` (nur in `_test.go`). Barcode-Inhalt ist bei Assets die Inventarnummer, sonst die URN `urn:reticora:<asset|consumable|location>:<uuid>` (Namensraum wie `urn:reticora:problem:*`). Kamera-Scan im Browser über `BarcodeDetector` mit `@zxing/browser` als dynamisch nachgeladenem Fallback (WP-807, WP-813). Pfade nach E-38: `assets/<id>/label?format=svg|png|pdf&template=…` (ersetzt `assets/<id>/label.svg` ohne Alias), `labels/batch` (Jobart `labels.batch`) und `labels/lookup` (WP-762: zuerst URN, dann Register); Entitlement `barcode` (E-44). Barcode und Inventarnummer sind je Organisation typübergreifend eindeutig über die Tabelle `barcode_registry` mit `UNIQUE (organization_id, code)` für Asset, Mengenartikel und Standort (WP-289). `asset.barcode` hat heute keinen Unique-Index; WP-271 legt `idx_asset_barcode_org` an. RFID bleibt je Organisation eindeutig (`idx_asset_rfid`); RFID-Etiketten sind [P4].
 
 **Frage:** INV-03 nennt Code128/QR und PDF-Vorlagen, aber keine Bibliotheken oder Vorlagenformate.
 
@@ -457,103 +655,1369 @@ Stand: 2026-10-13. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Empfehlung:** Option 1.
 
-**Blockiert / Auswirkung:** WP-289, WP-318, WP-320; Abhängigkeitsscan.
+**Blockiert / Auswirkung:** Symbologie, Bibliotheken und Vorlagen gelten für WP-289, WP-762, WP-763, WP-807 und WP-813; WP-329 erfasst die neuen Abhängigkeiten im Abhängigkeitsscan.
 
-**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:36
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:36; backend/migrations/000051_rfid_gps.up.sql; backend/internal/platform/httpx/problems.go (`urn:reticora:problem:*`)
 
-**Betroffene IDs:** INV-03, UI-14, UI-15
+**Betroffene IDs:** INV-03, SEC-11, UI-14, UI-15
 
-**Betroffene WPs:** WP-289 (`inv-barcode`), WP-318 (`ui-pickers-flows`), WP-320 (`ui-stock-orders-stocktake`)
+**Betroffene WPs:** WP-289 (`inv-barcode`), WP-762 (`inv-lookup`), WP-763 (`inv-labels`), WP-849 (`inv-labels-render`), WP-807 (`ui-flows-scan`), WP-813 (`ui-stocktake-labels`), WP-329 (`g2-security`)
 
 ## E-53
 
-**Thema:** NET-06/NET-09: Review-Typ `duplicate_ip` als Erweiterung des Review-Modells (REC-08)
+**Thema:** NET-06/NET-09: Auflösungen des Review-Typs `duplicate_ip`
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
 
-**Festlegung:** Option 1: `duplicate_ip` wird als elfter Review-Typ ergänzt (Aktionen: `keep_both`, `mark_stale`, `dismiss`); REC-08 nennt den Typ nicht, NET-06 und NET-09 verlangen ihn.
+**Festlegung:** Option 1: `duplicate_ip` ist seit WP-088 REC-08-Typ (`reviews.KindDuplicateIP` in `backend/internal/reviews/model.go`; CHECK `review_item_kind_check` in 000097, seit 000130 mit elf Typen, der elfte ist `unknown_relationship`). Ein neuer Typ und eine Migration entfallen. Die Auflösung folgt dem REC-08-Vokabular; `review_item_action_check` (merge, new, dismiss, accept) bleibt unverändert:
 
-**Frage:** WP-088 hat die zehn Typen aus REC-08 fest verdrahtet; NET-06/NET-09 verlangen einen weiteren Typ.
+- `reviews.AllowedActions[KindDuplicateIP]` wird `accept` und `dismiss` (heute nur `dismiss`), ebenso `REVIEW_ACTIONS.duplicate_ip` in `frontend/src/hooks/useReviews.ts` und die Beschreibung von `resolveReviewItem` in `api/openapi.yaml` (WP-772). Neue i18n-Schlüssel für Aktionen gibt es nicht.
+- Konflikt Reservierung ↔ Beobachtung (NET-09, WP-772): `accept` heißt, die Beobachtung gilt, und die Reservierung wird freigegeben. `dismiss` lässt beide Einträge bestehen.
+- Doppelte Beobachtungen (NET-06, WP-300, WP-773): `accept` mit `ci_id` heißt, die Adresse an der genannten CI-Seite ist veraltet; der Effekt entfernt die `ip_address`-Zeilen dieser Seite. Ist nur ein CI beteiligt, ist es diese Seite. Bei mehreren CI-Seiten ist `ci_id` aus `candidate_ci_ids` Pflicht (sonst 400); hält das CI die Adresse nicht mehr, folgt 422.
+- Die Wirkung von `accept` läuft in der Auflösungstransaktion unter der Zeilensperre (`FOR UPDATE OF review_item`, WP-675). Eine zweite Auflösung ergibt 409; eine abgelehnte Wirkung folgt dem Fehlervertrag der Ressource (409/422/404, WP-676). `dismiss` lässt alle Seiten bestehen.
+- Beide Erzeuger nutzen den `object_key` `ip:<vrf_id>/<host>`; je Adresse und VRF ist deshalb höchstens ein Item offen (`review_item_open_object`). Die Items aus WP-300 tragen die Payload `address`, `vrf_id`, `holders` und `side_keys` (gemeinsamer Aufbau in `backend/internal/ipam/duplicate.go`); die Items aus WP-772 behalten ihre Payload mit `conflict`.
+- Nach einer Auflösung (`dismissed` oder `resolved`) öffnet WP-300 kein neues Item, solange `side_keys` gleich bleibt. Dafür nutzt es `OpenUnlessSettled` (WP-652) mit `valueKey` `side_keys` und einer `holds`-Prüfung auf gleiches `side_keys`; eine neue Variante von `OpenUnlessDismissed` entsteht nicht. WP-772 bleibt bei `OpenUnlessDismissed` mit dem Schlüssel `conflict`, weil `accept` dort die Reservierung freigibt und der Konflikt damit entfällt.
+- `POST /api/v1/subnets/{id}/reservations` auf einer belegten Adresse antwortet mit 409; ein Review entsteht nur bei Discovery (WP-299).
+- Die Review-Inbox zeigt bei `duplicate_ip` Adresse, VRF und alle Seiten aus `payload.holders`, weil `reviewDiff` verschachtelte Payloads ausblendet; die seitenbezogene Aktion sendet `ci_id` (WP-773, UI-16).
+
+**Frage:** REC-08 nennt `duplicate_ip` als Typ und die Auflösungen merge, new, dismiss und accept. NET-06 und NET-09 verlangen das Review bei doppelter IP bzw. beim Konflikt einer Reservierung mit einer entdeckten Adresse, ohne Aktionen zu nennen. Der Typ besteht seit WP-088, aber nur mit `dismiss` und ohne Erzeuger. Welche Aktionen lösen ihn auf, und was bewirken sie?
 
 **Optionen:**
 
-1. Elfter Typ.
-2. `conflicting_values` wiederverwenden (verliert die IP-Semantik).
+1. REC-08-Vokabular ohne Migration: `accept` (seitenbezogen, mit `ci_id` bei mehreren CIs) und `dismiss`.
+2. Neue Aktionen `keep_both` und `mark_stale` mit Migration von `review_item_action_check` und Änderungen an `ReviewItem.action` und `ReviewItemResolveRequest.action` in `api/openapi.yaml`, an `reviews.AllowedActions`, `useReviews.ts` und i18n.
 
-**Empfehlung:** Option 1.
+**Empfehlung:** Option 1. REC-08 legt die Aktionen fest, und die Netz-WPs setzen sie ohne Migration um. Option 2 bleibt, wenn der Auftraggeber eigene Aktionsnamen in der Review-Inbox verlangt; dann liefert WP-772 die Migration. Die frühere Option „`conflicting_values` wiederverwenden“ ist gegenstandslos, weil der Typ besteht.
 
-**Blockiert / Auswirkung:** WP-299, WP-300, Review-Inbox (Phase 1 UI zeigt neue Typen generisch).
+**Blockiert / Auswirkung:** WP-299 (409-Regel), WP-772 (Aktionssatz `accept` und `dismiss` und Effekt, ohne Migration; Erzeuger über `OpenUnlessDismissed`), WP-300 (Erzeuger über `OpenUnlessSettled`, ohne Änderung an `reviews.Service`), WP-773 (seitenbezogenes `accept` in der gesperrten Auflösungstransaktion); Review-Inbox (UI-16). Eigene Aktionsnamen (Option 2) sind nicht Bestandteil.
 
-**Quelle:** docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:66,72; docs/spec/katalog-v3/05-collector-discovery-reconciliation.md (REC-08)
+**Quelle:** docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:66, :72; docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:64 (REC-08); backend/internal/reviews/model.go (`AllowedActions`); backend/internal/reviews/service.go (`OpenUnlessDismissed`, `OpenUnlessSettled`, `Resolve`); backend/internal/reviews/pg_repository.go (`FOR UPDATE OF review_item`); backend/migrations/000097_review_model.up.sql; backend/migrations/000130_review_unknown_relationship.up.sql
 
-**Betroffene IDs:** NET-06, NET-09
+**Betroffene IDs:** NET-06, NET-09, REC-08
 
-**Betroffene WPs:** WP-299 (`net-ip-reservation`), WP-300 (`net-duplicate-ip`)
+**Betroffene WPs:** WP-299 (`net-ip-reservation`), WP-772 (`net-ip-reservation-conflict`), WP-300 (`net-duplicate-ip`), WP-773 (`net-duplicate-ip-resolve`)
 
 ## E-54
 
 **Thema:** MET-50/CH18: Technische Basis für Form Builder und Klick-Builder
 
-**Status:** vorläufig entschieden (Option 1)
+**Status:** entschieden (2026-10-28, Option 1)
 
-**Festlegung:** Option 1: Drag & Drop mit `@dnd-kit/core` (Tastaturalternative nach WCAG), Regel-/Filter-Editor als eigene Komponente `RuleBuilder`, die ausschließlich den AST nach `api/rules.schema.json` erzeugt und die TypeScript-Auswertung aus WP-118 zur Vorschau nutzt; keine Text-DSL.
+**Festlegung:** Option 1: Drag & Drop mit `@dnd-kit/core` und `@dnd-kit/sortable` (Tastaturalternative und Bildschirmleser-Ansagen nach WCAG; `@dnd-kit/utilities` nur bei direktem Import von `CSS.Transform`). WP-797 führt die Abhängigkeiten und den Baustein `SortableList` ein. Ihn nutzen WP-314 (Reihenfolge der Template-Items), WP-800 (Reihenfolge der Templates am CI) und WP-316; WP-313 und WP-803 nutzen kein Drag & Drop.
 
-**Frage:** Der Katalog verlangt Klick-Builder und Drag & Drop, nennt aber keine Bibliotheken.
+Regel- und Filter-Editor ist die Komponente `RuleBuilder` ohne Text-DSL, mit festem Ausgabeformat je Modus (`frontend/src/rules/builderModes.ts`):
+
+- Filtermodus (WP-315): `FilterExpr` aus `api/openapi.yaml` in der Fassung nach WP-309 und WP-789; Vorschau serverseitig über `POST /api/v1/search/query`, ohne Auswertung im Frontend.
+- Bedingungs- und Validierungsmodus (WP-801): Bedingungsgrammatik aus WP-715 bzw. Regel-AST aus WP-118 nach `api/rules.schema.json`, Vorschau über `evaluateCondition` bzw. `evaluateRule` (`frontend/src/rules/rules.ts`) mit den Fällen aus `api/rules.conformance.json`.
+- Ausdrucksmodus (WP-802): `$defs/expr` aus WP-258, Vorschau über `evalExpr`.
+
+Der Filter-AST steht als `$defs/filter` in `api/rules.schema.json` (WP-789). Er behält die Knotenform von `FilterExpr` (and/or/not/related/Vergleich), weil `POST /api/v1/search/query` und `saved_view.filter_spec.where` G1-API sind (API-01: nur additiv). Die Vergleichsoperatoren `eq`, `ne`, `in`, `lt`, `lte`, `gt`, `gte` tragen dieselben Namen und Werteformen wie in der Bedingungsgrammatik aus WP-715; ihre SQL-Auswertung (Feldart, NULL-Werte, Zeitvergleich) beschreibt `$defs/filter`, weil sie von `fieldmeta.Predicate` abweicht. Filterspezifisch sind nur `like`, `exists`, `between`, `has_any`, `has_all` und `related`. Die Konformanzfälle stehen in `api/rules.conformance.json` (`filter_cases`, `invalid_filters`); `savedview/filter_test.go` und der TS-Validator `parseFilter` (`frontend/src/rules/filter.ts`) bestehen dieselben Fälle. Der Filtermodus erzeugt `FilterExpr`. Eine Umstellung von `where` auf eine gemeinsame Bedingungsgrammatik ist nicht Bestandteil von Phase 2; sie bräuchte eine eigene neue Entscheidung, weil sie nach API-01 nicht additiv ist (Option 3).
+
+**Frage:** Der Katalog verlangt Klick-Builder und Drag & Drop, nennt aber keine Bibliotheken. Der Regel-AST aus Phase 1 kennt keine UND/ODER/NICHT-Gruppen; diese gibt es nur im Filter-AST.
 
 **Optionen:**
 
-1. dnd-kit + eigene RuleBuilder-Komponente.
-2. Fertige Form-Builder-Bibliothek (meist nicht WCAG-konform und nicht AST-kompatibel).
+1. dnd-kit und eine eigene `RuleBuilder`-Komponente mit festem Ausgabeformat je Modus.
+2. Fertige Form- oder Query-Builder-Bibliothek (meist nicht WCAG-konform und nicht AST-kompatibel).
+3. Ein gemeinsamer neuer AST für Regeln und Filter (bricht `api/rules.schema.json` und `FilterExpr`, nicht additiv nach API-01).
 
-**Empfehlung:** Option 1.
+**Empfehlung:** Option 1. Beide ASTs bestehen und sind mit Tests abgesichert; gemeinsame Operatornamen und Konformanzfälle halten sie ohne Vertragsbruch beieinander.
 
-**Blockiert / Auswirkung:** WP-315, WP-316; Abhängigkeitsscan.
+**Blockiert / Auswirkung:** WP-797 (Abhängigkeiten, `SortableList`), WP-314, WP-800 und WP-316 (Drag & Drop); WP-315 (Filtermodus mit `FilterExpr`), WP-801, WP-802; WP-789 (`$defs/filter`), WP-715 (gemeinsame Operatornamen); WP-329 (Abhängigkeitsscan).
 
-**Quelle:** docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:93; docs/spec/katalog-v3/00-grundlagen.md (CH18)
+**Quelle:** docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:93; docs/spec/katalog-v3/00-grundlagen.md (CH18); api/rules.schema.json; api/rules.conformance.json; api/openapi.yaml (`FilterExpr`); frontend/src/rules/rules.ts (`evaluateRule`); backend/internal/savedview/filter.go
 
-**Betroffene IDs:** MET-50, MET-52, SRC-03, UI-11
+**Betroffene IDs:** MET-45, MET-50, SEC-11, SRC-03, SRC-04, UI-11
 
-**Betroffene WPs:** WP-313 (`ui-meta-types`), WP-315 (`ui-rule-builder`), WP-316 (`ui-form-builder`)
+**Betroffene WPs:** WP-715 (`met-rules-ast`), WP-789 (`src-ast-related`), WP-797 (`ui-meta-sets`), WP-314 (`ui-meta-templates-publish`), WP-800 (`ui-meta-ci-templates-migrate`), WP-315 (`ui-rule-builder`), WP-801 (`ui-rule-catalog`), WP-802 (`ui-rule-computed`), WP-316 (`ui-form-builder`), WP-329 (`g2-security`)
 
 ## E-55
 
 **Thema:** MGT-02: Norm und Nachweiskriterien für die Entsorgungsdokumentation
 
-**Status:** offen (Übergangsregel gilt)
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
 
-**Festlegung:** Keine Festlegung möglich: MGT-02 nennt „BSI/ISO“ ohne konkrete Norm. Übergangsregel: WP-278 dokumentiert Entsorgungsmethode nach DIN 66399 (Schutzklasse, Sicherheitsstufe) bzw. BSI-Empfehlung für Datenträger, Datenträger-Kennung, Dienstleister (Lieferant), Nachweisdokument, Durchführenden und Zeugen (Surrogate), Zeitpunkt; der Datensatz ist append-only und wird in der Audit-Hashkette referenziert.
+**Festlegung:** Option 1. Der Beschluss des Auftraggebers vom 2026-10-28 bestätigt Norm und Pflichtfelder. WP-751 dokumentiert die Entsorgung nach DIN 66399 (Schutzklasse, Sicherheitsstufe) bzw. der BSI-Empfehlung für Datenträger. `disposal_record` erhält `protection_class` (1–3), `security_level` (`^[POTEFH]-[1-7]$`), `supplier_id` (Dienstleister, E-41), `evidence_document_id` (Nachweisdokument, Fremdschlüssel ON DELETE RESTRICT), `performer_surrogate` und `witness_surrogate` (Vault-Subjekte der Art `person`) sowie `record_hash`; `method`, `data_carrier`, `certificate_ref`, `performed_at` und `notes` bleiben, ebenso `client_id` und `site_id` mit Ableitung, Propagation und Policies aus 000145 (WP-353). Die API nimmt `performed_by` und `witness` als Namen an und speichert nur die Surrogate. Die Pflichtfelder je Methode (`method` aus 000049) prüft der Handler anhand einer Tabelle im Code, die auch OpenAPI beschreibt; DB-CHECKs dafür gibt es nicht:
 
-**Aufgabe:** Norm und Pflichtfelder bestätigen. Zuständig: Auftraggeber/Datenschutz. Termin: vor WP-278 (`ast-disposal`).
+- immer: `method`, `performed_at`, `performed_by`, `asset_id` oder `ci_id`;
+- `destruction` und `physical_destruction`: zusätzlich `protection_class`, `security_level`, `data_carrier`, `supplier_id` oder `witness` sowie `evidence_document_id`;
+- `secure_erasure`: `data_carrier`, das Verfahren in `certificate_ref` oder `notes` sowie `evidence_document_id`;
+- `reuse`, `recycling` und `return_to_vendor`: nur die allgemeinen Pflichtfelder.
 
-**Frage:** Welche Norm und welche Pflichtangaben gelten für „revisionssicher nach BSI/ISO“?
+Fehlt ein Pflichtfeld, antwortet die API mit 400 (RFC 7807) und nennt das Feld. Weitere Anlagen über `document_link` (Ziel `disposal_record`, WP-267) sind kein Pflichtnachweis. Der Datensatz ist append-only; der Guard `disposal_record_immutable` lässt nur die Neuableitung von `client_id` und `site_id` durch. `record_hash` (SHA-256 über das kanonische JSON aller Fachfelder einschließlich der Surrogat-IDs, nie Klartext) setzt ein BEFORE-INSERT-Trigger nach dem Muster von `audit_entry_hash` in der Fassung von 000158 (`convert_to(…, 'UTF8')` statt `::bytea`, WP-423). `client_id` und `site_id` gehen nicht in den Hash ein, weil die Propagation sie nachträglich ändert. Altzeilen werden nachgefüllt; der Lauf schaltet wie 000145 den Trigger `disposal_record_no_update` nur dafür ab. Ein Audit-Eintrag `disposal_record.created` in derselben Transaktion referenziert ihn in der Audit-Hashkette. Das Formular in WP-815 spiegelt die Tabelle (`DISPOSAL_REQUIRED_FIELDS`); ändert sich die Tabelle, wird das Formular im selben PR mitgezogen.
+
+**Aufgabe:** **erledigt 2026-10-28** Beschluss des Auftraggebers: DIN 66399 und BSI-Datenträgerempfehlung mit den Pflichtfeldern je Methode aus E-55 sind bestätigt (A-21). WP-751 setzt die Tabelle ohne weitere Anpassung um.
+
+**Frage:** Welche Norm und welche Pflichtangaben gelten für „revisionssicher nach BSI/ISO“? Der Bestand speichert den Durchführenden als Klartext (`performed_by`) und als Nachweis nur den Freitext `certificate_ref` (000049).
 
 **Optionen:**
 
-1. DIN 66399 + BSI-Datenträgerempfehlung (Übergangsregel).
+1. DIN 66399 und BSI-Datenträgerempfehlung mit Pflichtfeldern je Methode (Übergangsregel).
 2. ISO/IEC 27001 Annex A 7.14 (Entsorgung von Betriebsmitteln) mit frei definierten Feldern.
 3. Andere Vorgabe des Auftraggebers.
 
-**Empfehlung:** Option 1.
+**Empfehlung:** Option 1. Die Pflichtfeldtabelle steht im Code und in OpenAPI und wird nach A-21 angepasst.
 
-**Blockiert / Auswirkung:** WP-278, WP-321.
+**Blockiert / Auswirkung:** WP-751 setzt Normfelder, Pflichtfeldtabelle und `record_hash` (Muster 000158, ohne `client_id` und `site_id`) als endgültige Regel um und behält Scope-Spalten und Policies aus 000145; ein Anpassungsvorbehalt nach A-21 entfällt. WP-815 spiegelt die Tabelle. WP-331 führt MGT-02 nicht mehr unter „PASS unter Übergangsregel“.
 
-**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:42; docs/audit/09-module-phase2plus.md:45
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:42; docs/audit/09-module-phase2plus.md:45; backend/migrations/000049_disposal.up.sql; backend/migrations/000145_disposal_record_scope.up.sql; backend/migrations/000158_audit_hash_utf8.up.sql
 
-**Betroffene IDs:** MGT-02, UI-14
+**Betroffene IDs:** DIS-08, DOD-01, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, MGT-02, OPS-06, SEQ-01, TEN-09, TST-04, UI-14
 
-**Betroffene WPs:** WP-278 (`ast-disposal`), WP-321 (`ui-documents-tickets`)
+**Betroffene WPs:** WP-751 (`ast-disposal-record`), WP-815 (`ui-sla-calendar-disposal`), WP-331 (`g2-gate`)
+
+## E-103
+
+**Thema:** Fortgeltung der in G1 durch Erklärung abgenommenen Punkte (B3 Pentest-Befundliste, B4 v2-Texte, B6 Subprozessoren) für G2
+
+**Status:** entschieden (2026-10-28, Beschluss des Auftraggebers: Die Erklärung vom 2026-10-15 gilt als Nachweis für G1 und G2; die Nachweise B3, B4 und B6 sind gestrichen; angepasst 2026-11-02)
+
+**Festlegung:** Die Erklärung des Auftraggebers vom 2026-10-15 gilt als Nachweis für G1 und G2. Die Nachweise B3 (Pentest-Befundliste), B4 (v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b)) und B6 (Subprozessorenliste) sind gestrichen. Sie werden nicht nachgereicht. Kein WP und keine Aufgabe sieht ihre Lieferung vor. Abgleiche mit v2-Texten entfallen. Der Beschluss vom 2026-10-28 löst E-76 (Korrekturplan, Option 2) in den Punkten „Erklärung ersetzt keinen Nachweis“ und „Lieferung vor GA“ ab. Die übrigen Regeln aus E-76 (Korrekturplan) bleiben und sind die Grundlage dieser Entscheidung.
+
+- Stand auf main: Nach E-76 (Korrekturplan; WP-450, WP-451, WP-595) stehen AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01, der Pentest-Anteil von GATE-03 und GATE-02 in `docs/acceptance/g1-ausnahmen.csv` mit Art `erklaerung` und den Lieferungen A-02, A-07 bzw. A-11 mit „Frist vor GA“ (WP-453, WP-454, WP-455, WP-457). `docs/acceptance/g1-gate.md` führt sie als „offen“; Zeilen „PASS (Erklärung des Auftraggebers)“ gibt es dort nicht, und `tests/rep01-structure.test.sh` verbietet PASS durch Erklärung in der G1-Checkliste. Das G1-Ergebnis setzt WP-600 (E-59, Korrekturplan) vor dem Start der Phase 2; mit Zeilen der Art `erklaerung` ist höchstens „bedingt bestanden“ möglich.
+- WP-453, WP-454, WP-455 und WP-457 (Korrekturplan) entfallen; ein Planungs-PR vermerkt das im Korrekturplan. Die Phase-1-Entscheidungen E-02 und E-35 stehen auf main auf „entschieden (2026-10-28, Erklärung des Auftraggebers ersetzt die Lieferung)“, die Phase-1-Aufgaben A-02, A-07 und A-11 auf „erledigt 2026-10-28“. Die Aufgabe A-23 ist erledigt, A-22 für ABN-01 (a)/(b).
+- G1 (WP-831): Die Zeilen der Art `erklaerung` in `g1-ausnahmen.csv` bleiben. Ihre Spalte `entscheidung` nennt zusätzlich E-103, ihre Spalte `lieferung` lautet „entfällt (E-103)“. `tests/rep01-structure.test.sh` verlangt für eine Zeile der Art `erklaerung` mit E-103 keine Frist (Bedingungen (1) und (3) von „bedingt bestanden“). In `docs/acceptance/g1-gate.md`, `docs/security/pentest-g1.md`, `docs/acceptance/abn-01.md` und `docs/legal/subprozessoren.md` ersetzt WP-831 „Nachweis ausstehend“ und „nachzureichen“ durch den Verweis auf die Erklärung vom 2026-10-15 und auf E-103. Die Statuszellen der G1-Checkliste bleiben ohne PASS durch Erklärung; das G1-Ergebnis aus WP-600 ändert WP-831 nicht.
+- GATE-01 in G2: Die Quelle „Pentest-Befundliste G1“ in `docs/acceptance/g2-gate.md` steht auf „kein offenes Critical laut Erklärung des Auftraggebers vom 2026-10-15“. WP-329 vermerkt im Abschnitt „Nachverfolgung G1“ die Erklärung statt einer Befundliste. Neue Critical-Befunde aus `docs/security/review-phase2.md`, den Scans und den Audit-Quellen prüft GATE-01 unverändert.
+- G2 (WP-331): Die IDs der Art `erklaerung` aus `g1-ausnahmen.csv` (AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), Pentest-Anteil von GATE-03) führt `g2-gate.md` mit „PASS (Erklärung des Auftraggebers, E-103)“ im Unterabschnitt „Abnahme durch Erklärung aus G1“, ohne Abgleich; die [B]-IDs stehen dort informativ. Die G2-Stufe von `tests/rep01-structure.test.sh` lässt PASS durch Erklärung nur für diese IDs zu; für jede andere ID bleibt es ein Fehler. Eine eigene Ausnahmeliste für G2 gibt es nicht (E-48).
+- ABN-01 (a)/(b): WP-330 führt in der Spalte „Status G2“ von `docs/acceptance/abn-01.md` „PASS (Erklärung des Auftraggebers, E-103)“. Für (c), (d) und (e) gelten die eigenen Nachweise.
+- Andere Nachweise bleiben: Die Läufe auf dem Release-Kandidaten G1 (CI mit den Scan-Jobs, install-smoke, nächtlicher `load.yml`-Lauf, `gate-final.yml`) liefert WP-595 (Korrekturplan) auf dem Tag `v1.0.0-rc.<n>`; WP-831 ergänzt nur, was dort fehlt.
+- Für GA (GATE-04) verlangt SEC-11 einen eigenen Pentest. Diese Entscheidung regelt nur G1 und G2.
+
+**Aufgabe:** **erledigt 2026-10-28** Beschluss des Auftraggebers: Die Erklärung vom 2026-10-15 gilt als Nachweis für G1 und G2. Die Nachweise B3, B4 und B6 sind gestrichen und werden nicht geliefert (A-23); A-02, A-07 und A-11 aus Phase 1 sind damit erledigt, A-22 für ABN-01 (a)/(b). E-76 (Korrekturplan) ist in den Punkten Nachweis und Lieferfrist abgelöst; WP-453, WP-454, WP-455 und WP-457 (Korrekturplan) entfallen.
+
+**Frage:** Der Auftraggeber hat am 2026-10-15 die G1-Blocker B3 (Pentest ohne offene High/Critical), B4 (v2-Texte zu AUT-05, AUT-06, NET-04 und ABN-01 (a)/(b)) und B6 (Subprozessorenliste, NFR-09) für erledigt erklärt. Die Nachweise liegen im Repository nicht vor (`docs/acceptance/g1-gate.md`, Abschnitt „Ergebnis“). [Q]-Punkte gelten für jedes Gate: GATE-01 verlangt „kein offenes Critical im jeweiligen Gate“, und ABN-01 ist [Q]. Gilt die Erklärung für G2 fort, oder müssen die Nachweise vor G2 vorliegen?
+
+**Optionen:**
+
+1. Nachweise vor G2: Pentest-Befundliste (GATE-01) und v2-Texte zu ABN-01 (a)/(b) (GATE-02) liegen vor der G2-Gateprüfung vor, sonst sind GATE-01 bzw. ABN-01 offen; die Subprozessorenliste wird ebenfalls nachgereicht, die [B]-Punkte stehen informativ.
+2. Die Erklärung vom 2026-10-15 gilt bis GA fort; G2 übernimmt die G1-Bewertung unverändert.
+3. Neue Erklärung des Auftraggebers zum G2-Gate.
+
+**Empfehlung:** Option 1. [Q]-Punkte gelten für jedes Gate, und eine nachgereichte Befundliste mit offenem Critical würde G2 sonst unbemerkt verfehlen. Phase 2 bringt neue Datenkategorien (Dokumentenspeicher, Unterschriften, Entsorgungsnachweise, Importdateien); die Subprozessorenliste gewinnt damit an Gewicht.
+
+**Blockiert / Auswirkung:** WP-831 stellt die Zeilen der Art `erklaerung` in `g1-ausnahmen.csv` auf „entfällt (E-103)“ um, passt die Fristprüfung in `tests/rep01-structure.test.sh` an und ersetzt „Nachweis ausstehend“ bzw. „nachzureichen“ durch den Verweis auf die Erklärung; die Läufe auf dem Release-Kandidaten liefert WP-595 (Korrekturplan). WP-453, WP-454, WP-455 und WP-457 (Korrekturplan) entfallen; Eingang von B3, B4, B6 und Abgleich mit v2-Texten entfallen. WP-329 übernimmt keine Befundliste und vermerkt die Erklärung. WP-330 führt ABN-01 (a)/(b) per Erklärung. WP-331 führt die GATE-01-Quelle Pentest G1 per Erklärung und den Unterabschnitt „Abnahme durch Erklärung aus G1“ und lässt PASS durch Erklärung in der G2-Stufe nur für die IDs der Art `erklaerung` zu. Phase 1: E-02 und E-35 entschieden; A-02, A-07, A-11 erledigt; A-22 für ABN-01 (a)/(b) erledigt. E-76 (Korrekturplan) ist in den Punkten Nachweis und Lieferfrist abgelöst.
+
+**Quelle:** docs/spec/katalog-v3/00-grundlagen.md:11 ([Q]); docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:85–87 (GATE-01, GATE-02), :48–50 (NFR-08, NFR-09); docs/acceptance/g1-gate.md; docs/acceptance/g1-ausnahmen.csv; docs/acceptance/abn-01.md; docs/security/pentest-g1.md; docs/legal/subprozessoren.md; tests/rep01-structure.test.sh; docs/plan/g1-korrektur/entscheidungen.md#e-59, #e-76; docs/plan/g1-korrektur/implementierungsplan.md (WP-453 bis WP-457, WP-595, WP-600); docs/plan/entscheidungen.md#e-02, #e-28, #e-35
+
+**Betroffene IDs:** ABN-01, AUT-05, AUT-06, DIS-08, DOD-01, GATE-01, GATE-02, GATE-03, GATE-05, GLO-11, INS-01, INS-04, NET-04, NFR-08, NFR-09, OPS-06, SEC-11, SEQ-01, TEN-09, TST-04
+
+**Betroffene WPs:** WP-831 (`g1-nachweise`), WP-329 (`g2-security`), WP-330 (`g2-abnahme`), WP-331 (`g2-gate`)
+
+## E-104
+
+**Thema:** Form von `total` in Listen über etwa 25.000 Objekten (Folge aus E-17)
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1, gedeckelte Zählung, für `GET /api/v1/cis` und `GET /api/v1/search`.
+
+- `total` bleibt Pflichtfeld von `PaginationEnvelope` (API-01). Bis 10.000 Treffer ist `total` exakt. Gezählt wird über höchstens 10.001 Zeilen. Darüber ist `total` gleich 10.000, und die Antwort trägt das additive Feld `total_capped: true`. Unterhalb der Schwelle ist `total_capped` `false` oder fehlt.
+- **Bestand nach dem Korrekturplan (angepasst 2026-11-02):** WP-605 (Korrekturplan) hat mit Migration 000156 den Index `idx_ci_list_sort` angelegt: `ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE deleted_at IS NULL`. `PGRepository.List` (`backend/internal/ci/pg_repository.go`) zählt seitdem nur, wenn ein Cursor gesetzt ist oder die Seite das Limit füllt. Sonst ergibt sich `total` aus Offset und Seitenlänge. Ohne Filter kann der Index die Zählung als Index-only-Scan bedienen. Sonst zählt die Liste mit `SELECT COUNT(*) FROM ci WHERE …` über alle Treffer. `nodeOrgReadAbove` ist unverändert 2.000. Die Suche zählt unverändert mit `COUNT(*) OVER()`. `total_capped` gibt es weder im Code noch in `api/openapi.yaml`. Die Deckelung bleibt deshalb nötig.
+- WP-839 setzt die Form um: die Zählung in `PGRepository.List` (`backend/internal/ci/pg_repository.go`), `COUNT(*) OVER()` in `backend/internal/search/pg_repository.go`, `ListResponse` in `backend/internal/api/api.go`, `PaginationEnvelope` in `api/openapi.yaml` und `schema.d.ts`. Die CI-Liste (`frontend/src/pages/CIListPage.tsx`) zeigt bei `total_capped` „mehr als 10.000“. Zu WP-839 gehören auch die Indizes der übrigen Sortierfelder, Keyset und die Neubewertung der Schwelle von `ListNodes` für 50.000 Objekte (`nodeOrgReadAbove`: heute liest es ab 2.000 IDs die ganze Organisation). Den Index der Standardsortierung legt WP-839 nicht erneut an.
+- Die übrigen Listen mit Zählung je Anfrage (`/api/v1/assets`, `/api/v1/tickets`, `/api/v1/consumables` und die neuen Listen der Phase 2) behalten die exakte Zählung. Ihr p95 bei 10.000 Objekten einschließlich `total` weist WP-327 nach (K23). Keine neue Liste zählt je Anfrage über die ganze Organisation ohne diesen Nachweis.
+- Über 10.000 Objekten bleiben diese Listen Teil der bekannten Einschränkung aus E-17 (Release-Notes in WP-331). Die Deckelung auch für sie braucht ein eigenes WP; der Phase-2-Plan enthält keines.
+- Eine Schätzung mit `total_estimated` gibt es nicht.
+
+**Aufgabe:** **erledigt 2026-10-28** A-24: Der Beschluss des Auftraggebers bestätigt Option 1, die gedeckelte Zählung mit Schwelle 10.000 und `total_capped`. Sie gilt für `GET /api/v1/cis` und `GET /api/v1/search`; die übrigen Listen behalten die exakte Zählung. Zuständig war: Product Owner/API-Verantwortlicher.
+
+**Frage:** E-17 (entschieden am 2026-10-15) nimmt Listen und Suche über etwa 25.000 Objekten als bekannte Einschränkung mit Folge-WP hin. Ursache ist die Zählung: `GET /api/v1/cis` ermittelt `total` je Anfrage mit `SELECT COUNT(*) FROM ci WHERE …` über die ganze Organisation (`backend/internal/ci/pg_repository.go`), die Suche mit `COUNT(*) OVER()`; bei 28.000 CIs lag p95 von `GET /cis` bei 1,9 s (`docs/plan/entscheidungen.md#e-17`; `docs/acceptance/lasttest-g1.md`, Offene Punkte 4). `PaginationEnvelope` in `api/openapi.yaml` verlangt `total`. Welche Form hat `total` bei großen Ergebnismengen, und für welche Listen gilt sie?
+
+**Optionen:**
+
+1. Gedeckelte Zählung: exakt bis zu einer Schwelle (Vorschlag 10.000, Messbasis aus E-17), gezählt über höchstens Schwelle + 1 Zeilen; darüber ist `total` die Schwelle und additiv `total_capped: true`. `total` bleibt Pflichtfeld; die Oberfläche zeigt „mehr als 10.000“.
+2. Exakte Zählung beibehalten und beschleunigen (Zähler je Organisation für ungefilterte Listen, Index-only-Scan); gefilterte Listen zählen weiter über die Treffermenge, ein Budget bei 50.000 Objekten ist nicht zugesagt.
+3. Geschätzte Gesamtzahl aus der Planerschätzung mit additivem Kennzeichen `total_estimated: true` (ungenau unter RLS und mit Filtern).
+4. Neue Listen ohne `total`, nur mit `has_more` und `next_cursor`; bestehende Listen behalten `total` (zwei Listenverträge nebeneinander).
+
+**Empfehlung:** Option 1. Die Kosten sind begrenzt, die Zahl bleibt bis zur Messbasis von E-17 exakt, und die Änderung ist additiv. Option 3 liefert unter RLS keine verlässlichen Werte, Option 4 teilt den Listenvertrag.
+
+**Blockiert / Auswirkung:** WP-839 setzt die gedeckelte Zählung um und beginnt diesen Teil ohne weitere Wartezeit; dazu gehört die Anzeige „mehr als 10.000“ in der CI-Liste. Es baut auf `idx_ci_list_sort` (000156, WP-605) auf und legt für die Standardsortierung keinen zweiten Index an. WP-327 weist den p95 der Listen mit exakter Zählung bei 10.000 Objekten nach (K23), u. a. für WP-740, WP-274, WP-789 und WP-319. WP-331 führt diese Listen über 10.000 Objekten als bekannte Einschränkung aus E-17.
+
+**Quelle:** docs/plan/entscheidungen.md#e-17; docs/acceptance/lasttest-g1.md (Offene Punkte 4 und 5); api/openapi.yaml (`PaginationEnvelope`); backend/internal/api/api.go (`ListResponse`); backend/internal/ci/pg_repository.go (`PGRepository.List`, `nodeOrgReadAbove`); backend/internal/search/pg_repository.go; backend/migrations/000156_ci_list_sort_index.up.sql (WP-605, Korrekturplan)
+
+**Betroffene IDs:** ABN-02, API-01, AST-01, AST-07, DIS-08, DOD-01, EVT-03, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, MET-45, NFR-01, NFR-02, NFR-03, OPS-06, SEQ-01, SRC-03, SRC-04, STK-04, TEN-09, TST-04, UI-12, UI-14
+
+**Betroffene WPs:** WP-839 (`g1-scale`), WP-740 (`ast-version-events`), WP-274 (`ast-movement`), WP-789 (`src-ast-related`), WP-319 (`ui-assets-contracts`), WP-327 (`g2-perf`), WP-331 (`g2-gate`)
+
+## E-105
+
+**Thema:** Release-Gate für P2-Funktionen ohne eigenes Modul (Metamodell, Tags, Feldrechte, Verträge/Lieferanten, Import)
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1. Der Katalog regelt nur Entitlements (ENT-05, ENT-06), nicht die Release-Einheit; nach E-03 sind Funktionen späterer Phasen im G1-Release abgeschaltet. Mit WP-830 wird G2 der Standard von `RETICORA_MODULES` (leer = alle Module mit Phase P2). Die Regel wirkt also auf Releases von main zwischen G1 und G2 und auf das Testprofil G1:
+
+- **Neues P2-Modul `metamodel`** in `LateModules` (`backend/internal/server/modules.go`) mit den Präfixen `/api/v1/attribute-sets`, `/api/v1/ci-types/<id>/attribute-sets`, `/api/v1/templates`, `/api/v1/rules`, `/api/v1/layouts`, `/api/v1/metamodel` (Drafts, Test, Publikation, Import) und `/api/v1/field-permissions`. Nav: `metamodel` (die Reiter der G1-Seite `ci-types` blenden sich über `useModules().isModuleEnabled('metamodel')` aus) und `rules` (Seite aus WP-801). Das Modul hat keinen Feature-Key (`cmdb_core`, E-44). Die Prüfung aus WP-705, dass jedes Präfix eines P2-Moduls einen Feature-Key hat, nimmt `metamodel` aus.
+- **Neues P2-Modul `import`** mit `/api/v1/import-profiles` und `/api/v1/imports`, Nav `import`, Feature-Key `import`.
+- **Neue Präfixe bestehender Module:** `/api/v1/suppliers`, `/api/v1/contracts` und `/api/v1/labels` → `inventory` (Nav zusätzlich `contracts` und `suppliers`); `/api/v1/business-calendars` und `/api/v1/review-items/<id>/ticket` → `ticketing`. Ein eigenes Modul `contracts` entfällt: Verträge und Garantien teilen den Lauf `expiry.check` und den Feature-Key `assets_basic`. `labels` hat keine eigene Navigationsseite, die `TestG1DefaultSwitchesLateModulesOff` für ein eigenes Modul verlangt. Die Module `disposal` (wird P2) und `gps` (neu, P4) regelt E-44.
+- **Kern ohne Modul-Gate** (kein `x-phase`, in jedem Release registriert): Tags (`/api/v1/tags`, `/api/v1/cis/<id>/tags`), weil WP-281 den G1-Schreibweg über `attributes.tags` sperrt und ein abgeschaltetes Modul keinen Schreibweg ließe; Asset-Tags unter `/api/v1/assets` folgen `inventory`. Ebenso die Nachfolger von G1-Pfaden (`/api/v1/lifecycle-models`, `/api/v1/cis/<id>/instance-attributes`) und der G1-Pfad `/api/v1/cis/<id>/lifecycle-transitions`, den Phase 2 erweitert (`/api/v1/assets/<id>/lifecycle-transitions` bleibt bei `inventory`), die aufgelösten Formulare `/api/v1/cis/<id>/form` und `/api/v1/ci-types/<id>/form` (ohne gespeichertes Layout das Standardlayout), die Template-Zuordnung `/api/v1/cis/<id>/templates` und die Kern-Unterpfade `/api/v1/subnets/<id>/reservations` (NET-09) und `/api/v1/relationships/<id>/changes` (REL-09); für beide gilt die Freigabe ohne Modul (A-25). `/api/v1/templates` ist kein Nachfolger von `ci-types/templates` (Katalog der Typvorlagen, E-38) und gehört zu `metamodel`.
+- **P2-Funktionen auf G1-Pfaden** lassen sich nicht per Präfix abschalten und sind Kern: `parent_type_id` an `ci-types`, `applies_to*` und `computed` an `attribute-definitions`, `include=references`, `child_mode`, das Feld `templates` an `POST /api/v1/cis`, `format_version=2` an `ci-types/export`, das DTO-Feld `tags`, `filter[tags]` und die Feldrechte-Projektion. Ihre Systemjobs und Seeds laufen ohne Modulbedingung (`attribute.computed_refresh`, `attribute.computed_backfill`, Seed `warranty_days_left`). Die Sensitivität von Feldern pflegt `field-permissions/sensitive-fields` im Modul `metamodel`; ein Kennzeichen an Attributdefinitionen gibt es nicht.
+- **Abhängige Wege folgen dem Modul:** Bei abgeschaltetem `metamodel` antworten die G1-Metamodellrouten mit `?draft` mit 404 und schreiben nichts (WP-720). `backend/cmd/server/main.go` registriert den Ausführer von `template.migrate` nur bei aktivem Modul (WP-712). Querschnittskanäle übernehmen Modul und Feature der Zielressource: die Vorprüfung des Imports (WP-775, WP-776; Verträge über `inventory`), Bulk (WP-304, WP-780; Tag-Aktionen und `change_template` ohne Modulprüfung), Suche und gespeicherte Sichten (Asset-Treffer nur mit `inventory`, Tag-Treffer immer), der DATEV-Export (400 ohne `inventory`, WP-790), der Lauf `expiry.check` (nur mit `inventory`) und die Oberfläche über `isModuleEnabled` bzw. `isPageEnabled`.
+- **Umsetzung:** `ModuleForRoute` wählt den längsten passenden Präfix; Präfixe dürfen `<id>` enthalten (WP-706). Wer ein Präfix einem Modul zuordnet, setzt `x-phase: P2` an allen Pfaden darunter, auch an Gerüstpfaden aus WP-247. Das Register der E-38-Pfade in `modules_test.go` (WP-706) führt jede neue Ressource mit Modul oder als Kern und legt das Modul `import` an. `metamodel` legt das erste Fach-WP mit einer Route an (WP-250), neue Präfixe bestehender Module das Fach-WP mit der ersten Route. `docs/README.md` führt `metamodel` und `import` bei `RETICORA_MODULES`. `TestRoutesAndSpecificationAreInParity` prüft das Release G2 (WP-706); den Standard stellt WP-830 um.
+
+**Aufgabe:** **erledigt 2026-10-28** A-25: Der Beschluss des Auftraggebers bestätigt Option 1: Module `metamodel` und `import`; Verträge, Lieferanten und Etiketten im Modul `inventory`; Kalender und Ticket aus Review im Modul `ticketing`. `subnets/<id>/reservations` und `relationships/<id>/changes` sind ohne Modul freigegeben (Kern). Zuständig war: Product Owner.
+
+**Frage:** Neue P2-Ressourcen ohne bestehendes Modul (Metamodell-Erweiterungen, Tags, Feldrechte, Lieferanten und Verträge, Etiketten, Import) haben kein Release-Gate. `x-phase` ist nur an Pfaden eines Moduls aus `LateModules` erlaubt (`TestLateRoutesAreMarkedInSpecification`), und der Paritätstest erwartet `x-phase`-Pfade im Release „G1“ als nicht registriert. Ohne Modul wären diese Funktionen ab dem Merge in jedem Release von main aktiv. P2-Felder auf G1-Pfaden (`parent_type_id`, `applies_to*`, `computed`, `templates` an `POST /cis`, `format_version=2`) lassen sich über Präfixe gar nicht abschalten. Tags ersetzen einen G1-Schreibweg (`attributes.tags`). Für Metamodell, Tags und Feldrechte kennt ENT-06 keinen Feature-Key.
+
+**Optionen:**
+
+1. Übergangsregel wie oben: Module `metamodel` und `import`; Verträge, Lieferanten und Etiketten im Modul `inventory`; Kalender und Ticket aus Review im Modul `ticketing`; Tags, Nachfolger von G1-Pfaden und P2-Felder auf G1-Pfaden als Kern ohne Modul-Gate.
+2. Kein Modul-Gate: Alle neuen Pfade sind ohne `x-phase` in jedem Release registriert; Gate nur über Entitlements (für Metamodell, Tags und Feldrechte also keines).
+3. Weitergehende Module: zusätzlich eigene Module `contracts` (Nav `contracts`, `suppliers`) und `tags` (Nav `tags`); P2-Felder auf G1-Pfaden werden bei abgeschaltetem Modul mit 422 abgewiesen. CI- und Typdienst brauchen dafür den Modulzustand aus `backend/cmd/server/main.go`, und für Tags braucht es bei abgeschaltetem Modul einen Ersatz-Schreibweg.
+
+**Empfehlung:** Option 1. Sie hält E-03 für die neuen Verwaltungsfunktionen ein: Unfertiges bleibt bis G2 abgeschaltet, und die bestehenden Tests prüfen das ohne neuen Mechanismus. Sie nimmt keinem G1-Nutzer einen Weg weg (Tags, Instanzwerte, Lifecycle) und braucht keinen Modulzustand in den Kerndiensten. Offen bleiben nur `subnets/<id>/reservations` und `relationships/<id>/changes` (A-25). Option 2 liefert halbfertige Metamodell-Funktionen in Folgereleases von G1 aus. Option 3 nimmt bei abgeschaltetem Modul den Schreibweg für Tags und braucht Modulprüfungen in CI- und Typdienst.
+
+**Blockiert / Auswirkung:** Die Festlegung gilt für folgende WPs. Modul-Register und Org-Gate: WP-706 (Register, Modul `import`, längster Präfix), WP-705 (Ausnahme `metamodel`), WP-247 (Gerüst ohne `x-phase`). Modul `metamodel` mit `x-phase: P2`: WP-250, WP-251, WP-716, WP-259, WP-260, WP-720, WP-721, WP-261, WP-722, WP-712, WP-726. Kern ohne `x-phase`: WP-248, WP-255, WP-258, WP-718, WP-713, WP-710, WP-719, WP-256, WP-723, WP-262, WP-273, WP-281, WP-753, WP-792, WP-299 (`subnets/<id>/reservations`), WP-296 (`relationships/<id>/changes`). Modul `inventory`: WP-736, WP-269, WP-270, WP-762, WP-763. Modul `ticketing`: WP-768, WP-291. Modul `import`: WP-774, WP-301. Querschnitt: WP-775, WP-776, WP-304, WP-780, WP-788, WP-790. Oberfläche: WP-797, WP-314, WP-798, WP-799, WP-800, WP-801, WP-316, WP-317, WP-808, WP-807, WP-322, WP-817. Release: WP-830, WP-822, WP-329, WP-331. WP-706 legt das Register ohne Wartezeit nach dieser Regel an.
+
+**Quelle:** backend/internal/server/modules.go (`LateModules`, `ModuleForRoute`, `RouteAllowed`); backend/internal/server/modules_test.go (`TestLateRoutesAreMarkedInSpecification`, `TestG1DefaultSwitchesLateModulesOff`); backend/internal/server/parity_test.go (`TestRoutesAndSpecificationAreInParity`); backend/internal/entitlement/middleware.go (`gatedRoutes`, `gatedSuffixes`); frontend/src/hooks/useEntitlements.ts (`useModules`, `isModuleEnabled`, `isPageEnabled`); backend/internal/savedview/filter.go (G1-Filter `tags`); api/openapi.yaml (`/api/v1/ci-types/templates`, `/api/v1/lifecycle-definitions`, `/api/v1/cis/<id>/lifecycle-transitions`); docs/README.md (`RETICORA_MODULES`); docs/plan/entscheidungen.md#e-03; docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:97–106
+
+**Betroffene IDs:** ABN-02, API-01, API-06, API-09, AST-04, AST-05, AUD-07, BLK-02, CI-07, CI-08, CI-12, DIS-08, DOD-01, ENT-02, ENT-05, ENT-06, EVT-03, GATE-01, GATE-02, GATE-05, GLO-11, GQL-03, IMP-IO-01, INS-01, INS-04, INV-03, JOB-01, JOB-02, JOB-04, LCY-02, MET-01, MET-06, MET-10, MET-12, MET-13, MET-14, MET-16, MET-45, MET-50, MET-51, MET-52, MET-53, MET-54, MGT-12, NET-09, NFR-02, NTF-05, OPS-06, OVR-03, RBA-05, REL-09, SEC-11, SEQ-01, SRC-02, TEN-09, TKT-01, TKT-02, TST-03, TST-04, UI-11, UI-12, UI-14, UI-15, VIE-02
+
+**Betroffene WPs:** WP-705 (`p2-feature-gates`), WP-706 (`p2-module-gates`), WP-247 (`p2-paths`), WP-248 (`met-inherit`), WP-250 (`met-sets`), WP-251 (`met-templates`), WP-710 (`met-ci-templates`), WP-712 (`met-migrate-job`), WP-713 (`met-ref-view`), WP-255 (`met-global-attrs`), WP-256 (`met-instance`), WP-716 (`met-rules-catalog`), WP-258 (`met-computed`), WP-718 (`met-computed-refresh`), WP-259 (`met-layouts`), WP-719 (`met-form`), WP-260 (`met-drafts`), WP-720 (`met-drafts-capture`), WP-261 (`met-publish`), WP-721 (`met-test`), WP-262 (`met-export-all`), WP-722 (`met-import`), WP-723 (`met-lifecycle-model-api`), WP-726 (`fr-admin`), WP-269 (`ast-supplier-contract`), WP-736 (`ast-supplier`), WP-270 (`ast-contract-expiry`), WP-273 (`ast-composition`), WP-281 (`ci-tags`), WP-753 (`ci-tags-api`), WP-762 (`inv-lookup`), WP-763 (`inv-labels`), WP-849 (`inv-labels-render`), WP-291 (`tkt-from-review`), WP-768 (`tkt-sla-calendar-api`), WP-296 (`rel-history`), WP-299 (`net-ip-reservation`), WP-301 (`io-import-model`), WP-774 (`io-import-profile`), WP-775 (`io-import-pipeline`), WP-776 (`io-import-entities`), WP-304 (`blk-ops`), WP-780 (`blk-ops-delegate`), WP-788 (`src-fields-users-tags`), WP-790 (`exp-datev-gate`), WP-792 (`gql-ci-aggregates`), WP-797 (`ui-meta-sets`), WP-314 (`ui-meta-templates-publish`), WP-798 (`ui-meta-draft-context`), WP-799 (`ui-meta-drafts-publish`), WP-800 (`ui-meta-ci-templates-migrate`), WP-801 (`ui-rule-catalog`), WP-316 (`ui-form-builder`), WP-317 (`ui-guided-create`), WP-807 (`ui-flows-scan`), WP-808 (`ui-contracts-suppliers`), WP-322 (`ui-import-bulk-views`), WP-817 (`ui-views-tags`), WP-822 (`g2-perf-reads`), WP-329 (`g2-security`), WP-331 (`g2-gate`), WP-830 (`g2-release`)
+
+## E-106
+
+**Thema:** RBA-05/RBA-06: Rechteschlüssel der Phase 2 und Rollenmatrix der Standardrollen
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1. Grundlage sind `backend/internal/permission/role_matrix.go` und `seed_standard_roles` in der Fassung von 000147 (WP-363, Korrekturplan). Nach E-13 werden Rechte nur erweitert, wo Katalog oder Entscheidung sie tragen; die P2-Zeilen der Rollenmatrix legt diese Entscheidung fest.
+
+- **Bestand nach dem Korrekturplan (angepasst 2026-11-02):** WP-363 hat mit Migration 000147 `ci_type:manage` in den RBA-01-Schlüssel `citype:manage` überführt. Die Routen `ci-types` verlangen jetzt `citype:manage`. `TestRBA01KeysGateTheirActions` lehnt jede Route mit `ci_type:manage` ab, `TestCatalogueHoldsTheRBA01Keys` jeden Katalogeintrag. Dieselbe Migration hat `asset:assign`, `credential:decrypt`, `credential:write`, `permission:write`, `role:write`, `user:write` und `webhook:write` entfernt. Wo diese Entscheidung bisher `ci_type:manage` nannte, gilt `citype:manage`. Nach F-199 schützt jeder Katalogschlüssel eine Route; routenlos ist nur `entitlement:manage` (`unroutedKeys` in `backend/internal/server/authz_catalog_test.go`). Seit WP-669 (Korrekturplan) lehnt `PUT /api/v1/roles/<id>/permissions` das Entfernen eines Seed-Rechts einer Standardrolle mit 409 ab (`standard-role-permissions`). Lesen, Antwort und Audit zeigen `role_permission ∪ role.permissions`.
+- **Neue Schlüssel (13):** `stock:read`, `stock:write`, `reservation:read`, `reservation:write`, `contract:read`, `contract:write` (Module aus RBA-05) sowie die Aktionsschlüssel `stocktake:complete`, `import:run`, `import:manage`, `tag:manage`, `field_permission:manage`, `metamodel:publish` und `saved_view:manage`. `document:manage` wird nicht angelegt, weil kein P2-WP ihn nutzt. Für das Metamodell gibt es neben `citype:manage` nur `metamodel:publish`. Manche Schlüssel erhalten ihre erste Route erst in einem späteren WP (`contract:*`, `import:*`, `tag:manage`, `field_permission:manage`, `metamodel:publish`). Für sie führt WP-245 eine eigene Liste neben `unroutedKeys`, mit dem anlegenden WP als Grund. `saved_view:manage` steht dauerhaft in `unroutedKeys`, weil WP-307 ihn im Handler prüft.
+- **Übersetzung** nach dem Muster von 000081 und 000147 in `role_permission`, `role.permissions`, `custom_role.permissions` und `api_key.permissions`. Erst danach werden ersetzte Schlüssel entfernt, sonst löscht die Kaskade die Grants still. Die Matrix der Standardrollen ändert nur die Migration (`seed_standard_roles`), denn Seed-Rechte lassen sich über die API nicht entziehen (409). Ersetzte Schlüssel verschwinden aus beiden Quellen, sonst zeigen GET und Audit verwaiste Altschlüssel. Ersetzend: `consumable:read` → `stock:read`, `consumable:write` → `stock:write`, `inventory:manage` → `stock:write`, `asset:reserve` → `reservation:write`. `asset:assign` gibt es seit 000147 nicht mehr; dafür bestehen keine Grants. Ergänzend (der Altschlüssel bleibt): `asset:read` → + `reservation:read`, `stocktake:write` → + `stocktake:complete`. `asset:move` bleibt. Einen Alias-Mechanismus für Rechte gibt es nicht.
+- **org_admin** erhält den ganzen Katalog.
+- **engineer** erhält zusätzlich `stock:read`, `stock:write`, `reservation:read`, `reservation:write`, `contract:read`, `contract:write`, `stocktake:complete`, `import:run` und `tag:manage`; er behält seine Bestandsrechte (u. a. `assignment:*`, `document:*`, `order:read`, `order:write`, `ci_instance_attribute:manage`). Er erhält nicht `order:approve`, `sla:write`, `lifecycle:manage`, `relationship_type:manage`, `metamodel:publish`, `field_permission:manage`, `import:manage` und `saved_view:manage`, wie bisher auch nicht `citype:manage` und `ci_attribute:manage`.
+- **viewer** erhält `stock:read`, `reservation:read` und `contract:read`.
+- **client_technician** (Client-Scope, C) erhält `stock:read`, `reservation:read`, `contract:read` und zum Bestandsschutz `stocktake:complete`. Er behält `ticket:write` und `stocktake:write`. Er erhält weder `tag:manage` noch `ci_instance_attribute:manage`.
+- **Grundsatz:** `metamodel:publish`, `field_permission:manage` und `import:manage` erhält keine client- oder standortgebundene Standardrolle. Der Test-Bericht von WP-721 enthält CI-IDs aller Clients.
+- **Metamodell:** `attribute-sets`, `templates`, `rules` und `layouts` lesen mit `ci:read` und schreiben mit `citype:manage` wie `ci-types`. Set-Attribute schreiben weiter über `attribute-definitions` mit `ci_attribute:manage`. Die Formular-Endpunkte (`cis/<id>/form`, `ci-types/<id>/form`, GraphQL `ciForm`) lesen mit `ci:read`. Die Vorschau (`preview=true`) und die Auflösung als fremde Rolle verlangen zusätzlich `citype:manage` (Prüfung im Handler). `metamodel/drafts*` verlangt für alle Methoden `citype:manage`, auch lesend, denn Entwürfe sind unveröffentlichter Admin-Arbeitsstand. Ausgenommen sind `POST /api/v1/metamodel/drafts/<id>/publish` und `/api/v1/metamodel/drafts/<id>/test`. Ihre routeRules (WP-261, WP-721) verlangen `metamodel:publish` statt `citype:manage`, denn die erste passende Regel gilt. Jedes Draft-Item verlangt zusätzlich das Schreibrecht seiner Zielroute (`metamodel.ItemPermission`): `citype:manage` bzw. `ci_attribute:manage`, für `template_version`/`publish` `metamodel:publish`. Die Erfassung über `?draft` verlangt zusätzlich `citype:manage`. `metamodel:publish` schützt das Publizieren von Drafts, das direkte Publizieren von Template-Versionen (`POST /api/v1/templates/<id>/versions/<version>/publish`), das Lesen des Test-Berichts (`GET /api/v1/metamodel/drafts/<id>/test`) und den Abbruch von `metamodel.test`-Jobs. Das Pflegen von Templates und Entwürfen bleibt bei `citype:manage`.
+- **Lifecycle:** `lifecycle-models` liest mit `asset:read` wie `lifecycle-definitions` und schreibt (POST, PATCH, DELETE) mit `lifecycle:manage`. `GET /api/v1/cis/<id>/lifecycle-transitions` verlangt `ci:read`, `GET /api/v1/assets/<id>/lifecycle-transitions` `asset:read`; Übergänge verlangen `lifecycle:transition`.
+- **Feldrechte, Tags, Views:** `field-permissions` liest und schreibt mit `field_permission:manage`. `tags` liest mit `ci:read` und schreibt mit `tag:manage`; `PUT /api/v1/cis/<id>/tags` verlangt `ci:write`. `PATCH` und `DELETE /api/v1/saved-views/<id>` erlaubt WP-518 nach E-86 (Korrekturplan, Option 1) nur dem Owner. E-86 verweist die Übernahme fremder und verwaister Sichten auf VIE-02 [P2]. Darauf baut diese Entscheidung auf: WP-307 erlaubt beides zusätzlich einem Inhaber von `saved_view:manage`, also org_admin.
+- **Lager, Bestellungen, Verträge:** `consumables` und `inventory` lesen mit `stock:read` und schreiben mit `stock:write`, `reservations` mit `reservation:read`/`reservation:write`. `POST /api/v1/stocktakes/<id>/complete` verlangt `stocktake:complete`. `POST assets/*/assign|return|transfer` verlangt `assignment:write` und `POST assets/*/reserve` `reservation:write`, jeweils über eine routeRule; ohne Regel gälte `asset:write`. `POST /api/v1/orders/<id>/receive` verlangt `stock:write` über eine eigene routeRule, weil der Wareneingang Bestand bucht (WP-760); ohne die Regel würde `order:write` abgeleitet. `orders/*/approve|reject` bleiben bei `order:approve`, `place`, `cancel` und `close` bei `order:write`. Die Vier-Augen-Regel (Genehmiger ≠ `requested_by`) braucht einen zweiten Inhaber von `order:approve`: Mit dieser Matrix genehmigt org_admin die Bestellungen von engineer; eigene Bestellungen eines org_admin brauchen einen zweiten org_admin. `suppliers` und `contracts` lesen mit `contract:read` und schreiben mit `contract:write`. Jede Standardrolle mit `asset:write` oder `order:write` (org_admin und engineer) hält `contract:read`; damit sind Lieferanten in WP-271 und WP-286 auswählbar. Custom-Rollen mit `asset:write` oder `order:write` ohne `contract:read` erhalten es durch die Übersetzung nicht; der PR von WP-245 nennt das.
+- **SLA und Import:** `business-calendars` liest mit `sla:read` und schreibt mit `sla:write`; engineer pflegt deshalb auch keine Business-Kalender (WP-768). `import:run` liest Mapping-Profile und Läufe, startet Läufe und die Vorschau und steuert über `WithKind` den Abbruch in der Job-API (WP-301). `import:manage` schreibt Mapping-Profile (WP-774); engineer startet Läufe also nur mit vorhandenen Profilen.
+- **Folgen im Bestand:** (1) engineer schreibt über `stock:write` auch `inventory/items`; bisher durfte das nur org_admin über `inventory:manage`. Das gilt, solange `inventory/items*` besteht: nach E-38 und E-40 bis WP-283, nach der Neufassung von WP-757 als Alias auf `consumable`. (2) Custom-Rollen und API-Keys, die nur `asset:read` halten, verlieren das Lesen von `inventory/items` und `inventory/availability`. (3) client_technician hat `ci:write`, aber nicht `ci_instance_attribute:manage`; er verliert mit WP-256 das Schreiben geänderter Instanzwerte per `PATCH /api/v1/cis/<id>` (MET-14). (4) Seit WP-518 ändert und löscht nur der Owner eine geteilte View (Prädikat `owner_id` in `savedview/pg_repository.go`). Nach WP-307 darf das zusätzlich org_admin über `saved_view:manage`. Die Änderungen erscheinen im Diff von `backend/internal/server/testdata/route_permissions.txt` bzw. in den Tests und werden im PR begründet.
+- **Nachweis RBA-06:** `role_matrix_integration_test.go` prüft je Systemrolle `lifecycle:manage`, `lifecycle:transition`, `reconciliation:manage`, `override:write`, `ci_instance_attribute:manage` und `relationship_type:manage` (engineer: ✓ für `lifecycle:transition`, `reconciliation:manage`, `override:write` und `ci_instance_attribute:manage`; – für `lifecycle:manage` und `relationship_type:manage`; client_technician: – für alle). `TestSpecialActionsRequireTheirOwnPermission` wird um `relationship-types`, `lifecycle-definitions` und `stocktakes/<id>/complete` ergänzt; WP-760 ergänzt `orders/<id>/receive`.
+- **Nachweise in G2:** WP-325 legt je Standardrolle einen Nutzer an; der Lasttest-Schlüssel entsteht über `-api-key-role`. Die Bestellungen im Seed genehmigt der Admin (WP-819), weil engineer `order:approve` nicht hält. Schritt 8 von ABN-01 (c) in WP-330 setzt voraus, dass engineer weder `citype:manage` noch `ci_attribute:manage` noch `metamodel:publish` hält. WP-329 prüft ASVS V4 gegen diese Matrix.
+
+**Aufgabe:** **erledigt 2026-10-28** A-26: Der Beschluss des Auftraggebers bestätigt die Rollenmatrix nach Option 1. engineer erhält weder `order:approve` noch `sla:write` (auch nicht für `business-calendars`), `lifecycle:manage` oder `relationship_type:manage`. client_technician erhält `ci_instance_attribute:manage` nicht. `saved_view:manage` liegt nur bei org_admin. Zuständig war: Product Owner.
+
+**Frage:** RBA-05 nennt die Module der Phase 2 (asset, assignment, stock, stocktake, reservation, order, document, contract, ticket), RBA-06 die Spezialrechte. Die Rollenmatrix aus RBA-02 deckt nur [B]-Schlüssel ab, und die Aktionsschlüssel stehen in keinem Katalogtext. Welche neuen Schlüssel gibt es, welche Route verlangt welches Recht, und welche Standardrolle erhält welches Recht? Insbesondere: Erhält engineer `order:approve`, `sla:write`, `lifecycle:manage` und `relationship_type:manage`? Erhält client_technician `ci_instance_attribute:manage`?
+
+**Optionen:**
+
+1. Matrix wie oben: engineer ohne Genehmigung von Bestellungen und ohne Konfigurationsrechte (SLA-Policies und Business-Kalender, Lifecycle-Modelle, Beziehungstypen, Metamodell-Publikation, Feldrechte, Mapping-Profile, fremde geteilte Views); client_technician ohne `ci_instance_attribute:manage`.
+2. engineer erhält zusätzlich `order:approve`, `sla:write`, `lifecycle:manage` und `relationship_type:manage`; client_technician erhält `ci_instance_attribute:manage` (C).
+3. Andere Matrix durch den Auftraggeber.
+
+**Empfehlung:** Option 1. Sie hält den Bestand: engineer hat heute weder `order:approve` noch `sla:write`, `lifecycle:manage` oder `relationship_type:manage`. Konfiguration bleibt wie `citype:manage` in RBA-02 beim org_admin, und die Genehmigung von Bestellungen bleibt von der Anlage getrennt. `ci_instance_attribute:manage` erlaubt auch das Definieren von Instanzfeldern (`PUT /api/v1/cis/<id>/field-definitions`) und gehört deshalb nicht zu einer client-gebundenen Rolle.
+
+**Blockiert / Auswirkung:** WP-245 legt den Katalog mit 13 neuen Schlüsseln einschließlich `saved_view:manage` an, dazu die Übersetzung und die Matrix nach der Festlegung. Es baut auf 000147 auf: kein `ci_type:manage`, kein `asset:assign`, vier ersetzte Schlüssel, `seed_standard_roles` in der Fassung von 000147. Die Listen routenloser Schlüssel in `authz_catalog_test.go` gehören zu WP-245. Die WPs mit neuen Routen und Rechten übernehmen die Zuordnung: WP-250, WP-251, WP-256, WP-716, WP-259, WP-719, WP-792, WP-260, WP-720, WP-721, WP-261, WP-723, WP-726, WP-736, WP-269, WP-277, WP-753, WP-283, WP-284, WP-756, WP-285, WP-286, WP-760, WP-761, WP-768, WP-301, WP-774, WP-307 und die Oberflächen-WPs mit Rechteprüfung. Jedes dieser WPs verwendet `citype:manage`, wo es bisher `ci_type:manage` nennt. Die Nachweise WP-325, WP-329 und WP-330 prüfen gegen diese Matrix.
+
+**Quelle:** docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:70, :72 (RBA-05, RBA-06); docs/plan/entscheidungen.md#e-13; backend/internal/permission/role_matrix.go; backend/internal/permission/catalog.go; backend/internal/permission/catalog_test.go (`TestCatalogueHoldsTheRBA01Keys`); backend/migrations/000081_permission_catalog_rba01.up.sql; backend/migrations/000147_rba01_key_cleanup.up.sql (WP-363, Korrekturplan); backend/internal/server/authz.go (`readPermissionFor`, `writePermissionOverrides`, `routeRules`); backend/internal/server/authz_catalog_test.go (`unroutedKeys`, `TestRBA01KeysGateTheirActions`); backend/internal/permission/handler.go (`ReplaceRole`, 409 nach WP-669); backend/internal/server/testdata/route_permissions.txt; backend/internal/savedview/pg_repository.go (Update/Delete mit `owner_id`, WP-518); docs/plan/g1-korrektur/entscheidungen.md#e-86; backend/internal/server/authz_test.go
+
+**Betroffene IDs:** ABN-01, API-06, API-09, AST-06, AST-07, AUD-07, CI-08, EVT-03, GQL-03, IMP-IO-01, INV-01, JOB-04, LCY-02, MET-14, MET-16, MET-50, MET-52, MET-53, MET-54, MGT-12, NTF-05, RBA-01, RBA-02, RBA-05, RBA-06, SEC-11, SIM-01, STK-01, STK-02, STK-03, STK-05, TKT-02, TST-03, UI-11, UI-14, UI-15, VIE-02
+
+**Betroffene WPs:** WP-245 (`p2-permissions`), WP-250 (`met-sets`), WP-251 (`met-templates`), WP-256 (`met-instance`), WP-716 (`met-rules-catalog`), WP-259 (`met-layouts`), WP-719 (`met-form`), WP-260 (`met-drafts`), WP-720 (`met-drafts-capture`), WP-261 (`met-publish`), WP-721 (`met-test`), WP-723 (`met-lifecycle-model-api`), WP-726 (`fr-admin`), WP-269 (`ast-supplier-contract`), WP-736 (`ast-supplier`), WP-277 (`ast-reservation`), WP-753 (`ci-tags-api`), WP-283 (`stk-consumable-model`), WP-756 (`stk-stock-bookings`), WP-284 (`stk-availability`), WP-285 (`stk-min-level`), WP-286 (`stk-orders`), WP-760 (`stk-orders-receive`), WP-761 (`inv-stocktake-complete`), WP-845 (`stk-min-level-notify`), WP-768 (`tkt-sla-calendar-api`), WP-301 (`io-import-model`), WP-774 (`io-import-profile`), WP-307 (`vie-shared`), WP-792 (`gql-ci-aggregates`), WP-316 (`ui-form-builder`), WP-803 (`ui-form-preview`), WP-808 (`ui-contracts-suppliers`), WP-320 (`ui-stock-orders-stocktake`), WP-812 (`ui-orders`), WP-813 (`ui-stocktake-labels`), WP-322 (`ui-import-bulk-views`), WP-817 (`ui-views-tags`), WP-323 (`ui-relationships-graph`), WP-325 (`g2-seed`), WP-329 (`g2-security`), WP-330 (`g2-abnahme`)
+
+## E-107
+
+**Thema:** Admin-Oberfläche für Feldrechte und Lifecycle-Modelle in Phase 2
+
+**Status:** entschieden (2026-10-28, Option 2)
+
+**Festlegung:** Option 2. Phase 2 liefert keine Admin-Oberfläche für Feldrechte und Lifecycle-Modelle. UI-11 zählt die Admin-Oberflächen der Phase 2 abschließend auf und nennt beide nicht; UI-14 bezieht sich auf die Module nach RBA-05.
+
+- WP-726 (`field-permissions`, mit Objektausnahmen) und WP-723 (`lifecycle-models`) liefern die Verwaltung nur über REST mit OpenAPI und Tests. Beide führen die Admin-Oberfläche unter „Nicht Bestandteil“, ebenso WP-264, WP-265 und WP-728.
+- WP-313 pflegt weder Feldrechte-Grants noch Sensitivität noch Lifecycle-Modelle. `frontend/src/pages/PermissionsPage.tsx` zeigt weiter nur den Rechtekatalog. Lifecycle-Übergänge bleiben auf den Detailseiten bedienbar.
+- Ein Feldrechte- und Lifecycle-Editor steht im Backlog. M2.9 erhält kein zusätzliches WP.
+
+**Aufgabe:** **erledigt 2026-10-28** A-27: Der Beschluss des Auftraggebers wählt Option 2. Phase 2 liefert keine Admin-Oberfläche für Feldrechte und Lifecycle-Modelle, nur REST. Zuständig war: Product Owner.
+
+**Frage:** Feldrechte (WP-726) und Lifecycle-Modelle (WP-723) gibt es im Plan nur als REST; M2.9 plant keine Oberfläche dafür. UI-11 zählt die Admin-Oberflächen der Phase 2 auf (Typen, Vererbung, Attribute, Sets, Templates, Regeln, Form Builder, Preview, Draft/Publish, Import-Mapping, Indexstatus) und nennt beide nicht. UI-14 verlangt Oberflächen für alle Module der Phase. Soll Phase 2 eine Admin-Oberfläche für beide liefern?
+
+**Optionen:**
+
+1. Ja: ein zusätzliches WP in M2.9 mit Feldrechte-Editor (Rolle × Typ × Attribut/Relation/Aktion, Objektausnahmen, Sensitivität, Vorschau der Auflösung nach E-43) und Lifecycle-Editor (Zustände, Übergänge, Guards).
+2. Nein: Verwaltung in Phase 2 nur über REST; Oberfläche als Backlog.
+3. Teilweise: nur der Lifecycle-Editor als Erweiterung von WP-313; Feldrechte nur über REST.
+
+**Empfehlung:** Option 2 als Übergangsregel. UI-11 zählt die Admin-Oberflächen der Phase 2 abschließend auf, und UI-14 bezieht sich auf die Module nach RBA-05; der Plan erfindet keine Anforderung. Ein Feldrechte-Editor ist fachlich sinnvoll; der Auftraggeber kann ihn mit Option 1 vor Beginn von M2.9 beauftragen.
+
+**Blockiert / Auswirkung:** WP-726 und WP-723 bleiben reine REST-WPs. WP-313 enthält keine Pflege von Feldrechten und Lifecycle-Modellen. Der Umfang von M2.9 bleibt ohne zusätzliches WP. WP-331 führt keine Admin-Oberfläche für beide als Lieferumfang.
+
+**Quelle:** docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:16 (UI-11), :22 (UI-14); docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:74 (RBA-07); docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:44 (LCY-02); frontend/src/pages/PermissionsPage.tsx
+
+**Betroffene IDs:** API-06, DIS-08, DOD-01, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, LCY-02, MET-54, OPS-06, RBA-07, SEQ-01, TEN-09, TST-04, UI-11, UI-14
+
+**Betroffene WPs:** WP-723 (`met-lifecycle-model-api`), WP-726 (`fr-admin`), WP-313 (`ui-meta-types`), WP-331 (`g2-gate`)
+
+## E-108
+
+**Thema:** MET-16: Materialisierung org-spezifischer Kompositionsebenen an Systemtypen
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1. Systemtypen (`ci_type.organization_id IS NULL`, 17 Seeds aus 000021 und 6 aus 000104) haben für alle Organisationen ein gemeinsames `ci_type.attribute_schema` und eine gemeinsame `schema_version` (000104). Eine Org-Ebene lässt sich dort nicht materialisieren, ohne andere Organisationen zu berühren (Querschnittsbefund M-M1). Daraus folgt:
+
+- **Materialisiert** in `attribute_schema` und `schema_version` werden nur System-Basis, Typkette (WP-248) und Sets (WP-709).
+- **Sets nur an Org-Typen:** Sets lassen sich wie Typattribute nur Org-Typen zuordnen. Das folgt dem Bestand: `checkAttributeType` (`backend/internal/citype/attribute_definition.go`) lehnt Org-Attribute an Systemtypen mit 422 ab. WP-250 antwortet bei einer Zuordnung an einen Systemtyp ebenso mit 422. Systemtypen erweitert eine Organisation über einen Org-Untertyp (WP-248).
+- **Nur zur Laufzeit:** Org-Globale mit `applies_to` (WP-255), Templates (WP-251, WP-710) und Instanzattribute wirken nur in `citype.Compose` bzw. `ResolveFields` (`backend/internal/citype/compose.go`, `resolver.go`). Templates gehen nicht in `attribute_schema` ein; Org-Templates an Systemtypen sind deshalb zulässig. MET-16 („im CI referenziert“) erfüllt die Template-Ebene über `ci_template.version`.
+- **Prüfung:** WP-252 prüft die Komposition aller Ebenen in Go; die SQL-Seite deckt nur die materialisierten Ebenen. WP-261 erhöht `schema_version` nur bei Änderungen materialisierter Ebenen. Der Paritätsnachweis Go ↔ SQL in WP-326 umfasst die materialisierten Ebenen; Org-Globale und Templates führt der Bericht als Ebenen ohne SQL-Gegenstück.
+- **Bestand nach dem Korrekturplan (angepasst 2026-11-02):** E-93 (Korrekturplan, Option 2) bestätigt die Laufzeitschicht der Org-Globalen für Phase 1: validiert, nicht materialisiert, `schema_version` referenziert System-Basis und Typ. WP-590 hat dazu mit Migration 000183 `ci_schema_version()` ersetzt. Jede Änderung von `ci_type_id`, `attributes` oder einer typisierten Spalte setzt jetzt die aktuelle Typversion am CI. Phase-2-WPs, die Trigger oder Funktionen zu `schema_version` ändern, bauen auf der Fassung von 000183 auf, nicht auf 000107. E-92 (Korrekturplan, Option 2) bestätigt die Instanzschicht: `ci_instance_field_definition` bleibt ihre Quelle, und DB-03 gilt für System-, Org- und Typdefinitionen.
+
+**Aufgabe:** **erledigt 2026-10-28** A-32: Der Beschluss des Auftraggebers bestätigt Option 1. Materialisiert werden nur System-Basis, Typkette und Sets; Sets gibt es nur an Org-Typen. Zuständig war: Product Owner/Architektur.
+
+**Frage:** MET-16 verlangt ein materialisiertes, mit `schema_version` versioniertes effektives Schema über alle Ebenen. Systemtypen teilen `attribute_schema` und `schema_version` über alle Organisationen. Wo liegen org-spezifische Ebenen (Set-Zuordnungen, Org-Globale mit `applies_to`, Templates) an Systemtypen?
+
+**Optionen:**
+
+1. Materialisierung nur für System-Basis, Typkette und Sets; Sets nur an Org-Typen; Org-Globale, Templates und Instanzattribute nur zur Laufzeit in `Compose` (Übergangsregel).
+2. Mandantentabelle `ci_type_effective_schema(organization_id, ci_type_id, schema_version, attribute_schema)` mit RLS; alle Org-Ebenen werden je Organisation und Typ materialisiert, auch an Systemtypen (+0,5 bis 1,0 PT in WP-709 oder eigenem WP).
+3. Org-Ebenen an Systemtypen ganz verbieten (auch Templates und Org-Globale; Erweiterung nur über Org-Untertypen).
+
+**Empfehlung:** Option 1. Sie folgt dem Bestand (`checkAttributeType`), braucht keine neue Tabelle und hält `schema_version` für alle Organisationen eindeutig. MET-16 nennt Org-Globale nicht als eigene Ebene, und die Template-Ebene ist über `ci_template.version` im CI referenziert. Option 3 schränkt Templates an Systemtypen ohne Not ein.
+
+**Blockiert / Auswirkung:** WP-250 weist Set-Zuordnungen an Systemtypen mit 422 ab. WP-709 materialisiert nur System-Basis, Typkette und Sets. WP-251, WP-710 und WP-255 wirken nur zur Laufzeit. WP-252 prüft alle Ebenen in Go. WP-261 erhöht `schema_version` nur bei materialisierten Ebenen. WP-326 weist die Parität Go ↔ SQL für die materialisierten Ebenen nach. Änderungen an Triggern und Funktionen zu `schema_version` bauen auf 000183 auf. Keine neue Tabelle und kein Mehraufwand in M2.1.
+
+**Quelle:** docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:89 (MET-16); backend/migrations/000104_ci_type_fields_seeds.up.sql:42; backend/migrations/000183_ci_schema_version_typed.up.sql (WP-590); docs/plan/g1-korrektur/entscheidungen.md#e-92 und #e-93; backend/internal/citype/attribute_definition.go (`checkAttributeType`); backend/internal/citype/compose.go; backend/internal/citype/resolver.go; Neufassungen von WP-250, WP-251, WP-252, WP-255 und WP-326
+
+**Betroffene IDs:** API-06, AUD-07, EVT-03, MET-06, MET-13, MET-16, MET-45, MET-53, TST-01
+
+**Betroffene WPs:** WP-250 (`met-sets`), WP-709 (`met-sets-compose`), WP-251 (`met-templates`), WP-710 (`met-ci-templates`), WP-252 (`met-compose-rules`), WP-255 (`met-global-attrs`), WP-261 (`met-publish`), WP-326 (`g2-tst01`)
+
+## E-109
+
+**Thema:** DIS-02: Zuordnung des Systemtemplates aus `attributes.system_template` beim Ingest
+
+**Status:** entschieden (2026-10-28, Option 3; Option 1 erst mit einem Katalogstand, der MET-30 bis MET-34 liefert; angepasst 2026-11-02)
+
+**Festlegung:** Option 3 bis zur Lieferung von MET-30 bis MET-34, danach Option 1. Die Collector-Profile melden den Schlüssel seit WP-151 (`collector/profiles/classify.go`, Attribut `system_template`). Nach E-37 tragen Systemtemplates die `systemTemplate`-Schlüssel und haben keine Items, solange MET-30 bis MET-34 nicht vorliegen. Der Phase-2-Plan sieht keine Lieferung von MET-30 bis MET-34 vor (E-37, A-15 erledigt). In Phase 2 gilt deshalb verbindlich Option 3.
+
+- **Bestand seit WP-581 (Korrekturplan, F-263; angepasst 2026-11-02):** Vor der Reconciliation bildet der Ingest (`processItems`) den Profilwert über `profileTemplates` (`backend/internal/discovery/system_template.go`, `mapSystemTemplates`) auf einen Template-Schlüssel des Typkatalogs `citype.Templates()` ab. Ein Wert, der schon Katalogschlüssel ist, bleibt. Beispiele: `server-bmc`, `linux-server` und `windows-server` werden zu `physical_server`, `network-switch` wird zu `switch`, `nas` und `storage-array` werden zu `storage`. Am CI steht nur noch dieser Katalogschlüssel. Unbekannte Werte verwirft der Ingest mit der Warnung `discovery.profile.unknown_template`. `attributes.system_template` enthält also nicht mehr den Profilschlüssel, den die Systemtemplates nach E-37 tragen. Die Abbildung ist nicht umkehrbar, weil mehrere Profilwerte denselben Katalogschlüssel ergeben.
+- **Phase 2:** `attributes.system_template` bleibt ein beobachtetes Attribut mit dem Katalogschlüssel. Die Discovery legt keine Zeilen in `ci_template` an. Zuordnungen entstehen nur über `cis/<id>/templates` (WP-710).
+- **Mit einem späteren Katalogstand, der MET-30 bis MET-34 liefert:** Die Discovery ordnet das Systemtemplate automatisch zu (Option 1). Sie schreibt die Zuordnung in `ci_template` über den Einzel- und den Batch-Schreibpfad (WP-332, WP-333), mit Spuren nach E-56 und mit Override-Schutz: Eine manuell entfernte Zuordnung entsteht nicht erneut. Weil am CI nur der Katalogschlüssel steht, wertet das Folge-WP den Profilwert vor `mapSystemTemplates` aus oder legt eine eigene Abbildung vom Katalogschlüssel auf das Systemtemplate fest.
+- Option 1 setzt ein eigenes Folge-WP um. Es wird mit diesem Katalogstand geplant; der Phase-2-Plan enthält es nicht.
+
+**Aufgabe:** **erledigt 2026-10-28** A-33: Der Beschluss des Auftraggebers wählt die Empfehlung: keine Auswertung von `attributes.system_template` bis zur Lieferung von MET-30 bis MET-34, danach automatische Zuordnung mit Override-Schutz über ein Folge-WP. Zuständig war: Product Owner.
+
+**Frage:** Darf die Discovery Templates zuordnen? DIS-02 lässt Profile auf ein System-Template abbilden, sagt aber nicht, ob die Zuordnung automatisch entsteht.
+
+**Optionen:**
+
+1. Die Discovery legt die Zuordnung in `ci_template` an: Einzel- und Batch-Schreibpfad (WP-332, WP-333), Spuren nach E-56, Override-Schutz (eine manuell entfernte Zuordnung entsteht nicht erneut).
+2. Die Discovery schlägt die Zuordnung nur vor (Review-Item oder Hinweis am CI); ein Nutzer bestätigt.
+3. Keine Auswertung in Phase 2 (Übergangsregel).
+
+**Empfehlung:** Option 3 bis zur Lieferung von MET-30 bis MET-34, danach Option 1. Solange Systemtemplates keine Items haben, ändert eine Zuordnung kein Feld; der Aufwand für Schreibpfade, Spuren und Override-Schutz lohnt erst mit Inhalt.
+
+**Blockiert / Auswirkung:** WP-251 und WP-710 werten `attributes.system_template` nicht aus. Der Phase-2-Plan braucht kein WP dafür. Ein Folge-WP (Ingest-Schreibpfad über WP-332 und WP-333, Spuren nach E-56, Override-Schutz) entsteht mit einem Katalogstand, der MET-30 bis MET-34 liefert. Es berücksichtigt die Abbildung aus WP-581, denn am CI steht der Katalogschlüssel, nicht der Profilschlüssel.
+
+**Quelle:** docs/spec/katalog-v3/05-collector-discovery-reconciliation.md:24 (DIS-02); collector/profiles/classify.go; collector/profiles/profiles.go (`SystemTemplate`); backend/internal/discovery/system_template.go (`profileTemplates`, `mapSystemTemplates`; WP-581, Korrekturplan, Commit 76748924); backend/internal/discovery/discovery.go (`processItems`); E-37; Neufassung von WP-251
+
+**Betroffene IDs:** API-06, AUD-07, DIS-02, MET-16, MET-53
+
+**Betroffene WPs:** WP-251 (`met-templates`), WP-710 (`met-ci-templates`)
+
+## E-110
+
+**Thema:** RBA-03/VIE-01: IdP-gemappte Standardrollen in rollengebundener Konfiguration (Layouts, geteilte Views)
+
+**Status:** entschieden (2026-10-28, Option 1 als Ziel; bis WP-725 gilt Option 2; angepasst 2026-11-02)
+
+**Festlegung:** Option 1 als Ziel. Bis WP-725 vorliegt, gilt Option 2. Befund: `applyAccess` (`backend/internal/identity/handler.go`) führt die über `StandardRolesForGroups` gemappten Rollen nur in die Rechte der Session ein. `identity.Principal` trägt keine Rollen-IDs und keine Gruppen. `visibleTo` (`backend/internal/savedview/pg_repository.go`) prüft nur `role_assignment` und `user_custom_role`. WP-518 (E-86, Korrekturplan) hat nur die Schreibrechte geändert, nicht `visibleTo`. Wer `engineer` nur über eine IdP-Gruppe hält, sieht deshalb heute keine mit `engineer` geteilte View. Feldrechte (WP-264) beziehen die gemappten Rollen ein, sobald WP-725 (M2.2) `Groups` in `identity.Principal` aufnimmt.
+
+- **Regel:** Layouts und geteilte Views berücksichtigen die über IdP-Gruppen gemappten Standardrollen wie die Feldrechte (RBA-03). `visibleTo` und die Layoutauflösung prüfen zusätzlich `StandardRolesForGroups(Principal.Groups)`.
+- **Geteilte Views:** WP-307 (M2.8) setzt das um und hat WP-725 als Voraussetzung. Die Beschreibungen von `listSavedViews` und `getSavedViewsId` in `api/openapi.yaml` nennen dann die gemappten Rollen; heute sprechen sie nur von Rollen des Aufrufers.
+- **Layouts (angepasst 2026-11-02):** WP-719 (M2.1) liegt vor M2.2. Es löst Layouts zunächst nur über gespeicherte Zuweisungen auf (Option 2) und nennt die Einschränkung in der OpenAPI an `cis/<id>/form`. WP-725 ergänzt nach Aufnahme von `Principal.Groups` die Rollen des Aufrufers in `LayoutStore` (`backend/internal/citype/layout_repository.go`) um die gemappten Standardrollen und entfernt den Hinweis an `cis/<id>/form`. Dafür erhält WP-725 WP-719 als Voraussetzung. WP-307 war dafür vorgesehen. Bei 2,0 PT hat es keinen Raum, und es nennt den Teil nicht.
+
+**Aufgabe:** **erledigt 2026-10-28** A-34: Der Beschluss des Auftraggebers wählt die Empfehlung: Layouts und geteilte Views berücksichtigen IdP-gemappte Standardrollen nach WP-725; bis dahin gelten nur gespeicherte Zuweisungen. Umsetzung (angepasst 2026-11-02): WP-307 für geteilte Views, WP-725 für Layouts. Zuständig war: Product Owner.
+
+**Frage:** Sollen Layouts und geteilte Views die über IdP-Gruppen gemappten Standardrollen berücksichtigen wie die Feldrechte?
+
+**Optionen:**
+
+1. Ja: Nach WP-725 prüfen `visibleTo` und die Layoutauflösung zusätzlich `StandardRolesForGroups(Principal.Groups)` (Änderung in WP-307 und WP-719; WP-307 erhält WP-725 als Voraussetzung).
+2. Nein: bekannte Einschränkung, dokumentiert in der OpenAPI (Übergangsregel).
+
+**Empfehlung:** Option 1 als Ziel, weil RBA-03 die Rechte aller Rollen vereinigt und dieselbe Rolle sonst je Kanal anders wirkt. Bis WP-725 vorliegt, gilt Option 2; WP-719 (M2.1) liegt vor M2.2 und setzt Option 1 bei Bedarf nachträglich um.
+
+**Blockiert / Auswirkung:** WP-307 prüft die gemappten Rollen in `visibleTo` und hat WP-725 als Voraussetzung. WP-725 liefert `Principal.Groups` für alle drei Kanäle und ergänzt die gemappten Rollen in der Layoutauflösung von WP-719 (`LayoutStore`). Dafür bekommt es WP-719 als Voraussetzung, 1,5 PT und 14 Dateien. WP-719 liefert die Layoutauflösung zunächst ohne gemappte Rollen, mit Hinweis in der OpenAPI; WP-725 entfernt den Hinweis. WP-259 bleibt unverändert.
+
+**Quelle:** backend/internal/identity/handler.go (`applyAccess`); backend/internal/identity/rbac.go (`StandardRolesForGroups`); backend/internal/identity/principal.go (`Principal` ohne `Groups`); backend/internal/savedview/pg_repository.go (`visibleTo`); api/openapi.yaml (`listSavedViews`, `getSavedViewsId`); docs/plan/g1-korrektur/entscheidungen.md#e-86; Neufassungen von WP-259 und WP-307
+
+**Betroffene IDs:** API-06, GQL-03, MET-50, MET-52, RBA-03, RBA-07, VIE-01, VIE-02
+
+**Betroffene WPs:** WP-259 (`met-layouts`), WP-719 (`met-form`), WP-725 (`fr-principal-roles`), WP-307 (`vie-shared`)
+
+## E-111
+
+**Thema:** MET-53: Versionsbindung der Template-Bestandteile (Katalogregeln und Layouts)
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1: Katalogregeln binden an `template_version_id` (WP-716), Layouts versionsunabhängig an `template_id` (WP-259). Regeln ändern die Validierung und gehören deshalb zur Template-Version; eine Migration (WP-253) bringt sie mit. Layouts sind Darstellung; ihre Änderungen laufen über `metamodel_draft` (WP-260, WP-261) und wirken sofort für alle Versionen eines Templates.
+
+**Frage:** Katalogregeln binden nach den Neufassungen von WP-257 und WP-716 an die Template-Version, Layouts nach WP-259 an das Template. Bleiben beide Bindungen so?
+
+**Optionen:**
+
+1. Regeln an `template_version_id`, Layouts an `template_id` (Stand der Neufassungen).
+2. Auch Layouts an `template_version_id`: Ein neues Layout erfordert eine neue Template-Version; die Migration bringt das Layout mit.
+3. Auch Regeln an `template_id`: Regeländerungen wirken sofort auf alle Versionen, ohne Migration.
+
+**Empfehlung:** Option 1. Validierung soll sich nur mit einer bewussten Migration ändern („Template-Version migrieren, Overrides bleiben erhalten“, ABN-01 c); für Layouts wäre eine Versionspflicht ohne Nutzen für die Daten.
+
+**Blockiert / Auswirkung:** WP-716 bindet Katalogregeln an `template_version_id`. WP-259 bindet Layouts an `template_id`. WP-251, WP-260, WP-261 und WP-316 folgen dieser Bindung. WP-253 bringt die Regeln mit der Template-Version mit; Layoutänderungen wirken nach dem Publizieren für alle Versionen.
+
+**Quelle:** docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:99 (MET-53); Neufassungen von WP-257, WP-716 und WP-259
+
+**Betroffene IDs:** API-06, AUD-07, EVT-03, MET-16, MET-50, MET-53, UI-11
+
+**Betroffene WPs:** WP-251 (`met-templates`), WP-716 (`met-rules-catalog`), WP-259 (`met-layouts`), WP-260 (`met-drafts`), WP-261 (`met-publish`), WP-316 (`ui-form-builder`)
+
+## E-112
+
+**Thema:** MET-53/API-06: Verweise auf Items desselben Metamodell-Drafts
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1. WP-722 legt abhängige Bestandteile in einem Draft an: Untertyp mit neuem Elterntyp, Attributdefinitionen an neuem Typ oder Set, Regeln an neuer Template-Version, Layouts an neuem Typ. WP-260 führt bei Neuanlage sonst nur ID-Verweise (`target_id` ist `null`, Payload mit `ci_type_id`); WP-261 wendet die Items über die Repository-Methoden an. Dafür gilt:
+
+- Ein Payload darf statt einer ID einen Item-Verweis tragen: ein Objekt mit dem einzigen Schlüssel `$item` und der ID eines Items als Wert.
+- WP-260 prüft bei der Erfassung, dass der Verweis auf ein Item desselben Drafts zeigt und keinen Zyklus bildet.
+- WP-261 wendet die Items in Abhängigkeitsreihenfolge an und ersetzt jeden Verweis durch die neu angelegte ID, alles in einer Transaktion. Ein Fehler rollt alle Items zurück.
+- WP-260 und WP-261 stellen den Item-Verweis vor Beginn von WP-722 bereit.
+
+**Aufgabe:** **erledigt 2026-10-28** A-35: Der Beschluss des Auftraggebers bestätigt Option 1: Item-Verweise mit dem Schlüssel `$item` im Payload, aufgelöst in WP-261. Zuständig war: Architektur/Product Owner.
+
+**Frage:** Wie verweisen Items eines Drafts auf andere, noch nicht angelegte Items desselben Drafts?
+
+**Optionen:**
+
+1. Item-Verweise im Payload, aufgelöst beim Publizieren (Ergänzung in WP-260 und WP-261).
+2. WP-722 teilt den Import in mehrere Drafts, die nacheinander publiziert werden (nicht atomar; ein Fehler hinterlässt einen Teilstand).
+3. WP-722 legt Elternbestandteile direkt produktiv an (verletzt MET-53: Drafts wirken nicht produktiv).
+
+**Empfehlung:** Option 1. Nur sie hält den Import atomar und nicht produktiv bis zum Publizieren. Der Mehraufwand liegt in WP-260 (Prüfung) und WP-261 (Reihenfolge, Ersetzung).
+
+**Blockiert / Auswirkung:** WP-260 prüft die Item-Verweise, WP-261 wendet sie in Abhängigkeitsreihenfolge an und ersetzt sie. WP-722 nutzt sie für abhängige Bestandteile. Der Import bleibt atomar und wirkt erst mit dem Publizieren produktiv (MET-53).
+
+**Quelle:** docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:99 (MET-53); Neufassung von WP-722
+
+**Betroffene IDs:** API-06, AUD-07, EVT-03, MET-53, MET-54
+
+**Betroffene WPs:** WP-260 (`met-drafts`), WP-261 (`met-publish`), WP-722 (`met-import`)
+
+## E-113
+
+**Thema:** UI-11/MET-53: Lesesicht eines Drafts in den Metamodell-Editoren und in der Formular-Vorschau
+
+**Status:** entschieden (2026-10-28, Option 3; angepasst 2026-11-02)
+
+**Festlegung:** Option 3. Nach einer Draft-Schreibung (202) zeigen die Editoren den Draft als Overlay; nur die Vorschau liest den Draft im Backend.
+
+- **Editoren:** WP-798 legt die Draft-Items im Frontend über den produktiven Stand: Kennzeichnung „im Draft“ und Platzhalterzeilen. Die Metamodell-GET-Routen werten keinen Parameter `draft` aus, außer der Vorschau.
+- **Vorschau:** `GET /api/v1/ci-types/<id>/form` nimmt den Parameter `draft=<draft_id>` an und löst das Formular mit den Items dieses Drafts auf. Ohne den Parameter gilt der veröffentlichte Stand. Der Aufruf verlangt wie `preview=true` zusätzlich `citype:manage` (Prüfung im Handler, E-106; `ci_type:manage` ist seit WP-363 in `citype:manage` aufgegangen). Ein Draft einer anderen Organisation ergibt 404. Bei abgeschaltetem Modul `metamodel` ergibt der Parameter `draft` ebenfalls 404, wie die Erfassung über `?draft` (E-105). WP-720 setzt den Parameter im Resolver und Handler aus WP-719 um; Voraussetzungen sind WP-260 und WP-719 (angepasst 2026-11-02, wie im Plan: WP-719 nennt die Draft-Vorschau unter „Nicht Bestandteil“).
+- **Oberfläche:** WP-803 zeigt bei aktivem Draft die Vorschau mit `draft=<draft_id>`. Der Layout-Editor (WP-316) schreibt weiter über `withDraft` in den Draft.
+- **Abnahme:** ABN-01 (c) verlangt „Layout pro Rolle erstellen; Preview prüfen; publizieren“. WP-330 prüft die Vorschau des Drafts vor dem Publizieren.
+
+**Aufgabe:** **erledigt 2026-10-28** A-36: Der Beschluss des Auftraggebers wählt Option 3: Overlay in den Editoren, Vorschau über `ci-types/<id>/form?draft=<draft_id>` im Backend. Zuständig war: Product Owner.
+
+**Frage:** Wie sehen Editoren und Vorschau einen Draft-Stand?
+
+**Optionen:**
+
+1. Overlay der Draft-Items im Frontend; Vorschau nur veröffentlicht (Übergangsregel).
+2. Lesepfade mit `?draft=<id>` im Backend für alle Metamodell-GET-Routen einschließlich `GET /api/v1/layouts` und `GET /api/v1/ci-types/<id>/form` (Erweiterung von WP-260 und WP-719).
+3. Nur die Vorschau `ci-types/<id>/form?draft=<id>` im Backend, die Editoren mit Overlay.
+
+**Empfehlung:** Option 3. Sie deckt den Abnahmeschritt „Preview prüfen“ vor dem Publizieren mit einer Route ab und vermeidet Draft-Parameter an allen Lesepfaden.
+
+**Blockiert / Auswirkung:** WP-720 ergänzt den Parameter `draft` an `GET /api/v1/ci-types/<id>/form` im Resolver aus WP-719 (Voraussetzungen WP-260 und WP-719). Bei abgeschaltetem Modul `metamodel` antwortet der Parameter mit 404. WP-798 und WP-314 zeigen den Draft als Overlay. WP-316 schreibt in den Draft, WP-803 zeigt die Vorschau des Drafts. WP-330 prüft die Vorschau vor dem Publizieren. Weitere Lesepfade mit `draft` gibt es nicht.
+
+**Quelle:** docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:99 (MET-53); docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:97 (ABN-01 c); backend/migrations/000147_rba01_key_cleanup.up.sql (`citype:manage`); Neufassungen von WP-314, WP-316 und WP-720
+
+**Betroffene IDs:** ABN-01, API-06, GQL-03, MET-50, MET-52, MET-53, UI-11
+
+**Betroffene WPs:** WP-719 (`met-form`), WP-260 (`met-drafts`), WP-720 (`met-drafts-capture`), WP-314 (`ui-meta-templates-publish`), WP-798 (`ui-meta-draft-context`), WP-316 (`ui-form-builder`), WP-803 (`ui-form-preview`), WP-330 (`g2-abnahme`)
+
+## E-114
+
+**Thema:** MET-45: Ablösung der attributgebundenen Regeln neben dem Regelkatalog
+
+**Status:** entschieden (2026-10-28, Option 3; angepasst 2026-11-02)
+
+**Festlegung:** Option 3: `attribute_definition.validation` und `conditional` (`fieldmeta.ConditionalRules`, Phase 1) bestehen in Phase 2 neben dem Regelkatalog `/api/v1/rules` (WP-716) fort. Beide Quellen gelten. Seit WP-589 speichert `validation` den Regel-AST nach MET-45 (`rules.Rule`, `api/rules.schema.json`) mit den Operatoren `required`, `pattern`, `range`, `enum` und `all`. Die Legacy-Form wird beim Speichern und Lesen übersetzt, und `reticora_validation_legacy` (000184) übersetzt den AST für die SQL-Komposition. Attributregeln und Katalogregeln nutzen damit dieselbe Regelsprache. Die Oberfläche legt neue Bedingungen und Validierungen nur im Katalog an. Sie zeigt die Attributregeln nur lesend (WP-801, WP-802). Die API der Attributdefinitionen bleibt in der Fassung nach WP-589 unverändert (API-01). Die Überführung in Katalogregeln (Option 2) ist nicht Teil von Phase 2; sie gehört in eine spätere Phase.
+
+**Aufgabe:** Keine. A-37 ist erledigt (Beschluss des Auftraggebers vom 2026-10-28: Option 3).
+
+**Frage:** Werden die attributgebundenen Regeln in Katalogregeln überführt oder dauerhaft parallel geführt?
+
+**Optionen:**
+
+1. Dauerhaft parallel, gleichrangig auch in der Oberfläche.
+2. Überführung in Katalogregeln per Datenmigration; `validation` und `conditional` werden deprecated (Sunset ≥ 12 Monate nach API-01).
+3. Parallel in Phase 2, neue Regeln nur im Katalog; Überführung in einer späteren Phase (Übergangsregel).
+
+**Empfehlung:** Option 3. Sie bricht keine G1-Schnittstelle und hält die Oberfläche eindeutig. Die Überführung (Option 2) gehört in eine spätere Phase, wenn MET-40 bis MET-43 vorliegen (E-37).
+
+**Blockiert / Auswirkung:** WP-257 und WP-716 führen beide Quellen nebeneinander; `validation` liegt bereits als Regel-AST nach MET-45 vor (WP-589). WP-801 und WP-802 legen neue Regeln nur im Katalog an und zeigen Attributregeln lesend. Die API der Attributdefinitionen ändert sich nicht.
+
+**Quelle:** backend/internal/fieldmeta/fieldmeta.go (`ConditionalRules`, `Predicate`, `ValidationFromRule`); backend/internal/citype/attribute_definition.go (`validation` als `rules.Rule`, `conditional`); backend/internal/rules/rules.go; api/rules.schema.json; backend/migrations/000184_attribute_validation_ast.up.sql (`reticora_validation_legacy`); WP-589 (Commit 688d0490); Neufassung von WP-315
+
+**Betroffene IDs:** API-06, AUD-07, MET-10, MET-45, UI-11
+
+**Betroffene WPs:** WP-257 (`met-rules`), WP-716 (`met-rules-catalog`), WP-801 (`ui-rule-catalog`), WP-802 (`ui-rule-computed`)
+
+## E-115
+
+**Thema:** RBA-07/MET-53: Import von Feldrechten aus dem Metamodell-Export
+
+**Status:** entschieden (2026-10-28, Option 3)
+
+**Festlegung:** Option 3: Phase 2 importiert keine Feldrechte. WP-726 exportiert `field_grant` und `field_sensitivity` mit Schlüsseln. `POST /api/v1/metamodel/import` (WP-722) legt nur einen Draft an, und Draft/Publish (WP-260, WP-261) kennen keine Grants. Der Import nimmt die Abschnitte an (DTO-Erweiterung in WP-726). Er übernimmt sie nicht und nennt sie im Importergebnis als nicht übernommen.
+
+**Frage:** Wie kommen exportierte Feldrechte in eine andere Organisation?
+
+**Optionen:**
+
+1. Übernahme über den Draft: Draft und Publish werden um Grants erweitert.
+2. Eigene Route `POST /api/v1/field-permissions/import`: sofort wirksam, Konfliktbericht für unbekannte Rollen und Typen.
+3. Kein Import in Phase 2; die Abschnitte werden angenommen und als nicht übernommen gemeldet (Übergangsregel).
+
+**Empfehlung:** Option 3. Grants verweisen auf Rollen, die je Organisation verschieden sind; ein Import braucht eine Rollenzuordnung, die kein Katalogtext beschreibt. Option 1 vergrößert Draft und Publish ohne Katalogauftrag.
+
+**Blockiert / Auswirkung:** WP-726 erweitert die Import-DTO um `field_grant` und `field_sensitivity`. WP-722 meldet diese Abschnitte im Importergebnis als nicht übernommen. Draft und Publish bleiben ohne Grants.
+
+**Quelle:** Neufassung von WP-264; E-43
+
+**Betroffene IDs:** API-06, MET-53, MET-54, RBA-07
+
+**Betroffene WPs:** WP-722 (`met-import`), WP-726 (`fr-admin`)
+
+## E-116
+
+**Thema:** LCY-02: Bindung des Lifecycle-Modells `software` an Systemtypen
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1: WP-263 legt das System-Seed `software` an (LCY-02). Es bindet das Modell per Migration an die Systemtypen `application` und `software` (000104). Heute gibt es nur das Seed `physical_asset` (000055); kein Systemtyp hat `lifecycle_definition_id`, und `ci_check_lifecycle_model` (000090) lehnt `ci.lifecycle_state` ohne Modell ab. Nach WP-248 erben Org-Untertypen dieser Systemtypen das Modell. Sie können es durch ein eigenes ersetzen, aber nicht entfernen. `database` bleibt ohne Bindung, bis der Katalog ein Modell dafür nennt.
+
+**Frage:** Bindet Phase 2 das Software-Modell an Systemtypen, oder bleibt die Bindung den Organisationen überlassen?
+
+**Optionen:**
+
+1. Bindung an `application` und `software` per Migration in WP-263.
+2. Keine Bindung; Organisationen binden das Modell an Org-Untertypen über `lifecycle-models` (REST, E-107).
+
+**Empfehlung:** Option 1. Ohne Oberfläche (E-107) bliebe das Modell sonst ungenutzt; `database` bleibt ohne Bindung, bis der Katalog ein Modell dafür nennt.
+
+**Blockiert / Auswirkung:** WP-263 legt das Seed `software` und die Bindung an `application` und `software` per Migration an. WP-723 baut darauf auf. CIs dieser Typen und ihrer Org-Untertypen können Zustände des Modells `software` führen; `ci_check_lifecycle_model` lässt sie zu. Einen Zustand setzt die Migration keinem CI.
+
+**Quelle:** docs/spec/katalog-v3/04-ci-netz-rack-beziehungen-impact.md:44 (LCY-02); backend/migrations/000055_cmdb_extensions.up.sql (Seed `physical_asset`); backend/migrations/000090_ci_health_lifecycle.up.sql (`ci_check_lifecycle_model`); backend/migrations/000104_ci_type_fields_seeds.up.sql; Neufassung von WP-263
+
+**Betroffene IDs:** API-06, LCY-02, MET-01, MET-06
+
+**Betroffene WPs:** WP-263 (`met-lifecycle-models`), WP-723 (`met-lifecycle-model-api`)
+
+## E-117
+
+**Thema:** Kategorie und Icon der globalen Systemtypen
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1: Kategorie und Icon der globalen Systemtypen liegen als Daten vor. Heute haben nur die 6 logischen Systemtypen aus 000104 `ci_type.category`; die 17 physischen aus 000021 haben keine, und keiner der 23 Systemtypen hat ein Icon. WP-248 ergänzt seine Migration, die `ci_type` ohnehin ändert, um eine Datenmigration. Sie setzt `ci_type.category` für die 17 physischen Systemtypen (Kategorien des Go-Katalogs `citype.Templates()`) und `ci_type.icon` (Name eines lucide-react-Icons) für alle 23 Systemtypen. Sie ändert nur globale Zeilen (`organization_id IS NULL`). Down setzt die ergänzten Werte auf NULL zurück. Der Filter `category` von `GET /api/v1/ci-types` und alle Oberflächen (WP-317, WP-313) nutzen diese Quelle. `TypeTiles.tsx` (WP-317) ordnet Systemtypen keine Kategorie und kein Icon mehr im Frontend zu. Typen ohne Kategorie stehen unter ‚Weitere‘ (`other`), Typen ohne Icon erhalten ein generisches Geräte-Icon.
+
+**Aufgabe:** Keine. A-38 ist erledigt (Beschluss des Auftraggebers vom 2026-10-28: Option 1, Datenmigration in WP-248).
+
+**Frage:** Liegen Kategorie und Icon der Systemtypen als Daten vor oder nur als Präsentations-Fallback?
+
+**Optionen:**
+
+1. Datenmigration auf `ci_type.category` und `ci_type.icon` für alle Systemtypen (Ergänzung der Migration von WP-248, die `ci_type` ohnehin ändert).
+2. Fallback im Frontend für die geführte Anlage (Übergangsregel).
+
+**Empfehlung:** Option 1. Der Filter `category` und alle Oberflächen nutzen dann dieselbe Quelle; die Migration ist klein und betrifft nur globale Zeilen.
+
+**Blockiert / Auswirkung:** WP-248: Datenmigration für `category` und `icon` der Systemtypen mit Down und Migrations-Roundtrip. WP-317: Die Kacheln lesen Kategorie und Icon aus `GET /api/v1/ci-types`; die Zuordnung Typschlüssel → Kategorie bzw. Icon im Frontend entfällt. WP-313: zeigt Kategorie und Icon aus derselben Quelle.
+
+**Quelle:** backend/migrations/000021_spec_alignment.up.sql:89–108; backend/migrations/000104_ci_type_fields_seeds.up.sql:72–79; Neufassung von WP-317 (F2)
+
+**Betroffene IDs:** MET-01, MET-06, MET-51, TST-03, UI-11, UI-12
+
+**Betroffene WPs:** WP-248 (`met-inherit`), WP-313 (`ui-meta-types`), WP-317 (`ui-guided-create`)
+
+## E-118
+
+**Thema:** MGT-01/NFR-05/NFR-06: Endgültiges Löschen von Dokumentinhalten im versionierten Bucket
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1: Eine Lifecycle-Regel des Dokument-Buckets `reticora-documents` entfernt nicht aktuelle Objektversionen nach `backup_retention_days` (Default 35 Tage, NFR-06). Die Frist ist bestätigt. Der Bucket bleibt versioniert (NFR-05, OPS-04). Die Versionierung schaltet die Anwendung beim Start ein: `setupObjectStorage` (`backend/cmd/server/main.go`) ruft `EnableVersioning` für alle App-Buckets auf, also auch beim mitgelieferten MinIO von `deploy/docker-compose`. WP-544 belegt das gegen MinIO (`TestSetupObjectStorageEnablesVersioning`). Für Provider-Buckets verlangt `backup_policy` in `deploy/terraform/main.tf` `versioning = true`. `backup_policy` nennt zwar `retention_days`, `deploy/` enthält aber weder in `deploy/terraform` noch für das mitgelieferte MinIO eine Lifecycle-Regel für nicht aktuelle Versionen. Der Purge (WP-732) setzt nur Löschmarken; das endgültige Entfernen leistet die Lifecycle-Regel. Sie ist Betriebsaufgabe in `deploy/terraform` und für das mitgelieferte MinIO in `deploy/docker-compose`. Sie ist nicht Teil von WP-732 (dort „Nicht Bestandteil“).
+
+**Aufgabe:** Keine. A-39 ist erledigt (Beschluss des Auftraggebers vom 2026-10-28: Frist 35 Tage wie die Backup-Frist).
+
+**Frage:** Ob und nach welcher Frist werden nicht aktuelle Objektversionen gelöscht? Abzuwägen sind Backup-Frist 35 Tage (NFR-06), Wiederherstellbarkeit (NFR-05) und Löschpflichten.
+
+**Optionen:**
+
+1. Lifecycle-Regel: nicht aktuelle Versionen nach der Backup-Frist (35 Tage) entfernen.
+2. Keine Regel: Inhalte bleiben in alten Versionen unbegrenzt erhalten.
+3. Der Purge löscht alle Versionen sofort (verliert die Wiederherstellbarkeit nach NFR-05).
+
+**Empfehlung:** Option 1. Sie hält Wiederherstellbarkeit im Rahmen der Backup-Frist und erfüllt Löschpflichten mit fester Frist. Option 2 verletzt Löschpflichten.
+
+**Blockiert / Auswirkung:** WP-732 bleibt beim Purge mit Löschmarken. Betrieb: Lifecycle-Regel für nicht aktuelle Versionen des Dokument-Buckets `reticora-documents` mit der Frist `backup_retention_days`, in `deploy/terraform` und für das mitgelieferte MinIO in `deploy/docker-compose`.
+
+**Quelle:** docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:42, :44 (NFR-05, NFR-06); docs/spec/katalog-v3/01-installation-stack.md:53 (OPS-04); deploy/terraform/main.tf (`backup_policy`); deploy/terraform/variables.tf (`backup_retention_days`); backend/cmd/server/main.go (`setupObjectStorage`); backend/cmd/server/objectstorage_integration_test.go (`TestSetupObjectStorageEnablesVersioning`, WP-544); deploy/docker-compose/docker-compose.yml (`minio`); Neufassung von WP-267
+
+**Betroffene IDs:** MGT-01, NFR-05, NFR-06
+
+**Betroffene WPs:** WP-732 (`doc-softdelete`)
+
+## E-119
+
+**Thema:** MGT-12: Verantwortliche am Vertrag und Wertebereich von `contract.kind`
+
+**Status:** entschieden (2026-10-28, Option 2)
+
+**Festlegung:** Option 2. MGT-12 nennt `kind`, aber keinen Wertebereich und keinen Owner. Es gilt:
+
+- **(a) Verantwortliche:** keine Owner-Spalten. Empfänger von `contract.expiring` ist nur `org_admin` mit `contract:read` im Client des Vertrags (WP-270).
+- **(b) Vertragsart:** `contract.kind` mit CHECK und englischen Schlüsseln nach GLO-10: `maintenance`, `support`, `lease`, `license`, `purchase`, `service`, `other` (WP-269). Die Oberfläche zeigt die Werte über i18n (WP-808).
+
+**Aufgabe:** Keine. A-40 ist erledigt (Beschluss des Auftraggebers vom 2026-10-28: Option 2, Werteliste bestätigt).
+
+**Frage:** (a) Erhält ein Vertrag Verantwortliche (`owner_user_id`/`owner_team_id`) als Empfänger der Ablaufbenachrichtigung? (b) Welche Werte hat `contract.kind`?
+
+**Optionen:**
+
+1. (a) Owner-Spalten nach E-124 (offene Zuständigkeit mit zusammengesetztem Fremdschlüssel); `contract.expiring` geht zusätzlich an `UserIDs`/`TeamIDs`. (b) Werteliste mit CHECK.
+2. (a) Kein Owner (Übergangsregel). (b) Werteliste mit CHECK (Übergangsregel).
+3. (a) Kein Owner. (b) Freitext ohne CHECK.
+
+**Empfehlung:** Option 2. Der Katalog verlangt keinen Owner; die Werteliste macht die Vertragsart nach GLO-10 filterbar und übersetzbar. Option 3 verletzt GLO-10.
+
+**Blockiert / Auswirkung:** WP-269 legt `contract.kind` mit CHECK auf die sieben Schlüssel an, ohne Owner-Spalten. WP-270 benachrichtigt nur `org_admin` mit `contract:read`. WP-808 zeigt die Vertragsarten über i18n.
+
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:62 (MGT-12); docs/spec/katalog-v3/00-grundlagen.md:99 (GLO-10); Neufassungen von WP-269, WP-270 und WP-319
+
+**Betroffene IDs:** API-06, GLO-10, MGT-12, NTF-05, UI-14
+
+**Betroffene WPs:** WP-269 (`ast-supplier-contract`), WP-270 (`ast-contract-expiry`), WP-808 (`ui-contracts-suppliers`)
+
+## E-120
+
+**Thema:** AST-01/LCY-02: Zustand und Altfelder am Asset (Backfill `lifecycle_state`, Ablösung von `status`, Freitext `location` und Spiegelspalten)
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1. Befund: `asset.lifecycle_state` (000055) ist NULL, hat keine Vorgabe und wird vom Asset-Repository nie gesetzt. `asset.status` hat seit 000055 keinen CHECK mehr. Gelesen wird er vom Filter `AvailableOnly` (`backend/internal/savedview/filter.go`, `asset.status IN ('in_stock')`), von `AssetFacts.Status` (`backend/internal/ci/model.go`) und von der Inventur (`backend/internal/stocktake/pg_repository.go`). Die Inventur schreibt heute in `PGRepository.Complete` `status` (`lost`, `in_stock`, `maintenance`) und den Freitext `location`; diese Schreibzugriffe entfernt WP-287. Neben `location_id` besteht der Freitext `asset.location`. Ohne Backfill lehnte WP-278 die Entsorgung eines Bestandsassets mit 422 ab, weil `disposed` im Seed `physical_asset` nur aus `retired` und `repair` erreichbar ist. Es gilt:
+
+- **(a) Backfill und Initialzustand (WP-271):** `status` → `lifecycle_state`: `in_stock` → `in_stock`, `assigned` → `deployed`, `maintenance` → `repair`, `retired` → `retired`, `disposed` → `disposed`. `lost` hat kein Ziel; die Zeile behält `lifecycle_state` NULL und geht nach `migration_quarantine` (Muster E-26). Neue Assets erhalten beim Anlegen den Initialzustand des Modells (`is_initial`, im Seed `ordered`).
+- **(b) Ablösung von `status` und `location` (WP-738, WP-739):** WP-738 stellt die SQL-Leser auf `lifecycle_state` und `location_id` um (Filter `AvailableOnly`, Inventur-Leser, `loadAssetFacts`). Es leitet `status` per Trigger aus `lifecycle_state` ab: `deployed` → `assigned`, `repair` → `maintenance`, `retired` → `retired`, `disposed` → `disposed`, alle übrigen Zustände → `in_stock`; bei `lifecycle_state` NULL bleibt `status` unverändert. `status` und `location` bleiben bis zum Sunset (mindestens 12 Monate, API-01) als deprecated Felder lesbar (WP-271 markiert sie in der OpenAPI); den Sunset-Termin setzt WP-739.
+- **(c) Spiegelspalten:** `asset_tag`, `purchase_cost`, `warranty_end` und `supplier` (WP-738) sowie die deprecated Felder in `CIAssetFacts` entfallen nach Ablauf der API-01-Frist in einer späteren Phase; den Sunset-Termin setzt WP-739.
+
+**Aufgabe:** Keine. A-41 ist erledigt (Beschluss des Auftraggebers vom 2026-10-28: Option 1 mit Mapping, Behandlung von `lost`, Ableitung von `status` und Leserumstellung in WP-738).
+
+**Frage:** Wie erhalten Bestandsassets einen Lifecycle-Zustand, und wann entfallen `status`, Freitext `location` und die Spiegelspalten?
+
+**Optionen:**
+
+1. Backfill, Leserumstellung und deprecated Felder mit Sunset; Entfernen in einer späteren Phase (Übergangsregel).
+2. `status` bleibt dauerhaft parallel zu `lifecycle_state`; nur Backfill.
+3. Kein Backfill: Bestandsassets ohne Zustand müssen manuell gesetzt werden, bevor sie entsorgt werden können.
+
+**Empfehlung:** Option 1. Nur sie macht Bestandsassets entsorgbar und beseitigt die zweite Zustandsquelle, ohne API-01 zu verletzen. Die Leserumstellung (b) liegt bei WP-738, das dieselben Dateien für die Spaltenumbenennung ändert.
+
+**Blockiert / Auswirkung:** WP-271: Backfill, Quarantäne für `lost`, Initialzustand und Deprecation von `status` und `location`. WP-738: Leserumstellung und Trigger für `status`. WP-739: Sunset-Termine. WP-278 kann Bestandsassets mit Backfill entsorgen. WP-263 liefert das Modell `physical_asset`; WP-287 schreibt `status` und den Freitext `location` nicht mehr.
+
+**Quelle:** backend/migrations/000009_phase2_assets.up.sql (`asset_status_check`); backend/migrations/000055_cmdb_extensions.up.sql (Seed `physical_asset`, `asset.lifecycle_state`, DROP `asset_status_check`); backend/internal/savedview/filter.go (`AvailableOnly`); backend/internal/stocktake/pg_repository.go (`Complete`); backend/internal/ci/model.go (`AssetFacts`); Neufassungen von WP-271, WP-278 und WP-287
+
+**Betroffene IDs:** API-06, AST-01, DB-05, INV-01, LCY-02, LCY-03, MET-01, MET-06, MGT-02, UI-12, UI-14
+
+**Betroffene WPs:** WP-263 (`met-lifecycle-models`), WP-271 (`ast-core`), WP-738 (`ast-field-names-db`), WP-739 (`ast-field-names-api`), WP-278 (`ast-disposal`), WP-279 (`ast-lifecycle-guards`), WP-287 (`inv-stocktake`), WP-848 (`inv-stocktake-area`), WP-319 (`ui-assets-contracts`)
+
+## E-121
+
+**Thema:** AST-01/NFR-06: Lösch- und Archivsemantik für Assets
+
+**Status:** entschieden (2026-10-28, Option 2)
+
+**Festlegung:** Option 2: Assets haben kein Soft-Delete. Das Lebensende eines Assets bildet der Lifecycle ab (`retired`/`disposed`). `asset` hat kein `deleted_at` (000009); `DELETE /api/v1/assets/<id>` löscht hart (`PGRepository.Delete` in `backend/internal/asset/pg_repository.go`). Das Löschen scheitert schon heute bei Historie: `asset_movement.asset_id` ist ON DELETE CASCADE, der Trigger `reject_asset_movement_mutation` (000055) verbietet das Löschen; `disposal_record.asset_id` ist ON DELETE SET NULL, und der Datensatz ist append-only (000049; seit 000145 lässt `disposal_record_immutable` nur die Scope-Propagation von `client_id` und `site_id` zu). Das kanonische Ledger führt `stock_movement.asset_id` ON DELETE RESTRICT (WP-744). WP-740 antwortet mit 409, wenn Bewegungen oder Entsorgungsnachweise bestehen. Assets ohne Historie bleiben hart löschbar.
+
+**Aufgabe:** Keine. A-42 ist erledigt (Beschluss des Auftraggebers vom 2026-10-28: Option 2).
+
+**Frage:** Gibt es für Assets ein Soft-Delete oder Archiv?
+
+**Optionen:**
+
+1. Soft-Delete mit `asset.deleted_at`, Ereignis `asset.deleted`, Restore und Purge nach 90 Tagen (NFR-06) nur ohne Historie.
+2. Archiv über den Lifecycle (`retired`/`disposed`); DELETE nur ohne Historie, sonst 409 (Übergangsregel).
+
+**Empfehlung:** Option 2. Bewegungen und Entsorgungsnachweise sind revisionssicher und dürfen nicht verwaisen; das Lebensende eines Assets bildet der Lifecycle ab. Ein Soft-Delete brächte Filter in allen Lesepfaden ohne Katalogauftrag.
+
+**Blockiert / Auswirkung:** WP-740: DELETE mit 409 bei Bewegungen oder Entsorgungsnachweisen, sonst hartes Löschen; keine Spalte `asset.deleted_at`. WP-744 und WP-274: Bewegungen bleiben unlöschbar. WP-781: Massenlöschen folgt derselben Regel.
+
+**Quelle:** backend/migrations/000009_phase2_assets.up.sql; backend/migrations/000049_disposal.up.sql; backend/migrations/000055_cmdb_extensions.up.sql:329–370; backend/migrations/000145_disposal_record_scope.up.sql (`disposal_record_immutable`); backend/internal/asset/pg_repository.go (`Delete`); Neufassungen von WP-271 und WP-274
+
+**Betroffene IDs:** AST-01, AST-07, BLK-01, BLK-02, EVT-03, STK-04
+
+**Betroffene WPs:** WP-740 (`ast-version-events`), WP-274 (`ast-movement`), WP-744 (`ast-movement-ledger`), WP-781 (`blk-ops-assets`)
+
+## E-122
+
+**Thema:** AST-01/AST-04: Benennung des Primär-CI (`primary_ci_id`)
+
+**Status:** entschieden (2026-10-28, Option 2)
+
+**Festlegung:** Option 2: `primary_ci_id` ist nur der API-Name über der Spalte `asset.ci_id` (WP-272). Die Spalte bleibt; WP-738 und WP-739 benennen sie nicht um. Eine Umbenennung beträfe `ci/merge.go`, `ci/pg_repository.go`, `jobs/harddelete.go`, `lifecycle/states.go`, `asset/*`, `assignment/*`, `disposal/*`, `stocktake/pg_repository.go`, die Trigger aus 000088 und mehrere Integrationstests; sie ist nicht vorgesehen.
+
+**Frage:** Wird die Spalte `asset.ci_id` in `primary_ci_id` umbenannt oder nur der API-Name eingeführt?
+
+**Optionen:**
+
+1. Spalte umbenennen (eigenes WP).
+2. Nur API-Name über der Spalte (Übergangsregel in WP-272).
+
+**Empfehlung:** Option 2. AST-01 bindet den API-Vertrag, nicht den Spaltennamen; die Umbenennung kostet ein WP ohne fachlichen Nutzen.
+
+**Blockiert / Auswirkung:** WP-272 führt `primary_ci_id` als API-Namen über `asset.ci_id`. WP-738 und WP-739 lassen die Spalte unverändert. Kein eigenes WP für eine Umbenennung.
+
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md (AST-01, AST-04); backend/internal/ci/merge.go; backend/internal/jobs/harddelete.go; backend/internal/lifecycle/states.go; backend/migrations/000088_ci_asset_canonical.up.sql; Neufassungen von WP-271 und WP-272
+
+**Betroffene IDs:** AST-01, AST-03, AST-04
+
+**Betroffene WPs:** WP-738 (`ast-field-names-db`), WP-739 (`ast-field-names-api`), WP-272 (`ast-ci-link`)
+
+## E-123
+
+**Thema:** AST-05: Vorgabe für `child_mode` und Löschen mit Konfigurationskindern
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1 (WP-273):
+
+- **(a) Vorgabe:** Wird `parent_ci_id` ohne `child_mode` gesetzt, gilt `standalone`. Die Kinder aus 000089 erhalten im Backfill `standalone`. API-01 verlangt additive Änderungen; `configuration` als Vorgabe würde Standort und Serial bestehender Kinder sperren.
+- **(b) Löschen und Restore:** Das Soft-Delete eines Elternteils mit nicht gelöschten Konfigurationskindern ergibt 409 statt einer Kaskade. Das Restore eines Konfigurationskinds mit gelöschtem Elternteil ergibt 409. Es gibt keine Lösch- oder Restore-Kaskade; sie bräuchte Indexpflege je Kind im Indexing-Decorator (`backend/internal/ci/indexing_repository.go`).
+
+**Frage:** Welcher `child_mode` gilt ohne Angabe, und was geschieht beim Löschen eines Elternteils mit Konfigurationskindern?
+
+**Optionen:**
+
+1. Vorgabe `standalone`; 409 beim Löschen bzw. Restore (Übergangsregel).
+2. Vorgabe `configuration`; Kaskade beim Soft-Delete und Restore.
+
+**Empfehlung:** Option 1. Sie ist additiv nach API-01 und vermeidet eine Kaskade ohne Indexpflege.
+
+**Blockiert / Auswirkung:** WP-273: Vorgabe und Backfill `standalone`, 409 beim Soft-Delete eines Elternteils mit Konfigurationskindern und beim Restore eines Konfigurationskinds mit gelöschtem Elternteil.
+
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:12 (AST-05); backend/migrations/000089_ci_parent_projection.up.sql; Neufassung von WP-273
+
+**Betroffene IDs:** AST-04, AST-05
+
+**Betroffene WPs:** WP-273 (`ast-composition`)
+
+## E-124
+
+**Thema:** SEC-05/Konvention 16: Nutzerverweise in Tabellen der Phase 2
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1. `app_user` hat kein Vault-Surrogat. Seit WP-639 (000177) trägt `app_user` den Schlüssel `app_user_id_organization_key UNIQUE (id, organization_id)`, seit WP-391 (000150) trägt `team` den Schlüssel `team_id_organization_key`. `desk_booking`, `key_assignment` und `training_assignment` verweisen damit bereits mit zusammengesetztem Fremdschlüssel ohne Löschaktion auf `app_user`. Protokollfelder verweisen meist ohne Fremdschlüssel auf Nutzer (`job.created_by`, 000115). Für alle neuen Nutzerverweise der Phase 2 gilt:
+
+- **Offene Zuständigkeiten** (Owner, Halter) verweisen mit `(<x>_user_id, organization_id) REFERENCES app_user (id, organization_id)` ohne Löschaktion (`NO ACTION`). Ein Nutzer, auf den eine Zuständigkeit verweist, lässt sich nicht löschen (409, `ErrUserReferenced`, TLC-04). Deaktivieren oder Anonymisieren ersetzt das Löschen. Das gilt für `ci.owner_user_id` (WP-280), `asset.assigned_user_id` (WP-745) und `asset.owner_user_id` (WP-271).
+- **Protokollfelder** (Akteur, Unterzeichner, Ersteller) führen die Nutzer-ID ohne Fremdschlüssel. Sie bleiben nach dem Löschen des Nutzers stehen. Das gilt etwa für `stock_movement.signer_user_id` (WP-276). `relationship_suppression.created_by` hat seit WP-584 (000178) abweichend einen zusammengesetzten Fremdschlüssel mit `ON DELETE SET NULL (created_by)`. Das bleibt so, ist aber kein Muster für Phase 2.
+- `app_user.id` gilt als pseudonymer Schlüssel im Sinne von SEC-05. Name und E-Mail kommen nur über die Nutzerauflösung.
+- Phase-2-Migrationen legen `app_user_id_organization_key` und `team_id_organization_key` nicht an und entfernen sie im Down nicht. Sie setzen 000177 und 000150 voraus.
+
+**Frage:** Wie verweisen neue Spalten auf Nutzer, und gilt `app_user.id` als Surrogat nach SEC-05?
+
+**Optionen:**
+
+1. Offene Zuständigkeiten mit zusammengesetztem Fremdschlüssel, Protokollfelder ohne Fremdschlüssel (Übergangsregel).
+2. Alle Nutzerverweise ohne Fremdschlüssel (Muster `job.created_by`).
+3. Alle Nutzerverweise mit zusammengesetztem Fremdschlüssel.
+
+**Empfehlung:** Option 1. Zuständigkeiten müssen auf existierende Nutzer derselben Organisation zeigen (K19, SR-03); Protokolle müssen das Löschen von Nutzern überstehen.
+
+**Blockiert / Auswirkung:** WP-271 legt `asset.owner_user_id` mit zusammengesetztem Fremdschlüssel ohne Löschaktion an und prüft den Verweis im Repository. Die Angabe „Nutzer-Surrogat ohne Fremdschlüssel (Muster `job.created_by`)“ in Migration und Akzeptanzkriterium von WP-271 entfällt. WP-280 legt `app_user_id_organization_key` nicht an und entfernt ihn im Down nicht. Sein Problemtext nennt beide Schlüssel als vorhanden. WP-264 legt `team_id_organization_key` nicht mehr an. WP-271, WP-745 und WP-744 nennen 000150 und 000177 als Herkunft der Schlüssel. Ein erneutes Anlegen würde an der bestehenden Constraint scheitern. WP-276 bleibt ohne Fremdschlüssel. Verträge erhalten nach E-119 keine Owner-Spalten. Das Löschen eines referenzierten Nutzers ergibt schon heute 409 über `ErrUserReferenced` (`DeleteUserTx`, SQLSTATE 23503); dafür ist kein neuer Code nötig.
+
+**Quelle:** docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:34; docs/spec/katalog-v3/00-grundlagen.md:31 (CH16, SEC-05); backend/migrations/000005_users_roles.up.sql; backend/migrations/000115_job.up.sql; backend/migrations/000150_role_assignment_team_scope.up.sql:25; backend/migrations/000177_module_org_references.up.sql:59; backend/migrations/000178_relationship_suppression_actor.up.sql; backend/internal/user/pg_repository.go (`DeleteUserTx`); Neufassungen von WP-271, WP-275, WP-276 und WP-280
+
+**Betroffene IDs:** AST-01, AST-02, AST-07, CI-01, CI-07, DB-05, MET-10, RBA-07, SEC-05, STK-04, TEN-05, TLC-04
+
+**Betroffene WPs:** WP-264 (`fr-model`), WP-271 (`ast-core`), WP-744 (`ast-movement-ledger`), WP-745 (`ast-assignment-holder`), WP-276 (`ast-signature`), WP-280 (`ci-owner-tags-fields`)
+
+## E-125
+
+**Thema:** API-01: Verschärfungen an G1-Routen (`attributes.tags`, Beziehungstypen)
+
+**Status:** entschieden (2026-10-28, Option 3; angepasst 2026-11-02)
+
+**Festlegung:** Option 3. Zwei Neufassungen ändern G1-Verhalten nicht additiv. Bisher sind Tags in `attributes.tags` frei schreibbar (POST/PATCH `/cis`, Ingest, `PUT /cis/<id>/fields/tags/override`). `POST /api/v1/relationship-types` mit dem Schlüssel eines Systemtyps legt heute einen Org-Typ an, der den Systemtyp überschattet (`GetByKey` sortiert `organization_id NULLS LAST`). Die Prüfung der Typlisten `allowed_source_types`/`allowed_target_types` ist keine Phase-2-Verschärfung mehr. Seit WP-592 (E-95, Korrekturplan) ergibt ein unbekannter CI-Typ-Schlüssel bei Anlage und PATCH eines Typs 400. Ein unerlaubter CI-Typ einer Kante ergibt an `POST /api/v1/relationships` 422. E-95 lässt `cardinality` bis REL-06 informativ. Es gilt:
+
+- **Beziehungstypen (WP-294):** Die übrigen Prüfungen gelten als Korrektur mit Release-Hinweis: 409 für den Schlüssel eines Systemtyps, 400 bei ungültiger `cardinality` und bei `undirected` außerhalb der Kategorie `network`, 409 beim Löschen eines benutzten Typs, 422 an `POST /api/v1/relationships` bei überschrittener `cardinality` (REL-06). Die Typlisten schließen künftig Untertypen ein.
+- **Tags (WP-281):** `attributes.tags` an POST/PATCH `/cis` und im Ingest wird bis zum Sunset (mindestens 12 Monate) in `ci_tag` übersetzt. Die Antwort trägt `Deprecation` und `Sunset` wie bei E-25. Erst nach dem Sunset ergibt `attributes.tags` 400.
+- **Override-Weg:** `PUT /cis/<id>/fields/tags/override` ergibt sofort 422.
+
+**Aufgabe:** Keine. A-43 ist mit dem Beschluss vom 2026-10-28 erledigt.
+
+**Frage:** Gelten die Verschärfungen als zulässige Korrektur mit Release-Hinweis, oder brauchen sie eine Deprecation-Frist nach API-01?
+
+**Optionen:**
+
+1. Alle als Korrektur mit Release-Hinweis (Empfehlung der Prüfung zu WP-281: sofortige Sperre).
+2. Alle mit Deprecation-Frist: altes Verhalten bis zum Sunset, danach die Prüfung.
+3. Gemischt: Prüfungen gegen Fehlzustände (Überschatten, ungültige Werte, Löschen benutzter Typen) als Korrektur; die Tags-Sperre mit Übersetzung bis zum Sunset (Übergangsregel).
+
+**Empfehlung:** Option 3. Die Beziehungstyp-Prüfungen verhindern Zustände, die schon in G1 fehlerhaft waren. Die Tags-Sperre trifft dagegen gültige Clients und Collector-Daten; E-57 legt API-01 streng aus.
+
+**Blockiert / Auswirkung:** WP-294 liefert die Seeds, die Prüfung von `cardinality` (Validierung, CHECK, 422 an `POST /api/v1/relationships`), Schatten- und Löschschutz, `undirected` nur in `network` sowie den Einschluss der Untertypen bei den Typlisten. Die Prüfung der Typlisten selbst besteht seit WP-592; Titel, Problemtext und Akzeptanzkriterien von WP-294 nennen das. Der PR nennt die Verhaltensänderung als Release-Hinweis. WP-281 trägt Mehraufwand: POST/PATCH `/cis` und der Ingest übersetzen `attributes.tags` bis zum Sunset in `ci_tag` und setzen `Deprecation` und `Sunset`. `CheckReservedKeys` und `fieldmeta.ReservedNames` bleiben unverändert; `tags` ist dort heute nicht reserviert. Die 400 greift erst nach dem Sunset. Der Override-Weg ergibt 422 über den CHECK `ci_field_value_no_tags`. Neue Phase-2-Pfade wie `set_fields` der Bulk-Aktionen (WP-304) lehnen `tags` mit einer eigenen Prüfung ab, nicht über `CheckReservedKeys`.
+
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:4 (API-01); backend/internal/fieldmeta/fieldmeta.go:209 (`ReservedNames`); backend/internal/ci/validation.go (`CheckReservedKeys`); backend/internal/relationshiptype/pg_repository.go (`GetByKey`, `Create`, `Delete`, `checkCITypeKeys`); backend/internal/relationship/pg_repository.go (`Create`); docs/plan/g1-korrektur/entscheidungen.md (E-95, Korrekturplan); Commit c6cfd5d6 (WP-592); E-25; E-57; Neufassungen von WP-281 und WP-294
+
+**Betroffene IDs:** API-01, API-06, CI-07, CI-08, CI-12, IMP-10, REL-06
+
+**Betroffene WPs:** WP-281 (`ci-tags`), WP-753 (`ci-tags-api`), WP-294 (`rel-custom-types`)
+
+## E-126
+
+**Thema:** API-02: Operator `all` für Mengenfelder
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1. `filter[tags][all]` (WP-754) ergänzt API-02 additiv. API-02 [B] nennt `exact`, `gte`, `lte`, `like` und `in`. Bei Mengenfeldern bedeutet `in` „mindestens einer“, `all` „alle“. `all` ist nur für Mengenfelder zugelassen. Die Erweiterung steht in der OpenAPI und in den Konformanzfällen des Filters.
+
+**Frage:** Darf API-02 um `all` für Mengenfelder erweitert werden?
+
+**Optionen:**
+
+1. `all` zusätzlich zu `in` (additiv nach API-01).
+2. Nur `in` (API-02 wörtlich).
+
+**Empfehlung:** Option 1. „Alle Tags“ ist die übliche Tag-Suche; die Erweiterung bricht nichts.
+
+**Blockiert / Auswirkung:** WP-754 liefert `filter[tags][all]` wie in seinen Akzeptanzkriterien (`api.OpAll` nur für `api.KindSet`). Keine weiteren WPs betroffen.
+
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:6 (API-02); Neufassung von WP-281
+
+**Betroffene IDs:** API-02, CI-08
+
+**Betroffene WPs:** WP-754 (`ci-tags-filter`)
+
+## E-127
+
+**Thema:** TKT-01: Ticket-Tags und Tag-Katalog
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1. Tickets führen Tags heute als `ticket.tags TEXT[]` (000013). WP-764 legt die Zuordnungstabelle `ticket_tag(ticket_id, tag_id, organization_id)` mit zusammengesetzten Fremdschlüsseln an (K19, Muster `ci_tag`) und übernimmt die Daten aus `ticket.tags`. `ticket.tags` bleibt als abgeleitetes API-Feld mit Katalogschlüsseln (`tag.key`). Zusammenführen und Löschschutz aus WP-753 erweitert WP-764 um `ticket_tag`, wie WP-755 es für `asset_tag_link` tut.
+
+**Aufgabe:** Keine. A-44 ist mit dem Beschluss vom 2026-10-28 erledigt.
+
+**Frage:** Bekommen Ticket-Tags eine Zuordnungstabelle, oder ändern die Katalogoperationen `ticket.tags` mit?
+
+**Optionen:**
+
+1. Tabelle `ticket_tag` wie bei CIs und Assets (Übergangsregel).
+2. Die Katalogoperationen ändern `ticket.tags` mit (`array_replace`, ohne referenzielle Integrität).
+3. Ticket-Tags bleiben Freitext ohne Katalogbezug.
+
+**Empfehlung:** Option 1. CIs (`ci_tag`) und Assets (`asset_tag_link`) nutzen Zuordnungstabellen; dieselbe Form hält Katalogoperationen und Filter einheitlich.
+
+**Blockiert / Auswirkung:** WP-764 legt `ticket_tag` mit Datenübernahme an. Es stellt den Filter `tags` auf die Tabelle um und erweitert Zusammenführen und Löschschutz von WP-753 um `ticket_tag`. Dafür braucht WP-764 WP-753 als Voraussetzung. Die Aussage „Keine Tabelle `ticket_tag`“ und der Punkt „Entscheidungsbedarf“ unter „Nicht Bestandteil“ entfallen. Der RLS-Matrix-Test erfasst die neue Tabelle.
+
+**Quelle:** backend/migrations/000013_phase2_tickets.up.sql:21; backend/internal/ticket/model.go; Neufassung von WP-290 (Teil tkt-links)
+
+**Betroffene IDs:** TKT-01
+
+**Betroffene WPs:** WP-764 (`tkt-links`)
+
+## E-128
+
+**Thema:** STK-01/TEN-05: Gesamtbestand von Mengenartikeln über Scopes
+
+**Status:** entschieden (2026-10-28, Option 1: (a) ja, (b) nein)
+
+**Festlegung:** Option 1. Σ `stock_level.on_hand` hängt unter `stock_level_isolation` (Client- und Site-Prädikat, WP-283) vom Scope ab. WP-285 führt den Gesamtbestand deshalb als `consumable.on_hand_total`.
+
+- **(a)** `on_hand_total` eines sichtbaren Artikels zeigt auch site- oder client-gescopten Principals den Gesamtbestand über alle Bins, also auch Mengen außerhalb ihres Scopes. Der Mindestbestand ist eine Eigenschaft des Artikels. Je Bin bleibt `GET /api/v1/consumables/<id>/stock` an den Scope gebunden.
+- **(b)** Client-gescopte Principals buchen keine Artikel ohne Client, weil sie die `consumable`-Zeile nicht sperren dürfen (TEN-05, `consumable_scoped_update` aus 000079), wie `AddMovement` in Phase 1.
+
+**Frage:** Darf ein gescopter Principal den Gesamtbestand sehen, und dürfen client-gescopte Principals Artikel ohne Client buchen?
+
+**Optionen:**
+
+1. (a) ja, (b) nein (Übergangsregel).
+2. (a) nein: `on_hand_total` nur für ungescopte Principals, sonst Σ der sichtbaren Bins; (b) nein.
+
+**Empfehlung:** Option 1. Der Mindestbestand gilt für den Artikel; eine Scope-abhängige Summe würde Warnungen je Betrachter unterschiedlich auslösen.
+
+**Blockiert / Auswirkung:** WP-285 führt `on_hand_total` scope-unabhängig. WP-283 hält die Bin-Sicht scope-gebunden. WP-756 lehnt Buchungen client-gescopter Principals auf Artikel ohne Client ab. Keine Änderung an den WP-Texten nötig.
+
+**Quelle:** backend/migrations/000079_rls_scoped_write_using.up.sql; backend/internal/consumable/pg_repository.go (`AddMovement`); docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:12 (TEN-05); Neufassung von WP-285
+
+**Betroffene IDs:** API-06, AST-07, NTF-05, STK-01, STK-02, STK-03, TEN-05
+
+**Betroffene WPs:** WP-283 (`stk-consumable-model`), WP-756 (`stk-stock-bookings`), WP-285 (`stk-min-level`)
+
+## E-129
+
+**Thema:** NTF-04 [B]: Digest bei Benachrichtigungen
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1. NTF-04 [B] verlangt „Deduplizierung und Digest (z. B. Reviews stündlich gebündelt)“. Den Digest hat WP-508 (Korrekturplan, F-156, Commit a8184d80) geliefert: Migration 000170 (`notification_preference.digest`, `notification_digest_item`), `backend/internal/notify/digest.go` und der Scheduler-Lauf `notify.digest`. Nicht kritische Kategorien werden je Nutzer stündlich oder täglich gebündelt, mit einer Zustellung je Kanal, Empfänger, Kategorie und Fenster. Ohne gespeicherte Präferenz gilt `review` stündlich. Kritische Benachrichtigungen, In-App und Webhooks werden nie gebündelt. Ein Folge-WP in Phase 2 entfällt. WP-831 ergänzt die Zeile NTF-04 in `docs/acceptance/g1-gate.md` um WP-508 und den Digest-Test; sie bleibt PASS. Neue nicht kritische Kategorien der Phase 2 fallen über `notify.DigestCategories` ohne weiteren Code unter den Digest.
+
+**Aufgabe:** Keine. A-45 ist mit dem Beschluss vom 2026-10-28 erledigt.
+
+**Frage:** Liefert ein Folge-WP den Digest nach, oder gilt die Lücke bis G2 als bekannte Einschränkung?
+
+**Optionen:**
+
+1. Folge-WP in M2.0b: stündliche Bündelung je Nutzer und Kategorie über `notification_delivery`; WP-831 korrigiert die Zeile NTF-04 in `docs/acceptance/g1-gate.md`.
+2. Bekannte Einschränkung bis G2; WP-831 setzt NTF-04 in `docs/acceptance/g1-gate.md` auf „teilweise“ mit Verweis auf diese Entscheidung.
+
+**Empfehlung:** Option 1. NTF-04 ist [B] und gilt für jedes Gate; ein falsches PASS darf nicht in G2 übernommen werden.
+
+**Blockiert / Auswirkung:** Kein neues WP für den Digest. WP-831 ergänzt den Nachweis in der Zeile NTF-04, statt sie auf „teilweise“ zu setzen. WP-331 prüft NTF-04 mit Digest (`backend/internal/notify/digest_integration_test.go`). WP-285 bleibt ohne eigenen Digest; seine Aussage, der Notifier habe keinen Digest, entfällt. Neue Benachrichtigungen der Phase 2 brauchen je Ereignistyp eine Kategorie in `notify.Subscriptions`; nicht kritische sind damit digestfähig.
+
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:78 (NTF-04); backend/internal/notify/digest.go; backend/migrations/000170_notification_digest.up.sql; backend/cmd/server/workers.go:421; docs/acceptance/g1-gate.md:644; docs/plan/g1-korrektur/implementierungsplan.md (WP-508); Commit a8184d80; Neufassung von WP-285
+
+**Betroffene IDs:** DIS-08, DOD-01, GATE-01, GATE-02, GATE-05, GLO-11, INS-01, INS-04, NTF-04, OPS-06, SEC-11, SEQ-01, TEN-09, TST-04
+
+**Betroffene WPs:** WP-831 (`g1-nachweise`), WP-331 (`g2-gate`)
+
+## E-130
+
+**Thema:** STK-05: Benachrichtigung des Antragstellers bei Statuswechsel einer Bestellung
+
+**Status:** entschieden (2026-10-28, Option 2)
+
+**Festlegung:** Option 2. Phase 2 liefert keine Benachrichtigung des Antragstellers bei Statuswechseln interner Bestellungen. Der Katalog verlangt sie nicht (STK-05, NTF-05). Sie bräuchte einen Eventtyp `order.*` im öffentlichen Ereignisvertrag über EVT-03 hinaus. Ein Folge-WP ist nicht vorgesehen. WP-286 führt sie unter „Nicht Bestandteil“.
+
+**Frage:** Liefert ein Folge-WP eine Benachrichtigung bei Statuswechseln interner Bestellungen?
+
+**Optionen:**
+
+1. Folge-WP mit Eventtyp `order.status_changed` und Empfänger Antragsteller.
+2. Keine Benachrichtigung in Phase 2.
+
+**Empfehlung:** Option 2. Ohne Katalogauftrag erweitert sie den öffentlichen Ereignisvertrag (EVT-03) dauerhaft.
+
+**Blockiert / Auswirkung:** WP-286 liefert keine Events `order.*`. Unter „Nicht Bestandteil“ steht bisher, die Benachrichtigung werde „ein eigenes Folge-WP“. Dieser Satz verweist künftig auf diese Entscheidung: kein Folge-WP in Phase 2.
+
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:28 (STK-05); docs/spec/katalog-v3/06-audit-sicherheit-events.md:52 (EVT-03); Neufassung von WP-286
+
+**Betroffene IDs:** STK-05
+
+**Betroffene WPs:** WP-286 (`stk-orders`)
+
+## E-131
+
+**Thema:** IMP: Transit über Subnetze und VLANs im Impact
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1. WP-298 hängt Subnetz- und VLAN-Knoten nur als Blätter an. Ein Ausfall erreicht über ein gemeinsames Subnetz oder VLAN keine weiteren CIs. `count` und `by_category` zählen die projizierten Knoten nicht als betroffene CIs.
+
+**Frage:** Soll ein Ausfall über ein gemeinsames Subnetz oder VLAN weitere CIs heuristisch erreichen?
+
+**Optionen:**
+
+1. Nein, Subnetze und VLANs nur als Blätter.
+2. Ja: wiederholte Traversierung über Netzknoten; braucht ein neues Statementbudget (NFR-02, WP-335) und eine Regel für `count`/`by_category`.
+
+**Empfehlung:** Option 1. Option 2 hat kein konstantes Statementbudget und würde in großen Subnetzen fast jedes CI als betroffen melden.
+
+**Blockiert / Auswirkung:** WP-298 bleibt wie geplant (Blätter, konstantes Statementbudget). Der Punkt „Transit über Subnetze und VLANs zu weiteren CIs (Entscheidungsbedarf)“ unter „Nicht Bestandteil“ verweist auf diese Entscheidung. Kein neues Statementbudget nach WP-335.
+
+**Quelle:** Neufassung von WP-298; WP-335 (Statementbudget); E-57
+
+**Betroffene IDs:** IMP-11
+
+**Betroffene WPs:** WP-298 (`imp-projection`)
+
+## E-132
+
+**Thema:** BLK-02: Semantik der Bulk-Aktionen Archivierung, Template-Wechsel und Zuweisung
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1, wie in den Akzeptanzkriterien von WP-304, WP-780 und WP-781:
+
+- **(a) `archive`:** Bei CIs nach BLK-02 Status `inactive` und Tag `archived`. Assets haben kein `inactive`: Tag `archived` und Lifecycle-Übergang nach `retired`. `retired` ist im Seed `physical_asset` nur aus `in_stock` und `deployed` erreichbar; andere Assets erscheinen im Partial-Failure-Report.
+- **(b) `change_template`:** Versionsmigration je CI über `MigrateTemplate` bzw. Austausch per `replace_template_id` im Job `ci.bulk` mit `ci:write`; kein Job `template.migrate`.
+- **(c) Zuweisung:** Bei CIs der Owner (`set_owner`, WP-280); `assign` nur für Assets.
+
+**Frage:** BLK-02 nennt Archivierung, Template-Wechsel und Zuweisung, legt sie aber für Assets und CIs nicht fest.
+
+**Optionen:**
+
+1. Semantik wie oben.
+2. Andere Festlegung durch den Auftraggeber.
+
+**Empfehlung:** Option 1. Sie folgt BLK-02 für CIs und bildet die Begriffe für Assets auf den Lifecycle ab.
+
+**Blockiert / Auswirkung:** WP-304, WP-780 und WP-781 setzen die Semantik wie in ihren Akzeptanzkriterien um. Der Vorbehalt „vorläufige Regel, siehe Entscheidungsbedarf“ an `archive` für Assets in WP-781 entfällt.
+
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:48 (BLK-02); backend/migrations/000055_cmdb_extensions.up.sql (Übergänge `physical_asset`); Neufassung von WP-304 (F7, F11, M4)
+
+**Betroffene IDs:** BLK-01, BLK-02, CI-08, OVR-03
+
+**Betroffene WPs:** WP-304 (`blk-ops`), WP-780 (`blk-ops-delegate`), WP-781 (`blk-ops-assets`)
+
+## E-133
+
+**Thema:** SR-04/NFR-02: Indexnutzung nicht-leakproof Operatoren unter RLS (Volltext, Attributfilter, Eindeutigkeit)
+
+**Status:** entschieden (2026-10-28, Option 2 für Bezeichner und Attributgleichheit, Option 3 für Volltext; angepasst 2026-11-02: Attributgleichheit nach E-73 (Korrekturplan))
+
+**Festlegung:** Option 2 für Bezeichner, Option 3 für Volltext. Attributgleichheit baut auf E-73 (Korrekturplan, Option A) auf. Unter FORCE RLS nutzt der Planer für die App-Rolle keinen Index, dessen Operator nicht leakproof ist (Muster `lower()` in 000134). Nach der Messung mit PostgreSQL 16 betrifft das auch `@@` (`ts_match_vq`), `->>`, `@>`, Array-Operatoren, `<<=` (`network_subeq`) und `numeric`-Vergleiche. Tags laufen über `ci_tag` mit leakproof Gleichheit und sind nicht betroffen. Es gilt:
+
+- **Bezeichner:** Seitentabellen bzw. gespeicherte Spalten mit leakproof Operatoren (`texteq`, Vergleiche auf `date`/`timestamptz`) für Gleichheit, Präfix und Suchwörter. WP-308 nutzt für Bezeichner eine Token-Tabelle mit B-Baum. Für MACs besteht die Seitentabelle `ci_identity_mac` seit WP-434 (000161).
+- **Attributfilter:** Seit WP-435 und WP-607 (E-73, Korrekturplan, mit Ergänzung vom 2026-10-26) vergleichen Filter und Attributindizes über die eigene LEAKPROOF-Funktion `reticora_attr_text(jsonb, text)` (000162). Die Indizes bestehen je Schlüssel (`idx_attr_key_<key>`) bzw. für eindeutige und typgebundene Definitionen je Definition (`idx_attr_<id>`, 000164). Der Filter ist damit unter RLS indexfähig (`TestAttributeFilterUsesIndexUnderRLS`). Phase 2 legt für Attributgleichheit keine eigene Seitentabelle an. Neue Attributvergleiche der Phase 2 nutzen `reticora_attr_text` mit dem Schlüssel als Literal. Option B von E-73 (Seitentabelle `ci_attribute_value`) bleibt der Weg vor GA, falls ein Betrieb ohne Superuser zugesagt wird oder die Zahl der Schlüsselindizes zu stark wächst.
+- **`UniqueConflicts`:** vergleicht weiter `c.attributes ->> d.key` mit dem Schlüssel aus der Definition und bleibt in Phase 2 ein dokumentierter Scan.
+- **Volltext:** bleibt in Phase 2 linear im Budget bis 10.000 Objekte (E-17, WP-327).
+- **Keine weitere Freigabe von Funktionen:** Phase 2 setzt keine Systemfunktion per Migration `LEAKPROOF` und legt keine weitere eigene LEAKPROOF-Funktion an. Beides ist nur nach einer eigenen Sicherheitsbewertung zulässig, wie sie `docs/security/review-g1.md` (SR-04) für `reticora_attr_text` enthält. Die Migrationen verlangen seit 000162 ohnehin einen Superuser.
+- WP-836 dokumentiert Plan und Messwerte.
+
+**Aufgabe:** Keine. A-46 ist mit dem Beschluss vom 2026-10-28 erledigt.
+
+**Frage:** Wie werden Volltext, Attributfilter und Eindeutigkeitsprüfung unter RLS indexierbar?
+
+**Optionen:**
+
+1. Gewählte Funktionen per Migration `LEAKPROOF` setzen (Superuser; Sicherheitsbewertung der Fehlermeldungen; Systemfunktionen sind nicht Teil von `pg_dump`, das Setzen muss nach Restore und Upgrade erneut greifen).
+2. Seitentabellen bzw. gespeicherte Spalten mit leakproof Operatoren (`texteq`, Vergleiche auf `date`/`timestamptz`) für Gleichheit, Präfix und Suchwörter.
+3. Linear bis zur E-17-Grenze von 10.000 Objekten (Übergangsregel für Volltext).
+
+**Empfehlung:** Option 2 für Bezeichner und Attributgleichheit, Option 3 für Volltext in Phase 2. Option 1 nur nach einer Sicherheitsbewertung, weil sie eine Superuser-Änderung an Systemfunktionen in jede Installation bringt. Konvention K22 nennt neben Ausdrucksindizes auch Operatorklassen.
+
+**Blockiert / Auswirkung:** WP-308 baut die Bezeichnertabelle mit B-Baum wie geplant. Für Attributgleichheit braucht kein WP eine Seitentabelle; `filter[attributes.<key>]` ist seit WP-435 unter RLS indexfähig. WP-836 behandelt `reticora_attr_text` als leakproof: Die Indizes `idx_attr_*` stehen nicht in `rls.LeakyIndexes`, und `TestIndexStatementLeakproof` prüft auch `citype.KeyIndexStatement`. Den Scan dokumentiert es nur noch für Volltext und `UniqueConflicts`. Seine Migration setzt keine weitere Funktion `LEAKPROOF`. WP-718 begründet den fehlenden Seed-Index nicht mehr mit `->>`. WP-824 erhebt den Plan des Attributfilters über `reticora_attr_text`. WP-309 kann für `attributes.<key>` die Indexnutzung belegen. WP-266 führt Volltext über `search_document_field` und bleibt linear. WP-327 misst Volltext linear bis 10.000 Objekte. Keine Phase-2-Migration setzt `LEAKPROOF`; 000162 bleibt die einzige.
+
+**Quelle:** backend/migrations/000134_ci_identity_lowercase.up.sql; backend/migrations/000030_search_ai.up.sql:24; backend/migrations/000021_spec_alignment.up.sql:39; backend/migrations/000161_ci_identity_mac.up.sql; backend/migrations/000162_attr_text_leakproof.up.sql; backend/migrations/000164_attr_index_per_key.up.sql; backend/internal/citype/ddl_job.go (`IndexStatement`, `KeyIndexStatement`); backend/internal/ci/attr_filter_plan_integration_test.go; backend/internal/ci/pg_repository.go (`UniqueConflicts`, Attributfilter über `citype.KeyExpression`); docs/security/review-g1.md:434 (SR-04); docs/plan/g1-korrektur/entscheidungen.md (E-73, Korrekturplan); Neufassungen von WP-308 und der Folge-WPs
+
+**Betroffene IDs:** ABN-02, API-01, JOB-02, NFR-01, NFR-02, NFR-03, RBA-07, REC-02, SRC-01, SRC-02, SRC-03
+
+**Betroffene WPs:** WP-836 (`g1-rls-indexes`), WP-839 (`g1-scale`), WP-718 (`met-computed-refresh`), WP-266 (`fr-search-export-webhooks`), WP-308 (`src-fields`), WP-309 (`src-ast-assets`), WP-327 (`g2-perf`), WP-824 (`g2-querybudget`)
+
+## E-134
+
+**Thema:** SRC-02: Durchsuchbarkeit von `asset.custom_fields` und Wirkung von `searchable`
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1 (WP-308, WP-786):
+
+- **(a) `asset.custom_fields`:** Alle skalaren Werte werden als `attributes.<key>` indiziert. Feldrechte gelten je Schlüssel nach WP-264. Asset-Attributdefinitionen gibt es in Phase 2 nicht.
+- **(b) Änderung von `attribute_definition.searchable`:** Sie wirkt auf Bestandsobjekte der Volltextsuche nach dem nächsten Reindex-Job (WP-786). Der Indexjob `attribute.index` (`backend/internal/citype/ddl_job.go`) stößt keinen Reindex an. Er pflegt nur die Attributindizes für den Attributfilter von `GET /api/v1/cis`, also `idx_attr_key_*` je Schlüssel und `idx_attr_<id>` je Definition über `reticora_attr_text` (E-73 (Korrekturplan), WP-435, WP-607, 000162, 000164). `search_document` berührt er nicht. Der Attributfilter liest `searchable` je Anfrage aus den Definitionen des CI-Typs (`attributeFilterOf`, WP-566) und braucht keinen Reindex.
+
+**Frage:** (a) Sind Custom-Felder von Assets ohne Attributdefinition durchsuchbar? (b) Wann wirkt eine Änderung von `searchable` auf Bestandsobjekte?
+
+**Optionen:**
+
+1. (a) alle skalaren Werte; (b) nach dem nächsten Reindex-Job.
+2. (a) erst mit Asset-Attributdefinitionen (ohne Phase-2-WP); (b) der Job `attribute.index` stößt den Reindex an.
+
+**Empfehlung:** Option 1. SRC-02 nennt Custom-Felder ausdrücklich; der Reindex-Job hält den Schreibpfad der Attributdefinitionen frei von Massenarbeit.
+
+**Blockiert / Auswirkung:** WP-308 indiziert alle skalaren Werte von `asset.custom_fields`. WP-786 liefert den Reindex-Job, über den eine Änderung von `searchable` auf Bestandsobjekte der Volltextsuche wirkt. Ein automatischer Reindex nach Änderung von `searchable` ist nicht Teil von Phase 2. Den Attributfilter von `GET /api/v1/cis` und seine Indizes aus E-73 (Korrekturplan) ändert diese Entscheidung nicht.
+
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:36 (SRC-02); backend/internal/citype/ddl_job.go (`IndexJobKind`, `KeyIndexName`, `ValueExpression`); backend/internal/ci/pg_repository.go (`attributeFilterOf`); backend/migrations/000162_attr_text_leakproof.up.sql; backend/migrations/000164_attr_index_per_key.up.sql; E-73 (Korrekturplan); Neufassung von WP-308
+
+**Betroffene IDs:** SRC-02
+
+**Betroffene WPs:** WP-308 (`src-fields`), WP-786 (`src-fields-hits`)
+
+## E-135
+
+**Thema:** INV-03: Auslieferung des Batch-Etiketten-PDFs an den Browser
+
+**Status:** entschieden (2026-10-28, Option 2; angepasst 2026-11-02)
+
+**Festlegung:** Option 2: `GET /api/v1/labels/batch/<job_id>/download` (WP-763) antwortet dem Ersteller des Jobs mit 200, JSON und dem Feld `download_url`, einer kurzlebigen, je Abruf frisch signierten URL. Alle anderen Principals erhalten 404. Eine Antwort 302 gibt es an diesem Pfad nicht. Das folgt dem Muster von Export (`DownloadURL` in `backend/internal/export/job_handler.go`, `ExportPage`) und Dokumenten (`backend/internal/document/handler.go`). Das PDF liegt im Bucket `exports` (`export.ExportBucket`). Seit WP-647 (F-376) gibt der Server signierte URLs unter dem öffentlichen Origin aus (`RETICORA_S3_PUBLIC_URL`, `<public base>/objects`). `frontend/objects-proxy.conf` leitet nur GET auf die Buckets `exports` und `reticora-documents` an den Objektspeicher weiter. Ein eigener Bucket für Etiketten bräuchte deshalb Änderungen an `frontend/objects-proxy.conf` und an `setupObjectStorage` (`backend/cmd/server/main.go`) und entfällt. Die SPA (WP-813) öffnet die URL direkt. Eine CORS-Freigabe des Blob-Speichers ist nicht nötig, weil die URL auf dem Origin der App liegt.
+
+**Frage:** Ein `fetch` aus der SPA kann ein 302-Ziel im Blob-Speicher nur mit CORS lesen; ein einfacher Link scheitert an der Bearer-Authentifizierung.
+
+**Optionen:**
+
+1. CORS-Freigabe des Blob-Speichers für die App-Origin als Betriebsvorgabe; Antwort 302.
+2. JSON-Antwort mit kurzlebiger `download_url` nur für den Ersteller.
+
+**Empfehlung:** Option 2. Sie nutzt ein bestehendes Muster und braucht keine Betriebsvorgabe je Installation.
+
+**Blockiert / Auswirkung:** WP-763 legt das PDF im Bucket `exports` ab und liefert am Download-Pfad JSON mit `download_url` statt 302. Der Integrationstest prüft für den Ersteller 200 mit `download_url` und für andere Principals 404. WP-813 lädt das JSON über den API-Client und öffnet `download_url` direkt. Der Hinweis auf CORS entfällt. `frontend/objects-proxy.conf` und die Bucket-Liste in `backend/cmd/server/main.go` bleiben unverändert.
+
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:36 (INV-03); backend/internal/export/job_handler.go; backend/internal/export/worker.go (`ExportBucket`); backend/internal/document/handler.go; frontend/objects-proxy.conf; backend/cmd/server/main.go (`setupObjectStorage`); WP-647 (F-376, Commit 063ae8dc); E-52; Neufassung von WP-320
+
+**Betroffene IDs:** INV-03, UI-14
+
+**Betroffene WPs:** WP-763 (`inv-labels`), WP-813 (`ui-stocktake-labels`)
+
+## E-136
+
+**Thema:** ABN-01 (c) [Q]: Ausführungsform der Metamodell-Abnahme
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1: ABN-01 (c) läuft als Playwright-Ablauf gegen das gemockte Backend im CI-Job `e2e` (WP-324). Die Wirkung im Backend belegen die Integrationstests der umsetzenden WPs. WP-330 führt beide Nachweise im Protokoll. (c) übernimmt damit nur den gemockten Teil des Musters von (e) (`frontend/e2e/conflict.spec.ts`). Für (e) ist seit WP-456 die Real-Stack-Spec `frontend/e2e-real/abn-01-konflikt.spec.ts` in `install-smoke.yml` der Abnahmenachweis, der gemockte Lauf nur Regression (`docs/acceptance/abn-01.md:15`). Seit WP-530 validiert das Mock-Backend Anfragen und Antworten samt Status gegen `api/openapi.yaml`, sodass die gemockten Antworten dem Vertrag folgen. Der Beschluss des Auftraggebers vom 2026-10-28 bestätigt diese Form für G2 ([Q]). Ein Lauf gegen eine echte Installation mit dem Seed aus WP-325 ist für (c) nicht gefordert.
+
+**Aufgabe:** Erledigt am 2026-10-28 (A-47): Der Beschluss des Auftraggebers bestätigt Option 1.
+
+**Frage:** Läuft ABN-01 (c) gegen ein gemocktes Backend oder gegen eine echte Installation?
+
+**Optionen:**
+
+1. Gemocktes Backend im CI-Job `e2e` plus Integrationstests (gemockter Teil des Musters (e)).
+2. Lauf gegen eine echte Installation mit dem Phase-2-Seed in `install-smoke.yml` wie bei (d) und seit WP-456 bei (e) (+0,5 PT, Module nach E-105).
+
+**Empfehlung:** Option 1. Sie hält die Abnahme im normalen CI-Lauf. Das strikte Mock-Backend aus WP-530 bindet die eingefrorenen Antworten an den OpenAPI-Vertrag.
+
+**Blockiert / Auswirkung:** WP-330 und WP-324 setzen die Abnahme im CI-Job `e2e` mit den Backend-Nachweisen der umsetzenden WPs um. Jede gemockte Antwort, auch ein 403, muss in `api/openapi.yaml` deklariert sein. WP-325, `.github/workflows/install-smoke.yml` und die Suite `frontend/e2e-real` bleiben für (c) unverändert. Das Protokoll von (c) weist aus, dass es anders als (e) keinen Real-Stack-Lauf hat.
+
+**Quelle:** docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:97 (ABN-01); docs/acceptance/abn-01.md:11-15, :286-291; frontend/e2e-real/abn-01-konflikt.spec.ts; frontend/e2e/support/backend.ts; frontend/e2e/support/contract.ts; .github/workflows/ci.yml (Job `e2e`); .github/workflows/install-smoke.yml (Job `e2e-real`); WP-456, WP-530, WP-532; Neufassung von WP-330
+
+**Betroffene IDs:** ABN-01, TST-03, UI-14
+
+**Betroffene WPs:** WP-324 (`ui-e2e-p2`), WP-330 (`g2-abnahme`)
+
+## E-137
+
+**Thema:** Termin der G1-Restbefunde ohne Phase-2-WP (Rest von SR-03, SR-10)
+
+**Status:** entschieden (2026-10-28, Option 2; angepasst 2026-11-02)
+
+**Festlegung:** Option 2: Der Rest von SR-03 und SR-10 wird vor GA behoben, mit WPs einer späteren Phase. `docs/security/review-g1.md` führt beide als offen. SR-03 ist Medium: 178 von 194 Fremdschlüsseln zwischen Mandantentabellen enthalten die Organisation nicht (Zählung der Erstfassung). SR-10 ist Low: Ein Record mit mehr als 256 Identitätsschlüsseln nimmt die Identitätssperre exklusiv. Der Korrekturplan hat Teile von SR-03 behoben, ohne den Befund zu schließen. WP-639 (000177, F-366) stellt die Verweise von desk, key und training auf zusammengesetzte Fremdschlüssel mit Organisation um. WP-838 deckt von SR-03 die Verweise, die Phase 2 nutzt, und legt die Restliste `rls.ReferencesWithoutOrganization` an. Auf main gibt es die Liste noch nicht. Der Rest von SR-03 (diese Restliste) und SR-10 haben den Termin vor GA. WP-329 führt beide in der Nachverfolgung der G1-Befunde mit diesem Termin. Sie blockieren G2 nicht. Nicht Gegenstand dieser Entscheidung sind die nach E-60 (Korrekturplan) zurückgestellten P3-Befunde F-212, F-287, F-316 und F-349. Ihr Ziel steht in `docs/acceptance/g1-gate.md:214-217`.
+
+**Aufgabe:** Erledigt am 2026-10-28 (A-48): Der Beschluss des Auftraggebers bestätigt den Termin vor GA.
+
+**Frage:** Bis wann werden die G1-Restbefunde ohne Phase-2-WP behoben?
+
+**Optionen:**
+
+1. Vor G2, mit neuen WPs in M2.0b.
+2. Vor GA, mit WPs einer späteren Phase (Übergangsregel).
+3. Bekannte Einschränkung ohne Termin.
+
+**Empfehlung:** Option 2. Beide Befunde sind Defense in Depth bzw. Verfügbarkeit (Medium/Low) und blockieren G2 nicht; ein Termin vor GA hält sie in der Nachverfolgung.
+
+**Blockiert / Auswirkung:** WP-838 bleibt auf die Verweise der Phase 2 beschränkt und führt die mit WP-639 umgestellten Verweise nicht in der Restliste. WP-329 führt den Rest von SR-03 und SR-10 als offen mit Termin vor GA. Phase 2 erhält dafür kein neues WP.
+
+**Quelle:** docs/security/review-g1.md:433, :437 (SR-03, SR-10); backend/migrations/000177_module_org_references.up.sql (WP-639); docs/acceptance/g1-gate.md:205-217 (E-60, Korrekturplan); Folge-WPs (Teil folgewps)
+
+**Betroffene IDs:** ABN-03, SEC-11, TEN-09
+
+**Betroffene WPs:** WP-838 (`g1-tenant-fk`), WP-329 (`g2-security`)
+
+## E-138
+
+**Thema:** RBA-05/STK-03: Recht für die Umwandlung von Mengenreservierungen (`reservations/<id>/convert`)
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1: `POST /api/v1/reservations/<id>/convert` behält das Routenrecht `assignment:write` (`routeRules` in `backend/internal/server/authz.go`, WP-277). `routeRules` unterscheiden nicht nach der Art der Reservierung. Bei Mengenreservierungen bucht die Umwandlung eine Entnahme `retrieval` (WP-759). Dafür prüft der Handler zusätzlich `stock:write` (`Principal.Has`, sonst 403 wie in `authz.go`), neben dem Feature `stock`. Damit verlangt jede Entnahme dasselbe Recht wie `POST /api/v1/stock-movements` (WP-756). Nach E-106 halten org_admin und engineer beide Rechte, client_technician keines der beiden.
+
+**Frage:** Nach WP-277 verlangt `…/convert` `assignment:write`. Bei Mengenreservierungen ist die Umwandlung fachlich eine Entnahme (`stock:write`). Genügt `assignment:write`?
+
+**Optionen:**
+
+1. Routenrecht `assignment:write`; bei Mengenreservierungen zusätzlich `stock:write` im Handler.
+2. Nur `assignment:write` für alle Reservierungen.
+
+**Empfehlung:** Option 1. Sonst entnimmt eine Rolle mit `assignment:write`, aber ohne `stock:write` Bestand. Die Route ist neu (E-38); API-01 ist nicht berührt.
+
+**Blockiert / Auswirkung:** WP-277 registriert die Route mit `assignment:write`. WP-759 prüft bei Mengenreservierungen im Handler zusätzlich `stock:write` und das Feature `stock`.
+
+**Quelle:** backend/internal/server/authz.go (`routeRules`); backend/internal/identity/principal.go (`Has`); E-106; Neufassungen von WP-277 und WP-284
+
+**Betroffene IDs:** API-06, AST-06, EVT-03, RBA-05, STK-03
+
+**Betroffene WPs:** WP-277 (`ast-reservation`), WP-759 (`stk-availability-api`)
+
+## E-139
+
+**Thema:** ENT-06/INV-03: Entitlement `barcode` an den Barcode-Feldern von Assets und Standorten
+
+**Status:** entschieden (2026-10-28, Option 2)
+
+**Festlegung:** Option 2: Der Handler prüft beim Setzen von `asset.barcode` und `location.barcode` das Feature `barcode` nicht. `asset.barcode` (000051) bleibt über `PATCH /api/v1/assets/<id>` mit `assets_basic` schreibbar. `location.barcode` setzt WP-289 über den G1-Pfad `PATCH /api/v1/locations/<id>`. Das Feature `barcode` sperrt nach E-44 die Pfade `labels` und `assets/<id>/label`, also Lookup und Etiketten (WP-762, WP-763). Der Kamera-Scan der Oberfläche nutzt den Lookup. Der Dublettenschutz über `barcode_registry` (WP-289) gilt in allen Paketen.
+
+**Aufgabe:** Erledigt am 2026-10-28 (A-49): Der Beschluss des Auftraggebers bestätigt Option 2.
+
+**Frage:** Prüft der Handler beim Setzen von `asset.barcode` und `location.barcode` das Feature `barcode` (ENT-06: ab Standard)?
+
+**Optionen:**
+
+1. Handlerprüfung mit `entitlement.Service.Check`: Setzen oder Ändern eines Barcodes ohne `barcode` ergibt 403 `feature-not-entitled`; Lesen bleibt frei.
+2. Keine Prüfung an den Feldern; das Feature sperrt nur Lookup, Scan und Etiketten (Übergangsregel).
+
+**Empfehlung:** Option 2. AST-01 führt `barcode` als Feld des Assets, und Assets gehören mit `assets_basic` zu allen Paketen. Den Nutzen des Pakets (Lookup, Kamera-Scan, Etiketten nach INV-03) sperrt das Feature bereits.
+
+**Blockiert / Auswirkung:** WP-289 setzt `location.barcode` und pflegt `barcode_registry` ohne Feature-Prüfung. WP-762 und WP-763 bleiben an `barcode` gebunden. WP-271 erhält keine Handlerprüfung.
+
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:4, :36 (AST-01, INV-03); docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:104 (ENT-06); backend/internal/entitlement/middleware.go (`gatedRoutes`); backend/migrations/000051_rfid_gps.up.sql; E-44; Neufassung von WP-289
+
+**Betroffene IDs:** ENT-06, INV-03
+
+**Betroffene WPs:** WP-289 (`inv-barcode`), WP-762 (`inv-lookup`)
+
+## E-140
+
+**Thema:** RBA-07: Feldrechte an Kanten (Scope beider Enden, Objektart)
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1, so in WP-770 umgesetzt:
+
+- **Scope:** WP-264 wertet Grants je Objekt mit dessen `client_id`/`site_id` aus. Eine Kante hat zwei Enden (`source_client_id`/`source_site_id`, `target_client_id`/`target_site_id`, 000061). Ausgewertet wird für beide Enden; das niedrigere Level gilt. Das entspricht dem USING der Policy `ci_relationship_isolation` (000063), das jedes Ende prüft (ohne Client bzw. Standort oder im Scope).
+- **Org-weites Ende:** Seit E-62 (Korrekturplan) und 000142 legen client- oder standortgebundene Principals Kanten zwischen einem eigenen und einem org-weiten CI an. Für WITH CHECK und die UPDATE- und DELETE-Policies genügt dann ein Ende im Scope. Ein Ende ohne Client bzw. Standort wertet WP-264 nach seiner Scope-Regel aus: Ein Grant gilt nur für Objekte im Scope der Zuweisung seiner Rolle. Ein solches Ende liegt also nur im Scope von Zuweisungen ohne Client- bzw. Standort-Scope, und nur deren Grants gelten dort. Auch hier gilt das niedrigere Level beider Enden.
+- **Objektart:** Auf Beziehungs-DTOs wirken nur Grants der Objektart `relationship` (Typ-Grants über `relationship_type_id`, Feld-Grants `attributes.<key>` und `core.`-Felder). Grants der Objektart `ci` mit `relationship_type_id` wirken nicht auf Kanten.
+
+**Frage:** Welcher Scope gilt für Feldrechte an einer Kante mit zwei Enden, und wirken Grants der Objektart `ci` mit `relationship_type_id` auf Beziehungs-DTOs?
+
+**Optionen:**
+
+1. Beide Enden, das niedrigere Level gilt; auf Kanten nur Grants der Objektart `relationship` (Übergangsregel).
+2. Nur das Quell-Ende; Grants der Objektart `ci` mit `relationship_type_id` wirken zusätzlich auf die Kante.
+
+**Empfehlung:** Option 1. Sie folgt der RLS-Policy, die jedes Ende prüft, und hält je Objektart eine Quelle für Grants.
+
+**Blockiert / Auswirkung:** WP-770 wertet Feldrechte an Kanten für beide Enden aus, ein org-weites Ende nach der Scope-Regel aus WP-264. Es wendet nur Grants der Objektart `relationship` an und testet auch eine Kante mit org-weitem Ende. WP-264 liefert die Auswertung je Objekt.
+
+**Quelle:** backend/migrations/000061_denormalize_ci_scope.up.sql; backend/migrations/000063_site_scope_policies.up.sql (`ci_relationship_isolation`); backend/migrations/000142_edge_orgwide_endpoint.up.sql; E-62 (Korrekturplan); E-43; Neufassung von WP-295
+
+**Betroffene IDs:** RBA-07
+
+**Betroffene WPs:** WP-770 (`rel-attributes-grants`)
+
+## E-141
+
+**Thema:** API-01/EXP-01: Formatwert `datev` des Exports und seine Sperre
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1: `datev` bleibt der Formatwert. Die Umstellung auf Asset-Daten (WP-310) und die Sperre hinter `export_datev`, `assets_basic`, `asset:read` und dem Modul `inventory` (WP-790) gelten als Korrektur, weil DATEV [P2] nie Teil des G1-Vertrags war (`docs/acceptance/g1-gate.md`, Zeile EXP-01). Neue Spalten und Windows-1252 an `POST /api/v1/exports` und am veralteten `POST /api/v1/export/jobs` sowie neue 403 an diesen beiden Pfaden und an `GET /api/v1/export/cis` sind damit zulässig. `GET /api/v1/export/cis?format=datev` (`x-sunset: 2027-10-15`) liefert bis zum Sunset das CI-Layout, aber nur hinter dem Gate. Ein neuer Formatwert und eine Änderung von `chk_export_format` (000035) entfallen. Diese Festlegung beantwortet die Frage aus dem letzten Absatz der Festlegung von E-50 (CI-Layout von `GET /api/v1/export/cis?format=datev`).
+
+**Aufgabe:** Erledigt am 2026-10-28 (A-50): Der Beschluss des Auftraggebers wählt Option 1.
+
+**Frage:** Darf der veröffentlichte Formatwert `datev` auf Asset-Daten umgestellt und gesperrt werden, oder braucht die Umstellung einen neuen Formatwert mit Deprecation?
+
+**Optionen:**
+
+1. `datev` bleibt Formatwert; Umstellung und Sperre gelten als Korrektur, weil DATEV [P2] nie Teil des G1-Vertrags war (`docs/acceptance/g1-gate.md`, Zeile EXP-01). `GET /api/v1/export/cis?format=datev` liefert bis zum Sunset 2027-10-15 das CI-Layout, aber nur hinter dem Gate.
+2. Neuer Formatwert (z. B. `datev_assets`) mit Gate und Erweiterung von `chk_export_format` (000035); `datev` bleibt ungesperrt im CI-Layout und erhält `Deprecation` und `Sunset` (mindestens 12 Monate).
+
+**Empfehlung:** Option 1. DATEV ist [P2]; G1 hat EXP-01 nur für den [B]-Anteil abgenommen. Ein zweiter Formatwert hielte ein CI-Layout ohne Katalogauftrag bis zum Sunset offen. Bei Option 1 passt die Konsolidierung den letzten Satz von E-50 an.
+
+**Blockiert / Auswirkung:** WP-790 kann beginnen und setzt die Sperre auf allen drei Exportpfaden um. WP-310 rendert für `datev` nur Assets und braucht keine Migration. WP-791 unterscheidet CI- und Anlagen-Export. Der letzte Absatz der Festlegung von E-50 und der DATEV-Punkt von A-18 (E-44) folgen dieser Festlegung.
+
+**Quelle:** docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:4, :50 (API-01, EXP-01); docs/acceptance/g1-gate.md:572; backend/internal/export/export.go; backend/migrations/000035_export_job_formats.up.sql (`chk_export_format`); api/openapi.yaml (`/api/v1/export/cis`); E-50; E-57; Neufassung von WP-310
+
+**Betroffene IDs:** API-01, ENT-02, ENT-05, EXP-01, MET-06, MET-45, TST-01
+
+**Betroffene WPs:** WP-310 (`exp-datev`), WP-790 (`exp-datev-gate`), WP-791 (`exp-datev-ui`), WP-326 (`g2-tst01`)
+
+## E-142
+
+**Thema:** AST-07: Schreibpfad für den Standortwechsel serieller Assets
+
+**Status:** entschieden (2026-10-28, Option 1)
+
+**Festlegung:** Option 1 (Fortschreibung von E-38): Der Standortwechsel eines seriellen Assets wird als Bewegung `transfer` mit `asset_id` über `POST /api/v1/stock-movements` gebucht. Gebucht wird über den Bewegungsdienst aus WP-274 in `stock_movement`; das ist die eine Bewegungshistorie nach AST-07. Die Route verlangt nach WP-756 das Recht `stock:write` und das Feature `stock` (E-44). Ihr Handler nimmt `asset_id` nur mit `movement_type` `transfer` an und prüft dafür zusätzlich `asset:move`. Andere Bewegungsarten mit `asset_id` ergeben 422. `PATCH /api/v1/assets/<id>` mit `location_id` bleibt 422 (WP-271). `POST /api/v1/assets/<id>/transfer` (WP-275) bleibt der Halterwechsel. WP-806 bietet „Verschieben“ auch für serielle Assets an.
+
+**Aufgabe:** Erledigt am 2026-10-28 (A-51): Der Beschluss des Auftraggebers wählt Option 1.
+
+**Frage:** Über welchen Pfad wird der Standortwechsel eines seriellen Assets gebucht?
+
+**Optionen:**
+
+1. Bewegung `transfer` mit `asset_id` über `POST /api/v1/stock-movements` (Fortschreibung von E-38; Bewegungsdienst aus WP-274, im Handler von WP-756 zusätzlich `asset:move`).
+2. Eigener Pfad `POST /api/v1/assets/<id>/move` über den Bewegungsdienst.
+3. Kein Umzug in Phase 2 außer der Rack-Platzierung (Übergangsregel).
+
+**Empfehlung:** Option 1. AST-07 verlangt genau eine Bewegungshistorie in `stock_movement`. E-38 nennt für `POST stock-movements` bereits physische Bewegungen nach WP-274, und WP-756 sieht die Prüfung `asset:move` für diesen Fall vor.
+
+**Blockiert / Auswirkung:** WP-274 liefert die Asset-Buchung `transfer` im Bewegungsdienst. WP-756 lässt `asset_id` mit `transfer` zu, prüft `asset:move` und testet das (statt 422). WP-806 nimmt den Standortwechsel serieller Assets in „Verschieben“ auf. E-38 (Pfadinventar) nennt diesen Schreibweg.
+
+**Quelle:** docs/spec/katalog-v3/09-module-phase2plus.md:16 (AST-07); E-38; Neufassungen von WP-274, WP-283 und WP-318
+
+**Betroffene IDs:** API-06, AST-04, AST-07, EVT-03, STK-01, STK-03, STK-04, UI-14, UI-15
+
+**Betroffene WPs:** WP-274 (`ast-movement`), WP-756 (`stk-stock-bookings`), WP-806 (`ui-flows-stock`), WP-809 (`ui-asset-detail`)
+
+## E-143
+
+**Thema:** TKT-01/E-39: Datenquelle der Queue-Ansicht „meine Teams“
+
+**Status:** entschieden (2026-10-28, Option 1; angepasst 2026-11-02)
+
+**Festlegung:** Option 1: `GET /api/v1/tickets` erhält den Filter `team_id=mine`. Er liefert die Tickets der Teams, in denen der Principal Mitglied ist (`team_member`, 000014), mit Cursor und `total`. Maßgeblich ist die Mitgliedschaft, nicht der Team-Scope der Rollenzuweisungen. Diesen Scope (`role_assignment.scope_team_id`, `app.team_scope`) gibt es seit WP-391 (000150). Die Policy `ticket_tenant_isolation` (000065) beschränkt das Ergebnis zusätzlich auf diesen Scope. Der Filter ist additiv nach API-01 und gehört zu WP-290 (`FilterParams` in `backend/internal/ticket/model.go`). Die Queue-Ansicht „meine Teams“ liefert WP-814 hinter dem Feature `ticketing_standard`. Sie gehört nach E-39 zu Ticketing Standard und ist Teil der Abnahme. Die Eskalation bleibt bei WP-769.
+
+**Aufgabe:** Erledigt am 2026-10-28 (A-52): Der Beschluss des Auftraggebers wählt Option 1 und ordnet Filter und Ansicht WP-290 und WP-814 zu.
+
+**Frage:** Wer liefert Datenquelle und Ansicht „meine Teams“, oder entfällt die Ansicht aus der Standard-Matrix?
+
+**Optionen:**
+
+1. Filter `team_id=mine` an `GET /api/v1/tickets` über `team_member` des Principals (additiv nach API-01, WP-290); Ansicht hinter `ticketing_standard` in WP-814.
+2. `GET /api/v1/me` liefert zusätzlich `team_ids`; die Oberfläche fragt je Team mit `team_id` ab.
+3. Die Ansicht entfällt aus Standard; Team-Queues sind dann nur die Eskalation (WP-769).
+
+**Empfehlung:** Option 1. Ein Filter liefert eine Liste mit Cursor und `total`. Option 2 bräuchte eine Abfrage je Team und könnte nicht über Teams hinweg sortieren.
+
+**Blockiert / Auswirkung:** WP-290 liefert den Filter `team_id=mine` samt OpenAPI und Test. Er filtert über `EXISTS` auf `team_member` unter RLS und lässt den Team-Scope aus WP-391 unberührt. WP-814 liefert die Ansicht „meine Teams“ hinter `ticketing_standard`. WP-769 verweist für die Ansicht auf WP-814. E-39 ordnet die Ansicht Ticketing Standard zu.
+
+**Quelle:** api/openapi.yaml (`/api/v1/me`, `/api/v1/teams`); backend/internal/ticket/model.go (`FilterParams`); backend/migrations/000014_phase2_users_teams_roles.up.sql (`team_member`); backend/migrations/000065_team_scope_policies.up.sql (`ticket_tenant_isolation`); backend/migrations/000150_role_assignment_team_scope.up.sql (WP-391); E-39; Neufassung von WP-321
+
+**Betroffene IDs:** EVT-03, TKT-01, UI-14
+
+**Betroffene WPs:** WP-290 (`tkt-core`), WP-769 (`tkt-sla-breach`), WP-814 (`ui-tickets`)
 
 ## Offene Aufgaben
 
-Diese Aufgaben folgen aus den Empfehlungen. Die betroffenen WPs starten erst, wenn die Aufgabe erledigt ist, oder sie nutzen die Übergangsregel der Entscheidung.
+Diese Aufgaben folgen aus den Empfehlungen. Mit dem Beschluss des Auftraggebers vom 2026-10-28 sind alle Aufgaben dieser Datei erledigt; kein WP wartet auf eine Aufgabe. Die Nummern sind über beide Entscheidungsdateien eindeutig: [`../entscheidungen.md`](../entscheidungen.md) belegt A-01 bis A-14, diese Datei zählt ab A-15. Die bis 2026-10-18 geführten Nummern A-12 bis A-19 dieser Datei heißen jetzt A-15 bis A-22. Die Phase-1-Aufgaben A-02, A-07 und A-11 sind ohne Nachreichung erledigt: Die Erklärung des Auftraggebers vom 2026-10-15 ersetzt die Lieferungen (E-103). Die überfällige A-03 führt A-28 fort.
 
 | Nr. | Entscheidung | Aufgabe | Zuständig | Termin |
 |---|---|---|---|---|
-| A-12 | [E-37](#e-37) | Wortlaut, Tag/Gate und Testziel für MET-20, MET-30 bis MET-34, MET-40 bis MET-44 nachliefern (verlängert A-03) | Auftraggeber/Product Owner | vor WP-250, spätestens vor WP-261 |
-| A-13 | [E-38](#e-38) | REST-Ressourcentabelle der Phase 2 bestätigen | Product Owner | vor WP-247 |
-| A-14 | [E-39](#e-39) | Funktionsmatrix Ticketing Essential/Standard bestätigen | Product Owner | vor WP-290 |
-| A-15 | [E-44](#e-44) | Paketmatrix Phase 2 und Speicherlimit bestätigen (ergänzt E-34) | Product Owner/Vertrieb | vor WP-244 |
-| A-16 | [E-47](#e-47) | Ausführung von WP-293 (Ticket-Provider-Schnittstelle, [O]) freigeben oder zurückstellen | Product Owner | vor M2.6 |
-| A-17 | [E-50](#e-50) | DATEV-Zielformat für die Anlagenbuchhaltung liefern | Auftraggeber/Buchhaltung | vor WP-310 |
-| A-18 | [E-55](#e-55) | Norm und Pflichtfelder der Entsorgungsdokumentation bestätigen | Auftraggeber/Datenschutz | vor WP-278 |
-| A-19 | [E-02](../entscheidungen.md#e-02) | v2-Texte für UI-14 ([A]-Anteil) und ABN-01 (a)/(b) nachliefern (unverändert aus Phase 1, A-02) | Auftraggeber/Product Owner | vor dem Add-on-Gate (GA) bzw. vor der Abnahme der Szenarien (a)/(b) |
+| A-15 | [E-37](#e-37) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers ersetzt die Lieferung der Texte MET-20, MET-30 bis MET-34 und MET-40 bis MET-44 (verlängerte A-03 aus Phase 1). Die Texte werden nicht nachgeliefert. Nach E-37 gilt die Umsetzung nach den Querverweisen (Option 2) als Regel; die IDs bleiben „nicht geliefert“ und sind von GATE-02 ausgenommen (E-48). | Auftraggeber/Product Owner | erledigt 2026-10-28 |
+| A-16 | [E-38](#e-38) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt das Pfadinventar der Phase 2 (E-38, Option 1). `inventory/items/<id>/convert` entfällt mit dem Sunset von `inventory/items*`. `cis/<id>/field-definitions` bleibt ohne Umbenennung neben `cis/<id>/instance-attributes`. `cis/<id>/state` und `assets/<id>/state` werden deprecated Aliase von `…/as-of`. Der Tab „Verfügbarkeit“ entfällt mit dem Sunset von `inventory/availability`; einen Nachfolger gibt es nicht. | Product Owner | erledigt 2026-10-28 |
+| A-17 | [E-39](#e-39) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt die Funktionsmatrix Ticketing Essential/Standard nach E-39, Option 1 (Teamzuweisung und Filter `team_id` Essential; SLA, Kalender, Eskalation und Queue-Ansicht „meine Teams“ Standard) und die Prioritätswerte `low`, `medium`, `high`, `critical`. | Product Owner | erledigt 2026-10-28 |
+| A-18 | [E-44](#e-44) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt nach E-44, Option 1 die Paketmatrix der Phase 2, die Zuordnung der Routen, das Speicherlimit (Staffel ohne Plandefault, E-34), das DATEV-Gate (E-141, Option 1) und die Wirkung von `valid_until` (stoppt nur `discovery`, kein Trial-Downgrade). WP-244 startet ohne weitere Freigabe. | Product Owner/Vertrieb | erledigt 2026-10-28 |
+| A-19 | [E-47](#e-47) | **erledigt 2026-10-28** Beschluss des Auftraggebers zu E-47: WP-293 (Ticket-Provider-Schnittstelle, [O]) wird in Phase 2 ausgeführt, ohne Gate-Wirkung (GATE-05). `external_ref` gilt nur für Ticket und Ticketkommentar. | Product Owner | 2026-10-28 |
+| A-20 | [E-50](#e-50) | **erledigt 2026-10-28** Beschluss des Auftraggebers zu E-50: Das Default-Mapping (`export/datev_mapping.json`) ist das bestätigte DATEV-Zielformat für die Anlagenbuchhaltung. Schnittstellenbeschreibung, Pflichtspalten und Beispiel werden nicht geliefert. Die Formatfälle in WP-326 prüfen das Default-Mapping; eine Nachprüfung entfällt. | Auftraggeber/Buchhaltung | 2026-10-28 |
+| A-21 | [E-55](#e-55) | **erledigt 2026-10-28** Beschluss des Auftraggebers zu E-55: DIN 66399 und BSI-Datenträgerempfehlung mit den Pflichtfeldern je Methode sind bestätigt. WP-751 setzt die Tabelle ohne weitere Anpassung um. | Auftraggeber/Datenschutz | 2026-10-28 |
+| A-22 | [E-02](../entscheidungen.md#e-02) | **erledigt 2026-10-28** für ABN-01 (a)/(b): Die Erklärung des Auftraggebers vom 2026-10-15 gilt als Nachweis für G1 und G2 (E-103). Die v2-Texte (B4, A-02) werden nicht nachgereicht. Offen bleibt der UI-14 [A]-Anteil (Self-Service, Access-Reviews): v2-Texte nachliefern; B4 umfasst ihn nicht. | Auftraggeber/Product Owner | ABN-01 (a)/(b): 2026-10-28; UI-14 [A] vor dem Add-on-Gate (GA) |
+| A-23 | [E-103](#e-103) | **erledigt 2026-10-28** Beschluss des Auftraggebers zu E-103: Die Erklärung vom 2026-10-15 gilt als Nachweis für G1 und G2. Die Nachweise B3 (Pentest-Befundliste, A-07), B4 (v2-Texte, A-02) und B6 (Subprozessorenliste, A-11) sind gestrichen und werden nicht geliefert. E-02 und E-35 sind entschieden. E-76 (Korrekturplan) ist in den Punkten Nachweis und Lieferfrist abgelöst; WP-453, WP-454, WP-455 und WP-457 (Korrekturplan) entfallen. | Auftraggeber; Subprozessorenliste: Betreiber | 2026-10-28 |
+| A-24 | [E-104](#e-104) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt Option 1, die gedeckelte Zählung mit Schwelle 10.000 und `total_capped`. Sie gilt für `GET /api/v1/cis` und `GET /api/v1/search`; die übrigen Listen behalten die exakte Zählung. | Product Owner/API-Verantwortlicher | vor WP-839 |
+| A-25 | [E-105](#e-105) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt Option 1: Module `metamodel` und `import`; Verträge, Lieferanten und Etiketten im Modul `inventory`; Kalender und Ticket aus Review im Modul `ticketing`. `subnets/<id>/reservations` und `relationships/<id>/changes` sind ohne Modul freigegeben (Kern). | Product Owner | vor WP-706 |
+| A-26 | [E-106](#e-106) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt die Rollenmatrix nach Option 1. engineer erhält weder `order:approve` noch `sla:write` (auch nicht für `business-calendars`), `lifecycle:manage` oder `relationship_type:manage`. client_technician erhält `ci_instance_attribute:manage` nicht. `saved_view:manage` liegt nur bei org_admin. | Product Owner | vor WP-245 |
+| A-27 | [E-107](#e-107) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers wählt Option 2. Phase 2 liefert keine Admin-Oberfläche für Feldrechte und Lifecycle-Modelle, nur REST. | Product Owner | vor Beginn von M2.9 |
+| A-28 | [E-04](../entscheidungen.md#e-04) | Fortsetzung von A-03 (Phase 1, überfällig seit G1): Teil 03 in `docs/audit/befunde.csv` und `docs/audit/99-gesamtbericht.md` konsolidieren, mit den Critical-Befunden LOC-10, LOC-11, MET-14, X-SCOPE und X-MANUAL für die GATE-01-Tabelle von G2 (WP-832). Die Anforderung der Texte DB-01, MET-20, MET-30 bis MET-34 und MET-40 bis MET-44 entfällt nach dem Beschluss vom 2026-10-28 (E-37). | Audit | vor WP-329, spätestens vor WP-331 |
+| A-29 | [E-38](#e-38) | **erledigt 2026-10-28** Entfällt: Eine Route `assets/<id>/move` gibt es nicht und wird nicht angelegt. Den Standortwechsel serieller Assets bucht `POST /api/v1/stock-movements` als `transfer` mit `asset_id`, mit zusätzlicher Prüfung `asset:move` (E-38, E-142). | Product Owner | erledigt 2026-10-28 |
+| A-30 | [E-43](#e-43) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt die Präzisierungen von E-43: Team über `object_grant`, Sensitivität in `field_sensitivity`, konservative Listenfilter-Regel, `object_grant` ohne Wirkung auf die Sichtbarkeit, Webhooks ohne Service-Account nach der Standardregel ohne Rolle. Teilfrage Audit-Log nach der Empfehlung entschieden: `audit:read` legt alle Feldwerte offen, das Audit-Log wird nicht projiziert. Angepasst 2026-11-02: Team wirkt zusätzlich über team-gescopte Rollenzuweisungen (WP-391, E-70 (Korrekturplan)). `GET /history/<entityType>/<id>` verlangt nach E-78 (Korrekturplan, WP-475) das Leserecht der Entität, Audit-Einträge nur mit `audit:read`. Die Projektion der Historie aus WP-727 schützt damit Werte für alle Leserollen ohne `audit:read`. | Product Owner | erledigt 2026-10-28 |
+| A-31 | [E-11](../entscheidungen.md#e-11) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt E-11 (Option 1, Schnittmenge nach TEN-05) mit den Phase-2-Zusätzen: (a) `ci.owner_team_id` und `asset.owner_team_id` sind die Team-Spalte nach TEN-05. (b) Zeilen ohne Team sind für team-gescopte Rollen sichtbar, aber nicht schreibbar; beim Anlegen durch einen team-gescopten Principal ist `owner_team_id` aus dem Scope Pflicht, und Dokument-Links auf Ziele ohne Team (CI, Asset, Location) sind ausgeschlossen. (c) CI-Kindtabellen erben den Team-Scope nicht. RBA-03 `scope_kind team` in Rollenzuweisungen ist nicht Bestandteil der Phase 2 und wird mit einer späteren Phase geplant. | Product Owner | vor WP-280 und WP-267 |
+| A-32 | [E-108](#e-108) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt Option 1. Materialisiert werden nur System-Basis, Typkette und Sets; Sets gibt es nur an Org-Typen. | Product Owner/Architektur | vor WP-709 |
+| A-33 | [E-109](#e-109) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers wählt die Empfehlung: keine Auswertung von `attributes.system_template` bis zur Lieferung von MET-30 bis MET-34, danach automatische Zuordnung mit Override-Schutz über ein Folge-WP. In Phase 2 gilt damit Option 3. | Product Owner | vor WP-710 |
+| A-34 | [E-110](#e-110) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers wählt die Empfehlung: Layouts und geteilte Views berücksichtigen IdP-gemappte Standardrollen nach WP-725. Bis dahin gelten nur gespeicherte Zuweisungen. Umsetzung (angepasst 2026-11-02): WP-307 für geteilte Views, WP-725 für Layouts. | Product Owner | vor WP-725 |
+| A-35 | [E-112](#e-112) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers bestätigt Option 1: Item-Verweise mit dem Schlüssel `$item` im Payload, aufgelöst in WP-261. | Architektur/Product Owner | vor WP-260, spätestens vor WP-722 |
+| A-36 | [E-113](#e-113) | **erledigt 2026-10-28** Der Beschluss des Auftraggebers wählt Option 3: Overlay in den Editoren, Vorschau über `ci-types/<id>/form?draft=<draft_id>` im Backend. | Product Owner | vor WP-798 |
+| A-37 | [E-114](#e-114) | **erledigt 2026-10-28** Verhältnis von `validation`/`conditional` zum Regelkatalog entschieden: Option 3, parallel in Phase 2, neue Regeln nur im Katalog, Überführung in einer späteren Phase (Beschluss des Auftraggebers, E-114). | Product Owner | erledigt 2026-10-28 |
+| A-38 | [E-117](#e-117) | **erledigt 2026-10-28** Kategorie und Icon der Systemtypen entschieden: Option 1, Datenmigration auf `ci_type.category` und `ci_type.icon` in WP-248 (Beschluss des Auftraggebers, E-117). | Product Owner | erledigt 2026-10-28 |
+| A-39 | [E-118](#e-118) | **erledigt 2026-10-28** Frist für das Löschen nicht aktueller Dokumentversionen bestätigt: 35 Tage wie die Backup-Frist (`backup_retention_days`, Beschluss des Auftraggebers, E-118). | Auftraggeber/Datenschutz | erledigt 2026-10-28 |
+| A-40 | [E-119](#e-119) | **erledigt 2026-10-28** Owner am Vertrag und Werteliste von `contract.kind` bestätigt: Option 2, kein Owner, Werteliste mit CHECK (Beschluss des Auftraggebers, E-119). | Product Owner | erledigt 2026-10-28 |
+| A-41 | [E-120](#e-120) | **erledigt 2026-10-28** Mapping `status` → `lifecycle_state`, Behandlung von `lost`, Ableitung von `status` und die Leserumstellung in WP-738 bestätigt: Option 1 (Beschluss des Auftraggebers, E-120). | Product Owner | erledigt 2026-10-28 |
+| A-42 | [E-121](#e-121) | **erledigt 2026-10-28** Lösch- und Archivsemantik für Assets entschieden: Option 2, Archiv über den Lifecycle, DELETE nur ohne Historie, sonst 409 (Beschluss des Auftraggebers, E-121). | Product Owner | erledigt 2026-10-28 |
+| A-43 | [E-125](#e-125) | **erledigt 2026-10-28** Verschärfungen an G1-Routen eingeordnet (E-125, Option 3): Beziehungstyp-Prüfungen als Korrektur mit Release-Hinweis, `attributes.tags` mit Übersetzung bis zum Sunset, Override-Weg sofort 422. | Product Owner/API-Verantwortlicher | vor WP-281 und WP-294 |
+| A-44 | [E-127](#e-127) | **erledigt 2026-10-28** Form der Ticket-Tags bestätigt (E-127, Option 1): Tabelle `ticket_tag` in WP-764. | Product Owner | vor WP-764 |
+| A-45 | [E-129](#e-129) | **erledigt 2026-10-28** Digest nach NTF-04 (E-129, Option 1). Angepasst 2026-11-02: Den Digest hat WP-508 (Korrekturplan, Migration 000170) geliefert; kein Folge-WP. WP-831 ergänzt den Nachweis in der Zeile NTF-04. | Product Owner | vor WP-831 |
+| A-46 | [E-133](#e-133) | **erledigt 2026-10-28** Indexierung unter RLS entschieden (E-133): Bezeichnertabelle mit B-Baum, Volltext linear bis 10.000 Objekte. Angepasst 2026-11-02: Attributgleichheit über `reticora_attr_text` nach E-73 (Korrekturplan), keine weitere Funktion `LEAKPROOF`. | Architektur/Sicherheit | vor WP-308 |
+| A-47 | [E-136](#e-136) | **erledigt 2026-10-28** Beschluss des Auftraggebers: ABN-01 (c) läuft gegen das gemockte Backend im CI-Job `e2e` plus Integrationstests (Option 1 von E-136). | Auftraggeber | vor WP-330 |
+| A-48 | [E-137](#e-137) | **erledigt 2026-10-28** Beschluss des Auftraggebers: Rest von SR-03 und SR-10 vor GA, mit WPs einer späteren Phase (Option 2 von E-137). | Product Owner/Sicherheit | vor WP-329 |
+| A-49 | [E-139](#e-139) | **erledigt 2026-10-28** Beschluss des Auftraggebers: Barcode-Felder bleiben ohne Gate `barcode` schreibbar (Option 2 von E-139). | Product Owner/Vertrieb | vor WP-289 |
+| A-50 | [E-141](#e-141) | **erledigt 2026-10-28** Beschluss des Auftraggebers: `datev` bleibt Formatwert, Umstellung und Sperre gelten als Korrektur, Altpfad bis zum Sunset im CI-Layout hinter dem Gate (Option 1 von E-141). | Product Owner/API-Verantwortlicher | vor WP-790 |
+| A-51 | [E-142](#e-142) | **erledigt 2026-10-28** Beschluss des Auftraggebers: Standortwechsel serieller Assets als `transfer` mit `asset_id` über `POST /api/v1/stock-movements` (Option 1 von E-142). | Product Owner | vor WP-274 |
+| A-52 | [E-143](#e-143) | **erledigt 2026-10-28** Beschluss des Auftraggebers: Filter `team_id=mine` in WP-290, Ansicht „meine Teams“ in WP-814 (Option 1 von E-143). | Product Owner | vor WP-290 |
+| A-53 | [E-51](#e-51) | **erledigt 2026-10-28** Beschluss des Auftraggebers zu E-51: Die Übernahme der Altsignaturen aus Migration 000047 (`assignment.checkout_signature`/`return_signature`) ist bestätigt (a). WP-749 wird ausgeführt; WP-747 legt die Sicherungstabelle `assignment_signature_legacy` an. Ein Verzicht (b) entfällt. | Product Owner | 2026-10-28 |

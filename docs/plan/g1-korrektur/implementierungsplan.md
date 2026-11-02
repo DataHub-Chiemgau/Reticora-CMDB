@@ -13,6 +13,7 @@ Dieser Plan ändert keinen Produktivcode. Er zerlegt die Korrektur aller nicht b
 - **Audit-Ergebnis: NICHT ABNAHMEFÄHIG – NO-GO für Phase 2.** Von 213 WPs sind 64 BESTANDEN, 102 TEILWEISE BESTANDEN und 47 FEHLGESCHLAGEN. Es gibt 354 Befunde (einschließlich des nachgetragenen F-354): 16 P0, 30 P1, 134 P2, 174 P3.
 - **Kodierte Defekte:** 116 Go-, 9 Shell- und 11 Frontend-Defekttests sowie 26 rote Real-Stack-E2E-Tests schlagen fehl, bis ihr Befund behoben ist (Audit-Bericht, Abschnitte 5 und 6). Sie sind die Abnahmekriterien dieses Plans.
 - **Verhältnis zu den anderen Plänen:** Der Phase-1-Plan endet mit WP-242 und der G1-Nachbesserung WP-332 bis WP-335; der Phase-2-Plan (WP-243 bis WP-331) setzt einen bestandenen Gate G1 voraus. Dieser Plan liegt dazwischen: Phase 2 beginnt erst nach dem Gate-WP dieses Plans ([E-59](entscheidungen.md#e-59)). Die Nummern setzen die globale Folge ab WP-336 fort, weil die Traceability-Prüfung WP-Nummern über alle Pläne eindeutig verlangt.
+- **Nachtrag vom 2026-11-02 (Beschluss des Auftraggebers vom 2026-10-28):** Die Erklärung des Auftraggebers vom 2026-10-15 gilt als Nachweis für B3, B4 und B6, für G1 und G2. Die Lieferungen A-02, A-07 und A-11 entfallen; damit entfallen WP-453 (`t5-pentest-evidence`), WP-454 (`t5-subprocessors`), WP-455 (`t5-v2-ids`) und WP-457 (`t5-abn01-ab`). Das löst [E-76](entscheidungen.md#e-76) (Option 2) in diesem Punkt ab. Die Wiederholungsprüfung und das Gate-WP (WP-596 bis WP-600) hängen von diesen vier WPs nicht ab. Gate-Unterlagen, Ausnahmeliste und `tests/rep01-structure.test.sh` stellt WP-831 (`g1-nachweise`) des Phase-2-Plans um.
 - **Audit-Status ist der Befund vom 2026-10-18.** Die Spalte „Abnahme“ der Anforderungstabellen zeigt den Status des Quell-WP in der Auditmatrix; Befundtexte (Reproduktion, Soll, Ist, Ursache, Empfehlung, Retest) stehen in `PHASE1_FINDINGS.md` und werden hier nicht wiederholt.
 
 ## Umfang und Abgrenzung
@@ -8069,6 +8070,8 @@ SEC-11;[Q];SR;tests/rep01-structure.test.sh;WP-452
 
 ### WP-453 – Pentest-Nachweis G1 ablegen (Lieferung A-07)
 
+**Entfällt (Nachtrag vom 2026-11-02):** Nach dem Beschluss des Auftraggebers vom 2026-10-28 gilt seine Erklärung vom 2026-10-15 als Nachweis für B3 (Pentest-Befundliste), B4 (v2-Texte) und B6 (Subprozessorenliste), für G1 und G2. Die Lieferungen A-02, A-07 und A-11 entfallen; das löst [E-76](entscheidungen.md#e-76) (Option 2) in diesem Punkt ab. Dieses WP wird nicht umgesetzt. Gate-Unterlagen, `docs/acceptance/g1-ausnahmen.csv` und `tests/rep01-structure.test.sh` stellt WP-831 (`g1-nachweise`) des Phase-2-Plans auf den Beschluss um ([E-103](../phase2/entscheidungen.md#e-103)).
+
 **Schlüssel:** `t5-pentest-evidence` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** SR · **Aufwand:** 0,5 PT
 
 **Voraussetzungen (gemergt):** WP-450 (`t5-trace-evidence`), WP-451 (`t5-gate-consistency`)
@@ -8126,6 +8129,8 @@ GATE-03;[Q];SR;tests/rep01-structure.test.sh;WP-453
 
 ### WP-454 – Subprozessorenliste ablegen (Lieferung A-11, NFR-09)
 
+**Entfällt (Nachtrag vom 2026-11-02):** Nach dem Beschluss des Auftraggebers vom 2026-10-28 gilt seine Erklärung vom 2026-10-15 als Nachweis für B3 (Pentest-Befundliste), B4 (v2-Texte) und B6 (Subprozessorenliste), für G1 und G2. Die Lieferungen A-02, A-07 und A-11 entfallen; das löst [E-76](entscheidungen.md#e-76) (Option 2) in diesem Punkt ab. Dieses WP wird nicht umgesetzt. Gate-Unterlagen, `docs/acceptance/g1-ausnahmen.csv` und `tests/rep01-structure.test.sh` stellt WP-831 (`g1-nachweise`) des Phase-2-Plans auf den Beschluss um ([E-103](../phase2/entscheidungen.md#e-103)).
+
 **Schlüssel:** `t5-subprocessors` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** A · **Aufwand:** 0,5 PT
 
 **Voraussetzungen (gemergt):** WP-450 (`t5-trace-evidence`), WP-451 (`t5-gate-consistency`)
@@ -8182,6 +8187,8 @@ NFR-09;[B];A;tests/rep01-structure.test.sh;WP-454
 **Nicht Bestandteil:** Abschluss der AV-Verträge selbst (Betreiber).
 
 ### WP-455 – v2-Texte zu AUT-05, AUT-06, NET-04 übernehmen und abgleichen (Lieferung A-02)
+
+**Entfällt (Nachtrag vom 2026-11-02):** Nach dem Beschluss des Auftraggebers vom 2026-10-28 gilt seine Erklärung vom 2026-10-15 als Nachweis für B3 (Pentest-Befundliste), B4 (v2-Texte) und B6 (Subprozessorenliste), für G1 und G2. Die Lieferungen A-02, A-07 und A-11 entfallen; das löst [E-76](entscheidungen.md#e-76) (Option 2) in diesem Punkt ab. Dieses WP wird nicht umgesetzt. Gate-Unterlagen, `docs/acceptance/g1-ausnahmen.csv` und `tests/rep01-structure.test.sh` stellt WP-831 (`g1-nachweise`) des Phase-2-Plans auf den Beschluss um ([E-103](../phase2/entscheidungen.md#e-103)).
 
 **Schlüssel:** `t5-v2-ids` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** G1 · **Aufwand:** 1,0 PT
 
@@ -8302,6 +8309,8 @@ ABN-01;[Q];G1;frontend/e2e-real/abn-01-konflikt.spec.ts;WP-456
 **Nicht Bestandteil:** Szenarien (a)/(b) (WP-457 (`t5-abn01-ab`)); Änderungen an frontend/e2e-real/discovery-override.spec.ts (D07–D10; WP-413 (`t3-override-clear-ui`), WP-575 (`t3-review-escalation-widget`), WP-381 (`t4-collector-disable-kick`), WP-414 (`t4-pki-renew-collector`)).
 
 ### WP-457 – ABN-01 (a)/(b): v2-Szenariotexte einfrieren und Schritt für Schritt protokollieren (Lieferung A-02)
+
+**Entfällt (Nachtrag vom 2026-11-02):** Nach dem Beschluss des Auftraggebers vom 2026-10-28 gilt seine Erklärung vom 2026-10-15 als Nachweis für B3 (Pentest-Befundliste), B4 (v2-Texte) und B6 (Subprozessorenliste), für G1 und G2. Die Lieferungen A-02, A-07 und A-11 entfallen; das löst [E-76](entscheidungen.md#e-76) (Option 2) in diesem Punkt ab. Dieses WP wird nicht umgesetzt. Gate-Unterlagen, `docs/acceptance/g1-ausnahmen.csv` und `tests/rep01-structure.test.sh` stellt WP-831 (`g1-nachweise`) des Phase-2-Plans auf den Beschluss um ([E-103](../phase2/entscheidungen.md#e-103)).
 
 **Schlüssel:** `t5-abn01-ab` · **Meilenstein:** K3 Installation, Betrieb und Gate-Nachweise · **Epic (Traceability):** G1 · **Aufwand:** 2,0 PT
 

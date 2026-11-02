@@ -494,6 +494,8 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 - WP-595 (`t5-rc-evidence`, K7) erweitert `tests/rep01-structure.test.sh` (Normalmodus und `--final`) um dieses Ergebnis und seine Bedingungen; WP-600 (`k-gate`, K7) darf G1 mit „bedingt bestanden“ entscheiden.
 - WP-453, WP-454, WP-455 und WP-457 bleiben offen, sind keine Voraussetzung von G1 (wie bisher) und entfernen mit der Lieferung ihre Zeilen; die Frist „vor GA“ steht in `g1-ausnahmen.csv`.
 
+**Nachtrag vom 2026-11-02 (Beschluss des Auftraggebers vom 2026-10-28):** Der Auftraggeber hat am 2026-10-28 entschieden, dass seine Erklärung vom 2026-10-15 als Nachweis für B3, B4 und B6 gilt, für G1 und G2 ([E-103](../phase2/entscheidungen.md#e-103), [E-02](../entscheidungen.md#e-02), [E-28](../entscheidungen.md#e-28), [E-35](../entscheidungen.md#e-35)). Das löst Option 2 in zwei Punkten ab: Die betroffenen IDs gelten als nachgewiesen, und die Lieferungen A-02, A-07 und A-11 mit Frist „vor GA“ entfallen. WP-453, WP-454, WP-455 und WP-457 entfallen. Die Umstellung von `docs/acceptance/g1-gate.md`, `docs/acceptance/g1-ausnahmen.csv` und `tests/rep01-structure.test.sh` übernimmt WP-831 (`g1-nachweise`) des Phase-2-Plans.
+
 **Betroffene IDs:** GATE-02, GATE-03, NFR-08, NFR-09, ABN-01, AUT-05, AUT-06, NET-04, GLO-11
 
 **Betroffene WPs:** WP-450, WP-451, WP-453, WP-454, WP-455, WP-457, WP-595, WP-600
