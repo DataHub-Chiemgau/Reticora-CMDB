@@ -201,10 +201,10 @@ func TestListNodesProjection(t *testing.T) {
 		       ($1, $2, 'model', '"not projected"', 'legacy', now(), true)`, f.OrgA, named); err != nil {
 		t.Fatal(err)
 	}
-	// Beyond 2,000 ids the projection reads the organization.
+	// Beyond 5,000 ids the projection reads the organization (nodeOrgReadAbove).
 	var many []string
 	rows, err := f.Admin.Query(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status)
-		SELECT $1, $2, t.id, 'node-bulk-' || g, 'active' FROM generate_series(1, 2001) g
+		SELECT $1, $2, t.id, 'node-bulk-' || g, 'active' FROM generate_series(1, 5001) g
 		JOIN ci_type t ON t.key = 'server' AND t.organization_id IS NULL RETURNING id::text`, f.OrgA, f.Client1)
 	if err != nil {
 		t.Fatal(err)

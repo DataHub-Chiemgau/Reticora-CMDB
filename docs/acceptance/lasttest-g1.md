@@ -770,19 +770,34 @@ Auftraggeber, die Nummer wird hier nachgetragen.
 4. **Listen und Suche über etwa 25.000 Objekte (Headroom 50.000):**
    Entscheidung E-17 (Option 1): bekannte Einschränkung ohne Budgetzusage,
    Folge-WP vor GA. Die Zählung und der Index der Standardsortierung der
-   CI-Liste sind mit WP-605 (`k1n-cilist-sort`) verbessert; gemessen ist
-   über 10.000 Objekten nichts.
-5. **Knotenlesung und Mehrfach-Impact:** `ListNodes` liest ab 2.000 IDs die
-   ganze Organisation; `GET /impact?ci_ids=` traversiert je ausgefallenem
+   CI-Liste sind mit WP-605 (`k1n-cilist-sort`) verbessert. **Umgesetzt mit
+   WP-839 (`g1-scale`), Lastnachweis steht aus:** `GET /cis` und
+   `GET /search` zählen nach E-104 gedeckelt (exakt bis 10.000, gezählt über
+   höchstens 10.001 Zeilen bzw. bis zur Zeile nach der Seite; darüber
+   `total` 10.000 und `total_capped: true` in der `PaginationEnvelope`).
+   Migration 000196 legt `idx_ci_list_name` (`ci (organization_id, name,
+   id) WHERE deleted_at IS NULL`) an; die erste Seite mit `sort_by=name`
+   liest ohne Sortierung aller Treffer (lokal bei 10.000 CIs: 50 gelesene
+   CIs, Index Scan auf `idx_ci_list_name`, `TestListFiltersAgainstPostgres`).
+   `updated_at` und `status` bekommen einen Index erst, wenn die Messung ihn
+   verlangt. Aufbau des Lastnachweises im Abschnitt „Listen über 10.000
+   Objekten (WP-839)“; die drei Läufe nach E-58 stehen aus.
+5. **Knotenlesung und Mehrfach-Impact:** `ListNodes` las ab 2.000 IDs die
+   ganze Organisation; `GET /impact?ci_ids=` traversierte je ausgefallenem
    CI. Entscheidung E-17: Schwelle für 50.000 Objekte neu bewerten, Folge-WP
    vor GA. **Erledigt** mit WP-840 (`g1-graph-scale`): `GET /impact?ci_ids=`
    liest die ausgefallenen CIs in einer Abfrage und ihre Kanten in einem
    Walk; die Statements hängen nicht von der Zahl der CIs ab (2, 10 und 100
    CIs gleich, Abschnitt ABN-02). Der Walk kappt nicht mehr still: Am
    Knotenlimit von 10.000 CIs tragen Topologie und Impact `truncated: true`
-   (NFR-01, Headroom 50.000 funktionsfähig nach E-17). Die Organisationslesung
-   von `ListNodes` ab 2.000 IDs bleibt; ihr Override-Abgleich nutzt den Index
-   aus Punkt 10. Den p95 über 10.000 Objekten misst WP-327 (E-17, ohne
+   (NFR-01, Headroom 50.000 funktionsfähig nach E-17). **Knotenlesung neu
+   bemessen mit WP-839:** `nodeOrgReadAbove` ist 5.000 statt 2.000, ohne
+   zusätzliche Anweisung je Anfrage (Messung im Abschnitt „Listen über
+   10.000 Objekten (WP-839)“); der Override-Abgleich der Organisationslesung
+   nutzt den Index aus Punkt 10. `TestTopologyQueryBudget` und
+   `TestImpactWorstCase` laufen mit 10.000 und, mit
+   `RETICORA_PERF_BUDGET=1`, mit 50.000 CIs bei unverändertem
+   Statementbudget. Den p95 über 10.000 Objekten misst WP-327 (E-17, ohne
    Budgetzusage).
 6. **Volltextsuche unter RLS (Rest von SR-04): erledigt (WP-836).**
    Migration 000191 entfernt `idx_ci_fts`; `ci` erhält nach E-133 keine
@@ -866,6 +881,69 @@ Vorlauf). Kein offener Punkt: Der
 NATS-Consumer `reticora-ingest` bleibt dauerhaft bestehen (der Server legt
 ihn wieder an); leer kostet er je Ingest-Instanz einen Abruf pro Sekunde
 (`docs/betrieb/ingest-spuren.md`).
+
+## Listen über 10.000 Objekten (WP-839)
+
+E-17 und E-104, Offene Punkte 4 und 5. Stand 2026-11-02: Code, Tests und
+Lastaufbau umgesetzt; **die drei Läufe nach E-58 stehen aus**.
+
+**Aufbau des Lastnachweises.** `load.yml` hat den Job `api-large` (Auswahl
+`scenarios=api-large`, auch in `all`) als zwei Matrixeinträge nach dem
+Muster von `nfr01-volume`: `api-large-28000` und `api-large-50000`, je mit
+frischer Datenbank, Seed mit `OBJECTS` 28.000 bzw. 50.000 (Matrixfeld
+`objects`), neu aufgebautem Suchindex und `ANALYZE`. `api.js` hat das
+Szenario `list_sorted` (`GET /cis?limit=50&sort_by=name`, 2 VUs; prüft die
+Form von `total` nach E-104) und die Umgebungsvariable `LATENCY_BUDGETS`:
+
+| Job | Objekte | `LATENCY_BUDGETS` | k6-Schwellen p95 |
+|---|---:|---|---|
+| `api`, `nfr01-volume` | 10.000 | `all` | alle Budgets von NFR-02, `list_sorted` < 500 ms |
+| `api-large-28000` | 28.000 | `lists` | nur `list`, `filter`, `list_sorted` < 500 ms (einschließlich `total`) |
+| `api-large-50000` | 50.000 | `none` | keine; Messwerte ohne Budgetzusage (E-17) |
+
+Die Fehlerschwellen (`http_req_failed` 0, Bulk, Checks) gelten in jedem
+Job. `search`, Topologie und Impact sind bei 28.000 und 50.000 Objekten
+Messwerte ohne Budgetzusage. Bewertet wird im Median dreier Läufe
+(`tests/load/evaluate-runs.sh`; die zusätzlichen Jobs wertet es wie jeden
+archivierten Job aus).
+
+**Zählung nach E-104.** `GET /cis` zählt mit `SELECT COUNT(*) FROM (SELECT
+1 FROM ci WHERE … LIMIT n)`, `n` = max(10.001, Offset + Limit + 1);
+`GET /search` begrenzt die Treffer in einer Unterabfrage ebenso und zählt
+sie mit `COUNT(*) OVER()` (eine Lesung von `search_document`, E-133).
+`has_more` bleibt dadurch auch nach der Grenze richtig. Die übrigen Listen
+und `totalCount` der GraphQL-Liste zählen exakt (E-104). Die Antwort von
+`GET /search` meldet `total` weiterhin als Treffer der Seite nach der
+Rechteprüfung; sie erreicht die Grenze nie und trägt kein `total_capped`.
+
+**Knotenlesung (`nodeOrgReadAbove`).** Lokal gemessen (PostgreSQL 16 ohne
+Last, `fsync=off`, Rolle `reticora_app`, beide Anweisungen von
+`ListNodes`, 5 % der CIs mit Override, IDs zufällig, bestes von fünf;
+keine Belege nach E-58):
+
+| CIs der Organisation | IDs | Lesung nach IDs | Lesung der Organisation |
+|---:|---:|---:|---:|
+| 10.000 | 2.000 | 17 ms | 23 ms |
+| 10.000 | 5.000 | 44 ms | 23 ms |
+| 50.000 | 2.000 | 21 ms | 83 ms |
+| 50.000 | 5.000 | 49 ms | 84 ms |
+| 50.000 | 10.000 | 80 ms | 73 ms |
+
+Der Schnittpunkt liegt bei etwa einem Viertel der Organisation. Die Größe
+der Organisation ist ohne eine weitere Anweisung nicht bekannt; 5.000 hält
+den größeren der beiden Umwege für 10.000 und 50.000 Objekte am kleinsten
+(21 ms bzw. 35 ms statt 0 bzw. 62 ms mit 2.000).
+
+**Tests (lokal, ohne Last).** `TestTopologyQueryBudget`: 10.000 und
+50.000 CIs mit denselben Statementzahlen (Topologie 13 je Ebene, Impact 17,
+Tiefe 20: 50 bzw. 54); Topologie ohne Wurzel mit 2.000 Knoten 105 ms bei
+10.000 und 122 ms bei 50.000 CIs. `TestImpactWorstCase` bei 10.000
+Objekten: 17 Anweisungen, 239 Byte je CI, 85 ms (bestes von fünf); bei
+50.000 Objekten 17 Anweisungen, 239 Byte je CI, 364 ms. Dort endet die
+Traversierung bei `relationship.MaxTraversalNodes` (10.000 Knoten): Der
+Impact des Core-Switches meldet 9.999 statt 49.997 CIs. Die Kappung der
+Traversierung gehört zu WP-840; `api.js` erwartet deshalb höchstens 9.999
+betroffene CIs.
 
 ## Kontrollmessung WP-834
 

@@ -273,6 +273,12 @@ func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string,
 	return kinds[0], typed, nil
 }
 
+// indexedSort are the sort columns whose order an index of the list holds
+// for the CIs of an organization: idx_ci_list_sort (000156, WP-605) and
+// idx_ci_list_name (WP-839). An unfiltered page in their order is read
+// from the index without sorting.
+var indexedSort = map[string]bool{"created_at": true, "name": true}
+
 // List returns paginated CIs filtered by the given parameters.
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	items := make([]Item, 0)
@@ -434,8 +440,11 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		// (for a client- or site-scoped principal also the invisible ones in
 		// between). Filters keep the planner's choice: a selective one is
 		// cheaper through its own index and a sort.
+		// The same holds for the order by name with idx_ci_list_name (WP-839,
+		// E-17): the first page reads its entries from the index instead of
+		// sorting the organization.
 		var pageErr error
-		if len(whereParts) == 1 && sortColumn == "created_at" {
+		if len(whereParts) == 1 && indexedSort[sortColumn] {
 			pageErr = withoutSort(ctx, tx, joined, readPage)
 		} else {
 			pageErr = readPage()
@@ -448,11 +457,21 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		// shorter than the limit and not past the end holds the last rows, so
 		// it gives the count; otherwise the count reads the matching CIs once
 		// more (without filters an index-only scan of idx_ci_list_sort can
-		// serve it).
+		// serve it). A capped count (E-104, WP-839) stops after
+		// api.TotalCountLimit matching CIs, or after the CI that follows the
+		// page when that lies further: a total beyond api.TotalCap means
+		// more, and offset + limit < total still tells whether more follow.
 		if page.Cursor == nil && len(items) < page.Limit && (len(items) > 0 || page.Offset == 0) {
 			total = page.Offset + len(items)
-		} else if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ci WHERE "+whereClause, args...).Scan(&total); err != nil {
-			return fmt.Errorf("count cis: %w", err)
+		} else {
+			countSQL := "SELECT COUNT(*) FROM ci WHERE " + whereClause
+			if filter.CappedTotal {
+				countSQL = fmt.Sprintf("SELECT COUNT(*) FROM (SELECT 1 FROM ci WHERE %s LIMIT %d) AS capped",
+					whereClause, max(api.TotalCountLimit, page.Offset+page.Limit+1))
+			}
+			if err := tx.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+				return fmt.Errorf("count cis: %w", err)
+			}
 		}
 
 		ptrs := make([]*Item, len(items))
@@ -567,11 +586,19 @@ func (r *PGRepository) GetByIDs(ctx context.Context, orgID string, ids []string)
 var nodeOverrideFields = []string{"name", "status", "management_ip"}
 
 // nodeOrgReadAbove: a projection of more CIs reads the nodes of the whole
-// organization and keeps the requested ones; beyond it, sending and
-// planning the id array costs more than that read at the reference size of
-// NFR-10 (10,000 objects). A larger organization pays one more read of its
-// CIs, as the traversal that reached so many CIs reads all its edges.
-const nodeOrgReadAbove = 2000
+// organization and keeps the requested ones. The read by ids costs about
+// 8 µs per id, the read of the organization about 2 µs per CI of it, so the
+// break-even lies near a quarter of the organization: about 2,500 ids at
+// the reference size of NFR-10 (10,000 objects) and 10,000 ids at the
+// headroom of NFR-01 (50,000 objects; WP-839, E-17). The size of the
+// organization is not known without one more statement per request, so
+// the threshold is fixed where the larger of the two detours is smallest
+// for both sizes (measured as the application role, ids at random, best
+// of five: at 10,000 CIs 5,000 ids by id 44 ms instead of 23 ms; at 50,000
+// CIs 5,001 ids from the organization 84 ms instead of 49 ms; with 2,000
+// the detour at 50,000 CIs was 83 ms instead of 21 ms). A traversal that
+// reached so many CIs reads all edges of the organization as well.
+const nodeOrgReadAbove = 5000
 
 // nodeQuery reads the node projection; %s narrows the CIs. The overrides
 // of the projected fields are a second statement (nodeOverrideQuery),

@@ -91,12 +91,34 @@ func ParseOffsetPage(w http.ResponseWriter, r *http.Request) (page PaginationPar
 // for endpoints that support keyset pagination and when more rows follow.
 // Data is always encoded as an array, never as null (API-02, F-214).
 type ListResponse[T any] struct {
-	Data       []T    `json:"data"`
-	Total      int    `json:"total"`
-	Limit      int    `json:"limit"`
-	Offset     int    `json:"offset"`
-	HasMore    bool   `json:"has_more"`
-	NextCursor string `json:"next_cursor,omitempty"`
+	Data  []T `json:"data"`
+	Total int `json:"total"`
+	// TotalCapped marks a total that a list with a capped count (E-104)
+	// stopped at TotalCap: more entries match.
+	TotalCapped bool   `json:"total_capped,omitempty"`
+	Limit       int    `json:"limit"`
+	Offset      int    `json:"offset"`
+	HasMore     bool   `json:"has_more"`
+	NextCursor  string `json:"next_cursor,omitempty"`
+}
+
+// TotalCap is where the lists with a capped count stop counting (E-104:
+// GET /cis and GET /search). Up to it total is exact; a count reads at most
+// TotalCap+1 matching rows (TotalCountLimit), and beyond it total is
+// TotalCap with total_capped true. The other lists count exactly.
+const TotalCap = 10000
+
+// TotalCountLimit is the number of matching rows a capped count reads: one
+// more than TotalCap tells an exact TotalCap from a larger set.
+const TotalCountLimit = TotalCap + 1
+
+// CapTotal returns the total of a list with a capped count (E-104) and
+// whether it was capped: n itself up to TotalCap, else TotalCap and true.
+func CapTotal(n int) (total int, capped bool) {
+	if n > TotalCap {
+		return TotalCap, true
+	}
+	return n, false
 }
 
 // listResponseJSON is ListResponse without its MarshalJSON method.

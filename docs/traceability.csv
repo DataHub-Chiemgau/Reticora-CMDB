@@ -1213,3 +1213,6 @@ API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/parity_test.go;WP-247
 EVT-03;[P2–P3];B;backend/internal/events/outbox_integration_test.go;WP-707
 API-04;[B];C;backend/internal/middleware/idempotency_integration_test.go;WP-778
 MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/rules/rules_test.go;WP-715
+NFR-02;[B];B;tests/load/api.js;WP-839
+NFR-01;[B], Teilumfang [P5];B;backend/internal/topology/querybudget_integration_test.go;WP-839
+API-01;[B];B;backend/internal/ci/listquery_integration_test.go;WP-839

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000195_ci_field_value_override_index
+Stand: Migration 000196_ci_list_name_index
 
 ## Prüfung
 
@@ -74,6 +74,13 @@ Ebenso der Index der Standardsortierung der CI-Liste (WP-605, NFR-02):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_sort ON ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE deleted_at IS NULL;
+```
+
+Ebenso der Index der CI-Liste sortiert nach Name (WP-839, E-17, Migration
+000196):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_name ON ci (organization_id, name, id) WHERE deleted_at IS NULL;
 ```
 
 Ebenso der Index der Adressen einer Schnittstelle (WP-608, NFR-03):

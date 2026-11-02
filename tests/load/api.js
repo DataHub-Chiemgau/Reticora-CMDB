@@ -9,6 +9,14 @@
 // cost_center) and the relationships of a CI (relationships; WP-437,
 // F-116).
 //
+// list_sorted reads the first page of the CI list sorted by name (WP-839,
+// idx_ci_list_name); its total has the form of E-104 (exact up to 10,000,
+// beyond 10,000 with total_capped). LATENCY_BUDGETS selects the p95
+// budgets of the run (E-17, WP-839): all (default, the NFR-02 budgets at
+// 10,000 objects), lists (only list, filter and list_sorted, the job
+// api-large at 28,000 objects) or none (measured values without a budget,
+// api-large at 50,000 objects). The failure thresholds stay in every run.
+//
 // No request may fail (F-388): http_req_failed is 0 in the run and in every
 // scenario, every bulk job succeeds (bulk_jobs_succeeded, the checks of
 // the scenario bulk), and bulk_500_duration records only bulk jobs that
@@ -24,6 +32,12 @@ import { BASE_URL, failed, firstID, get, params, post } from './lib.js';
 const DURATION = __ENV.DURATION || '1m';
 const VUS = Number(__ENV.VUS || 5);
 const OBJECTS = Number(__ENV.OBJECTS || 10000);
+const LATENCY_BUDGETS = __ENV.LATENCY_BUDGETS || 'all';
+if (!['all', 'lists', 'none'].includes(LATENCY_BUDGETS)) {
+  throw new Error(`LATENCY_BUDGETS=${LATENCY_BUDGETS}: all, lists or none`);
+}
+// TOTAL_CAP is where GET /cis stops counting (E-104).
+const TOTAL_CAP = 10000;
 // The searchable attribute of the seed and its number of values
 // (cmd/seed AttributeKey, CostCenters): CI i holds CC-<i mod 50 + 1>.
 const ATTR_KEY = __ENV.ATTR_KEY || 'cost_center';
@@ -40,6 +54,8 @@ const reads = (exec) => ({ executor: 'constant-vus', exec, vus: VUS, duration: D
 const scenarios = {
   list: reads('list'),
   list_name_filter: reads('listNameFilter'),
+  // WP-839 (E-17): the list sorted by name, two VUs like WP-437's.
+  list_sorted: { ...reads('listSorted'), vus: 2 },
   detail: reads('detail'),
   filter: reads('filter'),
   rack: reads('rack'),
@@ -54,21 +70,35 @@ const scenarios = {
   bulk: { executor: 'per-vu-iterations', exec: 'bulk', vus: 1, iterations: BULK_JOBS, maxDuration: '10m' },
 };
 
+// The p95 budgets of NFR-02 by request name; LATENCY_BUDGETS keeps all of
+// them, those of the lists (E-17: list, filter and list_sorted hold at
+// 28,000 objects) or none.
+const LIST_BUDGETS = ['list', 'filter', 'list_sorted'];
+const latency = {
+  list: 500,
+  list_name_filter: 500,
+  list_sorted: 500,
+  global_search: 500,
+  attr_filter: 500,
+  relationships: 500,
+  detail: 300,
+  filter: 500,
+  rack: 300,
+  topology: 3000,
+  impact: 2000,
+  impact_full: 2000,
+};
+const latencyThresholds = Object.fromEntries(
+  Object.entries(latency)
+    .filter(([name]) => LATENCY_BUDGETS === 'all' || (LATENCY_BUDGETS === 'lists' && LIST_BUDGETS.includes(name)))
+    .map(([name, ms]) => [`http_req_duration{name:${name}}`, [`p(95)<${ms}`]]),
+);
+
 export const options = {
   scenarios,
   thresholds: {
-    'http_req_duration{name:list}': ['p(95)<500'],
-    'http_req_duration{name:list_name_filter}': ['p(95)<500'],
-    'http_req_duration{name:global_search}': ['p(95)<500'],
-    'http_req_duration{name:attr_filter}': ['p(95)<500'],
-    'http_req_duration{name:relationships}': ['p(95)<500'],
-    'http_req_duration{name:detail}': ['p(95)<300'],
-    'http_req_duration{name:filter}': ['p(95)<500'],
-    'http_req_duration{name:rack}': ['p(95)<300'],
-    'http_req_duration{name:topology}': ['p(95)<3000'],
-    'http_req_duration{name:impact}': ['p(95)<2000'],
-    'http_req_duration{name:impact_full}': ['p(95)<2000'],
-    bulk_500_duration: ['p(95)<30000'],
+    ...latencyThresholds,
+    ...(LATENCY_BUDGETS === 'all' ? { bulk_500_duration: ['p(95)<30000'] } : {}),
     // F-388: every bulk job succeeds (a submetric without samples is not
     // evaluated, so the counter also catches bulk jobs that never ran).
     bulk_jobs_succeeded: [`count==${BULK_JOBS}`],
@@ -112,6 +142,24 @@ const pick = (n) => String(5 + Math.floor(Math.random() * n)).padStart(5, '0');
 
 export function list() {
   get('/cis?limit=50', 'list');
+  sleep(0.2);
+}
+
+// listSorted reads the first page of the CI list sorted by name (WP-839).
+// total is exact up to TOTAL_CAP; beyond it is TOTAL_CAP with total_capped
+// (E-104).
+export function listSorted() {
+  const res = get('/cis?limit=50&sort_by=name', 'list_sorted');
+  check(res, {
+    'list sorted by name has total after E-104': (r) => {
+      if (r.status !== 200) {
+        return false;
+      }
+      const total = r.json('total');
+      const capped = r.json('total_capped') === true;
+      return OBJECTS > TOTAL_CAP ? total === TOTAL_CAP && capped : total <= TOTAL_CAP && !capped;
+    },
+  });
   sleep(0.2);
 }
 
@@ -177,8 +225,11 @@ const IMPACT_FIELDS = 'name,ci_type,status,heuristic,hops,via,relay';
 const impactCount = (res) => Number((/"count":(\d+)/.exec(res.body || '') || [])[1] || 0);
 
 // The failure of the core switch reaches every CI of the seed but itself
-// and the two PDUs (cmd/seed relationships).
-const IMPACT_ALL = OBJECTS - 3;
+// and the two PDUs (cmd/seed relationships), at most the CIs the walk
+// keeps besides the root (relationship.MaxTraversalNodes, 10,000): 9,999
+// in the jobs api-large (WP-839).
+const MAX_TRAVERSAL_NODES = 10000;
+const IMPACT_ALL = Math.min(OBJECTS - 3, MAX_TRAVERSAL_NODES - 1);
 
 // impact is the impact of the core switch as the topology view asks for it:
 // the whole organization at depth 20, at most 250 bytes per impacted CI.

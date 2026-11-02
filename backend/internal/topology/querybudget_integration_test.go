@@ -55,6 +55,38 @@ func (c *queryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryE
 // ladderDepth is the deepest topology and impact (maxDepth).
 const ladderDepth = 20
 
+// budgetSizes are the sizes of organization A in the budget tests: 10,000
+// CIs, the reference size of NFR-02, and with RETICORA_PERF_BUDGET=1 also
+// 50,000, the headroom of NFR-01 (E-17, WP-839). The statement budgets
+// hold for both; the time budgets of NFR-02 apply at 10,000 CIs, at 50,000
+// the times are logged as measurements without a budget (E-17).
+func budgetSizes() []int {
+	if os.Getenv("RETICORA_PERF_BUDGET") == "1" {
+		return []int{10000, 50000}
+	}
+	return []int{10000}
+}
+
+// referenceSize reports whether objects is the size the time budgets of
+// NFR-02 apply to.
+func referenceSize(objects int) bool { return objects <= 10000 }
+
+// fillOrganization adds unconnected CIs of the global type server to
+// organization A, alternately of client 1 and client 2, until it holds
+// objects CIs, so the reads of the whole organization (edges beyond the
+// frontier, nodes beyond nodeOrgReadAbove) cover an organization of that
+// size (WP-839).
+func fillOrganization(t *testing.T, f *scopetest.Fixture, objects int) {
+	t.Helper()
+	if _, err := f.Admin.Exec(context.Background(), `
+		INSERT INTO ci (organization_id, client_id, ci_type_id, name, status)
+		SELECT $1, CASE WHEN i % 2 = 0 THEN $2::uuid ELSE $3::uuid END, t.id, 'budget-fill-' || i, 'active'
+		FROM generate_series(1, $4::int - (SELECT count(*) FROM ci WHERE organization_id = $1)::int) AS i
+		JOIN ci_type t ON t.key = 'server' AND t.organization_id IS NULL`, f.OrgA, f.Client1, f.Client2, objects); err != nil {
+		t.Fatalf("fill organization A to %d CIs: %v", objects, err)
+	}
+}
+
 // TestTopologyQueryBudget covers ABN-02 and NFR-10 (WP-204) for the
 // topology and the impact analysis against PostgreSQL: a hub with 400
 // neighbours costs the same number of statements as one with 20 (no N+1
@@ -66,10 +98,20 @@ const ladderDepth = 20
 // levels cost the same as one. GET /impact?ci_ids= walks once from all
 // failed CIs and reads them in one query (WP-840): 100 failed CIs cost the
 // same statements as two. The topology without a root is covered by
-// checkTopologyWithoutRoot (WP-602).
+// checkTopologyWithoutRoot (WP-602). Organization A holds 10,000 CIs and,
+// with RETICORA_PERF_BUDGET=1, in a second run 50,000 (budgetSizes,
+// WP-839): the budgets do not change with its size.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestTopologyQueryBudget(t *testing.T) {
+	for _, objects := range budgetSizes() {
+		t.Run(fmt.Sprintf("%d CIs", objects), func(t *testing.T) { topologyQueryBudget(t, objects) })
+	}
+}
+
+// topologyQueryBudget is TestTopologyQueryBudget with objects CIs in
+// organization A.
+func topologyQueryBudget(t *testing.T, objects int) {
 	f := scopetest.Seed(t, "c6")
 	bg := context.Background()
 	var serverType string
@@ -116,6 +158,7 @@ func TestTopologyQueryBudget(t *testing.T) {
 		return root
 	}
 	ladders := map[int]string{1: ladder("budget-ladder-1", 1), 40: ladder("budget-ladder-40", 40)}
+	fillOrganization(t, f, objects)
 
 	cfg := f.App.Config()
 	counter := &queryCounter{}
@@ -127,7 +170,7 @@ func TestTopologyQueryBudget(t *testing.T) {
 	t.Cleanup(pool.Close)
 	// Before the ANALYZE below: the topology without a root answers on the
 	// statistics from before its bulk inserts.
-	t.Run("without root", func(t *testing.T) { checkTopologyWithoutRoot(t, f, pool, counter) })
+	t.Run("without root", func(t *testing.T) { checkTopologyWithoutRoot(t, f, pool, counter, objects) })
 
 	if _, err := f.Admin.Exec(bg, `ANALYZE ci; ANALYZE ci_relationship`); err != nil {
 		t.Fatal(err)
@@ -261,7 +304,8 @@ type perNodeEdges struct{ relationship.Repository }
 //     of their CIs), not one read per node. The 20 CIs end the page of the
 //     CI list, so it takes their count from the page and skips its COUNT
 //     (WP-605); the full page of 2,000 counts.
-//   - 2,000 nodes answer within 3 s (NFR-02).
+//   - 2,000 nodes answer within 3 s (NFR-02) in an organization of 10,000
+//     CIs; at 50,000 the time is logged (budgetSizes).
 //   - Graph without a root, the source of the BFF query topology, sends the
 //     same statements and returns the same graph.
 //
@@ -271,7 +315,7 @@ type perNodeEdges struct{ relationship.Repository }
 // edges and the projected containment between visible CIs of the set as the
 // pattern of the data predicts, and no edge to a CI outside the set, a
 // deleted CI or a location (located_in).
-func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.Pool, counter *queryCounter) {
+func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.Pool, counter *queryCounter, objects int) {
 	bg := context.Background()
 	site1, site2 := f.ID(), f.ID()
 	for _, s := range []string{site1, site2} {
@@ -364,11 +408,11 @@ func checkTopologyWithoutRoot(t *testing.T, f *scopetest.Fixture, pool *pgxpool.
 	if smallCount+1 != largeCount || largeCount > budget {
 		t.Errorf("topology without a root: %d statements for 20 nodes, %d for 2,000, want one more for the COUNT of the full page, at most %d (N+1)", smallCount, largeCount, budget)
 	}
-	if elapsed > 3*time.Second {
+	if referenceSize(objects) && elapsed > 3*time.Second {
 		t.Errorf("topology without a root: 2,000 nodes in %v without ANALYZE, budget 3 s (NFR-02)", elapsed)
 	}
-	t.Logf("topology without a root: %d statements for 20 nodes, %d for 2,000; 2,000 nodes and %d edges in %v without ANALYZE",
-		smallCount, largeCount, len(largeGraph.Edges), elapsed.Round(time.Millisecond))
+	t.Logf("topology without a root (%d CIs and more in the organization): %d statements for 20 nodes, %d for 2,000; 2,000 nodes and %d edges in %v without ANALYZE",
+		objects, smallCount, largeCount, len(largeGraph.Edges), elapsed.Round(time.Millisecond))
 
 	// The source of the BFF query topology.
 	before := counter.n.Load()
@@ -551,12 +595,14 @@ func loadGraph(t *testing.T, f *scopetest.Fixture, orgID string, n int, clients,
 // for (fields=, API-02) costs at most 250 bytes per impacted CI, the
 // statements are those of a graph of 3,000 objects, and the paths of the
 // full answer are the ones a client rebuilds from via. The single request
-// is timed (best of five); RETICORA_PERF_BUDGET=1 enforces 250 ms.
+// is timed (best of five); RETICORA_PERF_BUDGET=1 enforces 250 ms and adds
+// the graph of 50,000 objects (budgetSizes, WP-839), whose statements and
+// bytes per CI are checked the same way and whose time is logged.
 //
 // WP-840: the CIs carry field values as in an organization filled by
 // discovery (fieldValues: eight discovered fields per CI, 1,400 overrides
 // on 12 % of the CIs), so the node read pays its override match. Its product
-// SQL, the overrides of the organization (ListNodes beyond 2,000 CIs),
+// SQL, the overrides of the organization (ListNodes beyond 5,000 CIs, WP-839),
 // uses idx_ci_field_value_override as the application role under RLS
 // (EXPLAIN ANALYZE, migration 000195). Neither answer carries truncated,
 // the walk keeps all 10,000 CIs; two more servers on the core switch take
@@ -566,6 +612,13 @@ func loadGraph(t *testing.T, f *scopetest.Fixture, orgID string, n int, clients,
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestImpactWorstCase(t *testing.T) {
+	for _, objects := range budgetSizes() {
+		t.Run(fmt.Sprintf("%d objects", objects), func(t *testing.T) { impactWorstCase(t, objects) })
+	}
+}
+
+// impactWorstCase is TestImpactWorstCase with a graph of objects CIs.
+func impactWorstCase(t *testing.T, objects int) {
 	f := scopetest.Seed(t, "f3")
 	bg := context.Background()
 	clientsB := [2]string{f.ID(), f.ID()}
@@ -586,7 +639,7 @@ func TestImpactWorstCase(t *testing.T) {
 		return out
 	}
 	clientsA := [2]string{f.Client1, f.Client2}
-	core := loadGraph(t, f, f.OrgA, 10000, clientsA, sites(f.OrgA, clientsA))
+	core := loadGraph(t, f, f.OrgA, objects, clientsA, sites(f.OrgA, clientsA))
 	coreB := loadGraph(t, f, f.OrgB, 3000, clientsB, sites(f.OrgB, clientsB))
 	overridesA := fieldValues(t, f, f.OrgA)
 	fieldValues(t, f, f.OrgB)
@@ -640,7 +693,10 @@ func TestImpactWorstCase(t *testing.T) {
 
 	// The answer: every CI but the core switch and the two PDUs, at one or
 	// two hops, with via and without paths or client and site.
-	if best.count != 9997 || len(best.impacted) != 9997 || small.count != 2997 {
+	// The walk keeps at most relationship.MaxTraversalNodes CIs, the root
+	// among them (the cap is WP-840's): at 50,000 objects 9,999 impacted.
+	want := min(objects-3, relationship.MaxTraversalNodes-1)
+	if best.count != want || len(best.impacted) != want || small.count != 2997 {
 		t.Fatalf("impacted %d (%d entries), %d in the 3,000-object graph", best.count, len(best.impacted), small.count)
 	}
 	for _, entry := range best.impacted {
@@ -659,7 +715,7 @@ func TestImpactWorstCase(t *testing.T) {
 
 	// Statements independent of the graph size; bytes per impacted CI.
 	if best.statements != small.statements {
-		t.Errorf("impact: %d statements for 10,000 objects, %d for 3,000", best.statements, small.statements)
+		t.Errorf("impact: %d statements for %d objects, %d for 3,000", best.statements, objects, small.statements)
 	}
 	perCI := len(best.body) / best.count
 	if perCI > 250 {
@@ -726,10 +782,10 @@ func TestImpactWorstCase(t *testing.T) {
 		}
 	}
 
-	t.Logf("worst case (10,000 objects, %d impacted): compact %d bytes (%d per CI), best of 5 %v, %d statements; full %d bytes (%d per CI) in %v",
-		best.count, len(best.body), perCI, best.elapsed.Round(time.Millisecond), best.statements,
+	t.Logf("worst case (%d objects, %d impacted): compact %d bytes (%d per CI), best of 5 %v, %d statements; full %d bytes (%d per CI) in %v",
+		objects, best.count, len(best.body), perCI, best.elapsed.Round(time.Millisecond), best.statements,
 		len(full.body), len(full.body)/full.count, full.elapsed.Round(time.Millisecond))
-	if os.Getenv("RETICORA_PERF_BUDGET") == "1" && best.elapsed > 250*time.Millisecond {
+	if os.Getenv("RETICORA_PERF_BUDGET") == "1" && referenceSize(objects) && best.elapsed > 250*time.Millisecond {
 		t.Errorf("worst-case impact: %v, budget 250 ms", best.elapsed)
 	}
 	if !bytes.Contains(full.body, []byte(`"path":[`)) {

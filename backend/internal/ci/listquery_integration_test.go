@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,7 +13,9 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
@@ -23,7 +26,8 @@ import (
 // on GET /cis against PostgreSQL: filter[field][op] on columns and on
 // searchable JSONB attributes with their data type, 400 with a hint for an
 // attribute that is not searchable, 422 for unknown fields, sort and
-// fields.
+// fields. checkCappedTotalAndNameSort adds total after E-104 and the page
+// sorted by name (WP-839).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestListFiltersAgainstPostgres(t *testing.T) {
@@ -106,6 +110,198 @@ func TestListFiltersAgainstPostgres(t *testing.T) {
 		if strings.Contains(query, "lq_note") && !strings.Contains(out["detail"].(string), "searchable") {
 			t.Errorf("no searchable hint: %v", out)
 		}
+	}
+
+	t.Run("capped total and sort by name", func(t *testing.T) { checkCappedTotalAndNameSort(t, f) })
+}
+
+// listNameIndex is the index of the CI list sorted by name (WP-839).
+const listNameIndex = "idx_ci_list_name"
+
+// cappedPage is the body of GET /cis with the mark of a capped total.
+type cappedPage struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+	Total       int   `json:"total"`
+	TotalCapped *bool `json:"total_capped"`
+	HasMore     bool  `json:"has_more"`
+}
+
+// ciRowsRead returns the rows the nodes of an EXPLAIN (ANALYZE, FORMAT
+// JSON) plan read from ci: returned rows plus rows removed by a filter or
+// an index recheck, over all loops.
+func ciRowsRead(nodes []map[string]any) int64 {
+	var read float64
+	for _, n := range nodes {
+		if n["Relation Name"] != "ci" {
+			continue
+		}
+		rows, _ := n["Actual Rows"].(float64)
+		filtered, _ := n["Rows Removed by Filter"].(float64)
+		rechecked, _ := n["Rows Removed by Index Recheck"].(float64)
+		loops, _ := n["Actual Loops"].(float64)
+		read += (rows + filtered + rechecked) * loops
+	}
+	return int64(read)
+}
+
+// checkCappedTotalAndNameSort covers WP-839 (API-01, NFR-02; E-104, E-17)
+// on GET /cis with organization A at 10,000 CIs and one more, placed as the
+// seed places them (client, site):
+//
+//   - total is exact up to api.TotalCap: 10,000 CIs answer 10,000 without
+//     total_capped. With 10,001 CIs total is 10,000 and total_capped true;
+//     the count reads at most api.TotalCountLimit CIs (LIMIT in the
+//     statement), has_more stays right on a page next to the cap and on the
+//     last page. A filter below the cap keeps the exact count.
+//   - The first page with sort_by=name (descending, and ascending with
+//     sort_dir) follows name and id. Its product SQL, explained with
+//     ANALYZE as the application role after the settings of the request
+//     (the frame of WP-436), reads the CIs from idx_ci_list_name without
+//     sorting them and reads at most 1 % of the organization's CIs.
+func checkCappedTotalAndNameSort(t *testing.T, f *scopetest.Fixture) {
+	bg := context.Background()
+	var existing int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL`, f.OrgA).Scan(&existing); err != nil {
+		t.Fatal(err)
+	}
+	seedListCIs(t, f, api.TotalCap-existing)
+	if _, err := f.Admin.Exec(bg, `ANALYZE ci`); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := f.App.Config()
+	trace := &statementLog{}
+	cfg.ConnConfig.Tracer = trace
+	cfg.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(bg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	mux := chi.NewRouter()
+	ci.NewHandler(ci.NewService(ci.NewPGRepository(pool))).RegisterRoutes(mux)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	get := func(query url.Values) (cappedPage, []loggedStatement) {
+		t.Helper()
+		before := trace.mark()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/cis?"+query.Encode(), nil).WithContext(ctx))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /cis?%s: %d %s", query.Encode(), w.Code, w.Body.String())
+		}
+		var page cappedPage
+		if jerr := json.Unmarshal(w.Body.Bytes(), &page); jerr != nil {
+			t.Fatal(jerr)
+		}
+		return page, trace.since(before)
+	}
+	isCapped := func(p cappedPage) bool { return p.TotalCapped != nil && *p.TotalCapped }
+	countsOf := func(stmts []loggedStatement) []string {
+		var out []string
+		for _, s := range stmts {
+			if strings.Contains(s.sql, "COUNT(*)") {
+				out = append(out, s.sql)
+			}
+		}
+		return out
+	}
+	get(url.Values{"limit": {"1"}}) // warms the pool
+
+	// At the cap: exact, without the mark.
+	first, firstStmts := get(url.Values{"limit": {"50"}})
+	if first.Total != api.TotalCap || first.TotalCapped != nil || !first.HasMore {
+		t.Errorf("%d CIs: total %d, total_capped %v, has_more %v; want %d, absent, true",
+			api.TotalCap, first.Total, first.TotalCapped, first.HasMore, api.TotalCap)
+	}
+	if c := countsOf(firstStmts); len(c) != 1 || !strings.Contains(c[0], fmt.Sprintf("LIMIT %d", api.TotalCountLimit)) {
+		t.Errorf("%d CIs: count statements %q, want one that reads at most %d CIs", api.TotalCap, c, api.TotalCountLimit)
+	}
+
+	// The first page sorted by name, both directions, and its plan.
+	var byName []string
+	rows, err := f.Admin.Query(bg, `SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY name DESC, id DESC`, f.OrgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		byName = append(byName, id)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	ascending := make([]string, 0, 50)
+	for i := len(byName) - 1; i >= len(byName)-50; i-- {
+		ascending = append(ascending, byName[i])
+	}
+	for _, c := range []struct {
+		dir  string
+		want []string
+	}{{"desc", byName[:50]}, {"asc", ascending}} {
+		named, nstmts := get(url.Values{"limit": {"50"}, "sort_by": {"name"}, "sort_dir": {c.dir}})
+		got := make([]string, len(named.Data))
+		for i, d := range named.Data {
+			got[i] = d.ID
+		}
+		if !slices.Equal(got, c.want) || named.Total != api.TotalCap {
+			t.Errorf("sort_by=name %s: total %d, ids %v; want %d and the first 50 of name, id %s", c.dir, named.Total, got, api.TotalCap, c.dir)
+		}
+		var pageStmt *loggedStatement
+		var settings []string
+		for i := range nstmts {
+			if strings.Contains(nstmts[i].sql, "ORDER BY") {
+				pageStmt = &nstmts[i]
+				break
+			}
+			if strings.HasPrefix(nstmts[i].sql, "SET LOCAL ") {
+				settings = append(settings, nstmts[i].sql)
+			}
+		}
+		if pageStmt == nil {
+			t.Fatalf("sort_by=name %s: no page statement among %d", c.dir, len(nstmts))
+		}
+		nodes := planNodes(t, explainAsAppWith(t, f.App, f.OrgA, "ANALYZE, FORMAT JSON", *pageStmt, settings...))
+		usesIndex := false
+		for _, n := range nodes {
+			switch n["Node Type"] {
+			case "Index Scan", "Index Only Scan":
+				usesIndex = usesIndex || (n["Index Name"] == listNameIndex && n["Relation Name"] == "ci")
+			case "Sort", "Incremental Sort":
+				t.Errorf("sort_by=name %s: the page sorts by %v: %s", c.dir, n["Sort Key"], describePlan(nodes))
+			}
+		}
+		if !usesIndex {
+			t.Errorf("sort_by=name %s: the page does not read %s: %s", c.dir, listNameIndex, describePlan(nodes))
+		}
+		if read, most := ciRowsRead(nodes), int64(api.TotalCap/100); read > most {
+			t.Errorf("sort_by=name %s: the page reads %d CIs, at most %d (1 %% of the organization): %s", c.dir, read, most, describePlan(nodes))
+		} else {
+			t.Logf("sort_by=name %s: %d CIs read: %s", c.dir, read, describePlan(nodes))
+		}
+	}
+
+	// Beyond the cap: total 10,000 and total_capped, on the first page, on
+	// a full page next to the cap and on the last page.
+	f.CI(t, f.OrgA, f.Client1, "list-beyond-cap")
+	for _, c := range []struct {
+		offset  int
+		rows    int
+		hasMore bool
+	}{{0, 50, true}, {api.TotalCap - 50, 50, true}, {api.TotalCap - 9, 10, false}} {
+		p, _ := get(url.Values{"limit": {"50"}, "offset": {fmt.Sprint(c.offset)}})
+		if p.Total != api.TotalCap || !isCapped(p) || p.HasMore != c.hasMore || len(p.Data) != c.rows {
+			t.Errorf("%d CIs, offset %d: %d rows, total %d, total_capped %v, has_more %v; want %d, %d, true, %v",
+				api.TotalCountLimit, c.offset, len(p.Data), p.Total, p.TotalCapped, p.HasMore, c.rows, api.TotalCap, c.hasMore)
+		}
+	}
+	// A filter below the cap counts exactly.
+	if p, _ := get(url.Values{"limit": {"50"}, "status": {"maintenance"}}); p.Total == 0 || p.Total >= api.TotalCap || isCapped(p) {
+		t.Errorf("filter status=maintenance: total %d, total_capped %v; want the exact count below the cap", p.Total, p.TotalCapped)
 	}
 }
 

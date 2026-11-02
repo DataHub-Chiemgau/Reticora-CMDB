@@ -8864,7 +8864,16 @@ export interface components {
       field?: string;
     };
     PaginationEnvelope: {
+      /**
+       * @description Number of matching entries. GET /api/v1/cis counts capped (E-104):
+       *     exact up to 10,000; beyond, total is 10,000 and total_capped is true.
+       */
       total: number;
+      /**
+       * @description True when the count stopped at 10,000 and more entries match (E-104,
+       *     GET /api/v1/cis). Absent or false otherwise.
+       */
+      total_capped?: boolean;
       limit: number;
       offset: number;
       has_more: boolean;

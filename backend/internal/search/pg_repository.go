@@ -145,8 +145,14 @@ func buildPostgresQueryWithTokens(q *Query, tokens []string) (query string, args
 	if q.Highlight && strings.TrimSpace(q.Text) != "" {
 		snippet = fmt.Sprintf("ts_headline('simple', title || ' ' || summary, websearch_to_tsquery('simple', $%d), 'StartSel=<mark>, StopSel=</mark>, MaxFragments=2')", 2)
 	}
+	// The count of the hits is capped (E-104, WP-839): the inner query
+	// keeps the best api.TotalCountLimit hits, or those up to the hit after
+	// the page when that lies further, and the window counts them. A count
+	// beyond api.TotalCap means more hits; offset + page < count still
+	// tells whether more follow. search_document is read once (E-133).
 	args = append(args, limit, q.Offset)
-	query = fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, %s AS score, %s AS snippet, COUNT(*) OVER() FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`, score, snippet, strings.Join(where, " AND "), pos, pos+1)
+	query = fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, score, %s AS snippet, COUNT(*) OVER() FROM (SELECT id, organization_id, entity_type, entity_id, title, summary, url, metadata, client_id, site_id, updated_at, %s AS score FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT GREATEST(%d, $%d::bigint + $%d::bigint + 1)) AS hit ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`,
+		snippet, score, strings.Join(where, " AND "), api.TotalCountLimit, pos+1, pos, pos, pos+1)
 	return query, args, nil
 }
 func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
@@ -155,6 +161,7 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 		limit = api.DefaultPageLimit
 	}
 	var res Result
+	var counted int
 	err := database.WithRequestTenant(ctx, r.pool, q.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		var tokens []string
 		if vault := pii.Default(); vault != nil {
@@ -176,7 +183,7 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 			var h Hit
 			var meta []byte
 			var snippet string
-			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.ClientID, &h.SiteID, &h.UpdatedAt, &h.Score, &snippet, &res.Total); err != nil {
+			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.ClientID, &h.SiteID, &h.UpdatedAt, &h.Score, &snippet, &counted); err != nil {
 				return err
 			}
 			if err := json.Unmarshal(meta, &h.Metadata); err != nil {
@@ -193,7 +200,8 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 		return contactDetails(ctx, tx, q.OrganizationID, res.Data)
 	})
 	res.Limit, res.Offset = limit, q.Offset
-	res.HasMore = q.Offset+len(res.Data) < res.Total
+	res.HasMore = q.Offset+len(res.Data) < counted
+	res.Total, res.TotalCapped = api.CapTotal(counted)
 	return res, err
 }
 
