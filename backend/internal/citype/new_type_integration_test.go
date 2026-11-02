@@ -172,6 +172,114 @@ func TestNewTypeWithoutReleaseAgainstPostgres(t *testing.T) {
 	if err := f.Admin.QueryRow(bg, `SELECT schema_version FROM ci WHERE id = $1`, item.ID).Scan(&stored); err != nil || stored != 3 {
 		t.Errorf("schema_version written directly: %d (%v), want it kept at 3", stored, err)
 	}
+
+	compositionCodes(t, call, system)
+}
+
+// compositionCodes covers WP-711 (MET-16) within
+// TestNewTypeWithoutReleaseAgainstPostgres: every kind of composition
+// conflict is a 422 invalid-field problem on key whose code is the one of
+// citype.CompositionError — raised by the database (system base against a
+// type attribute, compose_attribute_definition) and by the backend
+// (organization-global against a type attribute, checkCompositionTx), on
+// POST and on PATCH. multi_value is part of the data type in both. The
+// probe type's schema_version stays unchanged.
+func compositionCodes(t *testing.T, call func(method, path, body string) *httptest.ResponseRecorder,
+	system func(key, dataType, extra string)) {
+	t.Helper()
+	created := func(path, body string) string {
+		t.Helper()
+		rec := call(http.MethodPost, path, body)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST %s %s: %d %s", path, body, rec.Code, rec.Body.String())
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.ID
+	}
+	probe := created("/api/v1/ci-types", `{"key": "wp711-probe", "name": "WP-711 Probe"}`)
+	typed := func(key, rest string) string {
+		return `{"ci_type_id": "` + probe + `", "key": "` + key + `", ` + rest + `}`
+	}
+	version := func() int {
+		t.Helper()
+		rec := call(http.MethodGet, "/api/v1/ci-types/"+probe, "")
+		var typ citype.Type
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &typ) != nil {
+			t.Fatalf("get probe type: %d %s", rec.Code, rec.Body.String())
+		}
+		return typ.SchemaVersion
+	}
+
+	// The system base (checked by compose_attribute_definition).
+	system("wp711_sys_type", "text", "")
+	system("wp711_sys_ref", "user", "")
+	system("wp711_sys_multi", "text", "")
+	system("wp711_sys_enum", "enum", `{"enum_values": ["a", "b"]}`)
+	system("wp711_sys_range", "decimal", `{"max": 5}`)
+	system("wp711_sys_len", "text", `{"min_length": 4}`)
+	sysEnum := created("/api/v1/attribute-definitions", typed("wp711_sys_enum", `"data_type": "enum", "enum_values": ["a"]`))
+	// The organization's globals (checked by checkCompositionTx).
+	for _, body := range []string{
+		`{"key": "wp711_org_type", "data_type": "text"}`,
+		`{"key": "wp711_org_ref", "data_type": "user"}`,
+		`{"key": "wp711_org_multi", "data_type": "text", "multi_value": true}`,
+		`{"key": "wp711_org_enum", "data_type": "enum", "enum_values": ["a", "b"]}`,
+		`{"key": "wp711_org_range", "data_type": "decimal", "validation": {"max": 5}}`,
+		`{"key": "wp711_org_len", "data_type": "text", "validation": {"min_length": 4}}`,
+	} {
+		created("/api/v1/attribute-definitions", body)
+	}
+	orgLen := created("/api/v1/attribute-definitions", typed("wp711_org_len", `"data_type": "text", "validation": {"max_length": 10}`))
+	before := version()
+
+	for name, tc := range map[string]struct{ method, path, body, code string }{
+		"database: data type": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_sys_type", `"data_type": "integer"`), citype.CodeDatatypeConflict},
+		"database: reference target": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_sys_ref", `"data_type": "team"`), citype.CodeDatatypeConflict},
+		"database: multi_value": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_sys_multi", `"data_type": "text", "multi_value": true`), citype.CodeDatatypeConflict},
+		"database: no allowed value left": {http.MethodPatch, "/api/v1/attribute-definitions/" + sysEnum,
+			`{"enum_values": ["c"]}`, citype.CodeEnumEmpty},
+		"database: empty range": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_sys_range", `"data_type": "decimal", "validation": {"min": 6}`), citype.CodeRangeEmpty},
+		"database: empty length range": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_sys_len", `"data_type": "text", "validation": {"max_length": 3}`), citype.CodeLengthRangeEmpty},
+		"backend: data type": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_org_type", `"data_type": "integer"`), citype.CodeDatatypeConflict},
+		"backend: reference target": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_org_ref", `"data_type": "team"`), citype.CodeDatatypeConflict},
+		"backend: multi_value": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_org_multi", `"data_type": "text", "multi_value": false`), citype.CodeDatatypeConflict},
+		"backend: no allowed value left": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_org_enum", `"data_type": "enum", "enum_values": ["c"]`), citype.CodeEnumEmpty},
+		"backend: empty range": {http.MethodPost, "/api/v1/attribute-definitions",
+			typed("wp711_org_range", `"data_type": "decimal", "validation": {"min": 6}`), citype.CodeRangeEmpty},
+		"backend: empty length range": {http.MethodPatch, "/api/v1/attribute-definitions/" + orgLen,
+			`{"validation": {"max_length": 3}}`, citype.CodeLengthRangeEmpty},
+	} {
+		rec := call(tc.method, tc.path, tc.body)
+		var problem struct {
+			Type  string `json:"type"`
+			Field string `json:"field"`
+			Code  string `json:"code"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &problem)
+		if rec.Code != http.StatusUnprocessableEntity || rec.Header().Get("Content-Type") != "application/problem+json" ||
+			problem.Type != "urn:reticora:problem:invalid-field" || problem.Field != "key" || problem.Code != tc.code ||
+			!strings.Contains(rec.Body.String(), "MET-16") {
+			t.Errorf("%s: %d %s %s, want 422 invalid-field on key with code %s",
+				name, rec.Code, rec.Header().Get("Content-Type"), rec.Body.String(), tc.code)
+		}
+	}
+	if after := version(); after != before {
+		t.Errorf("rejected definitions changed the probe schema: v%d, want v%d", after, before)
+	}
 }
 
 // TestOrgGlobalDefinitionsAreRuntimeLayer covers MET-16 (WP-590, F-308)

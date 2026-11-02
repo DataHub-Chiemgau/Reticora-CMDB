@@ -73,6 +73,9 @@ type Field struct {
 	// IsSystem marks a system definition (no organization), the base
 	// layer of the composition (MET-16).
 	IsSystem bool `json:"is_system,omitempty"`
+	// MultiValue is attribute_definition.multi_value; nil when unknown. The
+	// legacy field views do not show it.
+	MultiValue *bool `json:"-"`
 }
 
 // InstanceField is a field definition scoped to a single CI instance (spec §2).
@@ -111,10 +114,13 @@ func (f Field) Definition() fieldmeta.FieldDefinition {
 		Validation:      f.Validation,
 		Conditional:     f.Conditional,
 		ReferenceTarget: f.ReferenceTarget,
+		MultiValue:      f.MultiValue,
 	}
 }
 
-// Definition converts an instance field into the shared fieldmeta shape.
+// Definition converts an instance field into the shared fieldmeta shape;
+// MultiValue stays nil (ci_instance_field_definition has no multi_value),
+// the composition takes it from the layer below.
 func (f InstanceField) Definition() fieldmeta.FieldDefinition {
 	return fieldmeta.FieldDefinition{
 		Name:            f.Name,

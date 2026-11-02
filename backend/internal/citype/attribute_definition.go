@@ -112,13 +112,14 @@ type AttributeDefinitionStore interface {
 
 // Field is the legacy field view of the definition (/ci-types/{id}/fields).
 func (d *AttributeDefinition) Field() Field {
+	multiValue := d.MultiValue
 	return Field{
 		ID: d.ID, CITypeID: d.CITypeID, Scope: d.Scope, Name: d.Key,
 		Label: d.DisplayName.WithFallback(d.Key)["en"], Description: d.Description,
 		DataType: d.DataType, Required: d.Required, DefaultValue: defaultString(d.Default),
 		EnumValues: d.EnumValues, UIGroup: d.Group, SortOrder: d.Order,
 		Validation: d.legacyValidation(), Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
-		IsSystem: d.IsSystem,
+		IsSystem: d.IsSystem, MultiValue: &multiValue,
 	}
 }
 
@@ -376,7 +377,10 @@ const compositionConstraint = "attribute_definition_composition"
 func attributeDBError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.ConstraintName == compositionConstraint {
-		return &api.FieldError{Field: "key", Message: pgErr.Message, Status: http.StatusUnprocessableEntity}
+		// compose_attribute_definition reports the code of the conflict in
+		// DETAIL, as CompositionError.Code.
+		return &api.FieldError{Field: "key", Message: pgErr.Message, Code: pgErr.Detail,
+			Status: http.StatusUnprocessableEntity}
 	}
 	return api.FieldDBError(err, attributeFields)
 }
@@ -412,7 +416,12 @@ func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
 	}
 	for _, t := range typed {
 		if _, err := Compose(system, org, t); err != nil {
-			return &api.FieldError{Field: "key", Message: err.Error(), Status: http.StatusUnprocessableEntity}
+			fe := &api.FieldError{Field: "key", Message: err.Error(), Status: http.StatusUnprocessableEntity}
+			var conflict *CompositionError
+			if errors.As(err, &conflict) {
+				fe.Code = conflict.Code
+			}
+			return fe
 		}
 	}
 	return nil

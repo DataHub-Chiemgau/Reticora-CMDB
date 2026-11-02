@@ -5904,7 +5904,7 @@ export interface paths {
     head?: never;
     /**
      * Update an attribute definition
-     * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409.
+     * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409. A definition that cannot be composed with the other layers of its key (MET-16) is 422 with `field` = `key` and a `code`.
      */
     patch: operations['updateAttributeDefinition'];
     trace?: never;
@@ -8860,8 +8860,10 @@ export interface components {
       instance?: string;
       /** @description Request id of the failed request (equals the X-Request-ID response header). */
       trace_id: string;
-      /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client). */
+      /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client, or `key` of an attribute definition that cannot be composed, 422). */
       field?: string;
+      /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`) or `length-range-empty` (`min_length` > `max_length`). */
+      code?: string;
     };
     PaginationEnvelope: {
       /**
@@ -10986,6 +10988,8 @@ export interface components {
       violations: {
         field: string;
         detail: string;
+        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty` or `length-range-empty`. */
+        code?: string;
       }[];
     };
     InterfaceInUseProblem: components['schemas']['ProblemDetail'] & {
@@ -28245,6 +28249,7 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

@@ -12151,7 +12151,8 @@ paths:
         read-only (403). Changing `searchable`, `unique` or `unique_scope`
         queues an `attribute.index` job that builds the index concurrently
         (DB-04); making an attribute unique while active CIs share a value is
-        409.
+        409. A definition that cannot be composed with the other layers of
+        its key (MET-16) is 422 with `field` = `key` and a `code`.
       requestBody:
         required: true
         content:
@@ -12175,6 +12176,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
@@ -16632,7 +16635,19 @@ components:
           description: Request id of the failed request (equals the X-Request-ID response header).
         field:
           type: string
-          description: Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client).
+          description: >-
+            Request field a 400, 409 or 422 refers to (e.g. the unique `name`
+            of a client, or `key` of an attribute definition that cannot be
+            composed, 422).
+        code:
+          type: string
+          description: >-
+            Machine-readable code of the failing rule, set where one is
+            defined. A composition conflict of attribute definitions (MET-16,
+            422 with `field` = `key`) carries `datatype-conflict` (data type,
+            reference target or `multi_value` differ), `enum-empty` (no
+            allowed value is left), `range-empty` (`min` > `max`) or
+            `length-range-empty` (`min_length` > `max_length`).
 
     PaginationEnvelope:
       type: object
@@ -20156,6 +20171,13 @@ components:
                 properties:
                   field: { type: string }
                   detail: { type: string }
+                  code:
+                    type: string
+                    description: >-
+                      Machine-readable code of the violation, set where one
+                      is defined: a composition conflict of the attribute
+                      definitions (MET-16) carries `datatype-conflict`,
+                      `enum-empty`, `range-empty` or `length-range-empty`.
     InterfaceInUseProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'

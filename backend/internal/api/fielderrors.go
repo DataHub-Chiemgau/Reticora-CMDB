@@ -11,6 +11,9 @@ import (
 type FieldError struct {
 	Field   string
 	Message string
+	// Code names the failing rule in machine-readable form, e.g. the code
+	// of a composition conflict (MET-16); empty when there is none.
+	Code string
 	// Status is the HTTP status; zero means 400.
 	Status int
 }
@@ -32,6 +35,8 @@ func (e *ConflictError) Error() string { return e.Field + ": " + e.Message }
 type FieldProblem struct {
 	ProblemDetail
 	Field string `json:"field"`
+	// Code is FieldError.Code; omitted when empty.
+	Code string `json:"code,omitempty"`
 }
 
 // Violation names a field of a problem and what is wrong with its value.
@@ -74,6 +79,7 @@ func WriteFieldError(w http.ResponseWriter, err error) bool {
 			ProblemDetail: ProblemDetail{Type: "urn:reticora:problem:invalid-field", Title: http.StatusText(status),
 				Status: status, Detail: fe.Error()},
 			Field: fe.Field,
+			Code:  fe.Code,
 		})
 		return true
 	}

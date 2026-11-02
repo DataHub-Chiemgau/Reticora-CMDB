@@ -14,7 +14,25 @@ import (
 type CompositionError struct {
 	Key    string
 	Reason string
+	// Code names the failing rule in machine-readable form, as
+	// compose_attribute_definition reports it in DETAIL: one of
+	// CodeDatatypeConflict, CodeEnumEmpty, CodeRangeEmpty and
+	// CodeLengthRangeEmpty.
+	Code string
 }
+
+// Codes of a composition conflict (MET-16); the API reports them as code.
+const (
+	// CodeDatatypeConflict: the data type, the reference target or
+	// multi_value differ.
+	CodeDatatypeConflict = "datatype-conflict"
+	// CodeEnumEmpty: no allowed value is left.
+	CodeEnumEmpty = "enum-empty"
+	// CodeRangeEmpty: min is greater than max.
+	CodeRangeEmpty = "range-empty"
+	// CodeLengthRangeEmpty: min_length is greater than max_length.
+	CodeLengthRangeEmpty = "length-range-empty"
+)
 
 func (e *CompositionError) Error() string {
 	return fmt.Sprintf("attribute %s: %s (MET-16)", e.Key, e.Reason)
@@ -24,6 +42,10 @@ func (e *CompositionError) Error() string {
 // violated field without importing this package.
 func (e *CompositionError) CompositionKey() string { return e.Key }
 
+// CompositionCode names the failing rule (see Code); ci reports it as the
+// code of the violation.
+func (e *CompositionError) CompositionCode() string { return e.Code }
+
 // Compose composes the effective schema from layers, the base first
 // (MET-16): system base → type chain → (phase 2: sets, templates) →
 // instance. Definitions of the same key are merged: required is OR-ed,
@@ -31,7 +53,9 @@ func (e *CompositionError) CompositionKey() string { return e.Key }
 // length bounds take the narrowest range (empty → error), all patterns
 // apply (allOf), the default and the presentation of the last layer that
 // sets them win; a different data type is an error. Keys keep the order
-// of their first appearance.
+// of their first appearance. multi_value is part of the data type: two
+// set values that differ are a conflict, an unset one (nil, an instance
+// definition) takes the other.
 // validation: CompositionError names the key and the rule that fails.
 func Compose(layers ...[]fieldmeta.FieldDefinition) ([]fieldmeta.FieldDefinition, error) {
 	order := make([]string, 0, 16)
@@ -87,14 +111,20 @@ func allowedValues(def *fieldmeta.FieldDefinition) []any {
 }
 
 func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefinition, error) {
-	conflict := func(format string, args ...any) error {
-		return &CompositionError{Key: top.Name, Reason: fmt.Sprintf(format, args...)}
+	conflict := func(code, format string, args ...any) error {
+		return &CompositionError{Key: top.Name, Reason: fmt.Sprintf(format, args...), Code: code}
 	}
 	if fieldmeta.CanonicalType(base.DataType) != fieldmeta.CanonicalType(top.DataType) ||
-		referenceTarget(base) != referenceTarget(top) {
-		return fieldmeta.FieldDefinition{}, conflict("data type %s conflicts with %s", top.DataType, base.DataType)
+		referenceTarget(base) != referenceTarget(top) ||
+		base.MultiValue != nil && top.MultiValue != nil && *base.MultiValue != *top.MultiValue {
+		return fieldmeta.FieldDefinition{}, conflict(CodeDatatypeConflict, "data type %s conflicts with %s", top.DataType, base.DataType)
 	}
 	out := *top
+	if out.MultiValue == nil {
+		// An instance definition does not know multi_value; it takes the
+		// value of the layer below.
+		out.MultiValue = base.MultiValue
+	}
 	out.Required = base.Required || top.Required
 	if out.DefaultValue == "" {
 		out.DefaultValue = base.DefaultValue
@@ -124,7 +154,7 @@ func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefiniti
 				}
 			}
 			if len(both) == 0 {
-				return fieldmeta.FieldDefinition{}, conflict("no allowed value is left")
+				return fieldmeta.FieldDefinition{}, conflict(CodeEnumEmpty, "no allowed value is left")
 			}
 			allowed = both
 		}
@@ -140,11 +170,11 @@ func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefiniti
 	}
 	v.Min, v.Max = narrowest(b.Min, t.Min, maxOf), narrowest(b.Max, t.Max, minOf)
 	if v.Min != nil && v.Max != nil && *v.Min > *v.Max {
-		return fieldmeta.FieldDefinition{}, conflict("the value range is empty")
+		return fieldmeta.FieldDefinition{}, conflict(CodeRangeEmpty, "the value range is empty")
 	}
 	v.MinLength, v.MaxLength = narrowest(b.MinLength, t.MinLength, maxOf), narrowest(b.MaxLength, t.MaxLength, minOf)
 	if v.MinLength != nil && v.MaxLength != nil && *v.MinLength > *v.MaxLength {
-		return fieldmeta.FieldDefinition{}, conflict("the length range is empty")
+		return fieldmeta.FieldDefinition{}, conflict(CodeLengthRangeEmpty, "the length range is empty")
 	}
 	for _, p := range append(b.AllPatterns(), t.AllPatterns()...) {
 		switch {
