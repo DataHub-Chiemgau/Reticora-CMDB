@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
 
@@ -256,7 +257,10 @@ type Service struct {
 	repo   Repository
 	limit  LimitGuard
 	fields FieldResolver
-	jobs   jobs.Tracker
+	// references checks reference values against their targets (MET-12);
+	// nil: form only.
+	references fieldmeta.ReferenceLookup
+	jobs       jobs.Tracker
 	// bulkJobs runs bulk operations from 100 ids on (API-08); with
 	// bulkQueue they run on the job queue (TEC-14).
 	bulkJobs  BulkJobs
@@ -285,8 +289,26 @@ func (s *Service) WithFieldResolver(fields FieldResolver) *Service {
 	return s
 }
 
-// validate checks the effective attributes of a CI against its field metadata.
-func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, existing, patch map[string]any) error {
+// WithReferences enables the existence, scope and client check of
+// reference values (MET-12, WP-254) on the manual and API write path
+// (Create, Update). Without a lookup (memory mode) reference values are
+// checked for their form only.
+func (s *Service) WithReferences(lookup fieldmeta.ReferenceLookup) *Service {
+	s.references = lookup
+	return s
+}
+
+// writeScope is the client a write leaves the CI in and whether the write
+// changes it: then every reference value is checked against it.
+type writeScope struct {
+	clientID      string
+	clientChanged bool
+}
+
+// validate checks the effective attributes of a CI against its field
+// metadata and the reference values the write sets against their targets
+// (checkReferences).
+func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, scope writeScope, existing, patch map[string]any) error {
 	if s.fields == nil {
 		return nil
 	}
@@ -294,7 +316,11 @@ func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, ex
 	if err != nil {
 		return err
 	}
-	return validateAttributes(defs, MergePatch(existing, patch), patch, existing)
+	values := MergePatch(existing, patch)
+	if verr := validateAttributes(defs, values, patch, existing); verr != nil {
+		return verr
+	}
+	return checkReferences(ctx, s.references, orgID, defs, scope, values, patch, existing)
 }
 
 // List returns paginated CIs filtered by the given parameters.
@@ -332,7 +358,8 @@ func (s *Service) create(ctx context.Context, item *Item) error {
 		return err
 	}
 	item.ChosenType = true
-	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", nil, withTyped(item.Attributes, typed)); err != nil {
+	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", writeScope{clientID: item.ClientID},
+		nil, withTyped(item.Attributes, typed)); err != nil {
 		return err
 	}
 	if item.AssetID != "" && item.LocationID != "" {
@@ -404,7 +431,14 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 		if err != nil {
 			return nil, err
 		}
-		if err := s.validate(ctx, orgID, before.CITypeID, id,
+		// The client the CI has after the write: references are checked
+		// against it, all of them when the write changes it (WP-254).
+		clientID := before.ClientID
+		if req.ClientID != nil {
+			clientID = *req.ClientID
+		}
+		scope := writeScope{clientID: clientID, clientChanged: !strings.EqualFold(clientID, before.ClientID)}
+		if err := s.validate(ctx, orgID, before.CITypeID, id, scope,
 			withTyped(before.Attributes, typedValues(before)), withTyped(req.Attributes, typed)); err != nil {
 			return nil, err
 		}
@@ -412,10 +446,6 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 			return nil, err
 		}
 		if unique {
-			clientID := before.ClientID
-			if req.ClientID != nil {
-				clientID = *req.ClientID
-			}
 			if err := CheckUnique(ctx, s.repo, orgID, before.CITypeID, clientID, id, MergePatch(before.Attributes, req.Attributes)); err != nil {
 				return nil, err
 			}

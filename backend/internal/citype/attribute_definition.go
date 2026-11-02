@@ -182,14 +182,10 @@ func (d *AttributeDefinition) Validate() error {
 		if err := json.Unmarshal(d.Default, &value); err != nil {
 			return &api.FieldError{Field: "default", Message: "default must be a JSON value"}
 		}
-		values := []any{value}
-		if list, ok := value.([]any); ok && d.MultiValue {
-			values = list
-		}
-		for _, v := range values {
-			if err := fieldmeta.ValidateValue(d.definition(), v); err != nil {
-				return &api.FieldError{Field: "default", Message: err.Error()}
-			}
+		// With multi_value ValidateValue checks a list element by element
+		// and refuses a repeated value (WP-254).
+		if err := fieldmeta.ValidateValue(d.definition(), value); err != nil {
+			return &api.FieldError{Field: "default", Message: err.Error()}
 		}
 	}
 	return nil

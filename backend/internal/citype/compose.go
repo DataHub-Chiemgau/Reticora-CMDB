@@ -3,7 +3,6 @@ package citype
 import (
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
@@ -83,19 +82,11 @@ func Compose(layers ...[]fieldmeta.FieldDefinition) ([]fieldmeta.FieldDefinition
 	return out, nil
 }
 
-// referenceTarget is the target of a reference-typed definition; the
-// specific type names (user, ci_ref, …) name their target.
+// referenceTarget is the target of a reference-typed or file definition
+// (fieldmeta.ReferenceTargetOf); the specific type names (user, ci_ref, …)
+// name their target.
 func referenceTarget(def *fieldmeta.FieldDefinition) string {
-	if fieldmeta.CanonicalType(def.DataType) != fieldmeta.TypeReference {
-		return ""
-	}
-	if def.DataType != fieldmeta.TypeReference {
-		return strings.TrimSuffix(def.DataType, "_ref")
-	}
-	if def.ReferenceTarget == "" {
-		return "ci"
-	}
-	return def.ReferenceTarget
+	return fieldmeta.ReferenceTargetOf(def)
 }
 
 // allowedValues are the values a definition permits; nil means any. The

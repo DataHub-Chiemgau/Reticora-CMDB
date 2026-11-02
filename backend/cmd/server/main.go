@@ -30,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
@@ -466,6 +467,10 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("late modules", "enabled", modules.EnabledKeys())
+	// Reference targets of switched-off modules (asset: inventory, file:
+	// documents) are not available to attribute definitions and writes
+	// (E-03, WP-254).
+	fieldmeta.SetReferenceModules(modules.Enabled)
 	// CI writes keep the search index in sync and, only with the module ai
 	// (F-301), the retrieval chunks; the consent is the one the router wires
 	// into the Ask path (AI-02).
@@ -507,13 +512,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// CI writes check attribute values against the field metadata and,
+	// with a database, reference values against their targets (MET-12).
+	ciService := ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType)
+	if auditPool != nil {
+		ciService = ciService.WithReferences(ci.NewPGReferenceLookup(auditPool))
+	}
+
 	handler, err := newHTTPHandler(repos, server.Options{
 		Version:            version,
 		Modules:            modules,
 		MetricsTenantLabel: cfg.MetricsTenantLabel,
 		Entitlements:       entitlementSvc,
 		Dispatcher:         webhookDispatcher,
-		CIService:          ci.NewServiceWithLimits(repos.CI, entitlementSvc).WithFieldResolver(repos.CIType),
+		CIService:          ciService,
 		Credentials:        credentialService,
 		OIDC:               oidcProvider,
 		Sessions:           sessionIssuer,

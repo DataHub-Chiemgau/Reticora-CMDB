@@ -2,6 +2,7 @@ package fieldmeta
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -112,6 +113,9 @@ func TestPredicateOperators(t *testing.T) {
 	values := map[string]any{
 		"n": 5.0, "s": "hello world", "list": []any{"a", "b"},
 		"empty": "", "missing": nil,
+		// Reference fields hold the UUID of their target, a list with
+		// multi_value (WP-254).
+		"owner": refA, "hosts": []any{refA, refB}, "no_owner": "",
 	}
 	cases := []struct {
 		p    Predicate
@@ -131,6 +135,14 @@ func TestPredicateOperators(t *testing.T) {
 		{Predicate{Field: "missing", Op: "empty"}, true},
 		{Predicate{Field: "s", Op: "empty"}, false},
 		{Predicate{Field: "s", Op: "not_empty"}, true},
+		{Predicate{Field: "owner", Op: "eq", Value: refA}, true},
+		{Predicate{Field: "owner", Op: "eq", Value: refB}, false},
+		{Predicate{Field: "owner", Op: "in", Value: []any{refB, refA}}, true},
+		{Predicate{Field: "owner", Op: "in", Value: []any{refB}}, false},
+		{Predicate{Field: "owner", Op: "empty"}, false},
+		{Predicate{Field: "no_owner", Op: "empty"}, true},
+		{Predicate{Field: "hosts", Op: "empty"}, false},
+		{Predicate{Field: "hosts", Op: "contains", Value: refB}, true},
 	}
 	for i, tc := range cases {
 		if got := match(tc.p, values[tc.p.Field]); got != tc.want {
@@ -505,4 +517,172 @@ func predicatesOf(cond *rules.Rule) (preds []Predicate, ok bool) {
 		preds = append(preds, Predicate{Field: r.Field, Op: r.Op, Value: r.Value})
 	}
 	return preds, true
+}
+
+// Reference ids of the reference tests: both start with the same digits, so
+// a comparison that read a number prefix would take them for equal.
+const (
+	refA = "12345678-0000-4000-8000-00000000000a"
+	refB = "12345678-0000-4000-8000-00000000000b"
+)
+
+// referenceTypes are the reference-typed data types with their target
+// (MET-11, MET-12): file stores a document, the alias types name their
+// target, reference without target refers to a CI.
+var referenceTypes = map[string]string{
+	TypeFile: TargetDocument, TypeReference: TargetCI, TypeUser: TargetUser, TypeTeam: TargetTeam,
+	TypeLocation: TargetLocation, TypeCIRef: TargetCI, TypeAssetRef: TargetAsset, TypeContractRef: TargetContract,
+}
+
+// withModules switches the late modules for one test (E-03).
+func withModules(t *testing.T, enabled func(module string) bool) {
+	t.Helper()
+	SetReferenceModules(enabled)
+	t.Cleanup(func() { SetReferenceModules(nil) })
+}
+
+// definitionAttribute is the attribute a *DefinitionError names, "" for
+// none.
+func definitionAttribute(err error) string {
+	var de *DefinitionError
+	if errors.As(err, &de) {
+		return de.Attribute
+	}
+	return ""
+}
+
+// TestReferenceValueForm: file, reference and the alias types take the
+// UUID of their target (like uuid) and nothing else (WP-254).
+func TestReferenceValueForm(t *testing.T) {
+	for dataType, target := range referenceTypes {
+		def := FieldDefinition{Name: "f", DataType: dataType}
+		if got := ReferenceTargetOf(&def); got != target {
+			t.Errorf("ReferenceTargetOf(%s) = %q, want %q", dataType, got, target)
+		}
+		for _, valid := range []any{refA, strings.ToUpper(refB)} {
+			if err := ValidateValue(def, valid); err != nil {
+				t.Errorf("%s: %v rejected: %v", dataType, valid, err)
+			}
+		}
+		for _, invalid := range []any{"srv-01", "12345678", refA + "0", 42.0, true, map[string]any{"id": refA}, []any{refA}} {
+			if err := ValidateValue(def, invalid); err == nil {
+				t.Errorf("%s: %v accepted", dataType, invalid)
+			}
+		}
+	}
+	for _, dataType := range []string{TypeText, TypeUUID, TypeJSON, TypeMultiselect} {
+		if got := ReferenceTargetOf(&FieldDefinition{Name: "f", DataType: dataType, ReferenceTarget: "ci"}); got != "" {
+			t.Errorf("ReferenceTargetOf(%s) = %q, want none", dataType, got)
+		}
+	}
+	if got := ReferenceTargetOf(&FieldDefinition{Name: "f", DataType: TypeReference, ReferenceTarget: TargetLocation}); got != TargetLocation {
+		t.Errorf("ReferenceTargetOf(reference to location) = %q", got)
+	}
+}
+
+// TestReferenceDefinitions: reference_target only on a reference type and
+// in agreement with an alias type; a target is available only when its
+// module is on and its existence check is registered (WP-254, E-03).
+func TestReferenceDefinitions(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		def       FieldDefinition
+		attribute string // "" when valid
+	}{
+		{"reference without target", FieldDefinition{Name: "x", DataType: TypeReference}, ""},
+		{"reference to team", FieldDefinition{Name: "x", DataType: TypeReference, ReferenceTarget: "team"}, ""},
+		{"reference to location", FieldDefinition{Name: "x", DataType: TypeReference, ReferenceTarget: "location"}, ""},
+		{"alias with its own target", FieldDefinition{Name: "x", DataType: TypeUser, ReferenceTarget: "user"}, ""},
+		{"ci_ref with target ci", FieldDefinition{Name: "x", DataType: TypeCIRef, ReferenceTarget: "ci"}, ""},
+		{"asset_ref", FieldDefinition{Name: "x", DataType: TypeAssetRef}, ""},
+		{"file", FieldDefinition{Name: "x", DataType: TypeFile}, ""},
+		{"target on text", FieldDefinition{Name: "x", DataType: TypeText, ReferenceTarget: "ci"}, "reference_target"},
+		{"target on uuid", FieldDefinition{Name: "x", DataType: TypeUUID, ReferenceTarget: "user"}, "reference_target"},
+		{"target on file", FieldDefinition{Name: "x", DataType: TypeFile, ReferenceTarget: "ci"}, "reference_target"},
+		{"user with target ci", FieldDefinition{Name: "x", DataType: TypeUser, ReferenceTarget: "ci"}, "reference_target"},
+		{"location with target team", FieldDefinition{Name: "x", DataType: TypeLocation, ReferenceTarget: "team"}, "reference_target"},
+		{"asset_ref with target ci", FieldDefinition{Name: "x", DataType: TypeAssetRef, ReferenceTarget: "ci"}, "reference_target"},
+		{"unknown target", FieldDefinition{Name: "x", DataType: TypeReference, ReferenceTarget: "bogus"}, "reference_target"},
+		{"document as reference_target", FieldDefinition{Name: "x", DataType: TypeReference, ReferenceTarget: "document"}, "reference_target"},
+		{"contract_ref is not available", FieldDefinition{Name: "x", DataType: TypeContractRef}, "data_type"},
+		{"reference to contract is not available", FieldDefinition{Name: "x", DataType: TypeReference, ReferenceTarget: "contract"}, "reference_target"},
+	} {
+		err := ValidateDefinition(tc.def)
+		switch {
+		case tc.attribute == "" && err != nil:
+			t.Errorf("%s: rejected: %v", tc.name, err)
+		case tc.attribute != "" && definitionAttribute(err) != tc.attribute:
+			t.Errorf("%s: err = %v (attribute %q), want a rejection of %s", tc.name, err, definitionAttribute(err), tc.attribute)
+		}
+	}
+	if err := ValidateDefinition(FieldDefinition{Name: "x", DataType: TypeContractRef}); err == nil ||
+		err.Error() != "reference target contract not available" {
+		t.Errorf("contract_ref: %v", err)
+	}
+	for _, target := range []string{TargetUser, TargetTeam, TargetLocation, TargetCI, TargetAsset, TargetDocument} {
+		if !ReferenceTargetAvailable(target) {
+			t.Errorf("%s is not available with every module on", target)
+		}
+	}
+	if ReferenceTargetAvailable(TargetContract) || ReferenceTargetAvailable("bogus") {
+		t.Error("contract or an unknown target is available")
+	}
+
+	// The G1 release: no late module is on, asset (inventory) and file
+	// (documents) are not available, the core targets are.
+	withModules(t, func(string) bool { return false })
+	for _, tc := range []struct {
+		name      string
+		def       FieldDefinition
+		attribute string
+	}{
+		{"asset_ref without inventory", FieldDefinition{Name: "x", DataType: TypeAssetRef}, "data_type"},
+		{"reference to asset without inventory", FieldDefinition{Name: "x", DataType: TypeReference, ReferenceTarget: "asset"}, "reference_target"},
+		{"file without documents", FieldDefinition{Name: "x", DataType: TypeFile}, "data_type"},
+	} {
+		if got := definitionAttribute(ValidateDefinition(tc.def)); got != tc.attribute {
+			t.Errorf("%s: rejected attribute %q, want %q", tc.name, got, tc.attribute)
+		}
+	}
+	for _, def := range []FieldDefinition{
+		{Name: "x", DataType: TypeUser}, {Name: "x", DataType: TypeTeam}, {Name: "x", DataType: TypeLocation},
+		{Name: "x", DataType: TypeCIRef}, {Name: "x", DataType: TypeReference},
+	} {
+		if err := ValidateDefinition(def); err != nil {
+			t.Errorf("%s without late modules: %v", def.DataType, err)
+		}
+	}
+	withModules(t, func(module string) bool { return module == "inventory" })
+	if !ReferenceTargetAvailable(TargetAsset) || ReferenceTargetAvailable(TargetDocument) {
+		t.Error("with inventory only: asset must be available, document not")
+	}
+}
+
+// TestReferenceMultiValue: with multi_value a list is checked element by
+// element and a repeated id is refused; without it a list is no reference.
+func TestReferenceMultiValue(t *testing.T) {
+	yes, no := true, false
+	for dataType := range referenceTypes {
+		list := FieldDefinition{Name: "f", DataType: dataType, MultiValue: &yes}
+		if err := ValidateValue(list, []any{refA, refB}); err != nil {
+			t.Errorf("%s: list of two ids rejected: %v", dataType, err)
+		}
+		if err := ValidateValue(list, refA); err != nil {
+			t.Errorf("%s: a single id rejected: %v", dataType, err)
+		}
+		if err := ValidateValue(list, []any{refA, strings.ToUpper(refA)}); err == nil || !strings.Contains(err.Error(), "listed twice") {
+			t.Errorf("%s: repeated id: %v", dataType, err)
+		}
+		if err := ValidateValue(list, []any{refA, "srv-01"}); err == nil {
+			t.Errorf("%s: list with an invalid id accepted", dataType)
+		}
+		if err := ValidateValue(FieldDefinition{Name: "f", DataType: dataType, MultiValue: &no}, []any{refA, refB}); err == nil {
+			t.Errorf("%s: list without multi_value accepted", dataType)
+		}
+	}
+	// multiselect keeps its list as its value.
+	sel := FieldDefinition{Name: "f", DataType: TypeMultiselect, EnumValues: []string{"a", "b"}, MultiValue: &yes}
+	if err := ValidateValue(sel, []any{"a", "b"}); err != nil {
+		t.Errorf("multiselect with multi_value: %v", err)
+	}
 }

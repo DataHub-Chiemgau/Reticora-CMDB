@@ -148,6 +148,66 @@ func TestComposeConflicts(t *testing.T) {
 	}
 }
 
+// TestComposeReferenceTargetOf: the composition compares the targets of
+// fieldmeta.ReferenceTargetOf (WP-254): an alias type and reference with
+// the same target compose, reference without target refers to a CI, file
+// to a document; a different target is a data type conflict.
+func TestComposeReferenceTargetOf(t *testing.T) {
+	for name, tc := range map[string]struct {
+		base, top fieldmeta.FieldDefinition
+		target    string
+		conflict  bool
+	}{
+		"user and reference to user": {
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeUser},
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeReference, ReferenceTarget: "user"}, "user", false,
+		},
+		"location and reference to location": {
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeLocation},
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeReference, ReferenceTarget: "location"}, "location", false,
+		},
+		"asset_ref and reference to asset": {
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeAssetRef},
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeReference, ReferenceTarget: "asset"}, "asset", false,
+		},
+		"reference without target and ci_ref": {
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeReference},
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeCIRef}, "ci", false,
+		},
+		"file and file": {
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeFile},
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeFile}, "document", false,
+		},
+		"team and location": {
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeTeam},
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeLocation}, "", true,
+		},
+		"reference to ci and reference to asset": {
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeReference},
+			fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeReference, ReferenceTarget: "asset"}, "", true,
+		},
+	} {
+		got, err := Compose([]fieldmeta.FieldDefinition{tc.base}, []fieldmeta.FieldDefinition{tc.top})
+		if tc.conflict {
+			var conflict *CompositionError
+			if !errors.As(err, &conflict) || conflict.Code != CodeDatatypeConflict {
+				t.Errorf("%s: err = %v, want %s", name, err, CodeDatatypeConflict)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if target := fieldmeta.ReferenceTargetOf(&got[0]); target != tc.target {
+			t.Errorf("%s: composed target = %q, want %q", name, target, tc.target)
+		}
+		if referenceTarget(&tc.base) != fieldmeta.ReferenceTargetOf(&tc.base) {
+			t.Errorf("%s: referenceTarget differs from fieldmeta.ReferenceTargetOf", name)
+		}
+	}
+}
+
 // layeredLister serves one definition per layer.
 type layeredLister struct{ system, org, typed, instance Field }
 

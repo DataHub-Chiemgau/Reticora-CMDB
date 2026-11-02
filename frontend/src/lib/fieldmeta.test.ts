@@ -64,6 +64,10 @@ describe('matchPredicate', () => {
     list: ['a', 'b'],
     empty: '',
     missing: null,
+    // Reference fields (WP-254), as in TestPredicateOperators.
+    owner: '12345678-0000-4000-8000-00000000000a',
+    hosts: ['12345678-0000-4000-8000-00000000000a', '12345678-0000-4000-8000-00000000000b'],
+    no_owner: '',
   };
   it.each([
     [{ field: 'n', op: 'gt', value: 4 } as const, true],
@@ -78,6 +82,24 @@ describe('matchPredicate', () => {
     [{ field: 'empty', op: 'empty' } as const, true],
     [{ field: 'missing', op: 'empty' } as const, true],
     [{ field: 's', op: 'not_empty' } as const, true],
+    [{ field: 'owner', op: 'eq', value: '12345678-0000-4000-8000-00000000000a' } as const, true],
+    [{ field: 'owner', op: 'eq', value: '12345678-0000-4000-8000-00000000000b' } as const, false],
+    [
+      {
+        field: 'owner',
+        op: 'in',
+        value: ['12345678-0000-4000-8000-00000000000b', '12345678-0000-4000-8000-00000000000a'],
+      } as const,
+      true,
+    ],
+    [{ field: 'owner', op: 'in', value: ['12345678-0000-4000-8000-00000000000b'] } as const, false],
+    [{ field: 'owner', op: 'empty' } as const, false],
+    [{ field: 'no_owner', op: 'empty' } as const, true],
+    [{ field: 'hosts', op: 'empty' } as const, false],
+    [
+      { field: 'hosts', op: 'contains', value: '12345678-0000-4000-8000-00000000000b' } as const,
+      true,
+    ],
   ])('evaluates %j as %s', (pred, want) => {
     expect(matchPredicate(pred, values[pred.field])).toBe(want);
   });
@@ -116,6 +138,38 @@ describe('validateValue', () => {
     expect(validateValue({ name: 'e', data_type: 'email' }, 'a@b')?.key).toBe(field('email'));
     expect(validateValue({ name: 'u', data_type: 'url' }, 'https://x.io/y')).toBeNull();
     expect(validateValue({ name: 'u', data_type: 'url' }, 'x.io')?.key).toBe(field('url'));
+  });
+
+  // Like TestReferenceValueForm and TestReferenceMultiValue in
+  // backend/internal/fieldmeta (WP-254).
+  it('validates the UUID form of file, reference and the alias types', () => {
+    const refA = '12345678-0000-4000-8000-00000000000a';
+    const refB = '12345678-0000-4000-8000-00000000000B';
+    const types: FieldDefinition['data_type'][] = [
+      'file',
+      'reference',
+      'user',
+      'team',
+      'location',
+      'ci_ref',
+      'asset_ref',
+      'contract_ref',
+    ];
+    for (const data_type of types) {
+      const def: FieldDefinition = { name: 'r', label: 'Owner', data_type };
+      expect(validateValue(def, refA), data_type).toBeNull();
+      expect(validateValue(def, refB), data_type).toBeNull();
+      for (const invalid of ['srv-01', '12345678', `${refA}0`, 42, true, [refA]]) {
+        expect(validateValue(def, invalid), `${data_type} ${String(invalid)}`).toEqual({
+          key: field('uuid'),
+          params: { label: 'Owner' },
+        });
+      }
+      const list: FieldDefinition = { ...def, multi_value: true };
+      expect(validateValue(list, [refA, refB]), data_type).toBeNull();
+      expect(validateValue(list, refA), data_type).toBeNull();
+      expect(validateValue(list, [refA, 'srv-01'])?.key, data_type).toBe(field('uuid'));
+    }
   });
 
   it('validates enum options', () => {

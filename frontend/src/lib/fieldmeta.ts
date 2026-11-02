@@ -93,7 +93,25 @@ export interface FieldDefinition {
   validation?: ValidationRules;
   conditional?: ConditionalRules;
   reference_target?: string;
+  // multi_value of the attribute definition: the value is a list of values
+  // of the type (a reference list), checked element by element.
+  multi_value?: boolean;
 }
+
+// The reference-typed data types (MET-11): file, reference and the alias
+// types store the UUID of their target (WP-254).
+const referenceTypes: ReadonlySet<FieldDataType> = new Set<FieldDataType>([
+  'file',
+  'reference',
+  'user',
+  'team',
+  'location',
+  'ci_ref',
+  'asset_ref',
+  'contract_ref',
+]);
+
+const uuidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 export interface FieldState {
   visible: boolean;
@@ -319,13 +337,15 @@ export function validateValue(
       if (/[\r\n]/.test(String(value))) return message('singleLine', label);
       break;
     case 'uuid':
-      if (
-        !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-          String(value),
-        )
-      )
-        return message('uuid', label);
+      if (!uuidPattern.test(String(value))) return message('uuid', label);
       break;
+  }
+  if (referenceTypes.has(t)) {
+    // A reference holds the UUID of its target, a list of them with
+    // multi_value (like checkType in Go).
+    const ids = def.multi_value && Array.isArray(value) ? value : [value];
+    if (!ids.every((id) => typeof id === 'string' && uuidPattern.test(id)))
+      return message('uuid', label);
   }
   // Allowed values, pattern and ranges: the shared rule AST, rule by rule so
   // a range message knows whether it bounds the value or the length.
