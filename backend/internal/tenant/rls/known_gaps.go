@@ -200,3 +200,162 @@ const KnownGapsBaselineMigration = 57
 // client-scope and site-scope check, or are documented in
 // DerivedScopeTables (RuleLocatedScope, WP-393).
 var KnownGaps = []Gap{}
+
+// LeakyIndex documents an index of a table with row level security that
+// the application role cannot use as an index condition (SR-04, K22): its
+// expression or predicate calls a function that is not leakproof, or its
+// operator class has only operators that are not leakproof. Under the
+// policies of the table the planner evaluates such a condition only after
+// the policies, so a query of reticora_app reads the table instead; the
+// index still serves the owner and the constraint it backs (unique,
+// exclusion), which is checked without the policies.
+type LeakyIndex struct {
+	// Table is the table of the index.
+	Table string
+	// Leaky names the functions and operator classes that are not
+	// leakproof, as LeakyIndexQuery reports them.
+	Leaky string
+	// Reason says why the index stays and what serves the reads of the
+	// application role instead.
+	Reason string
+}
+
+// LeakyIndexes are the indexes LeakyIndexQuery reports, by index name
+// (WP-836). TestRLSIndexesAreLeakproof (index_catalog_integration_test.go)
+// fails for a reported index missing here and for an entry that is no
+// longer reported, so the list only shrinks: a new index on a table with
+// row level security uses leakproof operators (a stored column compared
+// with texteq, a side table such as ci_identity_mac, or reticora_attr_text
+// of migration 000162), and the change that drops or replaces a listed
+// index removes its entry. reticora_attr_text is leakproof (E-73, WP-435),
+// so the attribute indexes idx_attr_* are not listed. No migration of
+// phase 2 sets a function LEAKPROOF (E-133).
+var LeakyIndexes = map[string]LeakyIndex{
+	"desk_booking_no_overlap": {
+		Table: "desk_booking", Leaky: "function tstzrange(timestamp with time zone,timestamp with time zone), operator class range_ops",
+		Reason: "exclusion constraint against overlapping bookings of a desk (000065); the constraint is checked " +
+			"without the policies, no read of the application role filters on the range",
+	},
+	"idx_ci_attributes_path": {
+		Table: "ci", Leaky: "operator class jsonb_path_ops",
+		Reason: "GIN index over ci.attributes (000109); @> (jsonb_contains) is not leakproof, the application role " +
+			"filters attributes through reticora_attr_text and idx_attr_* (E-73, WP-435) and matches identity " +
+			"MACs through ci_identity_mac (WP-434)",
+	},
+	"idx_location_path": {
+		Table: "location", Leaky: "operator class gist_ltree_ops",
+		Reason: "subtree index of the location tree (000062); the ltree operators are not leakproof, subtree " +
+			"reads of the application role scan the locations of the organization",
+	},
+	"idx_pii_subject_tokens": {
+		Table: "pii_subject", Leaky: "operator class array_ops",
+		Reason: "blind tokens of the PII vault (000126); @> (arraycontains) is not leakproof, the contact search " +
+			"compares the tokens per search document like the full-text search (E-133 option 3)",
+	},
+	"idx_review_item_candidates": {
+		Table: "review_item", Leaky: "operator class array_ops",
+		Reason: "candidate CIs of a review (000140); the array operators are not leakproof, the review list reads " +
+			"the open reviews of the organization",
+	},
+	"idx_saved_view_shared_roles": {
+		Table: "saved_view", Leaky: "operator class array_ops",
+		Reason: "shared roles of a saved view (000133); && (arrayoverlap) is not leakproof, an organization holds " +
+			"few saved views",
+	},
+	"idx_search_document_fts": {
+		Table: "search_document", Leaky: "operator class tsvector_ops",
+		Reason: "full-text index over the stored search_vector (000030); @@ (ts_match_vq) is not leakproof, the " +
+			"search of the application role stays linear within the budget up to 10,000 objects " +
+			"(E-133 option 3, E-17; TestSearchPlanUnderRLS)",
+	},
+	"idx_signup_request_email": {
+		Table: "signup_request", Leaky: "function lower(text)",
+		Reason: "signup requests of the operator path (000103, OperatorTables); lower is not leakproof, the " +
+			"operator reads few rows",
+	},
+	"location_path_key": {
+		Table: "location", Leaky: "operator class ltree_ops",
+		Reason: "unique constraint on the materialized path (000062); ltree_eq is not leakproof, the constraint " +
+			"is checked without the policies",
+	},
+	"rack_mount_no_overlap": {
+		Table: "rack_mount",
+		Leaky: "function int4pl(integer,integer), function int4range(integer,integer), function rack_face_range(text), " +
+			"operator class range_ops",
+		Reason: "exclusion constraint against overlapping rack mounts (000112); the constraint is checked " +
+			"without the policies, no read of the application role filters on the ranges",
+	},
+	"review_item_open_override_conflict": {
+		Table: "review_item", Leaky: "function jsonb_object_field_text(jsonb,text)",
+		Reason: "unique index of the open override conflicts (000076) over payload ->> 'ci_id' and 'field'; it " +
+			"deduplicates the inserts, checked without the policies",
+	},
+	"review_item_open_serial_mismatch": {
+		Table: "review_item", Leaky: "function jsonb_object_field_text(jsonb,text)",
+		Reason: "unique index of the open serial mismatches (000088) over payload ->> 'ci_id'; it deduplicates " +
+			"the inserts, checked without the policies",
+	},
+	"review_item_open_unlicensed_ci": {
+		Table: "review_item", Leaky: "function jsonb_object_field_text(jsonb,text)",
+		Reason: "unique index of the open unlicensed CIs (000085) over payload ->> 'device_key'; it " +
+			"deduplicates the inserts, checked without the policies",
+	},
+}
+
+// LeakyIndexQuery lists the indexes of the tables of schema public with
+// row level security that the application role cannot use as an index
+// condition (SR-04, K22, WP-836), one row per index: table, index and its
+// findings, sorted and comma separated. A finding is
+//
+//   - "function <signature>": the expression or the predicate of the index
+//     (pg_index.indexprs, indpred) calls a function, directly or as the
+//     function of an operator, that is not leakproof (pg_proc.proleakproof);
+//   - "expression <node>": the expression or the predicate holds a
+//     conversion through the text representation (CoerceViaIO, its input
+//     and output functions are not in the tree) or a comparison whose
+//     operators the query does not resolve (MinMaxExpr, RowCompareExpr);
+//   - "operator class <name>": no search operator of the operator class of
+//     a key column (pg_opclass, pg_amop) with the column type on the left is
+//     leakproof, so no condition on the column can use the index.
+//
+// TestRLSIndexesAreLeakproof and TestIndexStatementLeakproof
+// (internal/citype) run it.
+const LeakyIndexQuery = `
+WITH idx AS (
+    SELECT t.relname AS table_name, ic.relname AS index_name, i.indclass,
+           coalesce(i.indexprs::text, '') || ' ' || coalesce(i.indpred::text, '') AS tree
+      FROM pg_index i
+      JOIN pg_class t ON t.oid = i.indrelid
+      JOIN pg_class ic ON ic.oid = i.indexrelid
+      JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE n.nspname = 'public' AND t.relrowsecurity
+), called AS (
+    SELECT idx.index_name, m[1]::oid AS fn
+      FROM idx, regexp_matches(idx.tree, ':(?:funcid|opfuncid) (\d+)', 'g') AS m
+    UNION
+    SELECT idx.index_name, o.oprcode::oid
+      FROM idx, regexp_matches(idx.tree, ':opno (\d+)', 'g') AS m
+      JOIN pg_operator o ON o.oid = m[1]::oid
+), findings AS (
+    SELECT c.index_name, 'function ' || p.oid::regprocedure::text AS finding
+      FROM called c JOIN pg_proc p ON p.oid = c.fn
+     WHERE NOT p.proleakproof
+    UNION
+    SELECT idx.index_name, 'expression ' || lower(m[1])
+      FROM idx, regexp_matches(idx.tree, '\{(COERCEVIAIO|MINMAXEXPR|ROWCOMPAREEXPR)\M', 'g') AS m
+    UNION
+    SELECT idx.index_name, 'operator class ' || oc.opcname
+      FROM idx, unnest(idx.indclass::oid[]) AS k(opclass)
+      JOIN pg_opclass oc ON oc.oid = k.opclass
+     WHERE NOT EXISTS (
+           SELECT 1
+             FROM pg_amop ao
+             JOIN pg_operator o ON o.oid = ao.amopopr
+             JOIN pg_proc p ON p.oid = o.oprcode
+            WHERE ao.amopfamily = oc.opcfamily AND ao.amoppurpose = 's'
+              AND ao.amoplefttype = oc.opcintype AND p.proleakproof)
+)
+SELECT idx.table_name, f.index_name, string_agg(f.finding, ', ' ORDER BY f.finding COLLATE "C")
+  FROM findings f JOIN idx USING (index_name)
+ GROUP BY idx.table_name, f.index_name
+ ORDER BY f.index_name COLLATE "C"`

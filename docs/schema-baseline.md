@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000190_entitlement_p2_keys
+Stand: Migration 000191_drop_idx_ci_fts
 
 ## Prüfung
 
@@ -314,6 +314,76 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 |---|---|---|
 
 <!-- rls-known-gaps:end -->
+
+## Indizes unter RLS (SR-04, K22, WP-836)
+
+Unter `FORCE ROW LEVEL SECURITY` übernimmt der Planer für die App-Rolle
+`reticora_app` eine Bedingung nur dann als Indexbedingung vor die Policies,
+wenn alle beteiligten Funktionen leakproof sind (`pg_proc.proleakproof`).
+Sonst wertet er sie erst nach den Policies aus und liest die Tabelle. Regel K22
+für jede Tabelle mit RLS:
+
+- Kein Index, dessen Ausdruck oder Prädikat eine nicht-leakproof Funktion
+  aufruft, direkt oder als Funktion eines Operators (Beispiele: `->>`
+  (`jsonb_object_field_text`), `lower`, `to_tsvector`, `||` (`textcat`),
+  `int4pl`, Umwandlung über die Textdarstellung wie `id::text`).
+- Kein Index über eine Operatorklasse, deren Suchoperatoren für den
+  Spaltentyp alle nicht leakproof sind (`pg_opclass`, `pg_amop`). In
+  PostgreSQL 16 betrifft das u. a. `tsvector_ops` (`@@`, `ts_match_vq`),
+  `jsonb_ops` und `jsonb_path_ops` (`@>`), `array_ops` (`@>`, `&&`),
+  `range_ops`, die `ltree`-Klassen und `numeric`-Vergleiche. Leakproof sind
+  u. a. `texteq`, `uuid_eq`, `macaddr_eq`, `network_eq` und die Vergleiche auf
+  `date` und `timestamptz`.
+- Suchfelder liegen deshalb als gespeicherte Spalte mit leakproof Operator
+  (`GENERATED ALWAYS AS … STORED`, Muster 000134 `hostname_lc`), in einer
+  Seitentabelle (`ci_identity_mac`, 000161) oder in `search_document` mit dem
+  gespeicherten `search_vector`. Attributwerte vergleichen Filter und
+  Attributindizes über die LEAKPROOF-Funktion `reticora_attr_text(jsonb,
+  text)` (000162, E-73 Korrekturplan); die Indizes `idx_attr_*` sind damit
+  unter RLS nutzbar. Nach E-133 setzt keine weitere Migration eine Funktion
+  `LEAKPROOF`.
+
+Migration 000191 entfernt `idx_ci_fts` (`to_tsvector` über `ci`, 000021): Keine
+Abfrage nutzte den Ausdruck, die Volltextsuche liest
+`search_document.search_vector`. `ci` erhält keine zweite `tsvector`-Spalte.
+Volltext (`idx_search_document_fts`) und `UniqueConflicts` (Schlüssel aus
+`attribute_definition`, `c.attributes ->> d.key`) bleiben für die App-Rolle
+ein dokumentierter Scan, linear im Budget bis 10.000 Objekte (E-133 Option 3,
+E-17; `TestSearchPlanUnderRLS`, `TestUniqueConflictsPlanUnderRLS`). Der
+Attributfilter der CI-Liste hat die Indexbedingung über `reticora_attr_text`
+(`TestAttributeFilterUsesIndexUnderRLS`).
+
+`rls.LeakyIndexQuery` (`backend/internal/tenant/rls/known_gaps.go`) findet
+solche Indizes im Katalog (`pg_index.indexprs`/`indpred`, `pg_opclass`,
+`pg_amop`, `pg_proc.proleakproof`). `TestRLSIndexesAreLeakproof` verlangt,
+dass die gefundenen Indizes genau `rls.LeakyIndexes` entsprechen: Ein neuer
+Index ohne Eintrag und ein Eintrag ohne Fund lassen den Test scheitern, die
+Liste kann also nur schrumpfen. `TestIndexStatementLeakproof`
+(`backend/internal/citype`) prüft mit derselben Abfrage die Indizes des
+DDL-Jobs (`citype.IndexStatement`, `citype.KeyIndexStatement`). Die Gründe
+je Eintrag stehen in `known_gaps.go`; die Tabelle wird mit
+`RETICORA_UPDATE_SCHEMA_BASELINE=1 go test -run TestLeakyIndexesDocumented
+./internal/tenant/rls/` neu erzeugt.
+
+<!-- rls-leaky-indexes:begin -->
+
+| Index | Tabelle | Nicht leakproof |
+|---|---|---|
+| `desk_booking_no_overlap` | `desk_booking` | function tstzrange(timestamp with time zone,timestamp with time zone), operator class range_ops |
+| `idx_ci_attributes_path` | `ci` | operator class jsonb_path_ops |
+| `idx_location_path` | `location` | operator class gist_ltree_ops |
+| `idx_pii_subject_tokens` | `pii_subject` | operator class array_ops |
+| `idx_review_item_candidates` | `review_item` | operator class array_ops |
+| `idx_saved_view_shared_roles` | `saved_view` | operator class array_ops |
+| `idx_search_document_fts` | `search_document` | operator class tsvector_ops |
+| `idx_signup_request_email` | `signup_request` | function lower(text) |
+| `location_path_key` | `location` | operator class ltree_ops |
+| `rack_mount_no_overlap` | `rack_mount` | function int4pl(integer,integer), function int4range(integer,integer), function rack_face_range(text), operator class range_ops |
+| `review_item_open_override_conflict` | `review_item` | function jsonb_object_field_text(jsonb,text) |
+| `review_item_open_serial_mismatch` | `review_item` | function jsonb_object_field_text(jsonb,text) |
+| `review_item_open_unlicensed_ci` | `review_item` | function jsonb_object_field_text(jsonb,text) |
+
+<!-- rls-leaky-indexes:end -->
 
 ## CI-Änderungen `ci_change` (AUD-03, WP-487)
 

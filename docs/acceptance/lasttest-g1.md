@@ -542,12 +542,55 @@ der drei Klassen sind seit dem letzten Stand dieses Berichts behoben:
 - **Attributklasse (behoben, WP-435, Migration 000162):** Der Attributfilter
   der CI-Liste nutzt `reticora_attr_text` (LEAKPROOF) in Index und Filter;
   das Szenario `attr_filter` misst ihn (74,7 ms p95 im Vorlauf).
-- **Volltextsuche (offen):** `idx_ci_fts` (`to_tsvector`) bleibt unter RLS
-  unbenutzbar; die globale Suche liest `search_document` der Organisation
-  sequenziell (WP-438). Bei 10.000 Objekten hält sie das Budget (130,4 ms
-  p95 im Vorlauf); für den Headroom siehe Offene Punkte, Punkt 6.
+- **Volltextsuche (nach E-133 dokumentierter Scan, WP-836, Migration
+  000191):** `idx_ci_fts` (`to_tsvector` über `ci`) ist entfernt; keine
+  Abfrage nutzte ihn. Die globale Suche liest die gespeicherte Spalte
+  `search_document.search_vector`; `@@` (`ts_match_vq`) ist nicht leakproof,
+  `idx_search_document_fts` dient der App-Rolle daher nicht. Nach E-133
+  (Option 3) bleibt die Suche linear im Budget bis 10.000 Objekte (E-17):
+  130,4 ms p95 im Vorlauf; Planbelege und Messwerte unten.
+- **`UniqueConflicts` (nach E-133 dokumentierter Scan, WP-836):** Die
+  Eindeutigkeitsprüfung vergleicht `c.attributes ->> d.key` mit dem
+  Schlüssel aus `attribute_definition`; weder `->>` noch der Schlüssel als
+  Spalte passen zu einem Index, die App-Rolle liest die CIs der
+  Organisation und filtert.
 
-Die Lastgrenzen aus SR-04 betreffen damit nur noch die Volltextsuche.
+Katalogtest: `TestRLSIndexesAreLeakproof`
+(`backend/internal/tenant/rls/index_catalog_integration_test.go`) meldet
+jeden Index einer RLS-Tabelle mit nicht-leakproof Ausdruck, Prädikat oder
+Operatorklasse; bekannte Fälle stehen mit Grund in `rls.LeakyIndexes`
+(`docs/schema-baseline.md`, „Indizes unter RLS“). `TestIndexStatementLeakproof`
+prüft die Indizes des DDL-Jobs (`idx_attr_*` über `reticora_attr_text`) mit
+derselben Abfrage. Bezeichner laufen nach E-133 über die Bezeichnertabelle
+mit leakproof Operatoren (WP-308). Nach E-133 setzt keine Migration eine
+weitere Funktion `LEAKPROOF`.
+
+Planbelege als `reticora_app` mit RLS (`EXPLAIN (FORMAT JSON)`, Produkt-SQL;
+`TestSearchPlanUnderRLS` in `backend/internal/search/plan_integration_test.go`,
+`TestUniqueConflictsPlanUnderRLS` in
+`backend/internal/ci/attr_filter_plan_integration_test.go`). Messwerte aus
+den Integrationstests (Bestwert aus fünf Aufrufen, Datenbank lokal,
+PostgreSQL 16 ohne Last; keine `load.yml`-Läufe). Mit
+`RETICORA_PERF_BUDGET=1` prüfen die Tests das Budget von 500 ms bei 10.000
+Objekten.
+
+| Anfrage | Plan (App-Rolle) | 10.000 Objekte | 25.000 Objekte |
+|---|---|---|---|
+| `GET /search?q=` ein Treffer, org-weit | Seq Scan auf `search_document`, `@@` als Filter | 9 ms | 18 ms |
+| `GET /search?q=` ein Treffer, Client 1 | wie oben, Policy mit Client-Prädikat | 32 ms | 87 ms |
+| `GET /search?q=` alle CIs (10.000 bzw. 25.000 Treffer), org-weit | wie oben, `COUNT(*) OVER()` und Sortierung nach `ts_rank` | 66 ms | 186 ms |
+| `GET /search?q=` alle CIs, Client 1 (6.666 bzw. 16.666 Treffer) | wie oben | 54 ms | 143 ms |
+| `UniqueConflicts`, Wert eines anderen CI | Nested Loop: `attribute_definition` > Seq Scan auf `ci`, `->>` als Filter, Abbruch beim ersten Treffer | 4 ms | 5 ms |
+| `UniqueConflicts`, kein Konflikt (ganze Organisation gelesen) | wie oben | 8 ms | 17 ms |
+| Attributfilter `filter[attributes.<key>]` | Index Scan `idx_attr_*`, Indexbedingung über `reticora_attr_text` (`TestAttributeFilterUsesIndexUnderRLS`) | Szenario `attr_filter`: 74,7 ms p95 im Vorlauf | nicht gemessen |
+
+Die Volltextsuche wächst linear mit dem Bestand; bei 25.000 Objekten bleibt
+sie in diesen Messungen ohne Last unter dem Budget. Für Suche und
+Attributfilter über etwa 25.000 Objekten gilt die Einschränkung aus E-17
+(Headroom ohne Budgetzusage, Offene Punkte, Punkt 4).
+
+Die Lastgrenzen aus SR-04 betreffen damit nur noch die Volltextsuche und
+`UniqueConflicts`, beide nach E-133 als linearer Scan dokumentiert.
 
 ## ABN-02
 
@@ -705,10 +748,15 @@ Auftraggeber, die Nummer wird hier nachgetragen.
    ganze Organisation; `GET /impact?ci_ids=` traversiert je ausgefallenem
    CI. Entscheidung E-17: Schwelle für 50.000 Objekte neu bewerten, Folge-WP
    vor GA.
-6. **Volltextsuche unter RLS (Rest von SR-04):** gespeicherte
-   `tsvector`-Spalte mit Index statt `idx_ci_fts`; Katalogtest gegen neue
-   Ausdrucksindizes auf RLS-Tabellen. Folge-WP: offen, Vorschlag an den
-   Auftraggeber (Volltextsuche SR-04).
+6. **Volltextsuche unter RLS (Rest von SR-04): erledigt (WP-836).**
+   Migration 000191 entfernt `idx_ci_fts`; `ci` erhält nach E-133 keine
+   zweite `tsvector`-Spalte, die gespeicherte Spalte der Volltextsuche ist
+   `search_document.search_vector`. Volltext und `UniqueConflicts` bleiben
+   nach E-133 (Option 3) ein dokumentierter linearer Scan im Budget bis
+   10.000 Objekte (E-17); Planbelege und Messwerte bei 10.000 und 25.000
+   Objekten im Abschnitt „Umfangskorrektur SR-04“. Der Katalogtest
+   `TestRLSIndexesAreLeakproof` erkennt neue Indizes mit nicht-leakproof
+   Ausdruck oder Operatorklasse auf RLS-Tabellen.
 7. **Outbox-Nummerierung:** Der Trigger aus Migration 000120
    (`event_outbox_number()`) bestimmt `max(sequence)` je Zeile im
    Audit-/Outbox-Sperrabschnitt (historischer Abschnitt „Verbleibende

@@ -1189,3 +1189,6 @@ MET-15;B/G1;B;backend/internal/bootstrap/cirepo_test.go;WP-833
 UI-15;[P2];B;backend/internal/ci/provenance_integration_test.go;WP-850
 ENT-06;(V), [B–P4], [A];B;backend/internal/entitlement/entitlement_test.go;WP-244
 ENT-02;[B];B;backend/internal/entitlement/entitlement_test.go;WP-244
+SRC-01;[B];B;backend/internal/search/plan_integration_test.go;WP-836
+NFR-02;[B];B;backend/internal/ci/attr_filter_plan_integration_test.go;WP-836
+REC-02;[B];B;backend/internal/tenant/rls/index_catalog_integration_test.go;WP-836
