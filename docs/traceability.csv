@@ -1199,3 +1199,5 @@ EVT-01;[B];B;backend/internal/events/outbox_integration_test.go;WP-834
 ENT-03;[B];B;backend/internal/ci/admission_integration_test.go;WP-835
 RBA-05;[P2–P4], [A];B;backend/internal/server/modules_test.go;WP-705
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/modules_test.go;WP-705
+ABN-03;[Q], jeweilige Phase;B;backend/internal/tenant/rls/object_reference_integration_test.go;WP-838
+TEN-09;[Q];B;backend/internal/tenant/rls/object_reference_integration_test.go;WP-838
