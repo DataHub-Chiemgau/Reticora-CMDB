@@ -123,6 +123,30 @@ func TestDeprecatedOperationsCarryLifecycleHeaders(t *testing.T) {
 	}
 }
 
+// TestAssetMovementsAreDeprecated covers the first deprecation of the P2
+// path inventory (E-38, WP-247): GET /api/v1/assets/{id}/movements answers
+// with Deprecation, Sunset (12 months later) and the successor link to
+// GET /api/v1/stock-movements, which takes the filter asset_id.
+func TestAssetMovementsAreDeprecated(t *testing.T) {
+	h := DeprecationHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/assets/7b0c6e1a-0000-4000-8000-000000000001/movements", nil))
+	if got := w.Header().Get("Deprecation"); got != "@1793577600" {
+		t.Errorf("Deprecation %q, want @1793577600 (2026-11-02)", got)
+	}
+	if got := w.Header().Get("Sunset"); got != "Wed, 03 Nov 2027 00:00:00 GMT" {
+		t.Errorf("Sunset %q", got)
+	}
+	if got := w.Header().Get("Link"); got != `</api/v1/stock-movements>; rel="successor-version"` {
+		t.Errorf("Link %q", got)
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/stock-movements", nil))
+	if w.Header().Get("Deprecation") != "" || w.Header().Get("Sunset") != "" {
+		t.Errorf("the successor is marked deprecated: %v", w.Header())
+	}
+}
+
 // TestDeprecationsNeedTwelveMonthsNotice: the shipped specification is
 // valid, and a deprecation without sunset or with less than 12 months of
 // notice is rejected.

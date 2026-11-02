@@ -432,9 +432,6 @@ export const inventoryApi = {
   }) {
     return fetchAPI('/stock-movements', { method: 'POST', body: JSON.stringify(data) });
   },
-  assetMovements(assetId: string, params: { limit?: number; offset?: number } = {}) {
-    return fetchAPI<PaginatedResponse<StockMovement>>(`/assets/${assetId}/movements${qs(params)}`);
-  },
   listItems(params: { limit?: number; offset?: number } = {}) {
     return fetchAPI<PaginatedResponse<QuantityItem>>(`/inventory/items${qs(params)}`);
   },

@@ -170,6 +170,97 @@ Stand: 2026-11-02 (Abgleich mit main `a01e95db` nach dem Korrekturplan; Beschlus
 
 **(d) Nicht Phase 2:** `asset-locations` und `assets/<id>/locations` sind der GPS-Verlauf (`backend/internal/location`, LOC-09 [P4]), nicht AST-07. Sie wechseln in ein eigenes P4-Modul und bleiben im G2-Release abgeschaltet (E-44, WP-706).
 
+**Pfadinventar (WP-247, Stand 2026-11-02).** Klassen: (a) bleibt/additiv, (b) umbenannt → Nachfolger, (c) entfällt. „G1“ = im G1-Release ausgeliefert (ohne `x-phase`); „nein“ = mit `x-phase` (im G1-Release nie registriert). Regel: P2-Bestandspfade, die im G1-Release nie registriert waren, entfallen ohne Alias (E-03, E-25). Ausnahme: Das Frontend ruft sie bis zu einem späteren WP noch auf; dann führt das liefernde WP sie als deprecated Alias mit `x-sunset` ≥ 12 Monate. G1-Pfade der Klasse (b) bleiben mindestens 12 Monate als Alias.
+
+*Bestandsoperationen mit `x-phase: P2` (48 Pfade) und P4:*
+
+| Pfad (Operationen) | Klasse | G1 | Zuständiges WP | Nachfolger / Anmerkung |
+|---|---|---|---|---|
+| `assets` (GET, POST), `assets/<id>` (GET, PATCH, DELETE) | (a) | nein | WP-750, WP-809 | additive Felder, u. a. `active_reservation` in `GET assets/<id>` |
+| `assets/<id>/movements` (GET) | (b) | nein | WP-247 | → `GET stock-movements?asset_id=`; deprecated seit 2026-11-02, `x-sunset` 2027-11-03; keine Aufrufer im Frontend |
+| `assets/<id>/state` (GET) | (b) | nein | WP-795 | → `assets/<id>/as-of?at=` |
+| `assets/<id>/label.svg` (GET) | (b) | nein | WP-289, WP-763 | → `assets/<id>/label?format=svg\|png\|pdf`, ohne Alias |
+| `assets/<id>/children` (GET) | (a) | nein | WP-273, WP-742 | Kind-CIs aus `ci.parent_ci_id`, neue Antwortform |
+| `assets/<id>/lifecycle-transitions` (POST) | (a) | nein | WP-723 | neu `GET` mit den erlaubten Übergängen |
+| `assignments` (GET), `assignments/<id>` (GET) | (a) | nein | WP-746, WP-747 | nur lesend, Projektion aus `stock_movement`; kein Gerüst |
+| `assignments` (POST), `assignments/<id>` (DELETE), `assignments/<id>/return\|transfer` (POST) | (b) | nein | WP-275, WP-746 | → `assets/<id>/assign\|return\|transfer`, ohne Alias; Frontend-Aufrufe in `client.ts` stellt WP-746 um |
+| `reservations` (GET, POST), `reservations/<id>` (GET) | (a) | nein | WP-277 | `POST reservations` bleibt neben `POST assets/<id>/reserve` (derselbe Dienst) |
+| `reservations/<id>/release` (POST) | (a) | nein | WP-277 | |
+| `stock-movements` (GET) | (a) | nein | WP-283, WP-756 | Filter `asset_id`, `consumable_id`; Nachfolger von `assets/<id>/movements` |
+| `stock-movements` (POST) | (a), eingeschränkt | nein | WP-283, WP-756 | nur Mengenbuchungen `receipt`, `transfer`, `correction`, `retrieval` (dazu Asset-Umzug `transfer`, E-142); kein Gerüst |
+| `compositions` (GET, POST), `compositions/<id>` (GET, PATCH, DELETE) | (c) | nein | WP-273, WP-742 | entfällt ohne Alias; Kind-CIs über `assets/<id>/children` und `ci.parent_ci_id` |
+| `consumables` (GET, POST), `consumables/<id>` (GET, PATCH, DELETE) | (a) | nein | WP-283 | Nachfolger von `inventory/items*` |
+| `consumables/<id>/movements` (GET) | (b) | nein | WP-283, WP-756 | → `GET stock-movements?consumable_id=` |
+| `consumables/<id>/movements` (POST) | (b) | nein | WP-283, WP-756 | → `POST stock-movements` (`in` → `receipt`, `out` → `retrieval`); `client.ts` ruft ihn noch auf, deshalb deprecated Alias |
+| `inventory/items` (GET, POST), `inventory/items/<id>` (GET, PATCH, DELETE) | (b) | nein | WP-283, WP-757 | → `consumables*` und `consumables/<id>/stock`; deprecated Alias, weil `cmdb.ts` sie aufruft |
+| `inventory/items/<id>/convert` (POST) | (c) | nein | WP-757, WP-320 | ohne Nachfolger, keine Abkündigung; entfällt mit dem Sunset von `inventory/items*` |
+| `inventory/availability` (GET) | (b) | nein | WP-284, WP-759, WP-277, WP-750 | → `consumables/<id>/availability` für Mengenartikel; für Assets der Reservierungsstatus aus `GET assets/<id>` |
+| `orders` (GET, POST), `orders/<id>` (GET, PATCH, DELETE) | (a) | nein | WP-286 | |
+| `orders/<id>/submit\|approve\|reject` (POST) | (a) | nein | WP-286 | |
+| `orders/<id>/items` (POST) | (b) | nein | WP-286, WP-760 | Wareneingang → `orders/<id>/receive`; `orders/<id>/items` bleibt nur im Status `draft` und bucht nie |
+| `stocktakes` (GET, POST), `stocktakes/<id>` (GET, PATCH, DELETE) | (a) | nein | WP-287 | |
+| `stocktakes/<id>/scans` (GET, POST), `stocktakes/<id>/complete` (POST) | (a) | nein | WP-287, WP-761 | kein Gerüst |
+| `stocktakes/<id>/difference` (GET) | (b) | nein | WP-287 | → `stocktakes/<id>/differences`; deprecated Alias, weil `client.ts` ihn aufruft |
+| `documents` (GET, POST), `documents/<id>` (GET, PATCH, DELETE) | (a) | nein | WP-267, WP-811 | Listenfilter `entity_type`/`entity_id`, `links` im `POST` (E-61) |
+| `documents/<id>/content` (GET) | (a) | nein | WP-731 | aktuelle Version oder `?version=n` |
+| `documents/<id>/content` (PUT) | (a) | nein | WP-267, WP-731 | bleibt als kompatibler Upload neben `POST documents/<id>/versions` |
+| `documents/<id>/links` (GET, POST) | (a) | nein | WP-267 | neu `DELETE documents/<id>/links/<link_id>`; kein Gerüst für den Bestand |
+| `tickets` (GET, POST), `tickets/<id>` (GET, PATCH, DELETE), `tickets/<id>/comments` (GET, POST) | (a) | nein | WP-290 | |
+| `tickets/<id>/sla` (GET, POST), `slas/breaches` (GET) | (a) | nein | WP-292 | additive Felder |
+| `slas` (GET, POST), `slas/<id>` (GET, PATCH, DELETE) | (a) | nein | WP-292, WP-768 | |
+| `disposal-records` (GET, POST), `disposal-records/<id>` (GET) | (a) | nein | WP-706 | Modul `disposal` ist P2 (MGT-02) |
+| `asset-locations`, `assets/<id>/locations` | (a) | nein | WP-706 | GPS-Verlauf (LOC-09), Modul `gps` mit `x-phase: P4`, im G2-Release abgeschaltet |
+
+*G1-Pfade, die E-38 berührt:*
+
+| Pfad | Klasse | G1 | Zuständiges WP | Nachfolger / Anmerkung |
+|---|---|---|---|---|
+| `lifecycle-definitions`, `lifecycle-definitions/<id>` | (b) | ja | WP-723 | → `lifecycle-models*`, Alias mit Sunset ≥ 12 Monate; der Nachfolger bleibt ohne `x-phase` |
+| `cis/<id>/state?at=` | (b) | ja | WP-793 | → `cis/<id>/as-of?at=` (derselbe Handler) |
+| `cis/<id>/parent` | (b) | ja | WP-273, WP-742 | → `cis/<id>` mit `parent_ci_id`; Antwort bis zum Sunset kompatibel |
+| `cis/<id>/field-definitions*` | (a) | ja | WP-256 | bleibt ohne Alias; die Werte liegen unter `cis/<id>/instance-attributes` |
+| `cis/<id>/lifecycle-transitions` | (a) | ja | WP-723 | neu `GET` |
+| `ci-types/templates` | (a) | ja | WP-251 | Katalog der CIType-Startvorlagen, kein Alias von `templates` |
+| `ci-types/export` | (a) | ja | WP-262 | Format v2 nur als Opt-in |
+| `attribute-definitions` | (a) | ja | WP-796 | neu `…/<id>/reindex` |
+| `jobs/<id>/revert` | (a) | ja | WP-305 | Bestand seit WP-182 (E-25); WP-305 liefert den Reverter für `ci.bulk` |
+| `history/snapshots`, `history/<entityType>/<id>` | (a) | ja | WP-793, WP-795 | |
+
+*Neue Ressourcen (Gerüst mit `x-status: planned` aus WP-247):*
+
+| Ressource (Operationen) | `x-phase` / `x-feature` | Implementierendes WP |
+|---|---|---|
+| `lifecycle-models` (GET, POST), `…/<id>` (GET, PATCH, DELETE) | – | WP-723 |
+| `cis/<id>/as-of` (GET) | – | WP-793 |
+| `cis/<id>/form`, `ci-types/<id>/form` (GET) | – | WP-719 |
+| `cis/<id>/templates` (GET, PUT) | – | WP-710 |
+| `cis/<id>/instance-attributes` (GET), `…/<key>` (PUT, DELETE) | – | WP-256 |
+| `attribute-definitions/<id>/reindex` (POST) | – | WP-796 |
+| `tags` (GET, POST), `tags/<id>` (GET, PATCH, DELETE), `tags/<id>/merge` (POST), `cis/<id>/tags` (PUT) | – | WP-753 |
+| `subnets/<id>/reservations` (GET, POST), `…/<ip_id>` (DELETE) | – | WP-299 |
+| `relationships/<id>/changes` (GET) | – | WP-296 |
+| `assets/bulk` (POST) | P2 / `assets_basic` | WP-781 |
+| `assets/<id>/assign\|return\|transfer` (POST) | P2 / `assets_basic` | WP-275 |
+| `assets/<id>/reserve` (POST), `reservations/<id>/convert` (POST) | P2 / `assets_basic` | WP-277 |
+| `assets/<id>/cis` (GET, POST), `…/<ci_id>` (DELETE) | P2 / `assets_basic` | WP-272 |
+| `assets/<id>/label` (GET) | P2 / `barcode` | WP-763 |
+| `assets/<id>/as-of` (GET) | P2 / `assets_basic` | WP-795 |
+| `assets/<id>/tags` (PUT) | P2 / `assets_basic` | WP-755 |
+| `stock-movements/<id>/signature` (GET) | P2 / `signature` | WP-748 |
+| `consumables/<id>/stock` (GET) | P2 / `stock` | WP-283 |
+| `consumables/<id>/availability` (GET) | P2 / `stock` | WP-759 |
+| `orders/<id>/place\|cancel\|close` (POST) | P2 / `internal_orders` | WP-286 |
+| `orders/<id>/receive` (POST) | P2 / `internal_orders` | WP-760 |
+| `stocktakes/<id>/start\|cancel` (POST), `…/items`, `…/differences` (GET) | P2 / `stocktake_standard` | WP-287 |
+| `documents/<id>/versions` (GET, POST), `documents/usage` (GET) | P2 / `documents` | WP-731 |
+| `documents/<id>/links/<link_id>` (DELETE) | P2 / `documents` | WP-267 |
+| `tickets/<id>/links` (GET, POST), `…/<link_id>` (DELETE) | P2 / `ticketing_essential` | WP-764 |
+| `tickets/<id>/attachments` (GET) | P2 / `ticketing_essential` | WP-765 |
+| `import-profiles` (GET, POST), `…/<id>` (GET, PATCH, DELETE) | P2 / `import` | WP-774 |
+| `imports` (POST), `imports/preview` (POST), `imports/<id>`, `imports/<id>/report` (GET) | P2 / `import` | WP-301, WP-303 |
+
+*Neue Ressourcen ohne Gerüst:* Das Register der E-38-Pfade in `backend/internal/server/modules_test.go` (`TestE38ResourcesHaveAReleaseGate`, WP-706) verbietet jede dokumentierte Operation unter einem Präfix, dessen Modul erst ein Fach-WP setzt. Deshalb legt das Fach-WP mit der ersten Route die Operationen dieser Ressourcen zusammen mit Modulpräfix und `x-phase: P2` an: `attribute-sets`, `ci-types/<id>/attribute-sets`, `templates*` (WP-250, WP-251, WP-712), `rules` (WP-716), `layouts` (WP-259), `metamodel/drafts*` (WP-260, WP-721, WP-261) und `metamodel/import` (WP-722) im Modul `metamodel` (Präfix ab WP-250); `field-permissions*` (WP-726, Modul `metamodel`); `suppliers` (WP-736), `contracts` (WP-269), `labels/lookup` (WP-762) und `labels/batch*` (WP-763) bei `inventory`; `business-calendars` (WP-768) und `review-items/<id>/ticket` (WP-291) bei `ticketing`.
+
 **Regeln.**
 - Gerüst: WP-247 legt jede neue Operation aus (c) in `api/openapi.yaml` mit `x-status: planned` an (Pfad- oder Operationsebene). Gelesen wird der Wert von `speccheck.Planned`, das WP-247 neu anlegt; ein anderer Wert ist ein Fehler. `TestRoutesAndSpecificationAreInParity` nimmt geplante Operationen aus dem Abgleich und schlägt fehl, wenn eine geplante Operation registriert ist. Das liefernde WP ersetzt das Gerüst durch die Fachschemas, entfernt `x-status: planned` und streicht nicht umgesetzte Gerüstoperationen. Bestandspfade bekommen kein Gerüst. Zum G2-Release trägt keine Operation mehr `x-status: planned`; WP-331 prüft das.
 - `x-phase: P2` tragen genau die Pfade unter einem Präfix eines P2-Moduls in `LateModules` (`backend/internal/server/modules.go`, `TestLateRoutesAreMarkedInSpecification` in `modules_test.go`), auch im Gerüst. Die Module der neuen Präfixe legt E-105 fest (Option 1): `metamodel` mit `attribute-sets`, `ci-types/<id>/attribute-sets`, `templates`, `rules`, `layouts`, `metamodel` und `field-permissions`; `import` mit `imports` und `import-profiles`; `suppliers`, `contracts` und `labels` bei `inventory`; `business-calendars` und `review-items/<id>/ticket` bei `ticketing`. Die übrigen Unterpfade von Kernressourcen (`cis/<id>/…`, die übrigen `ci-types/<id>/…`, `attribute-definitions/<id>/reindex`, `subnets/<id>/reservations`, `relationships/<id>/changes`) sind Kern und tragen kein `x-phase`. Die Zuordnung setzt das Fach-WP mit der ersten Route um (`metamodel` ab WP-250). Die Nachfolger von G1-Pfaden (`lifecycle-models`, `cis/<id>/as-of`) und `cis/<id>/instance-attributes` bleiben ohne `x-phase`, solange ihr G1-Gegenstück ohne `x-phase` ausgeliefert wird. `templates` ist kein Nachfolger eines G1-Pfads und folgt E-105 wie `attribute-sets`.

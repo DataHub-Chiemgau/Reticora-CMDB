@@ -604,8 +604,40 @@ the public HTTP API. Every route is registered in exactly one place —
 `chi.Walk`, loads the specification and fails if a route is undocumented **or**
 if the specification documents an operation that is not registered. The check
 runs in the normal `go test ./...` job, so the specification cannot drift away
-from the implementation in either direction. `/metrics` is the only deliberate
-exception: it is the Prometheus scrape endpoint, not part of the tenant API.
+from the implementation in either direction. It compares the profiles
+`postgres` and `no-db` in the releases "all modules", "G1" (paths without
+`x-phase`) and "G2" (`RETICORA_MODULES=P2`: paths without `x-phase` or with
+`x-phase: P2`). The deliberate exceptions are `/metrics` (the Prometheus scrape
+endpoint, not part of the tenant API), the undocumented GraphQL BFF under
+`/bff/` (GQL-01) and, as the only exception inside the contract, operations
+marked `x-status: planned` (E-38, WP-247).
+
+`x-status: planned` marks the scaffold of the Phase 2 path contract: on the
+path level it covers every operation of the path, on the operation level that
+one operation; any other value fails `speccheck.Planned`. A planned operation
+has `operationId`, tag, `summary`, path parameters, `Limit`/`Cursor` on
+collection GETs, a 2xx response with only a `description` and its errors as
+`#/components/responses/*` (problem+json with `trace_id`,
+`TestPlannedOperationsUseProblemResponses`). The parity test leaves planned
+operations out of the expectation and fails with "x-status: planned
+entfernen" as soon as a route serves one. A work package that implements a
+planned operation therefore replaces the scaffold with the request and
+response schemas of its domain, removes `x-status: planned`, deletes scaffold
+operations it does not implement and regenerates
+`backend/internal/server/testdata/route_permissions.txt`. The work package
+for each planned resource is listed in the path inventory of E-38
+(`docs/plan/phase2/entscheidungen.md`).
+
+Deprecation follows API-01 (E-25, WP-167): the operation carries
+`deprecated: true`, `x-deprecated-at`, `x-sunset` (at least 12 months later)
+and `x-successor` (a plain path, filters go into `description`). The
+middleware `OpenAPIValidation` derives the `Deprecation`, `Sunset` and
+`Link: <…>; rel="successor-version"` headers from these fields
+(`ParseDeprecations`); no handler sets them itself. An alias is a second
+registration in the domain handler (WP-168). `x-successor` must be a
+documented path with at least one operation that is not planned, and its
+`x-phase` must be empty or that of the deprecated path, so every release that
+serves the alias serves the successor too (`TestDeprecationSuccessorsAreServed`).
 
 **Pagination:** list endpoints accept `limit` (default 50, maximum 200) plus
 either `offset` for random access or `cursor` for stable forward iteration.
