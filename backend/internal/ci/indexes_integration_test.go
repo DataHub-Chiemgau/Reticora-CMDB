@@ -21,7 +21,11 @@ import (
 
 // TestCIIndexesFollowCI02 covers CI-02 (WP-121) against PostgreSQL: the
 // migrated schema has every index CI-02 lists on ci, with its columns,
-// predicate and operator class — not just an index of that name.
+// predicate and operator class — not just an index of that name. The
+// full-text index over ci (idx_ci_fts, 000021) is gone since WP-836 (SR-04,
+// E-133, migration 000191): to_tsvector is not leakproof, so the planner
+// could not use it under RLS; the full-text search reads
+// search_document.search_vector instead (TestSearchPlanUnderRLS).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL).
 func TestCIIndexesFollowCI02(t *testing.T) {
@@ -52,18 +56,16 @@ func TestCIIndexesFollowCI02(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	coalesce := func(col string) string { return `COALESCE\(` + col + `, ''::text\)` }
 	for name, want := range map[string]string{
-		"(org, type)":            `USING btree \(organization_id, ci_type_id\)$`,
-		"(org, status)":          `USING btree \(organization_id, status\)$`,
-		"(org, location_id)":     `USING btree \(organization_id, location_id\)`,
-		"(org, asset_id)":        `USING btree \(organization_id, asset_id\)`,
-		"(org, parent_ci_id)":    `USING btree \(organization_id, parent_ci_id\)`,
-		"partial serial":         `USING btree \((organization_id, )?serial_number\) WHERE \(serial_number IS NOT NULL\)$`,
-		"partial hardware_uuid":  `USING btree \((organization_id, )?hardware_uuid\) WHERE \(hardware_uuid IS NOT NULL\)$`,
-		"partial management_ip":  `USING btree \((organization_id, )?management_ip\) WHERE \(management_ip IS NOT NULL\)$`,
-		"GIN jsonb_path_ops":     `USING gin \(attributes jsonb_path_ops\)$`,
-		"GIN full text (simple)": `USING gin \(to_tsvector\('simple'::regconfig, .*` + coalesce("name") + `.*` + coalesce("hostname") + `.*` + coalesce("manufacturer") + `.*` + coalesce("model") + `.*` + coalesce("serial_number"),
+		"(org, type)":           `USING btree \(organization_id, ci_type_id\)$`,
+		"(org, status)":         `USING btree \(organization_id, status\)$`,
+		"(org, location_id)":    `USING btree \(organization_id, location_id\)`,
+		"(org, asset_id)":       `USING btree \(organization_id, asset_id\)`,
+		"(org, parent_ci_id)":   `USING btree \(organization_id, parent_ci_id\)`,
+		"partial serial":        `USING btree \((organization_id, )?serial_number\) WHERE \(serial_number IS NOT NULL\)$`,
+		"partial hardware_uuid": `USING btree \((organization_id, )?hardware_uuid\) WHERE \(hardware_uuid IS NOT NULL\)$`,
+		"partial management_ip": `USING btree \((organization_id, )?management_ip\) WHERE \(management_ip IS NOT NULL\)$`,
+		"GIN jsonb_path_ops":    `USING gin \(attributes jsonb_path_ops\)$`,
 	} {
 		re := regexp.MustCompile(want)
 		found := false
@@ -75,6 +77,11 @@ func TestCIIndexesFollowCI02(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("index %s missing (want %s)", name, want)
+		}
+	}
+	for _, def := range defs {
+		if strings.Contains(def, "to_tsvector") {
+			t.Errorf("full-text index on ci is back (WP-836 dropped it, E-133): %s", def)
 		}
 	}
 }
