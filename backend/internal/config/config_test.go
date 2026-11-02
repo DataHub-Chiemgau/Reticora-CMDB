@@ -173,6 +173,9 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"smtp without sender", map[string]string{"RETICORA_SMTP_HOST": "mail.example"}, false, "RETICORA_SMTP_FROM is required"},
 		{"smtp with an unknown tls mode", map[string]string{"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_FROM": "noreply@example.org",
 			"RETICORA_SMTP_TLS": "ssl"}, false, "RETICORA_SMTP_TLS"},
+		{"smtp login without tls", map[string]string{"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_FROM": "noreply@example.org",
+			"RETICORA_SMTP_TLS": "none", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"}, false,
+			"RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls"},
 		{"audit retention below NFR-06", map[string]string{"RETICORA_RETENTION_AUDIT_YEARS": "9"}, false, "RETICORA_RETENTION_AUDIT_YEARS must be at least 10"},
 		{"history retention below NFR-06", map[string]string{"RETICORA_RETENTION_HISTORY_DAYS": "30"}, false, "RETICORA_RETENTION_HISTORY_DAYS must be at least 1095"},
 		{"soft-delete retention below NFR-06", map[string]string{"RETICORA_RETENTION_SOFT_DELETE_DAYS": "7"}, false, "at least 90"},
@@ -189,6 +192,30 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 			err := Load().Validate(tc.noDB)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestValidateSMTPWithoutTLS covers TEC-13: TLS mode none is valid without a
+// login (the mailpit of the E2E overlay, frontend/e2e/fixtures) and with a
+// login to a relay on the same host, which Go's net/smtp authenticates
+// unencrypted; a login to another host is refused (see
+// TestValidateRejectsInvalidSettings), as notify.SMTPConfig does.
+func TestValidateSMTPWithoutTLS(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"E2E mailpit": {"RETICORA_SMTP_HOST": "mailpit", "RETICORA_SMTP_PORT": "1025", "RETICORA_SMTP_TLS": "none",
+			"RETICORA_SMTP_FROM": "Reticora <noreply@reticora-e2e.de>", "RETICORA_SMTP_USERNAME": "", "RETICORA_SMTP_PASSWORD": ""},
+		"login to localhost": {"RETICORA_SMTP_HOST": "localhost", "RETICORA_SMTP_PORT": "25", "RETICORA_SMTP_TLS": "none",
+			"RETICORA_SMTP_FROM": "noreply@example.org", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"},
+		"login over starttls": {"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_TLS": "starttls",
+			"RETICORA_SMTP_FROM": "noreply@example.org", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			setAll(t, env)
+			if err := Load().Validate(true); err != nil {
+				t.Fatalf("Validate() = %v", err)
 			}
 		})
 	}

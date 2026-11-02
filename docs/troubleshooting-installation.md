@@ -902,7 +902,7 @@ docker compose --env-file .env -f docker-compose.yml config server | grep -E 'RE
 **Fix:** re-run `install-cloud.sh` and answer "Outgoing e-mail (SMTP)": host
 name or IP of the relay (not `localhost`: inside the containers that is the
 container itself), TLS mode (`starttls` on 587, `tls` on 465, `none`), port,
-user name and password (optional), sender (`noreply@example.com` or
+user name and password (optional, not asked with `none`), sender (`noreply@example.com` or
 `Reticora CMDB <noreply@example.com>`). Non-interactive: export
 `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT`, `RETICORA_SMTP_TLS`,
 `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD` and `RETICORA_SMTP_FROM`
@@ -925,6 +925,14 @@ Notes:
 
 - User name and password are written unquoted to `.env` (mode `0600`): no
   blanks, quotes, `\`, `` ` `` or `$`. The password is never printed.
+- A user name needs `RETICORA_SMTP_TLS=starttls` or `tls`: the server (Go
+  `net/smtp`) sends no login over an unencrypted connection to a host other
+  than `localhost`, so with `none` every e-mail would fail at AUTH while
+  `/readyz` (EHLO only) stays green. The installer refuses the combination
+  (`RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls`), an
+  interactive run asks for no user name with `none`, and the server refuses
+  it at its start (`invalid central SMTP configuration`). Use `none` only
+  for a relay without authentication.
 - The installer checks the sender the way the server parses it (Go
   `net/mail`): no `,` `;` `:` `@` `[` `]` `(` `)` `<` `>` in the name
   (`Reticora Inc. <noreply@example.com>`, not `Reticora, Inc. <…>`), no

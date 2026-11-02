@@ -80,11 +80,21 @@ func (c *SMTPConfig) Validate() error {
 		return fmt.Errorf("%w: smtp tls must be starttls, tls or none", ErrValidation)
 	case c.Password != "" && c.Username == "":
 		return fmt.Errorf("%w: smtp password without username", ErrValidation)
+	case c.TLS == SMTPNone && c.Username != "" && !smtpLocalhost(c.Host):
+		// smtp.PlainAuth refuses an unencrypted connection to any other
+		// host: every send would fail at AUTH.
+		return fmt.Errorf("%w: smtp authentication needs tls or starttls", ErrValidation)
 	}
 	if _, err := parseAddress(c.From); err != nil {
 		return fmt.Errorf("%w: smtp from: %v", ErrValidation, err)
 	}
 	return nil
+}
+
+// smtpLocalhost reports whether net/smtp's PlainAuth sends credentials to
+// host over an unencrypted connection: only to these literal names.
+func smtpLocalhost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // smtpPorts are the ports an organization's own server may use unless

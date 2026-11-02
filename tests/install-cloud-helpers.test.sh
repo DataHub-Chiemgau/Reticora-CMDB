@@ -2139,6 +2139,68 @@ ANSWERS
     grep -qF "The name must not contain , ; : @ [ ] ( ) < >" "$out"
 }
 
+# smtp_interactive <name> <answers> — collect_smtp_config with these answers
+# on the current .env; prints "host|tls|port|user|password|from". A prompt
+# that keeps asking at the end of the answers would loop: the run has a
+# deadline.
+# shellcheck disable=SC2317 # the stubs are called by the installer functions
+smtp_interactive() {
+    local out="$TMP_ROOT/smtp-$1.out" pid
+    smtp_relay_reachable() { return 0; }
+    is_tty() { return 0; }
+    (
+        collect_smtp_config <<< "$2"
+        printf 'RESULT %s|%s|%s|%s|%s|%s\n' "$RETICORA_SMTP_HOST" "$RETICORA_SMTP_TLS" "$RETICORA_SMTP_PORT" \
+            "$RETICORA_SMTP_USERNAME" "$RETICORA_SMTP_PASSWORD" "$RETICORA_SMTP_FROM"
+    ) >"$out" 2>&1 &
+    pid=$!
+    for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid"
+        echo "$1: collect_smtp_config still waits for input" >&2
+        return 1
+    fi
+    wait "$pid" || { tail -n 3 "$out" >&2; return 1; }
+    sed -n 's/^RESULT //p' "$out"
+}
+
+# TLS mode none sends no login (Go net/smtp refuses PLAIN over an unencrypted
+# connection to a host other than localhost): a relay without
+# authentication is accepted; an interactive run asks for no user name with
+# none, and a user name of .env makes it ask whether to drop the login or
+# choose the TLS mode again.
+# shellcheck disable=SC2034,SC2317 # variables and stubs used by the installer functions
+test_smtp_tls_none_without_login() {
+    smtp_relay_reachable() { return 0; }
+    smtp_env smtp-none "RETICORA_SMTP_HOST=relay.example.test" "RETICORA_SMTP_TLS=none" "RETICORA_SMTP_PORT=25" \
+        "RETICORA_SMTP_FROM=noreply@example.test"
+    collect_config >/dev/null
+    [ "$RETICORA_SMTP_TLS" = none ] && [ "$RETICORA_SMTP_PORT" = 25 ] && [ -z "$RETICORA_SMTP_USERNAME" ] \
+        || { echo "none without login: $RETICORA_SMTP_TLS $RETICORA_SMTP_PORT '$RETICORA_SMTP_USERNAME'"; return 1; }
+    smtp_env smtp-none-interactive "RETICORA_SMTP_HOST=relay.example.test" "RETICORA_SMTP_TLS=starttls" "RETICORA_SMTP_PORT=587" \
+        "RETICORA_SMTP_USERNAME=mailer" "RETICORA_SMTP_PASSWORD=secret-pw" "RETICORA_SMTP_FROM=noreply@example.test"
+    RETICORA_PUBLIC_BASE_URL="$(env_get RETICORA_PUBLIC_BASE_URL)"
+    local result
+    # Answers: host (kept), none, keep the login (no), TLS mode (Enter = the
+    # offered starttls), port, user name and password (kept), From. A From
+    # with a blank is no valid user name: a user name prompt in its place
+    # would ask again until the deadline.
+    result="$(smtp_interactive none-keep-login $'\nnone\nn\n\n\n\n\nOps Team <ops@example.test>\n')" || return 1
+    [ "$result" = "relay.example.test|starttls|587|mailer|secret-pw|Ops Team <ops@example.test>" ] \
+        || { echo "keep login: $result"; return 1; }
+    grep -qF "TLS mode none sends no login" "$TMP_ROOT/smtp-none-keep-login.out" || return 1
+    # Answers: host (kept), none, drop the login (yes), port, From: no user
+    # name or password is asked for.
+    result="$(smtp_interactive none-drop-login $'\nnone\ny\n\nOps Team <ops@example.test>\n')" || return 1
+    [ "$result" = "relay.example.test|none|587|||Ops Team <ops@example.test>" ] || { echo "drop login: $result"; return 1; }
+    # Without a user name none is taken as is; the next answers are the port
+    # and From.
+    smtp_env smtp-none-no-user "RETICORA_SMTP_HOST=relay.example.test" "RETICORA_SMTP_FROM=noreply@example.test"
+    result="$(smtp_interactive none-no-user $'\nnone\n25\nOps Team <ops@example.test>\n')" || return 1
+    [ "$result" = "relay.example.test|none|25|||Ops Team <ops@example.test>" ] || { echo "no user: $result"; return 1; }
+    ! grep -qF "TLS mode none sends no login" "$TMP_ROOT/smtp-none-no-user.out"
+}
+
 # smtp_refused <name> <message> <KEY=value…> — collect_config on the legacy
 # .env with these SMTP settings aborts with the message, never printing the
 # password of the case password-dollar.
@@ -2168,6 +2230,9 @@ test_smtp_settings_validated() {
             "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_PORT=70000" "RETICORA_SMTP_FROM=noreply@example.test" &&
         smtp_refused password-only "RETICORA_SMTP_PASSWORD needs RETICORA_SMTP_USERNAME" \
             "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_PASSWORD=secret-pw" "RETICORA_SMTP_FROM=noreply@example.test" &&
+        smtp_refused none-with-login "RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls" \
+            "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_TLS=none" "RETICORA_SMTP_PORT=25" \
+            "RETICORA_SMTP_USERNAME=mailer" "RETICORA_SMTP_PASSWORD=secret-pw" "RETICORA_SMTP_FROM=noreply@example.test" &&
         smtp_refused password-dollar "RETICORA_SMTP_PASSWORD must not contain blanks, quotes" "RETICORA_SMTP_HOST=smtp.example.test" \
             "RETICORA_SMTP_USERNAME=mailer" 'RETICORA_SMTP_PASSWORD=secret-pa$$' "RETICORA_SMTP_FROM=noreply@example.test" &&
         smtp_refused bad-from "RETICORA_SMTP_FROM ('Reticora <noreply>') must be an e-mail address or 'Name <address>'" \
@@ -2339,6 +2404,7 @@ run_test    "smtp: non-interactive from .env and environment; empty host keeps e
 run_test    "smtp: settings the server would refuse are refused, the password never shown"  test_smtp_settings_validated
 run_test    "smtp: the port follows the TLS mode (465 for tls after a run without SMTP)"      test_smtp_port_follows_tls_mode
 run_test    "smtp: interactive tls offers 465; a sender net/mail refuses is asked again"      test_smtp_interactive_port_and_from
+run_test    "smtp: TLS mode none without login; interactive none asks for no user name"     test_smtp_tls_none_without_login
 run_test    "smtp: an unreachable SMTP server stops a non-interactive run before .env"     test_smtp_unreachable_aborts
 run_test    "smtp: the TCP pre-check reaches a listener and detects a refused port"          test_smtp_relay_probe
 run_test    "signup: state after the start probed and reported in the summary"               test_signup_state_reported
@@ -2642,6 +2708,45 @@ test_edge_hosts_previous_and_override() {
     grep -qF "RETICORA_NATS_EDGE_HOSTS: 'bad host' is not a host name or IP address" <<< "$out"
 }
 
+# A base URL that valid_url accepts and earlier releases installed with does
+# not stop a re-run: the trailing dot of an FQDN is dropped (the same
+# certificate name), a host that is no certificate name as written
+# (underscore, non-ASCII) is skipped with a warning. A name the operator
+# gave (environment or previous .env value) is still refused.
+# shellcheck disable=SC2034 # read by nats_edge_hosts
+test_edge_hosts_base_host_not_a_cert_name() {
+    ENV_FILE="$TMP_ROOT/edge-base-none.env"
+    rm -f "$ENV_FILE"
+    NATS_EDGE_HOSTS_OVERRIDE=""
+    expect_hosts "cmdb.example.com,nats-edge,localhost" "https://cmdb.example.com./" "cmdb.example.com" "10.0.0.5" &&
+        expect_hosts "cmdb.example.com,nats-edge,localhost" "https://CMDB.example.com.:8443/ui" "" "10.0.0.5" || return 1
+    local out base
+    for base in "http://cmdb_prod:3000" "https://cmdb.bücher.de"; do
+        out="$(edge_hosts "$base" "" "10.0.0.5" 2>&1)" || { echo "$base: $out"; return 1; }
+        [ "$(tail -n 1 <<< "$out")" = "nats-edge,localhost" ] &&
+            grep -qF "The host '$(url_host "$base")' of RETICORA_PUBLIC_BASE_URL cannot be named on the certificate" <<< "$out" \
+            || { echo "$base: $out"; return 1; }
+    done
+    # The punycode name the operator added in .env is kept.
+    printf 'RETICORA_NATS_EDGE_HOSTS=cmdb.xn--bcher-kva.de,nats-edge,localhost\n' > "$ENV_FILE"
+    [ "$(edge_hosts "https://cmdb.bücher.de" "" "" 2>/dev/null)" = "cmdb.xn--bcher-kva.de,nats-edge,localhost" ] || return 1
+    # Operator names are checked as before.
+    printf 'RETICORA_NATS_EDGE_HOSTS=cmdb_prod,nats-edge,localhost\n' > "$ENV_FILE"
+    if out="$(nats_edge_hosts 2>&1)"; then echo "accepted 'cmdb_prod' of the previous .env"; return 1; fi
+    grep -qF "RETICORA_NATS_EDGE_HOSTS: 'cmdb_prod' is not a host name or IP address" <<< "$out" || return 1
+    rm -f "$ENV_FILE"
+    NATS_EDGE_HOSTS_OVERRIDE="cmdb_prod"
+    if out="$(nats_edge_hosts 2>&1)"; then echo "accepted 'cmdb_prod' of the environment"; return 1; fi
+    grep -qF "RETICORA_NATS_EDGE_HOSTS: 'cmdb_prod' is not a host name or IP address" <<< "$out" || return 1
+    # The whole configuration step of a re-run on such an .env completes.
+    NATS_EDGE_HOSTS_OVERRIDE=""
+    write_legacy_env edge-base-underscore
+    sed -i 's|^RETICORA_PUBLIC_BASE_URL=.*|RETICORA_PUBLIC_BASE_URL=http://cmdb_prod:3000|' "$ENV_FILE"
+    out="$(collect_config 2>&1)" || { tail -n 3 <<< "$out"; return 1; }
+    collect_config >/dev/null 2>&1 && [ "$RETICORA_NATS_EDGE_HOSTS" = "nats-edge,localhost" ] \
+        || { echo "edge hosts: $RETICORA_NATS_EDGE_HOSTS"; return 1; }
+}
+
 # The installer writes the names into .env, compose hands them to the server
 # (with nats-edge,localhost as before); an .env without them keeps the TLS
 # domain of the former default; a re-run keeps a name added in .env.
@@ -2670,6 +2775,7 @@ test_edge_hosts_written_and_rendered() {
 
 run_test    "edge hosts: derived for IP, domain, localhost and IPv6 installations"     test_edge_hosts_derived
 run_test    "edge hosts: previous names kept, environment overrides, invalid refused"  test_edge_hosts_previous_and_override
+run_test    "edge hosts: base host with trailing dot, underscore or IDN does not stop" test_edge_hosts_base_host_not_a_cert_name
 run_test    "edge hosts: written to .env, rendered by compose, old .env keeps default" test_edge_hosts_written_and_rendered
 
 # ─── documentation of the signup and collector failure modes ─────────────────

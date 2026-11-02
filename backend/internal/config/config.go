@@ -414,6 +414,12 @@ func absoluteHTTPURL(raw string) bool {
 	return scheme == "http" || scheme == "https"
 }
 
+// smtpLocalhost reports whether Go's net/smtp sends a login to host over an
+// unencrypted connection: only to these literal names (smtp.PlainAuth).
+func smtpLocalhost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
 // Minimum retention periods of NFR-06 and AUD-09.
 const (
 	MinRetentionAuditYears     = 10
@@ -600,6 +606,10 @@ func (c *Config) Validate(noDB bool) error {
 			errs = append(errs, fmt.Errorf("RETICORA_SMTP_TLS=%q is not one of starttls, tls, none", c.SMTPTLS))
 		case c.SMTPPort < 1 || c.SMTPPort > 65535:
 			errs = append(errs, fmt.Errorf("RETICORA_SMTP_PORT=%d is out of range", c.SMTPPort))
+		case c.SMTPTLS == "none" && c.SMTPUsername != "" && !smtpLocalhost(c.SMTPHost):
+			// Go's net/smtp sends no login over an unencrypted connection
+			// to another host: every e-mail would fail (notify.SMTPConfig).
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls: no login is sent unencrypted to %s", c.SMTPHost))
 		}
 	}
 	for _, r := range []struct {

@@ -1111,7 +1111,9 @@ select_direct_ports() {
 # a certificate without that name fails the handshake ("doesn't contain any
 # IP SANs", "certificate is valid for …, not …") and the collector delivers
 # nothing. Derived on every run, in this order and without duplicates: the
-# TLS domain, the host of RETICORA_PUBLIC_BASE_URL (not a loopback name) and,
+# TLS domain, the host of RETICORA_PUBLIC_BASE_URL (not a loopback name,
+# without a trailing dot; a host that is no valid certificate name, e.g.
+# with an underscore or non-ASCII characters, is skipped with a warning) and,
 # for a localhost or IP installation, the host IP (RETICORA_HOST_IP,
 # otherwise the source address of the default route; behind NAT the base
 # URL names the public address), then the names of the previous .env value
@@ -1127,7 +1129,19 @@ nats_edge_hosts() {
     else
         [ -z "${RETICORA_TLS_DOMAIN:-}" ] || candidates+=("$RETICORA_TLS_DOMAIN")
         base="$(url_host "${RETICORA_PUBLIC_BASE_URL:-}")"
-        host_is_loopback "$base" || candidates+=("$base")
+        # An FQDN with a trailing dot is the same certificate name (the
+        # server's normalizeEdgeHost and x509 host matching drop it).
+        base="${base%.}"
+        if host_is_loopback "$base"; then
+            :
+        elif valid_host "$base"; then
+            candidates+=("$base")
+        else
+            # The base URL passed valid_url, which earlier releases installed
+            # with: a name the operator did not give as an edge host must not
+            # stop the run.
+            warn "The host '$base' of RETICORA_PUBLIC_BASE_URL cannot be named on the certificate of the collector NATS endpoint as written (underscore or non-ASCII characters); it is not added to RETICORA_NATS_EDGE_HOSTS. Set RETICORA_NATS_EDGE_HOSTS to the names collectors connect to, e.g. the punycode form of an internationalized domain name (docs/betrieb/firewall-matrix.md)."
+        fi
         if host_is_loopback "$base" || host_is_ip "$base"; then
             h="$(host_primary_ip 2>/dev/null || true)"
             [ -z "$h" ] || candidates+=("$h")
@@ -1190,6 +1204,8 @@ smtp_port_for_mode() {
 # it, and apply_realm_smtp gives it to Keycloak's realm. An empty host keeps
 # e-mail off: self-signup then stays disabled, because its e-mail
 # verification is mandatory. The other values are kept for a later run.
+# TLS mode none asks for no user name and password: the server never sends
+# a login unencrypted (validate_smtp_config).
 collect_smtp_config() {
     local def_host def_port def_tls def_user def_pw def_from port_tls port
     def_host="${SMTP_HOST_OVERRIDE:-$(env_get RETICORA_SMTP_HOST || true)}"
@@ -1221,24 +1237,43 @@ collect_smtp_config() {
                 valid_smtp_host_answer explain_smtp_host_error
             [ "$RETICORA_SMTP_HOST" != - ] || RETICORA_SMTP_HOST=""
             if [ -n "$RETICORA_SMTP_HOST" ]; then
-                ask_validated RETICORA_SMTP_TLS "SMTP TLS mode: starttls (port 587), tls (implicit TLS, port 465) or none" \
-                    "$RETICORA_SMTP_TLS" valid_smtp_tls
+                while true; do
+                    ask_validated RETICORA_SMTP_TLS "SMTP TLS mode: starttls (port 587), tls (implicit TLS, port 465) or none (unencrypted, no login)" \
+                        "$RETICORA_SMTP_TLS" valid_smtp_tls
+                    [ "$RETICORA_SMTP_TLS" = none ] && [ -n "$RETICORA_SMTP_USERNAME" ] || break
+                    # A user name of .env or the environment: the server never
+                    # sends it unencrypted (validate_smtp_config).
+                    warn "TLS mode none sends no login: the server (Go net/smtp) never authenticates over an unencrypted connection, so the SMTP user name '$RETICORA_SMTP_USERNAME' needs starttls or tls."
+                    if confirm "Use TLS mode none without authentication (removes the SMTP user name and password)?" "no"; then
+                        RETICORA_SMTP_USERNAME=""
+                        RETICORA_SMTP_PASSWORD=""
+                        break
+                    fi
+                    RETICORA_SMTP_TLS=starttls
+                done
                 [ -n "$SMTP_PORT_OVERRIDE" ] \
                     || RETICORA_SMTP_PORT="$(smtp_port_for_mode "$RETICORA_SMTP_PORT" "$port_tls" "$RETICORA_SMTP_TLS")"
                 ask_validated RETICORA_SMTP_PORT "SMTP port" "$RETICORA_SMTP_PORT" valid_port
                 port_tls="$RETICORA_SMTP_TLS"
-                ask_validated RETICORA_SMTP_USERNAME "SMTP user name (empty = no authentication, optional; '-' removes it)" \
-                    "$RETICORA_SMTP_USERNAME" valid_smtp_username_answer
-                [ "$RETICORA_SMTP_USERNAME" != - ] || RETICORA_SMTP_USERNAME=""
-                if [ -n "$RETICORA_SMTP_USERNAME" ]; then
-                    while true; do
-                        ask_optional_secret RETICORA_SMTP_PASSWORD "SMTP password" "$RETICORA_SMTP_PASSWORD"
-                        valid_env_value "$RETICORA_SMTP_PASSWORD" && break
-                        warn "Invalid input — the password is written unquoted to $ENV_FILE: no blanks, quotes, '\\', '\`' or '\$'."
-                        RETICORA_SMTP_PASSWORD=""
-                    done
-                else
+                if [ "$RETICORA_SMTP_TLS" = none ]; then
+                    # No login over an unencrypted connection: no user name
+                    # and password to ask for.
+                    RETICORA_SMTP_USERNAME=""
                     RETICORA_SMTP_PASSWORD=""
+                else
+                    ask_validated RETICORA_SMTP_USERNAME "SMTP user name (empty = no authentication, optional; '-' removes it)" \
+                        "$RETICORA_SMTP_USERNAME" valid_smtp_username_answer
+                    [ "$RETICORA_SMTP_USERNAME" != - ] || RETICORA_SMTP_USERNAME=""
+                    if [ -n "$RETICORA_SMTP_USERNAME" ]; then
+                        while true; do
+                            ask_optional_secret RETICORA_SMTP_PASSWORD "SMTP password" "$RETICORA_SMTP_PASSWORD"
+                            valid_env_value "$RETICORA_SMTP_PASSWORD" && break
+                            warn "Invalid input — the password is written unquoted to $ENV_FILE: no blanks, quotes, '\\', '\`' or '\$'."
+                            RETICORA_SMTP_PASSWORD=""
+                        done
+                    else
+                        RETICORA_SMTP_PASSWORD=""
+                    fi
                 fi
                 ask_validated RETICORA_SMTP_FROM "Sender address (From), e.g. Reticora CMDB <noreply@example.com>" \
                     "$RETICORA_SMTP_FROM" valid_smtp_from explain_smtp_from_error
@@ -1281,6 +1316,11 @@ validate_smtp_config() {
         || die "RETICORA_SMTP_PASSWORD must not contain blanks, quotes, '\\', '\`' or '\$' (it is written unquoted to $ENV_FILE)."
     [ -z "$RETICORA_SMTP_PASSWORD" ] || [ -n "$RETICORA_SMTP_USERNAME" ] \
         || die "RETICORA_SMTP_PASSWORD needs RETICORA_SMTP_USERNAME: the server authenticates with both or none."
+    # Go's net/smtp sends no login over an unencrypted connection to a host
+    # other than localhost, and a loopback SMTP host is refused above: every
+    # mail would fail at AUTH while /readyz (EHLO only) stays green.
+    [ "$RETICORA_SMTP_TLS" != none ] || [ -z "$RETICORA_SMTP_USERNAME" ] \
+        || die "RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls: the server (Go net/smtp) never sends a login over an unencrypted connection, so with RETICORA_SMTP_TLS=none every e-mail would fail. Use starttls or tls, or remove RETICORA_SMTP_USERNAME and RETICORA_SMTP_PASSWORD for a relay without authentication ($SMTP_TROUBLESHOOTING)."
     [ -n "$RETICORA_SMTP_FROM" ] \
         || die "RETICORA_SMTP_FROM is required with RETICORA_SMTP_HOST: the sender of the e-mails, e.g. 'Reticora CMDB <noreply@example.com>' ($SMTP_TROUBLESHOOTING)."
     valid_smtp_from "$RETICORA_SMTP_FROM" \
