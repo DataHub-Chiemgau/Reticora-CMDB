@@ -86,6 +86,14 @@ export const ciTypeApi = {
   ) {
     return fetchAPI<PaginatedResponse<CIType>>(`/ci-types${qs(params)}`);
   },
+  /**
+   * listAll reads every page of GET /ci-types (pages of 200 with offset while
+   * has_more holds, F-362), so a selection offers all active types, not only
+   * the first page (MET-51, WP-804).
+   */
+  listAll(params: { include_inactive?: boolean; category?: string; search?: string } = {}) {
+    return fetchAllPages<CIType>('/ci-types', params);
+  },
   templates(): Promise<{ data: CIType[] }> {
     return fetchAPI('/ci-types/templates');
   },

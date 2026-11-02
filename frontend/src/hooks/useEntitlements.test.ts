@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { navFeatureFor, useModules } from './useEntitlements';
+import { hasPermission, navFeatureFor, navPermissionFor, useModules } from './useEntitlements';
 import { useAuthStore } from '../auth/authStore';
 import { createTestQueryClient, stubFetchRoutes } from '../test/utils';
 
@@ -96,6 +96,35 @@ describe('navFeatureFor', () => {
     expect(navFeatureFor.roomplan).toBe('rack_view');
     expect(navFeatureFor.webhooks).toBe('webhooks');
     expect(navFeatureFor.compliance).toBe('compliance');
+  });
+});
+
+describe('navPermissionFor (UI-12, WP-804)', () => {
+  it('requires citype:manage for the CI type administration (WP-363, 000147)', () => {
+    expect(navPermissionFor['ci-types']).toBe('citype:manage');
+    expect(Object.values(navPermissionFor)).not.toContain('ci_type:manage');
+  });
+
+  it('requires no permission for the core pages', () => {
+    for (const page of ['dashboard', 'cmdb', 'locations', 'saved-views', 'reviews']) {
+      expect(navPermissionFor[page], page).toBeUndefined();
+    }
+  });
+});
+
+describe('hasPermission (UI-12, WP-804)', () => {
+  it('matches the key exactly like identity.HasPermission', () => {
+    const permissions = ['ci:read', 'citype:manage'];
+    expect(hasPermission(permissions, 'citype:manage')).toBe(true);
+    expect(hasPermission(permissions, 'ci:write')).toBe(false);
+    expect(hasPermission(permissions, 'citype')).toBe(false);
+    expect(hasPermission(permissions, 'CITYPE:MANAGE')).toBe(false);
+    expect(hasPermission(['ci_type:manage'], 'citype:manage')).toBe(false);
+  });
+
+  it('fails closed while the rights load or cannot be read', () => {
+    expect(hasPermission(undefined, 'citype:manage')).toBe(false);
+    expect(hasPermission([], 'citype:manage')).toBe(false);
   });
 });
 

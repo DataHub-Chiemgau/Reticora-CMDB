@@ -23,7 +23,7 @@ import type { LocationTreeNode } from '../../api/cmdb';
 import { DynamicForm, validateAll } from '../form/DynamicForm';
 import { ApiError } from '../../api/client';
 import type { MetricPoint } from '../../api/client';
-import { useCIMetrics } from '../../api/hooks';
+import { useCIMetrics, useHasPermission } from '../../api/hooks';
 import { ProvenanceTooltip } from './ProvenanceTooltip';
 import { fieldValueText } from './fieldValue';
 import type { FieldDefinition, FieldError } from '../../lib/fieldmeta';
@@ -146,6 +146,11 @@ export function InstanceFieldsSection({
 }) {
   const { t } = useTranslation();
   const fields = useInstanceFields(ciId);
+  // Defining and deleting instance fields needs ci_instance_attribute:manage
+  // (PUT/DELETE /cis/{id}/field-definitions). Without it (fail closed, also
+  // while the rights load) the section shows only the values, without the
+  // metamodel terms (UI-12, WP-804).
+  const canManage = useHasPermission('ci_instance_attribute:manage') === true;
   const upsert = useUpsertInstanceField(ciId);
   const remove = useDeleteInstanceField(ciId);
   const [showAdd, setShowAdd] = useState(false);
@@ -163,6 +168,45 @@ export function InstanceFieldsSection({
       : ({} as Record<string, string>);
 
   const defs = fields.data?.data ?? [];
+
+  const valuesForm =
+    defs.length > 0 ? (
+      <DynamicForm
+        fields={defs}
+        values={draftValues}
+        errors={{ ...localErrors, ...serverViolations }}
+        onChange={(name, value) => {
+          // Render from a local draft so the keystroke stays visible even
+          // when it is invalid. Previously an invalid value was dropped on
+          // the floor with no message, so the input appeared frozen. Only
+          // values that pass client validation are propagated to the save
+          // handler; the server re-validates and can still reject them.
+          const next = { ...draftValues, [name]: value };
+          setValueDraft(next);
+          const errs = validateAll(defs, next);
+          setLocalErrors((current) => ({ ...current, [name]: errs[name] ?? null }));
+          if (!errs[name]) onChanged(next);
+        }}
+      />
+    ) : null;
+  const saveError =
+    serverError && Object.keys(serverViolations).length === 0 ? (
+      <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+        {serverError.message}
+      </p>
+    ) : null;
+
+  if (!canManage) {
+    // A CI without instance fields has nothing more to show.
+    if (defs.length === 0) return null;
+    return (
+      <Section title={t('ci.additionalDetails')}>
+        {valuesForm}
+        {saveError}
+      </Section>
+    );
+  }
+
   return (
     <Section title={t('ci.instanceFields', 'Instanzfelder')} count={defs.length}>
       <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
@@ -197,11 +241,7 @@ export function InstanceFieldsSection({
         + {t('ci.addInstanceField', 'Instanzfeld hinzufügen')}
       </Button>
 
-      {serverError && Object.keys(serverViolations).length === 0 ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
-          {serverError.message}
-        </p>
-      ) : null}
+      {saveError}
 
       <Modal
         open={showAdd}
@@ -262,26 +302,8 @@ export function InstanceFieldsSection({
       </Modal>
 
       {/* Instance-field values edit inline through the same DynamicForm. */}
-      {defs.length > 0 ? (
-        <div className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
-          <DynamicForm
-            fields={defs}
-            values={draftValues}
-            errors={{ ...localErrors, ...serverViolations }}
-            onChange={(name, value) => {
-              // Render from a local draft so the keystroke stays visible even
-              // when it is invalid. Previously an invalid value was dropped on
-              // the floor with no message, so the input appeared frozen. Only
-              // values that pass client validation are propagated to the save
-              // handler; the server re-validates and can still reject them.
-              const next = { ...draftValues, [name]: value };
-              setValueDraft(next);
-              const errs = validateAll(defs, next);
-              setLocalErrors((current) => ({ ...current, [name]: errs[name] ?? null }));
-              if (!errs[name]) onChanged(next);
-            }}
-          />
-        </div>
+      {valuesForm ? (
+        <div className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">{valuesForm}</div>
       ) : null}
     </Section>
   );

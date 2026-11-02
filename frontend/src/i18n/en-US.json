@@ -258,6 +258,7 @@
     "setOverride": "Set override",
     "protected": "protected",
     "instanceFields": "Instance fields",
+    "additionalDetails": "Additional details",
     "instanceFieldsConflict": "Save refused: {{fields}} was changed by someone else in the meantime. Please reload the page and repeat the change.",
     "instanceFieldsPrecondition": "Save refused: the version of this CI is outdated or unknown. Please reload the page.",
     "provenanceHint": "Discovered vs. effective value. Protected manual overrides are never overwritten by discovery.",

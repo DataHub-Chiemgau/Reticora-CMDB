@@ -120,3 +120,24 @@ export const navFeatureFor: Record<string, string | undefined> = {
   inventory: 'stock',
   'saved-views': undefined,
 };
+
+/**
+ * navPermissionFor maps a navigation page to the permission its use requires
+ * (UI-12, WP-804), next to the feature of navFeatureFor. Pages without a
+ * mapping need no permission beyond the session. The metamodel
+ * administration needs citype:manage (WP-363, migration 000147, replaces
+ * ci_type:manage); later metamodel pages add their permission here.
+ */
+export const navPermissionFor: Record<string, string | undefined> = {
+  'ci-types': 'citype:manage',
+};
+
+/**
+ * hasPermission tells whether the effective permissions (GET
+ * /me/permissions) name the key, as an exact match like
+ * identity.HasPermission on the server. Rights that are still loading or
+ * could not be read count as missing: fail closed like useHasPermission.
+ */
+export function hasPermission(permissions: readonly string[] | undefined, key: string): boolean {
+  return permissions?.includes(key) ?? false;
+}
