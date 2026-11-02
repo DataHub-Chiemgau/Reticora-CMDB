@@ -17,7 +17,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
-import { useModules } from '../hooks/useEntitlements';
+import { useEntitlements, useModules } from '../hooks/useEntitlements';
 import { useEscalatedReviewCount } from '../hooks/useReviews';
 import { DASHBOARD_ROLES, useDashboardStore } from '../stores/dashboard';
 import type { DashboardRole, DashboardWidget } from '../stores/dashboard';
@@ -40,6 +40,16 @@ const widgetModule: Partial<Record<DashboardWidget, string>> = {
   assets: 'inventory',
   stocktake: 'stocktake',
   tickets: 'ticketing',
+};
+
+// The feature key a widget needs besides its module (WP-705, ENT-06): without
+// the entitlement the widget is hidden instead of showing a 403.
+const widgetFeature: Partial<Record<DashboardWidget, string>> = {
+  assets: 'assets_basic',
+  stocktake: 'stocktake_standard',
+  tickets: 'ticketing_essential',
+  slaBreaches: 'ticketing_standard',
+  compliance: 'compliance',
 };
 
 function MetricCard({
@@ -309,9 +319,10 @@ export function DashboardPage() {
   const toggleWidget = useDashboardStore((state) => state.toggleWidget);
   const isVisible = useDashboardStore((state) => state.isVisible);
   const { isModuleEnabled } = useModules();
+  const { isEnabled } = useEntitlements();
   const widgets = allWidgets.filter((widget) => {
     const module = widgetModule[widget];
-    return !module || isModuleEnabled(module);
+    return (!module || isModuleEnabled(module)) && isEnabled(widgetFeature[widget]);
   });
 
   return (

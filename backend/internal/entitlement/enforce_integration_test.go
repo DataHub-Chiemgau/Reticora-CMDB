@@ -623,3 +623,66 @@ func TestEntitlementGatesRackAPIAccessEmail(t *testing.T) {
 		t.Error("e-mail after the cache lifetime: sent, want skipped")
 	}
 }
+
+// TestPhase2RouteGates covers WP-705 (RBA-05, API-06, E-44, E-38, E-39)
+// against PostgreSQL (reticora_app) and Redis: the org gate follows the
+// method and suffix rules. An essential organization reads tickets and the
+// movement ledger but gets 403 feature-not-entitled for SLAs, a quantity
+// booking and the SLA of a ticket; a standard organization gets through
+// everywhere.
+//
+// It runs only with TEST_DATABASE_URL and TEST_REDIS_URL.
+func TestPhase2RouteGates(t *testing.T) {
+	redisURL := os.Getenv("TEST_REDIS_URL")
+	if redisURL == "" || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL and TEST_REDIS_URL required; skipping phase-2 route gate test")
+	}
+	f := scopetest.Seed(t, "64")
+	bg := context.Background()
+	client, err := redisx.Connect(bg, redisURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	store := cache.NewRedisStore(client.Unwrap())
+	for _, org := range []string{f.OrgA, f.OrgB} {
+		_ = store.Delete(bg, "entitlements:"+org)
+		t.Cleanup(func() { _ = store.Delete(bg, "entitlements:"+org) })
+	}
+	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Cache: store, Enforce: true})
+	if n, provErr := svc.ProvisionOrganizations(bg, map[string]entitlement.Plan{
+		f.OrgA: entitlement.PlanEssential, f.OrgB: entitlement.PlanStandard}); n != 2 || provErr != nil {
+		t.Fatalf("provision: %d, %v", n, provErr)
+	}
+
+	mux := chi.NewRouter()
+	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
+	mux.Get("/api/v1/tickets", ok)
+	mux.Get("/api/v1/tickets/{id}/sla", ok)
+	mux.Get("/api/v1/stock-movements", ok)
+	mux.Post("/api/v1/stock-movements", ok)
+	mux.Get("/api/v1/slas", ok)
+	routes := svc.Middleware(mux)
+
+	for _, c := range []struct {
+		method, path string
+		essential    bool
+	}{
+		{http.MethodGet, "/api/v1/tickets", true},
+		{http.MethodGet, "/api/v1/stock-movements", true},
+		{http.MethodGet, "/api/v1/slas", false},
+		{http.MethodPost, "/api/v1/stock-movements", false},
+		{http.MethodGet, "/api/v1/tickets/t1/sla", false},
+	} {
+		essential := call(t, routes, f.OrgA, c.method, c.path)
+		switch {
+		case c.essential && essential.status != http.StatusNoContent:
+			t.Errorf("essential %s %s: %+v, want 204", c.method, c.path, essential)
+		case !c.essential && (essential.status != http.StatusForbidden || essential.problem != api.ProblemFeatureNotEntitled):
+			t.Errorf("essential %s %s: %+v, want 403 feature-not-entitled", c.method, c.path, essential)
+		}
+		if standard := call(t, routes, f.OrgB, c.method, c.path); standard.status != http.StatusNoContent {
+			t.Errorf("standard %s %s: %+v, want 204", c.method, c.path, standard)
+		}
+	}
+}

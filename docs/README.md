@@ -396,7 +396,7 @@ the former keys `inventory`, `stocktake` and `ticketing` among them, is 422
 with the field.
 
 Route→feature mapping of the phase-1 features (ENT-02, ENT-05;
-`gatedRoutes`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
+`featureRules`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
 checks in the handlers where the middleware cannot see the object; F-400).
 Not entitled is 403 `feature-not-entitled`; an expired discovery license
 stops only ingest and new scans (CH21):
@@ -470,15 +470,52 @@ organizations to the matrix: `inventory` → `assets_basic` (and `stock` from
 standard on), `ticketing` → `ticketing_essential` (and `ticketing_standard`
 from standard on), `stocktake` → `stocktake_standard`, keeping plan,
 enabled, limits, `valid_until` and source of the former row; every
-organization with rows got the missing phase-2 keys of its plan. The middleware gates the
-phase-2 modules with these keys: `/api/v1/assets*`, `/api/v1/assignments*`
-and `/api/v1/disposal-records*` with `assets_basic`, `/api/v1/consumables*`
-with `stock`, `/api/v1/stocktakes*` and `/api/v1/stocktake*` with
-`stocktake_standard`, `/api/v1/orders*` with `internal_orders`,
-`/api/v1/documents*` with `documents`, `/api/v1/tickets*` with
-`ticketing_essential`, `/api/v1/desks*` and `/api/v1/desk-bookings*` with
-`workplace`, `/api/v1/asset-locations*` with `gps_standard`. The module keys
-of `RETICORA_MODULES` (`inventory`, `documents`, `stocktake`, `ticketing`,
+organization with rows got the missing phase-2 keys of its plan.
+
+**Org gate (WP-705, E-44, E-38, E-39):** the global middleware
+`entitlement.(*Service).Middleware` is `RequireFeature` of ENT-03. It reads
+one mapping table, `featureRules` in
+`backend/internal/entitlement/middleware.go`: method (optional), prefix,
+suffix (optional) → one or more feature keys. It is the only source of the
+org gate and of the module test (`TestP2ModulePrefixesAreGated` in
+`backend/internal/server/modules_test.go`: every prefix of a P2 module
+except `metamodel` (E-105) has a key). `entitlement.RequiredFeature(method,
+path)` checks suffix rules first, then method rules, then prefix rules; a
+prefix matches whole segments, a suffix the sub-path of one resource
+(`/api/v1/assets/{id}/label`, also `label.svg` and paths below it). A rule
+with several keys needs every one (`RequiredFeatures`). The enrollment
+endpoint `/api/v1/collectors/enroll` and `coreRoutes` stay ungated, a
+request with an API key needs `api_access` on every path, and an expired
+discovery license stops only `IsIngest` requests. The phase-2 mapping:
+
+| Feature | REST (middleware) |
+|---------|-------------------|
+| assets_basic | `/api/v1/assets*`, `/api/v1/assignments*`, `/api/v1/reservations*`, `/api/v1/compositions*`, `/api/v1/disposal-records*`, `/api/v1/suppliers*`, `/api/v1/contracts*`, GET `/api/v1/stock-movements*` |
+| barcode | `/api/v1/assets/{id}/label*` (together with assets_basic), `/api/v1/labels*` |
+| signature | GET `/api/v1/stock-movements/{id}/signature` |
+| gps_standard | `/api/v1/asset-locations*`, `/api/v1/assets/{id}/locations` |
+| stock | `/api/v1/consumables*`, `/api/v1/inventory/*`, POST (and every method but GET) `/api/v1/stock-movements*` |
+| stocktake_standard | `/api/v1/stocktakes*`, `/api/v1/stocktake*` |
+| internal_orders | `/api/v1/orders*` |
+| documents | `/api/v1/documents*` |
+| import | `/api/v1/imports*`, `/api/v1/import-profiles*` |
+| ticketing_essential | `/api/v1/tickets*`, POST `/api/v1/review-items/{id}/ticket` (reading the review queue stays core) |
+| ticketing_standard | `/api/v1/slas*`, `/api/v1/tickets/{id}/sla`, `/api/v1/business-calendars*` |
+| workplace | `/api/v1/desks*`, `/api/v1/desk-bookings*` |
+
+Prefixes without a route yet (`suppliers`, `contracts`, `labels`,
+`business-calendars`, `imports`, `import-profiles`) have their entry in
+advance (E-44). A sub-function below a module prefix uses the route
+middleware `(*Service).RequireFeature(key)`; a check in the handler (a
+`signature` in the body of assign, `format=datev`) uses the port
+`entitlement.Checker` (`IsEnabled(ctx, orgID, key string) bool`, implemented
+by `*Service`). A missing feature is 403 `feature-not-entitled`
+(`api.ProblemFeatureNotEntitled`), an exhausted quota 403
+`entitlement-limit` (`api.ProblemEntitlementLimit`, `AllowCreate` with
+`api.WriteEntitlementError`). The dashboard hides a widget whose module is
+off or whose feature key is not entitled (`widgetFeature` in
+`frontend/src/pages/DashboardPage.tsx`). The module keys of
+`RETICORA_MODULES` (`inventory`, `documents`, `stocktake`, `ticketing`,
 ...) are release switches, not feature keys, and stay unchanged.
 
 

@@ -173,6 +173,33 @@ func TestAddonsAreNotImpliedByPlan(t *testing.T) {
 	}
 }
 
+// TestP2ModulePrefixesAreGated covers RBA-05 and API-06 (WP-705, E-44,
+// E-105): every route prefix of a P2 module has a feature key in the org
+// gate of package entitlement, for reading and writing, so a switched-on
+// module is not usable without its license. The core module metamodel has
+// no feature key (E-105).
+func TestP2ModulePrefixesAreGated(t *testing.T) {
+	p2 := 0
+	for _, m := range LateModules {
+		if m.Phase != "P2" || m.Key == "metamodel" {
+			continue
+		}
+		p2++
+		for _, prefix := range m.Prefixes {
+			for _, path := range []string{prefix, prefix + "/x1"} {
+				for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete} {
+					if feature, gated := entitlement.RequiredFeature(method, path); !gated || feature == "" {
+						t.Errorf("module %s: %s %s has no feature key in the org gate", m.Key, method, path)
+					}
+				}
+			}
+		}
+	}
+	if p2 == 0 {
+		t.Fatal("no P2 module in LateModules")
+	}
+}
+
 // TestModulesEndpointListsTheReleaseModules covers GET /api/v1/modules, which
 // the UI reads to hide the navigation of switched-off modules.
 func TestModulesEndpointListsTheReleaseModules(t *testing.T) {

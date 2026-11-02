@@ -1,8 +1,10 @@
 package entitlement
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -12,66 +14,146 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// gatedRoutes maps API path prefixes to the feature key required to use them.
-// Paths that are not listed belong to the always-available core (CMDB, tenants,
-// users, auth, audit and the entitlement API itself), among them the
-// location tree and the review queue; writes of rack nodes of the tree and
-// the resolution of scope_suggested items check their feature in the
-// handler (F-400). The phase-2 modules use the keys of ENT-06 (E-44,
-// WP-244); docs/README.md lists the mapping.
-var gatedRoutes = []struct {
-	prefix  string
-	feature string
-}{
-	{"/api/v1/ingest", FeatureDiscovery},
-	{"/api/v1/discovery", FeatureDiscovery},
+// featureRule maps requests to the feature keys required to use them (ENT-03,
+// ENT-05, ENT-06, E-44). method is empty for every method. Without suffix
+// the rule gates prefix and every path below it; with suffix it gates the
+// sub-path suffix of one resource below prefix (prefix/{id}suffix), the
+// paths below it and its file forms (prefix/{id}suffix.svg). A request
+// needs every key of the rule.
+type featureRule struct {
+	method   string
+	prefix   string
+	suffix   string
+	features []string
+}
+
+// rank orders the rules: suffix rules (with or without method) before
+// method rules before plain prefix rules (WP-705).
+func (r featureRule) rank() int {
+	switch {
+	case r.suffix != "":
+		return 0
+	case r.method != "":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func (r featureRule) matches(method, path string) bool {
+	if r.method != "" && r.method != method {
+		return false
+	}
+	if r.suffix == "" {
+		return path == r.prefix || strings.HasPrefix(path, r.prefix+"/") || strings.HasPrefix(path, r.prefix+"?")
+	}
+	rest, ok := strings.CutPrefix(strings.TrimSuffix(path, "/"), r.prefix+"/")
+	if !ok {
+		return false
+	}
+	id, sub, ok := strings.Cut(rest, "/")
+	if !ok || id == "" {
+		return false
+	}
+	sub = "/" + sub
+	return sub == r.suffix || strings.HasPrefix(sub, r.suffix+"/") || strings.HasPrefix(sub, r.suffix+".")
+}
+
+func gate(prefix string, features ...string) featureRule {
+	return featureRule{prefix: prefix, features: features}
+}
+
+// featureRules is the only route→feature mapping of the org gate (WP-705, E-44,
+// E-38, E-39); the module test of package server reads it through
+// RequiredFeature. Paths that are not listed belong to the always-available
+// core (CMDB, tenants, users, auth, audit and the entitlement API itself),
+// among them the location tree and the review queue; writes of rack nodes
+// of the tree and the resolution of scope_suggested items check their
+// feature in the handler (F-400). Sub-functions without a path of their own
+// (a signature in the body, format=datev) check it in the handler through
+// Checker; docs/README.md lists the mapping.
+var featureRules = []featureRule{
+	gate("/api/v1/ingest", FeatureDiscovery),
+	gate("/api/v1/discovery", FeatureDiscovery),
 	// The discovery scopes are a resource of their own, not below
 	// /api/v1/discovery/ (F-400).
-	{"/api/v1/discovery-scopes", FeatureDiscovery},
-	{"/api/v1/collectors", FeatureDiscovery},
-	{"/api/v1/credentials", FeatureDiscovery},
-	{"/api/v1/assets", FeatureAssetsBasic},
-	{"/api/v1/assignments", FeatureAssetsBasic},
-	{"/api/v1/documents", FeatureDocuments},
-	{"/api/v1/stocktakes", FeatureStocktakeStandard},
-	{"/api/v1/stocktake", FeatureStocktakeStandard},
-	{"/api/v1/consumables", FeatureStock},
-	{"/api/v1/orders", FeatureInternalOrders},
-	{"/api/v1/maintenance-windows", FeatureMonitoring},
-	{"/api/v1/disposal-records", FeatureAssetsBasic},
-	{"/api/v1/keys", FeatureCompliance},
-	{"/api/v1/trainings", FeatureWorkflowForms},
-	{"/api/v1/training-assignments", FeatureWorkflowForms},
-	{"/api/v1/desks", FeatureWorkplace},
-	{"/api/v1/asset-locations", FeatureGPSStandard},
-	{"/api/v1/agents", FeatureEndpointAgent},
-	{"/api/v1/security", FeatureCompliance},
-	{"/api/v1/desk-bookings", FeatureWorkplace},
-	{"/api/v1/tickets", FeatureTicketingEssential},
-	{"/api/v1/webhooks", FeatureWebhooks},
+	gate("/api/v1/discovery-scopes", FeatureDiscovery),
+	gate("/api/v1/collectors", FeatureDiscovery),
+	gate("/api/v1/credentials", FeatureDiscovery),
+
+	// Inventory (AST, E-44, E-38): the ledger is read with assets_basic,
+	// quantity bookings and transfers need stock; labels need barcode, the
+	// GPS history (LOC-09, P4) gps_standard.
+	gate("/api/v1/assets", FeatureAssetsBasic),
+	{prefix: "/api/v1/assets", suffix: "/label", features: []string{FeatureBarcode, FeatureAssetsBasic}},
+	{prefix: "/api/v1/assets", suffix: "/locations", features: []string{FeatureGPSStandard}},
+	gate("/api/v1/asset-locations", FeatureGPSStandard),
+	gate("/api/v1/assignments", FeatureAssetsBasic),
+	gate("/api/v1/reservations", FeatureAssetsBasic),
+	gate("/api/v1/compositions", FeatureAssetsBasic),
+	gate("/api/v1/disposal-records", FeatureAssetsBasic),
+	gate("/api/v1/suppliers", FeatureAssetsBasic),
+	gate("/api/v1/contracts", FeatureAssetsBasic),
+	{method: http.MethodGet, prefix: "/api/v1/stock-movements", features: []string{FeatureAssetsBasic}},
+	{method: http.MethodPost, prefix: "/api/v1/stock-movements", features: []string{FeatureStock}},
+	{method: http.MethodGet, prefix: "/api/v1/stock-movements", suffix: "/signature", features: []string{FeatureSignature}},
+	// Any other method on the ledger is stock, so no method stays ungated.
+	gate("/api/v1/stock-movements", FeatureStock),
+	gate("/api/v1/consumables", FeatureStock),
+	gate("/api/v1/inventory", FeatureStock),
+	gate("/api/v1/labels", FeatureBarcode),
+	gate("/api/v1/stocktakes", FeatureStocktakeStandard),
+	gate("/api/v1/stocktake", FeatureStocktakeStandard),
+	gate("/api/v1/orders", FeatureInternalOrders),
+	gate("/api/v1/documents", FeatureDocuments),
+	gate("/api/v1/import-profiles", FeatureImport),
+	gate("/api/v1/imports", FeatureImport),
+
+	// Ticketing (TKT-01, E-39): SLAs and business calendars are standard.
+	gate("/api/v1/tickets", FeatureTicketingEssential),
+	{prefix: "/api/v1/tickets", suffix: "/sla", features: []string{FeatureTicketingStandard}},
+	gate("/api/v1/slas", FeatureTicketingStandard),
+	gate("/api/v1/business-calendars", FeatureTicketingStandard),
+	// Reading the review queue stays core; opening a ticket from an item
+	// is ticketing (WP-291).
+	{method: http.MethodPost, prefix: "/api/v1/review-items", suffix: "/ticket", features: []string{FeatureTicketingEssential}},
+
+	gate("/api/v1/maintenance-windows", FeatureMonitoring),
+	gate("/api/v1/keys", FeatureCompliance),
+	gate("/api/v1/trainings", FeatureWorkflowForms),
+	gate("/api/v1/training-assignments", FeatureWorkflowForms),
+	gate("/api/v1/desks", FeatureWorkplace),
+	gate("/api/v1/desk-bookings", FeatureWorkplace),
+	gate("/api/v1/agents", FeatureEndpointAgent),
+	gate("/api/v1/security", FeatureCompliance),
+	gate("/api/v1/webhooks", FeatureWebhooks),
 	// Racks, their layout and the mounts are the rack_view feature (ENT-02,
 	// ENT-05, F-070).
-	{"/api/v1/racks", FeatureRackView},
-	{"/api/v1/mounts", FeatureRackView},
-	{"/api/v1/rack-mounts", FeatureRackView},
+	gate("/api/v1/racks", FeatureRackView),
+	gate("/api/v1/mounts", FeatureRackView),
+	gate("/api/v1/rack-mounts", FeatureRackView),
 	// Managing API keys is the api_access feature; requests authenticated
 	// with a key need it as well (Middleware).
-	{"/api/v1/api-keys", FeatureAPIAccess},
-	{"/api/v1/exports", FeatureExportCSV},
-	{"/api/v1/export", FeatureExportCSV},
-	{"/api/v1/topology", FeatureTopology},
+	gate("/api/v1/api-keys", FeatureAPIAccess),
+	gate("/api/v1/exports", FeatureExportCSV),
+	gate("/api/v1/export", FeatureExportCSV),
+	gate("/api/v1/topology", FeatureTopology),
 	// Impact analysis is part of the topology feature (API-05 path).
-	{"/api/v1/impact", FeatureTopology},
-	{"/api/v1/monitoring", FeatureMonitoring},
-	{"/api/v1/metrics", FeatureMonitoring},
-	{"/api/v1/forms", FeatureWorkflowForms},
-	{"/api/v1/form-submissions", FeatureWorkflowForms},
-	{"/api/v1/workflows", FeatureWorkflowForms},
-	{"/api/v1/workflow-runs", FeatureWorkflowForms},
-	{"/api/v1/compliance", FeatureCompliance},
-	{"/api/v1/iga", FeatureIGA},
-	{"/scim/v2", FeatureIGA},
-	{"/api/v1/ai", FeatureAI},
+	gate("/api/v1/impact", FeatureTopology),
+	// Sub-resources of the core CIs.
+	{prefix: "/api/v1/cis", suffix: "/dependencies", features: []string{FeatureTopology}},
+	{prefix: "/api/v1/cis", suffix: "/blast-radius", features: []string{FeatureTopology}},
+	{prefix: "/api/v1/cis", suffix: "/metrics", features: []string{FeatureMonitoring}},
+	gate("/api/v1/monitoring", FeatureMonitoring),
+	gate("/api/v1/metrics", FeatureMonitoring),
+	gate("/api/v1/forms", FeatureWorkflowForms),
+	gate("/api/v1/form-submissions", FeatureWorkflowForms),
+	gate("/api/v1/workflows", FeatureWorkflowForms),
+	gate("/api/v1/workflow-runs", FeatureWorkflowForms),
+	gate("/api/v1/compliance", FeatureCompliance),
+	gate("/api/v1/iga", FeatureIGA),
+	gate("/scim/v2", FeatureIGA),
+	gate("/api/v1/ai", FeatureAI),
 }
 
 // coreRoutes are core paths below a gated prefix. The review queue is
@@ -80,15 +162,6 @@ var gatedRoutes = []struct {
 // and GraphQL reviewInbox (F-400). Resolving a scope_suggested item needs
 // the discovery feature in the discovery effect instead.
 var coreRoutes = []string{"/api/v1/discovery/review-items"}
-
-// gatedSuffixes gate sub-resources of core resources (/api/v1/cis/{id}/...).
-var gatedSuffixes = []struct {
-	prefix, suffix, feature string
-}{
-	{"/api/v1/cis/", "/dependencies", FeatureTopology},
-	{"/api/v1/cis/", "/blast-radius", FeatureTopology},
-	{"/api/v1/cis/", "/metrics", FeatureMonitoring},
-}
 
 // ingestRoutes deliver discovery results or start scans; they are the only
 // requests stopped after the discovery license expired (CH21). Reading
@@ -121,30 +194,82 @@ var refusedIngest atomic.Int64
 // expired since start (ENT-07).
 func RefusedIngest() int64 { return refusedIngest.Load() }
 
-// RequiredFeature returns the feature key gating the given request path.
-func RequiredFeature(path string) (string, bool) {
+// RequiredFeatures returns the feature keys gating the request: those of
+// the first matching suffix rule, else of the first method rule, else of
+// the first prefix rule (WP-705). Nil means the core.
+func RequiredFeatures(method, path string) []string {
 	// The enrollment endpoint is the pre-entitlement onboarding entry point:
 	// the collector has no tenant context yet, the single-use code is the
 	// credential, and enrollment must work before any plan check can pass.
 	if path == "/api/v1/collectors/enroll" {
-		return "", false
+		return nil
 	}
 	for _, prefix := range coreRoutes {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") || strings.HasPrefix(path, prefix+"?") {
-			return "", false
+			return nil
 		}
 	}
-	for _, route := range gatedRoutes {
-		if path == route.prefix || strings.HasPrefix(path, route.prefix+"/") || strings.HasPrefix(path, route.prefix+"?") {
-			return route.feature, true
+	for rank := range 3 {
+		for _, rule := range featureRules {
+			if rule.rank() == rank && rule.matches(method, path) {
+				return rule.features
+			}
 		}
 	}
-	for _, route := range gatedSuffixes {
-		if strings.HasPrefix(path, route.prefix) && strings.HasSuffix(strings.TrimSuffix(path, "/"), route.suffix) {
-			return route.feature, true
-		}
+	return nil
+}
+
+// RequiredFeature returns the feature key gating the request: the first
+// key of its rule (barcode for assets/{id}/label; Middleware requires the
+// others as well).
+func RequiredFeature(method, path string) (string, bool) {
+	features := RequiredFeatures(method, path)
+	if len(features) == 0 {
+		return "", false
 	}
-	return "", false
+	return features[0], true
+}
+
+// Checker is the port for feature checks in handlers and services, for
+// sub-functions without a path of their own (a signature in the body of
+// assign, format=datev; E-44). *Service implements it; a failed lookup is
+// "not entitled".
+type Checker interface {
+	IsEnabled(ctx context.Context, orgID, featureKey string) bool
+}
+
+var _ Checker = (*Service)(nil)
+
+// RequireFeature is the route middleware for a sub-function below a module
+// prefix (ENT-03): without the feature the request is refused with 403
+// feature-not-entitled. The org gate of whole prefixes is Middleware.
+func (s *Service) RequireFeature(key string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			orgID := tenant.FromContext(r.Context()).OrganizationID
+			if orgID == "" {
+				api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+				return
+			}
+			_, ok, err := s.Check(r.Context(), orgID, key)
+			if err != nil {
+				api.WriteError(w, http.StatusInternalServerError, "Internal Error", "entitlement lookup failed")
+				return
+			}
+			if !ok {
+				writeNotEntitled(w, key)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// writeNotEntitled writes 403 feature-not-entitled for the feature; an
+// exhausted quota (LimitExceededError, AllowCreate) goes through the same
+// api.WriteEntitlementError as 403 entitlement-limit.
+func writeNotEntitled(w http.ResponseWriter, feature string) {
+	api.WriteEntitlementError(w, &FeatureNotEntitledError{FeatureKey: feature})
 }
 
 // Middleware blocks requests to features the organization is not entitled
@@ -156,10 +281,10 @@ func RequiredFeature(path string) (string, bool) {
 // principal and the organization are known.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		feature, gated := RequiredFeature(r.URL.Path)
+		features := RequiredFeatures(r.Method, r.URL.Path)
 		principal, _ := identity.PrincipalFromContext(r.Context())
 		apiKey := principal.Type == identity.PrincipalTypeAPIKey
-		if !gated && !apiKey {
+		if len(features) == 0 && !apiKey {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -170,52 +295,57 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if apiKey && feature != FeatureAPIAccess {
+		if apiKey && !slices.Contains(features, FeatureAPIAccess) {
 			_, ok, err := s.Check(r.Context(), orgID, FeatureAPIAccess)
 			if err != nil {
 				api.WriteError(w, http.StatusInternalServerError, "Internal Error", "entitlement lookup failed")
 				return
 			}
 			if !ok {
-				notEntitled := &FeatureNotEntitledError{FeatureKey: FeatureAPIAccess}
-				api.WriteProblem(w, http.StatusForbidden, notEntitled.ProblemType(), "Forbidden", notEntitled.Error())
+				writeNotEntitled(w, FeatureAPIAccess)
 				return
 			}
 		}
-		if !gated {
-			next.ServeHTTP(w, r)
-			return
-		}
 
-		ent, status, err := s.Status(r.Context(), orgID, feature)
-		if err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "Internal Error", "entitlement lookup failed")
-			return
-		}
-		if feature == FeatureDiscovery && status != StatusNotEntitled {
-			// The collector reads it from the heartbeat response and pauses
-			// or resumes (ENT-07).
-			w.Header().Set(LicenseStatusHeader, string(status))
-		}
-		switch status {
-		case StatusActive:
-		case StatusExpired:
-			if IsIngest(r.Method, r.URL.Path) {
-				refusedIngest.Add(1)
-				expired := &LicenseExpiredError{ValidUntil: *ent.ValidUntil}
-				slog.Warn("ingest refused: discovery license expired",
-					"organization_id", orgID, "path", r.URL.Path, "valid_until", ent.ValidUntil)
-				api.WriteProblem(w, http.StatusForbidden, expired.ProblemType(), "Forbidden", expired.Error())
+		for _, feature := range features {
+			if !s.allow(w, r, orgID, feature) {
 				return
 			}
-		default:
-			notEntitled := &FeatureNotEntitledError{FeatureKey: feature}
-			api.WriteProblem(w, http.StatusForbidden, notEntitled.ProblemType(), "Forbidden", notEntitled.Error())
-			return
 		}
-
 		next.ServeHTTP(w, r)
 	})
+}
+
+// allow checks one feature of the request and writes the refusal. After
+// the discovery license expired only ingest and new scans are refused
+// (CH21, ENT-07).
+func (s *Service) allow(w http.ResponseWriter, r *http.Request, orgID, feature string) bool {
+	ent, status, err := s.Status(r.Context(), orgID, feature)
+	if err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "entitlement lookup failed")
+		return false
+	}
+	if feature == FeatureDiscovery && status != StatusNotEntitled {
+		// The collector reads it from the heartbeat response and pauses
+		// or resumes (ENT-07).
+		w.Header().Set(LicenseStatusHeader, string(status))
+	}
+	switch status {
+	case StatusActive:
+	case StatusExpired:
+		if IsIngest(r.Method, r.URL.Path) {
+			refusedIngest.Add(1)
+			expired := &LicenseExpiredError{ValidUntil: *ent.ValidUntil}
+			slog.Warn("ingest refused: discovery license expired",
+				"organization_id", orgID, "path", r.URL.Path, "valid_until", ent.ValidUntil)
+			api.WriteProblem(w, http.StatusForbidden, expired.ProblemType(), "Forbidden", expired.Error())
+			return false
+		}
+	default:
+		writeNotEntitled(w, feature)
+		return false
+	}
+	return true
 }
 
 // RegisterMetrics registers reticora_ingest_refused_license_expired_total

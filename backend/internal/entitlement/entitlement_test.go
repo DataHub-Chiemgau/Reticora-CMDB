@@ -2,11 +2,15 @@ package entitlement
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
@@ -244,11 +248,68 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		// WP-671 (F-400): the discovery scopes are discovery.
 		"/api/v1/discovery-scopes":    FeatureDiscovery,
 		"/api/v1/discovery-scopes/s1": FeatureDiscovery,
+		// WP-705 (E-44, E-38, E-39): suffix rules go before the prefix of
+		// their module, and the prefixes of the phase-2 modules are gated.
+		"/api/v1/assets/a1/label.svg":          FeatureBarcode,
+		"/api/v1/assets/a1/label":              FeatureBarcode,
+		"/api/v1/assets/a1/locations":          FeatureGPSStandard,
+		"/api/v1/assets/a1/movements":          FeatureAssetsBasic,
+		"/api/v1/tickets/t1/sla":               FeatureTicketingStandard,
+		"/api/v1/tickets/t1/comments":          FeatureTicketingEssential,
+		"/api/v1/reservations":                 FeatureAssetsBasic,
+		"/api/v1/reservations/r1/release":      FeatureAssetsBasic,
+		"/api/v1/compositions":                 FeatureAssetsBasic,
+		"/api/v1/inventory/items":              FeatureStock,
+		"/api/v1/inventory/items/i1/convert":   FeatureStock,
+		"/api/v1/inventory/availability":       FeatureStock,
+		"/api/v1/slas":                         FeatureTicketingStandard,
+		"/api/v1/slas/breaches":                FeatureTicketingStandard,
+		"/api/v1/business-calendars":           FeatureTicketingStandard,
+		"/api/v1/suppliers":                    FeatureAssetsBasic,
+		"/api/v1/contracts/c1":                 FeatureAssetsBasic,
+		"/api/v1/labels/batch":                 FeatureBarcode,
+		"/api/v1/imports":                      FeatureImport,
+		"/api/v1/import-profiles/p1":           FeatureImport,
+		"/api/v1/stock-movements":              FeatureAssetsBasic,
+		"/api/v1/stock-movements/m1/signature": FeatureSignature,
 	}
 	for path, want := range cases {
-		got, gated := RequiredFeature(path)
+		got, gated := RequiredFeature(http.MethodGet, path)
 		if !gated || got != want {
-			t.Errorf("RequiredFeature(%q) = (%q, %v), want (%q, true)", path, got, gated, want)
+			t.Errorf("RequiredFeature(GET, %q) = (%q, %v), want (%q, true)", path, got, gated, want)
+		}
+	}
+
+	// Method rules: the ledger is read with assets_basic, a booking needs
+	// stock; opening a ticket from a review item is ticketing.
+	methodCases := []struct{ method, path, want string }{
+		{http.MethodGet, "/api/v1/stock-movements", FeatureAssetsBasic},
+		{http.MethodPost, "/api/v1/stock-movements", FeatureStock},
+		{http.MethodDelete, "/api/v1/stock-movements/m1", FeatureStock},
+		{http.MethodPost, "/api/v1/review-items/r1/ticket", FeatureTicketingEssential},
+		{http.MethodPost, "/api/v1/discovery/jobs", FeatureDiscovery},
+		{http.MethodPut, "/api/v1/tickets/t1/sla", FeatureTicketingStandard},
+	}
+	for _, c := range methodCases {
+		got, gated := RequiredFeature(c.method, c.path)
+		if !gated || got != c.want {
+			t.Errorf("RequiredFeature(%s, %q) = (%q, %v), want (%q, true)", c.method, c.path, got, gated, c.want)
+		}
+	}
+	// A label needs barcode and assets_basic (E-44).
+	if got := RequiredFeatures(http.MethodGet, "/api/v1/assets/a1/label.svg"); !slices.Equal(got, []string{FeatureBarcode, FeatureAssetsBasic}) {
+		t.Errorf("RequiredFeatures(label.svg) = %v, want [barcode assets_basic]", got)
+	}
+	// Every rule names at least one known feature key.
+	known := FeatureKeys()
+	for _, rule := range featureRules {
+		if len(rule.features) == 0 {
+			t.Errorf("rule %+v has no feature key", rule)
+		}
+		for _, f := range rule.features {
+			if !slices.Contains(known, f) {
+				t.Errorf("rule %+v names the unknown feature key %q", rule, f)
+			}
 		}
 	}
 
@@ -259,9 +320,83 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		// check their feature in the handler).
 		"/api/v1/review-items", "/api/v1/review-items/r1/resolve", "/api/v1/discovery/review-items",
 		"/api/v1/discovery/review-items/r1/resolve", "/api/v1/locations", "/api/v1/locations/tree", "/api/v1/locations/l1"} {
-		if _, gated := RequiredFeature(path); gated {
+		if _, gated := RequiredFeature(http.MethodGet, path); gated {
 			t.Errorf("expected %q to stay ungated", path)
 		}
+	}
+	// The review queue stays core for every method but the ticket action.
+	if _, gated := RequiredFeature(http.MethodPost, "/api/v1/review-items/r1/resolve"); gated {
+		t.Error("POST /api/v1/review-items/r1/resolve is gated, want core")
+	}
+}
+
+// TestRequireFeatureAndChecker covers WP-705 (ENT-03, E-44): the route
+// middleware for a sub-function refuses a request without the feature
+// with 403 feature-not-entitled and passes it once granted; *Service is the
+// Checker of the handlers.
+func TestRequireFeatureAndChecker(t *testing.T) {
+	svc := testService(t, PlanEssential)
+	var checker Checker = svc
+	ctx := context.Background()
+	if checker.IsEnabled(ctx, "org-1", FeatureTicketingStandard) || !checker.IsEnabled(ctx, "org-1", FeatureTicketingEssential) {
+		t.Fatal("Checker does not follow the essential plan")
+	}
+
+	h := svc.RequireFeature(FeatureTicketingStandard)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	serve := func() (int, string) {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, tenantCtx(httptest.NewRequest(http.MethodGet, "/api/v1/tickets/t1/sla", nil)))
+		var problem api.ProblemDetail
+		_ = json.Unmarshal(w.Body.Bytes(), &problem)
+		return w.Code, problem.Type
+	}
+	if code, problem := serve(); code != http.StatusForbidden || problem != api.ProblemFeatureNotEntitled {
+		t.Errorf("without ticketing_standard: %d %q, want 403 feature-not-entitled", code, problem)
+	}
+	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureTicketingStandard,
+		Plan: PlanStandard, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := serve(); code != http.StatusNoContent {
+		t.Errorf("with ticketing_standard: %d, want 204", code)
+	}
+	if !checker.IsEnabled(ctx, "org-1", FeatureTicketingStandard) {
+		t.Error("Checker does not see the grant")
+	}
+
+	// Without a tenant the middleware refuses the request.
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/tickets/t1/sla", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("without tenant: %d, want 401", w.Code)
+	}
+}
+
+// TestMiddlewareRequiresEveryKeyOfARule covers the multi-key rule of E-44:
+// a label needs barcode and assets_basic.
+func TestMiddlewareRequiresEveryKeyOfARule(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
+	h := svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	ctx := context.Background()
+	serve := func() int {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, tenantCtx(httptest.NewRequest(http.MethodGet, "/api/v1/assets/a1/label.svg", nil)))
+		return w.Code
+	}
+	for _, feature := range []string{FeatureBarcode, FeatureAssetsBasic} {
+		if code := serve(); code != http.StatusForbidden {
+			t.Errorf("label before %s: %d, want 403", feature, code)
+		}
+		if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: feature, Plan: PlanStandard, Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := serve(); code != http.StatusNoContent {
+		t.Errorf("label with barcode and assets_basic: %d, want 204", code)
 	}
 }
 

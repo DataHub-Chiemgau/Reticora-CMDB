@@ -295,4 +295,33 @@ describe('DashboardPage', () => {
     );
     expect(screen.queryByText('Offene Tickets')).not.toBeInTheDocument();
   });
+
+  it('hides the widgets without their entitlement instead of showing a 403 (WP-705)', async () => {
+    useAuthStore.setState({
+      token: 'header.payload.signature',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      user: { sub: 'user-1' },
+    });
+    const fetchMock = stubFetchRoutes({
+      '/modules': {
+        data: [{ key: 'ticketing', phase: 'P2', nav: ['tickets', 'slas'], enabled: true }],
+      },
+      '/entitlements': paginated([
+        { organization_id: 'org-1', feature_key: 'ticketing_essential', enabled: true },
+        { organization_id: 'org-1', feature_key: 'ticketing_standard', enabled: false },
+      ]),
+      '/cis': paginated([]),
+      '/collectors': paginated([]),
+      '/tickets': paginated([]),
+    });
+
+    renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'SLA-Verletzungen' })).not.toBeInTheDocument(),
+    );
+    // Essential ticketing keeps its widget.
+    expect(screen.getByRole('button', { name: 'Tickets' })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/entitlements'))).toBe(true);
+  });
 });
