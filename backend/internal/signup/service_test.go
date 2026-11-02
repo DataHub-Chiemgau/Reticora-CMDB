@@ -300,6 +300,77 @@ func TestTrialEntitlementsFollowENT07(t *testing.T) {
 	}
 }
 
+// storageOf returns the stored max_storage_mb per feature of the rows.
+func storageOf(ents []entitlement.Entitlement) map[string]int64 {
+	out := map[string]int64{}
+	for _, e := range ents {
+		if mb, ok := e.Limits[entitlement.LimitMaxStorageMB]; ok {
+			out[e.FeatureKey] = mb
+		}
+	}
+	return out
+}
+
+// TestNewOrganizationsGetThePlanStorage covers WP-706 (MGT-01, E-44, E-34):
+// a new organization gets the max_storage_mb of its plan stored on
+// documents (1,000 / 10,000 / 50,000), enterprise gets no entry, an
+// operator's own limit wins, and the trial stores its plan's value.
+func TestNewOrganizationsGetThePlanStorage(t *testing.T) {
+	for plan, want := range map[entitlement.Plan]int64{entitlement.PlanEssential: 1000,
+		entitlement.PlanStandard: 10000, entitlement.PlanPro: 50000, entitlement.PlanEnterprise: 0} {
+		ents, err := PlanEntitlements(plan, nil)
+		if err != nil {
+			t.Fatalf("PlanEntitlements(%s): %v", plan, err)
+		}
+		got := storageOf(ents)
+		switch {
+		case want == 0 && len(got) != 0:
+			t.Errorf("%s stores max_storage_mb %v, want none (unlimited)", plan, got)
+		case want != 0 && (len(got) != 1 || got[entitlement.FeatureDocuments] != want):
+			t.Errorf("%s stores max_storage_mb %v, want documents %d", plan, got, want)
+		}
+	}
+
+	// An own limit of the operator wins, also on enterprise; other quotas
+	// leave the plan's storage in place.
+	ents, err := PlanEntitlements(entitlement.PlanStandard, map[string]int64{entitlement.LimitMaxStorageMB: 2500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storageOf(ents); len(got) != 1 || got[entitlement.FeatureDocuments] != 2500 {
+		t.Errorf("own limit: %v, want documents 2500", got)
+	}
+	ents, err = PlanEntitlements(entitlement.PlanEnterprise, map[string]int64{entitlement.LimitMaxStorageMB: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storageOf(ents); got[entitlement.FeatureDocuments] != 0 || len(got) != 1 {
+		t.Errorf("own limit on enterprise: %v, want documents 0", got)
+	}
+	ents, err = PlanEntitlements(entitlement.PlanPro, map[string]int64{entitlement.LimitMaxCIs: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storageOf(ents); got[entitlement.FeatureDocuments] != 50000 {
+		t.Errorf("pro with max_cis only: %v, want documents 50000", got)
+	}
+
+	// The trial stores the value of the trial plan.
+	cfg := DefaultConfig()
+	ends := time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
+	trial, err := TrialEntitlements(cfg, ends)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := storageOf(trial); len(got) != 1 || got[entitlement.FeatureDocuments] != 10000 {
+		t.Errorf("standard trial: %v, want documents 10000", got)
+	}
+	cfg.TrialPlan = entitlement.PlanEnterprise
+	if trial, err = TrialEntitlements(cfg, ends); err != nil || len(storageOf(trial)) != 0 {
+		t.Errorf("enterprise trial: %v %v, want no max_storage_mb", storageOf(trial), err)
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	for in, want := range map[string]string{
 		"Acme GmbH":                      "acme-gmbh",

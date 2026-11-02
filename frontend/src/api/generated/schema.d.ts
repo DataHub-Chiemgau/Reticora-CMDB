@@ -7179,7 +7179,7 @@ export interface components {
       slug?: string;
       /** @enum {string} */
       plan: 'essential' | 'standard' | 'pro' | 'enterprise';
-      /** @description Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access). */
+      /** @description Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access, max_storage_mb on documents). Without max_storage_mb the plan default is stored (E-44: essential 1000, standard 10000, pro 50000 MiB; enterprise unlimited, no entry). */
       limits?: {
         /** Format: int64 */
         max_cis?: number;
@@ -7189,6 +7189,11 @@ export interface components {
         max_users?: number;
         /** Format: int64 */
         max_api_keys?: number;
+        /**
+         * Format: int64
+         * @description Document storage of the organization in MiB (MGT-01), stored on documents.
+         */
+        max_storage_mb?: number;
       };
       admin_email: string;
       admin_display_name?: string;
@@ -8579,13 +8584,13 @@ export interface components {
     };
     /** @enum {string} */
     EntitlementPlan: 'essential' | 'standard' | 'pro' | 'enterprise';
-    /** @description Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02): cmdb_core (always active), discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email. */
+    /** @description Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02): cmdb_core (always active), discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email. Phase-2 feature keys (ENT-06, E-44): assets_basic, documents, import and ticketing_essential in every plan; ticketing_standard, signature, stock, stocktake_standard, barcode, gps_standard, workplace and export_datev from standard on; internal_orders from pro on. Module keys of phases 3 and 4 (monitoring, endpoint_agent, workflow_forms, compliance) and the add-ons iga and ai. */
     Entitlement: {
       organization_id: string;
       feature_key: string;
       plan: components['schemas']['EntitlementPlan'];
       enabled: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A quota only gates when it is stored here (E-34). New organizations get the plan default of max_storage_mb stored (E-44: essential 1000, standard 10000, pro 50000; enterprise unlimited, no entry); existing organizations get none. */
       limits: {
         [key: string]: number;
       };
@@ -8598,7 +8603,7 @@ export interface components {
       feature: string;
       plan: components['schemas']['EntitlementPlan'];
       enabled: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys. A missing quota uses the plan default. */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A quota only gates when it is stored (E-34); new organizations get the plan default of max_storage_mb stored (E-44). */
       limits?: {
         [key: string]: number;
       };

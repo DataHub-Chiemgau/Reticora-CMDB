@@ -19,25 +19,45 @@ type Module struct {
 	Key string `json:"key"`
 	// Phase is the phase tag of the module: P2, P3, P4 or A (add-on).
 	Phase string `json:"phase"`
-	// Prefixes are the route prefixes the module serves.
+	// Prefixes are the route prefixes the module serves. A segment in
+	// braces ({id}) matches any one path segment; a route belongs to the
+	// module with the longest matching prefix (WP-706, E-105).
 	Prefixes []string `json:"-"`
 	// Workers are the background workers of the module.
 	Workers []string `json:"-"`
-	// Nav are the navigation pages of the UI that belong to the module.
+	// Nav are the navigation pages of the UI that belong to the module;
+	// empty, never nil, for a module without pages of its own (gps), so GET
+	// /api/v1/modules answers nav: [].
 	Nav []string `json:"nav"`
 }
 
+// Module keys that code outside the route table asks for.
+const (
+	// ModuleInventory is the inventory module (assets, reservations,
+	// stock; P2); its reservation sweeper runs only while it is on.
+	ModuleInventory = "inventory"
+)
+
+// PhaseP2 is the phase value of RETICORA_MODULES that switches on every
+// module with phase P2 (release G2, WP-706).
+const PhaseP2 = "P2"
+
 // LateModules lists every module with a phase tag from P2 or [A], after
-// API-06 and RBA-05.
+// API-06 and RBA-05. The P2 resources of E-38 without a module of their
+// own follow E-105: modules_test.go keeps their register.
 var LateModules = []Module{
-	{Key: "inventory", Phase: "P2", Prefixes: []string{
-		"/api/v1/assets", "/api/v1/asset-locations", "/api/v1/assignments", "/api/v1/reservations",
+	{Key: ModuleInventory, Phase: "P2", Prefixes: []string{
+		"/api/v1/assets", "/api/v1/assignments", "/api/v1/reservations",
 		"/api/v1/stock-movements", "/api/v1/compositions", "/api/v1/inventory",
 	}, Nav: []string{"assets", "assignments", "inventory"}},
 	{Key: "documents", Phase: "P2", Prefixes: []string{"/api/v1/documents"}, Nav: []string{"documents"}},
+	// Import of CSV/XLSX files (IMP-IO-01, E-105; feature key import).
+	{Key: "import", Phase: "P2", Prefixes: []string{"/api/v1/imports", "/api/v1/import-profiles"}, Nav: []string{"import"}},
 	{Key: "stocktake", Phase: "P2", Prefixes: []string{"/api/v1/stocktakes", "/api/v1/consumables", "/api/v1/orders"},
 		Nav: []string{"stocktake", "consumables", "orders"}},
 	{Key: "ticketing", Phase: "P2", Prefixes: []string{"/api/v1/tickets", "/api/v1/slas"}, Nav: []string{"tickets", "slas"}},
+	// Disposal is MGT-02 [P2] (E-38, E-44; formerly P4).
+	{Key: "disposal", Phase: "P2", Prefixes: []string{"/api/v1/disposal-records"}, Nav: []string{"disposal"}},
 	{Key: "maintenance", Phase: "P3", Prefixes: []string{"/api/v1/maintenance-windows"}, Nav: []string{"maintenance"}},
 	{Key: "workflows", Phase: "P3", Prefixes: []string{
 		"/api/v1/forms", "/api/v1/form-submissions", "/api/v1/workflows", "/api/v1/workflow-runs",
@@ -51,7 +71,9 @@ var LateModules = []Module{
 	{Key: "trainings", Phase: "P4", Prefixes: []string{"/api/v1/trainings", "/api/v1/training-assignments"},
 		Nav: []string{"trainings"}},
 	{Key: "desks", Phase: "P4", Prefixes: []string{"/api/v1/desks", "/api/v1/desk-bookings"}, Nav: []string{"desks"}},
-	{Key: "disposal", Phase: "P4", Prefixes: []string{"/api/v1/disposal-records"}, Nav: []string{"disposal"}},
+	// The GPS history of assets (LOC-09 [P4], E-44) has no page of its own.
+	{Key: "gps", Phase: "P4", Prefixes: []string{"/api/v1/asset-locations", "/api/v1/assets/{id}/locations"},
+		Nav: []string{}},
 	{Key: "agents", Phase: "P4", Prefixes: []string{"/api/v1/agents"}, Nav: []string{"agents"}},
 	{Key: "iga", Phase: "A", Prefixes: []string{"/api/v1/iga", "/scim"}, Nav: []string{"iga"}},
 	{Key: "ai", Phase: "A", Prefixes: []string{"/api/v1/ai"}, Nav: []string{"assistant"}},
@@ -73,8 +95,9 @@ func AllModules() *ModuleSet {
 
 // ParseModules reads RETICORA_MODULES: empty switches every late module off
 // (the G1 default after E-03), "all" switches them all on, otherwise a comma
-// list of module keys. Unknown keys fail, so a typo does not silently leave a
-// module off.
+// list of module keys and the phase value P2, which switches on every module
+// with phase P2 (release G2, WP-706). Unknown keys fail, so a typo does not
+// silently leave a module off.
 func ParseModules(spec string) (*ModuleSet, error) {
 	spec = strings.TrimSpace(spec)
 	if strings.EqualFold(spec, "all") {
@@ -84,6 +107,14 @@ func ParseModules(spec string) (*ModuleSet, error) {
 	for _, key := range strings.Split(spec, ",") {
 		key = strings.TrimSpace(key)
 		if key == "" {
+			continue
+		}
+		if key == PhaseP2 {
+			for _, m := range LateModules {
+				if m.Phase == PhaseP2 {
+					s.enabled[m.Key] = true
+				}
+			}
 			continue
 		}
 		if _, ok := moduleByKey(key); !ok {
@@ -111,16 +142,44 @@ func (s *ModuleSet) Enabled(key string) bool {
 	return s.enabled[key]
 }
 
-// ModuleForRoute returns the late module serving a route pattern.
+// ModuleForRoute returns the late module serving a route pattern: the one
+// with the longest matching prefix (in segments), so
+// /api/v1/assets/{id}/locations belongs to gps, not inventory (WP-706,
+// E-105). A prefix matches whole segments only.
 func ModuleForRoute(pattern string) (Module, bool) {
+	segments := strings.Split(pattern, "/")
+	var (
+		best    Module
+		bestLen = -1
+	)
 	for _, m := range LateModules {
 		for _, prefix := range m.Prefixes {
-			if pattern == prefix || strings.HasPrefix(pattern, prefix+"/") {
-				return m, true
+			if n := prefixSegments(prefix, segments); n > bestLen {
+				best, bestLen = m, n
 			}
 		}
 	}
-	return Module{}, false
+	return best, bestLen >= 0
+}
+
+// prefixSegments returns the number of segments of prefix when it matches
+// the leading segments of a route, else -1. A prefix segment in braces
+// matches any non-empty segment.
+func prefixSegments(prefix string, route []string) int {
+	parts := strings.Split(prefix, "/")
+	if len(parts) > len(route) {
+		return -1
+	}
+	for i, part := range parts {
+		if part == route[i] {
+			continue
+		}
+		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") && route[i] != "" {
+			continue
+		}
+		return -1
+	}
+	return len(parts)
 }
 
 // RouteAllowed reports whether a route pattern is registered.

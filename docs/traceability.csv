@@ -1206,3 +1206,5 @@ UI-12;[P2];B;frontend/src/components/cmdb/CIDetailSections.test.tsx;WP-804
 NFR-02;[B];B;backend/internal/topology/querybudget_integration_test.go;WP-840
 NFR-01;[B], Teilumfang [P5];B;backend/internal/topology/querybudget_integration_test.go;WP-840
 ABN-02;[Q];B;backend/internal/topology/querybudget_integration_test.go;WP-840
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/modules_test.go;WP-706
+RBA-05;[P2–P4], [A];B;backend/internal/server/modules_test.go;WP-706

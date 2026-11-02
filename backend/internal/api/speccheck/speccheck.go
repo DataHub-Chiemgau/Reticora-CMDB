@@ -160,3 +160,74 @@ func Phases(path string) (map[string]string, error) {
 	}
 	return phases, nil
 }
+
+// Features returns the feature key of every operation that carries one
+// (x-feature, E-38, WP-706): the x-feature of the operation, else the one of
+// its path. Operations without either are missing from the map.
+func Features(path string) (map[Operation]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open spec: %w", err)
+	}
+	defer file.Close()
+
+	var (
+		operations  []Operation
+		pathFeature = map[string]string{}
+		opFeature   = map[Operation]string{}
+		inPaths     bool
+		current     string
+		method      string
+	)
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimRight(scanner.Text(), " \t")
+		if line == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") {
+			inPaths = strings.HasPrefix(line, "paths:")
+			current, method = "", ""
+			continue
+		}
+		if !inPaths {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case indent == 2 && strings.HasPrefix(trimmed, "/") && strings.HasSuffix(trimmed, ":"):
+			current, method = strings.TrimSuffix(trimmed, ":"), ""
+		case indent == 4 && current != "":
+			method = ""
+			if value, ok := strings.CutPrefix(trimmed, "x-feature:"); ok {
+				pathFeature[current] = strings.TrimSpace(value)
+				continue
+			}
+			if name := strings.ToLower(strings.TrimSuffix(trimmed, ":")); strings.HasSuffix(trimmed, ":") && httpMethods[name] {
+				method = strings.ToUpper(name)
+				operations = append(operations, Operation{Method: method, Path: current})
+			}
+		case indent == 6 && method != "":
+			if value, ok := strings.CutPrefix(trimmed, "x-feature:"); ok {
+				opFeature[Operation{Method: method, Path: current}] = strings.TrimSpace(value)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read spec: %w", err)
+	}
+
+	features := map[Operation]string{}
+	for _, op := range operations {
+		feature, ok := opFeature[op]
+		if !ok {
+			feature, ok = pathFeature[op.Path]
+		}
+		if ok {
+			features[op] = feature
+		}
+	}
+	return features, nil
+}

@@ -94,7 +94,8 @@ func routerOperations(t *testing.T, mux *chi.Mux) []speccheck.Operation {
 // the PostgreSQL profile and --no-db serve exactly the documented
 // operations. With every late module on, that is the whole specification;
 // with the G1 default (WP-214, E-03) it is the specification without the
-// paths marked x-phase.
+// paths marked x-phase; with release G2 (RETICORA_MODULES=P2, WP-706) the
+// paths without x-phase or with x-phase P2.
 func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 	documented, err := speccheck.Load(filepath.Clean(specPath))
 	if err != nil {
@@ -108,9 +109,13 @@ func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse modules: %v", err)
 	}
+	g2, err := ParseModules(PhaseP2)
+	if err != nil {
+		t.Fatalf("parse modules: %v", err)
+	}
 
 	for profile, auditHandler := range map[string]*audit.Handler{"postgres": {}, "no-db": nil} {
-		for release, modules := range map[string]*ModuleSet{"all modules": AllModules(), "G1": g1} {
+		for release, modules := range map[string]*ModuleSet{"all modules": AllModules(), "G1": g1, "G2": g2} {
 			registered := routerOperations(t, testRouterWithModules(t, auditHandler, modules))
 
 			// /metrics is the Prometheus scrape endpoint, not part of the tenant
@@ -127,11 +132,14 @@ func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 				filtered = append(filtered, op)
 			}
 
+			// G1 serves the operations without x-phase, G2 those without
+			// x-phase or with x-phase P2 (WP-706).
 			expected := documented
-			if release == "G1" {
+			if release != "all modules" {
 				expected = nil
 				for _, op := range documented {
-					if _, late := phases[op.Path]; !late {
+					phase, late := phases[op.Path]
+					if !late || (release == "G2" && phase == PhaseP2) {
 						expected = append(expected, op)
 					}
 				}

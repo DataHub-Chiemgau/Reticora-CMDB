@@ -2771,6 +2771,7 @@ paths:
 
   /api/v1/assets:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssets
       tags: [Assets]
@@ -2843,6 +2844,7 @@ paths:
 
   /api/v1/assets/{id}:
     x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -2909,6 +2911,7 @@ paths:
 
   /api/v1/assignments:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssignments
       tags: [Assignments]
@@ -2971,6 +2974,7 @@ paths:
 
   /api/v1/assignments/{id}:
     x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3002,6 +3006,7 @@ paths:
 
   /api/v1/documents:
     x-phase: P2
+    x-feature: documents
     get:
       operationId: listDocuments
       tags: [Documents]
@@ -3059,6 +3064,7 @@ paths:
 
   /api/v1/documents/{id}:
     x-phase: P2
+    x-feature: documents
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3115,6 +3121,7 @@ paths:
 
   /api/v1/orders:
     x-phase: P2
+    x-feature: internal_orders
     get:
       operationId: listOrders
       tags: [Orders]
@@ -3163,6 +3170,7 @@ paths:
 
   /api/v1/orders/{id}:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3217,6 +3225,7 @@ paths:
 
   /api/v1/orders/{id}/submit:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3237,6 +3246,7 @@ paths:
 
   /api/v1/orders/{id}/approve:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3257,6 +3267,7 @@ paths:
 
   /api/v1/orders/{id}/reject:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3277,6 +3288,7 @@ paths:
 
   /api/v1/orders/{id}/items:
     x-phase: P2
+    x-feature: internal_orders
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -3439,7 +3451,8 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/disposal-records:
-    x-phase: P4
+    x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listDisposalRecords
       tags: [Disposal]
@@ -3489,7 +3502,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/disposal-records/{id}:
-    x-phase: P4
+    x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -3962,6 +3976,7 @@ paths:
 
   /api/v1/assets/{id}/label.svg:
     x-phase: P2
+    x-feature: barcode
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: base_url
@@ -3983,7 +3998,7 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/asset-locations:
-    x-phase: P2
+    x-phase: P4
     post:
       operationId: recordAssetLocation
       tags: [Assets]
@@ -4007,7 +4022,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   /api/v1/assets/{id}/locations:
-    x-phase: P2
+    x-phase: P4
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4363,6 +4378,7 @@ paths:
 
   /api/v1/consumables:
     x-phase: P2
+    x-feature: stock
     get:
       operationId: listConsumables
       tags: [Consumables]
@@ -4415,6 +4431,7 @@ paths:
 
   /api/v1/consumables/{id}:
     x-phase: P2
+    x-feature: stock
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4469,6 +4486,7 @@ paths:
 
   /api/v1/consumables/{id}/movements:
     x-phase: P2
+    x-feature: stock
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4512,6 +4530,7 @@ paths:
 
   /api/v1/stocktakes:
     x-phase: P2
+    x-feature: stocktake_standard
     get:
       operationId: listStocktakes
       tags: [Stocktake]
@@ -4570,6 +4589,7 @@ paths:
 
   /api/v1/stocktakes/{id}:
     x-phase: P2
+    x-feature: stocktake_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4642,6 +4662,7 @@ paths:
 
   /api/v1/stocktakes/{id}/scans:
     x-phase: P2
+    x-feature: stocktake_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4689,6 +4710,7 @@ paths:
 
   /api/v1/stocktakes/{id}/difference:
     x-phase: P2
+    x-feature: stocktake_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4714,6 +4736,7 @@ paths:
 
   /api/v1/stocktakes/{id}/complete:
     x-phase: P2
+    x-feature: stocktake_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -4762,6 +4785,7 @@ paths:
 
   /api/v1/tickets:
     x-phase: P2
+    x-feature: ticketing_essential
     get:
       operationId: listTickets
       tags: [Tickets]
@@ -4842,6 +4866,7 @@ paths:
 
   /api/v1/tickets/{id}:
     x-phase: P2
+    x-feature: ticketing_essential
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4906,6 +4931,7 @@ paths:
 
   /api/v1/tickets/{id}/comments:
     x-phase: P2
+    x-feature: ticketing_essential
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -8425,6 +8451,7 @@ paths:
 
   /api/v1/assignments/{id}/return:
     x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -8459,6 +8486,7 @@ paths:
 
   /api/v1/assignments/{id}/transfer:
     x-phase: P2
+    x-feature: assets_basic
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -9163,6 +9191,7 @@ paths:
 
   /api/v1/documents/{id}/content:
     x-phase: P2
+    x-feature: documents
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     put:
@@ -9243,6 +9272,7 @@ paths:
 
   /api/v1/documents/{id}/links:
     x-phase: P2
+    x-feature: documents
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -10456,6 +10486,7 @@ paths:
 
   /api/v1/slas:
     x-phase: P2
+    x-feature: ticketing_standard
     get:
       operationId: listSLAPolicies
       tags: [SLA]
@@ -10520,6 +10551,7 @@ paths:
 
   /api/v1/slas/breaches:
     x-phase: P2
+    x-feature: ticketing_standard
     get:
       operationId: listSLABreaches
       tags: [SLA]
@@ -10547,6 +10579,7 @@ paths:
 
   /api/v1/slas/{id}:
     x-phase: P2
+    x-feature: ticketing_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -10611,6 +10644,7 @@ paths:
 
   /api/v1/tickets/{id}/sla:
     x-phase: P2
+    x-feature: ticketing_standard
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -11866,6 +11900,7 @@ paths:
 
   /api/v1/assets/{id}/children:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssetsIdChildren
       summary: List child composition entries of a parent asset
@@ -11877,6 +11912,7 @@ paths:
 
   /api/v1/assets/{id}/lifecycle-transitions:
     x-phase: P2
+    x-feature: assets_basic
     post:
       operationId: createAssetsIdLifecycleTransitions
       summary: Execute a lifecycle transition on an asset
@@ -11894,6 +11930,7 @@ paths:
 
   /api/v1/assets/{id}/movements:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssetsIdMovements
       summary: List the movement ledger of an asset
@@ -11907,6 +11944,7 @@ paths:
 
   /api/v1/assets/{id}/state:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listAssetsIdState
       summary: Reconstruct asset state at a point in time
@@ -12610,6 +12648,7 @@ paths:
 
   /api/v1/compositions:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listCompositions
       summary: Manage parent-asset/child composition links
@@ -12629,6 +12668,7 @@ paths:
 
   /api/v1/compositions/{id}:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: getCompositionsId
       summary: Read, update or delete a composition link
@@ -12810,6 +12850,7 @@ paths:
 
   /api/v1/inventory/availability:
     x-phase: P2
+    x-feature: stock
     get:
       operationId: listInventoryAvailability
       summary: Query inventory availability projections
@@ -12821,6 +12862,7 @@ paths:
 
   /api/v1/inventory/items:
     x-phase: P2
+    x-feature: stock
     get:
       operationId: listInventoryItems
       summary: Manage quantity-based inventory items
@@ -12851,6 +12893,7 @@ paths:
 
   /api/v1/inventory/items/{id}:
     x-phase: P2
+    x-feature: stock
     get:
       operationId: getInventoryItemsId
       summary: Read, update or delete a quantity inventory item
@@ -13208,6 +13251,7 @@ paths:
 
   /api/v1/reservations:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listReservations
       summary: Manage inventory reservations
@@ -13237,6 +13281,7 @@ paths:
 
   /api/v1/reservations/{id}:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: getReservationsId
       summary: Read a reservation
@@ -13250,6 +13295,7 @@ paths:
 
   /api/v1/reservations/{id}/release:
     x-phase: P2
+    x-feature: assets_basic
     post:
       operationId: createReservationsIdRelease
       summary: Release a reservation
@@ -13393,6 +13439,7 @@ paths:
 
   /api/v1/stock-movements:
     x-phase: P2
+    x-feature: assets_basic
     get:
       operationId: listStockMovements
       summary: List and record inventory movements (append-only ledger)
@@ -13402,6 +13449,7 @@ paths:
         '401':
           description: Unauthorized
     post:
+      x-feature: stock
       operationId: createStockMovements
       summary: List and record inventory movements (append-only ledger)
       responses:
@@ -13424,6 +13472,7 @@ paths:
 
   /api/v1/inventory/items/{id}/convert:
     x-phase: P2
+    x-feature: stock
     post:
       operationId: convertInventoryItemToAsset
       summary: Convert one unit of a quantity item into a serialized asset
@@ -14461,13 +14510,23 @@ components:
         plan: { type: string, enum: [essential, standard, pro, enterprise] }
         limits:
           type: object
-          description: Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access).
+          description: >-
+            Quotas stored in the limits of their feature's entitlement (max_cis
+            and max_users on cmdb_core, max_collectors on discovery,
+            max_api_keys on api_access, max_storage_mb on documents). Without
+            max_storage_mb the plan default is stored (E-44: essential 1000,
+            standard 10000, pro 50000 MiB; enterprise unlimited, no entry).
           additionalProperties: false
           properties:
             max_cis: { type: integer, format: int64, minimum: 0 }
             max_collectors: { type: integer, format: int64, minimum: 0 }
             max_users: { type: integer, format: int64, minimum: 0 }
             max_api_keys: { type: integer, format: int64, minimum: 0 }
+            max_storage_mb:
+              type: integer
+              format: int64
+              minimum: 0
+              description: Document storage of the organization in MiB (MGT-01), stored on documents.
         admin_email: { type: string, maxLength: 254 }
         admin_display_name: { type: string, maxLength: 200 }
     OperatorCreatedOrganization:
@@ -16824,7 +16883,13 @@ components:
       description: >-
         Entitlement of a feature (ENT-01). Phase-1 feature keys (ENT-02):
         cmdb_core (always active), discovery, topology, rack_view, export_csv,
-        webhooks, api_access, notifications_email.
+        webhooks, api_access, notifications_email. Phase-2 feature keys
+        (ENT-06, E-44): assets_basic, documents, import and
+        ticketing_essential in every plan; ticketing_standard, signature,
+        stock, stocktake_standard, barcode, gps_standard, workplace and
+        export_datev from standard on; internal_orders from pro on. Module
+        keys of phases 3 and 4 (monitoring, endpoint_agent, workflow_forms,
+        compliance) and the add-ons iga and ai.
       required: [organization_id, feature_key, plan, enabled, limits, source]
       properties:
         organization_id:
@@ -16839,7 +16904,11 @@ components:
           type: object
           description: >-
             Named quotas (ENT-02): max_cis, max_collectors, max_users,
-            max_api_keys. A missing quota uses the plan default.
+            max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A
+            quota only gates when it is stored here (E-34). New organizations
+            get the plan default of max_storage_mb stored (E-44: essential
+            1000, standard 10000, pro 50000; enterprise unlimited, no entry);
+            existing organizations get none.
           additionalProperties:
             type: integer
             format: int64
@@ -16865,7 +16934,9 @@ components:
           type: object
           description: >-
             Named quotas (ENT-02): max_cis, max_collectors, max_users,
-            max_api_keys. A missing quota uses the plan default.
+            max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A
+            quota only gates when it is stored (E-34); new organizations get
+            the plan default of max_storage_mb stored (E-44).
           additionalProperties:
             type: integer
             format: int64

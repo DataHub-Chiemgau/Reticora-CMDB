@@ -310,19 +310,41 @@ func (s *Service) setup(now time.Time) (*Setup, error) {
 		FallbackPlan: s.cfg.FallbackPlan, Entitlements: ents}, nil
 }
 
+// planStorageMB is the document storage of a new organization per plan in
+// MiB (MGT-01, E-44: 1,000 / 10,000 / 50,000 / unlimited). A quota only
+// gates when it is stored (E-34), so a new organization gets the value of
+// its plan stored on documents (WP-706); enterprise is unlimited and gets
+// no entry. Existing organizations keep their rows.
+var planStorageMB = map[entitlement.Plan]int64{
+	entitlement.PlanEssential: 1000,
+	entitlement.PlanStandard:  10000,
+	entitlement.PlanPro:       50000,
+}
+
+// PlanStorageMB returns the max_storage_mb stored for a new organization of
+// the plan; false means unlimited (enterprise), stored as no entry.
+func PlanStorageMB(plan entitlement.Plan) (int64, bool) {
+	mb, ok := planStorageMB[plan]
+	return mb, ok
+}
+
 // TrialEntitlements returns the entitlement rows of a trial (ENT-07): every
 // feature of the trial plan with source selfsignup; features the fallback
 // plan lacks are valid until the trial ends; cmdb_core carries the trial's
-// max_cis.
+// max_cis and documents the trial plan's max_storage_mb (E-44, WP-706).
 func TrialEntitlements(cfg Config, endsAt time.Time) ([]entitlement.Entitlement, error) {
 	fallback := map[string]bool{}
 	for _, f := range entitlement.PlanFeatures(cfg.FallbackPlan) {
 		fallback[f] = true
 	}
+	storageMB, storageLimited := PlanStorageMB(cfg.TrialPlan)
 	var out []entitlement.Entitlement
 	for _, f := range entitlement.PlanFeatures(cfg.TrialPlan) {
 		ent := entitlement.Entitlement{FeatureKey: f, Plan: cfg.TrialPlan, Enabled: true,
 			Limits: map[string]int64{}, Source: "selfsignup"}
+		if storageLimited && f == entitlement.QuotaFeature[entitlement.LimitMaxStorageMB] {
+			ent.Limits[entitlement.LimitMaxStorageMB] = storageMB
+		}
 		if f == entitlement.FeatureCMDBCore {
 			ent.Limits[entitlement.LimitMaxCIs] = cfg.TrialMaxCIs
 		} else if !fallback[f] {
@@ -437,8 +459,15 @@ func validateOrganization(req *operator.NewOrganization) (*OrganizationSpec, ent
 // PlanEntitlements returns the entitlement rows of a plan set by an
 // operator: every feature of the plan, source manual, without expiry; each
 // quota is stored in the limits of its feature (entitlement.QuotaFeature).
+// Without an own max_storage_mb the plan's value is stored on documents
+// (E-44, WP-706); enterprise gets no entry.
 func PlanEntitlements(plan entitlement.Plan, limits map[string]int64) ([]entitlement.Entitlement, error) {
 	byFeature := map[string]map[string]int64{}
+	if _, own := limits[entitlement.LimitMaxStorageMB]; !own {
+		if mb, limited := PlanStorageMB(plan); limited {
+			byFeature[entitlement.QuotaFeature[entitlement.LimitMaxStorageMB]] = map[string]int64{entitlement.LimitMaxStorageMB: mb}
+		}
+	}
 	for quota, value := range limits {
 		feature, known := entitlement.QuotaFeature[quota]
 		if !known {
