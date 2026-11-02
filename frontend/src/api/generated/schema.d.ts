@@ -7394,6 +7394,11 @@ export interface components {
       impacted: components['schemas']['ImpactNode'][];
       count: number;
       summary: components['schemas']['ImpactSummary'];
+      /**
+       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01).
+       * @enum {boolean}
+       */
+      truncated?: true;
     };
     /** @description The answer of /api/v1/impact and /api/v1/impact/{ci_id} with fields (API-02): the properties of ImpactAnalysis, but each impacted CI carries its id and the selected fields only (ImpactNodeFields). */
     ImpactAnalysisFields: {
@@ -7408,6 +7413,11 @@ export interface components {
       impacted: components['schemas']['ImpactNodeFields'][];
       count: number;
       summary: components['schemas']['ImpactSummary'];
+      /**
+       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01).
+       * @enum {boolean}
+       */
+      truncated?: true;
     };
     BlastRadius: {
       ci_id: string;
@@ -10440,6 +10450,11 @@ export interface components {
     TopologyGraph: {
       nodes: components['schemas']['TopologyNode'][];
       edges: components['schemas']['TopologyEdge'][];
+      /**
+       * @description true when the walk from root_ci_id reached the node limit (10,000 CIs) and kept only the CIs closest to the root: the graph may then lack CIs and edges within the depth (NFR-01). Absent when the walk was not cut and without a root, which answers 422 beyond 2,000 CIs.
+       * @enum {boolean}
+       */
+      truncated?: true;
     };
     /** @description The tenant (LOC-01). */
     Organization: {

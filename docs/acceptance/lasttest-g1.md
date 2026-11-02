@@ -614,6 +614,15 @@ Transaktion (kein N+1) und prüfen per `EXPLAIN` die Indexnutzung.
   - Gemessen in WP-335, einschließlich BEGIN, `set_config` und COMMIT: am
     Hub Topologie (Tiefe 2) 16 und Impact (Tiefe 20) 26 Statements; an den
     Ketten in Tiefe 20 Topologie 53 und Impact 63.
+  - Mehrfach-Impact (WP-840): `GET /impact?ci_ids=` liest die ausgefallenen
+    CIs in einer Abfrage (`GetByIDs`) und läuft einen Walk von allen
+    zugleich (`relationship.(*PGRepository).WalkFromMany`); jede Kante wird
+    einmal gelesen. 2, 10 und 100 ausgefallene Blätter des Hubs mit 400
+    Nachbarn kosten gleich viel (lokal 19 Statements, Stand 2026-11-02).
+    `TestMultiImpactAgainstPostgres` vergleicht die Antwort Byte für Byte mit
+    den Walks je ausgefallenem CI, dem Weg vor WP-840 (126 Antworten:
+    Organisation und Client-1-Principal, Tiefen, Kategorien, Beziehungstyp,
+    `fields=`).
 - **Impact im Worst Case** (`TestImpactWorstCase`, gleiche Datei, WP-335):
   Der Impact des Core-Switches bei 10.000 Objekten (Graph wie `cmd/seed`, mit
   Client und Site) erreicht 9.997 CIs.
@@ -626,6 +635,25 @@ Transaktion (kein N+1) und prüfen per `EXPLAIN` die Indexnutzung.
     Grenze von 250 ms erzwingt der Test nur mit `RETICORA_PERF_BUDGET=1`, weil
     Zeitgrenzen auf geteilten CI-Runnern unzuverlässig sind; `load.yml` führt
     keine Go-Tests aus.
+  - Feldwerte wie in einer per Discovery befüllten Organisation (WP-840):
+    acht entdeckte Felder je CI (80.000 Zeilen in `ci_field_value`, 24.000
+    im Graphen mit 3.000 Objekten) und 1.400 Overrides auf 12 % der CIs
+    (davon 400 auf projizierten Feldern). Die Knotenlesung liest die Overrides
+    der Organisation (`nodeOverridesByOrg`) über den partiellen Index
+    `idx_ci_field_value_override` (Migration 000195); `EXPLAIN ANALYZE` des
+    Produkt-SQL als App-Rolle unter RLS: Index Scan, 400 Zeilen, rund 3 ms.
+    Ohne den Index liest dieselbe Abfrage `ci_field_value` sequenziell, und
+    der Test schlägt fehl. Lokal (Stand 2026-11-02, PostgreSQL 16 ohne
+    TimescaleDB, `fsync=off`, keine Belege nach E-58): unverändert 17
+    Statements, kompakt 2.390.051 Byte (239 Byte je betroffenem CI),
+    bestes von 5 mit Index 149–192 ms in drei Läufen, ohne Index 206–278 ms;
+    mit `RETICORA_PERF_BUDGET=1` grün.
+  - Keine stille Kappung (WP-840): Erreicht ein Walk
+    `relationship.MaxTraversalNodes` (10.000 CIs), tragen Topologie und
+    Impact, kompakt wie vollständig, `truncated: true`. Der Test hängt zwei
+    Server an den Core-Switch (10.002 CIs) und prüft die Kennzeichnung; ohne
+    Kappung fehlt das Feld, die Antworten bleiben byteweise gleich
+    (`TestImpactLeanAgainstPostgres`).
 - **Ingest je Record und Batch**
   (`backend/internal/discovery/ingest_budget_integration_test.go`,
   `TestIngestStatementBudget`, WP-332 bis WP-334), mit dem Schreibpfad des
@@ -747,7 +775,15 @@ Auftraggeber, die Nummer wird hier nachgetragen.
 5. **Knotenlesung und Mehrfach-Impact:** `ListNodes` liest ab 2.000 IDs die
    ganze Organisation; `GET /impact?ci_ids=` traversiert je ausgefallenem
    CI. Entscheidung E-17: Schwelle für 50.000 Objekte neu bewerten, Folge-WP
-   vor GA.
+   vor GA. **Erledigt** mit WP-840 (`g1-graph-scale`): `GET /impact?ci_ids=`
+   liest die ausgefallenen CIs in einer Abfrage und ihre Kanten in einem
+   Walk; die Statements hängen nicht von der Zahl der CIs ab (2, 10 und 100
+   CIs gleich, Abschnitt ABN-02). Der Walk kappt nicht mehr still: Am
+   Knotenlimit von 10.000 CIs tragen Topologie und Impact `truncated: true`
+   (NFR-01, Headroom 50.000 funktionsfähig nach E-17). Die Organisationslesung
+   von `ListNodes` ab 2.000 IDs bleibt; ihr Override-Abgleich nutzt den Index
+   aus Punkt 10. Den p95 über 10.000 Objekten misst WP-327 (E-17, ohne
+   Budgetzusage).
 6. **Volltextsuche unter RLS (Rest von SR-04): erledigt (WP-836).**
    Migration 000191 entfernt `idx_ci_fts`; `ci` erhält nach E-133 keine
    zweite `tsvector`-Spalte, die gespeicherte Spalte der Volltextsuche ist
@@ -793,9 +829,12 @@ Auftraggeber, die Nummer wird hier nachgetragen.
    eine unter dem Limit: genau eine; Gegenprobe ohne Sperre 4 bzw. 10).
 10. **Override-Abgleich der Knotenlesung:** `ci_field_value` hat keinen
     Index für den Override-Abgleich der Organisationslesung; der Seed
-    schreibt keine Feldwerte. Folge-WP: offen, Vorschlag an den
-    Auftraggeber (partieller Index auf `ci_field_value (organization_id,
-    ci_id)` für Overrides, Budget-Fixture mit Feldwerten; Migration).
+    schreibt keine Feldwerte. **Erledigt** mit WP-840 (`g1-graph-scale`):
+    Migration 000195 legt `idx_ci_field_value_override` auf
+    `ci_field_value (organization_id, ci_id) WHERE override_at IS NOT NULL`
+    an; `TestImpactWorstCase` legt Feldwerte und Overrides einer
+    Discovery-Organisation an und belegt per `EXPLAIN ANALYZE` als App-Rolle
+    die Nutzung des Index in `nodeOverridesByOrg` (Abschnitt ABN-02).
 11. **NFR-02 auf den NFR-01-Volumina:** Mit 100.000 Beziehungen je
     Organisation verfehlen `impact` (bis 4,27 s), `impact_full` (bis 4,24 s)
     und `relationships` (bis 2,65 s) ihr Budget in allen drei Läufen, auf

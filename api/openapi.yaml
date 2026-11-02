@@ -14755,6 +14755,15 @@ components:
         count: { type: integer }
         summary:
           $ref: '#/components/schemas/ImpactSummary'
+        truncated:
+          type: boolean
+          enum: [true]
+          description: >-
+            true when the walk from the failed CIs reached the node limit
+            (10,000 CIs) and kept only the CIs closest to them: the impacted
+            CIs may then be incomplete (NFR-01). Returned with and without
+            fields (E-57); absent when the walk was not cut, so that answer
+            stays as before (API-01).
     ImpactAnalysisFields:
       type: object
       description: >-
@@ -14783,6 +14792,15 @@ components:
         count: { type: integer }
         summary:
           $ref: '#/components/schemas/ImpactSummary'
+        truncated:
+          type: boolean
+          enum: [true]
+          description: >-
+            true when the walk from the failed CIs reached the node limit
+            (10,000 CIs) and kept only the CIs closest to them: the impacted
+            CIs may then be incomplete (NFR-01). Returned with and without
+            fields (E-57); absent when the walk was not cut, so that answer
+            stays as before (API-01).
     BlastRadius:
       type: object
       required: [ci_id, affected_cis, affected_count, heuristic_count]
@@ -19736,6 +19754,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TopologyEdge'
+        truncated:
+          type: boolean
+          enum: [true]
+          description: >-
+            true when the walk from root_ci_id reached the node limit
+            (10,000 CIs) and kept only the CIs closest to the root: the
+            graph may then lack CIs and edges within the depth (NFR-01).
+            Absent when the walk was not cut and without a root, which
+            answers 422 beyond 2,000 CIs.
 
     Organization:
       type: object

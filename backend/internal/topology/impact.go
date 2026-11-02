@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -662,6 +663,50 @@ func mergeGraphs(graphs []*ciGraph) (merged *ciGraph, roots []int32) {
 	return merged, roots
 }
 
+// readFailed reads the failed CIs ids, in their order: several in one
+// query when the repository reads in batches (ci.BatchReader, WP-840), a
+// single one and those of other repositories one by one. missing is the
+// first id the caller does not see (unknown, deleted, of another
+// organization or outside the scope, or no UUID); the answer is then 404
+// for it alike (WP-403).
+func (h *Handler) readFailed(ctx context.Context, orgID string, ids []string) (items []ci.Item, missing string, err error) {
+	reader, ok := h.ciRepo.(ci.BatchReader)
+	if !ok || len(ids) == 1 {
+		items = make([]ci.Item, 0, len(ids))
+		for _, id := range ids {
+			item, gerr := h.ciRepo.GetByID(ctx, orgID, id)
+			if gerr != nil {
+				return nil, id, nil
+			}
+			items = append(items, *item)
+		}
+		return items, "", nil
+	}
+	valid := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if api.IsUUID(id) {
+			valid = append(valid, id)
+		}
+	}
+	found, err := reader.GetByIDs(ctx, orgID, valid)
+	if err != nil {
+		return nil, "", err
+	}
+	byID := make(map[string]int, len(found))
+	for i := range found {
+		byID[strings.ToLower(found[i].ID)] = i
+	}
+	items = make([]ci.Item, 0, len(ids))
+	for _, id := range ids {
+		i, ok := byID[strings.ToLower(id)]
+		if !ok || !api.IsUUID(id) {
+			return nil, id, nil
+		}
+		items = append(items, found[i])
+	}
+	return items, "", nil
+}
+
 // impactOrder returns the numbers of the impacted, known CIs: certain
 // impacts first, then by name and id, a stable answer.
 func impactOrder(g *ciGraph, impacted []ciHit) []int32 {
@@ -691,7 +736,10 @@ func impactOrder(g *ciGraph, impacted []ciHit) []int32 {
 // failed CIs, the impacted CIs with their paths and a summary; single adds
 // the fields of the single-CI short form; sparse lets fields= narrow the
 // impacted CIs (API-02), and a path is only built when it is returned.
-// Each failed CI is read once, its graph walked once.
+// The failed CIs are read in one query and their graph is one walk that
+// reads each edge once (WP-840). truncated: true reports a walk the node
+// limit cut, in the full and in the compact form (NFR-01, E-57); an answer
+// of a walk that was not cut stays as it was (API-01).
 func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID string, ids []string, single, sparse bool) {
 	ctx := r.Context()
 	q := r.URL.Query()
@@ -713,27 +761,30 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 		}
 	}
 	withPaths := fields == nil || fields["path"]
-	failed := make([]Node, 0, len(ids))
-	graphs := make([]*ciGraph, 0, len(ids))
-	for _, id := range ids {
-		root, gerr := h.ciRepo.GetByID(ctx, orgID, id)
-		if gerr != nil {
-			api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found: "+id)
-			return
-		}
-		failed = append(failed, nodeFromItem(*root))
-		g, berr := h.graphFrom(ctx, orgID, root, depth)
-		if berr != nil {
-			api.WriteRepoError(w, berr)
-			return
-		}
-		graphs = append(graphs, g)
+	items, missing, err := h.readFailed(ctx, orgID, ids)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
 	}
-	// The graph of one failed CI is analysed as it is; several graphs
-	// share CIs and edges.
-	g, roots := graphs[0], []int32{0}
-	if len(graphs) > 1 {
-		g, roots = mergeGraphs(graphs)
+	if missing != "" {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found: "+missing)
+		return
+	}
+	// The failed CIs as roots, each CI once.
+	failed := make([]Node, len(items))
+	var distinct []ci.Item
+	seen := map[string]bool{}
+	for i := range items {
+		failed[i] = nodeFromItem(items[i])
+		if !seen[items[i].ID] {
+			seen[items[i].ID] = true
+			distinct = append(distinct, items[i])
+		}
+	}
+	g, roots, err := h.graphFromRoots(ctx, orgID, distinct, depth)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
 	}
 
 	// The providers of a redundant type beyond the depth keep their
@@ -775,6 +826,9 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 		"impacted":   impactedNodes,
 		"count":      len(impactedNodes),
 		"summary":    summary,
+	}
+	if g.truncated {
+		body["truncated"] = true
 	}
 	if fields != nil {
 		entries := make([]impactEntry, len(impactedNodes))

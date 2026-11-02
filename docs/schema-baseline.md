@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000194_object_reference_organization
+Stand: Migration 000195_ci_field_value_override_index
 
 ## Prüfung
 
@@ -80,6 +80,12 @@ Ebenso der Index der Adressen einer Schnittstelle (WP-608, NFR-03):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ip_address_interface ON ip_address (interface_id) WHERE interface_id IS NOT NULL;
+```
+
+Ebenso der Override-Index der Knotenlesung (WP-840, NFR-02):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_field_value_override ON ci_field_value (organization_id, ci_id) WHERE override_at IS NOT NULL;
 ```
 
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein

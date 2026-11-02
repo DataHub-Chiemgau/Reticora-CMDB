@@ -1203,3 +1203,6 @@ ABN-03;[Q], jeweilige Phase;B;backend/internal/tenant/rls/object_reference_integ
 TEN-09;[Q];B;backend/internal/tenant/rls/object_reference_integration_test.go;WP-838
 MET-51;P2/G2;B;frontend/src/pages/CIFormModal.test.tsx;WP-804
 UI-12;[P2];B;frontend/src/components/cmdb/CIDetailSections.test.tsx;WP-804
+NFR-02;[B];B;backend/internal/topology/querybudget_integration_test.go;WP-840
+NFR-01;[B], Teilumfang [P5];B;backend/internal/topology/querybudget_integration_test.go;WP-840
+ABN-02;[Q];B;backend/internal/topology/querybudget_integration_test.go;WP-840

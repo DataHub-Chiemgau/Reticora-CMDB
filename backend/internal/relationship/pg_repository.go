@@ -640,24 +640,44 @@ func (r *PGRepository) TraverseFrom(ctx context.Context, orgID, rootCIID string,
 // number instead of maps keyed by id strings (NFR-02, WP-611). Only the CIs
 // and edges it returns get their text form.
 func (r *PGRepository) WalkFrom(ctx context.Context, orgID, rootCIID string, maxDepth, maxNodes int) (*Walk, error) {
-	if maxDepth < 1 || maxNodes < 1 {
-		return &Walk{CIs: []string{rootCIID}, Edges: []WalkEdge{}}, nil
+	return r.WalkFromMany(ctx, orgID, []string{rootCIID}, maxDepth, maxNodes)
+}
+
+// WalkFromMany implements Walker: the walk of WalkFrom from several roots
+// at once (IMP-05, WP-840). The roots form the first level, each level
+// reads the edges of all CIs it reached in one statement, and a CI gets
+// the distance to its nearest root, so GET /impact?ci_ids= reads each edge
+// once instead of once per failed CI, with the statements of a single
+// walk. The roots are checked like the root of WalkFrom; a root the caller
+// does not see keeps its number and stays without edges.
+func (r *PGRepository) WalkFromMany(ctx context.Context, orgID string, rootCIIDs []string, maxDepth, maxNodes int) (*Walk, error) {
+	roots := make([]uuid, len(rootCIIDs))
+	seen := make(map[uuid]bool, len(rootCIIDs))
+	for i, id := range rootCIIDs {
+		var root pgtype.UUID
+		if err := root.Scan(id); err != nil {
+			return nil, fmt.Errorf("traverse relationships: root: %w", err)
+		}
+		if seen[root.Bytes] {
+			return nil, fmt.Errorf("traverse relationships: root %s given twice", id)
+		}
+		seen[root.Bytes], roots[i] = true, root.Bytes
 	}
-	var root pgtype.UUID
-	if err := root.Scan(rootCIID); err != nil {
-		return nil, fmt.Errorf("traverse relationships: root: %w", err)
+	g := newWalkGraph(roots...)
+	if maxDepth < 1 || maxNodes < 1 || g.roots == 0 {
+		return g.rootsOnly(), nil
 	}
-	g := newWalkGraph(root.Bytes)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		return r.walk(ctx, tx, orgID, g, maxDepth, maxNodes)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return g.selectWalk(maxDepth, maxNodes), nil
+	return g.selectWalk(maxDepth, max(maxNodes, int(g.roots))), nil
 }
 
-// walk reads the edges and CIs of a walk from the root (number 0) into g.
+// walk reads the edges and CIs of a walk from the roots (numbers 0 to
+// g.roots-1) into g.
 func (r *PGRepository) walk(ctx context.Context, tx pgx.Tx, orgID string, g *walkGraph, maxDepth, maxNodes int) error {
 	// A wide level reaches most of the graph: one read of all edges
 	// replaces the further levels, and the selection re-derives the walk
@@ -672,8 +692,11 @@ func (r *PGRepository) walk(ctx context.Context, tx pgx.Tx, orgID string, g *wal
 		return g.checkOrganization(ctx, tx, orgID)
 	}
 	seenEdge := map[edgeKey]struct{}{}
-	reached := 1
-	frontier := []int32{0}
+	reached := int(g.roots)
+	frontier := make([]int32, g.roots)
+	for n := range frontier {
+		frontier[n] = int32(n)
+	}
 	hops := maxDepth
 	for hop := 0; hop < hops && len(frontier) > 0; hop++ {
 		if len(frontier) > r.bulkFrontier {
@@ -693,7 +716,7 @@ func (r *PGRepository) walk(ctx context.Context, tx pgx.Tx, orgID string, g *wal
 		if err != nil {
 			return err
 		}
-		// The CIs this level reaches first; the root is checked with them.
+		// The CIs this level reaches first; the roots are checked with them.
 		var unchecked []int32
 		fresh := level[:0]
 		for i := range level {
@@ -703,7 +726,7 @@ func (r *PGRepository) walk(ctx context.Context, tx pgx.Tx, orgID string, g *wal
 			seenEdge[level[i].id] = struct{}{}
 			fresh = append(fresh, level[i])
 			for _, n := range [2]int32{level[i].source, level[i].target} {
-				if g.state[n] == ciUnchecked && n != 0 {
+				if g.state[n] == ciUnchecked && n >= g.roots {
 					g.state[n] = ciHidden
 					unchecked = append(unchecked, n)
 				}
@@ -713,13 +736,13 @@ func (r *PGRepository) walk(ctx context.Context, tx pgx.Tx, orgID string, g *wal
 			return readAll()
 		}
 		check := unchecked
-		if g.state[0] == ciUnchecked {
-			check = append([]int32{0}, unchecked...)
+		if hop == 0 {
+			check = append(slices.Clone(frontier), unchecked...)
 		}
 		if err := g.checkCIs(ctx, tx, orgID, check); err != nil {
 			return err
 		}
-		if g.state[0] != ciVisible {
+		if !g.anyRootVisible() {
 			return nil
 		}
 		for i := range fresh {
@@ -764,10 +787,12 @@ const (
 	ciVisible
 )
 
-// walkGraph is what a walk reads: every CI it met as a number (the root is
-// 0) with its id and visibility, and the edges with the numbers of their
-// ends. The types and origins of the edges are interned (text).
+// walkGraph is what a walk reads: every CI it met as a number (the roots
+// are 0 to roots-1) with its id and visibility, and the edges with the
+// numbers of their ends. The types and origins of the edges are interned
+// (text).
 type walkGraph struct {
+	roots  int32
 	number map[uuid]int32
 	ids    []uuid
 	state  []ciState
@@ -806,10 +831,29 @@ func compareKeys(a, b edgeKey) int {
 	return cmp.Compare(a[1], b[1])
 }
 
-func newWalkGraph(root uuid) *walkGraph {
+// newWalkGraph returns the graph of a walk from roots, distinct ids that
+// get the numbers 0 to len(roots)-1.
+func newWalkGraph(roots ...uuid) *walkGraph {
 	g := &walkGraph{number: map[uuid]int32{}, index: map[string]int32{}}
-	g.ci(root)
+	for i := range roots {
+		g.ci(roots[i])
+	}
+	g.roots = int32(len(g.ids))
 	return g
+}
+
+// anyRootVisible reports whether a root of g is visible.
+func (g *walkGraph) anyRootVisible() bool {
+	return slices.Contains(g.state[:g.roots], ciVisible)
+}
+
+// rootsOnly is the walk of the roots alone, without an edge.
+func (g *walkGraph) rootsOnly() *Walk {
+	walk := &Walk{CIs: make([]string, g.roots), Edges: []WalkEdge{}}
+	for n := range walk.CIs {
+		walk.CIs[n] = formatUUID(&g.ids[n])
+	}
+	return walk
 }
 
 // ci returns the number of the CI id, a new one for a CI not met before.
@@ -966,17 +1010,18 @@ func formatUUID(id *uuid) string {
 }
 
 // selectWalk is SelectTraversal on the CI numbers of g: every node gets
-// its hop distance from the root (at most maxDepth); the maxNodes nodes
-// with the smallest distance (ties by id) are kept, and the walk holds each
-// edge between visible kept nodes that leaves a node closer than maxDepth,
+// its hop distance from the nearest root (at most maxDepth); the maxNodes
+// nodes with the smallest distance (ties by id) are kept, the roots
+// always (maxNodes is at least their number), and the walk holds each edge
+// between visible kept nodes that leaves a node closer than maxDepth,
 // ordered by id. The CIs are numbered anew in the order the walk reaches
-// them, over the edges in the order of their ids, so the numbering does not
-// depend on the order the rows were read in.
+// them, the roots first, over the edges in the order of their ids, so the
+// numbering does not depend on the order the rows were read in.
 func (g *walkGraph) selectWalk(maxDepth, maxNodes int) *Walk {
-	walk := &Walk{CIs: []string{formatUUID(&g.ids[0])}, Edges: []WalkEdge{}}
-	if g.state[0] != ciVisible {
-		return walk
+	if !g.anyRootVisible() {
+		return g.rootsOnly()
 	}
+	walk := &Walk{}
 	edges := g.edges[:0]
 	for i := range g.edges {
 		if g.state[g.edges[i].source] == ciVisible && g.state[g.edges[i].target] == ciVisible {
@@ -1013,8 +1058,10 @@ func (g *walkGraph) selectWalk(maxDepth, maxNodes int) *Walk {
 	for v := range depth {
 		depth[v] = -1
 	}
-	depth[0] = 0
-	order := []int32{0}
+	order := make([]int32, g.roots)
+	for v := range order {
+		order[v], depth[v] = int32(v), 0
+	}
 	for d, start := int32(1), 0; int(d) <= maxDepth && start < len(order); d++ {
 		end := len(order)
 		for _, v := range order[start:end] {
