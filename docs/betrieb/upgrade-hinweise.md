@@ -37,6 +37,9 @@ Ein Rollback wirkt nur auf die eigene Datenbank:
   verwendet die vorhandene Rolle wieder.
 - `000078_app_role_ddl_contract.down.sql` verfährt mit `reticora_owner`
   ebenso, ohne Meldung.
+- `000188_audit_seal_append_only.down.sql` verfährt mit
+  `reticora_audit_sealer` (Eigentümer von `audit_seal_pii`, WP-680) ebenso,
+  ohne Meldung.
 
 Welche Datenbanken die Rolle noch verwenden, zeigt eine beliebige Datenbank
 des Clusters (`pg_shdepend` ist clusterweit):
@@ -221,6 +224,89 @@ direkt bis 179.
 prüft das Upgrade samt der von 000089 abgelegten Zeile und vergleicht das
 Schema mit einer frischen Installation.
 
+Seit WP-560 schreibt bereits 000066 in die Tabelle und legt sie ebenso an,
+wenn sie fehlt (nächster Abschnitt). 000089 legt sie dann nur noch auf
+Datenbanken an, die 000066 in der früheren Fassung angewendet haben. Der
+Test prüft beide Fälle (Tabelle auf Version 56 bzw. 66 entfernt).
+
+## Release-Hinweis: Bericht der von 000066 geleerten Storage-Keys (F-187, E-72)
+
+Stand: 2026-10-28. Umsetzung: WP-560. Entscheidung: E-72 (Option 1,
+entschieden 2026-10-26, nach dem Präzedenzfall E-26).
+
+Migration 000066 (WP-030) leert Storage-Keys von Dokumenten, die nicht unter
+dem Präfix der eigenen Organisation liegen (`org/<organization_id>/…` oder
+das Altformat `documents/<organization_id>/<Dokument-ID>/…`, jeweils ohne
+`..`), und legt danach die CHECK-Constraint
+`document_storage_key_org_prefix` an. Frühere Builds meldeten nur die Anzahl
+(`NOTICE: cleared 1 document storage keys outside the organization prefix`;
+golang-migrate zeigt NOTICEs nicht an). Welche Dokumente ihren
+Inhaltsverweis verloren haben, ließ sich danach nicht mehr feststellen.
+
+- 000066 schreibt jetzt vor dem Leeren je betroffenem Dokument eine Zeile in
+  `migration_quarantine`: `source_table = 'document'`,
+  `migration = '000066'`, `row_data` mit `id`, `organization_id` und dem
+  alten `storage_key`. Die Zeile gehört der Organisation des Dokuments
+  (RLS `migration_quarantine_isolation`).
+- Abfrage für Betreiber (Wartungsverbindung, wie für 000056 in
+  `docs/backup-dr.md`):
+
+  ```sql
+  SELECT organization_id,
+         row_data->>'id'          AS document_id,
+         row_data->>'storage_key' AS old_storage_key,
+         quarantined_at
+    FROM migration_quarantine
+   WHERE migration = '000066' AND source_table = 'document'
+   ORDER BY organization_id, document_id;
+  ```
+
+  Keine Zeile: Kein Key wurde geleert. Sonst hat das Dokument keinen Inhalt
+  mehr; der Inhalt wird mit `PUT /api/v1/documents/{id}/content` neu
+  hochgeladen. Der alte Key wird bewusst nicht wiederhergestellt, weil er auf
+  ein Objekt einer anderen Organisation zeigen kann. Erledigte Zeilen dürfen
+  gelöscht werden.
+- Die Down-Migration 000066 löscht die Berichtszeilen von 000066; die
+  geleerten Keys bleiben leer.
+- Datenbanken, die 000056 vor E-26 angewendet haben, besitzen keine
+  `migration_quarantine` (F-378, E-100). 000066 ist für sie jetzt die erste
+  Migration, die hineinschreibt, und legt die Tabelle wie 000089 an, wenn
+  `to_regclass('public.migration_quarantine')` leer ist (Definition von
+  000056; Eigentümer `reticora_owner` setzt 000078). Die Down-Migration
+  prüft die Tabelle ebenso. Das Upgrade solcher Datenbanken bricht dadurch
+  nicht ab; auf allen anderen Datenbanken und bei Neuinstallationen ist das
+  Schema unverändert.
+- Die Änderung wirkt nur für Installationen, die 000066 noch nicht
+  angewendet haben. Installationen über Version 65 haben keinen Bericht;
+  welche Keys geleert wurden, zeigt nur ein Backup von vor dem Upgrade auf
+  66, isoliert wiederhergestellt (`docs/backup-dr.md`, nie über die
+  Produktion), mit `SELECT version FROM schema_migrations` unter 66:
+
+  ```sql
+  SELECT id, organization_id, storage_key
+    FROM document
+   WHERE storage_key <> ''
+     AND NOT ((storage_key LIKE 'org/' || organization_id::text || '/%'
+               OR storage_key LIKE 'documents/' || organization_id::text || '/' || id::text || '/%')
+              AND position('..' IN storage_key) = 0);
+  ```
+
+Nachgestellt mit golang-migrate auf eigenen Datenbanken: Migrationen 1 bis
+65, zwei Organisationen, ein Dokument mit dem Key einer fremden Organisation
+und eines mit eigenem Key, dann `up`. Mit der alten Datei läuft `up` bis 184
+durch, der fremde Key ist leer, `migration_quarantine` enthält keine Zeile
+von 000066. Mit der neuen Datei enthält sie genau eine Zeile mit Dokument-ID
+und altem Key; der eigene Key bleibt. Dasselbe nach
+`DROP TABLE migration_quarantine` auf Version 65: `up` läuft bis 184 durch
+(nicht dirty), die Tabelle hat RLS ENABLE und FORCE, Eigentümer
+`reticora_owner` und die Rechte `reticora_app=arwd`.
+`TestMigration000066ReportsClearedStorageKeys` und
+`TestMigration000066WithoutMigrationQuarantine`
+(`backend/internal/database/migration_000066_report_integration_test.go`)
+prüfen den Bericht (Migration 65 → 66), die Sichtbarkeit je Organisation als
+`reticora_app`, die Down-Migration mit und ohne Tabelle und die angelegte
+Tabelle.
+
 ## Release-Hinweis: Upgrade mit vorhandenen Interface-Suffixnamen (F-310, E-94)
 
 Stand: 2026-10-28. Umsetzung: WP-592. Entscheidung: E-94 (Empfehlung
@@ -272,6 +358,188 @@ Datei endet `up` mit dem Fehler oben und 110 dirty; nach `force 109` läuft
 `vfy-eth0 (2)` und `vfy-eth0 (1)`. `TestNet01DedupeAvoidsExistingSuffix`
 (`backend/internal/ipam/net01_migration_integration_test.go`) prüft die
 Umbenennung samt doppelt vorhandener Suffixnamen.
+
+## Release-Hinweis: Service-Account-Keys tragen den Scope ihres Erzeugers (F-397)
+
+Stand: 2026-11-01. Umsetzung: WP-668 (Migration 000185). Anforderungen:
+RBA-08, AUT-04, TEN-09.
+
+Ein an einen Service-Account gebundener API-Key handelte bisher mit den
+jeweils aktuellen Rechten des Accounts. Der Scope seines Erzeugers wurde nur
+beim Binden geprüft: Gab ein org-weiter Administrator dem Account später
+org-weite Rollen, las ein Key, den ein auf Client 1 beschränkter Delegierter
+gebunden hatte, alle Clients.
+
+- Neue gebundene Keys speichern in `api_key.creator_scope` je Key-Recht den
+  Client-, Site- und Team-Scope, in dem der Erzeuger es beim Binden hielt
+  (wie der Scope-Snapshot der Webhook-Abos, E-98). Jede Anfrage schneidet
+  die aktuellen Rechte des Accounts damit: Einschränkungen des Accounts
+  wirken sofort, Erweiterungen nur innerhalb des Erzeuger-Scopes. Der Key
+  bleibt bei Deaktivierung des Erzeugers gültig (E-64), eine Rotation
+  übernimmt den Scope.
+- Keys, die vor 000185 gebunden wurden, haben keinen gespeicherten Scope
+  (`creator_scope` NULL): Welchen Scope ihr Erzeuger beim Binden hatte, ist
+  nicht bekannt. Sie handeln ab dem Upgrade höchstens mit den **aktuellen**
+  Rechten ihres Erzeugers aus seinen gespeicherten Rollenzuweisungen
+  (fail-closed). Ein org-weiter Erzeuger behält damit das bisherige
+  Verhalten, ein beschränkter Erzeuger begrenzt den Key auf seinen Scope.
+  Hat der Erzeuger keine Rollenzuweisung mehr (gelöscht, Rollen entzogen,
+  Rechte nur über IdP-Gruppen), gewährt der Key nichts mehr (403). Eine
+  Deaktivierung allein ändert daran nichts, die Rollenzuweisungen bleiben
+  dabei bestehen.
+- Betroffene Keys findet ein Betreiber nach dem Upgrade so (vor dem Upgrade
+  dieselbe Abfrage ohne die letzte Bedingung):
+
+  ```sql
+  SELECT organization_id, id, name, key_prefix, created_by, service_account_id
+    FROM api_key
+   WHERE service_account_id IS NOT NULL AND revoked_at IS NULL
+     AND (expires_at IS NULL OR expires_at > now())
+     AND creator_scope IS NULL;
+  ```
+
+- Soll ein solcher Key unabhängig von seinem Erzeuger weiterlaufen, legt
+  ein Administrator, dessen Scope die gewünschten Rechte deckt, einen neuen
+  Key für den Account an (`POST /api/v1/api-keys` mit `service_account_id`),
+  stellt die Integration um und widerruft den alten Key. Eine Rotation
+  genügt nicht: Der Nachfolger übernimmt den fehlenden Scope.
+- Rollback: `000185_api_key_creator_scope.down.sql` entfernt die Spalte
+  samt den gespeicherten Scopes. Ein früherer Build lässt gebundene Keys
+  dann wieder mit allen Rechten des Accounts handeln (F-397 offen).
+
+`TestBoundKeyStaysWithinCreatorScopeAfterServiceAccountWidening`
+(`backend/internal/identity/apikey_authz_integration_test.go`) prüft beide
+Fälle des Befunds, Rotation, Deaktivierung des Erzeugers, Einschränkung des
+Accounts und einen Key ohne gespeicherten Scope gegen PostgreSQL;
+`TestBoundKeyCreatorCeiling` (`backend/internal/identity/ceiling_test.go`)
+den Schnitt je Recht.
+
+## Release-Hinweis: Enrollment-Codes binden den Collector an Client und Site ihres Erzeugers (F-406)
+
+Stand: 2026-11-01. Umsetzung: WP-677 (Migration 000187). Anforderungen:
+COL-04, TEN-09, E-08.
+
+Ein Enrollment-Code trug bisher nur die Organisation. Das Einlösen
+(`POST /api/v1/collectors/enroll`, ohne Anmeldung) übernahm die `client_id`
+des Request-Bodys: Ein auf Client 1 beschränkter Principal mit
+`collector:manage` legte so einen aktiven Collector samt Client-Zertifikat in
+Client 2 oder einen org-weiten Collector an, obwohl ihm `POST /collectors`
+beides verweigert.
+
+- Neue Codes speichern in `collector_enrollment_code` den Client und die
+  Site, an die der Collector gebunden wird (`client_id`, `site_id`,
+  `binding_recorded = true`): aus dem Scope, in dem der Erzeuger
+  `collector:manage` hält, oder die beim Erzeugen gewählten
+  (`client_id`/`site_id` im Body, innerhalb dieses Scopes). Ein auf mehrere
+  Clients beschränkter Erzeuger muss einen wählen (422). Beim Einlösen
+  landet der Collector in diesem Client; eine andere `client_id` ergibt 422,
+  nichts wird angelegt, der Code bleibt gültig. Codes org-weiter Erzeuger
+  bleiben ungebunden: Der Collector darf wie bisher einen Client der
+  Organisation nennen oder org-weit bleiben.
+- Codes, die vor 000187 erzeugt wurden, haben keine gespeicherte Bindung
+  (`binding_recorded = false`). Mit welchem Scope ihr Erzeuger sie erzeugt
+  hat, ist nicht bekannt (`created_by` war nicht belegt). Sie werden ab dem
+  Upgrade nicht mehr eingelöst (401, fail-closed); dasselbe gilt für Codes,
+  die ein noch laufender älterer Build während des Rollouts erzeugt. Ein
+  Code gilt höchstens 24 Stunden: Ein Administrator erzeugt für noch nicht
+  eingerichtete Collectors einen neuen Code. Offene Altcodes findet ein
+  Betreiber so:
+
+  ```sql
+  SELECT organization_id, id, label, expires_at
+    FROM collector_enrollment_code
+   WHERE used_at IS NULL AND expires_at > now() AND NOT binding_recorded;
+  ```
+
+- Bereits eingeschriebene Collectors ändern sich nicht. Ein Collector, der
+  mit einem Code eines eingeschränkten Erzeugers in einen fremden Client
+  oder org-weit eingeschrieben wurde, ist aus den Daten nicht sicher zu
+  erkennen; Administratoren prüfen die Liste der Collectors (Client, Name,
+  Einschreibezeit, Audit-Eintrag `collector.enrolled`) und deaktivieren
+  unbekannte Collectors.
+- Rollback: `000187_enrollment_code_client_binding.down.sql` entfernt
+  Spalten, Trigger und Policies. Ein früherer Build übernimmt die
+  `client_id` des Bodys dann wieder (F-406 offen).
+
+`TestEnrollmentCodeBindsCreatorClients`
+(`backend/internal/server/enrollment_client_binding_integration_test.go`)
+prüft Bindung, Wahl, Ablehnung, Site-Bindung, org-weite Codes und Altcodes
+gegen PostgreSQL.
+## Release-Hinweis: Audit-Einträge für die Laufzeitrolle unveränderlich (F-409)
+
+Stand: 2026-11-01. Umsetzung: WP-680 (Migration 000188, Nummer vorläufig).
+Anforderungen: AUD-04, SEC-05.
+
+Bisher konnte die Laufzeitrolle `app.audit_pii_migration` selbst setzen, die
+`changes` eines Audit-Eintrags umschreiben und die Kette der Organisation mit
+`audit_rechain` neu verketten; `audit-verify` meldete die Kette danach intakt.
+
+- Die Einstellung und `audit_rechain` entfallen, `reticora_app` verliert das
+  UPDATE-Recht auf `audit_log`. Der Lauf `pii.backfill` versiegelt
+  personenbezogene Werte alter Einträge nur noch über `audit_seal_pii`
+  (SECURITY DEFINER der neuen Rolle `reticora_audit_sealer`, NOLOGIN, ohne
+  Mitglieder) und ohne Neuverkettung; der Eintrag behält seinen Hash, die
+  Datenbank hält den Digest des Originals fest (`docs/ops/workers.md`,
+  „Sealed audit entries“).
+- Die Migration legt die Rolle an: Das Migrations-Login braucht dafür
+  SUPERUSER oder CREATEROLE (wie 000056 und 000078). Kein Login und keine
+  Anwendungsrolle darf Mitglied von `reticora_audit_sealer` werden; der
+  Server startet sonst nicht (Rollenvertrag, `role … reaches the audit sealer
+  role`).
+- Einträge, die der Backfill vor 000188 versiegelt und neu verkettet hat,
+  bleiben unverändert und verifizieren wie bisher. `audit-verify` nennt
+  versiegelte Einträge in der Ausgabe und prüft sie mit
+  `RETICORA_MASTER_KEY` gegen den Tresor.
+- Rollback: Die Down-Migration verkettet jede Organisation ab ihrem ersten
+  versiegelten Eintrag neu (wie der frühere Backfill) und entfernt die drei
+  Spalten des Siegels; danach gilt wieder der Stand von WP-241 (F-409 offen).
+
+`TestRuntimeRoleCannotRewriteAuditChain` und
+`TestAuditSealOnlyReplacesPersonalValues` (`backend/internal/audit/`) prüfen
+die Rechte der Laufzeitrolle, das Siegel und die Verifikation gegen
+PostgreSQL.
+
+## Release-Hinweis: Enrollment-Codes halten ihre Site (F-430)
+
+Stand: 2026-11-01. Umsetzung: WP-701 (Migration 000189). Anforderungen:
+LOC-11, E-71, COL-04.
+
+Migration 000187 hat `collector_enrollment_code.site_id` mit `ON DELETE
+CASCADE` an die Site gebunden: Das Löschen einer Site entfernte die an sie
+gebundenen Enrollment-Codes still, obwohl kein Löschen eines Standorts
+kaskadiert und eine Site ihre Netz- und Discovery-Objekte hält (000157,
+E-71 Option 1).
+
+- Der Fremdschlüssel `collector_enrollment_code_site_fkey` ist ab 000189
+  `RESTRICT` wie der der Agent-Enrollment-Tokens. `DELETE /api/v1/sites/{id}`
+  und `DELETE /api/v1/locations/{id}` antworten 409 mit der Abhängigkeitsart
+  `collector_enrollment_code`, solange an der Site ein Code hängt, der weder
+  verbraucht noch abgelaufen ist; die Oberfläche nennt ihn „gültige
+  Collector-Enrollment-Codes“. Abgelaufene und verbrauchte Codes blockieren
+  nicht und werden in der Lösch-Transaktion entfernt (im Audit-Eintrag
+  `location.deleted` unter `removed` gezählt). Ein Code gilt höchstens
+  24 Stunden; wer die Site sofort löschen will, wartet den Ablauf ab oder
+  entfernt den Code in der Datenbank. Blockierende Codes einer Site findet
+  ein Betreiber so:
+
+  ```sql
+  SELECT id, label, expires_at
+    FROM collector_enrollment_code
+   WHERE site_id = '<site-id>' AND used_at IS NULL AND expires_at > now();
+  ```
+
+- Das Löschen eines Clients (`DELETE /api/v1/clients/{id}`) entfernt seine
+  Sites samt ihren Codes wie bisher (`collector_enrollment_code_client_fkey`
+  bleibt `CASCADE`, wie bei den Agent-Enrollment-Tokens).
+- Rollback: `000189_enrollment_code_site_restrict.down.sql` stellt `ON
+  DELETE CASCADE` wieder her (F-430 offen).
+
+`TestSiteDeleteKeepsCollectorEnrollmentCodes`
+(`backend/internal/locations/enrollment_code_delete_integration_test.go`)
+prüft gültige, abgelaufene, verbrauchte und für den Aufrufer unsichtbare
+Codes sowie das Löschen des Clients gegen PostgreSQL;
+`TestLocationDeleteReferencesMapToSpecKinds` die Löschregel aller
+Fremdschlüssel auf Standorte.
 
 ## Prüfung
 

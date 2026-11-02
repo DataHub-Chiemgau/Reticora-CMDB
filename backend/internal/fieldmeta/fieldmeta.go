@@ -208,38 +208,53 @@ type Predicate struct {
 // called like one (GLO-13).
 var ReservedNames = map[string]bool{"_overrides": true, "_observed": true, "_provenance": true, "_instance": true}
 
-// ValidateDefinition checks structural validity of a field definition.
+// DefinitionError names the attribute of a field definition that
+// ValidateDefinition rejects (F-408): name, data_type, reference_target,
+// validation or conditional. Error() is the text without the attribute.
+type DefinitionError struct {
+	Attribute string
+	Message   string
+}
+
+func (e *DefinitionError) Error() string { return e.Message }
+
+func definitionError(attribute, format string, args ...any) *DefinitionError {
+	return &DefinitionError{Attribute: attribute, Message: fmt.Sprintf(format, args...)}
+}
+
+// ValidateDefinition checks structural validity of a field definition; a
+// rejection is a *DefinitionError naming the attribute.
 // validation: fixed texts naming the field and the rule.
 func ValidateDefinition(def FieldDefinition) error {
 	if strings.TrimSpace(def.Name) == "" {
-		return fmt.Errorf("field name is required")
+		return definitionError("name", "field name is required")
 	}
 	if ReservedNames[def.Name] {
-		return fmt.Errorf("field name %q is a reserved namespace (GLO-13)", def.Name)
+		return definitionError("name", "field name %q is a reserved namespace (GLO-13)", def.Name)
 	}
 	if !ValidFieldTypes[def.DataType] {
-		return fmt.Errorf("unsupported field type %q", def.DataType)
+		return definitionError("data_type", "unsupported field type %q", def.DataType)
 	}
 	if def.ReferenceTarget != "" && !ReferenceTargets[def.ReferenceTarget] {
-		return fmt.Errorf("unsupported reference target %q", def.ReferenceTarget)
+		return definitionError("reference_target", "unsupported reference target %q", def.ReferenceTarget)
 	}
 	for _, p := range def.Validation.AllPatterns() {
 		if _, err := regexp.Compile(p); err != nil {
-			return fmt.Errorf("invalid validation pattern: %w", err)
+			return definitionError("validation", "invalid validation pattern: %v", err)
 		}
 	}
 	if def.Validation != nil && len(def.Validation.Options) > 0 {
 		options := rules.Rule{Op: rules.OpEnum, Values: def.Validation.Options}
 		if err := options.Validate(); err != nil {
-			return fmt.Errorf("invalid validation options: %w", err)
+			return definitionError("validation", "invalid validation options: %v", err)
 		}
 	}
 	for _, p := range def.allPredicates() {
 		if p.Field == "" {
-			return fmt.Errorf("conditional predicate requires a field")
+			return definitionError("conditional", "conditional predicate requires a field")
 		}
 		if !validOps[p.Op] {
-			return fmt.Errorf("unsupported predicate operator %q", p.Op)
+			return definitionError("conditional", "unsupported predicate operator %q", p.Op)
 		}
 	}
 	return nil

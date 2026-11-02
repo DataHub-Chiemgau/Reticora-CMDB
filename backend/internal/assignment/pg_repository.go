@@ -3,7 +3,6 @@ package assignment
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -153,7 +152,11 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate assignments: %w", err)
 		}
-		return nil
+		items := make([]*Assignment, len(assignments))
+		for i := range assignments {
+			items[i] = &assignments[i]
+		}
+		return reveal(ctx, tx, orgID, items...)
 	})
 
 	return assignments, total, err
@@ -173,7 +176,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Assignme
 			}
 			return fmt.Errorf("get assignment by id: %w", err)
 		}
-		return nil
+		return reveal(ctx, tx, orgID, assignment)
 	})
 	if err != nil {
 		return nil, err
@@ -184,11 +187,11 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Assignme
 // Create inserts a new assignment.
 func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
 	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		var checkoutSig any
-		if a.CheckoutSignature != nil {
-			if b, err := json.Marshal(a.CheckoutSignature); err == nil {
-				checkoutSig = string(b)
-			}
+		// The signer name goes into the vault; the table keeps its
+		// surrogate (SEC-05).
+		checkoutSig, err := sealSignature(ctx, tx, a.OrganizationID, a.CheckoutSignature)
+		if err != nil {
+			return err
 		}
 		query := `
 			INSERT INTO assignment (
@@ -200,7 +203,7 @@ func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
 			)
 			RETURNING id::text, assigned_at, created_at, updated_at
 		`
-		if err := tx.QueryRow(ctx, query,
+		if err = tx.QueryRow(ctx, query,
 			a.OrganizationID,
 			nilIfEmpty(a.AssetID),
 			nilIfEmpty(a.CIID),
@@ -227,11 +230,9 @@ func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
 // Update replaces mutable fields on an existing assignment.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignment) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var returnSig any
-		if a.ReturnSignature != nil {
-			if b, err := json.Marshal(a.ReturnSignature); err == nil {
-				returnSig = string(b)
-			}
+		returnSig, replaced, err := sealReturnSignature(ctx, tx, orgID, id, a.ReturnSignature)
+		if err != nil {
+			return err
 		}
 		query := `
 			UPDATE assignment SET
@@ -271,22 +272,65 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignme
 			}
 			return fmt.Errorf("update assignment: %w", err)
 		}
+		if serr := shred(ctx, tx, orgID, replaced); serr != nil {
+			return serr
+		}
+		if rerr := reveal(ctx, tx, orgID, updated); rerr != nil {
+			return rerr
+		}
 		*a = *updated
 		return requireVisible(ctx, tx, "assignment", assignmentVisible, id)
 	})
 }
 
+// sealReturnSignature returns the stored form of the return signature an
+// update writes: nil keeps the stored one, which is the case when sig is
+// none or equals it (a transfer or a repeated return carries the read
+// signature along). A new signature replaces the stored one, whose signer
+// subject (replaced) the caller deletes.
+func sealReturnSignature(ctx context.Context, tx pgx.Tx, orgID, id string, sig *Signature) (stored any, replaced string, err error) {
+	if sig == nil {
+		return nil, "", nil
+	}
+	var raw []byte
+	err = tx.QueryRow(ctx, "SELECT return_signature FROM assignment WHERE "+assignmentVisible+" AND id = $1 FOR UPDATE", id).Scan(&raw)
+	if err == pgx.ErrNoRows {
+		return nil, "", fmt.Errorf("not found")
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("read return signature: %w", err)
+	}
+	current := &Assignment{}
+	current.ReturnSignature, current.returnSigner = decodeSignature(raw)
+	if rerr := reveal(ctx, tx, orgID, current); rerr != nil {
+		return nil, "", rerr
+	}
+	if current.ReturnSignature != nil && *current.ReturnSignature == *sig {
+		return nil, "", nil
+	}
+	if stored, err = sealSignature(ctx, tx, orgID, sig); err != nil {
+		return nil, "", err
+	}
+	return stored, current.returnSigner, nil
+}
+
 // Delete deletes an assignment. The assignment table has no deleted_at column, so this is a hard delete.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM assignment WHERE "+assignmentVisible+" AND id = $1", id)
+		// The signer names of the deleted assignment are deleted with it
+		// (crypto-shredding).
+		var checkoutSig, returnSig []byte
+		err := tx.QueryRow(ctx, "DELETE FROM assignment WHERE "+assignmentVisible+" AND id = $1 RETURNING checkout_signature, return_signature", id).
+			Scan(&checkoutSig, &returnSig)
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("not found")
+		}
 		if err != nil {
 			return fmt.Errorf("delete assignment: %w", err)
 		}
-		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
-		}
-		return nil
+		_, checkoutSigner := decodeSignature(checkoutSig)
+		_, returnSigner := decodeSignature(returnSig)
+		return shred(ctx, tx, orgID, checkoutSigner, returnSigner)
 	})
 }
 
@@ -326,18 +370,8 @@ func scanAssignment(scanner assignmentScanner) (*Assignment, error) {
 	if returnedAt.Valid {
 		item.ReturnedAt = returnedAt.Time.UTC().Format(time.RFC3339)
 	}
-	if len(checkoutSig) > 0 {
-		var sig Signature
-		if err := json.Unmarshal(checkoutSig, &sig); err == nil {
-			item.CheckoutSignature = &sig
-		}
-	}
-	if len(returnSig) > 0 {
-		var sig Signature
-		if err := json.Unmarshal(returnSig, &sig); err == nil {
-			item.ReturnSignature = &sig
-		}
-	}
+	item.CheckoutSignature, item.checkoutSigner = decodeSignature(checkoutSig)
+	item.ReturnSignature, item.returnSigner = decodeSignature(returnSig)
 	item.AssignedAt = item.AssignedAt.UTC()
 	item.CreatedAt = item.CreatedAt.UTC()
 	item.UpdatedAt = item.UpdatedAt.UTC()

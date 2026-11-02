@@ -16,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -314,8 +315,9 @@ func (r *PGRepository) UpdateUserTx(ctx context.Context, orgID, id string, req U
 	return item, err
 }
 
-// deactivateInTx revokes the API keys of a user that was just deactivated and
-// records the deactivation, in the transaction of the status change (TLC-04).
+// deactivateInTx revokes the API keys of a user that was just deactivated (or
+// is deleted, F-393) and records the change, in the transaction of the status
+// change or the deletion (TLC-04).
 // The keys the user created for service accounts stay valid (decision E-64,
 // option 2): the audit entry lists them, and an apikey.creator_deactivated
 // event in the same transaction asks the org_admins to rotate them. Sessions
@@ -387,13 +389,37 @@ const openOwnershipQuery = `
 // removed either; they are deactivated or anonymized instead, so the
 // references stay intact.
 func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
+	return r.DeleteUserTx(ctx, orgID, id, nil)
+}
+
+// DeleteUserTx deletes the user and ends its access like a deactivation, in
+// one transaction (TLC-04, AUT-02, F-393): it locks the row of the
+// organization, refuses a user with open objects, revokes the API keys the
+// user created for themself, records user.deleted with the revoked and the
+// kept service-account keys (E-64, option 2) and deletes the row. onDelete
+// (may be nil) runs after the row is deleted and before the commit: a
+// refused deletion (409) leaves the sessions alone, and a failing revocation
+// rolls the deletion back.
+func (r *PGRepository) DeleteUserTx(ctx context.Context, orgID, id string, onDelete DeactivationHook) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id FROM app_user WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).Scan(&locked); err != nil {
+			if err == pgx.ErrNoRows {
+				return fmt.Errorf("user not found")
+			}
+			return fmt.Errorf("lock user for deletion: %w", err)
+		}
 		var open int
 		if err := tx.QueryRow(ctx, openOwnershipQuery, id).Scan(&open); err != nil {
 			return fmt.Errorf("check open objects of user: %w", err)
 		}
 		if open > 0 {
 			return fmt.Errorf("%w: %d open objects", ErrUserOwnsOpenObjects, open)
+		}
+		// api_key.created_by has no foreign key: without the revocation the
+		// keys of the user would outlive it (F-393).
+		if err := deactivateInTx(ctx, tx, orgID, id, "user.deleted"); err != nil {
+			return err
 		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM app_user WHERE id = $1 AND organization_id = $2", id, orgID)
 		var pgErr *pgconn.PgError
@@ -405,6 +431,9 @@ func (r *PGRepository) DeleteUser(ctx context.Context, orgID, id string) error {
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return fmt.Errorf("user not found")
+		}
+		if onDelete != nil {
+			return onDelete(ctx, tx)
 		}
 		return nil
 	})
@@ -854,7 +883,9 @@ func (r *PGRepository) CreateRole(ctx context.Context, role *CustomRole) error {
 
 // UpdateRole implements Repository. Permissions it adds must be held by
 // caller organization-wide (checkRoleWidening): the role applies to all its
-// assignments.
+// assignments. Permissions it removes are taken from every assignment, so
+// caller must be able to revoke each of them (permission.CheckRoleNarrowing,
+// F-396); the role row stays locked until the commit.
 func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller *identity.Principal, req UpdateRoleRequest) (*CustomRole, error) {
 	var item *CustomRole
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -872,6 +903,9 @@ func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller 
 		}
 		if req.Permissions != nil {
 			if err := checkRoleWidening(caller, current, req.Permissions); err != nil {
+				return err
+			}
+			if err := checkRoleNarrowing(ctx, tx, orgID, id, caller, current, req.Permissions); err != nil {
 				return err
 			}
 		}
@@ -924,10 +958,14 @@ func (r *PGRepository) UpdateRole(ctx context.Context, orgID, id string, caller 
 	return item, err
 }
 
-func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
+// DeleteRole implements Repository. Deleting the role revokes all its
+// assignments (user_custom_role, ON DELETE CASCADE), so caller must be able
+// to revoke each of them (permission.CheckRoleNarrowing, F-396); the role
+// row is locked, so no assignment is added meanwhile.
+func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string, caller *identity.Principal) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var isSystem bool
-		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID).Scan(&isSystem); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT is_system FROM custom_role WHERE id = $1 AND organization_id = $2 FOR UPDATE", id, orgID).Scan(&isSystem); err != nil {
 			if err == pgx.ErrNoRows {
 				return errRoleNotFound
 			}
@@ -935,6 +973,16 @@ func (r *PGRepository) DeleteRole(ctx context.Context, orgID, id string) error {
 		}
 		if isSystem {
 			return ErrSystemRole
+		}
+		role, found, err := readCustomRole(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errRoleNotFound
+		}
+		if narrowingErr := permission.CheckRoleNarrowing(ctx, tx, orgID, id, caller, role.Permissions, true); narrowingErr != nil {
+			return narrowingErr
 		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM custom_role WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
@@ -1440,6 +1488,11 @@ func (r *PGRepository) EnsureUser(ctx context.Context, orgID, oidcSubject, email
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		// The subject belongs to a user of another organization.
 		return "", false, identity.ErrFirstLoginNotPermitted
+	}
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "app_user_organization_id_fkey" {
+		// The organization attribute of the ID token names no
+		// organization: the login is refused, nothing is created (F-395).
+		return "", false, identity.ErrUnknownOrganization
 	}
 	if err != nil {
 		return "", false, fmt.Errorf("ensure oidc user: %w", err)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -38,9 +39,9 @@ var ErrSystemRole = errors.New("system roles cannot be changed or deleted")
 
 var errMemberNotFound = fmt.Errorf("team member %w", ErrNotFound)
 
-// DeactivationHook runs inside the transaction of a deactivation or
-// anonymization, after the user was found and locked in the organization and
-// before the commit; an error rolls the change back. The handler revokes the
+// DeactivationHook runs inside the transaction of a deactivation,
+// anonymization or deletion, after the user was found and locked in the
+// organization and before the commit; an error rolls the change back. The handler revokes the
 // sessions here, so a request for an unknown user or a user of another
 // organization never touches the blacklist (TLC-04, TEN-04). The memory
 // repository passes a nil transaction.
@@ -75,6 +76,10 @@ type Repository interface {
 	// the request sets a non-active status on a user of the organization.
 	UpdateUserTx(ctx context.Context, orgID, id string, req UpdateUserRequest, onDeactivate DeactivationHook) (*User, error)
 	DeleteUser(ctx context.Context, orgID, id string) error
+	// DeleteUserTx is DeleteUser that ends the access of the user like a
+	// deactivation and calls onDelete (may be nil) once the user of the
+	// organization is deleted, before the commit.
+	DeleteUserTx(ctx context.Context, orgID, id string, onDelete DeactivationHook) error
 	// AnonymizeUser replaces all personal data with surrogate values and
 	// deactivates the account, keeping the row for referential integrity and
 	// the audit chain (GDPR right to erasure).
@@ -100,7 +105,9 @@ type Repository interface {
 	// UpdateRole changes a custom role; permissions it adds must be held by
 	// caller organization-wide (RoleWideningError).
 	UpdateRole(ctx context.Context, orgID, id string, caller *identity.Principal, req UpdateRoleRequest) (*CustomRole, error)
-	DeleteRole(ctx context.Context, orgID, id string) error
+	// DeleteRole deletes a custom role with its assignments; caller must be
+	// able to revoke each of them (permission.RoleNarrowingError).
+	DeleteRole(ctx context.Context, orgID, id string, caller *identity.Principal) error
 	// AssignRole stores the assignment if the role fits the scope and caller
 	// holds role:manage and the role's permissions in a scope covering it
 	// (grant ceiling, GrantCeilingError).
@@ -250,13 +257,22 @@ func (r *MemoryRepository) UpdateUserTx(ctx context.Context, orgID, id string, r
 	return u, nil
 }
 
-func (r *MemoryRepository) DeleteUser(_ context.Context, orgID, id string) error {
+func (r *MemoryRepository) DeleteUser(ctx context.Context, orgID, id string) error {
+	return r.DeleteUserTx(ctx, orgID, id, nil)
+}
+
+func (r *MemoryRepository) DeleteUserTx(ctx context.Context, orgID, id string, onDelete DeactivationHook) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	u, ok := r.users[id]
 	if !ok || u.OrganizationID != orgID {
 		return fmt.Errorf("user not found")
+	}
+	if onDelete != nil {
+		if err := onDelete(ctx, nil); err != nil {
+			return err
+		}
 	}
 	delete(r.users, id)
 	return nil
@@ -507,6 +523,11 @@ func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, calle
 		if err := checkRoleWidening(caller, role.Permissions, req.Permissions); err != nil {
 			return nil, err
 		}
+		if slices.ContainsFunc(role.Permissions, func(key string) bool { return !slices.Contains(req.Permissions, key) }) {
+			if err := r.checkRoleNarrowing(caller, role, false); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if req.Name != nil {
 		role.Name = *req.Name
@@ -521,7 +542,7 @@ func (r *MemoryRepository) UpdateRole(_ context.Context, orgID, id string, calle
 	return role, nil
 }
 
-func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string) error {
+func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string, caller *identity.Principal) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -532,7 +553,41 @@ func (r *MemoryRepository) DeleteRole(_ context.Context, orgID, id string) error
 	if role.IsSystem {
 		return ErrSystemRole
 	}
+	if err := r.checkRoleNarrowing(caller, role, true); err != nil {
+		return err
+	}
 	delete(r.roles, id)
+	for aid, a := range r.assignments {
+		if a.CustomRoleID == id {
+			delete(r.assignments, aid)
+		}
+	}
+	return nil
+}
+
+// checkRoleNarrowing is permission.CheckRoleNarrowing over the assignments
+// of the memory repository: caller must pass the revocation ceiling of each
+// assignment of role. The memory repository knows no sites: a site scope
+// needs the role's permissions in all clients (fail-closed).
+func (r *MemoryRepository) checkRoleNarrowing(caller *identity.Principal, role *CustomRole, deletion bool) error {
+	var missing []identity.Permission
+	for _, a := range r.assignments {
+		if a.CustomRoleID != role.ID && a.RoleID != role.ID {
+			continue
+		}
+		var ceiling *GrantCeilingError
+		if err := grantCeiling(caller, identity.PermRoleManage, toPermissions(role.Permissions), a.ScopeType, a.ScopeID, ""); errors.As(err, &ceiling) {
+			for _, perm := range ceiling.Missing {
+				if !slices.Contains(missing, perm) {
+					missing = append(missing, perm)
+				}
+			}
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return &permission.RoleNarrowingError{Missing: missing, Deletion: deletion}
+	}
 	return nil
 }
 

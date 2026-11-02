@@ -27,12 +27,20 @@ import (
 type bulkRepo struct {
 	*MemoryRepository
 	keepStatus bool
-	mu         sync.Mutex
-	requests   map[string]UpdateRequest
+	// anyCase finds a CI by its id in any letter case, as PostgreSQL
+	// compares uuid values.
+	anyCase  bool
+	mu       sync.Mutex
+	requests map[string]UpdateRequest
+	writes   map[string]int
 }
 
 func (r *bulkRepo) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+	if r.anyCase {
+		id = strings.ToLower(id)
+	}
 	r.mu.Lock()
+	r.writes[id]++
 	r.requests[id] = req
 	r.mu.Unlock()
 	if r.keepStatus {
@@ -65,7 +73,7 @@ func (r *bulkRepo) checkManual(t *testing.T, author string, ids []string) {
 
 func newBulkRepo(t *testing.T, n int) (*bulkRepo, []string) {
 	t.Helper()
-	repo := &bulkRepo{MemoryRepository: NewMemoryRepository(), requests: map[string]UpdateRequest{}}
+	repo := &bulkRepo{MemoryRepository: NewMemoryRepository(), requests: map[string]UpdateRequest{}, writes: map[string]int{}}
 	ids := make([]string, n)
 	for i := range ids {
 		item := &Item{OrganizationID: "org-1", Name: fmt.Sprintf("bulk-%03d", i), CITypeID: "t", Status: StatusActive}
@@ -175,6 +183,99 @@ func TestBulkReportsAMalformedIDAs400(t *testing.T) {
 	t.Run("job", func(t *testing.T) {
 		mux, repo, ids, jobSvc := bulkMux(t, BulkJobFromIDs)
 		w := postBulk(mux, bulkBody(StatusInactive, append(append([]string{}, ids...), malformed...)...))
+		var accepted struct {
+			JobID string `json:"job_id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &accepted); err != nil || w.Code != http.StatusAccepted {
+			t.Fatalf("bulk job: %d %s", w.Code, w.Body.String())
+		}
+		var job *jobs.Job
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if job, _ = jobSvc.Get(context.Background(), "org-1", accepted.JobID); job != nil && job.Status.Terminal() {
+				break
+			}
+		}
+		if job == nil || job.Status != jobs.StatusSucceeded {
+			t.Fatalf("job: %+v", job)
+		}
+		var res BulkResult
+		if err := json.Unmarshal(job.Result, &res); err != nil {
+			t.Fatal(err)
+		}
+		check(t, res, repo, ids)
+	})
+}
+
+// TestBulkDeduplicatesUUIDCase covers WP-690 (API-08, BLK-01; F-419): ids
+// that name the same CI in another letter case of the UUID are one id. The
+// CI is written once (version 2) and reported once, under its canonical
+// lower-case id; an id sent only in upper case is applied and reported in
+// lower case as well; synchronously and in the job.
+func TestBulkDeduplicatesUUIDCase(t *testing.T) {
+	// hexIDs gives the CIs of repo ids with hex letters, found in any
+	// letter case like by PostgreSQL.
+	hexIDs := func(repo *bulkRepo, ids []string) {
+		repo.anyCase = true
+		repo.MemoryRepository.mu.Lock()
+		defer repo.MemoryRepository.mu.Unlock()
+		for i, id := range ids {
+			item := repo.items[id]
+			delete(repo.items, id)
+			item.ID = fmt.Sprintf("c0dea0%02x-abcd-4ef0-8abc-%012x", i, 0xdef000+i)
+			repo.items[item.ID] = item
+			ids[i] = item.ID
+		}
+	}
+	check := func(t *testing.T, res BulkResult, repo *bulkRepo, ids []string) {
+		t.Helper()
+		if res.Total != len(ids) || res.Succeeded != len(ids) || res.Failed != 0 || len(res.Items) != len(ids) {
+			t.Errorf("report totals: total %d, succeeded %d, failed %d, %d items, want %d ids once each",
+				res.Total, res.Succeeded, res.Failed, len(res.Items), len(ids))
+		}
+		for i := range res.Items {
+			if i < len(ids) && (res.Items[i].ID != ids[i] || res.Items[i].Result != "ok") {
+				t.Errorf("item %d: %+v, want ok for the canonical id %s", i, res.Items[i], ids[i])
+			}
+		}
+		repo.mu.Lock()
+		again := 0
+		for _, id := range ids {
+			if repo.writes[id] != 1 {
+				if again == 0 {
+					item, _ := repo.GetByID(context.Background(), "org-1", id)
+					t.Errorf("%s: written %d times (version %d), want once (version 2)", id, repo.writes[id], item.Version)
+				}
+				again++
+			}
+		}
+		repo.mu.Unlock()
+		if again > 0 {
+			t.Errorf("%d of %d CIs not written exactly once", again, len(ids))
+			return
+		}
+		repo.checkManual(t, "user-1", ids)
+	}
+
+	t.Run("synchronous", func(t *testing.T) {
+		mux, repo, ids, _ := bulkMux(t, 2)
+		hexIDs(repo, ids)
+		mixed := strings.ToUpper(ids[0][:8]) + ids[0][8:]
+		w := postBulk(mux, bulkBody(StatusInactive, ids[0], strings.ToUpper(ids[0]), mixed, strings.ToUpper(ids[1])))
+		var res BulkResult
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("bulk: %d %s", w.Code, w.Body.String())
+		}
+		check(t, res, repo, ids)
+	})
+
+	t.Run("job", func(t *testing.T) {
+		mux, repo, ids, jobSvc := bulkMux(t, BulkJobFromIDs)
+		hexIDs(repo, ids)
+		sent := append([]string{}, ids...)
+		for _, id := range ids {
+			sent = append(sent, strings.ToUpper(id))
+		}
+		w := postBulk(mux, bulkBody(StatusInactive, sent...))
 		var accepted struct {
 			JobID string `json:"job_id"`
 		}

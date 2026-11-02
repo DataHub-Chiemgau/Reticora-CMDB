@@ -211,6 +211,11 @@ func (r *optionalRepository) CreateMany(context.Context, string, []*Item) (Creat
 	return CreateManyResult{}, nil
 }
 
+func (r *optionalRepository) CountActive(context.Context, string) (int64, error) {
+	r.calls["CountActive"]++
+	return 7, nil
+}
+
 func (r *optionalRepository) GetByIDs(context.Context, string, []string) ([]Item, error) {
 	r.calls["GetByIDs"]++
 	return []Item{}, nil
@@ -304,6 +309,17 @@ func TestIndexingRepositoryForwardsOptionalInterfaces(t *testing.T) {
 				return false, nil
 			}
 			_, err := x.CreateMany(ctx, "org-1", []*Item{{OrganizationID: "org-1", Name: "batch"}})
+			return true, err
+		}},
+		{"ActiveCounter (max_cis: Service, discovery)", "CountActive", func(r Repository) (bool, error) {
+			x, ok := r.(ActiveCounter)
+			if !ok {
+				return false, nil
+			}
+			n, err := x.CountActive(ctx, "org-1")
+			if err == nil && n != 7 {
+				err = fmt.Errorf("counted %d, want the wrapped repository's 7", n)
+			}
 			return true, err
 		}},
 		{"BatchReader (graphqlbff, discovery identity)", "GetByIDs", func(r Repository) (bool, error) {

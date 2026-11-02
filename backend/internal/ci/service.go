@@ -119,6 +119,25 @@ type ChangeReader interface {
 	ListChanges(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Change, int, error)
 }
 
+// ActiveCounter counts the active (not deleted) CIs of the organization for
+// max_cis, whatever the client and site scope of the caller (ENT-03,
+// F-403): the limit caps the organization, not what one principal sees. The
+// PG repository implements it with ci_active_count() (migration 000186).
+type ActiveCounter interface {
+	CountActive(ctx context.Context, orgID string) (int64, error)
+}
+
+// CountActive returns the number of active CIs max_cis is checked against:
+// through the repository's ActiveCounter, or the total of List for a
+// repository without one (it has no scope to narrow the count).
+func CountActive(ctx context.Context, repo Repository, orgID string) (int64, error) {
+	if counter, ok := repo.(ActiveCounter); ok {
+		return counter.CountActive(ctx, orgID)
+	}
+	_, total, err := repo.List(ctx, orgID, FilterParams{}, api.PaginationParams{Limit: 1})
+	return int64(total), err
+}
+
 // LimitGuard enforces licensed resource limits before a new CI is created.
 // It is implemented by the entitlement service.
 type LimitGuard interface {
@@ -199,10 +218,23 @@ func (e *UniqueError) Error() string {
 	return "another CI holds the value of the unique attribute(s): " + strings.Join(e.Fields, ", ")
 }
 
-// checkUnique enforces the unique attributes server-side (MET-15) when the
-// repository can check them.
-func (s *Service) checkUnique(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) error {
-	checker, ok := s.repo.(UniqueChecker)
+// ConflictViolations implements api.ViolationsConflict: 409 with a
+// violation per attribute, never naming the other CI.
+func (e *UniqueError) ConflictViolations() []api.Violation {
+	violations := make([]api.Violation, len(e.Fields))
+	for i, f := range e.Fields {
+		violations[i] = api.Violation{Field: f, Detail: "another CI already holds this value of the unique attribute"}
+	}
+	return violations
+}
+
+// CheckUnique enforces the unique attributes server-side (MET-15) when the
+// repository can check them (UniqueChecker): a value of attrs another
+// active CI holds is a *UniqueError. ciID is the CI written ("" for a new
+// one). Every path that sets or brings back the values of a CI runs it,
+// not only ci.Service: the unique index may not exist yet (F-429).
+func CheckUnique(ctx context.Context, repo Repository, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) error {
+	checker, ok := repo.(UniqueChecker)
 	if !ok {
 		return nil
 	}
@@ -278,14 +310,8 @@ func (s *Service) GetByID(ctx context.Context, orgID, id string) (*Item, error) 
 // The type is the writer's choice (ChosenType): an ID that is no UUID is
 // refused here, the repository reads the type in the writing transaction.
 func (s *Service) Create(ctx context.Context, item *Item) error {
-	if s.limit != nil {
-		_, total, err := s.repo.List(ctx, item.OrganizationID, FilterParams{}, api.PaginationParams{Limit: 1})
-		if err != nil {
-			return err
-		}
-		if err := s.limit.AllowCreate(ctx, item.OrganizationID, LimitFeatureKey, int64(total)); err != nil {
-			return err
-		}
+	if err := s.allowActive(ctx, item.OrganizationID); err != nil {
+		return err
 	}
 	if err := CheckReservedKeys("attributes", item.Attributes); err != nil {
 		return err
@@ -304,10 +330,26 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 	if item.AssetID != "" && item.LocationID != "" {
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
 	}
-	if err := s.checkUnique(ctx, item.OrganizationID, item.CITypeID, item.ClientID, "", item.Attributes); err != nil {
+	if err := CheckUnique(ctx, s.repo, item.OrganizationID, item.CITypeID, item.ClientID, "", item.Attributes); err != nil {
 		return err
 	}
 	return s.repo.Create(ctx, item)
+}
+
+// allowActive checks max_cis before a CI becomes active (ENT-03): Create
+// adds one, Restore and Unmerge bring a deleted one back. Over the limit it
+// returns the entitlement error (403 entitlement-limit) and nothing is
+// written. It counts every active CI of the organization, also those
+// outside the caller's scope (CountActive, F-403).
+func (s *Service) allowActive(ctx context.Context, orgID string) error {
+	if s.limit == nil {
+		return nil
+	}
+	total, err := CountActive(ctx, s.repo, orgID)
+	if err != nil {
+		return err
+	}
+	return s.limit.AllowCreate(ctx, orgID, LimitFeatureKey, total)
 }
 
 // Update modifies an existing CI. The repository loads the prior state inside
@@ -345,7 +387,7 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 			if req.ClientID != nil {
 				clientID = *req.ClientID
 			}
-			if err := s.checkUnique(ctx, orgID, before.CITypeID, clientID, id, MergePatch(before.Attributes, req.Attributes)); err != nil {
+			if err := CheckUnique(ctx, s.repo, orgID, before.CITypeID, clientID, id, MergePatch(before.Attributes, req.Attributes)); err != nil {
 				return nil, err
 			}
 		}
@@ -392,10 +434,15 @@ func (s *Service) WithRestoreRetention(retention time.Duration) *Service {
 }
 
 // Restore brings a deleted CI back within the retention (CI-05, API-05).
+// The restored CI counts against max_cis like a new one: at the limit the
+// CI stays deleted (ENT-03, F-399).
 func (s *Service) Restore(ctx context.Context, orgID, id string) (*Item, error) {
 	restorer, ok := s.repo.(Restorer)
 	if !ok {
 		return nil, errors.New("restore is not supported by this repository")
+	}
+	if err := s.allowActive(ctx, orgID); err != nil {
+		return nil, err
 	}
 	retention := s.restoreRetention
 	if retention <= 0 {

@@ -23,7 +23,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // staticResolver answers the lookup of a name with one address.
@@ -308,7 +307,7 @@ func TestOwnSMTPServerEgressPolicy(t *testing.T) {
 		NewHandler(center).WithEgress(policy).RegisterRoutes(mux)
 		return center, func(method, path, body string) *httptest.ResponseRecorder {
 			req := httptest.NewRequest(method, path, strings.NewReader(body))
-			req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
+			req = req.WithContext(adminContext(req.Context(), "org-1", "u-1"))
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
 			return w

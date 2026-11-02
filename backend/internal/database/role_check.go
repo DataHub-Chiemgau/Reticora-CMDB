@@ -15,6 +15,12 @@ import (
 // LEVEL SECURITY, so the policies bind the owner as well.
 const DefaultOwnerRole = "reticora_owner"
 
+// AuditSealerRole owns audit_seal_pii (migration 000188), the only way to
+// change an audit entry: it seals personal values in place. No login of the
+// application may reach it, or the runtime could rewrite audit entries
+// (AUD-04, WP-680).
+const AuditSealerRole = "reticora_audit_sealer"
+
 // Querier is what VerifyRoleContract needs; *pgxpool.Pool, *pgx.Conn and
 // pgx.Tx satisfy it.
 type Querier interface {
@@ -113,6 +119,11 @@ truncatable AS (
 SELECT current_user::text, session_user::text, msg FROM (
 SELECT msg FROM escalation
 UNION ALL
+SELECT format('role %s reaches the audit sealer role %s%s; the runtime could rewrite audit entries',
+              reachable.start, r.rolname, CASE WHEN reachable.inherited THEN ' (inherited)' ELSE ' via SET ROLE' END)
+  FROM reachable JOIN pg_roles r ON r.oid = reachable.oid
+ WHERE r.rolname = '` + AuditSealerRole + `'
+UNION ALL
 SELECT format('owner role %s does not exist', $1::text)
  WHERE NOT EXISTS (SELECT 1 FROM owner)
 UNION ALL
@@ -161,6 +172,7 @@ ORDER BY msg`
 //
 //   - neither session_user nor current_user is SUPERUSER or BYPASSRLS, and no
 //     role reachable from them, inherited or by SET ROLE, is;
+//   - neither of them reaches AuditSealerRole;
 //   - current_user can SET ROLE ownerRole but does not inherit it, and has no
 //     CREATE on schema public of its own; ownerRole has it;
 //   - every tenant table current_user can read or write (organization and

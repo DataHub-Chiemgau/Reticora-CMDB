@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -175,6 +176,9 @@ func (h *Handler) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		op, ok := h.authenticate(r)
 		if !ok {
+			// A failed attempt counts against the pre-auth budget of the
+			// IP (AUT-10) even when its entry fails and it is answered 500.
+			middleware.SpendPreAuthSlot(r.Context())
 			if h.record(w, r, &AuditEntry{OperatorID: "anonymous", OperatorKind: KindOIDC,
 				Action: actionFor(r.Method, r.URL.Path), Status: http.StatusUnauthorized,
 				Details: map[string]any{"remote": r.RemoteAddr}}) {
@@ -218,17 +222,21 @@ func writeAuditFailure(w http.ResponseWriter, e *AuditEntry, err error) {
 		"the operator audit entry could not be written; the request was not carried out")
 }
 
-// targetOrg extracts the organization of /admin/orgs/{id}/... requests.
+// targetOrg extracts the organization of /admin/orgs/{id}/... requests. An
+// id that is no UUID names none (the action names the path): it would fail
+// the uuid column (SQLSTATE 22P02) and with it the request (500, F-392).
+// The id is lower-cased as the uuid column returns it, so the entry hashes
+// as it is read back (an upper-case id would break the chain).
 func targetOrg(r *http.Request) string {
 	rest, ok := strings.CutPrefix(r.URL.Path, "/api/v1/admin/orgs/")
 	if !ok {
 		return ""
 	}
 	id, _, _ := strings.Cut(rest, "/")
-	if len(id) != 36 {
+	if !api.IsUUID(id) {
 		return ""
 	}
-	return id
+	return strings.ToLower(id)
 }
 
 // newTokenID returns a random token id (jti).

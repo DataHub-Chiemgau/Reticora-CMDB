@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 )
@@ -57,11 +59,16 @@ type StoredAPIKey struct {
 	// ServiceAccountID binds the key to a service account (RBA-08): the key
 	// then acts with the account's rights instead of its creator's.
 	ServiceAccountID *string
-	RotatedFrom      *string
-	ExpiresAt        *time.Time
-	RevokedAt        *time.Time
-	LastUsedAt       *time.Time
-	CreatedAt        time.Time
+	// CreatorScope is the scope in which the creator held each key
+	// permission when binding the key to its service account (F-397,
+	// migration 000185): the key never acts beyond it. nil for keys not
+	// bound and for keys bound before the migration (see creatorCeiling).
+	CreatorScope map[Permission]Scope
+	RotatedFrom  *string
+	ExpiresAt    *time.Time
+	RevokedAt    *time.Time
+	LastUsedAt   *time.Time
+	CreatedAt    time.Time
 }
 
 // OwnerAccessResolver loads the current role grants of a key owner (RBA-08):
@@ -172,7 +179,9 @@ func HashKey(plaintext string) string {
 
 // Validate identifies a presented key, checks hash, revocation, expiry and
 // environment, and returns the rights it grants: the intersection of the
-// key's permissions and the owner's current rights, in the owner's scope.
+// key's permissions and the owner's current rights, in the owner's scope. A
+// key bound to a service account acts with the account's current rights
+// within the scope its creator held at binding (creatorCeiling, F-397).
 func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -238,6 +247,15 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInf
 			return nil, fmt.Errorf("%w: resolve API key owner rights: %w", ErrAPIKeyUnavailable, grantErr)
 		}
 		owner := ResolveAccess(grants)
+		if stored.ServiceAccountID != nil {
+			// A bound account does not widen its creator's scope (F-397,
+			// like E-98 for webhook subscriptions).
+			ceiling, ceilingErr := s.creatorCeiling(ctx, stored)
+			if ceilingErr != nil {
+				return nil, fmt.Errorf("%w: resolve API key creator scope: %w", ErrAPIKeyUnavailable, ceilingErr)
+			}
+			owner = withinCeiling(&owner, ceiling)
+		}
 		info.Scopes = intersectPermissions(stored.Permissions, owner.Permissions)
 		scope := owner.Scope
 		info.Scope = &scope
@@ -270,6 +288,120 @@ func intersectPermissions(key, owner []Permission) []Permission {
 		}
 	}
 	return out
+}
+
+// creatorScopeOf is the scope in which p holds each of perms (the scope
+// GrantCeiling checks), recorded on a key bound to a service account
+// (F-397). Permissions p does not hold are left out.
+func creatorScopeOf(p *Principal, perms []Permission) map[Permission]Scope {
+	out := make(map[Permission]Scope, len(perms))
+	for _, perm := range perms {
+		if s, ok := principalScopeFor(p, perm); ok {
+			out[perm] = intersectScope(&s, &s)
+		}
+	}
+	return out
+}
+
+// creatorCeiling is the scope a bound key may act in per permission: the
+// scope its creator held at binding (StoredAPIKey.CreatorScope). A key bound
+// before migration 000185 has none recorded; it is limited to its creator's
+// current rights (fail-closed, docs/betrieb/upgrade-hinweise.md), and to
+// nothing without an owner resolver.
+func (s *APIKeyService) creatorCeiling(ctx context.Context, stored *StoredAPIKey) (map[Permission]Scope, error) {
+	if stored.CreatorScope != nil {
+		return stored.CreatorScope, nil
+	}
+	if s.owners == nil {
+		return map[Permission]Scope{}, nil
+	}
+	grants, err := s.owners.AccessGrants(ctx, stored.OrganizationID, stored.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	creator := ResolveAccess(grants)
+	return creatorScopeOf(&Principal{Permissions: creator.Permissions, Scope: &creator.Scope, PermissionScopes: creator.PermissionScopes}, stored.Permissions), nil
+}
+
+// withinCeiling limits access to the permissions of ceiling, each to the
+// intersection of its scope with the ceiling's; the union scope (the tenant
+// scope of the requests) is limited to the union of the ceiling scopes. In
+// every dimension the result lies within both, so the RLS shows the key no
+// row the account or the creator does not reach.
+func withinCeiling(access *Access, ceiling map[Permission]Scope) Access {
+	out := Access{Permissions: make([]Permission, 0, len(access.Permissions))}
+	held := make(map[Permission]Scope, len(access.Permissions))
+	bounds := make([]Scope, 0, len(access.Permissions))
+	for _, p := range access.Permissions {
+		bound, ok := ceiling[p]
+		if !ok {
+			continue
+		}
+		scope := access.Scope
+		if narrower, ok := access.PermissionScopes[p]; ok {
+			scope = narrower
+		}
+		out.Permissions = append(out.Permissions, p)
+		held[p] = intersectScope(&scope, &bound)
+		bounds = append(bounds, bound)
+	}
+	union := unionScopes(bounds)
+	out.Scope = intersectScope(&access.Scope, &union)
+	for _, p := range out.Permissions {
+		if s := held[p]; !s.equal(&out.Scope) {
+			if out.PermissionScopes == nil {
+				out.PermissionScopes = make(map[Permission]Scope)
+			}
+			out.PermissionScopes[p] = s
+		}
+	}
+	return out
+}
+
+// intersectScope is the scope covered by both a and b, per dimension.
+func intersectScope(a, b *Scope) Scope {
+	return Scope{Clients: intersectSet(a.Clients, b.Clients), Sites: intersectSet(a.Sites, b.Sites), Teams: intersectSet(a.Teams, b.Teams)}
+}
+
+// unionScopes unites scopes per dimension; without scopes it is empty.
+func unionScopes(scopes []Scope) Scope {
+	var out Scope
+	for i := range scopes {
+		out.Clients = unionSet(out.Clients, scopes[i].Clients)
+		out.Sites = unionSet(out.Sites, scopes[i].Sites)
+		out.Teams = unionSet(out.Teams, scopes[i].Teams)
+	}
+	return out
+}
+
+// intersectSet returns the IDs in both sets, lower case and sorted.
+func intersectSet(a, b ScopeSet) ScopeSet {
+	if a.All && b.All {
+		return ScopeSet{All: true}
+	}
+	if a.All {
+		a, b = b, a
+	}
+	in := make(map[string]bool, len(b.IDs))
+	for _, id := range b.IDs {
+		in[strings.ToLower(strings.TrimSpace(id))] = true
+	}
+	ids := make([]string, 0, len(a.IDs))
+	for _, id := range a.IDs {
+		if id = strings.ToLower(strings.TrimSpace(id)); id != "" && (b.All || in[id]) && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ScopeSet{IDs: ids}
+}
+
+func unionSet(a, b ScopeSet) ScopeSet {
+	if a.All || b.All {
+		return ScopeSet{All: true}
+	}
+	merged := ScopeSet{IDs: append(append([]string(nil), a.IDs...), b.IDs...)}
+	return intersectSet(merged, ScopeSet{All: true})
 }
 
 // parseAPIKey returns the public prefix and the environment of a key in the

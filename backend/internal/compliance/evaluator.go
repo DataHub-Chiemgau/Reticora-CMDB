@@ -89,7 +89,8 @@ func summarize(results []Result) EvaluationResponse {
 		out = append(out, *s)
 	}
 	finish(&overall)
-	return EvaluationResponse{Overall: overall, ByCIType: out, Results: results}
+	// results is a required array of the contract: [] without results (F-401).
+	return EvaluationResponse{Overall: overall, ByCIType: out, Results: api.NonNilSlice(results)}
 }
 func add(s *Score, status string) {
 	switch status {

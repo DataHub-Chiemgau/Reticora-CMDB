@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"context"
 	"slices"
 	"testing"
 )
@@ -86,5 +87,97 @@ func TestGrantCeiling(t *testing.T) {
 				t.Errorf("GrantCeiling = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+type grantsFunc func(orgID, id string) ([]Grant, error)
+
+func (f grantsFunc) AccessGrants(_ context.Context, orgID, id string) ([]Grant, error) {
+	return f(orgID, id)
+}
+
+func (f grantsFunc) ServiceAccountGrants(_ context.Context, orgID, id string) ([]Grant, error) {
+	return f(orgID, id)
+}
+
+// TestBoundKeyCreatorCeiling covers the creator scope of a key bound to a
+// service account (WP-668, F-397): per permission the key acts in the
+// intersection of the account's current scope and the scope its creator held
+// at binding, its tenant scope lies within the union of the creator's
+// scopes, and permissions outside the snapshot are dropped. A key bound
+// before migration 000185 follows its creator's current rights, and grants
+// nothing without an owner resolver (fail-closed).
+func TestBoundKeyCreatorCeiling(t *testing.T) {
+	const c1, c2, s1 = "c-1", "c-2", "s-1"
+	creator := func(grants ...Grant) *Principal {
+		access := ResolveAccess(grants)
+		return &Principal{Permissions: access.Permissions, Scope: &access.Scope, PermissionScopes: access.PermissionScopes}
+	}
+	all := ScopeSet{All: true}
+	only := func(ids ...string) ScopeSet { return ScopeSet{IDs: ids} }
+
+	// Creator: ci:read org-wide, ci:write in client 1; the account holds
+	// both and location:read org-wide.
+	ceiling := creatorScopeOf(creator(OrgWideGrant([]Permission{PermCIRead}),
+		Grant{Permissions: []Permission{PermCIWrite}, Clients: []string{c1}}), []Permission{PermCIRead, PermCIWrite})
+	account := ResolveAccess([]Grant{OrgWideGrant([]Permission{PermCIRead, PermCIWrite, PermLocationRead})})
+	got := withinCeiling(&account, ceiling)
+	if !slices.Equal(got.Permissions, []Permission{PermCIRead, PermCIWrite}) {
+		t.Errorf("permissions %v, want ci:read and ci:write only", got.Permissions)
+	}
+	if !got.Scope.OrgWide() {
+		t.Errorf("tenant scope %+v, want org-wide (ci:read)", got.Scope)
+	}
+	if w := got.PermissionScopes[PermCIWrite]; w.Clients.All || !slices.Equal(w.Clients.IDs, []string{c1}) || !w.Sites.All {
+		t.Errorf("ci:write scope %+v, want client 1", w)
+	}
+
+	// Creator: ci:read at site 1 of client 1; the account reads client 2.
+	ceiling = creatorScopeOf(creator(Grant{Permissions: []Permission{PermCIRead}, Clients: []string{c1}, Sites: []string{s1}}), []Permission{PermCIRead})
+	account = ResolveAccess([]Grant{{Permissions: []Permission{PermCIRead}, Clients: []string{c2}}})
+	got = withinCeiling(&account, ceiling)
+	want := Scope{Clients: only(), Sites: only(s1), Teams: all}
+	if !got.Scope.equal(&want) {
+		t.Errorf("site-1 creator, client-2 account: scope %+v, want no client and site 1", got.Scope)
+	}
+
+	// Through Validate: a recorded scope, a legacy key and no owner resolver.
+	sa := "sa-1"
+	store := NewMemoryAPIKeyStore()
+	generated, err := GenerateAPIKey(APIKeyEnvironmentLive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Create(context.Background(), &StoredAPIKey{OrganizationID: "org", Name: "k", KeyHash: generated.KeyHash,
+		KeyPrefix: generated.KeyPrefix, Permissions: []Permission{PermCIRead}, CreatedBy: "creator", ServiceAccountID: &sa,
+		CreatorScope: map[Permission]Scope{PermCIRead: {Clients: only(c1), Sites: all, Teams: all}}}); err != nil {
+		t.Fatal(err)
+	}
+	orgWideAccount := grantsFunc(func(string, string) ([]Grant, error) { return []Grant{OrgWideGrant([]Permission{PermCIRead})}, nil })
+	creatorClient2 := grantsFunc(func(string, string) ([]Grant, error) {
+		return []Grant{{Permissions: []Permission{PermCIRead}, Clients: []string{c2}}}, nil
+	})
+	service := NewAPIKeyServiceWithStore(store).WithOwnerAccess(creatorClient2).WithServiceAccountAccess(orgWideAccount)
+	clients := func() ScopeSet {
+		t.Helper()
+		info, vErr := service.Validate(context.Background(), generated.Plaintext)
+		if vErr != nil {
+			t.Fatalf("validate: %v", vErr)
+		}
+		if len(info.Scopes) == 0 {
+			return ScopeSet{}
+		}
+		return info.Scope.Clients
+	}
+	if got := clients(); got.All || !slices.Equal(got.IDs, []string{c1}) {
+		t.Errorf("recorded creator scope client 1, org-wide account: clients %+v, want client 1", got)
+	}
+	store.keys[0].CreatorScope = nil
+	if got := clients(); got.All || !slices.Equal(got.IDs, []string{c2}) {
+		t.Errorf("legacy key, creator now in client 2: clients %+v, want client 2", got)
+	}
+	service.owners = nil
+	if info, vErr := service.Validate(context.Background(), generated.Plaintext); vErr != nil || len(info.Scopes) != 0 {
+		t.Errorf("legacy key without owner resolver: %+v, %v; want no permissions", info, vErr)
 	}
 }

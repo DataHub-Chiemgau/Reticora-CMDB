@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 )
 
@@ -252,6 +255,125 @@ func TestOfflineDetectorOrgIsolation(t *testing.T) {
 		t.Errorf("Run totals = %+v, want the CI set offline in organization %s counted", changes, second)
 	}
 	checkWarnings("Run")
+}
+
+// TestOfflineDetectorRecordsStatusChange is the coding test of F-413
+// (WP-684, k7n-offline-status-history; AUD-03, AUD-07, REC-09, LCY-05):
+// the detector's change of the status, active to unknown and unknown to
+// active, is part of the CI's history like the ingest's status change: one
+// ci_change change set of kind status_changed with the field status, the
+// CI version and source system, without actor, and one audit entry
+// ci.status_changed (actor_type system, source system) naming the job, in
+// the transaction of the change. The version of the CI stays (a system
+// write below rank 92, API-07), the audit chain stays intact, and a second
+// run records nothing. On e5c2d86 the detector wrote neither (0 rows).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestOfflineDetectorRecordsStatusChange(t *testing.T) {
+	f := scopetest.Seed(t, "5e")
+	bg := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	var server string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&server); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	collector := f.ID()
+	exec(`INSERT INTO collector (id, organization_id, client_id, name, status) VALUES ($1, $2, $3, 'wp684', 'active')`, collector, f.OrgA, f.Client1)
+	exec(`INSERT INTO discovery_scope (organization_id, collector_id, name, kind, target, schedule) VALUES ($1, $2, 'wp684', 'cidr', '10.69.0.0/24', '1h')`,
+		f.OrgA, collector)
+	stale, back := f.ID(), f.ID()
+	for _, c := range []struct {
+		id, name, status, ip string
+		seen                 time.Duration
+	}{{stale, "wp684-stale", "active", "10.69.0.5", 4 * time.Hour}, {back, "wp684-back", "unknown", "10.69.0.6", 10 * time.Minute}} {
+		exec(`INSERT INTO ci (id, organization_id, client_id, ci_type_id, name, status, discovery_source, management_ip, is_manual, last_seen_at)
+			VALUES ($1, $2, $3, $4, $5, $6, 'snmp', $7::inet, false, $8)`, c.id, f.OrgA, f.Client1, server, c.name, c.status, c.ip, now.Add(-c.seen))
+	}
+
+	d := lifecycle.NewOfflineDetector(f.App).WithClock(func() time.Time { return now })
+	changes, err := d.RunOrg(bg, f.OrgA)
+	if err != nil || changes.Offline != 1 || changes.Online != 1 {
+		t.Fatalf("RunOrg = %+v %v, want one CI offline and one online", changes, err)
+	}
+
+	for _, c := range []struct{ id, old, new string }{{stale, "active", "unknown"}, {back, "unknown", "active"}} {
+		var version int64
+		var status string
+		if err = f.Admin.QueryRow(bg, `SELECT version, status FROM ci WHERE id = $1`, c.id).Scan(&version, &status); err != nil {
+			t.Fatal(err)
+		}
+		if status != c.new || version != 1 {
+			t.Errorf("CI %s: status %s version %d, want %s and version 1 (unchanged)", c.old, status, version, c.new)
+		}
+		rows, qErr := f.Admin.Query(bg, `SELECT change_kind, change_type, COALESCE(field_name, ''), old_value::text, new_value::text,
+				COALESCE(ci_version, 0), change_set_id IS NOT NULL, COALESCE(source, ''), actor_id IS NULL AND actor_user_id IS NULL, COALESCE(comment, '')
+			FROM ci_change WHERE ci_id = $1`, c.id)
+		if qErr != nil {
+			t.Fatal(qErr)
+		}
+		n := 0
+		for rows.Next() {
+			n++
+			var kind, typ, field, oldV, newV, source, comment string
+			var ciVersion int64
+			var set, noActor bool
+			if err = rows.Scan(&kind, &typ, &field, &oldV, &newV, &ciVersion, &set, &source, &noActor, &comment); err != nil {
+				t.Fatal(err)
+			}
+			if kind != "status_changed" || typ != "status_change" || field != "status" || oldV != `"`+c.old+`"` || newV != `"`+c.new+`"` ||
+				ciVersion != version || !set || source != "system" || !noActor || comment != lifecycle.OfflineDetectorKind {
+				t.Errorf("CI %s -> %s: ci_change %s/%s %s %s->%s version %d set %v source %q no actor %v comment %q", c.old, c.new,
+					kind, typ, field, oldV, newV, ciVersion, set, source, noActor, comment)
+			}
+		}
+		rows.Close()
+		if n != 1 {
+			t.Errorf("CI %s -> %s: %d ci_change rows, want 1", c.old, c.new, n)
+		}
+		var entries int
+		var action, actorType, source, job, fields string
+		if err = f.Admin.QueryRow(bg, `SELECT count(*) OVER (), action, actor_type, source, COALESCE(actor_id::text, '') || COALESCE(changes->>'job', ''),
+				COALESCE((changes->'fields')::text, '')
+			FROM audit_log WHERE organization_id = $1 AND resource_type = 'ci' AND resource_id = $2`, f.OrgA, c.id).
+			Scan(&entries, &action, &actorType, &source, &job, &fields); err != nil {
+			t.Errorf("CI %s -> %s: no audit entry: %v", c.old, c.new, err)
+			continue
+		}
+		wantFields := `[{"field": "status", "new_value": "` + c.new + `", "old_value": "` + c.old + `"}]`
+		if entries != 1 || action != "ci.status_changed" || actorType != "system" || source != "system" || job != lifecycle.OfflineDetectorKind ||
+			fields != wantFields {
+			t.Errorf("CI %s -> %s: %d audit entries, %s by %s from %s, actor+job %q, fields %s (want %s)", c.old, c.new, entries, action, actorType,
+				source, job, fields, wantFields)
+		}
+	}
+	if res, verr := audit.Verify(bg, f.App, f.OrgA); verr != nil || !res.Intact {
+		t.Errorf("audit chain after the run: %+v %v", res, verr)
+	}
+
+	// The unified history shows the change to unknown (change_kind
+	// status_changed) with its field change.
+	h, total, err := history.NewPGRepository(f.App).List(f.OrgCtx(f.OrgA), f.OrgA, "ci", stale, api.PaginationParams{Limit: 50},
+		history.ListOptions{ChangeKind: "status_changed"})
+	if err != nil || total != 1 || len(h) != 1 || len(h[0].FieldChanges) != 1 || h[0].FieldChanges[0].Field != "status" ||
+		h[0].FieldChanges[0].New != "unknown" || h[0].ChangeSource != "system" {
+		t.Errorf("history of the CI set unknown, status_changed: %d %+v %v", total, h, err)
+	}
+
+	// A second run changes nothing and records nothing.
+	if changes, err = d.RunOrg(bg, f.OrgA); err != nil || changes.Offline != 0 || changes.Online != 0 {
+		t.Errorf("second run: %+v %v", changes, err)
+	}
+	var rows int
+	if err = f.Admin.QueryRow(bg, `SELECT (SELECT count(*) FROM ci_change WHERE ci_id IN ($1, $2)) +
+			(SELECT count(*) FROM audit_log WHERE organization_id = $3 AND resource_id IN ($1, $2))`, stale, back, f.OrgA).Scan(&rows); err != nil || rows != 4 {
+		t.Errorf("after the second run: %d history rows and audit entries, want 4 (%v)", rows, err)
+	}
 }
 
 // logCapture collects the JSON log records of slog's default logger.

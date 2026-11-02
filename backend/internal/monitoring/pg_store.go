@@ -76,7 +76,9 @@ func (h *PGHealthRefresher) RefreshHealth(ctx context.Context) error {
 
 // Ingest inserts the samples through metric_sample_v. Every sample
 // must belong to the caller's organization and name a CI visible under its
-// scope (or no CI).
+// scope (or no CI). The batch is stored whole or not at all: a sample whose
+// CI is unknown, of another organization or outside the scope rolls back
+// the batch with an *UnknownCIError naming that ci_id (TEN-06, F-394).
 func (s *PGMetricStore) Ingest(ctx context.Context, metrics []Metric) error {
 	if len(metrics) == 0 {
 		return nil
@@ -112,7 +114,7 @@ func (s *PGMetricStore) Ingest(ctx context.Context, metrics []Metric) error {
 			}
 			if tag.RowsAffected() == 0 {
 				_ = results.Close()
-				return fmt.Errorf("ingest metric sample: ci %s not found", m.CIID)
+				return &UnknownCIError{CIID: m.CIID}
 			}
 		}
 		return results.Close()

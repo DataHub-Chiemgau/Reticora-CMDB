@@ -13,7 +13,8 @@
 # server_ref, lscpu, memory and configuration), the outcome of the job
 # (result-<job>.txt), the seed duration and the seeded volumes, the
 # integrity check, the database cost report, the summaries of the slow
-# plans and of the CPU profile, and /readyz. Server and PostgreSQL logs and
+# plans and of the CPU profile, /readyz and the failed requests by name and
+# status (failed-<job>.txt, tests/load/failed-requests.sh, F-388). Server and PostgreSQL logs and
 # the binary profile stay in the artifacts of the run.
 #
 # <archive>/ergebnis.md lists the run (from the environment of the
@@ -55,7 +56,7 @@ mkdir -p "$archive"
 
 # The files of a job the archive keeps (%s is the job).
 keep=(%s.json %s.txt run-%s.txt result-%s.txt seed-%s.txt volumes-%s.txt integrity-%s.txt statements-%s.txt
-	slow-plans-%s.txt cpu-%s.txt readyz-%s.json)
+	slow-plans-%s.txt cpu-%s.txt readyz-%s.json failed-%s.txt)
 
 # field FILE KEY: the value after "KEY:" in a record file, else "–".
 field() {
@@ -78,6 +79,17 @@ thresholds() {
 		| ((.key | capture("^(?<stat>[a-z]+(\\([0-9.]+\\))?)") | .stat) // "") as $stat
 		| $v[if $stat == "rate" then "value" else $stat end] as $val
 		| "| `\($m)` | `\(.key)` | \($val | num)\(if $val == null then "" else unit($m) end) | \(if .value then "**verfehlt**" else "eingehalten" end) |"
+	' "$1"
+}
+
+# failed FILE: the failed requests of failed-<job>.txt in one cell: the
+# total, then name, status and count per row of its table.
+failed() {
+	awk -F'|' '
+		NR == 1 { total = $0; sub(/^Fehlgeschlagene Anfragen: */, "", total) }
+		/^\| `/ { gsub(/^ +| +$/, "", $2); gsub(/^ +| +$/, "", $3); gsub(/^ +| +$/, "", $4)
+			rows = rows (rows == "" ? "" : ", ") $2 " " $3 ": " $4 }
+		END { print total (rows == "" ? "" : " (" rows ")") }
 	' "$1"
 }
 
@@ -176,6 +188,9 @@ join() {
 		fi
 		if [ -f "$dir/volumes-$job.txt" ]; then
 			echo "| Datenbestand | $(tr '\n' ';' <"$dir/volumes-$job.txt" | sed 's/|/ /g; s/;$//; s/;/, /g') |"
+		fi
+		if [ -f "$dir/failed-$job.txt" ]; then
+			echo "| Fehlgeschlagene Anfragen | $(failed "$dir/failed-$job.txt") |"
 		fi
 		if [ -f "$dir/integrity-$job.txt" ]; then
 			echo "| Integritätsprüfung | $(awk -F'|' '{s += $2; n++} END {print s + 0 " Verletzungen in " n + 0 " Prüfungen"}' "$dir/integrity-$job.txt") |"

@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
@@ -72,8 +73,8 @@ func (h *Handler) WithPrivacySources(tickets TicketActivityLister, assignments A
 	return h
 }
 
-// WithSessionRevoker makes deactivation and anonymization end the sessions
-// and refresh tokens of the user immediately (TLC-04, AUT-02).
+// WithSessionRevoker makes deactivation, anonymization and deletion end the
+// sessions and refresh tokens of the user immediately (TLC-04, AUT-02).
 func (h *Handler) WithSessionRevoker(sessions SessionRevoker) *Handler {
 	h.sessions = sessions
 	return h
@@ -96,10 +97,10 @@ func (h *Handler) revokeSessions(ctx context.Context, userID string) error {
 }
 
 // sessionRevocation blacklists the sessions of the user as the
-// DeactivationHook, inside the deactivation transaction once the user was
-// found in the organization: a failure rolls the deactivation back, and a
-// request for a user of another organization writes nothing. err keeps the
-// failure so the handler can answer 503 instead of 404.
+// DeactivationHook, inside the transaction of the deactivation or deletion
+// once the user was found in the organization: a failure rolls the change
+// back, and a request for a user of another organization writes nothing.
+// err keeps the failure so the handler can answer 503 instead of 404.
 type sessionRevocation struct {
 	h      *Handler
 	userID string
@@ -319,14 +320,26 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "you cannot delete your own account")
 		return
 	}
-	if err := h.repo.DeleteUser(r.Context(), t.OrganizationID, id); err != nil {
+	// The deletion ends every access of the user like a deactivation, in
+	// its transaction: API keys revoked, user.deleted recorded, sessions and
+	// refresh tokens blacklisted; if the blacklist cannot be written,
+	// nothing is deleted (TLC-04, AUT-02, F-393).
+	revocation := &sessionRevocation{h: h, userID: id}
+	if err := h.repo.DeleteUserTx(r.Context(), t.OrganizationID, id, revocation.hook); err != nil {
 		switch {
+		case revocation.err != nil:
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "sessions could not be revoked; the user was not deleted")
 		case errors.Is(err, ErrUserOwnsOpenObjects), errors.Is(err, ErrUserReferenced):
 			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
 		default:
 			api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
 		}
 		return
+	}
+	// Second revocation after the commit: covers tokens refreshed between
+	// the first one and the commit of the deletion.
+	if err := h.revokeSessions(r.Context(), id); err != nil {
+		slog.Warn("second session revocation after deletion failed", "user_id", id, "error", err)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -824,8 +837,13 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.UpdateRole(r.Context(), t.OrganizationID, id, &p, req)
 	var widening *RoleWideningError
-	if errors.As(err, &widening) {
+	var narrowing *permission.RoleNarrowingError
+	switch {
+	case errors.As(err, &widening):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", widening.Error())
+		return
+	case errors.As(err, &narrowing):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", narrowing.Error())
 		return
 	}
 	if err != nil {
@@ -847,7 +865,18 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteRole(r.Context(), t.OrganizationID, id); err != nil {
+	p, ok := identity.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "deleting a role requires an authenticated principal")
+		return
+	}
+	err := h.repo.DeleteRole(r.Context(), t.OrganizationID, id, &p)
+	var narrowing *permission.RoleNarrowingError
+	if errors.As(err, &narrowing) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", narrowing.Error())
+		return
+	}
+	if err != nil {
 		writeTeamError(w, r, "role not found", err)
 		return
 	}

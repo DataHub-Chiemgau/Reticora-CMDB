@@ -64,6 +64,7 @@ var handlerErrorAllowlist = []errorEchoAllowance{
 	{"agent/handler.go", "Handler.ConfirmSite", "err", 1, "", "validation: ErrSiteNotOfClient, returned unwrapped"},
 	{"agent/handler.go", "Handler.Enroll", "err", 1, "", "validation: ErrInvalidEnrollmentToken, returned unwrapped"},
 	{"api/api.go", "WriteTypedProblem", "typed", 1, "", "validation: the typed problems are the entitlement errors (limit, feature, license) and reviews.Error with fixed texts"},
+	{"api/fielderrors.go", "WriteFieldError", "vc", 1, "", "validation: the ViolationsConflict is ci.UniqueError with its fixed rule text and the keys of the unique attributes (MET-15)"},
 	{"asset/handler.go", "Handler.List", "err", 1, "", "validation: api.ErrInvalidCursor \"sort order changed\" of the keyset check"},
 	{"assignment/handler.go", "Handler.List", "err", 1, "", "validation: api.ErrInvalidCursor \"sort order changed\" of the keyset check"},
 	{"ci/handler.go", "Handler.Create", "err", 1, "", "validation: an entitlement refusal (LimitExceeded) without problem type, fixed text"},

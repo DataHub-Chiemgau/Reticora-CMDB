@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000184_attribute_validation_ast
+Stand: Migration 000189_enrollment_code_site_restrict
 
 ## Prüfung
 
@@ -436,7 +436,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `collector` | ja | ja | collector_isolation (ALL), collector_scoped_delete (DELETE), collector_scoped_update (UPDATE) |
 | `collector_ca` | ja | ja | collector_ca_operator (ALL) |
 | `collector_certificate` | ja | ja | collector_certificate_isolation (ALL), collector_certificate_system_select (SELECT) |
-| `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_system_select (SELECT) |
+| `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_scope_delete (DELETE), collector_enrollment_code_scope_insert (INSERT), collector_enrollment_code_scope_select (SELECT), collector_enrollment_code_scope_update (UPDATE), collector_enrollment_code_system_select (SELECT) |
 | `compliance_result` | ja | ja | compliance_result_scoped_delete (DELETE), compliance_result_scoped_update (UPDATE), compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
 | `composition` | ja | ja | composition_isolation (ALL) |

@@ -1,7 +1,8 @@
 // WP-563 (SEC-08, F-204): the egress policy of server.Options (set from
 // RETICORA_EGRESS_ALLOW_PRIVATE in cmd/server/main.go) reaches the
 // notification handler, which checks the url of a webhook channel with it
-// when the channel is stored.
+// when the channel is stored. The caller holds notification:manage for the
+// whole organization (F-418).
 //
 // Retest:
 //
@@ -16,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -36,7 +38,9 @@ func TestNotifyHandlerUsesTheEgressPolicy(t *testing.T) {
 		notifyHandler(&Options{Egress: c.policy}).RegisterRoutes(mux)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/notification-channels",
 			strings.NewReader(`{"name":"hook","provider":"webhook","config":{"url":"`+c.url+`"}}`))
-		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
+		admin := identity.Principal{Subject: "u-1", OrganizationID: "org-1", Type: identity.PrincipalTypeUser,
+			Permissions: []identity.Permission{identity.PermNotificationManage}}
+		req = req.WithContext(tenant.WithTenant(identity.WithPrincipal(req.Context(), admin), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		if w.Code != c.want {

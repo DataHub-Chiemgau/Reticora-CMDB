@@ -11,6 +11,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 )
 
 // Grant ceiling of invitations and role assignments (RBA-03, TLC-03, F-015):
@@ -293,10 +294,29 @@ func checkAssignmentTarget(ctx context.Context, tx pgx.Tx, orgID string, caller 
 	return checkTeamScope(ctx, tx, orgID, a)
 }
 
+// checkRoleNarrowing is the ceiling of removing permissions from a custom
+// role (F-396): when next leaves out a key of current, caller must be able
+// to revoke every assignment of the role (permission.CheckRoleNarrowing with
+// the role's catalog permissions before the change). The role row is locked
+// by the caller.
+func checkRoleNarrowing(ctx context.Context, tx pgx.Tx, orgID, roleID string, caller *identity.Principal, current, next []string) error {
+	if !slices.ContainsFunc(current, func(key string) bool { return !slices.Contains(next, key) }) {
+		return nil
+	}
+	role, found, err := readCustomRole(ctx, tx, orgID, roleID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return errRoleNotFound
+	}
+	return permission.CheckRoleNarrowing(ctx, tx, orgID, roleID, caller, role.Permissions, false)
+}
+
 // checkRoleWidening is the ceiling of a role definition change (F-015): every
 // permission next adds to current must be held organization-wide
-// (identity.GrantCeiling with an org-wide target). Removing permissions is not
-// limited.
+// (identity.GrantCeiling with an org-wide target). Removing permissions is
+// limited by checkRoleNarrowing.
 func checkRoleWidening(caller *identity.Principal, current, next []string) error {
 	var added []identity.Permission
 	for _, key := range next {

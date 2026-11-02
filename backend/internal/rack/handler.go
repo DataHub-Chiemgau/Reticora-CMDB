@@ -290,11 +290,34 @@ func FreeUnits(height int, mounts []RackMount) map[string][]int {
 	return free
 }
 
-// PutMountRequest places a CI in a rack (RCK-02).
+// PutMountRequest places a CI in a rack (RCK-02). height_u and face are
+// pointers: an omitted field takes its default (1, front), an explicit
+// value is checked (F-415).
 type PutMountRequest struct {
-	PositionU int    `json:"position_u"`
-	HeightU   int    `json:"height_u,omitempty"`
-	Face      string `json:"face,omitempty"`
+	PositionU int     `json:"position_u"`
+	HeightU   *int    `json:"height_u,omitempty"`
+	Face      *string `json:"face,omitempty"`
+}
+
+// mountDefaults checks the explicit height_u and face of a mount request
+// and returns them with the defaults of omitted ones (F-415, RCK-02): an
+// explicit height below 1 (also 0) and a face outside front, rear and both
+// (also "") are a 400 naming the field, not the default.
+func mountDefaults(height *int, face *string) (heightU int, side string, err error) {
+	heightU, side = 1, "front"
+	if height != nil {
+		if *height < 1 {
+			return 0, "", &api.FieldError{Field: "height_u", Message: "must be >= 1"}
+		}
+		heightU = *height
+	}
+	if face != nil {
+		if !ValidFaces[*face] {
+			return 0, "", &api.FieldError{Field: "face", Message: "must be front, rear or both"}
+		}
+		side = *face
+	}
+	return heightU, side, nil
 }
 
 // PutMount handles PUT /api/v1/racks/{id}/mounts/{ci_id}: it mounts the CI
@@ -310,21 +333,16 @@ func (h *Handler) PutMount(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.HeightU == 0 {
-		req.HeightU = 1
-	}
-	if req.Face == "" {
-		req.Face = "front"
-	}
-	if !ValidFaces[req.Face] {
-		api.WriteFieldError(w, &api.FieldError{Field: "face", Message: "must be front, rear or both"})
+	height, face, err := mountDefaults(req.HeightU, req.Face)
+	if err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	rackID, ciID := chi.URLParam(r, "id"), chi.URLParam(r, "ci_id")
 	current, err := h.repo.MountByCI(r.Context(), orgID, ciID)
 	switch {
 	case errors.Is(err, ErrNotFound):
-		m := &RackMount{OrganizationID: orgID, RackID: rackID, CIID: ciID, PositionU: req.PositionU, HeightU: req.HeightU, Face: req.Face}
+		m := &RackMount{OrganizationID: orgID, RackID: rackID, CIID: ciID, PositionU: req.PositionU, HeightU: height, Face: face}
 		if cerr := h.repo.CreateMount(r.Context(), m); cerr != nil {
 			writeRepoError(w, r, cerr, "rack not found")
 			return
@@ -336,7 +354,7 @@ func (h *Handler) PutMount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := h.repo.UpdateMount(r.Context(), orgID, current.ID, UpdateMountRequest{
-		RackID: &rackID, PositionU: &req.PositionU, HeightU: &req.HeightU, Face: &req.Face,
+		RackID: &rackID, PositionU: &req.PositionU, HeightU: &height, Face: &face,
 	})
 	if err != nil {
 		writeRepoError(w, r, err, "rack not found")
@@ -416,16 +434,9 @@ func (h *Handler) CreateMount(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "rack_id", Message: "is required"})
 		return
 	}
-	height := req.HeightU
-	if height == 0 {
-		height = 1
-	}
-	face := req.Face
-	if face == "" {
-		face = "front"
-	}
-	if !ValidFaces[face] {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid face")
+	height, face, err := mountDefaults(req.HeightU, req.Face)
+	if err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	m := &RackMount{
@@ -436,7 +447,7 @@ func (h *Handler) CreateMount(w http.ResponseWriter, r *http.Request) {
 		HeightU:        height,
 		Face:           face,
 	}
-	if err := h.repo.CreateMount(r.Context(), m); err != nil {
+	if err = h.repo.CreateMount(r.Context(), m); err != nil {
 		writeRepoError(w, r, err, "rack not found")
 		return
 	}
@@ -466,6 +477,10 @@ func (h *Handler) UpdateMount(w http.ResponseWriter, r *http.Request) {
 	var req UpdateMountRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if _, _, err := mountDefaults(req.HeightU, req.Face); err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	m, err := h.repo.UpdateMount(r.Context(), orgID, chi.URLParam(r, "id"), req)

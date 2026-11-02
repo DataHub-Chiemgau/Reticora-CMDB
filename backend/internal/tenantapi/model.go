@@ -141,7 +141,9 @@ type UpdateBuildingRequest struct {
 	FloorplanObjectKey *string `json:"floorplan_object_key,omitempty"`
 }
 
-// Room represents a room within a building.
+// Room represents a room within a building. Layout holds only the
+// positions of CIs the caller sees, not deleted and located in the room
+// (F-427).
 type Room struct {
 	ID             string                    `json:"id"`
 	OrganizationID string                    `json:"organization_id"`
@@ -167,10 +169,12 @@ type UpdateRoomRequest struct {
 	Name     *string `json:"name,omitempty"`
 	Floor    *int    `json:"floor,omitempty"`
 	RoomType *string `json:"room_type,omitempty"`
-	// Layout replaces the room's floor-plan object positions
-	// (object_id → {x, y} normalized 0..1). Nil leaves the layout untouched;
-	// an empty object clears it. Every key is a CI of the organization the
-	// caller sees, x and y lie in 0..1 (422 otherwise, F-341).
+	// Layout replaces the room's floor-plan object positions the caller sees
+	// (CI id → {x, y} normalized 0..1). Nil leaves the layout untouched; an
+	// empty object clears the visible positions. Every key is a CI of the
+	// organization the caller sees, not deleted and located in the room, x
+	// and y lie in 0..1 (422 otherwise, F-341, F-427). Stored positions of
+	// CIs the caller does not see are kept.
 	Layout map[string]LayoutPosition `json:"layout,omitempty"`
 	// IfMatch is the updated_at the editor last read (If-Match, F-342); nil
 	// when the request carries none or "*". A room changed since is 409.

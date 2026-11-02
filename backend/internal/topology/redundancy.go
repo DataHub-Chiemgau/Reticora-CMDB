@@ -64,12 +64,9 @@ func redundantProviders(g *ciGraph, steps []stepRule) map[dependentType][]int32 
 // one. One statement for the analysis (relationship.IncidentEdgeReader,
 // RLS of the caller), none when every such dependent lies within the
 // depth; a provider that is no visible CI of g is outside and counts as
-// up. Without such a reader g stays as it is.
+// up. Without such a reader g stays as it is. readHiddenFeeds then adds
+// the supplies the caller's scope hides.
 func (h *Handler) readFeeds(ctx context.Context, orgID string, g *ciGraph, roots []int32, depth int, rules map[string]impactRule) error {
-	reader, ok := h.relRepo.(relationship.IncidentEdgeReader)
-	if !ok {
-		return nil
-	}
 	steps := g.stepRules(rules, impactQuery{})
 	var relTypes []string
 	types := map[string]int32{}
@@ -80,6 +77,20 @@ func (h *Handler) readFeeds(ctx context.Context, orgID string, g *ciGraph, roots
 		}
 	}
 	if len(relTypes) == 0 {
+		return nil
+	}
+	if err := h.readDepthFeeds(ctx, orgID, g, roots, depth, steps, relTypes, types); err != nil {
+		return err
+	}
+	return h.readHiddenFeeds(ctx, orgID, g, steps, relTypes, types)
+}
+
+// readDepthFeeds reads the edges of readFeeds beyond the depth or the
+// node limit; types gives the number in g of each of relTypes.
+func (h *Handler) readDepthFeeds(ctx context.Context, orgID string, g *ciGraph, roots []int32, depth int,
+	steps []stepRule, relTypes []string, types map[string]int32) error {
+	reader, ok := h.relRepo.(relationship.IncidentEdgeReader)
+	if !ok {
 		return nil
 	}
 	hops := g.hopsFrom(roots)
@@ -142,6 +153,65 @@ func (h *Handler) readFeeds(ctx context.Context, orgID string, g *ciGraph, roots
 	}
 	if added {
 		g.first, g.incident = nil, nil
+	}
+	return nil
+}
+
+// readHiddenFeeds adds to g, as feeds, the edges of a redundant type of each
+// dependent of g over such a type whose provider the caller's client or
+// site scope hides (IMP-04, IMP-07, F-420), at any depth: the walk and
+// EdgesOf see only the CIs the caller sees, so a dependent with a second
+// supply in another client would fail with its visible one, unlike for an
+// org-wide caller. Such a provider is outside and keeps the dependent up,
+// like one beyond the depth; a deleted one does not count.
+// relationship.HiddenEdgeReader hands out neither the id of such an edge
+// nor of a CI the caller does not see, so no answer names them and no walk
+// passes them. Nothing is read for an org-wide caller (the reader returns
+// nothing) or without a reader.
+func (h *Handler) readHiddenFeeds(ctx context.Context, orgID string, g *ciGraph, steps []stepRule, relTypes []string, types map[string]int32) error {
+	reader, ok := h.relRepo.(relationship.HiddenEdgeReader)
+	if !ok {
+		return nil
+	}
+	dependent := make([]bool, len(g.ids))
+	var ids []string
+	for i := range g.edges {
+		e := &g.edges[i]
+		rule := &steps[e.relType]
+		if !rule.redundant {
+			continue
+		}
+		for _, from := range [2]int32{e.source, e.target} {
+			if to, _, ok := e.step(from, rule); ok && !dependent[to] {
+				dependent[to] = true
+				ids = append(ids, g.ids[to])
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rels, err := reader.HiddenEdgesOf(ctx, orgID, ids, relTypes)
+	if err != nil || len(rels) == 0 {
+		return err
+	}
+	number := make(map[string]int32, len(g.ids))
+	for n, id := range g.ids {
+		if g.known[n] {
+			number[id] = int32(n)
+		}
+	}
+	end := func(id string) int32 {
+		if n, ok := number[id]; ok && id != "" {
+			return n
+		}
+		return outside
+	}
+	for i := range rels {
+		rel := &rels[i]
+		if relType, ok := types[rel.RelType]; ok {
+			g.feeds = append(g.feeds, ciEdge{source: end(rel.SourceCIID), target: end(rel.TargetCIID), relType: relType})
+		}
 	}
 	return nil
 }

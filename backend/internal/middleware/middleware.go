@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -128,7 +129,10 @@ const maxAuditBody = 1 << 20
 // and new value per changed column ("values", AUD-07, WP-505); excluded
 // columns never appear, personal ones only as a surrogate (CH16). A row
 // that cannot be read before the handler refuses the request (503) like a
-// missing intent.
+// missing intent. A path parameter that is no storable text (NUL byte,
+// invalid UTF-8) addresses no resource: 404 before the intent (F-391); a
+// top-level key of the JSON body that is none names no field: 400 before
+// the intent (F-392).
 //
 // source overrides the source derived from the principal (ingest routes of
 // collectors and agents).
@@ -152,7 +156,27 @@ func AuditRoute(method, pattern string, auditor RouteAuditor, mode AuditMode, so
 				next.ServeHTTP(w, r)
 				return
 			}
+			if mode == AuditIntent && !validPathParams(r) {
+				// No stored text holds a NUL byte or invalid UTF-8, so such
+				// an id, key or name addresses no resource; as the resource
+				// key of the intent it would fail in PostgreSQL (SQLSTATE
+				// 22021) and refuse the request as an audit outage (503,
+				// F-391). Answered like an unknown id before the intent and
+				// the handler: nothing changes, so nothing needs an entry.
+				api.WriteError(w, http.StatusNotFound, "Not Found", "the requested resource was not found")
+				return
+			}
 			fields := writtenFields(r)
+			if !storableTexts(fields...) {
+				// A key with a NUL byte names no field of the API (the
+				// handlers refuse unknown fields), and neither the intent
+				// (text[]) nor the entry (jsonb) can hold it: stored, it
+				// would refuse the request as an audit outage (503, F-392).
+				// A client error before the intent and the handler.
+				api.WriteError(w, http.StatusBadRequest, "Bad Request",
+					"invalid request body: a field name must not contain NUL characters")
+				return
+			}
 			var intent *audit.RouteIntent
 			if mode == AuditIntent {
 				intent = &audit.RouteIntent{
@@ -385,6 +409,26 @@ func routeResourceID(r *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// validPathParams reports whether every path parameter of the route is
+// valid UTF-8 without a NUL byte, i.e. storable as PostgreSQL text.
+func validPathParams(r *http.Request) bool {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		return storableTexts(rctx.URLParams.Values...)
+	}
+	return true
+}
+
+// storableTexts reports whether every value is valid UTF-8 without a NUL
+// byte, i.e. storable as PostgreSQL text and jsonb.
+func storableTexts(values ...string) bool {
+	for _, v := range values {
+		if strings.IndexByte(v, 0) >= 0 || !utf8.ValidString(v) {
+			return false
+		}
+	}
+	return true
 }
 
 // responseID is the id of a created resource in the response body.

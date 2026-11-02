@@ -88,10 +88,12 @@ func validateLayoutRange(layout map[string]LayoutPosition) error {
 }
 
 // unknownLayoutCI refuses a layout key that is no CI of the organization
-// visible to the caller (422 naming layout.<ci>, F-341).
+// visible to the caller, not deleted and located in the room (422 naming
+// layout.<ci>, F-341, F-427). The text is the same for every reason, so a CI
+// of another client reads like an unknown id.
 func unknownLayoutCI(key string) error {
 	return &FieldError{Field: "layout." + key, Status: http.StatusUnprocessableEntity,
-		Message: "the key is not a configuration item of the organization"}
+		Message: "the key is not a configuration item located in this room"}
 }
 
 // iso4217 lists the active alphabetic codes of ISO 4217 (list one,

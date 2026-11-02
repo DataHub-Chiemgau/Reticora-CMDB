@@ -11,9 +11,25 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
+
+// adminContext is the context of a signed-in user of org who holds
+// notification:manage for the whole organization (F-418).
+func adminContext(ctx context.Context, org, user string) context.Context {
+	return withPrincipal(ctx, org, user, nil)
+}
+
+// withPrincipal adds the tenant and a user principal holding
+// notification:manage in scope (nil: the whole organization).
+func withPrincipal(ctx context.Context, org, user string, scope *identity.Scope) context.Context {
+	p := identity.Principal{Subject: user, OrganizationID: org, Type: identity.PrincipalTypeUser, Scope: scope,
+		Permissions: []identity.Permission{identity.PermNotificationManage}}
+	ctx = identity.WithPermissions(identity.WithPrincipal(ctx, p), p.Permissions)
+	return tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: org, UserID: user})
+}
 
 // TestNotificationAPI covers API-05 and NTF-04 (WP-139): the channel
 // resource never returns secrets and keeps them when the placeholder comes
@@ -28,7 +44,7 @@ func TestNotificationAPI(t *testing.T) {
 	NewHandler(center).RegisterRoutes(mux)
 	call := func(user, method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: user}))
+		req = req.WithContext(adminContext(req.Context(), "org-1", user))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w
@@ -234,7 +250,7 @@ func channelAPIWith(center *Center, policy egress.Options) func(method, path, bo
 	NewHandler(center).WithEgress(policy).RegisterRoutes(mux)
 	return func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"}))
+		req = req.WithContext(adminContext(req.Context(), "org-1", "u-1"))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w
@@ -504,5 +520,78 @@ func TestNotificationLanguagePreference(t *testing.T) {
 	expect("after choosing the organization's locale", "u-1", "")
 	if code, got := call("u-2", http.MethodPut, `{"locale":""}`); code != http.StatusOK || got["locale"] != "" {
 		t.Errorf("PUT empty without a choice: %d %v", code, got)
+	}
+}
+
+// TestChannelAdministrationNeedsOrgWideScope covers NTF-04, RBA-03 and
+// TEN-06 (WP-689, F-418) without a database: channels and deliveries belong
+// to the organization, so a holder of notification:manage bound to a
+// client, a site or a team (also only for this permission, or as a
+// client-bound API key), and a request without principal, get 403 on
+// every route of the channel administration and the delivery list, and the
+// stored channel stays as it is. The org-wide holder keeps 200/201/204.
+func TestChannelAdministrationNeedsOrgWideScope(t *testing.T) {
+	center := NewMemoryCenter()
+	mux := chi.NewRouter()
+	NewHandler(center).RegisterRoutes(mux)
+	call := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	bg := context.Background()
+	orgWide := adminContext(bg, "org-1", "u-admin")
+	w := call(orgWide, http.MethodPost, "/api/v1/notification-channels", `{"name":"center","provider":"inapp"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("org-wide create: %d %s", w.Code, w.Body.String())
+	}
+	var created Channel
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+
+	all := identity.ScopeSet{All: true}
+	scoped := map[string]context.Context{
+		"client":       withPrincipal(bg, "org-1", "u-c1", &identity.Scope{Clients: identity.ScopeSet{IDs: []string{"c-1"}}, Sites: all, Teams: all}),
+		"site":         withPrincipal(bg, "org-1", "u-s1", &identity.Scope{Clients: all, Sites: identity.ScopeSet{IDs: []string{"s-1"}}, Teams: all}),
+		"team":         withPrincipal(bg, "org-1", "u-t1", &identity.Scope{Clients: all, Sites: all, Teams: identity.ScopeSet{IDs: []string{"t-1"}}}),
+		"no principal": tenant.WithTenant(bg, tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-x"}),
+		// org-wide for other rights, notification:manage only in client 1
+		"per permission": func() context.Context {
+			p := identity.Principal{Subject: "u-pp", OrganizationID: "org-1", Type: identity.PrincipalTypeUser,
+				Scope: &identity.Scope{Clients: all, Sites: all, Teams: all}, Permissions: []identity.Permission{identity.PermNotificationManage},
+				PermissionScopes: map[identity.Permission]identity.Scope{identity.PermNotificationManage: {Clients: identity.ScopeSet{IDs: []string{"c-1"}}, Sites: all, Teams: all}}}
+			return tenant.WithTenant(identity.WithPrincipal(bg, p), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-pp"})
+		}(),
+		// a client-bound API key without resolved scope
+		"client-bound key": func() context.Context {
+			p := identity.Principal{Subject: "k-1", OrganizationID: "org-1", Type: identity.PrincipalTypeAPIKey,
+				Permissions: []identity.Permission{identity.PermNotificationManage}, ClientScope: "c-1"}
+			return tenant.WithTenant(identity.WithPrincipal(bg, p), tenant.TenantInfo{OrganizationID: "org-1"})
+		}(),
+	}
+	routes := []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/notification-channels", ""},
+		{http.MethodPost, "/api/v1/notification-channels", `{"name":"hook","provider":"webhook","config":{"url":"https://hooks.example.org/x"}}`},
+		{http.MethodGet, "/api/v1/notification-channels/" + created.ID, ""},
+		{http.MethodPatch, "/api/v1/notification-channels/" + created.ID, `{"enabled":false}`},
+		{http.MethodDelete, "/api/v1/notification-channels/" + created.ID, ""},
+		{http.MethodGet, "/api/v1/notification-deliveries", ""},
+	}
+	for kind, ctx := range scoped {
+		for _, r := range routes {
+			if w := call(ctx, r.method, r.path, r.body); w.Code != http.StatusForbidden {
+				t.Errorf("%s: %s %s = %d, want 403: %s", kind, r.method, r.path, w.Code, w.Body.String())
+			}
+		}
+	}
+	stored, err := center.Channels.List(bg, "org-1")
+	if err != nil || len(stored) != 1 || !stored[0].Enabled || stored[0].ID != created.ID {
+		t.Fatalf("channels after the refused requests: %+v %v, want the enabled in-app channel only", stored, err)
+	}
+	for i, want := range []int{http.StatusOK, http.StatusCreated, http.StatusOK, http.StatusOK, http.StatusNoContent, http.StatusOK} {
+		r := routes[i]
+		if w := call(orgWide, r.method, r.path, r.body); w.Code != want {
+			t.Errorf("org-wide: %s %s = %d, want %d: %s", r.method, r.path, w.Code, want, w.Body.String())
+		}
 	}
 }

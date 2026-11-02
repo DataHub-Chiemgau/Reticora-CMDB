@@ -96,7 +96,11 @@ interface Options {
   scopes?: unknown[];
   suggestions?: unknown[];
   /** write answers every POST, PATCH and DELETE; default 200 with the scope. */
-  write?: (url: string, method: string) => Response;
+  write?: (url: string, method: string, body: unknown) => Response;
+  /** session answers GET /me (session claims); without it /me is 404. */
+  session?: unknown;
+  /** clients answers GET /clients. */
+  clients?: unknown[];
 }
 
 interface Call {
@@ -112,14 +116,19 @@ function stubDiscovery({
   scopes = [scope],
   suggestions = [],
   write = () => json(scope),
+  session,
+  clients = [],
 }: Options = {}) {
   const calls: Call[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = (init?.method ?? 'GET').toUpperCase();
-    calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (method !== 'GET') return write(url, method);
+    const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ url, method, body });
+    if (method !== 'GET') return write(url, method, body);
     if (url.includes('/me/permissions')) return json({ permissions });
+    if (url.endsWith('/api/v1/me') && session) return json(session);
+    if (url.includes('/clients')) return json(paginated(clients));
     if (url.includes('/review-items')) return json(paginated(suggestions));
     if (url.includes('/discovery-scopes?collector_id=c1')) return json(paginated(scopes));
     if (url.includes('/collectors')) return json(paginated(collectors));
@@ -506,5 +515,178 @@ describe('DiscoveryPage collector hints (COL-08, INS-06)', () => {
     expect(dialog).toHaveTextContent('Port 4222/TCP');
     expect(dialog).toHaveTextContent(/erscheinen hier als Vorschläge/);
     expect(dialog).not.toHaveTextContent(/erscheint automatisch/);
+  });
+});
+
+/*
+ * The enrollment code of a user restricted to several clients (F-425,
+ * COL-04, TEN-09, WP-677): the server binds the code to the client of the
+ * creator's collector:manage scope and refuses a creator of several clients
+ * without client_id (422). The dialog offers exactly those clients (GET /me:
+ * pscp of collector:manage, cls otherwise) and shows the server's reason.
+ */
+describe('DiscoveryPage enrollment code (COL-04, F-425)', () => {
+  const clients = [
+    { id: 'client-1', organization_id: 'org-1', name: 'Kunde A', slug: 'kunde-a' },
+    { id: 'client-2', organization_id: 'org-1', name: 'Kunde B', slug: 'kunde-b' },
+    { id: 'client-3', organization_id: 'org-1', name: 'Kunde C', slug: 'kunde-c' },
+  ];
+  const rights = ['discovery:read', 'collector:manage', 'review:resolve', 'location:read'];
+
+  /** claims are the session claims of GET /me with the client scope `cls` and `pscp`. */
+  function claims(cls: string[] | null, pscp?: Record<string, { cls: string[] | null }>) {
+    return {
+      sub: 'user-1',
+      org: 'org-1',
+      scopes: rights,
+      cls,
+      sts: null,
+      tms: null,
+      ...(pscp ? { pscp } : {}),
+      iat: 1,
+      exp: 2,
+    };
+  }
+
+  /**
+   * enrollAPI answers POST /collectors/enrollment-codes like the server for a
+   * creator holding collector:manage in `allowed` (null: org-wide).
+   */
+  function enrollAPI(allowed: string[] | null) {
+    return (url: string, method: string, body: unknown) => {
+      if (!url.endsWith('/collectors/enrollment-codes') || method !== 'POST') {
+        return problem(404, { detail: `unexpected write: ${method} ${url}` });
+      }
+      const requested = (body as { client_id?: string }).client_id;
+      const created = (clientId?: string) =>
+        json(
+          {
+            id: 'code-1',
+            code: 'ABCD-EFGH',
+            label: (body as { label: string }).label,
+            expires_at: '2026-10-15T00:00:00Z',
+            ...(clientId ? { client_id: clientId } : {}),
+          },
+          201,
+        );
+      const fieldProblem = (status: number, message: string) =>
+        problem(status, {
+          type: 'urn:reticora:problem:invalid-field',
+          detail: `client_id: ${message}`,
+          field: 'client_id',
+        });
+      if (allowed === null) return created(requested);
+      if (requested) {
+        return allowed.includes(requested)
+          ? created(requested)
+          : fieldProblem(403, 'outside your scope');
+      }
+      if (allowed.length === 1) return created(allowed[0]);
+      return fieldProblem(422, 'required: your scope holds several clients');
+    };
+  }
+
+  async function openDialog() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Collector verbinden' }));
+    return within(await screen.findByRole('dialog'));
+  }
+
+  it('offers the client choice to a user restricted to several clients (WP-677)', async () => {
+    const calls = stubDiscovery({
+      permissions: rights,
+      // The session reaches client C as well, collector:manage only A and B.
+      session: claims(['client-1', 'client-2', 'client-3'], {
+        'collector:manage': { cls: ['client-1', 'client-2'] },
+      }),
+      clients,
+      write: enrollAPI(['client-1', 'client-2']),
+    });
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+    const dialog = await openDialog();
+    const select = await dialog.findByRole('combobox', { name: 'Kunde' });
+    expect(select).toBeRequired();
+    await waitFor(() =>
+      expect(
+        within(select)
+          .getAllByRole('option')
+          .map((o) => o.textContent),
+      ).toEqual(['Kunde wählen', 'Kunde A', 'Kunde B']),
+    );
+    expect(
+      dialog.getByText(
+        'Ihr Zugriff umfasst mehrere Kunden: Wählen Sie den Kunden, an den der Collector gebunden wird.',
+      ),
+    ).toBeInTheDocument();
+    const generate = dialog.getByRole('button', { name: 'Code erzeugen' });
+    expect(generate).toBeDisabled();
+
+    fireEvent.change(dialog.getByRole('textbox'), { target: { value: 'site-b' } });
+    fireEvent.change(select, { target: { value: 'client-2' } });
+    expect(generate).toBeEnabled();
+    fireEvent.click(generate);
+
+    expect(await screen.findByText(/--code ABCD-EFGH/)).toBeInTheDocument();
+    expect(writes(calls, 'POST').map((c) => c.body)).toEqual([
+      { label: 'site-b', client_id: 'client-2' },
+    ]);
+  });
+
+  it('shows the reason of the server instead of a generic error (WP-677)', async () => {
+    // Without readable session claims there is no choice: the 422 is shown as is.
+    stubDiscovery({ permissions: rights, write: enrollAPI(['client-1', 'client-2']) });
+    const first = renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+    let dialog = await openDialog();
+    const generate = dialog.getByRole('button', { name: 'Code erzeugen' });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    expect(await dialog.findByRole('alert')).toHaveTextContent(
+      'Der Enrollment-Code wurde nicht erzeugt: client_id: required: your scope holds several clients',
+    );
+    expect(dialog.queryByText('Ein Fehler ist aufgetreten')).toBeNull();
+    first.unmount();
+    vi.unstubAllGlobals();
+
+    // With the choice the refusal of a client stands at the client field.
+    stubDiscovery({
+      permissions: rights,
+      session: claims(['client-1', 'client-2']),
+      clients,
+      write: enrollAPI(['client-1']),
+    });
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+    dialog = await openDialog();
+    const select = await dialog.findByRole('combobox', { name: 'Kunde' });
+    fireEvent.change(select, { target: { value: 'client-2' } });
+    fireEvent.click(dialog.getByRole('button', { name: 'Code erzeugen' }));
+    expect(await dialog.findByText('outside your scope')).toBeInTheDocument();
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+    expect(dialog.queryByText('Ein Fehler ist aufgetreten')).toBeNull();
+  });
+
+  it.each([
+    ['org-wide', claims(null), null],
+    ['restricted to one client', claims(['client-1']), ['client-1']],
+    [
+      'holding collector:manage in one of two clients',
+      claims(['client-1', 'client-2'], { 'collector:manage': { cls: ['client-1'] } }),
+      ['client-1'],
+    ],
+  ])('creates the code without a choice for a user %s', async (_name, session, allowed) => {
+    const calls = stubDiscovery({
+      permissions: rights,
+      session,
+      clients,
+      write: enrollAPI(allowed),
+    });
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+    const dialog = await openDialog();
+    const generate = dialog.getByRole('button', { name: 'Code erzeugen' });
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/api/v1/me'))).toBe(true));
+    await waitFor(() => expect(generate).toBeEnabled());
+    expect(dialog.queryByRole('combobox')).toBeNull();
+    fireEvent.click(generate);
+    expect(await screen.findByText(/--code ABCD-EFGH/)).toBeInTheDocument();
+    expect(writes(calls, 'POST').map((c) => c.body)).toEqual([{ label: 'collector' }]);
   });
 });

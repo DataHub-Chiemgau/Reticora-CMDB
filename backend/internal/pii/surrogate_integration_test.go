@@ -35,8 +35,10 @@ func (c *captured) Consume(_ context.Context, env *events.Envelope) error {
 // personal values only as vault surrogates, the audit API, the CI history
 // and the in-process event consumers resolve them; existing plaintext
 // entries are sealed by the backfill with the hash chain intact
-// (audit-verify); a deleted vault entry, or the deleted person a value
-// belongs to, leaves no personal data in the history.
+// (audit-verify) and, since WP-680, without a rewritten hash: the sealed
+// entry is confirmed against its original through the vault; a deleted
+// vault entry, or the deleted person a value belongs to, leaves no personal
+// data in the history.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestHistoryKeepsSurrogates(t *testing.T) {
@@ -68,12 +70,22 @@ func TestHistoryKeepsSurrogates(t *testing.T) {
 		}
 		return found
 	}
-	verify := func() {
+	verify := func() audit.VerifyResult {
 		t.Helper()
 		res, verr := audit.Verify(bg, f.App, f.OrgA)
 		if verr != nil || !res.Intact {
 			t.Fatalf("audit chain = %+v, %v", res, verr)
 		}
+		return res
+	}
+	hashes := func() string {
+		t.Helper()
+		var all string
+		if qerr := f.Admin.QueryRow(bg, `SELECT string_agg(previous_hash || hash, ',' ORDER BY seq) FROM audit_log
+			WHERE organization_id = $1`, f.OrgA).Scan(&all); qerr != nil {
+			t.Fatal(qerr)
+		}
+		return all
 	}
 
 	// Audit: written sealed, listed resolved.
@@ -161,19 +173,26 @@ func TestHistoryKeepsSurrogates(t *testing.T) {
 		t.Fatal(err)
 	}
 	verify()
+	chained := hashes()
 	res, err := jobs.NewPIIBackfill(f.App).RunOrg(bg, f.OrgA)
 	if err != nil {
 		t.Fatalf("backfill: %v", err)
 	}
-	if res.Audit != 1 || res.CIChanges != 1 || res.Events != 1 || res.Rechained < 2 {
+	if res.Audit != 1 || res.CIChanges != 1 || res.Events != 1 {
 		t.Fatalf("backfill = %+v", res)
+	}
+	// The backfill appends its own entry; the hashes of the others stay.
+	if now := hashes(); !strings.HasPrefix(now, chained+",") {
+		t.Fatalf("the backfill rewrote hashes:\n%s\nwas\n%s", now, chained)
 	}
 	if plaintext(`SELECT 1 FROM audit_log WHERE organization_id = $1 AND changes::text ~ 'old@example'`, f.OrgA) ||
 		plaintext(`SELECT 1 FROM ci_change WHERE ci_id = $1 AND (old_value::text || new_value::text) ~ '\+49'`, ciID) ||
 		plaintext(`SELECT 1 FROM event_outbox WHERE organization_id = $1 AND data::text ~ 'legacy@example'`, f.OrgA) {
 		t.Fatal("plaintext left after the backfill")
 	}
-	verify()
+	if sealed := verify(); sealed.Sealed != 1 || sealed.Unconfirmed != 0 {
+		t.Fatalf("after the backfill %d sealed entries, %d not confirmed; want 1, 0", sealed.Sealed, sealed.Unconfirmed)
+	}
 	if again, aerr := jobs.NewPIIBackfill(f.App).RunOrg(bg, f.OrgA); aerr != nil || again.Total() != 0 {
 		t.Fatalf("second backfill = %+v, %v", again, aerr)
 	}

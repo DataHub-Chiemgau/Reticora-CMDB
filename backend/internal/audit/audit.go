@@ -59,6 +59,13 @@ type VerifyResult struct {
 	BrokenID     string `json:"broken_id,omitempty"`
 	BrokenAt     int    `json:"broken_at,omitempty"`
 	BrokenReason string `json:"broken_reason,omitempty"`
+	// Sealed counts the entries whose personal values the pii.backfill run
+	// replaced with vault surrogates after they were chained (migration
+	// 000188); Unconfirmed those of them whose original could not be
+	// rebuilt from the vault (no vault, a value redacted or deleted). Only
+	// audit-verify prints them; the API response is unchanged.
+	Sealed      int `json:"-"`
+	Unconfirmed int `json:"-"`
 }
 
 // TxRecorder records audit entries inside an existing transaction.
@@ -525,7 +532,36 @@ func Verify(ctx context.Context, pool *pgxpool.Pool, orgID string) (VerifyResult
 	return result, err
 }
 
+// A sealed entry (chained_digest set, migration 000188) keeps the hash it
+// was chained with: its link is checked with chained_digest, the digest of
+// the canonical JSON before the seal, its present content with sealed_hash,
+// and with a vault the referenced values must give back chained_digest
+// (confirmSeals).
 func verifyTx(ctx context.Context, tx pgx.Tx, orgID string) (VerifyResult, error) {
+	// A database before migration 000188 (a restored backup of an earlier
+	// release, before its migrations ran) has no sealed entries: every entry
+	// is checked with audit_entry_hash.
+	var sealable bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_attribute
+		WHERE attrelid = 'audit_log'::regclass AND attname = 'chained_digest' AND NOT attisdropped)`).Scan(&sealable); err != nil {
+		return VerifyResult{}, fmt.Errorf("audit: inspect audit_log: %w", err)
+	}
+	seal := `
+			audit_entry_hash(organization_id, seq, timestamp, actor_id, actor_type, action, resource_type,
+				resource_id, changes, source, request_id, correlation_id, previous_hash),
+			false, '{}'::text[], true`
+	if sealable {
+		seal = `
+			CASE WHEN chained_digest IS NULL
+			     THEN audit_entry_hash(organization_id, seq, timestamp, actor_id, actor_type, action, resource_type,
+				      resource_id, changes, source, request_id, correlation_id, previous_hash)
+			     ELSE audit_chain_link(previous_hash, chained_digest) END,
+			chained_digest IS NOT NULL,
+			COALESCE(sealed_refs, '{}'),
+			chained_digest IS NULL OR sealed_hash IS NOT DISTINCT FROM audit_chain_link(hash,
+				audit_entry_digest(organization_id, seq, timestamp, actor_id, actor_type, action, resource_type,
+					resource_id, changes, source, request_id, correlation_id))`
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT
 			id::text,
@@ -542,9 +578,7 @@ func verifyTx(ctx context.Context, tx pgx.Tx, orgID string) (VerifyResult, error
 			COALESCE(request_id, ''),
 			COALESCE(correlation_id, ''),
 			COALESCE(previous_hash, ''),
-			hash,
-			audit_entry_hash(organization_id, seq, timestamp, actor_id, actor_type, action, resource_type,
-				resource_id, changes, source, request_id, correlation_id, previous_hash)
+			hash,`+seal+`
 		FROM audit_log
 		WHERE organization_id = $1
 		ORDER BY seq ASC
@@ -554,11 +588,131 @@ func verifyTx(ctx context.Context, tx pgx.Tx, orgID string) (VerifyResult, error
 	}
 	defer rows.Close()
 
-	entries, expected, err := scanEntriesWithExpected(rows)
+	entries, expected, seals, err := scanEntriesWithExpected(rows)
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	return verifyEntries(entries, expected), nil
+	result := verifyEntries(entries, expected)
+	// The entries before the first break of the chain: a sealed entry among
+	// them whose content changed after its seal breaks the chain there.
+	checked := len(entries)
+	if !result.Intact {
+		checked = result.Checked
+	}
+	for i := 0; i < checked; i++ {
+		if seals[i].sealed && !seals[i].intact {
+			return VerifyResult{Intact: false, Checked: i, BrokenID: entries[i].ID, BrokenAt: int(entries[i].Seq),
+				BrokenReason: "sealed entry changed after its seal"}, nil
+		}
+	}
+	confirmed, mismatch, err := confirmSeals(ctx, tx, orgID, entries[:checked], seals[:checked])
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if mismatch >= 0 {
+		return VerifyResult{Intact: false, Checked: mismatch, BrokenID: entries[mismatch].ID,
+			BrokenAt: int(entries[mismatch].Seq), BrokenReason: "sealed value differs from the original"}, nil
+	}
+	for i := 0; i < checked; i++ {
+		if seals[i].sealed {
+			result.Sealed++
+		}
+	}
+	result.Unconfirmed = result.Sealed - confirmed
+	return result, nil
+}
+
+// sealState is what verifyTx reads about the seal of an entry.
+type sealState struct {
+	sealed bool
+	// refs are the references the seals introduced; intact reports whether
+	// sealed_hash matches the present content.
+	refs   []string
+	intact bool
+}
+
+// confirmSeals rebuilds the changes a sealed entry was chained with from
+// the values of the default vault and compares their digest with
+// chained_digest. It returns how many sealed entries it confirmed and the
+// index of the first one whose values differ from the original (-1 for
+// none). Without a vault nothing is confirmed; an entry with a redacted or
+// deleted value cannot be rebuilt and stays unconfirmed.
+func confirmSeals(ctx context.Context, tx pgx.Tx, orgID string, entries []Entry, seals []sealState) (confirmed, mismatch int, err error) {
+	vault := pii.Default()
+	var ids []string
+	for i := range seals {
+		if seals[i].sealed {
+			ids = append(ids, seals[i].refs...)
+		}
+	}
+	if vault == nil || len(ids) == 0 {
+		return 0, -1, nil
+	}
+	subjects, err := vault.ResolveTx(ctx, tx, orgID, ids)
+	if err != nil {
+		return 0, -1, fmt.Errorf("audit: resolve sealed values: %w", err)
+	}
+	values := map[string]map[string]string{}
+	for i := range seals {
+		if !seals[i].sealed || len(seals[i].refs) == 0 {
+			continue
+		}
+		vals := map[string]string{}
+		for _, id := range seals[i].refs {
+			subject := subjects[id]
+			if subject == nil || subject.Kind != pii.KindValue {
+				vals = nil
+				break
+			}
+			vals[id] = subject.Data["v"]
+		}
+		if vals != nil {
+			values[entries[i].ID] = vals
+		}
+	}
+	if len(values) == 0 {
+		return 0, -1, nil
+	}
+	payload, err := json.Marshal(values)
+	if err != nil {
+		return 0, -1, fmt.Errorf("audit: encode sealed values: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT a.id::text,
+		       audit_entry_digest(a.organization_id, a.seq, a.timestamp, a.actor_id, a.actor_type, a.action,
+		           a.resource_type, a.resource_id, audit_unseal(a.changes, v.value), a.source, a.request_id,
+		           a.correlation_id) = a.chained_digest
+		FROM jsonb_each($2::jsonb) AS v
+		JOIN audit_log a ON a.id = v.key::uuid
+		WHERE a.organization_id = $1`, orgID, payload)
+	if err != nil {
+		return 0, -1, fmt.Errorf("audit: rebuild sealed entries: %w", err)
+	}
+	matches := map[string]bool{}
+	for rows.Next() {
+		var id string
+		var match bool
+		if err = rows.Scan(&id, &match); err != nil {
+			rows.Close()
+			return 0, -1, fmt.Errorf("audit: rebuild sealed entries: %w", err)
+		}
+		matches[id] = match
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return 0, -1, fmt.Errorf("audit: rebuild sealed entries: %w", err)
+	}
+	for i := range entries {
+		match, rebuilt := matches[entries[i].ID]
+		switch {
+		case !rebuilt:
+		case !match:
+			return confirmed, i, nil
+		default:
+			confirmed++
+		}
+	}
+	return confirmed, -1, nil
 }
 
 // VerifyEntries verifies an in-memory sequence of audit entries in chain
@@ -734,20 +888,6 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
-// restrictedResource hides entries about resources outside a restricted
-// principal's scope: the resource tables' policies filter the subqueries,
-// while audit_log carries no client column. Entries about deleted resources
-// are hidden from restricted principals as well (fail-closed); org-wide
-// principals see the whole log.
-const restrictedResource = `CASE audit_log.resource_type
-	WHEN 'ci' THEN EXISTS (SELECT 1 FROM ci WHERE ci.id = audit_log.resource_id)
-	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = audit_log.resource_id)
-	WHEN 'contact' THEN EXISTS (SELECT 1 FROM contact WHERE contact.id = audit_log.resource_id)
-	WHEN 'credential' THEN EXISTS (SELECT 1 FROM credential WHERE credential.id = audit_log.resource_id)
-	WHEN 'document' THEN EXISTS (SELECT 1 FROM document WHERE document.id = audit_log.resource_id)
-	WHEN 'ticket' THEN EXISTS (SELECT 1 FROM ticket WHERE ticket.id = audit_log.resource_id)
-	ELSE true END`
-
 func (h *Handler) list(ctx context.Context, orgID string, filter *ListFilter, page api.PaginationParams) ([]Entry, int, error) {
 	var entries []Entry
 	var total int
@@ -760,12 +900,10 @@ func (h *Handler) list(ctx context.Context, orgID string, filter *ListFilter, pa
 }
 
 func listTx(ctx context.Context, tx pgx.Tx, orgID string, filter *ListFilter, page api.PaginationParams) ([]Entry, int, error) {
-	where := "organization_id = $1"
+	// A restricted principal sees only the entries about objects it may
+	// read (VisibleEntries, scope.go); audit_log carries no client column.
+	where := "organization_id = $1 AND " + VisibleEntries(ctx)
 	args := []any{orgID}
-	if scope, ok := database.TenantScopeFromContext(ctx); ok &&
-		(!scope.Clients.IsAll() || !scope.Sites.IsAll() || !scope.Teams.IsAll()) {
-		where += " AND " + restrictedResource
-	}
 	where, args = filter.where(where, args)
 
 	var total int
@@ -817,21 +955,26 @@ func listTx(ctx context.Context, tx pgx.Tx, orgID string, filter *ListFilter, pa
 }
 
 func scanEntries(rows pgx.Rows) ([]Entry, error) {
-	entries, _, err := scanEntriesWithExpected(rows)
+	entries, _, _, err := scanEntriesWithExpected(rows)
 	return entries, err
 }
 
 // scanEntriesWithExpected scans audit rows; when the query projects the
 // trailing audit_entry_hash(...) column, the database-computed expected hash
-// is returned per row. Callers reading rows without that column (List) get nil.
-func scanEntriesWithExpected(rows pgx.Rows) ([]Entry, []string, error) {
+// is returned per row, and with the three seal columns of verifyTx after it
+// the seal of each row. Callers reading rows without them (List) get empty
+// values.
+func scanEntriesWithExpected(rows pgx.Rows) ([]Entry, []string, []sealState, error) {
 	entries := []Entry{}
 	expected := []string{}
-	hasExpected := len(rows.FieldDescriptions()) == 16
+	seals := []sealState{}
+	hasExpected := len(rows.FieldDescriptions()) >= 16
+	hasSeal := len(rows.FieldDescriptions()) == 19
 	for rows.Next() {
 		var entry Entry
 		var changes []byte
 		var exp *string
+		var seal sealState
 		dest := []any{
 			&entry.ID,
 			&entry.OrganizationID,
@@ -852,12 +995,15 @@ func scanEntriesWithExpected(rows pgx.Rows) ([]Entry, []string, error) {
 		if hasExpected {
 			dest = append(dest, &exp)
 		}
+		if hasSeal {
+			dest = append(dest, &seal.sealed, &seal.refs, &seal.intact)
+		}
 		if err := rows.Scan(dest...); err != nil {
-			return nil, nil, fmt.Errorf("audit: scan entry: %w", err)
+			return nil, nil, nil, fmt.Errorf("audit: scan entry: %w", err)
 		}
 		if len(changes) > 0 {
 			if err := json.Unmarshal(changes, &entry.Changes); err != nil {
-				return nil, nil, fmt.Errorf("audit: decode changes: %w", err)
+				return nil, nil, nil, fmt.Errorf("audit: decode changes: %w", err)
 			}
 		}
 		entries = append(entries, entry)
@@ -866,11 +1012,12 @@ func scanEntriesWithExpected(rows pgx.Rows) ([]Entry, []string, error) {
 		} else {
 			expected = append(expected, "")
 		}
+		seals = append(seals, seal)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("audit: iterate entries: %w", err)
+		return nil, nil, nil, fmt.Errorf("audit: iterate entries: %w", err)
 	}
-	return entries, expected, nil
+	return entries, expected, seals, nil
 }
 
 // Log is an in-memory audit log with one chain.

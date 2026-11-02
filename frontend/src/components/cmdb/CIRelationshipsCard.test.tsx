@@ -11,7 +11,8 @@
  * edges to CIs in that scope and names the hidden ones (E-87, F-169).
  * "Entfernen und unterdrücken" deletes nothing without a confirmation with
  * a reason; the suppressions of the CI are listed with reason and actor and
- * can be lifted (F-273).
+ * can be lifted (F-273). The create dialog offers no structural type,
+ * which the server refuses with 422 (F-242).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -356,6 +357,42 @@ describe('CIRelationshipsCard create dialog', () => {
   function posts(fetchMock: ReturnType<typeof vi.fn>) {
     return fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST');
   }
+
+  it('offers only storable relationship types, no structural ones (F-242)', async () => {
+    // contains, mounted_in and located_in (and their inverses) are
+    // projected from parent, rack mount and location (DB-05); the server
+    // refuses them with 422, so the form must not offer them.
+    const fetchMock = vi.fn(async () => json(emptyList));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<CIRelationshipsCard ciId={CI_ID} />);
+    const dialog = await openCreateDialog();
+    const typeSelect = within(dialog).getByLabelText('Beziehungstyp') as HTMLSelectElement;
+    const offered = Array.from(typeSelect.options).map((option) => option.value);
+
+    const structural = [
+      'contains',
+      'contained_by',
+      'parent_of',
+      'child_of',
+      'mounted_in',
+      'located_in',
+    ];
+    expect(offered.filter((value) => structural.includes(value))).toEqual([]);
+    expect(offered).toEqual([
+      'connected_to',
+      'hosted_on',
+      'depends_on',
+      'member_of',
+      'powers',
+      'powered_by',
+      'runs_on',
+      'uplink_to',
+      'managed_by',
+      'uses',
+    ]);
+    expect(typeSelect).toHaveValue('connected_to');
+  });
 
   it('creates the edge once on a double click and closes the dialog (F-314)', async () => {
     // The server stores the first create; a repeat is refused as a

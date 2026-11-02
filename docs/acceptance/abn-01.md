@@ -90,6 +90,14 @@ PR #94: „Expected: 0, Received: 58“). Die Spec fragt jetzt
 bleiben unverändert; die Prüfsumme der Datei in `artefakte/SHA256SUMS` ist
 neu.
 
+Nachtrag 2026-11-01: WP-673 (`k7n-relationship-list-filters`, F-402).
+`GET /api/v1/relationships` wendet die dokumentierten Filter `ci_id`,
+`source_ci_id`, `target_ci_id` und `rel_type` jetzt an; das oben beschriebene
+Symptom (alle Beziehungen der Organisation trotz `ci_id`) ist behoben. Die
+eingefrorenen Artefakte bleiben unverändert: Der Negativfall fragt weiter
+`GET /api/v1/cis/<id>/relationships` ab, die Prüfsummen in
+`artefakte/SHA256SUMS` gelten unverändert.
+
 Änderung nach dem Einfrieren, 2026-10-26: WP-468 (`t2-ci-export`, API-05,
 F-077). Der Export-Schritt lud die Datei über den veralteten Pfad
 `GET /api/v1/export/cis` (deprecated, Sunset 2027-10-15), nicht über den

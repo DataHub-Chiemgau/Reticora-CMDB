@@ -3,6 +3,7 @@ package discovery
 import (
 	"cmp"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -599,6 +600,17 @@ type edgeFinder interface {
 // another source between the same CIs stays untouched (source policy,
 // REL-08). It reports whether a new edge was created.
 func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d DerivedRelationship) bool {
+	created, _ := h.upsertRelationshipErr(ctx, orgID, d, false)
+	return created
+}
+
+// upsertRelationshipErr is upsertRelationship with the error of the
+// creation, for a caller that answers for it (the accept of an
+// unknown_relationship item, F-405). checkTypes makes the creation check
+// the type lists of the relationship type as POST /relationships does: an
+// edge a person decides on (F-424); an observed edge is recorded without.
+// A soft-deleted CI is refused either way (relationship.PGRepository.Create).
+func (h *Handler) upsertRelationshipErr(ctx context.Context, orgID string, d DerivedRelationship, checkTypes bool) (bool, error) {
 	confidence := d.Confidence
 	if finder, ok := h.repo.(edgeFinder); ok {
 		id, source, found, err := finder.DiscoveryEdge(ctx, orgID, d.SourceCIID, d.TargetCIID, d.RelType)
@@ -606,7 +618,7 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 			if relationship.MayChange(RelationshipSource, source) {
 				h.reconfirm(ctx, orgID, id, &confidence, d.Refresh)
 			}
-			return false
+			return false, nil
 		}
 	} else if existing, _, err := h.relRepo.List(ctx, orgID, d.SourceCIID, api.PaginationParams{Limit: 10000, Offset: 0}); err == nil {
 		for i := range existing {
@@ -617,7 +629,7 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 			if relationship.MayChange(RelationshipSource, rel.Source) {
 				h.reconfirm(ctx, orgID, rel.ID, &confidence, d.Refresh)
 			}
-			return false
+			return false, nil
 		}
 	}
 	rel := &relationship.Relationship{
@@ -629,10 +641,13 @@ func (h *Handler) upsertRelationship(ctx context.Context, orgID string, d Derive
 		Attributes:     edgeAttributes(d.Attributes),
 		Confidence:     &confidence,
 	}
-	if err := h.relRepo.Create(ctx, rel); err != nil {
-		return false
+	if checkTypes {
+		rel.CheckTypeLists()
 	}
-	return true
+	if err := h.relRepo.Create(ctx, rel); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // reconfirm re-confirms one discovery edge; with refresh its attributes
@@ -715,17 +730,42 @@ func (h *Handler) acceptedEdgeHolds(ctx context.Context, item *ReviewItem) (bool
 }
 
 // resolveUnknownRelationship: accept records the neighbor as connected_to
-// (confidence 0.5); dismiss keeps the edge away.
+// (confidence 0.5); dismiss keeps the edge away. An accept that records no
+// edge is refused and the item stays open (TOP-01, F-405): CIs that are no
+// UUIDs or whose types the type lists of connected_to do not allow are 422,
+// a CI that is gone (unknown, not visible or soft-deleted) 404 (F-424). The
+// accept is a human decision: it checks the type lists like POST
+// /relationships.
 func (h *Handler) resolveUnknownRelationship(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	if res.Action != reviews.ActionAccept || h.relRepo == nil {
 		return false, nil
 	}
 	d := DerivedRelationship{SourceCIID: payloadString(item.Payload, "source_ci_id"), TargetCIID: payloadString(item.Payload, "target_ci_id"),
 		RelType: "connected_to", Confidence: defaultConfidence}
-	if d.SourceCIID == "" || d.TargetCIID == "" {
+	if !isUUID(d.SourceCIID) || !isUUID(d.TargetCIID) {
 		return false, refused(http.StatusUnprocessableEntity, "the item names no CIs")
 	}
-	h.upsertRelationship(ctx, item.OrganizationID, d)
+	// A CI deleted meanwhile is gone also when the edge exists already, which
+	// the creation (it refuses a deleted end) would only re-confirm.
+	if h.ciRepo != nil {
+		for _, id := range []string{d.SourceCIID, d.TargetCIID} {
+			if _, err := h.ciRepo.GetByID(ctx, item.OrganizationID, id); err != nil {
+				if errors.Is(err, ci.ErrNotFound) || isNotFound(err) {
+					return false, refused(http.StatusNotFound, "the source or target CI was not found")
+				}
+				return false, err
+			}
+		}
+	}
+	if _, err := h.upsertRelationshipErr(ctx, item.OrganizationID, d, true); err != nil {
+		switch {
+		case errors.Is(err, relationship.ErrSourceCINotFound), errors.Is(err, relationship.ErrTargetCINotFound):
+			return false, refused(http.StatusNotFound, "the source or target CI was not found")
+		case errors.Is(err, relationship.ErrSourceCITypeNotAllowed), errors.Is(err, relationship.ErrTargetCITypeNotAllowed):
+			return false, refused(http.StatusUnprocessableEntity, err.Error())
+		}
+		return false, err
+	}
 	res.Note = "recorded as connected_to"
 	return false, nil
 }

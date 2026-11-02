@@ -50,6 +50,8 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-98](#e-98) | Webhook-Abos und der Scope ihres Erzeugers (TEN-09) | entschieden: Option B (Auftraggeber, 2026-10-25) | WP-601 |
 | [E-99](#e-99) | Auswahl der Oberflächensprache (GLO-10, UI-18) | entschieden (Auftraggeber 2026-10-27): Option 1 | WP-523 |
 | [E-100](#e-100) | Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-649 |
+| [E-101](#e-101) | WP-332 AK 3: Rahmen und Ledger eines Ingest-Batches in einer oder in zwei Transaktionen (NFR-03) | offen; Übergangsregel: Empfehlung (Option 1) | WP-657 |
+| [E-102](#e-102) | Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432) | offen; Übergangsregel: Empfehlung (Option 1) | WP-703 |
 
 ## E-59
 
@@ -358,10 +360,11 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 Folgen der Entscheidung:
 - Eine Site mit einem Merge-Tombstone ist bis `tombstone_until` (höchstens 12 Monate) nicht löschbar.
 - Ein verbrauchtes, noch nicht abgelaufenes Enrollment-Token blockiert bis zu seinem Ablauf (Standard 24 h, höchstens 30 Tage). Das Schema kennt keinen Widerrufsstatus.
+- Collector-Enrollment-Codes, die 000187 an eine Site bindet, folgen derselben Regel (WP-701, Migration 000189, F-430): Ein weder verbrauchter noch abgelaufener Code blockiert mit `collector_enrollment_code`, abgelaufene und verbrauchte Codes werden in der Lösch-Transaktion entfernt.
 
 **Betroffene IDs:** LOC-11
 
-**Betroffene WPs:** WP-411
+**Betroffene WPs:** WP-411, WP-701
 
 ## E-72
 
@@ -1059,3 +1062,50 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 **Betroffene IDs:** DB-02
 
 **Betroffene WPs:** WP-649
+
+
+## E-101
+
+**Thema:** WP-332 AK 3: Rahmen und Ledger eines Ingest-Batches in einer oder in zwei Transaktionen (NFR-03)
+
+**Status:** offen; Übergangsregel: Empfehlung (Option 1)
+
+**Frage:** WP-332 (`nfr03-tx`) verlangt in AK 3: „Rahmen und Ledger eines Batches laufen in einer Transaktion“. Gebaut und gemessen sind zwei Transaktionen je Batch: Der Rahmen (Ledger lesen, Typ-Lookup, VRF) läuft kurz vor den Records, der Ledger (ein `unnest`-INSERT) nach den Records; zusammen 8 Statements in 2 Transaktionen, unabhängig von der Batchgröße (`TestIngestStatementBudget`, `docs/acceptance/lasttest-g1.md`). Die Wiederholungsprüfung (K7) hat die Abweichung als F-386 (P3) erfasst. Der Ledger darf nur Records nennen, deren eigene Transaktion committet hat, und der Rahmen muss ihn vor den Records lesen; eine gemeinsame Transaktion bliebe deshalb über den ganzen Batch auf einer zweiten Pool-Verbindung offen. Ein Prototyp (WP-657) hängt damit bei einem Pool mit einer Verbindung bis zum Timeout (500 nach 10 s statt 202 nach 107 ms), zwei Organisationen auf einem Pool mit zwei Verbindungen in 5 von 5 Runden; die bestehenden Suiten fangen das nicht. Funktional wirkt die Abweichung nicht: Die Budgets halten, und eine Neuzustellung nach verlorenem Ledger-Schreibvorgang wendet idempotent an (gemessen: 0 neue CIs, 0 neue `ci_change`). Soll der Plantext an den gebauten Entwurf angeglichen werden?
+
+**Optionen:**
+
+- 1) Plantext von WP-332 AK 3 an den Entwurf angleichen: „Der Rahmen eines Batches läuft in einer kurzen Transaktion vor den Records, der Ledger nach den Records in einer zweiten mit einem `unnest`-INSERT; zusammen höchstens 8 Statements in 2 Transaktionen je Batch, unabhängig von der Batchgröße.“ Keine Codeänderung.
+- 2) Zusammenlegung in eine Transaktion mit eigener Verbindungsbegrenzung, sodass ein Batch nie zwei Pool-Verbindungen belegt; Aufwand rund 2 PT, Gewinn 2 Statements je Batch.
+- 3) Savepoints statt eigener Record-Transaktionen; widerspricht WP-332 AK 2 und AK 4 sowie der deadlockfreien Sperrreihenfolge von WP-334.
+
+**Empfehlung:** Option 1. Die Trennung folgt aus der Ledger-Semantik (REC-01) und hält den Verbindungsbedarf des Ingest bei einer Verbindung je Batch (WP-334, `processingSlots`); NFR-03 ist mit zwei Transaktionen erfüllt. Option 2 kostet rund 2 PT für 2 Statements je Batch, Option 3 bricht die Sperrreihenfolge.
+
+**Übergangsregel:** bis zur Entscheidung gilt Option 1: Code und `TestIngestStatementBudget` bleiben unverändert; WP-332 bleibt in der Wiederholungsprüfung wegen F-386 TEILWEISE BESTANDEN, bis die Entscheidung den Plantext angleicht (WP-657).
+
+**Betroffene IDs:** NFR-03
+
+**Betroffene WPs:** WP-332, WP-657
+
+
+## E-102
+
+**Thema:** Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432)
+
+**Status:** offen; Übergangsregel: Empfehlung (Option 1)
+
+**Frage:** Ein Collector meldet für ein Gerät einen Wert eines eindeutigen Attributs (z. B. Seriennummer), den bereits ein anderes aktives CI hält. Über die API ist das 409 (WP-692, WP-700), beim Ingest empfängt aber kein Mensch die Antwort. Bis WP-703 entstand ohne Unique-Index ein Duplikat; mit Index scheiterte der Datensatz als vorübergehender Fehler (500, `retryable`), das Gerät fehlte und die Neuzustellung lief endlos. Die Anforderungen (MET-15, DIS-*, REC-*) legen das Verhalten nicht fest. Wie soll der Ingest einen vergebenen Wert behandeln?
+
+**Optionen:**
+
+- 1) Der vergebene Wert wird nicht gespeichert und in `invalid_values` des Batches gezählt (wie ungültige Werte nach WP-501 und vergebene Identitäten); das Gerät wird ohne ihn angelegt oder aktualisiert, der Batch läuft weiter, ein Log-Eintrag `ingest.unique.dropped` nennt den Attributschlüssel. Eine Umklassifizierung von `generic_device`, die den Wert erst unter ein eindeutiges Attribut brächte, unterbleibt; der `unclassified_device`-Eintrag bleibt offen. Umgesetzt in WP-703.
+- 2) Wie 1, aber mit eigenem Zähler (z. B. `taken_unique_values`) statt `invalid_values`.
+- 3) Wie 1 und zusätzlich ein Review-Eintrag (z. B. `probable_duplicate` mit dem anderen CI als Kandidat), damit ein Mensch den Konflikt sieht.
+- 4) Datensatz dauerhaft abweisen (`permanent`, 409); das Gerät wird nicht inventarisiert.
+
+**Empfehlung:** Option 1 für G1. Sie nutzt einen bestehenden Mechanismus, verliert kein Gerät, erzeugt kein Duplikat und hält das Statement-Budget (NFR-03, `TestIngestStatementBudget` unverändert). Option 3 ist fachlich die vollständigste und kann nach G1 folgen; Option 4 verliert Geräte.
+
+**Übergangsregel:** bis zur Entscheidung gilt Option 1 (Code von WP-703, `TestIngestUniqueAttributes`).
+
+**Betroffene IDs:** MET-15, DIS-01
+
+**Betroffene WPs:** WP-703

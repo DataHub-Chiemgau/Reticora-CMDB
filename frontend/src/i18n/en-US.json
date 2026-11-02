@@ -366,7 +366,11 @@
       "generate": "Generate code",
       "once": "This code is shown only once and expires. Run in the customer network:",
       "expires": "Valid until",
-      "after": "Then restart the collector and confirm the suggested scopes on this page."
+      "after": "Then restart the collector and confirm the suggested scopes on this page.",
+      "client": "Client",
+      "clientChoose": "Choose a client",
+      "clientHint": "Your access covers several clients: choose the client the collector is bound to.",
+      "failed": "The enrollment code was not created: {{detail}}"
     },
     "collectorStatus": {
       "pending": "Pending",
@@ -608,7 +612,6 @@
     "size": "Size",
     "version": "Version",
     "upload": "Create Document",
-    "storageKey": "Storage Key",
     "categories": {
       "general": "General",
       "contract": "Contract",
@@ -1183,7 +1186,8 @@
     "positionFor": "Position of {{name}}",
     "conflict": "The room plan was changed elsewhere in the meantime and has been reloaded. Please check the position and move the object again.",
     "rangeError": "Position not saved: the coordinates must lie between 0 and 100 %.",
-    "saveError": "Position not saved: {{message}}"
+    "saveError": "Position not saved: {{message}}",
+    "staleObject": "Position not saved: an object is no longer assigned to this room. The room plan was reloaded; please move the object again."
   },
   "consumables": {
     "summary": "Consumable stock with level and minimum level.",
@@ -1528,6 +1532,7 @@
       "collector": "collectors",
       "discovery_scope": "discovery scopes",
       "agent_enrollment_token": "valid agent enrollment tokens",
+      "collector_enrollment_code": "valid collector enrollment codes",
       "ci_merge": "CI merges (tombstones)"
     }
   },

@@ -251,15 +251,34 @@ func (e *Entitlement) Validate() error {
 }
 
 // LimitExceededError is returned when a tenant exceeds a licensed limit.
+// Current counts the whole organization (F-403); HideCurrent keeps count
+// and limit out of the text for a caller who may not read every client and
+// site (F-414).
 type LimitExceededError struct {
-	FeatureKey string
-	Limit      int64
-	Current    int64
+	FeatureKey  string
+	Limit       int64
+	Current     int64
+	HideCurrent bool
 }
 
-// validation: the feature key and the counts of the limit.
+// validation: the feature key; count and limit of the organization only for
+// an org-wide caller (F-414: at the refusal the count mostly equals the
+// limit, so a scoped caller gets neither).
 func (e *LimitExceededError) Error() string {
+	if e.HideCurrent {
+		return fmt.Sprintf("entitlement limit for %q exceeded: the limit of the plan is reached", e.FeatureKey)
+	}
 	return fmt.Sprintf("entitlement limit for %q exceeded: %d of %d in use", e.FeatureKey, e.Current, e.Limit)
+}
+
+// countVisible reports whether the caller of ctx may learn the number of
+// resources of the organization a quota counts (F-414): a principal whose
+// client and site scope is org-wide. A scoped principal (also a job with its
+// creator's scope) and a context without a user (invitation, first login,
+// enrollment, collector ingest) get the limit only.
+func countVisible(ctx context.Context) bool {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	return ok && scope.UserID != "" && scope.Clients.IsAll() && scope.Sites.IsAll()
 }
 
 // LimitExceeded marks the error as an entitlement limit violation so callers can
@@ -478,7 +497,8 @@ func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error
 
 // AllowCreate enforces a quota (max_cis, max_collectors, max_users,
 // max_api_keys) before another resource is created. current is the number
-// of resources already stored.
+// of resources already stored; the refusal names it only to an org-wide
+// caller (countVisible, F-414).
 func (s *Service) AllowCreate(ctx context.Context, orgID, quota string, current int64) error {
 	feature, ok := QuotaFeature[quota]
 	if !ok {
@@ -499,7 +519,7 @@ func (s *Service) AllowCreate(ctx context.Context, orgID, quota string, current 
 		return err
 	}
 	if limit != nil && current >= *limit {
-		return &LimitExceededError{FeatureKey: quota, Limit: *limit, Current: current}
+		return &LimitExceededError{FeatureKey: quota, Limit: *limit, Current: current, HideCurrent: !countVisible(ctx)}
 	}
 	return nil
 }

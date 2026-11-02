@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -261,9 +262,21 @@ func coveredByScope(scopes []Scope, cidr string) bool {
 // resolveScopeSuggested creates the scope of an accepted suggestion. Accept
 // creates a scope and dismiss suppresses one, so both need discovery:manage
 // besides review:resolve (DIS-09, F-031); without it the item stays open.
+// For the same reason both need the discovery feature, as POST
+// /api/v1/discovery-scopes does: not entitled is 403 feature-not-entitled
+// and the item stays open, an expired license passes (CH21). Reading the
+// queue is cmdb_core (F-400).
 func (h *Handler) resolveScopeSuggested(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	if perms, _ := identity.PermissionsFromContext(ctx); !identity.HasPermission(perms, identity.PermDiscoveryManage) {
 		return false, refused(http.StatusForbidden, "missing required permission: "+string(identity.PermDiscoveryManage))
+	}
+	state, problem, err := h.edgeLicense(ctx, item.OrganizationID)
+	if err != nil {
+		return false, err
+	}
+	if state == LicenseNotEntitled {
+		refusal := &entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureDiscovery}
+		return false, &reviews.Error{Status: http.StatusForbidden, Problem: problem, Message: refusal.Error()}
 	}
 	if res.Action != reviews.ActionAccept {
 		return false, nil
@@ -532,12 +545,42 @@ func (h *Handler) WithScopeCycles(cycles *observability.Cycles) *Handler {
 	return h
 }
 
+// scopeResultSuffixes are the subjects on which a collector delivers
+// discovery results; like the ingest they need an active license (CH21).
+var scopeResultSuffixes = map[string]bool{ScopesResultSuffix: true, SubnetsReportSuffix: true}
+
+// scopeChannelLicensed reports whether the organization's discovery license
+// allows the scope channel subject, and otherwise the error of the reply
+// (ENT-05, ENT-07, F-400): without the discovery entitlement no subject is
+// answered, so the collector gets no scopes or jobs and opens no
+// scope_suggested item; after the license expired the results (run
+// results, subnet reports) are refused like the ingest, while scopes, jobs
+// and job statuses are still answered (the collector is paused). A failed
+// lookup refuses (fail-closed) and counts as a failed request.
+func (h *Handler) scopeChannelLicensed(ctx context.Context, orgID, collectorID, suffix string) (string, bool) {
+	state, _, err := h.edgeLicense(ctx, orgID)
+	if err != nil {
+		h.scopeCycles.Fail()
+		slog.Error("collector scope request: discovery license lookup failed", "organization_id", orgID,
+			"collector_id", collectorID, "suffix", suffix, "error", err)
+		return "not available", false
+	}
+	if state == LicenseNotEntitled || (state != LicenseActive && scopeResultSuffixes[suffix]) {
+		slog.Warn("collector scope request refused", "organization_id", orgID, "collector_id", collectorID,
+			"suffix", suffix, "license", state)
+		return "discovery license " + state, false
+	}
+	return "", true
+}
+
 // ServeCollectorScopes answers the scope requests, run results and subnet
 // reports of the collectors on nc until ctx ends (DIS-09), and their
 // requests for open discovery jobs and the job statuses they report
 // (JOB-01, F-358). A request of an
 // unknown or disabled collector is refused before its handler runs,
-// whatever the suffix, so nothing of it is persisted (COL-04).
+// whatever the suffix, so nothing of it is persisted (COL-04); so is a
+// request the organization's discovery license does not allow
+// (scopeChannelLicensed, F-400).
 func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error {
 	var subs []*nats.Subscription
 	for suffix, handle := range h.scopeHandlers() {
@@ -553,6 +596,8 @@ func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error
 					slog.Warn("collector scope request refused", "organization_id", orgID, "collector_id", collectorID,
 						"suffix", suffix, "error", cerr)
 					resp = map[string]string{"error": "not available"}
+				} else if refusal, licensed := h.scopeChannelLicensed(sctx, orgID, collectorID, suffix); !licensed {
+					resp = map[string]string{"error": refusal}
 				} else {
 					resp = handle(sctx, orgID, collectorID, msg.Data)
 				}

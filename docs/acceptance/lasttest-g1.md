@@ -14,6 +14,43 @@ kein Job in zwei Läufen rot (Abschnitt „Nachweisläufe nach den
 K3-Nachträgen“). Damit sind AK 3 von WP-439 und die Offenen Punkte 1 und 11
 erledigt.
 
+Nachtrag 2026-10-28 (WP-658, `k7n-preauth-concurrency`, F-387): Lauf
+40713089267 auf `e5c2d86` hatte im Job `api` 19 von 17.879 und im Job
+`nfr01-volume` 23 von 13.920 fehlgeschlagene Anfragen, darunter alle drei
+Bulk-Anfragen (429 des Pre-Auth-Limiters, `tests/load` und `load.yml`
+unverändert seit `3910aae`). Ursache: Seit WP-462 hielt jede Anfrage mit
+gültigem API-Key während der Schlüsselprüfung eine Einheit des
+Pre-Auth-Budgets ihrer IP (20/min); mehr als 20 gleichzeitige Prüfungen von
+k6 (eine IP) erhielten 429. Seit WP-658 wartet eine solche Anfrage auf eine
+frei werdende Einheit; 429 gibt es erst, wenn Fehlversuche das Budget
+verbraucht haben. Lokal (Server von WP-658, `load.yml`-Einstellungen, Seed
+10.000 Objekte, `api.js` 60 s): 0 von 4.542 Anfragen fehlgeschlagen, kein
+429 (vorher auf demselben Bestand 32 fehlgeschlagene Checks, 26 × 429). Der
+Wiederholungslauf von `load.yml` auf GitHub **steht aus**.
+
+Nachtrag 2026-10-28 (WP-658, Review-Nachtrag): Die Warteschlange ist jetzt
+begrenzt (je Server-Instanz 40 wartende Anfragen einer IP, 256 aller IPs,
+höchstens 2,5 s), und eine zurückgegebene Einheit weckt nur eine wartende
+Anfrage ihrer IP. `api.js` hat 38 VUs und erreicht die Grenze nicht. Lokal
+erneut gemessen (Server des Review-Nachtrags, `load.yml`-Einstellungen, Seed
+10.000 Objekte): 60, 60 und 100 gleichzeitige Anfragen mit gültigem Key einer
+IP jeweils ohne 429; `api.js` 60 s: 0 von 6.938 Anfragen fehlgeschlagen,
+Checks 8.069 von 8.069, kein 429; 60 ungültige Keys: 20 × 401, 40 × 429.
+
+Nachtrag 2026-11-01 (WP-688, `k7n-load-evidence-same-commit`, F-417):
+`tests/load/evaluate-runs.sh` (und damit `load-evidence.yml`) prüft jetzt
+die Voraussetzungen von „Drei vollständige Läufe“, statt Server-Commit und
+Vollständigkeit nur auszugeben: Die drei Läufe müssen denselben Commit
+unter „Server, Seed und Migrationen“ nennen, und jeder Lauf muss jeden der
+fünf Jobs (`api`, `ingest`, `ingest-spool`, `ingest-rediscover`,
+`nfr01-volume`) haben. Sonst lautet die letzte Zeile „Bewertung nach E-58
+(Median über drei Läufe): nicht bewertbar: …“, Exit 1 (vorher: drei Läufe
+verschiedener Commits mit nur dem Job `api` → „alle Budgets gehalten“,
+Exit 0). Eine Teilbewertung (`--partial`, nur die vorhandenen Jobs) ist ein
+eigener Modus und nie der Nachweis (Abschnitt „Bewertung nach E-58“). Die
+Bewertung der Nachweisläufe N1 bis N3 (Run 40320307297) bleibt gültig: alle
+drei auf `3910aae`, jeder mit allen fünf Jobs.
+
 **Quelle der Werte:** Die Werte der Läufe 1 bis 3 stammen aus den
 k6-Zusammenfassungen und Protokollzeilen in den Job-Logs der Läufe
 40269518264, 40270929166 und 40271818796 (Abschnitt „Läufe“). Das Archiv je
@@ -66,6 +103,26 @@ die Einzelwerte aus den Job-Logs. Fett: Schwelle verfehlt.
   (`seed-<job>.txt`, `volumes-<job>.txt`); die k6-Zusammenfassungen
   `<job>.json` und `<job>.txt`. Der Job `archive` fasst alles in
   `ergebnis.md` zusammen.
+- **Fehlgeschlagene Anfragen (F-388, WP-659):** Ein Job ist nur grün, wenn
+  keine Anfrage fehlschlägt: `http_req_failed` `rate==0` für den ganzen Lauf
+  und je k6-Szenario (`http_req_failed{scenario:<name>}`), in `api.js` und
+  `ingest.js`; fehlgeschlagen ist jede Antwort außerhalb 200–399 und jede
+  Anfrage ohne Antwort, auch Abfragen und `/readyz`. Eine Toleranz sieht
+  E-58 nicht vor („Alle Schwellen sind im Nachweislauf eingehalten“); die
+  Schwelle ist deshalb 0. Jeder der drei Bulk-Jobs von `api.js` muss
+  gelingen (`bulk_jobs_succeeded` `count==3`, `checks{scenario:bulk}`
+  `rate==1`), und `bulk_500_duration` zählt nur gelungene Bulk-Jobs.
+  `checks` `rate>0.99` gilt weiter nur für die inhaltlichen Prüfungen der
+  Antworten. Jede fehlgeschlagene Anfrage steht mit Name und Status in der
+  Zusammenfassung des Jobs, in `failed-<job>.txt` und in `ergebnis.md`, mit
+  Methode, Pfad und Anfang der Antwort in `console-<job>.log`.
+  Bis WP-659 hatte `api.js` keine Schwelle auf `http_req_failed`, und
+  `bulk_500_duration` zählte auch abgewiesene Bulk-Anfragen (1 bis 15 ms):
+  Lauf 40713089267 auf `e5c2d86` blieb im Job `api` grün, obwohl 19 von
+  17.879 Anfragen und alle 3 Bulk-Anfragen fehlschlugen (429 des
+  Pre-Auth-Limits, F-387). Läufe vor WP-659 sind deshalb nur mit
+  `http_req_failed` 0 in ihrer k6-Zusammenfassung (Tabelle NFR-02, Zeile
+  „Checks / fehlgeschlagene Anfragen“) als fehlerfrei belegt.
 
 | Lauf | CPU (`lscpu`) | RAM (`MemTotal`) |
 |---|---|---|
@@ -154,7 +211,19 @@ E-58 nach dem Median der drei Läufe (nächster Abschnitt).
 Ergänzung zu E-58 vom 2026-10-26 (`docs/plan/entscheidungen.md`): Ein
 Budget gilt als gehalten, wenn der Median seiner Messwerte aus den drei
 Läufen im Budget liegt; ein Job gilt als verfehlt, wenn er in mindestens
-zwei der drei Läufe rot ist. Die Mediane unten sind aus den Werten der
+zwei der drei Läufe rot ist. Für `http_req_failed` (`rate==0`) und
+`bulk_jobs_succeeded` (`count==3`) gilt dieselbe Regel; seit WP-659
+(F-388) ist ein Job mit einer fehlgeschlagenen Anfrage oder einem nicht
+gelungenen Bulk-Job in seinem Lauf rot, und zwei solche Läufe verfehlen
+den Job. Bewertbar sind nur drei Läufe desselben Server-Commits („Server,
+Seed und Migrationen“ in `ergebnis.md`), von denen jeder alle fünf Jobs
+(`api`, `ingest`, `ingest-spool`, `ingest-rediscover`, `nfr01-volume`) hat
+(WP-206/WP-612 „Drei vollständige Läufe“, F-417, WP-688);
+`tests/load/evaluate-runs.sh` meldet sonst „nicht bewertbar“ mit Exit 1.
+Ein Job ohne Artefakt in einem dieser Läufe macht die drei Läufe damit
+nicht bewertbar; die Regel „zählt in seinem Lauf als rot“ gilt nur noch
+in der Teilbewertung (`--partial`, nur die vorhandenen Jobs, derselbe
+Server-Commit), die kein G1-Nachweis ist. Die Mediane unten sind aus den Werten der
 Läufe 1 bis 3 in diesem Bericht gebildet (Quelle: Job-Logs);
 `tests/load/evaluate-runs.sh` bildet sie aus den Archiven, sobald diese
 übernommen sind. Fett: im Median verfehlt.
@@ -211,7 +280,7 @@ Seed. Werte in ms, Bulk in s.
 | Impact Tiefe 20 (kompakt, Oberfläche) | `impact` | < 2.000 | 704,2 | 1.830 | 1.370 | 1.610 |
 | Impact Tiefe 20 (Standardform mit Pfaden) | `impact_full` | < 2.000 | 685,2 | 1.800 | 1.300 | 1.710 |
 | Bulk 500 IDs | `bulk_500_duration` | < 30 s | 7,11 s | 20,49 s | 19,35 s | 17,11 s |
-| Checks / fehlgeschlagene Anfragen | `checks`, `http_req_failed` | > 99 % / – | 100 % / 0 | 100 % (15.098 von 15.098) / 0 von 12.893 | 100 % (13.223 von 13.223) / 0 von 11.082 | 100 % (16.165 von 16.165) / 0 von 13.727 |
+| Checks / fehlgeschlagene Anfragen | `checks`, `http_req_failed` | > 99 % / – (seit WP-659: 0 je Lauf und Szenario) | 100 % / 0 | 100 % (15.098 von 15.098) / 0 von 12.893 | 100 % (13.223 von 13.223) / 0 von 11.082 | 100 % (16.165 von 16.165) / 0 von 13.727 |
 
 Im Vorlauf und in den Läufen 1 und 3 hält jedes Budget, mit wenig Abstand
 bei `global_search` (485 bzw. 418 ms) und `impact` (1,83 bzw. 1,61 s). In

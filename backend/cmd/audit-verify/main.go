@@ -4,6 +4,13 @@
 // hash mismatch, AUD-04) and exits non-zero when a chain is broken — the
 // offline counterpart of POST /api/v1/audit/verify required by the
 // specification.
+//
+// Entries whose personal values the pii.backfill run sealed after they were
+// chained (migration 000188) are verified with the digest of their original
+// and their seal; with RETICORA_MASTER_KEY (and RETICORA_MASTER_KEY_PREVIOUS
+// during a rotation) set, the original is also rebuilt from the vault and a
+// value that differs from it breaks the chain. The output names how many
+// sealed entries were not confirmed that way (docs/ops/workers.md).
 package main
 
 import (
@@ -12,12 +19,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
 func main() {
@@ -43,6 +53,15 @@ func main() {
 		os.Exit(2)
 	}
 	defer pool.Close()
+	// The vault confirms sealed entries against their original.
+	if key := os.Getenv("RETICORA_MASTER_KEY"); key != "" {
+		enc, encErr := crypto.NewEnvelopeEncryptor(key, strings.Split(os.Getenv("RETICORA_MASTER_KEY_PREVIOUS"), ",")...)
+		if encErr != nil {
+			fmt.Fprintf(os.Stderr, "audit-verify: master key: %v\n", encErr)
+			os.Exit(2)
+		}
+		pii.SetDefault(pii.NewVault(pool, enc))
+	}
 
 	orgs := []string{*orgID}
 	if *all {
@@ -72,6 +91,9 @@ func run(ctx context.Context, out io.Writer, orgs []string, verify func(context.
 			if code == 0 {
 				code = 1
 			}
+		case result.Sealed > 0:
+			fmt.Fprintf(out, "audit chain intact for organization %s (%d entries verified, %d of them sealed, "+
+				"%d sealed entries not confirmed against the vault)\n", org, result.Checked, result.Sealed, result.Unconfirmed)
 		default:
 			fmt.Fprintf(out, "audit chain intact for organization %s (%d entries verified)\n", org, result.Checked)
 		}

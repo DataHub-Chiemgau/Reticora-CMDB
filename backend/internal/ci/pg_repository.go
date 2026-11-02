@@ -435,6 +435,24 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 	return items, total, err
 }
 
+var _ ActiveCounter = (*PGRepository)(nil)
+
+// CountActive implements ActiveCounter: the number of active CIs of the
+// organization, also of the clients and sites outside the caller's scope
+// (max_cis, F-403). ci_active_count() (migration 000186) widens only the
+// client and site scope for the one count, in the caller's transaction when
+// ctx carries one, and returns nothing but the number.
+func (r *PGRepository) CountActive(ctx context.Context, orgID string) (int64, error) {
+	var n int64
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT ci_active_count()`).Scan(&n); err != nil {
+			return fmt.Errorf("count active cis: %w", err)
+		}
+		return nil
+	})
+	return n, err
+}
+
 // GetByID retrieves a single CI by ID within the tenant scope.
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, error) {
 	var item *Item
@@ -1039,6 +1057,9 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		}
 		return nil, fmt.Errorf("get ci before update: %w", err)
 	}
+	if reviveErr := reviveSighted(before, &req); reviveErr != nil {
+		return nil, reviveErr
+	}
 	if req.Manual != nil {
 		if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
 			return nil, preErr
@@ -1154,6 +1175,25 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		}
 	}
 	return w, nil
+}
+
+// reviveSighted brings an unknown CI back to active for a sighting
+// (UpdateRequest.Sighting) newer than the last one of the locked row
+// before: like a status the record carries, a field override of the status
+// keeps it (dropOverriddenFields).
+func reviveSighted(before *Item, req *UpdateRequest) error {
+	if !req.Sighting || req.Status != nil || req.LastSeenAt == nil || before.Status != StatusUnknown {
+		return nil
+	}
+	seen, err := time.Parse(time.RFC3339, *req.LastSeenAt)
+	if err != nil {
+		return &ValidationError{Violations: []Violation{{Field: "last_seen_at", Detail: "must be an RFC 3339 date-time"}}}
+	}
+	if before.LastSeenAt == nil || seen.After(*before.LastSeenAt) {
+		active := StatusActive
+		req.Status = &active
+	}
+	return nil
 }
 
 // checkCITypes keeps the type of a CI within its organization (CI-01,
@@ -1523,6 +1563,9 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns)
 		if restored, err = scanCI(tx.QueryRow(ctx, query, id, orgID)); err != nil {
 			return fmt.Errorf("get restored ci: %w", err)
+		}
+		if uerr := r.checkUniqueBack(ctx, tx, restored); uerr != nil {
+			return uerr
 		}
 		if changeErr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindRestored), orgID, id, restored.Version, changeType, "deleted_at", "deleted", nil); changeErr != nil {
 			return changeErr
@@ -2262,6 +2305,16 @@ func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error)
 // CI type and the global ones whose value another active CI of the
 // organization (scope org) or of the same client (scope client) holds.
 // Soft-deleted CIs do not count (MET-15).
+//
+// The check covers the CIs the caller does not see (F-421): for a caller
+// restricted in the client or site scope it runs in an own transaction,
+// which only reads, with the organization-wide scope of the caller's
+// organization (database.OrgWideScope, app.org_id stays), so the value of
+// a CI of another client or site is found also while the unique index
+// does not exist yet (DB-04). It returns only the keys of the attributes,
+// never the other CI. When ctx carries the caller's transaction, the
+// check also runs in it, so a CI written earlier in that transaction
+// counts as well.
 func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, clientID, ciID string, attrs map[string]any) ([]string, error) {
 	if len(attrs) == 0 {
 		return nil, nil
@@ -2271,7 +2324,7 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 		return nil, fmt.Errorf("encode attributes: %w", err)
 	}
 	var keys []string
-	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	check := func(ctx context.Context, tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx, `
 			SELECT d.key FROM attribute_definition d
 			WHERE d.is_unique AND (d.ci_type_id = $2::uuid OR d.ci_type_id IS NULL)
@@ -2288,10 +2341,43 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 		if qerr != nil {
 			return fmt.Errorf("check unique attributes: %w", qerr)
 		}
-		keys, qerr = pgx.CollectRows(rows, pgx.RowTo[string])
+		found, qerr := pgx.CollectRows(rows, pgx.RowTo[string])
+		for _, key := range found {
+			if !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
 		return qerr
-	})
-	return keys, err
+	}
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok || (scope.Clients.IsAll() && scope.Sites.IsAll()) {
+		err = database.WithRequestTenant(ctx, r.pool, orgID, check)
+		return keys, err
+	}
+	if !strings.EqualFold(scope.OrgID, orgID) {
+		return nil, fmt.Errorf("%w: %q", database.ErrTenantMismatch, orgID)
+	}
+	if database.InTx(ctx) {
+		if terr := database.WithRequestTenant(ctx, r.pool, orgID, check); terr != nil {
+			return nil, terr
+		}
+	}
+	wide := database.OrgWideScope(scope.OrgID, scope.UserID)
+	if werr := database.WithTenant(database.WithoutTx(ctx), r.pool, &wide, check); werr != nil {
+		return nil, werr
+	}
+	slices.Sort(keys)
+	return keys, nil
+}
+
+// checkUniqueBack refuses a CI that comes back with its values (restore,
+// unmerge) while another active CI holds a value of one of its unique
+// attributes (MET-15, F-429): the check of ci.Service (CheckUnique), run in
+// the writing transaction tx, so it holds also while the unique index does
+// not exist yet. The caller's transaction rolls back; the CI stays deleted
+// or merged.
+func (r *PGRepository) checkUniqueBack(ctx context.Context, tx pgx.Tx, item *Item) error {
+	return CheckUnique(database.ContextWithTx(ctx, tx), r, item.OrganizationID, item.CITypeID, item.ClientID, item.ID, item.Attributes)
 }
 
 // ChangeType implements TypeChanger (CI-11): the CI keeps its row, so its
@@ -2321,7 +2407,9 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 		return r.recordEvent(ctx, tx, events.CIChanged, tc.result.CI, []string{"ci_type_id"})
 	})
 	if err != nil {
-		return nil, err
+		// A concurrent write the check could not see: the index names the
+		// attribute.
+		return nil, r.uniqueField(ctx, orgID, err)
 	}
 	return result, nil
 }
@@ -2377,6 +2465,14 @@ func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID
 	if mode == TypeChangeManual && !active {
 		return nil, ciTypeViolation(ciTypeDeactivated)
 	}
+	// The values the CI carries fall under the unique attributes of the
+	// target type (MET-15, F-431): the check of ci.Service (CheckUnique) in
+	// the writing transaction, before the row changes, so it holds also
+	// while the unique index does not exist yet. A value another active CI
+	// holds is a *UniqueError; the CI keeps its type.
+	if uerr := CheckUnique(database.ContextWithTx(ctx, tx), r, orgID, typeID, before.ClientID, ciID, before.Attributes); uerr != nil {
+		return nil, uerr
+	}
 	if _, err = tx.Exec(ctx, `UPDATE ci SET ci_type_id = $3, version = version + 1, updated_at = NOW()
 		WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
 		return nil, locationError(fmt.Errorf("change ci type: %w", err))
@@ -2410,7 +2506,8 @@ func (r *PGRepository) recordTypeChangeAudit(ctx context.Context, tx pgx.Tx, tc 
 // record's origin, one event ci.changed (and ci.online for a CI it brings
 // back from unknown to active) and the audit entries of the update and of
 // the type change. A reclassification discovery may not make
-// (ErrReclassificationRefused, ErrUnknownType) leaves the type as it is.
+// (ErrReclassificationRefused, ErrUnknownType) or a value of a unique attribute
+// of the target type refuses (keepsType, F-432) leaves the type as it is.
 func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
 	result := &RecordUpdateResult{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -2423,7 +2520,8 @@ func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *
 		if rec.TypeID != "" && rec.TypeID != item.CITypeID && api.IsUUID(rec.TypeID) {
 			tc, err = r.changeTypeRow(ctx, tx, orgID, id, rec.TypeID, TypeChangeDiscovery)
 			switch {
-			case errors.Is(err, ErrReclassificationRefused), errors.Is(err, ErrUnknownType):
+			case keepsType(ctx, err, id, rec.TypeID):
+				// The unique check only reads: the transaction goes on.
 				tc = nil
 			case err != nil:
 				return err

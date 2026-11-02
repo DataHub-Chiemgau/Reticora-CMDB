@@ -165,6 +165,52 @@ func TestRackLayoutAgainstPostgres(t *testing.T) {
 		}
 	})
 
+	// F-415 (RCK-01, RCK-02, API-03): PutRackMountRequest.height_u has
+	// minimum 1 and default 1, face the enum front, rear, both with default
+	// front. An explicit 0 or empty face is a value, not an omitted field:
+	// 400 naming the field, nothing stored, an existing mount unchanged.
+	t.Run("explicit height_u 0 and empty face are 400 and store nothing", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, method, path, body, field string
+		}{
+			{"new mount with height_u 0", http.MethodPut, "/api/v1/racks/" + rk.ID + "/mounts/" + ci3, `{"position_u":1,"height_u":0}`, "height_u"},
+			{"new mount with height_u -1", http.MethodPut, "/api/v1/racks/" + rk.ID + "/mounts/" + ci3, `{"position_u":1,"height_u":-1}`, "height_u"},
+			{"new mount with empty face", http.MethodPut, "/api/v1/racks/" + rk.ID + "/mounts/" + ci3, `{"position_u":1,"face":""}`, "face"},
+			{"move of the 2U mount with height_u 0", http.MethodPut, "/api/v1/racks/" + rk.ID + "/mounts/" + ci1, `{"position_u":7,"height_u":0}`, "height_u"},
+			{"move of the 2U mount with empty face", http.MethodPut, "/api/v1/racks/" + rk.ID + "/mounts/" + ci1, `{"position_u":7,"face":""}`, "face"},
+			{"deprecated POST with height_u 0", http.MethodPost, "/api/v1/racks/" + rk.ID + "/mounts", `{"ci_id":"` + ci3 + `","position_u":1,"height_u":0}`, "height_u"},
+			{"deprecated POST with empty face", http.MethodPost, "/api/v1/mounts", `{"rack_id":"` + rk.ID + `","ci_id":"` + ci3 + `","position_u":1,"face":""}`, "face"},
+			{"PATCH with height_u 0", http.MethodPatch, "/api/v1/rack-mounts/" + ci1Mount.ID, `{"height_u":0}`, "height_u"},
+			{"PATCH with empty face", http.MethodPatch, "/api/v1/rack-mounts/" + ci1Mount.ID, `{"face":""}`, "face"},
+		} {
+			w := do(orgCtx, tc.method, tc.path, tc.body)
+			var problem struct {
+				Field string `json:"field"`
+			}
+			if w.Code != http.StatusBadRequest || json.Unmarshal(w.Body.Bytes(), &problem) != nil || problem.Field != tc.field {
+				t.Errorf("%s: %s %s = %d %.300s, want 400 with field %s", tc.name, tc.method, tc.body, w.Code, w.Body.String(), tc.field)
+			}
+		}
+		if n := mountsOf(ci3); n != 0 {
+			t.Errorf("ci 3 has %d mounts after the refused writes, want 0", n)
+		}
+		var pos, height int
+		var face string
+		if err := f.Admin.QueryRow(context.Background(), `SELECT position_u, height_u, face FROM rack_mount WHERE id = $1`, ci1Mount.ID).Scan(&pos, &height, &face); err != nil ||
+			pos != 7 || height != 2 || face != "front" {
+			t.Errorf("ci 1 after the refused writes: U%d %dU %s (%v), want U7 2U front", pos, height, face, err)
+		}
+		// Omitted fields keep their defaults.
+		w := put(ci3, `{"position_u":1}`)
+		var m rack.RackMount
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &m) != nil || m.HeightU != 1 || m.Face != "front" {
+			t.Errorf("PUT without height_u and face = %d %.300s, want 201 with 1U front", w.Code, w.Body.String())
+		}
+		if w = do(orgCtx, http.MethodDelete, "/api/v1/racks/"+rk.ID+"/mounts/"+ci3, ""); w.Code != http.StatusNoContent {
+			t.Fatalf("unmount of ci 3 = %d %.300s, want 204", w.Code, w.Body.String())
+		}
+	})
+
 	t.Run("filled layout names CI and type under RLS", func(t *testing.T) {
 		// A client-2 CI in the client-1 rack: the org-wide principal sees it
 		// with its name, the client-1 principal neither the mount nor the name.

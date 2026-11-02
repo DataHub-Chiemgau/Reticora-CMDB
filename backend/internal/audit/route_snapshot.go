@@ -362,11 +362,13 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"monitoring/alerts": "alert_rule", "notification-channels": "notification_channel", "orders": "internal_order",
 		"racks": "rack", "relationships": "ci_relationship", "roles": "custom_role", "rooms": "room",
 		"saved-views": "saved_view", "sites": "site", "slas": "sla", "stocktakes": "stocktake", "subnets": "subnet",
-		"teams": "team", "tickets": "ticket", "trainings": "training", "users": "app_user", "vlans": "vlan", "vrfs": "vrf",
+		"teams": "team", "tickets": "ticket", "trainings": "training", "vlans": "vlan", "vrfs": "vrf",
 		"workflows": "workflow_def",
 	} {
 		crud(m, v1+collection, table, all...)
 	}
+	// DELETE /users/{id} records user.deleted in its transaction (F-393).
+	crud(m, v1+"users", "app_user", "POST", "PATCH")
 	crud(m, v1+"collectors", "collector", "POST", "PATCH")
 	crud(m, v1+"credentials", "credential", "DELETE")
 	m["POST "+v1+"credentials/"] = created("credential")
@@ -472,11 +474,16 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		Keys: []SnapshotKey{{"id", "delivery_id"}, {"subscription_id", "id"}}}
 	m["DELETE /api/v1/teams/{teamId}/members/{userId}"] = RouteSnapshot{Table: "team_member",
 		Keys: []SnapshotKey{{"team_id", "teamId"}, {"user_id", "userId"}}}
-	// The permissions of a standard role are rows of role_permission.
+	// The permissions of a standard role are the rows of role_permission and
+	// its seed keys (role.permissions) within the catalogue, as every grant
+	// path reads them (F-398).
 	m["PUT /api/v1/roles/{id}/permissions"] = RouteSnapshot{Table: "role", Keys: []SnapshotKey{{"id", "id"}},
 		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'permission_keys',
-			(SELECT COALESCE(jsonb_agg(rp.permission_key ORDER BY rp.permission_key), '[]'::jsonb) FROM role_permission rp
-			 WHERE rp.organization_id = t.organization_id AND rp.role_id = t.id))`}
+			(SELECT COALESCE(jsonb_agg(k.key ORDER BY k.key), '[]'::jsonb) FROM (
+			   SELECT rp.permission_key AS key FROM role_permission rp
+			    WHERE rp.organization_id = t.organization_id AND rp.role_id = t.id
+			   UNION SELECT jsonb_array_elements_text(COALESCE(t.permissions, '[]'::jsonb))) k
+			  WHERE k.key IN (SELECT key FROM permission)))`}
 	m["POST /api/v1/tickets/{id}/sla"] = RouteSnapshot{Table: "ticket_sla", Keys: []SnapshotKey{{"ticket_id", "id"}}}
 	// Relationship types are addressed by key; the organization's own type,
 	// not the built-in one of the same key.

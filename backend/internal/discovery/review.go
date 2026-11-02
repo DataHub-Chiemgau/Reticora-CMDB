@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
 
@@ -219,8 +220,13 @@ func (h *Handler) resolveReclassified(ctx context.Context, orgID, ciID string) e
 		return err
 	}
 	for i := range open {
-		if _, err = h.repo.ResolveReviewItem(ctx, orgID, open[i].ID, &Resolution{Status: ReviewStatusResolved,
-			Note: ReasonReclassified}); err != nil {
+		_, err = h.repo.ResolveReviewItem(ctx, orgID, open[i].ID, &Resolution{Status: ReviewStatusResolved,
+			Note: ReasonReclassified})
+		if errors.Is(err, reviews.ErrAlreadyResolved) {
+			// A principal resolved it meanwhile (F-404).
+			continue
+		}
+		if err != nil {
 			return err
 		}
 		id := open[i].ID
@@ -286,6 +292,10 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 			restorer, ok := h.ciRepo.(ciRestorer)
 			if !ok {
 				return false, refused(http.StatusNotImplemented, "this repository cannot reactivate CIs")
+			}
+			// The reactivated CI counts against max_cis (ENT-03).
+			if err := h.allowActiveCI(ctx, orgID); err != nil {
+				return false, err
 			}
 			if _, err := restorer.Restore(ctx, orgID, res.CIID); err != nil {
 				return false, restoreRefused(err)
@@ -399,6 +409,18 @@ func (h *Handler) createReviewedDevice(ctx context.Context, item *ReviewItem, ch
 	// the writing transaction: unknown, of another organization or
 	// deactivated is refused (CI-01, TEN-09).
 	newItem.ChosenType = chosenTypeID != ""
+	// The CI counts against max_cis as one created by POST /cis: over the
+	// limit new is 403 entitlement-limit, no CI is created and the item
+	// stays open with the device record (ENT-03, ENT-08).
+	if err := h.allowActiveCI(ctx, orgID); err != nil {
+		return "", err
+	}
+	// The unique attributes are checked as POST /cis checks them, also
+	// before their index exists: a value another active CI holds is 409
+	// with the violations and the item stays open (MET-15, F-429).
+	if err := ci.CheckUnique(ctx, h.ciRepo, orgID, typeID, newItem.ClientID, "", newItem.Attributes); err != nil {
+		return "", err
+	}
 	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
 		if ve, ok := ci.AsValidationError(err); ok && len(ve.Violations) > 0 {
 			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: ve.Violations[0].Field,
@@ -528,7 +550,19 @@ func (h *Handler) resolveOverrideConflict(ctx context.Context, item *ReviewItem,
 		return false, refused(http.StatusNotImplemented, "overrides cannot be cleared here")
 	}
 	ciID, field := payloadString(item.Payload, "ci_id"), payloadString(item.Payload, "field")
+	if !isUUID(ciID) || field == "" {
+		return false, refused(http.StatusUnprocessableEntity, "the item names no CI field")
+	}
 	if err := clearer.ClearOverride(ctx, item.OrganizationID, ciID, field); err != nil {
+		// A CI that is gone or a field without an override (any more) is
+		// 404 like an unknown item, a name that is no field 422; the item
+		// stays open (F-405).
+		switch {
+		case errors.Is(err, override.ErrNotFound):
+			return false, refused(http.StatusNotFound, "the CI or the override of "+field+" was not found; dismiss the item")
+		case errors.Is(err, override.ErrReservedName):
+			return false, refused(http.StatusUnprocessableEntity, "the item names no CI field")
+		}
 		return false, err
 	}
 	res.Note = "override of " + field + " removed, observed value accepted"

@@ -15,6 +15,11 @@ import { ApiError, ciApi, collectorApi, fetchAPI, scopeSuggestionApi } from '../
 import { useAuthStore } from '../auth/authStore';
 import { InsecureContextError } from '../auth/oidc';
 import { OtherAccountHint, SignOutButton } from '../auth/SignOutButton';
+import {
+  EnrollmentClientSelect,
+  describeEnrollmentRefusal,
+  useEnrollmentClientChoice,
+} from '../components/EnrollmentClientSelect';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
@@ -415,15 +420,26 @@ function VerifyStep({ token, signedInAs }: { token: string; signedInAs?: string 
   );
 }
 
+/**
+ * CollectorStep creates the enrollment code. A user restricted to several
+ * clients chooses the collector's client first (F-425); a refusal shows the
+ * server's reason.
+ */
 function CollectorStep() {
   const { t } = useTranslation();
+  const [clientId, setClientId] = useState('');
+  const choice = useEnrollmentClientChoice(true);
   const code = useMutation({
     mutationFn: () =>
       fetchAPI<{ code: string; expires_at: string }>('/collectors/enrollment-codes', {
         method: 'POST',
-        body: JSON.stringify({ label: 'onboarding' }),
+        body: JSON.stringify({
+          label: 'onboarding',
+          ...(choice.required && clientId ? { client_id: clientId } : {}),
+        }),
       }),
   });
+  const refusal = describeEnrollmentRefusal(code.error, t, choice.required);
   return (
     <div className="space-y-3 text-sm">
       <p>{t('onboarding.collector.hint')}</p>
@@ -436,13 +452,25 @@ function CollectorStep() {
           <p className="mt-2 text-muted">{t('onboarding.collector.waiting')}</p>
         </div>
       ) : (
-        <Button onClick={() => code.mutate()} loading={code.isPending}>
-          {t('onboarding.collector.create')}
-        </Button>
+        <>
+          <EnrollmentClientSelect
+            choice={choice}
+            value={clientId}
+            onChange={setClientId}
+            error={refusal.client}
+          />
+          <Button
+            onClick={() => code.mutate()}
+            loading={code.isPending}
+            disabled={choice.required && !clientId}
+          >
+            {t('onboarding.collector.create')}
+          </Button>
+        </>
       )}
-      {code.error ? (
+      {refusal.message ? (
         <p role="alert" className="text-danger">
-          {errorMessage(code.error)}
+          {refusal.message}
         </p>
       ) : null}
     </div>

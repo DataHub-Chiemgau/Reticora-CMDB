@@ -366,7 +366,11 @@
       "generate": "Code erzeugen",
       "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
       "expires": "Gültig bis",
-      "after": "Starten Sie danach den Collector neu und bestätigen Sie die vorgeschlagenen Scopes auf dieser Seite."
+      "after": "Starten Sie danach den Collector neu und bestätigen Sie die vorgeschlagenen Scopes auf dieser Seite.",
+      "client": "Kunde",
+      "clientChoose": "Kunde wählen",
+      "clientHint": "Ihr Zugriff umfasst mehrere Kunden: Wählen Sie den Kunden, an den der Collector gebunden wird.",
+      "failed": "Der Enrollment-Code wurde nicht erzeugt: {{detail}}"
     },
     "collectorStatus": {
       "pending": "Ausstehend",
@@ -608,7 +612,6 @@
     "size": "Größe",
     "version": "Version",
     "upload": "Dokument erstellen",
-    "storageKey": "Storage-Key",
     "categories": {
       "general": "Allgemein",
       "contract": "Vertrag",
@@ -1183,7 +1186,8 @@
     "positionFor": "Position von {{name}}",
     "conflict": "Der Raumplan wurde zwischenzeitlich von anderer Seite geändert und neu geladen. Bitte prüfen Sie die Position und verschieben Sie das Objekt erneut.",
     "rangeError": "Position nicht gespeichert: Die Koordinaten müssen zwischen 0 und 100 % liegen.",
-    "saveError": "Position nicht gespeichert: {{message}}"
+    "saveError": "Position nicht gespeichert: {{message}}",
+    "staleObject": "Position nicht gespeichert: Ein Objekt ist diesem Raum nicht mehr zugeordnet. Der Raumplan wurde neu geladen; bitte verschieben Sie das Objekt erneut."
   },
   "consumables": {
     "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",
@@ -1528,6 +1532,7 @@
       "collector": "Collectors",
       "discovery_scope": "Discovery-Scopes",
       "agent_enrollment_token": "gültige Agent-Enrollment-Tokens",
+      "collector_enrollment_code": "gültige Collector-Enrollment-Codes",
       "ci_merge": "CI-Zusammenführungen (Tombstones)"
     }
   },

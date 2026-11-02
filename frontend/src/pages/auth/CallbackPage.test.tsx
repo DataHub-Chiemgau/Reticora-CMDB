@@ -77,6 +77,13 @@ describe('CallbackPage refusals', () => {
       'Ihr Konto ist keiner Organisation zugeordnet. Wenden Sie sich an die Administration Ihrer Organisation.',
     ],
     [
+      // The attribute names no organization of the instance (F-395).
+      401,
+      'https://reticora.io/problems/login-no-organization',
+      'identity: the organization attribute names no organization',
+      'Ihr Konto ist keiner Organisation zugeordnet. Wenden Sie sich an die Administration Ihrer Organisation.',
+    ],
+    [
       403,
       'https://reticora.io/problems/login-no-role',
       'identity: no role is assigned to the user in this organization; ask an administrator for access',

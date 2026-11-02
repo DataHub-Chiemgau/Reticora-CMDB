@@ -323,6 +323,10 @@ func (q *queryResolver) SearchEverything(ctx context.Context, text string, types
 	return out, nil
 }
 
+// ReviewInbox reads the review queue. The queue is cmdb_core, as REST
+// /api/v1/review-items and its deprecated /api/v1/discovery/review-items
+// alias (F-400): CI merges open items too; only resolving a scope_suggested
+// item needs the discovery feature.
 func (q *queryResolver) ReviewInbox(ctx context.Context, status, kind *string, first *int) ([]*reviews.Item, error) {
 	orgID, err := q.authorize(ctx, identity.PermDiscoveryRead, FeatureCMDBCore)
 	if err != nil {

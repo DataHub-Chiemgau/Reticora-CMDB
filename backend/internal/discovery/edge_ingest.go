@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -162,16 +163,162 @@ func (h *Handler) edgeIngest(ctx context.Context, orgID, collectorID string, dat
 	}
 	received := len(items)
 	items, rejected := admitObservedAt(items, time.Now().UTC())
-	t := tenant.TenantInfo{OrganizationID: orgID}
-	ctx = tenant.WithTenant(ctx, t)
-	resp, err := h.dispatch(ctx, newIngestMessages(ctx, t, collectorID, items))
+	// The records of a client-bound collector are processed in its client
+	// (F-406/F-407, DIS-05): its scope carries them to the consumer, a
+	// record without client_id takes the collector's client, one naming
+	// another client, a site or a discovery scope outside it is rejected
+	// on its own (WP-481).
+	ctx, col, err := h.collectorIngestContext(ctx, orgID, collectorID)
+	if err != nil {
+		return edgeRefusal(err)
+	}
+	items, outside := h.bindRecordsToCollector(ctx, orgID, col, items)
+	var resp BulkIngestResponse
+	if len(items) > 0 {
+		resp, err = h.dispatch(ctx, newIngestMessages(ctx, tenant.FromContext(ctx), collectorID, items))
+	}
 	// Records that fail are listed in the reply; only when no record was
 	// accepted does the request fail as a whole (WP-481).
-	if err = resp.finish(received, rejected, err); err != nil {
+	if err = resp.finish(received, rejected, withRecordErrors(err, outside)); err != nil {
+		var se *collectorScopeError
+		if errors.As(err, &se) {
+			// Every record lies outside the collector's client: refused for
+			// good, the collector does not send them again.
+			return EdgeReply{Status: http.StatusForbidden, Error: se.Error(), Result: &resp}
+		}
 		slog.Error("edge ingest failed", "organization_id", orgID, "collector_id", collectorID, "error", err)
 		return EdgeReply{Status: http.StatusInternalServerError, Error: "ingest failed"}
 	}
 	return EdgeReply{Status: http.StatusAccepted, LicenseStatus: state, Result: &resp}
+}
+
+// collectorScopeError rejects a record of a client-bound collector whose
+// field names a client, site or discovery scope outside the collector's
+// client (F-407): 403, permanent.
+type collectorScopeError struct{ field string }
+
+func (e *collectorScopeError) Error() string {
+	return e.field + ": outside the client of the collector"
+}
+
+// SiteClientReader returns the client of a site visible in the scope of
+// ctx; the PostgreSQL repository implements it.
+type SiteClientReader interface {
+	SiteClient(ctx context.Context, orgID, siteID string) (string, error)
+}
+
+// bindRecordsToCollector binds the records of a client-bound collector to
+// its client (F-407, DIS-05): a record without client_id takes the
+// collector's client and, for a collector bound to a site, its site; a
+// record naming another client or site, a site of another client or a
+// discovery scope the collector's client does not see (or of another
+// client) is removed and returned as a permanent record error, the others
+// go on. A lookup that fails for another reason fails the record
+// transiently. The records of an organization-wide collector stay as they
+// are (the client comes from their scope).
+func (h *Handler) bindRecordsToCollector(ctx context.Context, orgID string, col *Collector, items []IngestItem) ([]IngestItem, []RecordError) {
+	if col == nil || col.ClientID == "" {
+		return items, nil
+	}
+	sites, _ := h.repo.(SiteClientReader)
+	scopes, _ := h.repo.(ScopeRepository)
+	siteClient := map[string]string{}
+	scopeClient := map[string]string{}
+	var failed []RecordError
+	admitted := items[:0]
+	for i := range items {
+		item := items[i]
+		err := h.bindRecord(ctx, orgID, col, &item, sites, scopes, siteClient, scopeClient)
+		if err != nil {
+			var se *collectorScopeError
+			if errors.As(err, &se) {
+				slog.Warn("ingest record rejected: outside the client of its collector",
+					"event", "ingest.record.outside_collector", "organization_id", orgID, "collector_id", col.ID,
+					"record_id", item.RecordID, "field", se.field)
+			}
+			failed = append(failed, newRecordError(&item, err))
+			continue
+		}
+		admitted = append(admitted, item)
+	}
+	return admitted, failed
+}
+
+// bindRecord applies bindRecordsToCollector to one record; the maps cache
+// the lookups of a request.
+func (h *Handler) bindRecord(ctx context.Context, orgID string, col *Collector, item *IngestItem, sites SiteClientReader,
+	scopes ScopeRepository, siteClient, scopeClient map[string]string) error {
+	switch {
+	case item.ClientID == "":
+		item.ClientID = col.ClientID
+	case !strings.EqualFold(item.ClientID, col.ClientID):
+		return &collectorScopeError{field: "client_id"}
+	}
+	switch {
+	case col.SiteID != "" && item.SiteID == "":
+		item.SiteID = col.SiteID
+	case col.SiteID != "" && !strings.EqualFold(item.SiteID, col.SiteID):
+		return &collectorScopeError{field: "site_id"}
+	case col.SiteID == "" && item.SiteID != "":
+		client, ok := siteClient[item.SiteID]
+		if !ok {
+			if sites == nil || !isUUID(item.SiteID) {
+				return &collectorScopeError{field: "site_id"}
+			}
+			var err error
+			if client, err = sites.SiteClient(ctx, orgID, item.SiteID); err != nil && !isNotFound(err) {
+				return err
+			}
+			siteClient[item.SiteID] = client
+		}
+		if !strings.EqualFold(client, col.ClientID) {
+			return &collectorScopeError{field: "site_id"}
+		}
+	}
+	if item.ScopeID == "" {
+		return nil
+	}
+	client, ok := scopeClient[item.ScopeID]
+	if !ok {
+		if scopes == nil {
+			return &collectorScopeError{field: "scope_id"}
+		}
+		s, err := scopes.GetScope(ctx, orgID, item.ScopeID)
+		switch {
+		case isNotFound(err):
+			client = "-"
+		case err != nil:
+			return err
+		default:
+			client = s.ClientID
+		}
+		scopeClient[item.ScopeID] = client
+	}
+	// A scope the collector's client does not see, or one of another
+	// client; an organization-wide scope of the collector stays valid.
+	if client == "-" || (client != "" && !strings.EqualFold(client, col.ClientID)) {
+		return &collectorScopeError{field: "scope_id"}
+	}
+	return nil
+}
+
+// withRecordErrors adds the records refused before the dispatch to its
+// error: after the records the dispatch reports, so a transient failure of
+// those still decides the answer when nothing was accepted. A failure of
+// the dispatch as a whole stays as it is.
+func withRecordErrors(err error, refused []RecordError) error {
+	if len(refused) == 0 {
+		return err
+	}
+	if err == nil {
+		return &IngestErrors{Records: refused}
+	}
+	var ie *IngestErrors
+	if errors.As(err, &ie) && ie.Rest == nil {
+		ie.Records = append(ie.Records, refused...)
+		return ie
+	}
+	return err
 }
 
 // EdgeHeartbeat records a collector heartbeat sent over the edge like
@@ -202,10 +349,11 @@ func (h *Handler) EdgeHeartbeat(ctx context.Context, orgID, collectorID string, 
 
 // EdgeMetrics stores the metric samples a collector sent over the edge like
 // POST /api/v1/monitoring/metrics (MON-02): 403 with the problem type of
-// the entitlement middleware without the monitoring feature, otherwise 202
-// with the stored and the unassigned samples. The samples are assigned in
-// the collector's scope; the samples of an unknown or disabled collector
-// are refused.
+// the entitlement middleware without the monitoring feature, 404 for a
+// sample whose ci_id names a CI outside the collector's scope (nothing of
+// the batch is stored), otherwise 202 with the stored and the unassigned
+// samples. The samples are assigned in the collector's scope; the samples
+// of an unknown or disabled collector are refused.
 func (h *Handler) EdgeMetrics(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
 	if err := h.checkCollector(ctx, orgID, collectorID); err != nil {
 		return edgeRefusal(err)
@@ -235,9 +383,14 @@ func (h *Handler) edgeMetrics(ctx context.Context, orgID, collectorID string, da
 	}
 	result, err := h.metrics.IngestPayload(ctx, orgID, data)
 	var invalid *monitoring.InvalidMetricsError
+	var unknown *monitoring.UnknownCIError
 	switch {
 	case errors.As(err, &invalid):
 		return EdgeReply{Status: http.StatusBadRequest, Error: invalid.Error()}
+	case errors.As(err, &unknown):
+		// A sample naming a CI outside the collector's scope refuses the
+		// batch as on the API (404, nothing stored, F-394).
+		return EdgeReply{Status: http.StatusNotFound, Error: "ci_id: " + unknown.Error()}
 	case err != nil:
 		slog.Error("edge metrics ingest failed", "organization_id", orgID, "collector_id", collectorID, "error", err)
 		return EdgeReply{Status: http.StatusInternalServerError, Error: "metrics ingest failed"}
@@ -249,26 +402,43 @@ func (h *Handler) edgeMetrics(ctx context.Context, orgID, collectorID string, da
 // as the request scope: its client and its site, so the samples it sends
 // are assigned only to CIs of that client or site; a collector without a
 // client or site keeps the organization-wide scope. The discovery ingest
-// binds the records of a collector to its client the same way
-// (deviceReviewScope, ResolveIdentity).
+// binds the records of a collector to its client (collectorIngestContext).
 func (h *Handler) collectorScopeContext(ctx context.Context, orgID, collectorID string) (context.Context, error) {
+	ctx, _, err := h.collectorContext(ctx, orgID, collectorID, true)
+	return ctx, err
+}
+
+// collectorIngestContext returns ctx with the scope the records of the
+// collector are processed in (F-407): its client, so they create and
+// update only CIs of that client (RLS, ResolveIdentity) and review items
+// carry it; the site dimension stays organization-wide, since a discovered
+// CI takes its site from a location, not from the record (a site scope
+// would refuse every new CI). A collector without a client keeps the
+// organization-wide scope. It also returns the collector.
+func (h *Handler) collectorIngestContext(ctx context.Context, orgID, collectorID string) (context.Context, *Collector, error) {
+	return h.collectorContext(ctx, orgID, collectorID, false)
+}
+
+// collectorContext reads the collector and returns ctx with its client
+// scope and, with sites, its site scope as the request scope.
+func (h *Handler) collectorContext(ctx context.Context, orgID, collectorID string, sites bool) (context.Context, *Collector, error) {
 	repo, ok := h.repo.(ScopeRepository)
 	if !ok {
-		return nil, errors.New("collector scope unavailable")
+		return nil, nil, errors.New("collector scope unavailable")
 	}
 	col, err := repo.ScopeCollector(ctx, orgID, collectorID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	scope := database.OrgWideScope(orgID, "")
 	if col.ClientID != "" {
 		scope.Clients = database.ScopeIDs(col.ClientID)
 	}
-	if col.SiteID != "" {
+	if sites && col.SiteID != "" {
 		scope.Sites = database.ScopeIDs(col.SiteID)
 	}
 	ctx = database.ContextWithTenantScope(ctx, &scope)
-	return tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: orgID, ClientID: col.ClientID}), nil
+	return tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: orgID, ClientID: col.ClientID}), col, nil
 }
 
 // edgeHandlers are the handlers of the edge data subjects by suffix; they

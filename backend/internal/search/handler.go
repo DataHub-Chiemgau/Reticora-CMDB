@@ -83,9 +83,11 @@ func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 
 // filterAllowed keeps the hits whose entity type the caller may read
 // (SRC-01). It fails closed: without a permission repository or a user every
-// hit is dropped, as are hits of types without a read permission.
+// hit is dropped, as are hits of types without a read permission. The
+// result is never nil: an empty page answers "data": [] like every list,
+// also when the backend found nothing (API-02, F-401).
 func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits []Hit) []Hit {
-	out := hits[:0]
+	out := make([]Hit, 0, len(hits))
 	if h.permissions == nil || t.UserID == "" {
 		return out
 	}

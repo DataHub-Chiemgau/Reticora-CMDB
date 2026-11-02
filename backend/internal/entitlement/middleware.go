@@ -14,13 +14,19 @@ import (
 
 // gatedRoutes maps API path prefixes to the feature key required to use them.
 // Paths that are not listed belong to the always-available core (CMDB, tenants,
-// users, auth, audit and the entitlement API itself).
+// users, auth, audit and the entitlement API itself), among them the
+// location tree and the review queue; writes of rack nodes of the tree and
+// the resolution of scope_suggested items check their feature in the
+// handler (F-400). docs/README.md lists the mapping.
 var gatedRoutes = []struct {
 	prefix  string
 	feature string
 }{
 	{"/api/v1/ingest", FeatureDiscovery},
 	{"/api/v1/discovery", FeatureDiscovery},
+	// The discovery scopes are a resource of their own, not below
+	// /api/v1/discovery/ (F-400).
+	{"/api/v1/discovery-scopes", FeatureDiscovery},
 	{"/api/v1/collectors", FeatureDiscovery},
 	{"/api/v1/credentials", FeatureDiscovery},
 	{"/api/v1/assets", FeatureInventory},
@@ -66,6 +72,13 @@ var gatedRoutes = []struct {
 	{"/scim/v2", FeatureIGA},
 	{"/api/v1/ai", FeatureAI},
 }
+
+// coreRoutes are core paths below a gated prefix. The review queue is
+// cmdb_core (REC-08: CI merges open review items as well): its deprecated
+// alias below /api/v1/discovery follows its successor /api/v1/review-items
+// and GraphQL reviewInbox (F-400). Resolving a scope_suggested item needs
+// the discovery feature in the discovery effect instead.
+var coreRoutes = []string{"/api/v1/discovery/review-items"}
 
 // gatedSuffixes gate sub-resources of core resources (/api/v1/cis/{id}/...).
 var gatedSuffixes = []struct {
@@ -114,6 +127,11 @@ func RequiredFeature(path string) (string, bool) {
 	// credential, and enrollment must work before any plan check can pass.
 	if path == "/api/v1/collectors/enroll" {
 		return "", false
+	}
+	for _, prefix := range coreRoutes {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") || strings.HasPrefix(path, prefix+"?") {
+			return "", false
+		}
 	}
 	for _, route := range gatedRoutes {
 		if path == route.prefix || strings.HasPrefix(path, route.prefix+"/") || strings.HasPrefix(path, route.prefix+"?") {

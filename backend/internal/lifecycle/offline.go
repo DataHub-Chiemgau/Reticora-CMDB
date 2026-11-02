@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -193,7 +194,8 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 		if err != nil {
 			return fmt.Errorf("observable CIs: %w", err)
 		}
-		outbox := events.NewOutbox()
+		var entries []audit.Entry
+		var es []*events.Event
 		for i := range cis {
 			ci := &cis[i]
 			interval := scopeinterval.Shortest(scopeinterval.Scopes(ci.schedules, ci.lastRuns, ci.nextRuns), fallback, now)
@@ -207,14 +209,24 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 			default:
 				continue
 			}
-			if _, err = tx.Exec(ctx, `UPDATE ci SET status = $3 WHERE id = $1 AND organization_id = $2`, ci.id, orgID, next); err != nil {
-				return fmt.Errorf("set CI %s %s: %w", ci.id, next, err)
+			version, changed, setErr := setStatus(ctx, tx, orgID, ci, next)
+			if setErr != nil {
+				return setErr
 			}
-			if _, err = outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: eventType, EntityID: ci.id,
+			if !changed {
+				continue
+			}
+			lastSeen := ci.lastSeen.UTC().Format(time.RFC3339)
+			if recErr := recordStatusChange(ctx, tx, orgID, ci, next, version); recErr != nil {
+				return recErr
+			}
+			entries = append(entries, audit.Entry{OrganizationID: orgID, ActorType: "system", Action: "ci.status_changed",
+				ResourceType: "ci", ResourceID: ci.id, Source: audit.SourceSystem,
+				Changes: map[string]any{"fields": []map[string]any{{"field": "status", "old_value": ci.status, "new_value": next}},
+					"job": OfflineDetectorKind, "last_seen_at": lastSeen, "scope_interval": interval.String()}})
+			es = append(es, &events.Event{OrgID: orgID, Type: eventType, EntityID: ci.id,
 				Data: map[string]any{"id": ci.id, "name": ci.name, "client_id": ci.client, "site_id": ci.site, "status": next,
-					"last_seen_at": ci.lastSeen.UTC().Format(time.RFC3339), "scope_interval": interval.String()}}); err != nil {
-				return err
-			}
+					"last_seen_at": lastSeen, "scope_interval": interval.String()}})
 			if eventType == events.CIOffline {
 				c.Offline++
 				slog.Warn("CI offline", "event", events.CIOffline, "organization_id", orgID, "ci_id", ci.id, "last_seen_at", ci.lastSeen,
@@ -224,7 +236,62 @@ func (d *OfflineDetector) RunOrg(ctx context.Context, orgID string) (OfflineChan
 				slog.Info("CI online again", "event", events.CIOnline, "organization_id", orgID, "ci_id", ci.id)
 			}
 		}
+		if len(es) == 0 {
+			return nil
+		}
+		// The audit entries and the events after the status changes: the
+		// chain lock (AUD-01) and the outbox lock of the organization are
+		// held from the first entry or event to the commit. The run takes
+		// them last and in the order of the ingest (ci: audit, then event,
+		// both before its commit), so it never holds one while it changes
+		// rows, and a run and an ingest never wait for each other in a
+		// cycle.
+		if _, err = audit.NewPGRecorder().RecordMany(ctx, tx, entries); err != nil {
+			return fmt.Errorf("audit status changes: %w", err)
+		}
+		if _, err = events.NewOutbox().AppendMany(ctx, tx, es); err != nil {
+			return fmt.Errorf("events of the status changes: %w", err)
+		}
 		return nil
 	})
 	return c, err
+}
+
+// setStatus sets the status of ci to next if the row is still as the run
+// read it (F-412): same status, same last_seen_at, not deleted, and not
+// locked by another writer. A sighting the ingest committed after the read,
+// or one it is writing (its row lock), and a status a person or another
+// job set in between leave the row as it is; the run then changes nothing
+// and raises no event, the next run decides on the new state. The version
+// stays, as for the ingest's status change (a system write below rank 92,
+// API-07); it is returned for the change row.
+func setStatus(ctx context.Context, tx pgx.Tx, orgID string, ci *observedCI, next string) (version int64, changed bool, err error) {
+	err = tx.QueryRow(ctx, `
+		UPDATE ci SET status = $3
+		WHERE id = (SELECT c.id FROM ci c WHERE c.id = $1 AND c.organization_id = $2 AND c.deleted_at IS NULL
+			AND c.status = $4 AND c.last_seen_at = $5 FOR UPDATE SKIP LOCKED)
+		RETURNING version`, ci.id, orgID, next, ci.status, ci.lastSeen).Scan(&version)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return 0, false, nil
+	case err != nil:
+		return 0, false, fmt.Errorf("set CI %s %s: %w", ci.id, next, err)
+	}
+	return version, true, nil
+}
+
+// recordStatusChange writes the status change of ci into its history
+// (AUD-03, F-413) as the ingest records its status change: one change set
+// of kind status_changed with the field status and the CI version, source
+// system and no actor; the comment names the job.
+func recordStatusChange(ctx context.Context, tx pgx.Tx, orgID string, ci *observedCI, next string, version int64) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ci_change (organization_id, ci_id, change_type, field_name, old_value, new_value, comment,
+			ci_version, change_kind, change_set_id, source)
+		VALUES ($1, $2, 'status_change', 'status', to_jsonb($3::text), to_jsonb($4::text), $5,
+			$6, 'status_changed', gen_random_uuid(), 'system')`,
+		orgID, ci.id, ci.status, next, OfflineDetectorKind, version); err != nil {
+		return fmt.Errorf("record status change of CI %s: %w", ci.id, err)
+	}
+	return nil
 }

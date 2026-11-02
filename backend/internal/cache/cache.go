@@ -25,6 +25,13 @@ type Store interface {
 	// result is 0.
 	Decrement(ctx context.Context, key string) (int64, error)
 
+	// IncrementBelow increments the counter key like Increment, but only
+	// when its value is below limit; otherwise the counter stays
+	// unchanged. In the same atomic step it reads the counter other (0
+	// when missing), so one round trip decides for all clients of the
+	// store.
+	IncrementBelow(ctx context.Context, key string, limit int64, ttl time.Duration, other string) (BoundedCount, error)
+
 	// Delete removes a key; a missing key is not an error.
 	Delete(ctx context.Context, key string) error
 
@@ -41,6 +48,16 @@ type Store interface {
 
 	// Close releases any resources held by the store.
 	Close() error
+}
+
+// BoundedCount is the outcome of IncrementBelow.
+type BoundedCount struct {
+	// Added reports whether the counter was incremented.
+	Added bool
+	// Count is the value of the counter afterwards.
+	Count int64
+	// Other is the value of the counter read along.
+	Other int64
 }
 
 // Window is the state of a sliding window (WindowAdd, WindowCount).

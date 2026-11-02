@@ -12,6 +12,11 @@
 #            the production wiring) is recorded and rated at least High, open
 #            or fixed (F-119); the review records the P0 findings F-001 to
 #            F-015 of the Phase-1 audit as Critical SR findings (WP-452);
+#            every P0-P2 finding of the correction (table "Übersicht" of
+#            audit/g1-reaudit/FINDINGS.md, also findings added later) is an
+#            SR finding of the review or listed in its section "Befunde der
+#            Korrektur ohne Sicherheitswirkung" with a reason (F-428,
+#            WP-699);
 #   GATE-02  every [B]/[Q] ID that docs/acceptance/g1-gate.md carries as N/P,
 #            WARN or offen has a reason, and every traceability row pointing to
 #            the checklist names an ID listed there; the IDs of
@@ -43,7 +48,8 @@
 # result is "offen", "bestanden" or, after E-76 option 2, "bedingt
 # bestanden" under conditions (1) to (5) (WP-595, rules conditional_*).
 # --final (gate decision, WP-595/WP-600) additionally demands no open
-# Critical in review and pentest, no open High/Critical in the pentest, the
+# Critical in review and pentest, no open High/Critical in the pentest, no
+# open Critical/High SR finding of the review (F-428), the
 # documented release-candidate runs (no placeholder, no "steht aus") and the
 # install smoke evidence on the last product change (install_evidence_current,
 # moved from tests/audit/g1-gate-evidence.test.sh, F-122); for "offen" and
@@ -280,6 +286,18 @@ finding_rows() {
         }' "$2"
 }
 
+# reaudit_overview FILE prints ID and priority (P0 to P3) of every row of
+# table "## Übersicht" of the findings of the correction
+# (audit/g1-reaudit/FINDINGS.md: | [F-nnn](#f-nnn) | Pn | …).
+reaudit_overview() {
+    section "$1" '^## Übersicht' | awk -F'|' '
+        /^\| *\[?F-[0-9]+/ {
+            if (!match($2, /F-[0-9]+/)) next
+            id = substr($2, RSTART, RLENGTH); p = $3; gsub(/[ *]/, "", p)
+            print id "\t" p
+        }'
+}
+
 # rack_rows FINDINGS prints the SR/PT rows of FINDINGS (finding_rows output)
 # that record the site-scope bypass in the rack channel (F-002, F-040).
 rack_rows() {
@@ -312,6 +330,7 @@ gate_check() {
     local SUB="$root/docs/legal/subprozessoren.md" SUMS="$root/docs/acceptance/artefakte/SHA256SUMS"
     local V2="$root/docs/spec/v2/aut-05-aut-06-net-04.md"
     local annex findings g03 body xs xd res crit pthc pentest ten09 rel
+    local RA="$root/audit/g1-reaudit/FINDINGS.md" ra srrows listed srhc
     local id s n fid sev open row cid xid xart xdl f p d line field tf rack notpass rows
     # STATUS: annex status per ID (first row), XART: kind of exception,
     # SEC: "**Status:**" of the GATE sections, REASON: words of the reason in
@@ -412,6 +431,34 @@ gate_check() {
     while IFS= read -r sev; do
         [ -z "$sev" ] || [ "$sev" = critical ] || [ "$sev" = high ] || v sr11_severity "SR-11 is rated $sev"
     done <<< "$s"
+
+    # F-428: every P0-P2 finding of the correction (table "## Übersicht" of
+    # audit/g1-reaudit/FINDINGS.md, F-355 onwards, including findings added
+    # later) is an SR finding of the review, that is an SR row with a
+    # severity naming its ID, or a row of section "Befunde der Korrektur ohne
+    # Sicherheitswirkung" with a reason of at least five words. Without the
+    # file (fixtures) the rule is skipped; the repository check below demands
+    # the file.
+    if [ -f "$RA" ]; then
+        ra="$(reaudit_overview "$RA")"
+        [ -n "$ra" ] || v reaudit_coverage "audit/g1-reaudit/FINDINGS.md has no finding row in table '## Übersicht'"
+        srrows="$(awk -F'\t' '$1 == "R" && $2 ~ /^SR-[0-9]+$/ { print $5 }' <<< "$findings")"
+        listed="$(section "$RV" '^#+ Befunde der Korrektur ohne Sicherheitswirkung' | awk -F'|' '
+            /^\| *\**F-[0-9]+/ { f = $2; gsub(/[ *]/, "", f)
+                                 n = 0; m = split($4, w, /[ \t]+/); for (k = 1; k <= m; k++) if (w[k] != "") n++
+                                 print f "\t" n }')"
+        while IFS=$'\t' read -r fid p; do
+            [[ "$p" =~ ^P[0-2]$ ]] || continue
+            grep -qE "(^|[^0-9A-Za-z-])${fid}([^0-9]|\$)" <<< "$srrows" && continue
+            n="$(awk -F'\t' -v f="$fid" '$1 == f { print $2; exit }' <<< "$listed")"
+            [ "${n:-0}" -ge 5 ] && continue
+            if [ -n "$n" ]; then
+                v reaudit_coverage "$fid ($p) is listed without security impact, but its reason has fewer than five words"
+            else
+                v reaudit_coverage "$fid ($p) is neither an SR finding of docs/security/review-g1.md nor listed in section 'Befunde der Korrektur ohne Sicherheitswirkung'"
+            fi
+        done <<< "$ra"
+    fi
 
     # GATE-03: an open High/Critical pentest finding keeps GATE-03 from PASS.
     if [ -n "$pthc" ]; then
@@ -634,6 +681,9 @@ gate_check() {
     [ "$mode" = final ] || return 0
     [ -n "$crit" ] && v final_critical "open Critical findings in review or pentest: $crit"
     [ -n "$pthc" ] && v final_pentest "open High/Critical pentest findings: $pthc"
+    # F-428: no SR finding of the review rated Critical or High is open.
+    srhc="$(awk -F'\t' '$1 == "R" && $2 ~ /^SR-[0-9]+$/ && ($3 == "critical" || $3 == "high") && $4 == 1 { print $2 }' <<< "$findings" | sort -u | tr '\n' ' ')"
+    [ -n "$srhc" ] && v final_review_high "open Critical/High SR findings in docs/security/review-g1.md: $srhc"
     # 'bedingt bestanden' replaces these two by conditions (1) to (5) above.
     if [ "$res" != "bedingt bestanden" ]; then
         rows="$(gate_rows_not_pass)"
@@ -654,8 +704,8 @@ gate_check() {
 GATE_RULES=(result gate01_critical sr11_severity gate03_pentest gate03_rows finding_ids exceptions declaration
     gate02_all result_rows conditional_release conditional_ids conditional_deadlines conditional_gate_rows
     conditional_findings reasons agree rack_site_scope delivery_pentest delivery_subprocessors delivery_abn01
-    delivery_v2)
-FINAL_RULES=(final_critical final_pentest final_gate_rows final_exceptions final_rc_runs)
+    delivery_v2 reaudit_coverage)
+FINAL_RULES=(final_critical final_pentest final_review_high final_gate_rows final_exceptions final_rc_runs)
 describe() {
     case "$1" in
         result) echo "the checklist states the gate result (offen, bestanden or bedingt bestanden)" ;;
@@ -680,7 +730,9 @@ describe() {
         delivery_subprocessors) echo "GATE-02 PASS of NFR-09 needs the subprocessor list (A-11)" ;;
         delivery_abn01) echo "GATE-02 PASS of ABN-01 needs the frozen texts (a) and (b) (A-02)" ;;
         delivery_v2) echo "GATE-02 PASS of AUT-05/AUT-06/NET-04 needs the v2 texts and their comparison (A-02)" ;;
+        reaudit_coverage) echo "GATE-01 every P0–P2 finding of audit/g1-reaudit/FINDINGS.md is an SR finding of the review or listed without security impact (F-428)" ;;
         final_critical) echo "--final no open Critical finding in review and pentest" ;;
+        final_review_high) echo "--final no SR finding of the security review rated Critical or High is open (F-428)" ;;
         final_pentest) echo "--final no open High/Critical pentest finding" ;;
         final_gate_rows) echo "--final every GATE row is PASS (result offen or bestanden)" ;;
         final_exceptions) echo "--final no exception of kind erklaerung or luecke (result offen or bestanden)" ;;
@@ -718,6 +770,11 @@ for n in $(seq 1 15); do
 done
 check "GATE-01 the security review records the P0 findings F-001 to F-015 of the Phase-1 audit as Critical SR findings${p0_missing:+ (missing: ${p0_missing% })}" \
     "[ -z '${p0_missing}' ]"
+# F-428: rule reaudit_coverage reads the findings of the correction; it is
+# skipped without the file, so the repository must have it.
+# shellcheck disable=SC2016 # expanded when check evaluates the condition
+check "GATE-01 audit/g1-reaudit/FINDINGS.md lists the findings of the correction in table '## Übersicht' (F-428)" \
+    '[ -n "$(reaudit_overview audit/g1-reaudit/FINDINGS.md)" ]'
 
 # --- Installation evidence on the release candidate (WP-595, F-122) ---------
 # install_evidence ROOT prints nothing when the install smoke evidence in
@@ -865,6 +922,37 @@ selftest finding_reconciled_missing final finding_ids - drop "$C" '^\| SR-08 \| 
 selftest finding_reconciled_high final finding_ids - subst "$R" 's/^\| SR-08 \| Low \|/| SR-08 | High |/'
 selftest finding_reconciled_short final finding_ids - subst "$C" 's/^\| SR-08 \| NFR-03 \| .*/| SR-08 | NFR-03 | erfüllt |/'
 selftest finding_closed final pass pass subst "$R" 's/^\| SR-08 \| Low \| offen \|/| SR-08 | Low | behoben |/'
+# F-428: every P0-P2 finding of audit/g1-reaudit/FINDINGS.md is an SR
+# finding (an SR row with a severity naming it) or listed without security
+# impact with a reason; P3 findings are not demanded; --final forbids an open
+# Critical or High SR finding.
+reaudit_findings() {
+    mkdir -p audit/g1-reaudit
+    {
+        printf '# Befunde der Korrektur G1 (Fixture)\n\n## Übersicht\n\n'
+        printf '| ID | Prio | Titel | Gefunden in | Ursache | Kodierender Test | Korrektur-WP |\n|---|---|---|---|---|---|---|\n'
+        printf '%s\n' "$@"
+        printf '\n<a id="f-901"></a>\n### F-901 (P1) – Fixture-Befund\n'
+    } > audit/g1-reaudit/FINDINGS.md
+}
+RA_F901='| [F-901](#f-901) | P1 | Fixture-Befund | Fixture | belegt | tests/fixture.test.sh | WP-999 |'
+RA_F902='| [F-902](#f-902) | **P3** | Fixture-Befund | Fixture | belegt | tests/fixture.test.sh | WP-999 |'
+reaudit_listed() {
+    reaudit_findings "$RA_F901" "$RA_F902"
+    printf '\n## Befunde der Korrektur ohne Sicherheitswirkung\n\n| Befund | Prio | Begründung |\n|---|---|---|\n| F-901 | P1 | %s |\n' "$1" >> "$R"
+}
+reaudit_sr() {
+    reaudit_findings "$RA_F901"
+    append "$R" "| SR-94 | $1 | $2 | F-901: Fixture-Befund. | WP-999 | Fixture-Test |"
+}
+selftest reaudit_finding_missing final reaudit_coverage reaudit_coverage reaudit_findings "$RA_F901"
+selftest reaudit_finding_listed final pass pass reaudit_listed 'Barrierefreiheit der Oberfläche, keine Daten und keine Rechte berührt.'
+selftest reaudit_finding_short_reason final reaudit_coverage reaudit_coverage reaudit_listed 'keine Sicherheitswirkung'
+selftest reaudit_finding_sr final pass pass reaudit_sr Critical '**behoben**'
+selftest reaudit_finding_p3_only final pass pass reaudit_findings "$RA_F902"
+selftest reaudit_overview_empty final reaudit_coverage reaudit_coverage reaudit_findings
+selftest reaudit_sr_high_open final pass final_review_high reaudit_sr High offen
+selftest reaudit_sr_critical_open final gate01_critical final_review_high reaudit_sr '**Critical**' offen
 # F-040: TEN-09 PASS needs the recorded rack site-scope finding.
 selftest rack_site_scope final rack_site_scope - drop "$R" '^\| SR-12 \|'
 selftest rack_site_scope_open open rack_site_scope - subst "$C" 's/^\| TEN-09 \| \[Q\] \| offen/| TEN-09 | [Q] | PASS/'

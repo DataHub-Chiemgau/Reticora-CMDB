@@ -56,15 +56,17 @@ type RackMount struct {
 	CIType string `json:"ci_type,omitempty"`
 }
 
-// CreateMountRequest is the payload for mounting a CI into a rack.
+// CreateMountRequest is the payload for mounting a CI into a rack. An
+// omitted height_u or face takes its default (1, front); an explicit value
+// is checked (F-415).
 type CreateMountRequest struct {
 	// RackID names the rack on POST /mounts; the nested route takes it
 	// from the path.
-	RackID    string `json:"rack_id,omitempty"`
-	CIID      string `json:"ci_id"`
-	PositionU int    `json:"position_u"`
-	HeightU   int    `json:"height_u,omitempty"`
-	Face      string `json:"face,omitempty"`
+	RackID    string  `json:"rack_id,omitempty"`
+	CIID      string  `json:"ci_id"`
+	PositionU int     `json:"position_u"`
+	HeightU   *int    `json:"height_u,omitempty"`
+	Face      *string `json:"face,omitempty"`
 }
 
 // UpdateMountRequest is the payload for updating a rack mount.
