@@ -2,13 +2,14 @@
 Ein PR = ein Arbeitspaket (DOD-01, 0,5–2 PT). Die CI liest die WP-Nummern aus
 dem PR-Titel und aus der Zeile „Arbeitspakete:“ und verlangt alle
 Traceability-Zeilen, die der Plan des WPs für sie vorsieht:
-docs/plan/implementierungsplan.md oder der Korrekturplan
-docs/plan/g1-korrektur/implementierungsplan.md (WP-336 ff.).
+docs/plan/implementierungsplan.md, der Korrekturplan
+docs/plan/g1-korrektur/implementierungsplan.md (WP-336 ff.) oder der
+Phase-2-Plan docs/plan/phase2/implementierungsplan.md.
 Die Zeile „Arbeitspakete:“ enthält nur WP-Nummern oder das Wort „keine“;
 jede weitere WP-Nummer auf dieser Zeile wird als Arbeitspaket des PRs
 gewertet. Reine Planungs- und Dokumentations-PRs ohne Arbeitspaket schreiben
-„Arbeitspakete: keine“. WP-Nummern aus docs/plan/phase2/ kennt die Prüfung
-erst, wenn das erste WP der Phase 2 (p2-trace) gemergt ist.
+„Arbeitspakete: keine“. Die nach E-03 verschobenen Nummern WP-215 bis WP-239
+dürfen weder im Titel noch in der Zeile „Arbeitspakete:“ stehen (E-46).
 -->
 
 **Arbeitspakete:** WP-nnn
