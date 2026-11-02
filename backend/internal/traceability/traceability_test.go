@@ -348,14 +348,66 @@ func TestPullRequestWorkPackages(t *testing.T) {
 		"**Arbeitspakete:** WP-332 – WP-334, WP-450 `$(touch /tmp/x)` \"WP-336\" $HOME ${{ github.token }}\r\n" +
 		"## Zusammenfassung\n\nBezieht sich auf WP-999 und WP-213.\n" +
 		"Arbeitspaket: WP-010 bis WP-011\n"
-	got := PullRequestWorkPackages("WP-450: Traceability (t5-trace-evidence) `x` 'y' $Z", body)
+	got, err := PullRequestWorkPackages("WP-450: Traceability (t5-trace-evidence) `x` 'y' $Z", body)
 	want := []string{"WP-450", "WP-332", "WP-333", "WP-334", "WP-336", "WP-010", "WP-011"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("PullRequestWorkPackages() = %v, want %v", got, want)
+	if err != nil || strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("PullRequestWorkPackages() = %v, %v; want %v", got, err, want)
 	}
-	if got := PullRequestWorkPackages("Planung", "**Arbeitspakete:** keine\n"); len(got) != 0 {
-		t.Fatalf("PullRequestWorkPackages() without WP = %v", got)
+
+	// Real pull requests (WP-704): title and the relevant lines of the body.
+	for _, tc := range []struct {
+		name, title, body string
+		want              []string
+		wantErr           string
+	}{
+		{"PR #60 without line", "Lasttest (NFR-10): WP-203 – WP-207",
+			"## Inhalt\n\nMeilenstein Lasttest (NFR-10), ein Commit je WP.\n\n- **WP-203 – Seed:** …\n",
+			rangeOf(203, 207), `no line "Arbeitspakete:"`},
+		{"PR #61 without line", "Sicherheitsreview: WP-208 – WP-210 (+ WP-207-Nachtrag)",
+			"## Inhalt\n\nMeilenstein Sicherheitsreview, ein Commit je WP.\n",
+			[]string{"WP-208", "WP-209", "WP-210", "WP-207"}, `no line "Arbeitspakete:"`},
+		{"PR #58 with range", "Epic C: API, Kernfunktionen, UI (WP-163 – WP-202)",
+			"**Arbeitspakete:** WP-163 – WP-202 (ohne WP-192/193, bereits gemergt)\n\nEpic C – API.\n",
+			rangeOf(163, 202), ""},
+		{"PR #63 planning", "Planung G1-Nachbesserung: Ingest-Durchsatz und Impact (NFR-02, NFR-03)",
+			"**Arbeitspakete:** keine\n\n## Zusammenfassung\n\nNeue WPs WP-332 bis WP-335 im Plan.\n",
+			nil, ""},
+		{"PR #64 list", "G1-Nachbesserung: WP-332 – WP-335 (NFR-02, NFR-03)",
+			"**Arbeitspakete:** WP-332 WP-333 WP-334 WP-335\n\n## Zusammenfassung\n",
+			[]string{"WP-332", "WP-333", "WP-334", "WP-335"}, ""},
+		{"disposable-domains PR", "chore: update disposable email domains",
+			"Automatic monthly update of the disposable email domain list (E-33).\n\n**Arbeitspakete:** keine\n",
+			nil, ""},
+		{"keine with WP in title", "WP-704: Planung",
+			"**Arbeitspakete:** keine\n", []string{"WP-704"}, `says "keine", but the pull request names WP-704`},
+		{"keine with WP on the line", "Planung",
+			"Arbeitspakete: keine (WP-243 folgt)\n", []string{"WP-243"}, `says "keine"`},
+		{"ranges with hyphen and bis", "Sammel-PR",
+			"**Arbeitspakete:** WP-243 - WP-244, WP-704 bis WP-705\n", []string{"WP-243", "WP-244", "WP-704", "WP-705"}, ""},
+		{"multi-line text is only read", "WP-704: Prüfung",
+			"**Arbeitspakete:** WP-704\n$(rm -rf /)\nArbeitspakete WP-999 ohne Doppelpunkt\n", []string{"WP-704"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := PullRequestWorkPackages(tc.title, tc.body)
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("WPs = %v, want %v", got, tc.want)
+			}
+			switch {
+			case tc.wantErr == "" && err != nil:
+				t.Errorf("unexpected error: %v", err)
+			case tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)):
+				t.Errorf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
 	}
+}
+
+func rangeOf(from, to int) []string {
+	var out []string
+	for n := from; n <= to; n++ {
+		out = append(out, fmt.Sprintf("WP-%03d", n))
+	}
+	return out
 }
 
 func TestIsTestFile(t *testing.T) {
@@ -683,7 +735,11 @@ func TestTraceabilityFile(t *testing.T) {
 	errs = append(errs, ValidateExceptions(exceptions, catalog)...)
 
 	wps := WorkPackagesIn(os.Getenv(WorkPackagesEnv))
-	for _, wp := range PullRequestWorkPackages(os.Getenv(PullRequestTitleEnv), os.Getenv(PullRequestBodyEnv)) {
+	prWPs, prErr := PullRequestWorkPackages(os.Getenv(PullRequestTitleEnv), os.Getenv(PullRequestBodyEnv))
+	if prErr != nil && os.Getenv(PullRequestTitleEnv) != "" {
+		errs = append(errs, prErr)
+	}
+	for _, wp := range prWPs {
 		if !slices.Contains(wps, wp) {
 			wps = append(wps, wp)
 		}

@@ -8,8 +8,13 @@ Phase-2-Plan docs/plan/phase2/implementierungsplan.md.
 Die Zeile „Arbeitspakete:“ enthält nur WP-Nummern oder das Wort „keine“;
 jede weitere WP-Nummer auf dieser Zeile wird als Arbeitspaket des PRs
 gewertet. Reine Planungs- und Dokumentations-PRs ohne Arbeitspaket schreiben
-„Arbeitspakete: keine“. Die nach E-03 verschobenen Nummern WP-215 bis WP-239
-dürfen weder im Titel noch in der Zeile „Arbeitspakete:“ stehen (E-46).
+„Arbeitspakete: keine“ und tragen keine WP-Nummer im Titel; fehlt die Zeile
+oder nennt ein Planungs-PR trotzdem eine WP-Nummer, scheitert die Prüfung.
+Die nach E-03 verschobenen Nummern WP-215 bis WP-239 dürfen weder im Titel
+noch in der Zeile „Arbeitspakete:“ stehen (E-46).
+Sammel-PRs: je ein Commit pro WP mit Präfix „WP-nnn:“. Ein Bereich in
+„Arbeitspakete:“ (z. B. „WP-243 – WP-246“) umfasst nur WPs dieses PRs, weil
+die CI ihn expandiert.
 -->
 
 **Arbeitspakete:** WP-nnn

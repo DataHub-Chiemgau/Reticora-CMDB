@@ -1026,16 +1026,35 @@ func WorkPackagesIn(s string) []string {
 // in bold ("**Arbeitspakete:**").
 var workPackagesLine = regexp.MustCompile(`(?i)^[*_ ]*Arbeitspakete?[*_ ]*:`)
 
+// noWorkPackages matches the value "keine" of a line "Arbeitspakete:" (a
+// planning PR without work package).
+var noWorkPackages = regexp.MustCompile(`(?i)^[*_ ]*Arbeitspakete?[*_ ]*:[*_ ]*keine\b`)
+
 // PullRequestWorkPackages returns the WPs of a pull request: those in its title
-// and on the lines "Arbeitspakete:" of its description (DOD-01). Both texts
-// are untrusted input and only read here.
-func PullRequestWorkPackages(title, body string) []string {
+// and on the lines "Arbeitspakete:" of its description (DOD-01); ranges are
+// expanded (WorkPackagesIn). It reports an error when the description has no
+// line "Arbeitspakete:" or when that line says "keine" while the title or
+// the line names a WP number (WP-704). Both texts are untrusted input and only
+// read here.
+func PullRequestWorkPackages(title, body string) ([]string, error) {
 	lines := []string{title}
+	found, none := false, false
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if workPackagesLine.MatchString(line) {
+			found = true
+			if noWorkPackages.MatchString(line) {
+				none = true
+			}
 			lines = append(lines, line)
 		}
 	}
-	return WorkPackagesIn(strings.Join(lines, "\n"))
+	wps := WorkPackagesIn(strings.Join(lines, "\n"))
+	switch {
+	case !found:
+		return wps, errors.New(`the pull request description has no line "Arbeitspakete:" (WP numbers or "keine", see .github/pull_request_template.md)`)
+	case none && len(wps) > 0:
+		return wps, fmt.Errorf(`the line "Arbeitspakete:" says "keine", but the pull request names %s; planning PRs carry no WP number in title or line`, strings.Join(wps, ", "))
+	}
+	return wps, nil
 }

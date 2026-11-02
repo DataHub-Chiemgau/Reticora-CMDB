@@ -1183,3 +1183,4 @@ COL-04;[B];B;backend/internal/locations/enrollment_code_delete_integration_test.
 LOC-11;B/G1;B;backend/internal/locations/move_integration_test.go;WP-701
 GLO-11;[Q];B;backend/internal/traceability/traceability_test.go;WP-243
 DOD-01;[Q];B;backend/internal/traceability/traceability_test.go;WP-243
+DOD-01;[Q];B;backend/internal/traceability/traceability_test.go;WP-704
