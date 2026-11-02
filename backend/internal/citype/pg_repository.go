@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -34,6 +35,7 @@ const typeSelectColumns = `
 	schema_version,
 	version,
 	COALESCE(cloned_from_id::text, ''),
+	COALESCE(parent_type_id::text, ''),
 	COALESCE(template_key, ''),
 	COALESCE(lifecycle_definition_id::text, ''),
 	capabilities,
@@ -135,8 +137,13 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Type, er
 	return out, err
 }
 
-// Create inserts a new type with its field definitions.
+// Create inserts a new type with its field definitions. A parent is
+// checked by trg_ci_type_parent_guard (MET-06); its errors and a chain that
+// cannot be composed are reported on parent_type_id.
 func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
+	if typ.ParentTypeID != "" && !api.IsUUID(typ.ParentTypeID) {
+		return errParentUnknown()
+	}
 	return database.WithRequestTenant(ctx, r.pool, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if typ.Key == "" {
 			typ.Key = slugify(typ.Name)
@@ -146,19 +153,19 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, template_key,
 				lifecycle_definition_id, capabilities, allowed_relationship_types,
-				ui_schema, compliance_rules, discovery_mappings, is_observable
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15,$16)
+				ui_schema, compliance_rules, discovery_mappings, is_observable, parent_type_id
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 			RETURNING id::text, is_active, version, schema_version, created_at, updated_at`,
 			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, typ.DisplayName.WithFallback(typ.Name),
 			nilIfEmpty(typ.Icon), nilIfEmpty(typ.Description), nilIfEmpty(typ.Category),
 			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleDefinitionID),
 			jsonOrDefault(typ.Capabilities, emptyObject), jsonOrDefault(typ.AllowedRelationshipTypes, emptyArray),
 			jsonOrDefault(typ.UISchema, emptyObject), jsonOrDefault(typ.ComplianceRules, emptyArray),
-			jsonOrDefault(typ.DiscoveryMappings, emptyArray), typ.IsObservable,
+			jsonOrDefault(typ.DiscoveryMappings, emptyArray), typ.IsObservable, nilIfEmpty(typ.ParentTypeID),
 		)
 		typ.DisplayName = typ.DisplayName.WithFallback(typ.Name)
 		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.SchemaVersion, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
-			return fmt.Errorf("create ci type: %w", err)
+			return fmt.Errorf("create ci type: %w", typeDBError(err))
 		}
 		for _, f := range typ.Fields {
 			f.Scope = "type"
@@ -171,12 +178,55 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 				return err
 			}
 		}
+		if typ.ParentTypeID != "" {
+			if err := checkSubtreeCompositionTx(ctx, tx, typ.ID); err != nil {
+				return err
+			}
+		}
 		return recordMetamodelAudit(ctx, tx, typ.OrganizationID, "ci_type.created", "ci_type", typ.ID, nil, typ)
 	})
 }
 
-// Update applies the mutable metadata of a type in place.
+// typeParentErrors maps the constraints of trg_ci_type_parent_guard and
+// of the parent foreign key onto the errors of parent_type_id (MET-06).
+var typeParentErrors = map[string]func() error{
+	"ci_type_parent_unknown":      errParentUnknown,
+	"ci_type_parent_type_id_fkey": errParentUnknown,
+	"ci_type_parent_system":       errParentSystem,
+	"ci_type_parent_cycle":        errParentCycle,
+	"ci_type_parent_depth":        errParentDepth,
+}
+
+// typeDBError maps a failed type write onto parent_type_id: the parent
+// rules and a type chain the regenerated schema cannot compose
+// (attribute_definition_composition, with the text attributeDBError
+// reports on key). Other errors pass unchanged.
+func typeDBError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	if mapped, ok := typeParentErrors[pgErr.ConstraintName]; ok {
+		return mapped()
+	}
+	var fe *api.FieldError
+	if pgErr.ConstraintName == compositionConstraint && errors.As(attributeDBError(err), &fe) {
+		fe.Field = "parent_type_id"
+		return fe
+	}
+	return err
+}
+
+// Update applies the mutable metadata of a type in place. A parent change
+// (parent_type_id, "" makes the type a root) is checked by
+// trg_ci_type_parent_guard and regenerates the moved subtree; the subtree
+// must stay composable with the organization's global attributes as well
+// (MET-06, MET-16). Parent errors are reported on parent_type_id, an
+// unknown or system type is "not found".
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
+	if !api.IsUUID(id) {
+		return nil, fmt.Errorf("not found")
+	}
 	var out *Type
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}
@@ -236,6 +286,13 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 			}
 			return err
 		}
+		parentChanged := req.ParentTypeID != nil && *req.ParentTypeID != before.ParentTypeID
+		if parentChanged {
+			if *req.ParentTypeID != "" && !api.IsUUID(*req.ParentTypeID) {
+				return errParentUnknown()
+			}
+			add("parent_type_id", nilIfEmpty(*req.ParentTypeID))
+		}
 		if len(sets) == 0 {
 			t, err := scanType(tx.QueryRow(ctx,
 				fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1 AND organization_id IS NOT NULL", typeSelectColumns), id))
@@ -255,7 +312,19 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 			if err == pgx.ErrNoRows {
 				return fmt.Errorf("not found")
 			}
-			return fmt.Errorf("update ci type: %w", err)
+			return fmt.Errorf("update ci type: %w", typeDBError(err))
+		}
+		if parentChanged {
+			// The moved subtree with the organization's layer; the database
+			// composed system base and chain while regenerating it.
+			if cerr := checkSubtreeCompositionTx(ctx, tx, id); cerr != nil {
+				return cerr
+			}
+			// RETURNING precedes the regeneration of trg_ci_type_parent_regenerate.
+			if t, err = scanType(tx.QueryRow(ctx,
+				fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1", typeSelectColumns), id)); err != nil {
+				return fmt.Errorf("read updated ci type: %w", err)
+			}
 		}
 		flds, err := listFieldsTx(ctx, tx, id)
 		if err != nil {
@@ -387,6 +456,158 @@ func (r *PGRepository) Versions(ctx context.Context, orgID, id string) ([]Type, 
 		return rows.Err()
 	})
 	return out, err
+}
+
+// TypeChain implements Repository: the chain root → id (ci_type_ancestors,
+// MET-06) with the field definitions of each type, in one query. It runs
+// on every attribute validation of a CI write (ResolveFields), also in the
+// ingest record transaction, which reads no ci_type rows (budget of
+// TestIngestStatementBudget): each level carries its ID and its
+// definitions only; GetByID and TypeSubtree read the type columns. A type
+// the organization does not see has an empty chain.
+func (r *PGRepository) TypeChain(ctx context.Context, orgID, id string) ([]Type, error) {
+	out := []Type{}
+	if !api.IsUUID(id) {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE((
+				SELECT jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key)
+				FROM attribute_definition a WHERE a.ci_type_id = c.id), '[]'::jsonb)
+			FROM ci_type_ancestors($1::uuid) c ORDER BY c.level`, id)
+		if err != nil {
+			return fmt.Errorf("read ci type chain: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var t Type
+			var defs []byte
+			if err = rows.Scan(&t.ID, &defs); err != nil {
+				return fmt.Errorf("scan ci type chain: %w", err)
+			}
+			attrs, err := attributesFromJSON(defs)
+			if err != nil {
+				return err
+			}
+			for i := range attrs {
+				t.Fields = append(t.Fields, attrs[i].Field())
+			}
+			out = append(out, t)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// TypeSubtree implements Repository: id and every descendant the
+// organization sees (ci_type_subtree, MET-06), by depth and name.
+func (r *PGRepository) TypeSubtree(ctx context.Context, orgID, id string) ([]Type, error) {
+	out := []Type{}
+	if !api.IsUUID(id) {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+typeSelectColumns+` FROM (
+				SELECT s.depth AS lvl, t.* FROM ci_type_subtree($1::uuid) s JOIN ci_type t ON t.id = s.id
+			) subtree ORDER BY lvl, name, id`, id)
+		if err != nil {
+			return fmt.Errorf("read ci type subtree: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			t, err := scanType(rows)
+			if err != nil {
+				return fmt.Errorf("scan ci type subtree: %w", err)
+			}
+			out = append(out, *t)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// extraColumns scans a row whose columns surround those of another
+// scanner: before precede them, after follow them.
+type extraColumns struct {
+	row           interface{ Scan(dest ...any) error }
+	before, after []any
+}
+
+func (e extraColumns) Scan(dest ...any) error {
+	all := make([]any, 0, len(e.before)+len(dest)+len(e.after))
+	all = append(append(append(all, e.before...), dest...), e.after...)
+	return e.row.Scan(all...)
+}
+
+// attributeRowJSON is a row of attribute_definition as to_jsonb renders it.
+type attributeRowJSON struct {
+	ID              string          `json:"id"`
+	OrganizationID  *string         `json:"organization_id"`
+	CITypeID        *string         `json:"ci_type_id"`
+	Scope           string          `json:"scope"`
+	Key             string          `json:"key"`
+	DisplayName     json.RawMessage `json:"display_name"`
+	Description     *string         `json:"description"`
+	DataType        string          `json:"data_type"`
+	Required        bool            `json:"required"`
+	DefaultValue    json.RawMessage `json:"default_value"`
+	EnumValues      json.RawMessage `json:"enum_values"`
+	MultiValue      bool            `json:"multi_value"`
+	Searchable      bool            `json:"searchable"`
+	IsUnique        bool            `json:"is_unique"`
+	UniqueScope     string          `json:"unique_scope"`
+	Inheritable     bool            `json:"inheritable"`
+	Validation      json.RawMessage `json:"validation"`
+	Conditional     json.RawMessage `json:"conditional"`
+	ReferenceTarget *string         `json:"reference_target"`
+	GroupName       *string         `json:"group_name"`
+	SortOrder       int             `json:"sort_order"`
+	Unit            *string         `json:"unit"`
+}
+
+// attributesFromJSON decodes a JSON array of attribute_definition rows the
+// way scanAttribute reads a row.
+func attributesFromJSON(raw []byte) ([]AttributeDefinition, error) {
+	var rows []attributeRowJSON
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("decode attribute definitions: %w", err)
+	}
+	str := func(s *string) string {
+		if s == nil {
+			return ""
+		}
+		return *s
+	}
+	out := make([]AttributeDefinition, 0, len(rows))
+	for i := range rows {
+		row := &rows[i]
+		d := AttributeDefinition{
+			ID: row.ID, OrganizationID: str(row.OrganizationID), CITypeID: str(row.CITypeID), Scope: row.Scope,
+			Key: row.Key, Description: str(row.Description), DataType: row.DataType, Required: row.Required,
+			MultiValue: row.MultiValue, Searchable: row.Searchable, Unique: row.IsUnique, UniqueScope: row.UniqueScope,
+			Inheritable: row.Inheritable, ReferenceTarget: str(row.ReferenceTarget), Group: str(row.GroupName),
+			Order: row.SortOrder, Unit: str(row.Unit),
+		}
+		if err := json.Unmarshal(row.DisplayName, &d.DisplayName); err != nil {
+			return nil, fmt.Errorf("decode display_name: %w", err)
+		}
+		if len(row.DefaultValue) > 0 && string(row.DefaultValue) != "null" {
+			d.Default = row.DefaultValue
+		}
+		if len(row.EnumValues) > 0 {
+			_ = json.Unmarshal(row.EnumValues, &d.EnumValues)
+		}
+		d.Validation = fieldmeta.StoredValidation(row.Validation)
+		if len(row.Conditional) > 0 && string(row.Conditional) != "null" {
+			var c fieldmeta.ConditionalRules
+			if json.Unmarshal(row.Conditional, &c) == nil {
+				d.Conditional = &c
+			}
+		}
+		d.IsSystem = d.OrganizationID == ""
+		out = append(out, d)
+	}
+	return out, nil
 }
 
 // ListFields returns the type-scope field definitions of a type.
@@ -800,7 +1021,7 @@ func scanType(scanner typeScanner) (*Type, error) {
 	if err := scanner.Scan(
 		&t.ID, &t.OrganizationID, &t.Key, &t.Name, &displayName, &t.Icon,
 		&t.Description, &t.Category, &t.IsBuiltin, &t.IsSystem, &t.IsActive,
-		&t.IsLogical, &t.IsObservable, &t.SchemaVersion, &t.Version, &t.ClonedFromID, &t.TemplateKey,
+		&t.IsLogical, &t.IsObservable, &t.SchemaVersion, &t.Version, &t.ClonedFromID, &t.ParentTypeID, &t.TemplateKey,
 		&t.LifecycleDefinitionID, &capabilities, &allowedRels, &uiSchema,
 		&compliance, &discovery, &attributeSchema, &t.RequiredFields, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {

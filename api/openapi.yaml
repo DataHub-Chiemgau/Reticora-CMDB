@@ -12216,7 +12216,10 @@ paths:
         `display_name` is a map of languages (de, en); a missing language
         takes the other one or the name, a plain string is accepted for both.
         `is_observable` defaults to true for physical and false for logical
-        types (MET-01).
+        types (MET-01). `parent_type_id` makes the type a subtype of a type
+        of the organization or a system type (MET-06): an unknown parent and
+        one of another organization are both 422 on `parent_type_id`, as is
+        a chain of more than 6 types; a taken key or name is 409.
       requestBody:
         required: true
         content:
@@ -12298,6 +12301,14 @@ paths:
     patch:
       operationId: updateCiTypesId
       summary: Update a CI type
+      description: >-
+        `parent_type_id` moves the type below another type of the
+        organization or a system type (MET-06); an empty string makes it a
+        root. An unknown parent and one of another organization are both 422
+        on `parent_type_id`, a cycle is 409, a chain of more than 6 types
+        (including the moved subtree) is 422, and a moved subtree whose
+        attribute definitions cannot be composed is 422 naming the attribute
+        key. An unknown CI type, or a system type, is 404.
       requestBody:
         required: true
         content:
@@ -12315,6 +12326,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ci-types/{id}/activate:
     post:
@@ -15805,6 +15822,9 @@ components:
           items: { type: string }
         version: { type: integer }
         cloned_from_id: { type: string }
+        parent_type_id:
+          type: string
+          description: Parent in the type chain (MET-06); absent for a root. The type inherits the inheritable attribute definitions of its ancestors.
         template_key: { type: string }
         lifecycle_definition_id: { type: string }
         capabilities: { type: object, additionalProperties: true }
@@ -15853,6 +15873,10 @@ components:
         category: { type: string }
         is_logical: { type: boolean }
         is_observable: { type: boolean }
+        parent_type_id:
+          type: string
+          format: uuid
+          description: Parent type of the organization or a system type (MET-06).
         template_key: { type: string }
         lifecycle_definition_id: { type: string }
         capabilities: { type: object, additionalProperties: true }
@@ -15882,6 +15906,9 @@ components:
         category: { type: string }
         is_logical: { type: boolean }
         is_observable: { type: boolean }
+        parent_type_id:
+          type: string
+          description: New parent type (MET-06); an empty string makes the type a root.
         lifecycle_definition_id: { type: string }
         capabilities: { type: object, additionalProperties: true }
         allowed_relationship_types:

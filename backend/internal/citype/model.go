@@ -8,11 +8,14 @@ package citype
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 )
 
@@ -38,9 +41,12 @@ type Type struct {
 	AttributeSchema map[string]any `json:"attribute_schema,omitempty"`
 	RequiredFields  []string       `json:"required_fields"`
 	// SchemaVersion is the version of the generated attribute schema.
-	SchemaVersion            int            `json:"schema_version"`
-	Version                  int            `json:"version"`
-	ClonedFromID             string         `json:"cloned_from_id,omitempty"`
+	SchemaVersion int    `json:"schema_version"`
+	Version       int    `json:"version"`
+	ClonedFromID  string `json:"cloned_from_id,omitempty"`
+	// ParentTypeID is the parent in the type chain (MET-06): a type of the
+	// organization or a system type; empty for a root.
+	ParentTypeID             string         `json:"parent_type_id,omitempty"`
 	TemplateKey              string         `json:"template_key,omitempty"`
 	LifecycleDefinitionID    string         `json:"lifecycle_definition_id,omitempty"`
 	Capabilities             map[string]any `json:"capabilities"`
@@ -76,6 +82,9 @@ type Field struct {
 	// MultiValue is attribute_definition.multi_value; nil when unknown. The
 	// legacy field views do not show it.
 	MultiValue *bool `json:"-"`
+	// Inheritable: subtypes inherit the definition (MET-06); the type's own
+	// definitions apply to it either way.
+	Inheritable bool `json:"inheritable"`
 }
 
 // InstanceField is a field definition scoped to a single CI instance (spec §2).
@@ -148,7 +157,9 @@ type CreateTypeRequest struct {
 	Category    string        `json:"category,omitempty"`
 	IsLogical   bool          `json:"is_logical,omitempty"`
 	// IsObservable defaults to !IsLogical.
-	IsObservable             *bool          `json:"is_observable,omitempty"`
+	IsObservable *bool `json:"is_observable,omitempty"`
+	// ParentTypeID makes the type a subtype (MET-06).
+	ParentTypeID             string         `json:"parent_type_id,omitempty"`
 	TemplateKey              string         `json:"template_key,omitempty"`
 	LifecycleDefinitionID    string         `json:"lifecycle_definition_id,omitempty"`
 	Capabilities             map[string]any `json:"capabilities,omitempty"`
@@ -163,13 +174,16 @@ type CreateTypeRequest struct {
 // BreaksExistingValidation requests a new version instead of an in-place edit
 // when existing CIs would fail the tightened validation.
 type UpdateTypeRequest struct {
-	Name                     *string        `json:"name,omitempty"`
-	DisplayName              LocalizedText  `json:"display_name,omitempty"`
-	Icon                     *string        `json:"icon,omitempty"`
-	Description              *string        `json:"description,omitempty"`
-	Category                 *string        `json:"category,omitempty"`
-	IsLogical                *bool          `json:"is_logical,omitempty"`
-	IsObservable             *bool          `json:"is_observable,omitempty"`
+	Name         *string       `json:"name,omitempty"`
+	DisplayName  LocalizedText `json:"display_name,omitempty"`
+	Icon         *string       `json:"icon,omitempty"`
+	Description  *string       `json:"description,omitempty"`
+	Category     *string       `json:"category,omitempty"`
+	IsLogical    *bool         `json:"is_logical,omitempty"`
+	IsObservable *bool         `json:"is_observable,omitempty"`
+	// ParentTypeID moves the type below another one; "" makes it a root
+	// (MET-06).
+	ParentTypeID             *string        `json:"parent_type_id,omitempty"`
 	LifecycleDefinitionID    *string        `json:"lifecycle_definition_id,omitempty"`
 	Capabilities             map[string]any `json:"capabilities,omitempty"`
 	AllowedRelationshipTypes []string       `json:"allowed_relationship_types,omitempty"`
@@ -304,6 +318,38 @@ func (l LocalizedText) Contains(sub string) bool {
 		}
 	}
 	return false
+}
+
+// MaxTypeChainDepth is the number of types a chain root → leaf holds at
+// most; the root is level 1 (MET-06).
+const MaxTypeChainDepth = 6
+
+// Errors of the parent of a type (MET-06), reported on parent_type_id: an
+// unknown parent and one of another organization alike (422), a cycle
+// (409), a chain deeper than MaxTypeChainDepth (422).
+// validation: fixed texts; the composition text names the attribute key.
+func errParentUnknown() error {
+	return &api.FieldError{Field: "parent_type_id", Message: "parent ci type not found", Status: http.StatusUnprocessableEntity}
+}
+
+func errParentSystem() error {
+	return &api.FieldError{Field: "parent_type_id", Message: "a system ci type has only system ci types as parent",
+		Status: http.StatusUnprocessableEntity}
+}
+
+func errParentCycle() error {
+	return &api.ConflictError{Field: "parent_type_id", Message: "the parent ci type would make the type its own ancestor"}
+}
+
+func errParentDepth() error {
+	return &api.FieldError{Field: "parent_type_id",
+		Message: fmt.Sprintf("a ci type chain has at most %d levels", MaxTypeChainDepth), Status: http.StatusUnprocessableEntity}
+}
+
+// errParentComposition reports definitions of the moved chain that cannot
+// be composed (MET-16); the message names the attribute key.
+func errParentComposition(msg, code string) error {
+	return &api.FieldError{Field: "parent_type_id", Message: msg, Status: http.StatusUnprocessableEntity, Code: code}
 }
 
 // observableDefault is the MET-01 default of is_observable.

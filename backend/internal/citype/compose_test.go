@@ -155,8 +155,8 @@ func (l layeredLister) ListGlobalFields(context.Context, string) ([]Field, error
 	return []Field{l.system, l.org}, nil
 }
 
-func (l layeredLister) ListFields(context.Context, string, string) ([]Field, error) {
-	return []Field{l.typed}, nil
+func (l layeredLister) TypeChain(_ context.Context, _, typeID string) ([]Type, error) {
+	return []Type{{ID: typeID, Fields: []Field{l.typed}}}, nil
 }
 
 func (l layeredLister) ListInstanceFields(context.Context, string, string) ([]InstanceField, error) {

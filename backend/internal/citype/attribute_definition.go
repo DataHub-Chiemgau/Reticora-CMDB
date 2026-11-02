@@ -119,7 +119,7 @@ func (d *AttributeDefinition) Field() Field {
 		DataType: d.DataType, Required: d.Required, DefaultValue: defaultString(d.Default),
 		EnumValues: d.EnumValues, UIGroup: d.Group, SortOrder: d.Order,
 		Validation: d.legacyValidation(), Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
-		IsSystem: d.IsSystem, MultiValue: &multiValue,
+		IsSystem: d.IsSystem, MultiValue: &multiValue, Inheritable: d.Inheritable,
 	}
 }
 
@@ -386,43 +386,119 @@ func attributeDBError(err error) error {
 }
 
 // checkCompositionTx publishes a definition only when every effective
-// schema that contains its key can still be composed (MET-16): the system
-// base, the organization's global attributes and each type's attributes
-// of the key. The database checks the materialized schemas (system base
-// and type) itself; this adds the organization's layer.
+// schema that contains its key can still be composed (MET-16): system
+// base → organization's global attributes → type chain (of the ancestors
+// the inheritable definitions, of the type all, MET-06), for every type
+// that defines the key and every type in its subtree (ci_type_subtree).
+// The database checks the materialized schemas (system base and chain)
+// itself; this adds the organization's layer. A conflict is a 422 on key.
 func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
-	rows, err := tx.Query(ctx, `SELECT `+attributeColumns+` FROM attribute_definition WHERE key = $1`, key)
+	rows, err := tx.Query(ctx, `SELECT DISTINCT s.id::text FROM attribute_definition a
+		CROSS JOIN LATERAL ci_type_subtree(a.ci_type_id) s
+		WHERE a.key = $1 AND a.ci_type_id IS NOT NULL`, key)
 	if err != nil {
-		return fmt.Errorf("read definitions of %s: %w", key, err)
+		return fmt.Errorf("read types of %s: %w", key, err)
 	}
-	defs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*AttributeDefinition, error) { return scanAttribute(row) })
+	targets, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return fmt.Errorf("read definitions of %s: %w", key, err)
+		return fmt.Errorf("read types of %s: %w", key, err)
+	}
+	if cerr := chainCompositionTx(ctx, tx, targets, key); cerr != nil {
+		var conflict *CompositionError
+		if errors.As(cerr, &conflict) {
+			return &api.FieldError{Field: "key", Message: cerr.Error(), Status: http.StatusUnprocessableEntity, Code: conflict.Code}
+		}
+		return cerr
+	}
+	return nil
+}
+
+// checkSubtreeCompositionTx checks the subtree of a type that got a new
+// parent (MET-06): every type in it stays composable with the
+// organization's global attributes. A conflict is a 422 on
+// parent_type_id naming the key.
+func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID string) error {
+	rows, err := tx.Query(ctx, `SELECT s.id::text FROM ci_type_subtree($1::uuid) s`, typeID)
+	if err != nil {
+		return fmt.Errorf("read ci type subtree: %w", err)
+	}
+	targets, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read ci type subtree: %w", err)
+	}
+	if cerr := chainCompositionTx(ctx, tx, targets, ""); cerr != nil {
+		var conflict *CompositionError
+		if errors.As(cerr, &conflict) {
+			return errParentComposition(cerr.Error(), conflict.Code)
+		}
+		return cerr
+	}
+	return nil
+}
+
+// chainCompositionTx composes the definitions of key ("" every key) for
+// the system base with the organization's global attributes and, for
+// each target type, with its chain root → type (MET-16, MET-06). It
+// returns the first *CompositionError.
+// validation: the *CompositionError texts of Compose (MET-16), naming the key.
+func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key string) error {
+	collect := func(row pgx.CollectableRow) (*AttributeDefinition, error) { return scanAttribute(row) }
+	rows, err := tx.Query(ctx, `SELECT `+attributeColumns+` FROM attribute_definition
+		WHERE ci_type_id IS NULL AND ($1 = '' OR key = $1) ORDER BY sort_order, key`, key)
+	if err != nil {
+		return fmt.Errorf("read global definitions: %w", err)
+	}
+	globals, err := pgx.CollectRows(rows, collect)
+	if err != nil {
+		return fmt.Errorf("read global definitions: %w", err)
 	}
 	var system, org []fieldmeta.FieldDefinition
-	var typed [][]fieldmeta.FieldDefinition
-	for _, d := range defs {
-		switch {
-		case d.CITypeID != "":
-			typed = append(typed, []fieldmeta.FieldDefinition{d.definition()})
-		case d.IsSystem:
+	for _, d := range globals {
+		if d.IsSystem {
 			system = append(system, d.definition())
-		default:
+		} else {
 			org = append(org, d.definition())
 		}
 	}
-	if len(typed) == 0 {
-		typed = append(typed, nil)
+	if _, err = Compose(system, org); err != nil {
+		return err
 	}
-	for _, t := range typed {
-		if _, err := Compose(system, org, t); err != nil {
-			fe := &api.FieldError{Field: "key", Message: err.Error(), Status: http.StatusUnprocessableEntity}
-			var conflict *CompositionError
-			if errors.As(err, &conflict) {
-				fe.Code = conflict.Code
-			}
-			return fe
+	if len(targets) == 0 {
+		return nil
+	}
+	rows, err = tx.Query(ctx, `SELECT target, `+attributeColumns+` FROM (
+			SELECT tt.id::text AS target, c.level AS lvl, a.*
+			FROM unnest($1::uuid[]) AS tt (id)
+			CROSS JOIN LATERAL ci_type_ancestors(tt.id) c
+			JOIN attribute_definition a ON a.ci_type_id = c.id
+			WHERE (a.inheritable OR c.id = tt.id) AND ($2 = '' OR a.key = $2)
+		) defs ORDER BY target, lvl, sort_order, key`, targets, key)
+	if err != nil {
+		return fmt.Errorf("read chain definitions: %w", err)
+	}
+	type chainDefinition struct {
+		target string
+		def    *AttributeDefinition
+	}
+	defs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (chainDefinition, error) {
+		var cd chainDefinition
+		d, serr := scanAttribute(extraColumns{row: row, before: []any{&cd.target}})
+		cd.def = d
+		return cd, serr
+	})
+	if err != nil {
+		return fmt.Errorf("read chain definitions: %w", err)
+	}
+	for start := 0; start < len(defs); {
+		end := start
+		var typed []fieldmeta.FieldDefinition
+		for ; end < len(defs) && defs[end].target == defs[start].target; end++ {
+			typed = append(typed, defs[end].def.definition())
 		}
+		if _, err = Compose(system, org, typed); err != nil {
+			return err
+		}
+		start = end
 	}
 	return nil
 }

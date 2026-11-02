@@ -5924,7 +5924,7 @@ export interface paths {
     put?: never;
     /**
      * Create a CI type
-     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01).
+     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01). `parent_type_id` makes the type a subtype of a type of the organization or a system type (MET-06): an unknown parent and one of another organization are both 422 on `parent_type_id`, as is a chain of more than 6 types; a taken key or name is 409.
      */
     post: operations['createCiTypes'];
     delete?: never;
@@ -5987,7 +5987,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Update a CI type */
+    /**
+     * Update a CI type
+     * @description `parent_type_id` moves the type below another type of the organization or a system type (MET-06); an empty string makes it a root. An unknown parent and one of another organization are both 422 on `parent_type_id`, a cycle is 409, a chain of more than 6 types (including the moved subtree) is 422, and a moved subtree whose attribute definitions cannot be composed is 422 naming the attribute key. An unknown CI type, or a system type, is 404.
+     */
     patch: operations['updateCiTypesId'];
     trace?: never;
   };
@@ -8269,6 +8272,8 @@ export interface components {
       readonly required_fields?: string[];
       version: number;
       cloned_from_id?: string;
+      /** @description Parent in the type chain (MET-06); absent for a root. The type inherits the inheritable attribute definitions of its ancestors. */
+      parent_type_id?: string;
       template_key?: string;
       lifecycle_definition_id?: string;
       capabilities: {
@@ -8306,6 +8311,11 @@ export interface components {
       category?: string;
       is_logical?: boolean;
       is_observable?: boolean;
+      /**
+       * Format: uuid
+       * @description Parent type of the organization or a system type (MET-06).
+       */
+      parent_type_id?: string;
       template_key?: string;
       lifecycle_definition_id?: string;
       capabilities?: {
@@ -8329,6 +8339,8 @@ export interface components {
       category?: string;
       is_logical?: boolean;
       is_observable?: boolean;
+      /** @description New parent type (MET-06); an empty string makes the type a root. */
+      parent_type_id?: string;
       lifecycle_definition_id?: string;
       capabilities?: {
         [key: string]: unknown;
@@ -28429,6 +28441,9 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   createCiTypesIdActivate: {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,12 @@ type Repository interface {
 	SetActive(ctx context.Context, orgID, id string, active bool) (*Type, error)
 	// Versions returns the clone/version lineage of a type.
 	Versions(ctx context.Context, orgID, id string) ([]Type, error)
+	// TypeChain returns the type chain root → id (MET-06), each type with
+	// its own field definitions (PostgreSQL fills ID and Fields only).
+	TypeChain(ctx context.Context, orgID, id string) ([]Type, error)
+	// TypeSubtree returns the type id and every descendant the
+	// organization sees, by depth (MET-06).
+	TypeSubtree(ctx context.Context, orgID, id string) ([]Type, error)
 
 	ListFields(ctx context.Context, orgID, typeID string) ([]Field, error)
 	ListGlobalFields(ctx context.Context, orgID string) ([]Field, error)
@@ -134,6 +141,9 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Type, 
 func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.checkParentLocked(typ, typ.ParentTypeID); err != nil {
+		return err
+	}
 	for _, existing := range r.types {
 		if existing.OrganizationID == typ.OrganizationID &&
 			(existing.Key == typ.Key || existing.Name == typ.Name) && existing.IsActive {
@@ -151,8 +161,17 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	typ.UpdatedAt = now
 	stored := *typ
 	r.types[typ.ID] = &stored
+	// As in PostgreSQL (upsertFieldTx), a new definition is inheritable.
 	flds := append([]Field{}, typ.Fields...)
+	for i := range flds {
+		flds[i].Inheritable = true
+	}
 	r.fields[typ.ID] = flds
+	if err := r.checkSubtreeCompositionLocked(stored.OrganizationID, typ.ID); err != nil {
+		delete(r.types, typ.ID)
+		delete(r.fields, typ.ID)
+		return err
+	}
 	return nil
 }
 
@@ -162,6 +181,17 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	t, ok := r.types[id]
 	if !ok || (t.OrganizationID != "" && t.OrganizationID != orgID) {
 		return nil, fmt.Errorf("not found")
+	}
+	if req.ParentTypeID != nil && *req.ParentTypeID != t.ParentTypeID {
+		if err := r.checkParentLocked(t, *req.ParentTypeID); err != nil {
+			return nil, err
+		}
+		previous := t.ParentTypeID
+		t.ParentTypeID = *req.ParentTypeID
+		if err := r.checkSubtreeCompositionLocked(orgID, id); err != nil {
+			t.ParentTypeID = previous
+			return nil, err
+		}
 	}
 	applyTypeUpdate(t, req)
 	t.UpdatedAt = time.Now().UTC()
@@ -287,6 +317,154 @@ func (r *MemoryRepository) Versions(_ context.Context, orgID, id string) ([]Type
 	return out, nil
 }
 
+// visibleLocked returns type id when orgID sees it (its own or a system
+// type).
+func (r *MemoryRepository) visibleLocked(orgID, id string) (*Type, bool) {
+	t, ok := r.types[id]
+	if !ok || (t.OrganizationID != "" && t.OrganizationID != orgID) {
+		return nil, false
+	}
+	return t, true
+}
+
+// chainLocked is the chain root → id of the types orgID sees.
+func (r *MemoryRepository) chainLocked(orgID, id string) []*Type {
+	var up []*Type
+	for cur := id; cur != "" && len(up) <= 64; {
+		t, ok := r.visibleLocked(orgID, cur)
+		if !ok {
+			break
+		}
+		up = append(up, t)
+		cur = t.ParentTypeID
+	}
+	slices.Reverse(up)
+	return up
+}
+
+// subtreeLocked is id and its visible descendants, by depth; height is
+// the number of levels (1 for a leaf).
+func (r *MemoryRepository) subtreeLocked(orgID, id string) (out []*Type, height int) {
+	root, ok := r.visibleLocked(orgID, id)
+	if !ok {
+		return nil, 0
+	}
+	level := []*Type{root}
+	for len(level) > 0 && height <= 64 {
+		height++
+		out = append(out, level...)
+		var next []*Type
+		for _, parent := range level {
+			for _, t := range r.types {
+				if t.ParentTypeID == parent.ID && (t.OrganizationID == "" || t.OrganizationID == orgID) {
+					next = append(next, t)
+				}
+			}
+		}
+		sort.Slice(next, func(i, j int) bool { return next[i].Name < next[j].Name })
+		level = next
+	}
+	return out, height
+}
+
+// checkParentLocked applies the rules of trg_ci_type_parent_guard to the
+// new parent of t (t.ID empty for a new type).
+func (r *MemoryRepository) checkParentLocked(t *Type, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	parent, ok := r.types[parentID]
+	switch {
+	case !ok:
+		return errParentUnknown()
+	case t.OrganizationID == "" && parent.OrganizationID != "":
+		return errParentSystem()
+	case parent.OrganizationID != "" && parent.OrganizationID != t.OrganizationID:
+		return errParentUnknown()
+	}
+	chain := r.chainLocked(t.OrganizationID, parentID)
+	height := 1
+	if t.ID != "" {
+		for _, a := range chain {
+			if a.ID == t.ID {
+				return errParentCycle()
+			}
+		}
+		_, height = r.subtreeLocked(t.OrganizationID, t.ID)
+	}
+	if len(chain)+height > MaxTypeChainDepth {
+		return errParentDepth()
+	}
+	return nil
+}
+
+// chainTypesLocked copies a chain with the field definitions of each type.
+func (r *MemoryRepository) chainTypesLocked(chain []*Type) []Type {
+	out := make([]Type, 0, len(chain))
+	for _, t := range chain {
+		c := *t
+		c.Fields = append([]Field{}, r.fields[t.ID]...)
+		sort.SliceStable(c.Fields, func(i, j int) bool { return c.Fields[i].SortOrder < c.Fields[j].SortOrder })
+		out = append(out, c)
+	}
+	return out
+}
+
+// checkSubtreeCompositionLocked composes system → organization → chain
+// for id and each descendant (MET-16); a conflict is a 422 on
+// parent_type_id naming the key.
+func (r *MemoryRepository) checkSubtreeCompositionLocked(orgID, id string) error {
+	var system, org []fieldmeta.FieldDefinition
+	globals := r.globals[orgID]
+	for i := range globals {
+		if globals[i].IsSystem {
+			system = append(system, globals[i].Definition())
+		} else {
+			org = append(org, globals[i].Definition())
+		}
+	}
+	subtree, _ := r.subtreeLocked(orgID, id)
+	for _, t := range subtree {
+		typed := chainDefinitions(r.chainTypesLocked(r.chainLocked(orgID, t.ID)))
+		if _, err := Compose(system, org, typed); err != nil {
+			var conflict *CompositionError
+			code := ""
+			if errors.As(err, &conflict) {
+				code = conflict.Code
+			}
+			return errParentComposition(err.Error(), code)
+		}
+	}
+	return nil
+}
+
+// TypeChain implements Repository: the chain root → id; an unknown type is
+// "not found".
+func (r *MemoryRepository) TypeChain(_ context.Context, orgID, id string) ([]Type, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.visibleLocked(orgID, id); !ok {
+		return nil, fmt.Errorf("not found")
+	}
+	return r.chainTypesLocked(r.chainLocked(orgID, id)), nil
+}
+
+// TypeSubtree implements Repository: id and its visible descendants by
+// depth; an unknown type is "not found".
+func (r *MemoryRepository) TypeSubtree(_ context.Context, orgID, id string) ([]Type, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	subtree, _ := r.subtreeLocked(orgID, id)
+	if len(subtree) == 0 {
+		return nil, fmt.Errorf("not found")
+	}
+	out := make([]Type, 0, len(subtree))
+	for _, t := range subtree {
+		out = append(out, *t)
+	}
+	return out, nil
+}
+
 func (r *MemoryRepository) ListFields(_ context.Context, orgID, typeID string) ([]Field, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -353,6 +531,7 @@ func (r *MemoryRepository) UpsertField(_ context.Context, orgID, typeID string, 
 	}
 	f.ID = r.nextID()
 	f.CITypeID = typeID
+	f.Inheritable = true
 	r.fields[typeID] = append(list, f)
 	return &f, nil
 }
