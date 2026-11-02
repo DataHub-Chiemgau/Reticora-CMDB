@@ -1,16 +1,20 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 )
@@ -29,6 +33,36 @@ const idempotencyTTL = 24 * time.Hour
 // idempotencyLockTTL bounds a reservation: a request that never stores its
 // result (crash, timeout) releases its key after this time.
 const idempotencyLockTTL = 2 * time.Minute
+
+// maxIdempotentRequestBody caps the request body the middleware buffers to
+// hash it (API-04) and the body OpenAPIValidation reads. It is at least the
+// largest route limit (maxIngestBody, 64 MiB, in discovery/devicerecord.go),
+// so no route receives a truncated body; a larger body gets 413. A variable
+// so tests can lower it.
+var maxIdempotentRequestBody int64 = 64 << 20
+
+// errRequestBodyTooLarge reports a body above maxIdempotentRequestBody.
+var errRequestBodyTooLarge = errors.New("request body too large")
+
+// readRequestBody reads the whole body up to maxIdempotentRequestBody and
+// returns errRequestBodyTooLarge above it. It never truncates.
+func readRequestBody(r *http.Request) ([]byte, error) {
+	limit := maxIdempotentRequestBody
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, errRequestBodyTooLarge
+	}
+	return body, nil
+}
+
+// writeRequestBodyTooLarge answers a body above maxIdempotentRequestBody.
+func writeRequestBodyTooLarge(w http.ResponseWriter) {
+	api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large",
+		fmt.Sprintf("request body exceeds %d bytes", maxIdempotentRequestBody))
+}
 
 // IdempotencyWithStore returns middleware that deduplicates POST requests
 // with an Idempotency-Key for 24 hours (API-04). It runs per route after the
@@ -54,13 +88,20 @@ func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 
 			storeKey := "idempotency:" + idempotencyScope(r) + ":" + key
 
-			// Read and hash the body (limit to 1MB for safety)
-			body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+			// Buffer and hash the whole body: the replay decision falls
+			// before the handler, so a streaming hash does not suffice. The
+			// handler receives exactly the hashed body; a body above the
+			// cap gets 413 without reserving the key.
+			body, err := readRequestBody(r)
+			if errors.Is(err, errRequestBodyTooLarge) {
+				writeRequestBodyTooLarge(w)
+				return
+			}
 			if err != nil {
 				httpx.Internal(w, r, "failed to read request body")
 				return
 			}
-			r.Body = io.NopCloser(strings.NewReader(string(body)))
+			r.Body = io.NopCloser(bytes.NewReader(body))
 			bodyHash := hashBody(body)
 
 			if replayStored(w, r, store, storeKey, bodyHash) {

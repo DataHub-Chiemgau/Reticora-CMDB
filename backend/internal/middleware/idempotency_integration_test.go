@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -192,5 +194,87 @@ func TestIdempotencyStoresNo5xx(t *testing.T) {
 	firstID, replayID := refused.Header().Get("X-Request-ID"), replay.Header().Get("X-Request-ID")
 	if trace := problemTraceID(t, replay); trace != firstID || trace != problemTraceID(t, refused) || replayID == "" || replayID == firstID {
 		t.Errorf("4xx replay: body trace_id %q, first X-Request-ID %q, replay X-Request-ID %q", trace, firstID, replayID)
+	}
+}
+
+// lowerIdempotentRequestBody lowers maxIdempotentRequestBody for one test.
+func lowerIdempotentRequestBody(t *testing.T, limit int64) {
+	t.Helper()
+	previous := maxIdempotentRequestBody
+	maxIdempotentRequestBody = limit
+	t.Cleanup(func() { maxIdempotentRequestBody = previous })
+}
+
+// TestIdempotencyHashesTheWholeBody covers WP-778 (API-04): with an
+// Idempotency-Key a body over 1 MiB reaches the handler in full, two bodies
+// with the same first MiB are different requests (409 idempotency-mismatch),
+// and a body above maxIdempotentRequestBody gets 413 without the handler
+// and without reserving the key.
+func TestIdempotencyHashesTheWholeBody(t *testing.T) {
+	store := cache.NewMemoryStore()
+	var calls atomic.Int32
+	var gotLen atomic.Int64
+	var gotHash atomic.Value
+	handler := Chain(
+		AuthMiddleware,
+		TenantMiddleware,
+		IdempotencyWithStore(store),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("handler read: %v", err)
+		}
+		gotLen.Store(int64(len(body)))
+		gotHash.Store(hashBody(body))
+		api.WriteJSON(w, http.StatusCreated, map[string]int{"length": len(body)})
+	}))
+	post := func(key string, body []byte) *httptest.ResponseRecorder {
+		token := testToken(t, Claims{Subject: "alice", OrganizationID: "org-1", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Idempotency-Key", key)
+		req.Header.Set("Content-Type", "application/octet-stream")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w
+	}
+
+	// 2 MiB; the second body differs from the first only in its last byte,
+	// so both share the first MiB.
+	first := bytes.Repeat([]byte("a"), 2<<20)
+	second := bytes.Clone(first)
+	second[len(second)-1] = 'b'
+
+	w := post("k-large", first)
+	if w.Code != http.StatusCreated || calls.Load() != 1 {
+		t.Fatalf("2 MiB body: %d, handler ran %d times: %s", w.Code, calls.Load(), w.Body.String())
+	}
+	if gotLen.Load() != int64(len(first)) || gotHash.Load() != hashBody(first) {
+		t.Fatalf("handler got %d bytes (hash %v), want %d bytes (hash %s)", gotLen.Load(), gotHash.Load(), len(first), hashBody(first))
+	}
+	if replay := post("k-large", first); replay.Code != http.StatusCreated || replay.Header().Get("Idempotency-Replayed") != "true" || calls.Load() != 1 {
+		t.Fatalf("replay of the same body: %d replayed %q, handler ran %d times", replay.Code, replay.Header().Get("Idempotency-Replayed"), calls.Load())
+	}
+	mismatch := post("k-large", second)
+	if mismatch.Code != http.StatusConflict || !strings.Contains(mismatch.Body.String(), "idempotency-mismatch") || calls.Load() != 1 {
+		t.Fatalf("same first MiB, other body: %d, handler ran %d times: %s", mismatch.Code, calls.Load(), mismatch.Body.String())
+	}
+
+	// Above the cap: 413 problem+json without the handler.
+	lowerIdempotentRequestBody(t, 1<<10)
+	tooLarge := post("k-too-large", bytes.Repeat([]byte("x"), 1<<10+1))
+	if tooLarge.Code != http.StatusRequestEntityTooLarge || calls.Load() != 1 {
+		t.Fatalf("body above the cap: %d, handler ran %d times", tooLarge.Code, calls.Load())
+	}
+	if ct := tooLarge.Header().Get("Content-Type"); ct != "application/problem+json" {
+		t.Errorf("413 content type %q, want application/problem+json", ct)
+	}
+	// The key was not reserved: a body at the cap with the same key
+	// executes (no 409, no replay) and reaches the handler in full.
+	atCap := post("k-too-large", bytes.Repeat([]byte("x"), 1<<10))
+	if atCap.Code != http.StatusCreated || atCap.Header().Get("Idempotency-Replayed") != "" || calls.Load() != 2 || gotLen.Load() != 1<<10 {
+		t.Errorf("body at the cap after 413: %d replayed %q, handler ran %d times, got %d bytes",
+			atCap.Code, atCap.Header().Get("Idempotency-Replayed"), calls.Load(), gotLen.Load())
 	}
 }
