@@ -45,17 +45,34 @@ func IsProtected(ctx context.Context, repo Repository, orgID, ciID, fieldName st
 	return fv.Protected && fv.OverrideAt != nil, nil
 }
 
+// AuthorNames resolves the display name of an override author (a user or
+// a service account) within orgID. ok is false for an author that is
+// unknown, deleted or of another organization (UI-15).
+type AuthorNames func(ctx context.Context, orgID, authorID string) (name string, ok bool)
+
 // MemoryRepository is an in-memory implementation (tests, --no-db).
 type MemoryRepository struct {
 	mu       sync.RWMutex
 	values   map[string]*FieldValue // orgID/ciID/field -> value
 	policies map[string]*SourcePolicy
 	seq      int
+	// authorNames resolves OverrideAuthorName in ListForCI as the
+	// PostgreSQL repository does from app_user and service_account.
+	authorNames AuthorNames
 }
 
 // NewMemoryRepository creates an empty in-memory override repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{values: map[string]*FieldValue{}, policies: map[string]*SourcePolicy{}}
+}
+
+// WithAuthorNames sets the resolver of override author names (UI-15).
+// Without one, ListForCI answers no names.
+func (r *MemoryRepository) WithAuthorNames(names AuthorNames) *MemoryRepository {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.authorNames = names
+	return r
 }
 
 func (r *MemoryRepository) nextID() string {
@@ -76,16 +93,31 @@ func (r *MemoryRepository) withEffective(fv *FieldValue) *FieldValue {
 	return &out
 }
 
-func (r *MemoryRepository) ListForCI(_ context.Context, orgID, ciID string) ([]FieldValue, error) {
+// ListForCI returns the field values of a CI with the display names of
+// their override authors (UI-15).
+func (r *MemoryRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]FieldValue, error) {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	var out []FieldValue
 	for _, fv := range r.values {
 		if fv.OrganizationID == orgID && fv.CIID == ciID {
 			out = append(out, *r.withEffective(fv))
 		}
 	}
+	names := r.authorNames
+	r.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].FieldName < out[j].FieldName })
+	// The names are resolved outside the lock: the resolver reads other
+	// repositories.
+	if names != nil {
+		for i := range out {
+			if out[i].OverrideAuthor == "" {
+				continue
+			}
+			if name, ok := names(ctx, orgID, out[i].OverrideAuthor); ok {
+				out[i].OverrideAuthorName = name
+			}
+		}
+	}
 	return out, nil
 }
 

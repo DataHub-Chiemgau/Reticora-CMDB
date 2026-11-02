@@ -19408,7 +19408,15 @@ components:
           enum: [override, source_rank, asset, record]
         recorded_at: { type: string, format: date-time }
         observed_at: { type: string, format: date-time }
-        override_author: { type: string }
+        override_author:
+          type: string
+          description: Id of the user or service account that set the override.
+        override_author_name:
+          type: string
+          description: >-
+            Display name of the override author (UI-15, REC-10): the display name of a user, the name
+            of a service account. Resolved on read under the reader's tenant scope and never stored;
+            absent when the author is unknown, deleted or not visible to the reader.
         override_reason: { type: string }
         protected: { type: boolean }
         discovered_value: {}

@@ -47,12 +47,15 @@ type FieldProvenance struct {
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 	ObservedAt *time.Time `json:"observed_at,omitempty"`
 	// The override, when there is one, and the observed value it covers.
-	OverrideAuthor   string `json:"override_author,omitempty"`
-	OverrideReason   string `json:"override_reason,omitempty"`
-	Protected        bool   `json:"protected,omitempty"`
-	DiscoveredValue  any    `json:"discovered_value,omitempty"`
-	DiscoveredSource string `json:"discovered_source,omitempty"`
-	Diverged         bool   `json:"diverged"`
+	OverrideAuthor string `json:"override_author,omitempty"`
+	// OverrideAuthorName is the display name of OverrideAuthor, resolved
+	// on read (UI-15); absent when the author is not visible.
+	OverrideAuthorName string `json:"override_author_name,omitempty"`
+	OverrideReason     string `json:"override_reason,omitempty"`
+	Protected          bool   `json:"protected,omitempty"`
+	DiscoveredValue    any    `json:"discovered_value,omitempty"`
+	DiscoveredSource   string `json:"discovered_source,omitempty"`
+	Diverged           bool   `json:"diverged"`
 }
 
 // typedFields are the typed columns of a CI with their read of item.
@@ -157,6 +160,7 @@ func fromRecord(rec *override.FieldValue) FieldProvenance {
 	if rec.OverrideAt != nil || rec.OverrideValue != nil {
 		p.Source, p.Reason, p.Rank = "manual_override", ReasonOverride, override.SourceRank("manual_override")
 		p.RecordedAt, p.OverrideAuthor, p.OverrideReason, p.Protected = rec.OverrideAt, rec.OverrideAuthor, rec.OverrideReason, rec.Protected
+		p.OverrideAuthorName = rec.OverrideAuthorName
 		p.ObservedAt = rec.ObservedAt
 		return p
 	}

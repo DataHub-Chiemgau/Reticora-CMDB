@@ -149,15 +149,62 @@ func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]Fie
 			values = append(values, fv)
 		}
 		rows.Close()
-		if err := rows.Err(); err != nil {
+		if err = rows.Err(); err != nil {
+			return err
+		}
+		names, err := authorNamesTx(ctx, tx, values)
+		if err != nil {
 			return err
 		}
 		for _, fv := range values {
-			out = append(out, *r.withEffectiveTx(ctx, tx, fv))
+			resolved := r.withEffectiveTx(ctx, tx, fv)
+			resolved.OverrideAuthorName = names[fv.OverrideAuthor]
+			out = append(out, *resolved)
 		}
 		return nil
 	})
 	return out, err
+}
+
+// authorNamesTx resolves the display names of the override authors of
+// values in the reader's tenant transaction (UI-15, REC-10): the display
+// name of a user, the name of a service account. Only the id is stored
+// (SEC-05); the RLS of app_user and service_account keeps the names of
+// other organizations out, and a deleted or unknown author has no name.
+func authorNamesTx(ctx context.Context, tx pgx.Tx, values []*FieldValue) (map[string]string, error) {
+	seen := map[string]bool{}
+	var ids []string
+	for _, fv := range values {
+		if fv.OverrideAuthor != "" && !seen[fv.OverrideAuthor] {
+			seen[fv.OverrideAuthor] = true
+			ids = append(ids, fv.OverrideAuthor)
+		}
+	}
+	names := map[string]string{}
+	if len(ids) == 0 {
+		return names, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, display_name FROM app_user WHERE id = ANY($1::text[]::uuid[])
+		UNION ALL
+		SELECT id::text, name FROM service_account WHERE id = ANY($1::text[]::uuid[])`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("resolve override authors: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("resolve override authors: %w", err)
+		}
+		if name != "" {
+			names[id] = name
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("resolve override authors: %w", err)
+	}
+	return names, nil
 }
 
 // Get returns one field value.

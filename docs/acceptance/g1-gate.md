@@ -214,11 +214,22 @@ Defekttest, falls vorhanden, bleibt in `tests/audit/expected-failures.txt`.
 | F-212 | Datenkorrektur 000086 behält implizit provisionierte Add-on-Zeilen (WP-075) | Betrifft nur die Add-on-Features `iga` und `ai` ([A], CH14), deren Module im G1-Release nach E-03 durch WP-214 abgeschaltet sind; implizit provisionierte Add-on-Zeilen sind dort wirkungslos (Phase-2+-Funktion). Die Bereinigung muss implizite von echten Operator-Grants unterscheiden (Abgleich mit `operator_audit`) und gehört zur Aktivierung der Add-on-Module. | Aktivierungs-WP der Add-on-Module IGA und KI (Phase-2-Plan, Modulfreigabe nach E-03); bis dahin Release-Hinweis in `docs/acceptance/g1-installation.md`, Abschnitt „Release-Kandidat“. |
 | F-287 | Roundtrip-Test scheitert auf geteilten PostgreSQL-Clustern, die clusterweite Rolle `reticora_app` wird gelöscht (WP-006) | Auf einem Cluster mit weiteren migrierten Datenbanken bricht `000056_rls_enforcement.down.sql` (DROP ROLE `reticora_app`) mit SQLSTATE 2BP01 ab. Der Retest bräuchte eine Änderung der ausgelieferten Migration 000056 oder eine eigene Cluster-Testinfrastruktur. Keine AK-Wirkung: WP-006 ist bestanden, CI nutzt einen dedizierten PostgreSQL-Service; bewusst akzeptierte Einschränkung eines Entwicklerwerkzeugs. Nachtrag des Plans vom 2026-10-26: E-72 ist mit Option 1 entschieden, WP-427 (`t1-mig56-down`) behebt die Ursache mit; ob F-287 damit aus der Zurückstellung fällt, bewertet WP-600. | Phase-2-Werkzeug-WP (Testinfrastruktur mit temporärem dediziertem Cluster für den Roundtrip, pg_shdepend-Prüfung mit klarer Fehlermeldung). |
 | F-316 | Audit-Kette synchron unter Org-Lock bis COMMIT statt asynchroner Outbox mit Single-Runner (AUD-04, WP-132) | Bewusst akzeptierte Abweichung ohne AK-Wirkung: E-56 (2026-10-15, Abschnitt „Audit-Kette und Outbox“) erkennt die synchrone Kette als verbleibende Grenze mit Folge-WP an. Kein WP-132-Kriterium ist verletzt (Kette je Org mit Sequenz, audit-verify meldet die Bruchstelle, keine Gabelung); kein Funktionsverlust, nur eine Durchsatzgrenze je Org. | Folge-WP Outbox-Nummerierung nach E-56 vor GA (asynchroner Audit-Runner nach AUD-04/JOB-02); Regressionsschutz bis dahin `TestAuditChainPerOrganizationPG`. |
-| F-349 | Override-Autor wird im Provenienz-Tooltip als rohe User-ID gezeigt (WP-198) | Kosmetische Abweichung ohne AK-Wirkung: das REC-10-Kriterium von WP-198 (Quelle, Zeit, Rang/Override-Grund) ist erfüllt; die User-ID ist korrekt und eindeutig. Die Auflösung zu Anzeigenamen ist kein Phase-1-AK. | Folge-WP im Phase-2-Plan (Anzeigename des Override-Autors in Provenienz-Tooltip und Historie, z. B. `override_author_name` serverseitig). |
 
 Der Ratchet-Vergleich der Real-Stack-Suite auf dem Release-Kandidaten
 (`install-smoke.yml`, Job `e2e-real-ratchet`) lässt nur Zeilen dieser
 Befunde zu (WP-595).
+
+**Behoben nach E-60:** F-349 (Override-Autor im Provenienz-Tooltip als rohe
+User-ID, WP-198) ist nicht mehr zurückgestellt, sondern mit WP-850
+(`g1-override-author`, Phase-2-Plan, UI-15) behoben:
+`GET /api/v1/cis/{id}/provenance` liefert additiv `override_author_name`
+(Anzeigename des Nutzers bzw. Name des Service-Accounts, beim Lesen unter der
+RLS des Lesenden aufgelöst, gespeichert bleibt nur die ID), und der Tooltip
+zeigt unter „Autor“ den Anzeigenamen, ohne Namen wie bisher die ID. Retest:
+`frontend/src/components/cmdb/ProvenanceTooltip.test.tsx`,
+`frontend/e2e-real/discovery-override.spec.ts` (D03) und
+`TestProvenanceOverrideAuthorName`
+(`backend/internal/ci/provenance_integration_test.go`).
 
 ### Läufe auf dem Release-Kandidaten
 

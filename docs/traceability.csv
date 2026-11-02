@@ -1186,3 +1186,4 @@ DOD-01;[Q];B;backend/internal/traceability/traceability_test.go;WP-243
 DOD-01;[Q];B;backend/internal/traceability/traceability_test.go;WP-704
 CI-13;[B];B;backend/internal/bootstrap/cirepo_test.go;WP-833
 MET-15;B/G1;B;backend/internal/bootstrap/cirepo_test.go;WP-833
+UI-15;[P2];B;backend/internal/ci/provenance_integration_test.go;WP-850

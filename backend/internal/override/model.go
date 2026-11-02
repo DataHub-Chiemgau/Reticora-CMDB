@@ -34,9 +34,17 @@ type FieldValue struct {
 	ObservedAt     *time.Time `json:"observed_at,omitempty"`
 	OverrideValue  any        `json:"override_value,omitempty"`
 	OverrideAuthor string     `json:"override_author,omitempty"`
-	OverrideReason string     `json:"override_reason,omitempty"`
-	OverrideAt     *time.Time `json:"override_at,omitempty"`
-	Protected      bool       `json:"protected"`
+	// OverrideAuthorName is the display name of OverrideAuthor (UI-15,
+	// REC-10): app_user.display_name of a user, service_account.name of a
+	// service account. ListForCI resolves it on read under the reader's
+	// tenant scope; it is never stored (SEC-05) and empty when the author is
+	// unknown, deleted or not visible. Only the provenance of GET
+	// /cis/{id}/provenance answers it (CIFieldProvenance); the field value
+	// DTO of /cis/{id}/fields keeps its contract.
+	OverrideAuthorName string     `json:"-"`
+	OverrideReason     string     `json:"override_reason,omitempty"`
+	OverrideAt         *time.Time `json:"override_at,omitempty"`
+	Protected          bool       `json:"protected"`
 	// EffectiveValue resolves through the source-priority policy: a protected
 	// override always wins; otherwise the highest-trust discovered value.
 	EffectiveValue any `json:"effective_value,omitempty"`
