@@ -2952,6 +2952,8 @@ export interface paths {
         categories?: string;
         /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
       path: {
@@ -6109,7 +6111,7 @@ export interface paths {
     };
     /**
      * Compute the blast radius of a CI failure
-     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed, also those outside the client or site scope of the caller, which the answer never names (IMP-07). single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed, also those outside the client or site scope of the caller, which the answer never names (IMP-07). single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids. The service impact chain (IMP-08) is always computed: affected_services, service_spofs, spof_truncated and blast_radius, as /api/v1/impact/{ci_id} returns them with include=services,clients,sites,spof; truncated reports a walk the node limit cut.
      */
     get: operations['listCisIdBlastRadius'];
     put?: never;
@@ -8642,10 +8644,21 @@ export interface components {
       count: number;
       summary: components['schemas']['ImpactSummary'];
       /**
-       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01).
+       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01). With include the counts of blast_radius are then lower bounds (E-17).
        * @enum {boolean}
        */
       truncated?: true;
+      /** @description include=services (IMP-08): the impacted services, certain ones first, then by name; heuristic marks a service reached only over an undirected network edge (IMP-03). */
+      affected_services?: components['schemas']['AffectedService'][];
+      /** @description include=clients, the clients of the certainly impacted CIs, sorted. */
+      client_ids?: string[];
+      /** @description include=sites, the sites of the certainly impacted CIs, sorted. */
+      site_ids?: string[];
+      /** @description include=spof (IMP-08), see ServiceSPOF. */
+      service_spofs?: components['schemas']['ServiceSPOF'][];
+      /** @description include=spof, true when more than 500 CIs were candidates; only the 500 closest to the failure were simulated. */
+      spof_truncated?: boolean;
+      blast_radius?: components['schemas']['BlastCounts'];
     };
     /** @description The answer of /api/v1/impact and /api/v1/impact/{ci_id} with fields (API-02): the properties of ImpactAnalysis, but each impacted CI carries its id and the selected fields only (ImpactNodeFields). */
     ImpactAnalysisFields: {
@@ -8661,10 +8674,21 @@ export interface components {
       count: number;
       summary: components['schemas']['ImpactSummary'];
       /**
-       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01).
+       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01). With include the counts of blast_radius are then lower bounds (E-17).
        * @enum {boolean}
        */
       truncated?: true;
+      /** @description include=services (IMP-08): the impacted services, certain ones first, then by name; heuristic marks a service reached only over an undirected network edge (IMP-03). */
+      affected_services?: components['schemas']['AffectedService'][];
+      /** @description include=clients, the clients of the certainly impacted CIs, sorted. */
+      client_ids?: string[];
+      /** @description include=sites, the sites of the certainly impacted CIs, sorted. */
+      site_ids?: string[];
+      /** @description include=spof (IMP-08), see ServiceSPOF. */
+      service_spofs?: components['schemas']['ServiceSPOF'][];
+      /** @description include=spof, true when more than 500 CIs were candidates; only the 500 closest to the failure were simulated. */
+      spof_truncated?: boolean;
+      blast_radius?: components['schemas']['BlastCounts'];
     };
     BlastRadius: {
       ci_id: string;
@@ -8674,17 +8698,55 @@ export interface components {
       affected_count: number;
       /** @description The CIs reached only over an undirected network edge (connected_to). */
       heuristic_count: number;
-      affected_services?: components['schemas']['TopologyNode'][];
-      /** @description Clients of the affected CIs (heuristic hits not included). */
+      /** @description The affected CIs of type business_service or application or a type inheriting from one of them (IMP-08), certain ones first, then by name; heuristic hits carry heuristic true. Absent when none is affected. */
+      affected_services?: components['schemas']['BlastRadiusCI'][];
+      /** @description Clients of the affected CIs (heuristic hits not included), sorted. */
       client_ids?: string[];
-      /** @description Sites of the affected CIs (heuristic hits not included). */
+      /** @description Sites of the affected CIs (heuristic hits not included), sorted. */
       site_ids?: string[];
+      /** @description The direct dependents of the failed CI without an alternative provider (IMP-04); the SPOF of the services are service_spofs. */
       single_points_of_failure?: components['schemas']['TopologyNode'][];
       protected_by_redundancy?: components['schemas']['TopologyNode'][];
+      /** @description The single points of failure of the affected services (IMP-08), see ServiceSPOF. */
+      service_spofs: components['schemas']['ServiceSPOF'][];
+      /** @description true when more than 500 CIs were candidates; only the 500 closest to the failure were simulated. */
+      spof_truncated: boolean;
+      /**
+       * @description true when the walk from the CI reached the node limit (10,000 CIs): the affected CIs may then be incomplete and the counts of blast_radius are lower bounds (NFR-01, E-17); absent otherwise.
+       * @enum {boolean}
+       */
+      truncated?: true;
+      blast_radius: components['schemas']['BlastCounts'];
     };
     BlastRadiusCI: components['schemas']['TopologyNode'] & {
       /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
       heuristic: boolean;
+    };
+    /** @description An impacted service (IMP-08). */
+    AffectedService: {
+      id: string;
+      name: string;
+      /** @description The id of the CI type. */
+      ci_type: string;
+      /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
+      heuristic: boolean;
+    };
+    /** @description A single point of failure of the service chain (IMP-08): a failed or certainly affected CI whose failure alone takes down the certainly affected services service_ids over directed steps, the other failed CIs of the analysis kept up. A service is a SPOF only for another service; a service reached only heuristically has none. Ordered by distance from the failure, then by name. */
+    ServiceSPOF: {
+      id: string;
+      name: string;
+      /** @description The id of the CI type. */
+      ci_type: string;
+      service_ids: string[];
+    };
+    /** @description The blast radius in numbers (IMP-08): cis counts the certainly affected CIs; the other counts are present when their block was computed (include on /api/v1/impact, always on blast-radius). services and services_heuristic split the affected services like affected_count and heuristic_count. With truncated the counts are lower bounds (E-17). */
+    BlastCounts: {
+      cis: number;
+      services?: number;
+      services_heuristic?: number;
+      clients?: number;
+      sites?: number;
+      spof?: number;
     };
     DependencyResult: {
       ci_id: string;
@@ -13022,6 +13084,8 @@ export interface components {
     ListFields: string;
     /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
     ImpactFields: string;
+    /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+    ImpactInclude: string;
     /** @description Free-text search. */
     ListQ: string;
     /**
@@ -19451,6 +19515,8 @@ export interface operations {
         depth?: number;
         /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
       path?: never;
@@ -19471,7 +19537,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Unknown category, unknown field in fields or more than 100 CIs. */
+      /** @description Unknown category, unknown field in fields, unknown value in include or more than 100 CIs. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -19493,6 +19559,8 @@ export interface operations {
         categories?: string;
         /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
       path: {
@@ -19524,7 +19592,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Unknown category or unknown field in fields. */
+      /** @description Unknown category, unknown field in fields or unknown value in include. */
       422: {
         headers: {
           [name: string]: unknown;

@@ -16,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -82,6 +83,18 @@ type Handler struct {
 	// types supplies the impact semantics of the organization's
 	// relationship types; without it the built-in catalogue applies.
 	types relationshiptype.Repository
+	// ciTypes resolves which CI types are services (business_service,
+	// application and their subtypes, IMP-08); without it the service
+	// impact chain has no services.
+	ciTypes citype.Repository
+}
+
+// WithCITypes lets the impact name the affected services and their single
+// points of failure (IMP-08, WP-297): the analysis reads the CI types of
+// the organization once to tell the services by type and type chain.
+func (h *Handler) WithCITypes(types citype.Repository) *Handler {
+	h.ciTypes = types
+	return h
 }
 
 // NewHandler creates a topology handler backed by the CI and relationship

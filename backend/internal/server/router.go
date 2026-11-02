@@ -504,7 +504,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.CIService != nil {
 		discoveryHandler.WithMerger(opts.CIService)
 	}
-	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType)
+	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType).
+		WithCITypes(repos.CIType)
 	// The Ask path sends the question and the CI context to the provider only
 	// with the organization's opt-in and the ai add-on (AI-02); the same
 	// consent as the CI chunk indexer of cmd/server.

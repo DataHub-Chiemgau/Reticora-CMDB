@@ -17,6 +17,7 @@ Budgets: Wird ein Budget verfehlt, schlägt der Lauf fehl.
 | `api.js` `topology` | Topologie des Core-Switches, Tiefe 1 (> 2.000 Knoten) | < 3 s |
 | `api.js` `impact` | Impact des Core-Switches, Tiefe 20 (ganze Organisation), kompakte Antwort der Topologie-Ansicht (`fields=…`, ≤ 250 Byte je betroffenem CI) | < 2 s |
 | `api.js` `impact_full` | derselbe Impact in der vollständigen Antwort (alle Felder und Pfade) | < 2 s |
+| `api.js` `blast_radius` | Blast Radius des Core-Switches mit Service-Impact-Kette `GET /cis/{id}/blast-radius` (WP-297); der Seed hat keine Services, gemessen werden Zeit und Größe der Antwort (`blast_radius_bytes`), die SPOF-Last weist `TestServiceImpactWorstCase` nach | < 2 s |
 | `api.js` `bulk` | Bulk-Statuswechsel von 500 CIs bis Job-Ende | < 30 s |
 | `ingest.js` `load` | `POST /ingest/bulk` mit `RATE` Records/s für `DURATION_S`; Verzögerung Record → sichtbar (Probe-Records während der Last, danach bis alle Records sichtbar sind) | < 30 s |
 | `ingest.js` `spool` | Spool-Flush eines Collectors (COL-05): 10.000 Records als nacheinander gesendete Uploads (`POST /discovery/ingest`, gzip); Abbau-Rate ab Sendeende, Dauer bis alle sichtbar | ≥ 200/s, < 5 min |
@@ -32,7 +33,7 @@ Schwellen auf den Volumina von NFR-01 aus (Abschnitt „NFR-01-Volumina“).
 **Fehlgeschlagene Anfragen (F-388, WP-659):** Kein Lauf ist mit einer
 fehlgeschlagenen Anfrage grün. Jedes Skript hat `http_req_failed: rate==0`
 für den ganzen Lauf (mit `setup`) und je Szenario
-(`http_req_failed{scenario:<name>}`; `api.js` alle zwölf Szenarien,
+(`http_req_failed{scenario:<name>}`; `api.js` alle vierzehn Szenarien,
 `ingest.js` `ingest` und `probe` bzw. `spool`). Als fehlgeschlagen zählt
 k6 jede Antwort außerhalb 200–399 und jede Anfrage ohne Antwort (Status 0),
 auch die Abfragen der Sichtbarkeit und `/readyz`. `api.js` verlangt

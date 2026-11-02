@@ -30,17 +30,22 @@ type DependencyResult struct {
 }
 
 // BlastRadius summarizes the blast radius of a CI failure (spec §15):
-// affected CIs plus the resolved assets, business services, clients and sites
-// reachable through the impact set. As in /impact a CI reached only over an
+// affected CIs plus the business services, clients and sites reachable
+// through the impact set. As in /impact a CI reached only over an
 // undirected network edge (connected_to) is a heuristic hit (IMP-03,
 // F-098): listed with its mark, counted in HeuristicCount, not in
-// AffectedCount, and its client and site are not affected.
+// AffectedCount, and its client and site are not affected. The service
+// chain (IMP-08, WP-297) adds the affected services, their single points of
+// failure and the counts of the blast radius.
 type BlastRadius struct {
-	CIID             string          `json:"ci_id"`
-	AffectedCIs      []BlastRadiusCI `json:"affected_cis"`
-	AffectedCount    int             `json:"affected_count"`
-	HeuristicCount   int             `json:"heuristic_count"`
-	AffectedServices []Node          `json:"affected_services,omitempty"`
+	CIID           string          `json:"ci_id"`
+	AffectedCIs    []BlastRadiusCI `json:"affected_cis"`
+	AffectedCount  int             `json:"affected_count"`
+	HeuristicCount int             `json:"heuristic_count"`
+	// AffectedServices are the affected CIs of a service type
+	// (business_service, application or a subtype), heuristic ones marked
+	// (IMP-08).
+	AffectedServices []BlastRadiusCI `json:"affected_services,omitempty"`
 	ClientIDs        []string        `json:"client_ids,omitempty"`
 	SiteIDs          []string        `json:"site_ids,omitempty"`
 	// SinglePointsOfFailure lists the affected CIs that depend on the failed
@@ -49,6 +54,15 @@ type BlastRadius struct {
 	// ProtectedByRedundancy lists the CIs that depend on the failed CI over
 	// a redundant type but keep a working provider (IMP-04).
 	ProtectedByRedundancy []Node `json:"protected_by_redundancy,omitempty"`
+	// ServiceSPOFs are the CIs of the chain whose failure alone takes down
+	// a certainly affected service (IMP-08); SPOFTruncated reports more
+	// candidates than maxSPOFCandidates.
+	ServiceSPOFs  []ServiceSPOF `json:"service_spofs"`
+	SPOFTruncated bool          `json:"spof_truncated"`
+	// Truncated reports a walk the node limit cut (NFR-01, WP-840): the
+	// counts are then lower bounds (E-17).
+	Truncated   bool        `json:"truncated,omitempty"`
+	BlastCounts BlastCounts `json:"blast_radius"`
 }
 
 // BlastRadiusCI is a CI of the blast radius; Heuristic marks a CI reached
@@ -121,48 +135,46 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rules := h.impactRules(r.Context(), t.OrganizationID)
-	if err := h.readFeeds(r.Context(), t.OrganizationID, g, []int32{0}, maxDepth, rules); err != nil {
+	if feedErr := h.readFeeds(r.Context(), t.OrganizationID, g, []int32{0}, maxDepth, rules); feedErr != nil {
+		api.WriteRepoError(w, feedErr)
+		return
+	}
+	isService, err := h.serviceTypes(r.Context(), t.OrganizationID)
+	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	impacted := impactOf(g, []int32{0}, impactQuery{depth: maxDepth}, rules)
-	result := BlastRadius{CIID: id, AffectedCIs: []BlastRadiusCI{}}
-	services := map[string]struct{}{}
-	clients := map[string]struct{}{}
-	sites := map[string]struct{}{}
+	q := impactQuery{depth: maxDepth}
+	impacted := impactOf(g, []int32{0}, q, rules)
+	order := impactOrder(g, impacted)
+	result := BlastRadius{CIID: id, AffectedCIs: []BlastRadiusCI{}, Truncated: g.truncated}
 	// Certain hits first, then by name, as in /impact; a heuristic hit is
 	// listed with its mark but neither counted as affected nor does it
 	// affect its client or site (IMP-03).
-	for _, n := range impactOrder(g, impacted) {
-		node := g.nodes[n]
-		heuristic := impacted[n].heuristic
-		result.AffectedCIs = append(result.AffectedCIs, BlastRadiusCI{Node: node, Heuristic: heuristic})
-		if heuristic {
+	for _, n := range order {
+		hit := BlastRadiusCI{Node: g.nodes[n], Heuristic: impacted[n].heuristic}
+		result.AffectedCIs = append(result.AffectedCIs, hit)
+		if hit.Heuristic {
 			result.HeuristicCount++
-			continue
-		}
-		result.AffectedCount++
-		if node.ClientID != "" {
-			clients[node.ClientID] = struct{}{}
-		}
-		if node.SiteID != "" {
-			sites[node.SiteID] = struct{}{}
+		} else {
+			result.AffectedCount++
 		}
 	}
-	for id := range clients {
-		result.ClientIDs = append(result.ClientIDs, id)
+	// The service chain (IMP-08): services, clients, sites and the SPOF of
+	// the services, always computed here.
+	chain := serviceChainOf(g, []int32{0}, impacted, order, g.stepRules(rules, q), isService, true)
+	if len(chain.clients) > 0 {
+		result.ClientIDs = chain.clients
 	}
-	for id := range sites {
-		result.SiteIDs = append(result.SiteIDs, id)
+	if len(chain.sites) > 0 {
+		result.SiteIDs = chain.sites
 	}
-	// Business services in the affected set (logical type heuristic: the CI
-	// type key resolves through ci.CITypeID which carries the type id; the
-	// caller can filter by type on the client side).
-	for i := range result.AffectedCIs {
-		if _, ok := services[result.AffectedCIs[i].ID]; ok {
-			result.AffectedServices = append(result.AffectedServices, result.AffectedCIs[i].Node)
-		}
+	for _, n := range chain.services {
+		result.AffectedServices = append(result.AffectedServices, BlastRadiusCI{Node: g.nodes[n], Heuristic: impacted[n].heuristic})
 	}
+	result.ServiceSPOFs, result.SPOFTruncated = chain.spofs, chain.spofTruncated
+	result.BlastCounts = chain.counts(impactInclude{services: true, clients: true, sites: true, spof: true},
+		len(chain.services)-chain.certainServices)
 	result.SinglePointsOfFailure, result.ProtectedByRedundancy = redundancyOf(g, 0, impacted, rules)
 	api.WriteJSON(w, http.StatusOK, result)
 }
@@ -739,7 +751,9 @@ func impactOrder(g *ciGraph, impacted []ciHit) []int32 {
 // The failed CIs are read in one query and their graph is one walk that
 // reads each edge once (WP-840). truncated: true reports a walk the node
 // limit cut, in the full and in the compact form (NFR-01, E-57); an answer
-// of a walk that was not cut stays as it was (API-01).
+// of a walk that was not cut stays as it was (API-01). On the catalog paths
+// (sparse) include= adds the service chain (IMP-08, addServiceChain);
+// without it neither the answer nor the statements change.
 func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID string, ids []string, single, sparse bool) {
 	ctx := r.Context()
 	q := r.URL.Query()
@@ -756,6 +770,15 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 	var fields map[string]bool
 	if sparse {
 		if fields, err = parseImpactFields(q.Get("fields")); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	// include= adds the service chain on the catalog paths (IMP-08); the
+	// deprecated path ignores it like fields=.
+	var include impactInclude
+	if sparse {
+		if include, err = parseImpactInclude(q.Get("include")); err != nil {
 			api.WriteFieldError(w, err)
 			return
 		}
@@ -795,7 +818,8 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 		return
 	}
 	relType := q.Get("rel_type")
-	impacted := impactOf(g, roots, impactQuery{relType: relType, categories: categories, depth: depth}, rules)
+	query := impactQuery{relType: relType, categories: categories, depth: depth}
+	impacted := impactOf(g, roots, query, rules)
 	order := impactOrder(g, impacted)
 	impactedNodes := make([]ImpactNode, 0, len(order))
 	summary := ImpactSummary{Failed: len(failed), ByCategory: map[string]int{}}
@@ -829,6 +853,12 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 	}
 	if g.truncated {
 		body["truncated"] = true
+	}
+	if include.asked() {
+		if err := h.addServiceChain(ctx, orgID, body, g, roots, impacted, order, query, rules, include); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
 	}
 	if fields != nil {
 		entries := make([]impactEntry, len(impactedNodes))

@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -95,12 +96,14 @@ func fillOrganization(t *testing.T, f *scopetest.Fixture, objects int) {
 // at once (WP-335): a hub with 3,000 neighbours costs the same as one with
 // 1,200; that regime has a fixed statement more than the level regime.
 // Within a regime the count depends on the depth only: 40 chains of 20
-// levels cost the same as one. GET /impact?ci_ids= walks once from all
-// failed CIs and reads them in one query (WP-840): 100 failed CIs cost the
-// same statements as two. The topology without a root is covered by
-// checkTopologyWithoutRoot (WP-602). Organization A holds 10,000 CIs and,
-// with RETICORA_PERF_BUDGET=1, in a second run 50,000 (budgetSizes,
-// WP-839): the budgets do not change with its size.
+// levels cost the same as one. GET /cis/{id}/blast-radius with its service
+// chain (WP-297) holds the same: its statements do not grow with the hub.
+// GET /impact?ci_ids= walks once from all failed CIs and reads them in one
+// query (WP-840): 100 failed CIs cost the same statements as two. The
+// topology without a root is covered by checkTopologyWithoutRoot (WP-602).
+// Organization A holds 10,000 CIs and, with RETICORA_PERF_BUDGET=1, in a
+// second run 50,000 (budgetSizes, WP-839): the budgets do not change with
+// its size.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestTopologyQueryBudget(t *testing.T) {
@@ -177,7 +180,7 @@ func topologyQueryBudget(t *testing.T, objects int) {
 	}
 	mux := chi.NewRouter()
 	topology.NewHandler(ci.NewPGRepository(pool), relationship.NewPGRepository(pool)).
-		WithRelationshipTypes(relationshiptype.NewPGRepository(pool)).RegisterRoutes(mux)
+		WithRelationshipTypes(relationshiptype.NewPGRepository(pool)).WithCITypes(citype.NewPGRepository(pool)).RegisterRoutes(mux)
 	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
 	get := func(path string, want int) int64 {
 		t.Helper()
@@ -188,13 +191,14 @@ func topologyQueryBudget(t *testing.T, objects int) {
 			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body.String())
 		}
 		var body struct {
-			Nodes    []json.RawMessage `json:"nodes"`
-			Impacted []json.RawMessage `json:"impacted"`
+			Nodes       []json.RawMessage `json:"nodes"`
+			Impacted    []json.RawMessage `json:"impacted"`
+			AffectedCIs []json.RawMessage `json:"affected_cis"`
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 			t.Fatal(err)
 		}
-		if got := len(body.Nodes) + len(body.Impacted); got < want {
+		if got := len(body.Nodes) + len(body.Impacted) + len(body.AffectedCIs); got < want {
 			t.Errorf("GET %s: %d nodes, want at least %d", path, got, want)
 		}
 		return counter.n.Load() - before
@@ -212,6 +216,11 @@ func topologyQueryBudget(t *testing.T, objects int) {
 		}},
 		{"impact", ladderDepth, func(id string, depth int) string {
 			return fmt.Sprintf("/api/v1/impact/%s?depth=%d", id, depth)
+		}},
+		// The blast radius walks at depth 20 and adds the service chain
+		// with its one read of the CI types (IMP-08, WP-297).
+		{"blast-radius", ladderDepth, func(id string, _ int) string {
+			return "/api/v1/cis/" + id + "/blast-radius"
 		}},
 	} {
 		counts := map[int]int64{}
@@ -972,4 +981,160 @@ func compactPlan(t *testing.T, plan []byte) string {
 		parts = append(parts, part)
 	}
 	return strings.Join(parts, " > ")
+}
+
+// serviceGraph inserts a graph of n objects whose services hang off a core
+// switch over directed edges (IMP-08, WP-297): 99 hypervisors uplink_to the
+// switch, and then in groups of three a vm hosted_on a hypervisor, an
+// application that runs_on the vm and a business_service that depends_on
+// the application. It returns the core switch.
+func serviceGraph(t *testing.T, f *scopetest.Fixture, orgID string, n int, client any) string {
+	t.Helper()
+	bg := context.Background()
+	if _, err := f.Admin.Exec(bg, `
+		INSERT INTO ci (id, organization_id, client_id, ci_type_id, name, status)
+		SELECT md5($1 || '/svc/' || i)::uuid, $1::uuid, $3::uuid, t.id, k.key || '-' || lpad(i::text, 5, '0'), 'active'
+		FROM generate_series(1, $2::int) AS i
+		CROSS JOIN LATERAL (SELECT CASE WHEN i = 1 THEN 'switch' WHEN i <= 100 THEN 'hypervisor'
+			ELSE (ARRAY['vm', 'application', 'business_service'])[(i - 101) % 3 + 1] END AS key) k
+		JOIN ci_type t ON t.organization_id IS NULL AND t.key = k.key`, orgID, n, client); err != nil {
+		t.Fatalf("service cis: %v", err)
+	}
+	if _, err := f.Admin.Exec(bg, `
+		INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+		SELECT $1::uuid, md5($1 || '/svc/' || e.src)::uuid, md5($1 || '/svc/' || e.dst)::uuid, e.rel
+		FROM (SELECT i AS src, 1 AS dst, 'uplink_to' AS rel FROM generate_series(2, LEAST(100, $2::int)) AS i
+			UNION ALL SELECT i, CASE (i - 101) % 3 WHEN 0 THEN 2 + ((i - 101) / 3) % 99 ELSE i - 1 END,
+				(ARRAY['hosted_on', 'runs_on', 'depends_on'])[(i - 101) % 3 + 1]
+			FROM generate_series(101, $2::int) AS i) e`, orgID, n); err != nil {
+		t.Fatalf("service relationships: %v", err)
+	}
+	var core string
+	if err := f.Admin.QueryRow(bg, `SELECT md5($1 || '/svc/1')::uuid::text`, orgID).Scan(&core); err != nil {
+		t.Fatal(err)
+	}
+	return core
+}
+
+// TestServiceImpactWorstCase covers NFR-02, E-17 and IMP-08 (WP-297) on the
+// worst case of the service chain: 10,000 objects whose services hang off
+// the core switch over directed edges (uplink_to, hosted_on, runs_on,
+// depends_on). Without include= the impact answers and sends the
+// statements as without CI type repository (API-01); include=services,spof
+// adds a fixed number of statements, the read of the CI types, the same
+// for a graph of 3,000 objects. The answer names every service, the switch
+// first and the 99 hypervisors as SPOF, and reports spof_truncated beyond
+// 500 candidates; GET /cis/{id}/blast-radius sends the statements of
+// include=services,spof. RETICORA_PERF_BUDGET=1 enforces 2 s for
+// include=services,spof (best of three).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestServiceImpactWorstCase(t *testing.T) {
+	f := scopetest.Seed(t, "f3")
+	bg := context.Background()
+	const objects = 10000
+	core := serviceGraph(t, f, f.OrgA, objects, f.Client1)
+	coreB := serviceGraph(t, f, f.OrgB, 3000, nil)
+	if _, err := f.Admin.Exec(bg, `ANALYZE ci; ANALYZE ci_relationship`); err != nil {
+		t.Fatal(err)
+	}
+	cfg := f.App.Config()
+	counter := &queryCounter{}
+	cfg.ConnConfig.Tracer = counter
+	pool, err := pgxpool.NewWithConfig(bg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	handler := func(withTypes bool) *chi.Mux {
+		h := topology.NewHandler(ci.NewPGRepository(pool), relationship.NewPGRepository(pool)).
+			WithRelationshipTypes(relationshiptype.NewPGRepository(pool))
+		if withTypes {
+			h.WithCITypes(citype.NewPGRepository(pool))
+		}
+		mux := chi.NewRouter()
+		h.RegisterRoutes(mux)
+		return mux
+	}
+	mux, plain := handler(true), handler(false)
+	type answer struct {
+		statements int64
+		elapsed    time.Duration
+		body       []byte
+	}
+	get := func(m *chi.Mux, org, path string) answer {
+		t.Helper()
+		ctx := tenant.WithTenant(f.OrgCtx(org), tenant.TenantInfo{OrganizationID: org, UserID: f.User})
+		before := counter.n.Load()
+		w := httptest.NewRecorder()
+		start := time.Now()
+		m.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
+		a := answer{elapsed: time.Since(start), statements: counter.n.Load() - before, body: w.Body.Bytes()}
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %.300s", path, w.Code, a.body)
+		}
+		return a
+	}
+	const include = "?depth=20&include=services,spof"
+	get(mux, f.OrgB, "/api/v1/impact/"+coreB+"?depth=20") // warms the pool
+
+	// Without include the answer and its statements are those of a handler
+	// without CI types.
+	without := get(mux, f.OrgA, "/api/v1/impact/"+core+"?depth=20")
+	before := get(plain, f.OrgA, "/api/v1/impact/"+core+"?depth=20")
+	if without.statements != before.statements || !bytes.Equal(without.body, before.body) {
+		t.Errorf("without include: %d statements, %d without CI types; answers equal %v",
+			without.statements, before.statements, bytes.Equal(without.body, before.body))
+	}
+	var best answer
+	for i := 0; i < 3; i++ {
+		if a := get(mux, f.OrgA, "/api/v1/impact/"+core+include); i == 0 || a.elapsed < best.elapsed {
+			best = a
+		}
+	}
+	extra := best.statements - without.statements
+	small := get(mux, f.OrgB, "/api/v1/impact/"+coreB+include).statements - get(mux, f.OrgB, "/api/v1/impact/"+coreB+"?depth=20").statements
+	if extra <= 0 || extra > 5 || extra != small {
+		t.Errorf("include=services,spof adds %d statements at %d objects, %d at 3,000 (want a fixed count of at most 5)", extra, objects, small)
+	}
+
+	var chain struct {
+		AffectedServices []topology.AffectedService `json:"affected_services"`
+		ServiceSPOFs     []topology.ServiceSPOF     `json:"service_spofs"`
+		SPOFTruncated    bool                       `json:"spof_truncated"`
+		BlastRadius      topology.BlastCounts       `json:"blast_radius"`
+		Truncated        bool                       `json:"truncated"`
+	}
+	if err := json.Unmarshal(best.body, &chain); err != nil {
+		t.Fatal(err)
+	}
+	services := 2 * ((objects - 100) / 3)
+	if len(chain.AffectedServices) != services || chain.BlastRadius.Services == nil || *chain.BlastRadius.Services != services ||
+		!chain.SPOFTruncated || chain.Truncated || len(chain.ServiceSPOFs) == 0 {
+		t.Fatalf("service chain: %d services (%v), %d SPOF, spof_truncated %v, truncated %v",
+			len(chain.AffectedServices), chain.BlastRadius.Services, len(chain.ServiceSPOFs), chain.SPOFTruncated, chain.Truncated)
+	}
+	if first := chain.ServiceSPOFs[0]; first.ID != core || len(first.ServiceIDs) != services {
+		t.Errorf("first SPOF %s with %d services, want the core switch with %d", first.Name, len(first.ServiceIDs), services)
+	}
+	hypervisors := 0
+	for _, s := range chain.ServiceSPOFs {
+		if strings.HasPrefix(s.Name, "hypervisor-") {
+			hypervisors++
+		}
+	}
+	if hypervisors != 99 {
+		t.Errorf("%d hypervisors among the SPOF, want 99", hypervisors)
+	}
+
+	blast := get(mux, f.OrgA, "/api/v1/cis/"+core+"/blast-radius")
+	if blast.statements != best.statements {
+		t.Errorf("blast radius: %d statements, include=services,spof %d", blast.statements, best.statements)
+	}
+	t.Logf("service chain (%d objects, %d services, %d SPOF): include=services,spof best of 3 %v, %d bytes, %d statements (+%d); blast radius %v, %d bytes",
+		objects, services, len(chain.ServiceSPOFs), best.elapsed.Round(time.Millisecond), len(best.body), best.statements, extra,
+		blast.elapsed.Round(time.Millisecond), len(blast.body))
+	if os.Getenv("RETICORA_PERF_BUDGET") == "1" && best.elapsed > 2*time.Second {
+		t.Errorf("service chain with include=services,spof: %v, budget 2 s", best.elapsed)
+	}
 }
