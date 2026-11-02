@@ -157,6 +157,100 @@ func TestDiscoveryJobRunsOnCollector(t *testing.T) {
 	}
 }
 
+// TestDiscoveryJobRefreshesScopes: a job fetched while the collector holds
+// no scope (a suggestion accepted shortly before "run now") makes the
+// collector ask for its scopes once and run on the scope the server
+// returns, instead of failing with config_error during the 15-minute
+// refresh gap; a tick without open jobs sends no scopes request.
+func TestDiscoveryJobRefreshesScopes(t *testing.T) {
+	const target = "192.0.2.41"
+	sweepSpy := &auditSpy{name: "sweep", alive: func(targets []string) []plugins.Result {
+		out := make([]plugins.Result, 0, len(targets))
+		for _, tg := range targets {
+			out = append(out, plugins.Result{IP: tg, Name: tg})
+		}
+		return out
+	}}
+	auditUsePlugins(t, sweepSpy)
+	up, uploaded := auditUploadSink(t)
+	collectorScopes.set([]collectorScope{}, nil)
+	t.Cleanup(func() { scopesEmptyWarned.Store(false) })
+
+	const job = "7a1c0000-0000-4000-8000-000000000011"
+	nc, err := nats.Connect(auditNATSURL(t), nats.Timeout(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := fmt.Sprintf("collector.jobscopes-%d.c1", time.Now().UnixNano())
+	var mu sync.Mutex
+	var reports []jobReport
+	jobsOpen, scopeRequests := true, 0
+	if _, err = nc.Subscribe(subject+".jobs.request", func(m *nats.Msg) {
+		mu.Lock()
+		open := jobsOpen
+		jobsOpen = false
+		mu.Unlock()
+		if !open {
+			_ = m.Respond([]byte(`{"jobs":[]}`))
+			return
+		}
+		_ = m.Respond([]byte(`{"jobs":[{"id":"` + job + `","job_type":"sweep","config":{}}]}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = nc.Subscribe(subject+".scopes.request", func(m *nats.Msg) {
+		mu.Lock()
+		scopeRequests++
+		mu.Unlock()
+		_ = m.Respond([]byte(`{"scopes":[{"id":"6f0b6f0e-0000-4000-8000-0000000000b2","kind":"host","target":"` + target +
+			`","schedule":"24h","plugins":["sweep"]}]}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = nc.Subscribe(subject+".jobs.status", func(m *nats.Msg) {
+		var r jobReport
+		_ = json.Unmarshal(m.Data, &r)
+		mu.Lock()
+		reports = append(reports, r)
+		mu.Unlock()
+		_ = m.Respond([]byte(`{"status":"recorded"}`))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	scopeChannel.Store(&scopeChannelState{nc: nc, subject: subject})
+	t.Cleanup(func() { scopeChannel.Store(nil); nc.Close() })
+
+	if ran := runOpenJobs(context.Background(), &collectorConfig{}, up, &hostCache{}); ran != 1 {
+		t.Fatalf("jobs run = %d, want 1", ran)
+	}
+	mu.Lock()
+	got, requested := slices.Clone(reports), scopeRequests
+	mu.Unlock()
+	if requested != 1 {
+		t.Errorf("scopes requests = %d, want 1 before the job", requested)
+	}
+	if len(got) != 2 || got[1].Status != jobCompleted || got[1].Result.Scopes != 1 || got[1].Result.Records != 1 {
+		t.Errorf("job reports %+v, want running, then completed on the returned scope with 1 record", got)
+	}
+	if recs := uploaded(); len(recs) != 1 || recs[0].TargetIP != target {
+		t.Errorf("uploaded %+v, want the record of %s", recs, target)
+	}
+
+	// A tick without open jobs sends no scopes request, also while the
+	// collector holds no scope.
+	collectorScopes.set([]collectorScope{}, nil)
+	runOpenJobs(context.Background(), &collectorConfig{}, up, &hostCache{})
+	mu.Lock()
+	requested = scopeRequests
+	mu.Unlock()
+	if requested != 1 {
+		t.Errorf("scopes requests = %d after a tick without jobs, want still 1", requested)
+	}
+}
+
 // TestDiscoveryJobProtocols: the plugins of each job type.
 func TestDiscoveryJobProtocols(t *testing.T) {
 	scope := []string{"snmp", "sweep", "ssh"}

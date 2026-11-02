@@ -361,7 +361,7 @@
     "enroll": {
       "button": "Collector verbinden",
       "title": "Collector verbinden",
-      "intro": "Schließen Sie einen Collector an: erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Die Infrastruktur erscheint automatisch.",
+      "intro": "Schließen Sie einen Collector an: Erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Der Collector muss den Server über Port 4222/TCP erreichen. Die Subnetze, die er meldet, erscheinen hier als Vorschläge; erst bestätigte Subnetze scannt er.",
       "label": "Bezeichnung (z. B. Standort)",
       "generate": "Code erzeugen",
       "once": "Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:",
@@ -378,6 +378,13 @@
       "offline": "Offline",
       "disabled": "Deaktiviert",
       "paused": "Pausiert (Lizenz)"
+    },
+    "collectorHints": {
+      "noEdge": "Keine Edge-Verbindung: Der Collector liefert Daten nur über Port 4222/TCP (mTLS), diese Verbindung steht nicht.",
+      "noEdgeCauses": "Häufige Ursachen: Port 4222/TCP in einer Firewall gesperrt, Collector nicht enrolled oder nach dem Enrollment nicht neu gestartet, Server-Zertifikat passt nicht zum Hostnamen. Siehe docs/troubleshooting-installation.md, Abschnitt „Collector delivers nothing“.",
+      "noScope": "Kein Discovery-Scope – der Collector scannt nichts. Vorgeschlagene Subnetze bestätigen oder Scope anlegen.",
+      "showSuggestions": "Vorgeschlagene Subnetze anzeigen ({{count}})",
+      "noScopeRights": "Scope anlegen erfordert die Berechtigung discovery:manage, Vorschläge bestätigen zusätzlich review:resolve."
     },
     "scopes": {
       "title": "Discovery-Scopes",
@@ -524,13 +531,19 @@
   "accessibility": {
     "closeModal": "Modal schließen",
     "closePanel": "Detailansicht schließen",
-    "toggleDarkMode": "Dunkelmodus umschalten",
     "commandPaletteSearch": "Befehle durchsuchen",
     "searchCIs": "Configuration Items durchsuchen",
     "filterCIStatus": "CI-Status filtern",
     "primaryNavigation": "Hauptnavigation",
     "breadcrumb": "Brotkrumen-Navigation",
     "skipToContent": "Zum Inhalt springen"
+  },
+  "theme": {
+    "toggle": "Dunkelmodus umschalten – aktuell: {{current}}, als Nächstes: {{next}}",
+    "light": "Hell",
+    "dark": "Dunkel",
+    "system": "System",
+    "systemResolved": "System ({{theme}})"
   },
   "asset": {
     "title": "Inventar",
@@ -721,6 +734,7 @@
     "revoke": "Widerrufen",
     "sent": "Einladung an {{email}} gesendet, gültig bis {{expires}}.",
     "link": "Einladungslink (wird nur jetzt angezeigt)",
+    "mailOnly": "Den Einladungslink erhält nur die eingeladene Adresse per E-Mail.",
     "errorTitle": "Einladungen konnten nicht geladen werden",
     "errors": {
       "notSaved": "Die Einladung wurde nicht gesendet. Bitte prüfen Sie die markierten Felder.",
@@ -735,6 +749,7 @@
       "notFound": "Die Einladung gibt es nicht mehr. Die Liste wurde aktualisiert.",
       "accepted": "Die Einladung wurde bereits angenommen und kann nicht mehr geändert werden.",
       "unavailable": "Einladungen sind auf diesem Server nicht eingerichtet. Wenden Sie sich an den Betrieb.",
+      "mailFailed": "Die Einladungs-E-Mail konnte nicht versendet werden, es wurde nichts gespeichert oder geändert. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Betrieb.",
       "rejected": "Der Server hat die Einladung abgelehnt: {{detail}}",
       "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
     }
@@ -781,7 +796,11 @@
     "invitationAccepted": "Ihr Konto für {{email}} ist angelegt. Melden Sie sich jetzt an.",
     "backendUnreachable": "Der Server ist nicht erreichbar. Prüfen Sie, ob Reticora läuft und die Adresse stimmt, und versuchen Sie es erneut.",
     "signupPrompt": "Noch kein Konto?",
-    "signupLink": "Konto anlegen"
+    "signupLink": "Konto anlegen",
+    "otherAccount": {
+      "hint": "Ist in diesem Browser noch ein anderes Konto angemeldet, etwa in einem anderen Tab, meldet die Anmeldung Sie mit diesem Konto an statt mit dem neuen. Melden Sie es dann zuerst ab oder verwenden Sie ein privates Fenster.",
+      "signOut": "Anderes Konto abmelden"
+    }
   },
   "topology": {
     "subtitle": "Beziehungen zwischen Configuration Items als Graph.",
@@ -1390,7 +1409,10 @@
       "reason": "Grund: {{detail}}",
       "partial": "Das Feld „{{name}}“ wurde gespeichert, die Index-Einstellungen aber nicht. {{reason}}",
       "flagsNotSaved": "Index-Einstellungen nicht gespeichert. {{reason}}",
-      "fieldNotSaved": "Feld nicht gespeichert. {{reason}}"
+      "fieldNotSaved": "Feld nicht gespeichert. {{reason}}",
+      "forbiddenPermission": "Keine Berechtigung: Ihrer Sitzung fehlt das Recht „{{permission}}“.",
+      "systemType": "Systemtypen sind schreibgeschützt und erhalten keine eigenen Felder. Klonen Sie den Typ oder legen Sie ein organisationsweites Feld an.",
+      "readOnly": "System-Attribute sind schreibgeschützt."
     },
     "indexJob": {
       "scheduled": "Index-Job eingeplant",
@@ -1402,6 +1424,21 @@
         "failed": "fehlgeschlagen",
         "cancelled": "abgebrochen"
       }
+    },
+    "systemReadOnly": "Systemtyp: schreibgeschützt. Felder lassen sich hier nicht hinzufügen, und der Typ lässt sich nicht deaktivieren. Eigene Felder erfassen Sie so:",
+    "systemReadOnlyClone": "„Klonen“ legt einen eigenen Typ mit allen Feldern dieses Typs an, den Sie erweitern können. Bestehende und von der Discovery erkannte CIs behalten den Systemtyp.",
+    "systemReadOnlyOrgFields": "Organisationsweite Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und erkannte CIs.",
+    "orgFields": {
+      "title": "Organisationsweite Felder",
+      "hint": "Diese Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und von der Discovery erkannte CIs. Systemfelder sind schreibgeschützt.",
+      "add": "Neues organisationsweites Feld",
+      "editorHint": "Das Feld gilt für alle CI-Typen der Organisation. Hier angelegte organisationsweite Felder sind optional.",
+      "empty": "Keine organisationsweiten Felder definiert.",
+      "readOnly": "Nur lesbar: Zum Ändern brauchen Sie das Recht „ci_attribute:manage“.",
+      "editAction": "Organisationsweites Feld bearbeiten: {{name}}",
+      "deleteAction": "Organisationsweites Feld löschen: {{name}}",
+      "deleteConfirm": "Organisationsweites Feld „{{name}}“ löschen? Es entfällt danach bei allen CI-Typen der Organisation.",
+      "deleteFailed": "Feld „{{name}}“ nicht gelöscht. {{reason}}"
     }
   },
   "inventory": {
@@ -1787,16 +1824,43 @@
       "email": "E-Mail-Adresse",
       "name": "Ihr Name",
       "submit": "Konto anlegen",
-      "sent": "Wir haben einen Bestätigungslink an {{email}} geschickt. Öffnen Sie ihn, um fortzufahren."
+      "sent": "Wir haben einen Bestätigungslink an {{email}} geschickt. Öffnen Sie ihn, um fortzufahren.",
+      "unavailable": "Die Registrierung ist auf diesem Server noch nicht eingerichtet: Es ist kein E-Mail-Versand (SMTP) konfiguriert. Wenden Sie sich an den Betreiber.",
+      "temporarilyUnavailable": "Die Registrierung ist gerade nicht möglich. Bitte versuchen Sie es in einigen Minuten erneut.",
+      "rateLimited": "Zu viele Versuche. Bitte warten Sie einige Minuten und versuchen Sie es dann erneut.",
+      "emailBlocked": "Diese E-Mail-Domain wird für die Registrierung nicht angenommen (z. B. Wegwerf-Adressen). Bitte verwenden Sie Ihre geschäftliche E-Mail-Adresse.",
+      "emailInvalid": "Bitte geben Sie eine gültige E-Mail-Adresse an (z. B. name@firma.de).",
+      "organizationInvalid": "Bitte geben Sie den Namen Ihrer Organisation an (höchstens 200 Zeichen).",
+      "nameTooLong": "Ihr Name darf höchstens 200 Zeichen haben.",
+      "captchaFailed": "Die automatische Sicherheitsprüfung ist fehlgeschlagen oder abgelaufen. Bitte senden Sie das Formular erneut ab.",
+      "failed": "Die Registrierung ist fehlgeschlagen: {{detail}}"
     },
     "verify": {
       "password": "Passwort festlegen (mindestens 12 Zeichen)",
+      "policy": "Mindestens {{min}} Zeichen mit Groß- und Kleinbuchstaben, einer Ziffer und einem Sonderzeichen; nicht Ihre E-Mail-Adresse.",
+      "policyNotMet": "Das Passwort erfüllt die Richtlinie noch nicht. Es fehlt: {{rules}}.",
+      "rules": {
+        "length": "mindestens {{min}} Zeichen",
+        "upper": "ein Großbuchstabe",
+        "lower": "ein Kleinbuchstabe",
+        "digit": "eine Ziffer",
+        "special": "ein Sonderzeichen"
+      },
       "submit": "Konto bestätigen",
       "done": "Ihre Organisation „{{slug}}“ ist angelegt.",
       "login": "Jetzt anmelden und fortfahren",
       "expired": "Der Bestätigungslink ist abgelaufen. Registrieren Sie sich bitte erneut.",
       "invalid": "Der Bestätigungslink ist ungültig oder wurde bereits verwendet.",
-      "trial": "Ihr Testzeitraum läuft bis {{date}}."
+      "trial": "Ihr Testzeitraum läuft bis {{date}}.",
+      "notAccepted": "Das Konto wurde nicht bestätigt. Bitte prüfen Sie das Passwort.",
+      "passwordRejected": "Das Passwort wurde nicht angenommen. Es muss der Richtlinie entsprechen und darf nicht Ihre E-Mail-Adresse sein.",
+      "accountExists": "Für diese E-Mail-Adresse gibt es bereits ein Konto. Melden Sie sich damit an oder registrieren Sie sich mit einer anderen Adresse.",
+      "organizationTaken": "Der Name der Organisation ist bereits vergeben. Bitte registrieren Sie sich mit einem anderen Namen erneut.",
+      "unavailable": "Die Bestätigung ist auf diesem Server gerade nicht möglich. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Betreiber.",
+      "failed": "Die Bestätigung ist fehlgeschlagen: {{detail}}",
+      "signedIn": "Dieser Tab ist noch als {{user}} angemeldet. Das neue Konto wird trotzdem angelegt; melden Sie sich danach hier ab, bevor Sie sich mit dem neuen Konto anmelden.",
+      "signOutFirst": "Sie sind noch als {{user}} angemeldet. Melden Sie sich zuerst ab, sonst meldet die Anmeldung Sie wieder mit diesem Konto an statt mit dem neuen. Nach der Abmeldung (der Anmeldedienst fragt eventuell noch einmal nach) melden Sie sich auf der Anmeldeseite mit dem neuen Konto an.",
+      "signOutAndSignIn": "Abmelden und mit dem neuen Konto anmelden"
     },
     "collector": {
       "hint": "Installieren Sie den Collector in Ihrem Netz und geben Sie dort einen Enrollment-Code ein.",

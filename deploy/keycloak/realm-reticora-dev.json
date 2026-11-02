@@ -114,6 +114,9 @@
         "RETICORA_OIDC_ISSUER_ORIGIN_PLACEHOLDER",
         "http://localhost:5173"
       ],
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      },
       "defaultClientScopes": [
         "profile",
         "email",

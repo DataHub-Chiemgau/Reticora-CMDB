@@ -118,8 +118,9 @@ export interface ScopedUser {
  * scopedUser creates a Keycloak user of the administrator's organization holding exactly
  * one standard role (`role`, e.g. client_technician or viewer) in the scope of one client
  * or site (WP-535). An invitation carries a standard role, so the user is invited as
- * viewer of the client `inviteClientId` and accepts it through the API (the server
- * creates the Keycloak user); the role is then assigned with POST /api/v1/role-assignments
+ * viewer of the client `inviteClientId` and accepts it through the API with the token of
+ * the invitation mail (the server creates the Keycloak user); the role is then assigned
+ * with POST /api/v1/role-assignments
  * {user_id, role_id, scope_type, scope_id} and the viewer assignment of the invitation is
  * deleted. GET /role-assignments afterwards lists exactly the new assignment. Every call
  * goes through the API with the administrator's token; a refused call fails the setup.
@@ -175,9 +176,13 @@ export async function scopedUser(
     scope_type: 'client',
     scope_id: opts.inviteClientId,
   });
-  expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+  expect(invitation.token, 'the token reaches the invited mailbox only').toBeUndefined();
   const accept = await request.post(`${BASE}/api/v1/invitations/accept`, {
-    data: { token: invitation.token, password, display_name: `Audit ${opts.label}` },
+    data: {
+      token: await invitationToken(request, email),
+      password,
+      display_name: `Audit ${opts.label}`,
+    },
     failOnStatusCode: false,
   });
   expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);
@@ -295,6 +300,60 @@ export async function verificationLink(request: APIRequestContext, email: string
     )
     .not.toBe('');
   return link;
+}
+
+/**
+ * invitationTokens returns the tokens of the invitation e-mails to `email` in the mail
+ * catcher, newest first.
+ */
+export async function invitationTokens(
+  request: APIRequestContext,
+  email: string,
+): Promise<string[]> {
+  const search = await request.get(`${MAILPIT}/api/v1/search`, {
+    params: { query: `to:"${email}"` },
+  });
+  if (!search.ok()) return [];
+  const found = (await search.json()) as { messages?: { ID: string }[] };
+  const tokens: string[] = [];
+  for (const { ID } of found.messages ?? []) {
+    const message = (await (await request.get(`${MAILPIT}/api/v1/message/${ID}`)).json()) as {
+      Text?: string;
+      HTML?: string;
+    };
+    const match = `${message.Text ?? ''} ${message.HTML ?? ''}`.match(
+      /\/invitations\/accept\?token=([A-Za-z0-9_\-.%]+)/,
+    );
+    if (match) tokens.push(decodeURIComponent(match[1]!));
+  }
+  return tokens;
+}
+
+/**
+ * invitationToken waits for the invitation e-mail to `email` and returns the token of its
+ * accept link. This stack creates the invitee's IdP account on acceptance (Keycloak admin
+ * client and central SMTP server), so issue and renewal return no token: only the invited
+ * mailbox gets it, sent straight over the central SMTP server (the mail catcher) before
+ * the response, and the specs read it from the mail catcher like the invitee. `known`
+ * are tokens to skip, those of earlier invitations to the address or the one a renewal
+ * replaced; the newest other token is returned.
+ */
+export async function invitationToken(
+  request: APIRequestContext,
+  email: string,
+  known: string[] = [],
+): Promise<string> {
+  let token = '';
+  await expect
+    .poll(
+      async () => {
+        token = (await invitationTokens(request, email)).find((t) => !known.includes(t)) ?? '';
+        return token;
+      },
+      { message: `invitation e-mail to ${email}`, timeout: 60_000, intervals: [1_000, 2_000] },
+    )
+    .not.toBe('');
+  return token;
 }
 
 /**

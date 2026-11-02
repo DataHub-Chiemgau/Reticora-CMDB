@@ -142,9 +142,11 @@ type Config struct {
 	EgressAllowPrivate bool
 
 	// Self-signup (TLC-01, E-33). SignupVerifyURL is the page the
-	// verification link opens; the Keycloak admin client creates the first
-	// org_admin's account. Without them, or without an e-mail channel
-	// (WP-137), signup answers 503.
+	// verification link opens (the SPA's /onboarding; the link adds
+	// ?token=<token>); the Keycloak admin client creates the first
+	// org_admin's account. Without them, or without the central SMTP server
+	// (WP-137), signup answers 503. Development defaults to
+	// DefaultSignupVerifyURL.
 	SignupVerifyURL           string
 	KeycloakAdminClientID     string
 	KeycloakAdminClientSecret string
@@ -357,15 +359,21 @@ func Load() *Config {
 	cfg.explicit = l.set
 	cfg.invalid = l.invalid
 
-	// Compose derives the accept URL from RETICORA_PUBLIC_BASE_URL, which may
-	// end with a slash: https://host//invitations/accept becomes
-	// https://host/invitations/accept.
+	// Compose derives the accept and the verify URL from
+	// RETICORA_PUBLIC_BASE_URL, which may end with a slash:
+	// https://host//invitations/accept becomes
+	// https://host/invitations/accept, https://host//onboarding becomes
+	// https://host/onboarding.
 	cfg.InvitationAcceptURL = collapseLeadingSlashes(cfg.InvitationAcceptURL)
+	cfg.SignupVerifyURL = collapseLeadingSlashes(cfg.SignupVerifyURL)
 
 	if cfg.Environment == EnvDevelopment {
 		cfg.LogLevel = slog.LevelDebug
 		if cfg.InvitationAcceptURL == "" {
 			cfg.InvitationAcceptURL = DefaultInvitationAcceptURL
+		}
+		if cfg.SignupVerifyURL == "" {
+			cfg.SignupVerifyURL = DefaultSignupVerifyURL
 		}
 	} else if !cfg.anySet(s3Keys...) {
 		// Outside development the local MinIO defaults are never used
@@ -379,6 +387,10 @@ func Load() *Config {
 // DefaultInvitationAcceptURL is the accept page of the development frontend
 // (Vite on port 5173).
 const DefaultInvitationAcceptURL = "http://localhost:5173/invitations/accept"
+
+// DefaultSignupVerifyURL is the onboarding page of the development frontend
+// (Vite on port 5173), which redeems the verification token of a signup.
+const DefaultSignupVerifyURL = "http://localhost:5173/onboarding"
 
 // collapseLeadingSlashes replaces a run of slashes at the start of the path
 // of raw with one; any other value stays as it is.
@@ -400,6 +412,12 @@ func absoluteHTTPURL(raw string) bool {
 	}
 	scheme := strings.ToLower(u.Scheme)
 	return scheme == "http" || scheme == "https"
+}
+
+// smtpLocalhost reports whether Go's net/smtp sends a login to host over an
+// unencrypted connection: only to these literal names (smtp.PlainAuth).
+func smtpLocalhost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // Minimum retention periods of NFR-06 and AUD-09.
@@ -569,6 +587,11 @@ func (c *Config) Validate(noDB bool) error {
 	if c.InvitationAcceptURL != "" && !absoluteHTTPURL(c.InvitationAcceptURL) {
 		errs = append(errs, fmt.Errorf("RETICORA_INVITATION_ACCEPT_URL must be an absolute http or https URL with a host and without user info"))
 	}
+	// The verification mail of the self-signup carries this link, with the
+	// same rules.
+	if c.SignupVerifyURL != "" && !absoluteHTTPURL(c.SignupVerifyURL) {
+		errs = append(errs, fmt.Errorf("RETICORA_SIGNUP_VERIFY_URL must be an absolute http or https URL with a host and without user info"))
+	}
 	if c.TrialDays <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_TRIAL_DAYS must be positive, got %d", c.TrialDays))
 	}
@@ -583,6 +606,10 @@ func (c *Config) Validate(noDB bool) error {
 			errs = append(errs, fmt.Errorf("RETICORA_SMTP_TLS=%q is not one of starttls, tls, none", c.SMTPTLS))
 		case c.SMTPPort < 1 || c.SMTPPort > 65535:
 			errs = append(errs, fmt.Errorf("RETICORA_SMTP_PORT=%d is out of range", c.SMTPPort))
+		case c.SMTPTLS == "none" && c.SMTPUsername != "" && !smtpLocalhost(c.SMTPHost):
+			// Go's net/smtp sends no login over an unencrypted connection
+			// to another host: every e-mail would fail (notify.SMTPConfig).
+			errs = append(errs, fmt.Errorf("RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls: no login is sent unencrypted to %s", c.SMTPHost))
 		}
 	}
 	for _, r := range []struct {

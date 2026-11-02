@@ -98,7 +98,16 @@ export const pageToPath: Record<AppPage, string> = {
 interface CommandPaletteProps {
   onNavigate: (page: AppPage) => void;
   onCreateCI: () => void;
+  /**
+   * onToggleDarkMode switches to the next theme mode, relative to the OS
+   * theme: system -> opposite of the OS -> OS theme -> system.
+   */
   onToggleDarkMode: () => void;
+  /**
+   * themeToggleLabel names the theme command with the current and the next
+   * mode, as the header toggle does. Defaults to a generic label.
+   */
+  themeToggleLabel?: string;
   /**
    * isFeatureEnabled reports whether an entitlement-gated module is available.
    * Defaults to always-true so tests and ungated contexts keep full commands.
@@ -238,6 +247,7 @@ export function CommandPalette({
   onNavigate,
   onCreateCI,
   onToggleDarkMode,
+  themeToggleLabel,
   isFeatureEnabled = () => true,
   isPageEnabled = () => true,
 }: CommandPaletteProps) {
@@ -298,8 +308,8 @@ export function CommandPalette({
         },
         {
           id: 'toggle-theme',
-          label: t('commandPalette.commands.toggleDarkMode'),
-          keywords: ['theme dark light appearance'],
+          label: themeToggleLabel ?? t('commandPalette.commands.toggleDarkMode'),
+          keywords: ['theme dark light system appearance farbschema hell dunkel'],
           action: onToggleDarkMode,
         },
         {
@@ -429,7 +439,15 @@ export function CommandPalette({
         const page = cmd.id.slice(4) as AppPage;
         return isFeatureEnabled(navFeatureFor[page]) && isPageEnabled(page);
       }),
-    [onCreateCI, onNavigate, onToggleDarkMode, t, isFeatureEnabled, isPageEnabled],
+    [
+      onCreateCI,
+      onNavigate,
+      onToggleDarkMode,
+      themeToggleLabel,
+      t,
+      isFeatureEnabled,
+      isPageEnabled,
+    ],
   );
 
   const filteredCommands = useMemo(() => {
@@ -570,9 +588,11 @@ export function CommandPalette({
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm" />
+        {/* Portaled under <body>, outside the App shell: the content sets the
+            theme text colour itself instead of inheriting it from the shell. */}
         <Dialog.Content
           onCloseAutoFocus={handleCloseAutoFocus}
-          className="fixed left-1/2 top-[18vh] z-50 w-[min(92vw,36rem)] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900"
+          className="fixed left-1/2 top-[18vh] z-50 w-[min(92vw,36rem)] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white text-gray-900 shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
         >
           <Dialog.Title className="sr-only">{t('commandPalette.title')}</Dialog.Title>
           {contact ? (

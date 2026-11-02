@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,11 +17,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -268,7 +272,7 @@ func TestInvitationsAgainstPostgres(t *testing.T) {
 	// With the IdP client: the password creates the account; a failing IdP
 	// rolls the acceptance back.
 	accounts := &stubInvitationAccounts{}
-	h.WithAccounts(accounts)
+	h.WithAccounts(accounts, &recordingMailer{})
 	if rec := call(ctx, http.MethodPost, "/api/v1/invitations/accept", `{"token":"`+pending.Token+`"}`); rec.Code != http.StatusBadRequest {
 		t.Errorf("missing password: %d, want 400", rec.Code)
 	}
@@ -573,6 +577,293 @@ func TestAuditDefectInvitationCreatedEvent(t *testing.T) {
 			t.Errorf("organization B invitation events = %d, want 0", len(got))
 		}
 	})
+}
+
+// TestInvitationMailStraightToTheInviteeAgainstPostgres covers TLC-03 and
+// NTF-05 with the IdP admin client, where the acceptance creates a verified
+// IdP account: issue and renewal send exactly one mail straight to the
+// invited address (the mailer over the central SMTP server) in their
+// transaction, with the stored token; the response, invitation.created, the
+// audit entries and the list carry neither link nor token. The fixture
+// organization has no e-mail channel, like the default organization of an
+// installation, and its invitee still gets the mail; the mailed token is
+// accepted. A send the server refuses rolls back: the issue stores no
+// invitation, event or audit entry, the renewal keeps token, expiry, events
+// and audit; both answer 503 "the invitation e-mail could not be sent".
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestInvitationMailStraightToTheInviteeAgainstPostgres' ./internal/user/
+func TestInvitationMailStraightToTheInviteeAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "d2")
+	bg := context.Background()
+	mailer, accounts := &recordingMailer{}, &stubInvitationAccounts{}
+	mux := chi.NewRouter()
+	NewInvitationHandler(NewPGInvitations(f.App)).WithAcceptURL(testAcceptURL).WithAccounts(accounts, mailer).RegisterRoutes(mux)
+	admin := f.AppUser(t, f.OrgA, "mail-d2-orgadmin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`,
+		f.OrgA, admin, auditRoleID(t, f, "org_admin")); err != nil {
+		t.Fatal(err)
+	}
+	adminCtx, viewerRole := auditPrincipalCtx(t, f, admin), auditRoleID(t, f, "viewer")
+	count := func(sql string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, sql, args...).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return n
+	}
+	var orgName string
+	if err := f.Admin.QueryRow(bg, `SELECT name FROM organization WHERE id = $1`, f.OrgA).Scan(&orgName); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(`SELECT count(*) FROM notification_channel WHERE organization_id = $1`, f.OrgA); n != 0 {
+		t.Fatalf("fixture: the organization has %d notification channels, want none", n)
+	}
+	events := func() int {
+		return count(`SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = 'invitation.created'`, f.OrgA)
+	}
+	audits := func() int {
+		return count(`SELECT count(*) FROM audit_log WHERE organization_id = $1 AND resource_type = 'user_invitation'`, f.OrgA)
+	}
+	// leaked counts the event and audit rows of A that hold the link or
+	// the token (its secret part).
+	leaked := func(token string) int {
+		_, secret, _ := strings.Cut(token, ".")
+		return count(`SELECT count(*) FROM event_outbox o WHERE organization_id = $1 AND (data ? 'link' OR strpos(o::text, $2) > 0)`, f.OrgA, secret) +
+			count(`SELECT count(*) FROM audit_log a WHERE organization_id = $1 AND strpos(a::text, $2) > 0`, f.OrgA, secret)
+	}
+	storedHash := func(id string) (hash string, expires time.Time) {
+		t.Helper()
+		if err := f.Admin.QueryRow(bg, `SELECT token_hash, expires_at FROM user_invitation WHERE id = $1`, id).Scan(&hash, &expires); err != nil {
+			t.Fatal(err)
+		}
+		return hash, expires
+	}
+	refused := func(t *testing.T, w *httptest.ResponseRecorder) {
+		t.Helper()
+		var problem struct {
+			Detail string `json:"detail"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &problem)
+		if w.Code != http.StatusServiceUnavailable || problem.Detail != ErrInvitationMail.Error() {
+			t.Errorf("refused send = %d %s, want 503 %q", w.Code, w.Body.String(), ErrInvitationMail)
+		}
+	}
+	mailed := func(t *testing.T, i int, w *httptest.ResponseRecorder, email string) string {
+		t.Helper()
+		var inv Invitation
+		if err := json.Unmarshal(w.Body.Bytes(), &inv); err != nil {
+			t.Fatalf("%s: %v", w.Body.String(), err)
+		}
+		if len(mailer.sent) != i+1 {
+			t.Fatalf("%d direct mails, want %d", len(mailer.sent), i+1)
+		}
+		m := mailer.sent[i]
+		token := tokenOf(t, m.Link)
+		if hash, expires := storedHash(inv.ID); HashInvitationToken(token) != hash || !m.ExpiresAt.Equal(expires) {
+			t.Errorf("mail %d carries no stored token or another expiry: %+v", i, m)
+		}
+		if m.To != email || m.OrganizationName != orgName {
+			t.Errorf("mail %d = %+v, want to %s for %s", i, m, email, orgName)
+		}
+		if inv.Token != "" || strings.Contains(w.Body.String(), token) {
+			t.Errorf("the response carries the token: %s", w.Body.String())
+		}
+		if n := leaked(token); n != 0 {
+			t.Errorf("%d event or audit rows hold the link or the token", n)
+		}
+		return token
+	}
+
+	const email = "mail-d2-invitee@invite.example"
+	w := auditPost(mux, adminCtx, "/api/v1/invitations", `{"email":"`+email+`","role_id":"`+viewerRole+`"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("issue = %d %s", w.Code, w.Body.String())
+	}
+	var inv Invitation
+	if err := json.Unmarshal(w.Body.Bytes(), &inv); err != nil {
+		t.Fatal(err)
+	}
+	first := mailed(t, 0, w, email)
+	if events() != 1 || audits() != 1 {
+		t.Errorf("after the issue: %d events, %d audit entries, want 1 each", events(), audits())
+	}
+
+	w = auditPost(mux, adminCtx, "/api/v1/invitations/"+inv.ID+"/renew", ``)
+	if w.Code != http.StatusOK {
+		t.Fatalf("renew = %d %s", w.Code, w.Body.String())
+	}
+	if second := mailed(t, 1, w, email); second == first {
+		t.Error("the renewal mailed the old token")
+	}
+	list := httptest.NewRecorder()
+	mux.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/invitations", nil).WithContext(adminCtx))
+	for _, m := range mailer.sent {
+		if list.Code != http.StatusOK || strings.Contains(list.Body.String(), tokenOf(t, m.Link)) {
+			t.Errorf("list = %d and holds a token: %s", list.Code, list.Body.String())
+		}
+	}
+
+	beforeEvents, beforeAudits := events(), audits()
+	hash, expires := storedHash(inv.ID)
+	mailer.err = errors.New("smtp connect relay.internal:587: connection refused")
+	const lost = "mail-d2-lost@invite.example"
+	refused(t, auditPost(mux, adminCtx, "/api/v1/invitations", `{"email":"`+lost+`","role_id":"`+viewerRole+`"}`))
+	refused(t, auditPost(mux, adminCtx, "/api/v1/invitations/"+inv.ID+"/renew", ``))
+	mailer.err = nil
+	if n := count(`SELECT count(*) FROM user_invitation WHERE organization_id = $1 AND email = $2`, f.OrgA, lost); n != 0 {
+		t.Errorf("a refused send stored %d invitations", n)
+	}
+	if h, e := storedHash(inv.ID); h != hash || !e.Equal(expires) {
+		t.Error("a refused send renewed the invitation")
+	}
+	if events() != beforeEvents || audits() != beforeAudits {
+		t.Errorf("refused sends: %d events (was %d), %d audit entries (was %d)", events(), beforeEvents, audits(), beforeAudits)
+	}
+
+	// The invitee accepts with the token of the last mail.
+	w = auditPost(mux, bg, "/api/v1/invitations/accept",
+		`{"token":"`+tokenOf(t, mailer.sent[1].Link)+`","password":"correct horse battery"}`)
+	var accepted AcceptedInvitation
+	if err := json.Unmarshal(w.Body.Bytes(), &accepted); w.Code != http.StatusCreated || err != nil || !accepted.AccountCreated {
+		t.Errorf("accept with the mailed token = %d %s", w.Code, w.Body.String())
+	}
+	if len(accounts.created) != 1 || accounts.created[0] != email {
+		t.Errorf("IdP accounts = %v, want %s", accounts.created, email)
+	}
+}
+
+// outboxLockClass is the class of the advisory lock that the insert trigger
+// of event_outbox takes per organization (migration 000120).
+const outboxLockClass int32 = 1165389428
+
+// probeOrgLocks takes the advisory locks of orgID's audit chain
+// (audit.AcquireAdvisoryLock) and event outbox in a transaction of its own
+// on pool, with lock_timeout 500 ms, and releases them again. An error means
+// that another transaction holds one of them.
+func probeOrgLocks(pool *pgxpool.Pool, orgID string) error {
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '500ms'`); err != nil {
+		return err
+	}
+	if err := audit.AcquireAdvisoryLock(ctx, tx, orgID); err != nil {
+		return fmt.Errorf("audit chain lock: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, audit_org_lock_key($2::uuid))`, outboxLockClass, orgID); err != nil {
+		return fmt.Errorf("event outbox lock: %w", err)
+	}
+	return nil
+}
+
+// lockProbeMailer stands in for the central SMTP sender: while the issue or
+// renewal sends, it takes the organization's advisory locks from another
+// connection (probeOrgLocks) and records each failure.
+type lockProbeMailer struct {
+	pool  *pgxpool.Pool
+	orgID string
+	sent  int
+	held  []error
+}
+
+func (m *lockProbeMailer) SendInvitation(context.Context, *notify.InvitationMail) error {
+	m.sent++
+	if err := probeOrgLocks(m.pool, m.orgID); err != nil {
+		m.held = append(m.held, err)
+	}
+	return nil
+}
+
+// TestInvitationMailHoldsNoOrganizationLockAgainstPostgres covers TLC-03 and
+// NTF-05 with the IdP admin client: issue and renewal send the invitation
+// mail before the audit entry and invitation.created take the
+// organization's audit-chain and event-outbox advisory locks
+// (sendInvitation), so a slow or unreachable SMTP server does not stall the
+// audited or event-writing writes of the organization for the duration of
+// the send. While the mailer runs, another connection must get both locks
+// within 500 ms; the probe itself must fail against a transaction holding
+// either lock. Audit entry and event are still written after the send.
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestInvitationMailHoldsNoOrganizationLockAgainstPostgres' ./internal/user/
+func TestInvitationMailHoldsNoOrganizationLockAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "d2")
+	bg := context.Background()
+	count := func(sql string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, sql, args...).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return n
+	}
+
+	// The probe detects a held lock of either kind.
+	for name, lock := range map[string]func(pgx.Tx) error{
+		"audit chain": func(tx pgx.Tx) error { return audit.AcquireAdvisoryLock(bg, tx, f.OrgA) },
+		"event outbox": func(tx pgx.Tx) error {
+			_, err := tx.Exec(bg, `SELECT pg_advisory_xact_lock($1, audit_org_lock_key($2::uuid))`, outboxLockClass, f.OrgA)
+			return err
+		},
+	} {
+		holder, err := f.Admin.Begin(bg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := lock(holder); err != nil {
+			t.Fatalf("%s lock: %v", name, err)
+		}
+		if err := probeOrgLocks(f.Admin, f.OrgA); err == nil {
+			t.Errorf("the probe got the %s lock that another transaction holds", name)
+		}
+		_ = holder.Rollback(bg)
+	}
+	if err := probeOrgLocks(f.Admin, f.OrgA); err != nil {
+		t.Fatalf("probe without a holder: %v", err)
+	}
+
+	mailer := &lockProbeMailer{pool: f.Admin, orgID: f.OrgA}
+	mux := chi.NewRouter()
+	NewInvitationHandler(NewPGInvitations(f.App)).WithAcceptURL(testAcceptURL).
+		WithAccounts(&stubInvitationAccounts{}, mailer).RegisterRoutes(mux)
+	admin := f.AppUser(t, f.OrgA, "lock-d2-orgadmin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`,
+		f.OrgA, admin, auditRoleID(t, f, "org_admin")); err != nil {
+		t.Fatal(err)
+	}
+	adminCtx := auditPrincipalCtx(t, f, admin)
+
+	w := auditPost(mux, adminCtx, "/api/v1/invitations",
+		`{"email":"lock-d2-invitee@invite.example","role_id":"`+auditRoleID(t, f, "viewer")+`"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("issue = %d %s", w.Code, w.Body.String())
+	}
+	var inv Invitation
+	if err := json.Unmarshal(w.Body.Bytes(), &inv); err != nil {
+		t.Fatal(err)
+	}
+	if w = auditPost(mux, adminCtx, "/api/v1/invitations/"+inv.ID+"/renew", ``); w.Code != http.StatusOK {
+		t.Fatalf("renew = %d %s", w.Code, w.Body.String())
+	}
+	if mailer.sent != 2 {
+		t.Errorf("%d sends, want one for the issue and one for the renewal", mailer.sent)
+	}
+	for _, err := range mailer.held {
+		t.Errorf("an advisory lock of the organization was held during the send: %v", err)
+	}
+	if n := count(`SELECT count(*) FROM audit_log WHERE organization_id = $1 AND resource_type = 'user_invitation' AND resource_id = $2`,
+		f.OrgA, inv.ID); n != 2 {
+		t.Errorf("%d audit entries of the invitation, want issued and renewed", n)
+	}
+	if n := count(`SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = 'invitation.created' AND entity_id = $2`,
+		f.OrgA, inv.ID); n != 2 {
+		t.Errorf("%d invitation.created events, want one per send", n)
+	}
 }
 
 // Grant ceiling of invitations and role assignments (WP-394, TLC-03, RBA-03,

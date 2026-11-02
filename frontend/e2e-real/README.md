@@ -28,8 +28,13 @@ Invitations need `RETICORA_INVITATION_ACCEPT_URL`, the page the link of the invi
 without it `POST /api/v1/invitations` and `/invitations/{id}/renew` answer 503 and `roles-authz.spec.ts` fails. The
 installed stack derives it from `RETICORA_PUBLIC_BASE_URL` (`deploy/docker-compose/docker-compose.yml`), the onboarding
 overlay `e2e/fixtures/docker-compose.e2e.yml` sets it to `${E2E_BASE_URL:-http://localhost:3000}/invitations/accept`.
-Issue and renewal mail the link to the invitee over the tenant's e-mail channel (`roles-authz.spec.ts` test 05 reads it
-from the mail catcher).
+With the Keycloak admin client and the central SMTP server, as on this stack, the acceptance creates a verified IdP
+account of the address, so the token reaches the invited mailbox only: issue and renewal send the invitation mail
+straight to the invited address over the central SMTP server (here the mail catcher) before they answer, never over a
+notification channel of the tenant, and return no token. Every spec reads it from that mail in the mail catcher
+(`invitationToken` in `support/stack.ts`), as the invitee does; `roles-authz.spec.ts` test 05 checks that a second
+e-mail channel of the tenant adds no copy. Without the admin client the server returns the token once and mails the
+link over the tenant's e-mail channels.
 
 ## Client- and site-scoped users (`client-scope.spec.ts`, WP-535)
 

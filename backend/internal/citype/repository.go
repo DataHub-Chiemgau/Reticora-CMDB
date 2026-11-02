@@ -333,8 +333,14 @@ func (r *MemoryRepository) UpsertField(_ context.Context, orgID, typeID string, 
 		r.globals[orgID] = append(list, f)
 		return &f, nil
 	}
-	if _, ok := r.types[typeID]; !ok {
+	// As in PostgreSQL (checkFieldType): a type of another organization is
+	// unknown, a system type is read-only.
+	t, ok := r.types[typeID]
+	if !ok || (t.OrganizationID != "" && t.OrganizationID != orgID) {
 		return nil, fmt.Errorf("not found")
+	}
+	if t.OrganizationID == "" || t.IsSystem {
+		return nil, errSystemTypeAttribute()
 	}
 	list := r.fields[typeID]
 	for i, existing := range list {

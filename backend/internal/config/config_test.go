@@ -38,7 +38,8 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
-		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_EVENTS_MAX_AGE", "RETICORA_EVENTS_MAX_BYTES",
+		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
+		"RETICORA_EVENTS_MAX_BYTES",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -172,6 +173,9 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"smtp without sender", map[string]string{"RETICORA_SMTP_HOST": "mail.example"}, false, "RETICORA_SMTP_FROM is required"},
 		{"smtp with an unknown tls mode", map[string]string{"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_FROM": "noreply@example.org",
 			"RETICORA_SMTP_TLS": "ssl"}, false, "RETICORA_SMTP_TLS"},
+		{"smtp login without tls", map[string]string{"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_FROM": "noreply@example.org",
+			"RETICORA_SMTP_TLS": "none", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"}, false,
+			"RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls"},
 		{"audit retention below NFR-06", map[string]string{"RETICORA_RETENTION_AUDIT_YEARS": "9"}, false, "RETICORA_RETENTION_AUDIT_YEARS must be at least 10"},
 		{"history retention below NFR-06", map[string]string{"RETICORA_RETENTION_HISTORY_DAYS": "30"}, false, "RETICORA_RETENTION_HISTORY_DAYS must be at least 1095"},
 		{"soft-delete retention below NFR-06", map[string]string{"RETICORA_RETENTION_SOFT_DELETE_DAYS": "7"}, false, "at least 90"},
@@ -188,6 +192,30 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 			err := Load().Validate(tc.noDB)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestValidateSMTPWithoutTLS covers TEC-13: TLS mode none is valid without a
+// login (the mailpit of the E2E overlay, frontend/e2e/fixtures) and with a
+// login to a relay on the same host, which Go's net/smtp authenticates
+// unencrypted; a login to another host is refused (see
+// TestValidateRejectsInvalidSettings), as notify.SMTPConfig does.
+func TestValidateSMTPWithoutTLS(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"E2E mailpit": {"RETICORA_SMTP_HOST": "mailpit", "RETICORA_SMTP_PORT": "1025", "RETICORA_SMTP_TLS": "none",
+			"RETICORA_SMTP_FROM": "Reticora <noreply@reticora-e2e.de>", "RETICORA_SMTP_USERNAME": "", "RETICORA_SMTP_PASSWORD": ""},
+		"login to localhost": {"RETICORA_SMTP_HOST": "localhost", "RETICORA_SMTP_PORT": "25", "RETICORA_SMTP_TLS": "none",
+			"RETICORA_SMTP_FROM": "noreply@example.org", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"},
+		"login over starttls": {"RETICORA_SMTP_HOST": "mail.example", "RETICORA_SMTP_TLS": "starttls",
+			"RETICORA_SMTP_FROM": "noreply@example.org", "RETICORA_SMTP_USERNAME": "mailer", "RETICORA_SMTP_PASSWORD": "pw"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clearEnv(t)
+			setAll(t, env)
+			if err := Load().Validate(true); err != nil {
+				t.Fatalf("Validate() = %v", err)
 			}
 		})
 	}
@@ -232,6 +260,63 @@ func TestInvitationAcceptURL(t *testing.T) {
 			} else if strings.Contains(err.Error(), "secret") {
 				t.Errorf("the start check repeats the value: %v", err)
 			}
+		}
+	}
+}
+
+// TestSignupVerifyURL covers the link of the self-signup verification mail
+// (TLC-01) with the rules of the invitation link: development defaults to
+// the Vite onboarding page; outside development there is no default (signup
+// answers 503 until it is set). Compose derives the URL from
+// RETICORA_PUBLIC_BASE_URL, so a base URL with a trailing slash must not
+// give https://host//onboarding?token=…; the doubled slash is collapsed. A
+// URL without host, a relative URL, another scheme and user info fail the
+// start check, which does not repeat the value.
+func TestSignupVerifyURL(t *testing.T) {
+	clearEnv(t)
+	if cfg := Load(); cfg.SignupVerifyURL != "http://localhost:5173/onboarding" || cfg.Validate(true) != nil {
+		t.Errorf("development default: %q, %v", cfg.SignupVerifyURL, cfg.Validate(true))
+	}
+	setAll(t, productionEnv)
+	if cfg := Load(); cfg.SignupVerifyURL != "" || cfg.Validate(false) != nil {
+		t.Errorf("production without verify URL: %q, %v; want none and a valid configuration", cfg.SignupVerifyURL, cfg.Validate(false))
+	}
+	for _, c := range []struct{ in, want string }{
+		{"http://192.0.2.10/onboarding", "http://192.0.2.10/onboarding"},
+		{"http://192.0.2.10:3000/onboarding", "http://192.0.2.10:3000/onboarding"},
+		{"https://cmdb.example.com/onboarding", "https://cmdb.example.com/onboarding"},
+		{"https://cmdb.example.com//onboarding", "https://cmdb.example.com/onboarding"},
+		{"https://cmdb.example.com///onboarding", "https://cmdb.example.com/onboarding"},
+		{"http://192.0.2.10:3000//onboarding", "http://192.0.2.10:3000/onboarding"},
+	} {
+		t.Run(c.in, func(t *testing.T) {
+			t.Setenv("RETICORA_SIGNUP_VERIFY_URL", c.in)
+			cfg := Load()
+			if err := cfg.Validate(false); err != nil || cfg.SignupVerifyURL != c.want {
+				t.Errorf("production with %q: %q, %v; want %q and a valid configuration", c.in, cfg.SignupVerifyURL, err, c.want)
+			}
+		})
+	}
+	t.Run("development keeps an explicit URL", func(t *testing.T) {
+		t.Setenv("RETICORA_ENVIRONMENT", EnvDevelopment)
+		t.Setenv("RETICORA_SIGNUP_VERIFY_URL", "http://localhost:3000//onboarding")
+		if cfg := Load(); cfg.SignupVerifyURL != "http://localhost:3000/onboarding" {
+			t.Errorf("development with an explicit URL: %q", cfg.SignupVerifyURL)
+		}
+	})
+	for _, env := range []string{EnvProduction, EnvDevelopment} {
+		for _, bad := range []string{"https:///onboarding", "/onboarding", "onboarding",
+			"ftp://cmdb.example.com/onboarding", "https://user:secret@cmdb.example.com/onboarding"} {
+			t.Run(env+" "+bad, func(t *testing.T) {
+				t.Setenv("RETICORA_ENVIRONMENT", env)
+				t.Setenv("RETICORA_SIGNUP_VERIFY_URL", bad)
+				err := Load().Validate(false)
+				if err == nil || !strings.Contains(err.Error(), "RETICORA_SIGNUP_VERIFY_URL") {
+					t.Errorf("%s with %q: %v, want an error naming RETICORA_SIGNUP_VERIFY_URL", env, bad, err)
+				} else if strings.Contains(err.Error(), "secret") {
+					t.Errorf("the start check repeats the value: %v", err)
+				}
+			})
 		}
 	}
 }

@@ -46,7 +46,7 @@ healthy".
 | Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` probes both databases (CMDB and Keycloak) over TCP and resets a stale role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
 | Migrations not applied | `logs server` shows missing tables/columns | Re-run the installer; migrations run before the server starts. |
 | DDL event trigger disabled | `logs server` shows `database is not ready … event trigger reticora_restrict_app_ddl is not enabled` (or `is missing`); `/readyz` answers `"database":"unavailable"` | An aborted TimescaleDB update left it disabled — see [TimescaleDB extension update failed](#timescaledb-extension-update-failed). Re-run the installer; the update step enables it again. |
-| SMTP server unreachable | `logs server` shows `"msg":"readiness check failed","check":"smtp","address":"<host>:<port>"` with the cause (e.g. `connection refused`, `smtp server offers no STARTTLS`, `x509: …`); `/readyz` answers 503 with `"smtp":"unavailable"` | With `RETICORA_SMTP_HOST` set, the SMTP server is a dependency of the server: `/readyz` connects, waits for the 220 greeting and sends EHLO in the TLS mode of `RETICORA_SMTP_TLS` (no mail, no login). An installation whose configured mail server is unreachable therefore fails in `wait_for_service server` ("Reticora server did not become healthy"). Make the server reachable from the container with the configured port and TLS mode (`starttls` needs an offered STARTTLS, `tls` implicit TLS, both a certificate for the host name the server trusts), or remove `RETICORA_SMTP_HOST` from the server's environment (e.g. the Compose override that sets the `RETICORA_SMTP_*` variables) until the relay exists; self-signup and `central_smtp` notifications stay off without it. Then re-run the installer. |
+| SMTP server unreachable | `logs server` shows `"msg":"readiness check failed","check":"smtp","address":"<host>:<port>"` with the cause (e.g. `connection refused`, `smtp server offers no STARTTLS`, `x509: …`); `/readyz` answers 503 with `"smtp":"unavailable"` | With `RETICORA_SMTP_HOST` set, the SMTP server is a dependency of the server: `/readyz` connects, waits for the 220 greeting and sends EHLO in the TLS mode of `RETICORA_SMTP_TLS` (no mail, no login). An installation whose configured mail server is unreachable therefore fails in `wait_for_service server` ("Reticora server did not become healthy"); `install-cloud.sh` probes `RETICORA_SMTP_HOST:RETICORA_SMTP_PORT` over TCP before anything starts and stops a non-interactive run (an interactive one offers to continue without e-mail). Make the server reachable from the container with the configured port and TLS mode (`starttls` needs an offered STARTTLS, `tls` implicit TLS, both a certificate for the host name the server trusts), or empty `RETICORA_SMTP_HOST` in `deploy/docker-compose/.env` (and in the environment of the installer run) until the relay exists; self-signup and `central_smtp` notifications stay off without it. Then re-run the installer. See [Self-signup answers 503](#self-signup-answers-503-self-signup-is-not-available). |
 | Object storage unreachable | `logs server` shows `"msg":"readiness check failed","check":"object_storage","address":"<host>:<port>"`; `/readyz` answers `"object_storage":"unavailable"` | The address is the one the S3 client uses for `RETICORA_S3_ENDPOINT`: the scheme of a URL is removed, and an endpoint without port gets 443 (`https://` or `RETICORA_S3_USE_SSL=true`) or 80. Check that MinIO or the managed S3 answers on that address. |
 
 Every readiness check that turns unavailable writes exactly one log line
@@ -265,8 +265,8 @@ after `.env` had been edited.
   (`docker compose --env-file .env logs keycloak`) and re-run the installer.
 
 No password or secret is printed: the rotation lines (`Keycloak rotation: …`)
-name the setting; only redirect URIs and web origins are shown with their
-values.
+name the setting; only redirect URIs, web origins and post-logout redirect
+URIs are shown with their values.
 
 ---
 
@@ -607,7 +607,11 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | Session key | Reused; a Docker-created directory or zero-byte file is removed and regenerated. |
 | Database passwords | `RETICORA_DB_PASSWORD` (CMDB), `RETICORA_DB_APP_PASSWORD` (runtime login) and `KEYCLOAK_DB_PASSWORD` (Keycloak) are probed over TCP — the images trust the local socket and 127.0.0.1 regardless of the password — and on mismatch the stored role password is resynced automatically. |
 | Keycloak admin password | A changed `KEYCLOAK_ADMIN_PASSWORD` is set through the admin CLI: login with the password of `.env.previous`, then with the new one; afterwards the old password no longer works. |
-| OIDC client `reticora-app` | Secret (`RETICORA_OIDC_CLIENT_SECRET`), redirect URIs and web origins (from `RETICORA_OIDC_REDIRECT_URL` and `RETICORA_OIDC_ISSUER_URL`) of the rendered realm file are compared with the running realm; each differing value is applied with one `kcadm update clients/<id>`. |
+| OIDC client `reticora-app` | Secret (`RETICORA_OIDC_CLIENT_SECRET`), redirect URIs and web origins (from `RETICORA_OIDC_REDIRECT_URL` and `RETICORA_OIDC_ISSUER_URL`) and the post-logout redirect URIs (`post.logout.redirect.uris`, `+`: the valid redirect URIs, needed for the sign-out's return to `/login`, see [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Sign-out") of the rendered realm file are compared with the running realm; each differing value is applied with one `kcadm update clients/<id>` (the attribute update names only this attribute; Keycloak keeps the others). |
+| Server admin client `reticora-server-admin` | `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID`/`_SECRET` are generated once (`.env`, never asked for). `ensure_admin_client` creates the confidential client with its service account (realm-management `manage-users`, `view-users`, `query-users`) before the server starts, repairs drifted settings and missing roles, and sets a secret that differs from `.env` (logged by name only); an unchanged client is not written. |
+| SMTP server | `RETICORA_SMTP_*` from the environment, `.env` or the prompt; checked over TCP before the start. With a host, `apply_realm_smtp` sets the same server as `smtpServer` of the realm `reticora` (password only on stdin). |
+| Collector endpoint names | `RETICORA_NATS_EDGE_HOSTS` is derived on every run (TLS domain, host of `RETICORA_PUBLIC_BASE_URL`, host IP of an IP or localhost installation) and merged with the names already in `.env`; the server reissues the nats-edge certificate when the names change. |
+| Frontend | A frontend that started before the server's current start is restarted after the server became healthy: its nginx resolves the server's address only at its start (otherwise `/api/` could answer 502 after the server was recreated). |
 | TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day (a running frontend reloads it before the issuer checks). |
 | Let's Encrypt cert | Not re-issued when a real certificate is present (no ACME order, no `-0001` lineage). A failed request restores the placeholder. |
 | Realm file | Re-rendered and validated on every run. Keycloak imports it only while the realm does not exist (`start --import-realm` skips an existing realm). |
@@ -622,11 +626,13 @@ their value; a run without a change writes nothing to Keycloak.
 
 **Limits of the rotation:**
 
-- Of the realm file only the client's secret, redirect URIs and web origins
-  reach an existing realm; these three follow the realm file, so a change made
-  to them in the Keycloak console is reset by the next run. Other realm
-  content — roles, groups, flows, password and MFA policies, mappers, the user
-  profile — is not updated by a re-run; change it in the Keycloak console.
+- Of the realm file only the client's secret, redirect URIs, web origins and
+  post-logout redirect URIs (`post.logout.redirect.uris` of `reticora-app`)
+  reach an existing realm; these four follow the realm file, so a change made
+  to them in the Keycloak console (e.g. post-logout redirect URIs `-`) is
+  reset by the next run. Other realm content — roles, groups, flows, password
+  and MFA policies, mappers, the user profile — is not updated by a re-run;
+  change it in the Keycloak console.
 - The name of the Keycloak administrator (`KEYCLOAK_ADMIN`) is not renamed;
   only its password is rotated.
 - `RETICORA_MASTER_KEY` and the session signing key are not rotated by the
@@ -849,3 +855,207 @@ branch explicitly, use:
 Source builds are not signature-verified. The installer never switches to them
 automatically. A signed installation requires a published release with its
 signed artifacts; a Git tag alone is insufficient.
+
+---
+
+## 10. Self-signup and e-mail
+
+### Self-signup answers 503 (`self-signup is not available`)
+
+**Symptom:** "Create account" ("Konto anlegen") on the login page opens
+`/onboarding`; submitting the form shows `self-signup is not available` (or
+the hint that e-mail is not set up on this server), and
+`GET /api/v1/signup/challenge` answers 503. The summary of `install-cloud.sh`
+says `⚠ Self-signup disabled: no SMTP configured — re-run the installer and
+enter an SMTP server` or `⚠ Self-signup: not available …`.
+
+**Cause:** the server takes self-signups only with all of these:
+
+| Prerequisite | Settings | Provided by |
+|---|---|---|
+| Keycloak admin client (creates the first org_admin's account) | `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID`, `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` | `install-cloud.sh`: client `reticora-server-admin`, secret generated once, created in Keycloak on every run (`ensure_admin_client`) |
+| Central SMTP server (the e-mail verification is mandatory) | `RETICORA_SMTP_HOST`, `RETICORA_SMTP_FROM` (`_PORT`, `_TLS`, `_USERNAME`, `_PASSWORD`) | **the operator**: the installer's question "Outgoing e-mail (SMTP)" |
+| Verification page | `RETICORA_SIGNUP_VERIFY_URL` | `docker-compose.yml`: `<RETICORA_PUBLIC_BASE_URL>/onboarding` unless set in `.env` |
+| Captcha key (optional; without it challenges verify only on the instance that issued them) | `RETICORA_SIGNUP_CAPTCHA_KEY` | `install-cloud.sh`, generated once |
+
+Without an SMTP server self-signup therefore stays off by design; nothing
+else is missing on an installation of the current installer. The values in
+`.env` reach the server container only because `docker-compose.yml` forwards
+them (an empty value counts as unset); no Compose override is needed, and in
+the release mode the installer disables `docker-compose.override.yml`
+anyway.
+
+**Diagnosis:**
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/api/v1/signup/challenge   # 200 = available
+docker compose --env-file .env logs server | grep -E 'self-signup|central SMTP|Keycloak admin client'
+docker compose --env-file .env -f docker-compose.yml config server | grep -E 'RETICORA_(SMTP|SIGNUP|KEYCLOAK_ADMIN)_'
+```
+
+| Server log | Meaning |
+|---|---|
+| `self-signup configured available=false` | One of the prerequisites above is missing. |
+| no `central SMTP configured` line | `RETICORA_SMTP_HOST` is empty in the container. |
+| `no Keycloak admin client (RETICORA_KEYCLOAK_ADMIN_CLIENT_ID): granting org_admin fails until it is configured` | The admin client is not configured (an `.env` of an earlier release): re-run the installer. |
+| `Keycloak admin client disabled` | The client could not be set up (CA bundle, `RETICORA_KEYCLOAK_INTERNAL_URL`); the line names the cause. |
+| `signup failed … keycloak: token: status 401` | Keycloak has another secret than `.env`: re-run the installer, which sets the secret of `.env`. |
+
+**Fix:** re-run `install-cloud.sh` and answer "Outgoing e-mail (SMTP)": host
+name or IP of the relay (not `localhost`: inside the containers that is the
+container itself), TLS mode (`starttls` on 587, `tls` on 465, `none`), port,
+user name and password (optional, not asked with `none`), sender (`noreply@example.com` or
+`Reticora CMDB <noreply@example.com>`). Non-interactive: export
+`RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT`, `RETICORA_SMTP_TLS`,
+`RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD` and `RETICORA_SMTP_FROM`
+(or write them into `deploy/docker-compose/.env`) and run
+`./install-cloud.sh --non-interactive`. The run
+
+1. checks that `RETICORA_SMTP_HOST:RETICORA_SMTP_PORT` accepts a TCP
+   connection: with `RETICORA_SMTP_HOST` set the server's `/readyz` depends
+   on the relay (see the table in section 1), so an unreachable one stops a
+   non-interactive run with `The SMTP server … is not reachable from this
+   host`, and an interactive run offers to continue without e-mail;
+2. creates or updates the admin client and sets the same SMTP server for the
+   realm `reticora` (Keycloak's own e-mails);
+3. recreates the server, restarts the frontend (its nginx resolves the
+   server's new address only at its start) and probes
+   `/api/v1/signup/challenge`; the summary shows
+   `Self-signup: <base URL>/onboarding`.
+
+Notes:
+
+- User name and password are written unquoted to `.env` (mode `0600`): no
+  blanks, quotes, `\`, `` ` `` or `$`. The password is never printed.
+- A user name needs `RETICORA_SMTP_TLS=starttls` or `tls`: the server (Go
+  `net/smtp`) sends no login over an unencrypted connection to a host other
+  than `localhost`, so with `none` every e-mail would fail at AUTH while
+  `/readyz` (EHLO only) stays green. The installer refuses the combination
+  (`RETICORA_SMTP_USERNAME needs RETICORA_SMTP_TLS=starttls or tls`), an
+  interactive run asks for no user name with `none`, and the server refuses
+  it at its start (`invalid configuration` with `RETICORA_SMTP_USERNAME needs
+  RETICORA_SMTP_TLS=starttls or tls`). Use `none` only
+  for a relay without authentication.
+- The installer checks the sender the way the server parses it (Go
+  `net/mail`): no `,` `;` `:` `@` `[` `]` `(` `)` `<` `>` in the name
+  (`Reticora Inc. <noreply@example.com>`, not `Reticora, Inc. <…>`), no
+  leading, trailing or double dot in the address. A sender the server
+  refuses stops it at its start (`invalid central SMTP configuration`) and
+  the installation ends in `Reticora server did not become healthy`.
+- Without `RETICORA_SMTP_PORT` in the environment the port follows the TLS
+  mode: the default of the previous mode (587 for `starttls`, 465 for `tls`)
+  becomes the default of the new one, so `RETICORA_SMTP_TLS=tls` after a run
+  without SMTP uses 465. Any other port in `.env` is kept.
+- `RETICORA_PUBLIC_BASE_URL` must be the address users open: the
+  verification link is `<base URL>/onboarding?token=…`.
+- The sender domain needs SPF/DKIM at the relay, otherwise the mails land in
+  spam.
+- Test the signup logged out or in a private window and open the
+  verification link in a new tab: a signed-in session (e.g. the initial
+  administrator's) or its Keycloak SSO session hides the signup steps or
+  signs in as that user again.
+- The password of the new org_admin must meet the realm policy (at least 12
+  characters with upper and lower case, a digit and a special character, not
+  the e-mail address); OTP is set up at the first login.
+- Do **not** enable Keycloak's own registration (`registrationAllowed`):
+  accounts created there have no organization and cannot sign in. Only
+  `/onboarding` creates organizations (see
+  [deploy/keycloak/README.md](../deploy/keycloak/README.md)).
+- Without self-signup, platform operators create organizations through
+  `POST /api/v1/admin/orgs` (members of the Keycloak group `operators`,
+  [README.md](README.md), "Creating organizations"). With
+  `RETICORA_SMTP_HOST` Keycloak sends the first administrator an invitation
+  over the realm's SMTP server (`admin_invited: true`). Without it the
+  organization is created without an IdP account (`admin_invited: false`):
+  create the first administrator's account in Keycloak by hand — the same
+  e-mail address, user attribute `organization_id` = the `id` of the
+  response, realm role `org_admin`, group `reticora-admin` — and it is
+  linked at the first login.
+
+---
+
+## 11. Collector delivers nothing
+
+### Collector delivers nothing (no CIs, no heartbeat)
+
+**Symptom:** the collector host visibly sends traffic to the cloud, but no
+CIs appear; on the Discovery page the collector is missing, stays `pending`
+or `offline`, or has no "last heartbeat".
+
+**Background:** a collector delivers heartbeats, discovery results and
+metrics only over the mTLS NATS endpoint `tls://<host of its server
+URL>:4222` (`nats-edge`; the server URL is the one of its enrollment
+command). The HTTP API authenticates no collector: over 443/3000 heartbeats
+and uploads are answered with 401, the collector keeps the batches in its
+spool and retries every 30 s — traffic, but nothing arrives
+([betrieb/firewall-matrix.md](betrieb/firewall-matrix.md)). Spooled batches
+are delivered once the endpoint connects (up to `RETICORA_SPOOL_MAX_AGE`).
+The collector side (name rule of the endpoint certificate, `RETICORA_NATS_TLS_SERVER_NAME`, all log events) is described in [betrieb/collector-verbindung.md](betrieb/collector-verbindung.md).
+
+**Log signatures** of the collector (`journalctl -u reticora-collector
+--since -1h`; Docker mode: `docker compose -f /opt/reticora-collector/docker-compose.yml logs collector`):
+
+| Collector log | Meaning | Fix |
+|---|---|---|
+| `collector NATS endpoint connected over mTLS` | The endpoint works. | Check the scopes (last row). |
+| `"event":"collector.enroll.pending"` / `collector not enrolled: nothing is delivered until it is` (older collectors: `collector NATS endpoint not used` with `reason="not enrolled or no endpoint"`) | Not enrolled yet. A running collector picks up the credentials within about 30 s after the enrollment; collectors before this release read them only at start and need a restart. | Enroll, then restart (below). |
+| `"event":"collector.nats.unreachable"` / `collector NATS endpoint unreachable` with `x509: cannot validate certificate for <ip> because it doesn't contain any IP SANs` or `x509: certificate is valid for …, not <host>` | The server certificate of the endpoint does not name the host the collector dials. | Certificate names (below). |
+| … with `x509: certificate signed by unknown authority` | The collector does not trust the endpoint: its CA bundle comes from another installation, or a proxy intercepts TLS on 4222. | Enroll against this installation; let 4222 pass without TLS inspection. |
+| … with `i/o timeout`, `connection refused` or `no route to host` | Port 4222 is not reachable. | Open 4222 (below). |
+| `"event":"collector.heartbeat.refused"` / `heartbeat completed status=401` | A heartbeat went over HTTP and was refused: the endpoint is not connected. | See the NATS lines above. |
+| `"event":"collector.upload.unauthenticated"` / `upload failed with status 401` / `spool flush postponed; backend unavailable` | Uploads over HTTP are refused for the same reason; the batches wait in the spool. | See the NATS lines above. |
+| `"event":"collector.scopes.empty"` / `discovery scopes updated scopes=0` | The endpoint works, but the collector has no enabled discovery scope and discovers nothing. | Confirm the suggested scopes or create a scope (below). |
+
+**Checks:**
+
+```bash
+# On the collector host: enrolled, and restarted after the enrollment?
+sudo test -s /var/lib/reticora-collector/credentials.json && echo enrolled
+systemctl show -p ActiveEnterTimestamp reticora-collector
+sudo stat -c '%y' /var/lib/reticora-collector/credentials.json   # must be older than the start
+# The server URL of the collector (empty = the enrolled one; not the placeholder https://cmdb.example.com)
+grep -E '^RETICORA_(SERVER_URL|NATS_URL|NATS_TLS_SERVER_NAME)=' /opt/reticora-collector/collector.env
+# Port 4222 reachable from the collector network?
+nc -vz <cloud host> 4222
+# Names on the endpoint's certificate (nats-edge starts with the TLS handshake)
+openssl s_client -connect <cloud host>:4222 </dev/null 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName
+# On the cloud host: the configured names
+grep '^RETICORA_NATS_EDGE_HOSTS=' deploy/docker-compose/.env
+```
+
+The certificate must name the host of the collector's server URL (an IP
+address as `IP Address:`), or carry the fixed name `reticora-collector-nats`,
+which the server adds to every endpoint certificate and which current
+collectors accept as well (with `RETICORA_NATS_TLS_SERVER_NAME` in
+`collector.env` the collector expects exactly that name instead).
+
+**Fixes:**
+
+- **Certificate names:** re-run `install-cloud.sh`. It derives
+  `RETICORA_NATS_EDGE_HOSTS` on every run from the TLS domain, the host of
+  `RETICORA_PUBLIC_BASE_URL` and, for an IP or localhost installation, the
+  host IP (`RETICORA_HOST_IP` overrides it), keeps the names already in
+  `.env` and shows `Collector endpoint: tls://<first name>:4222 (certificate
+  names: …)` before the start. Add further names (a DNS alias, the public IP
+  of a host behind NAT) comma-separated in `.env`, or run
+  `RETICORA_NATS_EDGE_HOSTS=<names> ./install-cloud.sh` (the environment
+  replaces the derived list). The server reissues the certificate when the
+  names change, and nats-edge serves it after the run. Enroll collectors
+  with a URL whose host is one of these names: the command of the Discovery
+  page names the address the browser uses, so open the UI under
+  `RETICORA_PUBLIC_BASE_URL`.
+- **Port 4222:** allow 4222/TCP inbound on the cloud host — in the host
+  firewall *and* in the cloud provider's firewall or security group — and
+  outbound from the customer network, without a TLS-inspecting proxy.
+- **Enrollment:** Discovery → "Connect collector" ("Collector verbinden"):
+  generate the single-use code, then on the collector host
+  `sudo reticora-collector enroll --server <URL> --code <code>` and
+  `sudo systemctl restart reticora-collector` (Docker mode: the commands in
+  the summary of `install-vm.sh`). Remove `RETICORA_ORGANIZATION_ID`,
+  `RETICORA_COLLECTOR_ID` and a deviating `RETICORA_SERVER_URL` from
+  `collector.env` so the enrolled identity applies.
+- **Scopes:** once the collector shows a recent heartbeat, confirm the
+  suggested scopes (the subnets it reports) on the Discovery page or create
+  a scope for it. Without an enabled scope the collector discovers nothing
+  (`RETICORA_SCAN_SUBNETS` applies only before it received its first scope
+  list); a new scope reaches it within 15 minutes or at its next restart.

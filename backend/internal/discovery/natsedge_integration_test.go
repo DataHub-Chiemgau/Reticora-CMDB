@@ -1008,6 +1008,94 @@ func TestEdgePKIExportKeepsOnlyMatchingPair(t *testing.T) {
 	}
 }
 
+// TestEdgePKIExportReissuesForChangedHosts covers the host list of the
+// endpoint's server certificate (COL-08, contracts C1/C2): the certificate
+// always names reticora-collector-nats besides the configured hosts. A
+// host added to RETICORA_NATS_EDGE_HOSTS (the IP of an installation without
+// a TLS domain) replaces the pair at the next export, without waiting for
+// the renewal; the new certificate verifies for the new IP, the domain and
+// reticora-collector-nats from the collector CA bundle. The same hosts in
+// another order or spelling, or a subset of them, keep it: no reissue and
+// no reload on every export.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
+//	  go test -count=1 -v -p 1 -run 'TestEdgePKIExportReissuesForChangedHosts' ./internal/discovery/
+func TestEdgePKIExportReissuesForChangedHosts(t *testing.T) {
+	e, enc := auditEdge(t, "d2")
+	bg := context.Background()
+	secrets, err := discovery.DeriveEdgeSecrets(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "pki")
+	certPath, keyPath := filepath.Join(dir, "server.pem"), filepath.Join(dir, "server-key.pem")
+	now := time.Now()
+	export := func(hosts ...string) {
+		t.Helper()
+		if eerr := discovery.ExportEdgePKI(bg, e.ca, secrets, dir, hosts, now); eerr != nil {
+			t.Fatal(eerr)
+		}
+		if cerr := checkEdgePKIDir(dir); cerr != nil {
+			t.Fatal(cerr)
+		}
+	}
+	read := func(path string) string {
+		t.Helper()
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		return string(data)
+	}
+	verifyFor := func(certPEM, name string) error {
+		t.Helper()
+		bundle := read(filepath.Join(dir, "ca.pem"))
+		roots := x509.NewCertPool()
+		roots.AppendCertsFromPEM([]byte(bundle))
+		_, verr := parseCert(t, certPEM).Verify(x509.VerifyOptions{Roots: roots, DNSName: name,
+			KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}})
+		return verr
+	}
+
+	// The compose default of an installation without a TLS domain.
+	export("localhost", "nats-edge", "localhost")
+	cert, key := read(certPath), read(keyPath)
+	if verr := verifyFor(cert, discovery.EdgeServerName); verr != nil {
+		t.Fatalf("the server certificate does not name %s: %v", discovery.EdgeServerName, verr)
+	}
+	if verifyFor(cert, "203.0.113.10") == nil {
+		t.Fatal("control: the first certificate already names 203.0.113.10")
+	}
+
+	// Negative: the installer added the public IP and the domain.
+	changed := []string{"203.0.113.10", "cmdb.example.com", "nats-edge", "localhost"}
+	export(changed...)
+	if read(certPath) == cert || read(keyPath) == key {
+		t.Fatal("a server certificate that does not name a configured host was kept")
+	}
+	cert, key = read(certPath), read(keyPath)
+	for _, name := range []string{"203.0.113.10", "cmdb.example.com", "nats-edge", "localhost", discovery.EdgeServerName} {
+		if verr := verifyFor(cert, name); verr != nil {
+			t.Errorf("the reissued server certificate does not verify for %s: %v", name, verr)
+		}
+	}
+
+	// Positive: the same hosts, reordered and written differently, and a
+	// subset of them keep the pair.
+	for _, same := range [][]string{
+		changed,
+		{"LOCALHOST", "nats-edge", "CMDB.example.com.", "203.0.113.10:4222"},
+		{"localhost", "nats-edge"},
+	} {
+		export(same...)
+		if read(certPath) != cert || read(keyPath) != key {
+			t.Fatalf("export with %q replaced a pair that names every host", same)
+		}
+	}
+}
+
 // edgePKILockClass is the class of the export's advisory lock
 // (natsedge.go); TestEdgePKIExportLock proves the export takes it.
 const edgePKILockClass int32 = 0x52504b49

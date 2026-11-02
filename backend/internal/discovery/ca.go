@@ -773,16 +773,16 @@ func (h *Handler) PKI(w http.ResponseWriter, r *http.Request) {
 }
 
 // IssueServer issues the TLS server certificate of the collector NATS
-// endpoint (COL-08) for the host names, by the edge issuer (the oldest
-// trusted CA): every collector trusts it through the CA bundle it received
-// at enrollment or renewal, also during a roll-over. The key is generated
-// here; it is handed to the NATS server.
+// endpoint (COL-08) for the host names and EdgeServerName (edgeServerHosts),
+// by the edge issuer (the oldest trusted CA): every collector trusts it
+// through the CA bundle it received at enrollment or renewal, also during a
+// roll-over. The key is generated here; it is handed to the NATS server.
 func (ca *CA) IssueServer(ctx context.Context, hosts []string, validity time.Duration) (certPEM, keyPEM string, err error) {
 	st, err := ca.state(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	return issueWithKey(st.edge, "reticora-collector-nats", hosts, validity, x509.ExtKeyUsageServerAuth, ca.now())
+	return issueWithKey(st.edge, EdgeServerName, edgeServerHosts(hosts), validity, x509.ExtKeyUsageServerAuth, ca.now())
 }
 
 // IssueInternalClient issues a client certificate for a Reticora service

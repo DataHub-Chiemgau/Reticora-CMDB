@@ -361,7 +361,7 @@
     "enroll": {
       "button": "Connect collector",
       "title": "Connect collector",
-      "intro": "Connect a collector: generate a single-use enrollment code and enter it in the collector. Your infrastructure appears automatically.",
+      "intro": "Connect a collector: generate a single-use enrollment code and enter it in the collector. The collector must reach the server on port 4222/TCP. The subnets it reports appear here as suggestions; it scans only the subnets you confirm.",
       "label": "Label (e.g. site)",
       "generate": "Generate code",
       "once": "This code is shown only once and expires. Run in the customer network:",
@@ -378,6 +378,13 @@
       "offline": "Offline",
       "disabled": "Disabled",
       "paused": "Paused (license)"
+    },
+    "collectorHints": {
+      "noEdge": "No edge connection: the collector delivers data only over port 4222/TCP (mTLS), and this connection is not up.",
+      "noEdgeCauses": "Common causes: port 4222/TCP blocked by a firewall, collector not enrolled or not restarted after enrollment, server certificate does not match the host name. See docs/troubleshooting-installation.md, section \"Collector delivers nothing\".",
+      "noScope": "No discovery scope – the collector scans nothing. Confirm suggested subnets or add a scope.",
+      "showSuggestions": "Show suggested subnets ({{count}})",
+      "noScopeRights": "Adding a scope needs the discovery:manage permission, confirming suggestions also review:resolve."
     },
     "scopes": {
       "title": "Discovery scopes",
@@ -524,13 +531,19 @@
   "accessibility": {
     "closeModal": "Close modal",
     "closePanel": "Close detail view",
-    "toggleDarkMode": "Toggle dark mode",
     "commandPaletteSearch": "Search commands",
     "searchCIs": "Search Configuration Items",
     "filterCIStatus": "Filter CI status",
     "primaryNavigation": "Primary navigation",
     "breadcrumb": "Breadcrumb navigation",
     "skipToContent": "Skip to content"
+  },
+  "theme": {
+    "toggle": "Toggle dark mode – current: {{current}}, next: {{next}}",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "systemResolved": "System ({{theme}})"
   },
   "asset": {
     "title": "Assets",
@@ -721,6 +734,7 @@
     "revoke": "Revoke",
     "sent": "Invitation sent to {{email}}, valid until {{expires}}.",
     "link": "Invitation link (shown only now)",
+    "mailOnly": "Only the invited address receives the invitation link, by email.",
     "errorTitle": "Invitations could not be loaded",
     "errors": {
       "notSaved": "The invitation was not sent. Please check the marked fields.",
@@ -735,6 +749,7 @@
       "notFound": "The invitation no longer exists. The list has been refreshed.",
       "accepted": "The invitation has already been accepted and can no longer be changed.",
       "unavailable": "Invitations are not set up on this server. Contact your operations team.",
+      "mailFailed": "The invitation email could not be sent; nothing was saved or changed. Please try again later or contact your operations team.",
       "rejected": "The server rejected the invitation: {{detail}}",
       "failed": "The action failed: {{detail}}"
     }
@@ -781,7 +796,11 @@
     "invitationAccepted": "Your account for {{email}} has been created. Sign in now.",
     "backendUnreachable": "The server cannot be reached. Check that Reticora is running and the address is correct, then try again.",
     "signupPrompt": "No account yet?",
-    "signupLink": "Create account"
+    "signupLink": "Create account",
+    "otherAccount": {
+      "hint": "If another account is still signed in in this browser, for example in another tab, signing in would use that account instead of the new one. Sign that account out first, or use a private window.",
+      "signOut": "Sign out the other account"
+    }
   },
   "topology": {
     "subtitle": "Relationships between configuration items as a graph.",
@@ -1390,7 +1409,10 @@
       "reason": "Reason: {{detail}}",
       "partial": "The field “{{name}}” was saved, its index settings were not. {{reason}}",
       "flagsNotSaved": "Index settings not saved. {{reason}}",
-      "fieldNotSaved": "Field not saved. {{reason}}"
+      "fieldNotSaved": "Field not saved. {{reason}}",
+      "forbiddenPermission": "Not allowed: your session lacks the permission “{{permission}}”.",
+      "systemType": "System types are read-only and get no fields of their own. Clone the type or add an organization-wide field.",
+      "readOnly": "System attributes are read-only."
     },
     "indexJob": {
       "scheduled": "Index job scheduled",
@@ -1402,6 +1424,21 @@
         "failed": "failed",
         "cancelled": "cancelled"
       }
+    },
+    "systemReadOnly": "System type: read-only. Fields cannot be added here and the type cannot be deactivated. To add your own fields:",
+    "systemReadOnlyClone": "“Clone” creates your own type with all fields of this type, which you can extend. Existing CIs and CIs found by discovery keep the system type.",
+    "systemReadOnlyOrgFields": "Organization-wide fields apply to every CI type of the organization, including system types and discovered CIs.",
+    "orgFields": {
+      "title": "Organization-wide fields",
+      "hint": "These fields apply to every CI type of the organization, including system types and CIs found by discovery. System fields are read-only.",
+      "add": "New organization-wide field",
+      "editorHint": "The field applies to every CI type of the organization. Organization-wide fields added here are optional.",
+      "empty": "No organization-wide fields defined.",
+      "readOnly": "Read-only: changing them needs the permission “ci_attribute:manage”.",
+      "editAction": "Edit organization-wide field: {{name}}",
+      "deleteAction": "Delete organization-wide field: {{name}}",
+      "deleteConfirm": "Delete the organization-wide field “{{name}}”? It is then removed from every CI type of the organization.",
+      "deleteFailed": "Field “{{name}}” not deleted. {{reason}}"
     }
   },
   "inventory": {
@@ -1787,16 +1824,43 @@
       "email": "E-mail address",
       "name": "Your name",
       "submit": "Create account",
-      "sent": "We sent a confirmation link to {{email}}. Open it to continue."
+      "sent": "We sent a confirmation link to {{email}}. Open it to continue.",
+      "unavailable": "Sign-up is not set up on this server yet: no e-mail delivery (SMTP) is configured. Contact the operator.",
+      "temporarilyUnavailable": "Sign-up is not possible right now. Please try again in a few minutes.",
+      "rateLimited": "Too many attempts. Please wait a few minutes and try again.",
+      "emailBlocked": "This e-mail domain is not accepted for sign-up (for example disposable addresses). Please use your business e-mail address.",
+      "emailInvalid": "Please enter a valid e-mail address (e.g. name@company.com).",
+      "organizationInvalid": "Please enter the name of your organization (at most 200 characters).",
+      "nameTooLong": "Your name may have at most 200 characters.",
+      "captchaFailed": "The automatic security check failed or expired. Please submit the form again.",
+      "failed": "Sign-up failed: {{detail}}"
     },
     "verify": {
       "password": "Set a password (at least 12 characters)",
+      "policy": "At least {{min}} characters with upper-case and lower-case letters, a digit and a special character; not your e-mail address.",
+      "policyNotMet": "The password does not meet the policy yet. Missing: {{rules}}.",
+      "rules": {
+        "length": "at least {{min}} characters",
+        "upper": "an upper-case letter",
+        "lower": "a lower-case letter",
+        "digit": "a digit",
+        "special": "a special character"
+      },
       "submit": "Confirm account",
       "done": "Your organization “{{slug}}” has been created.",
       "login": "Sign in and continue",
       "expired": "The confirmation link has expired. Please sign up again.",
       "invalid": "The confirmation link is invalid or was already used.",
-      "trial": "Your trial runs until {{date}}."
+      "trial": "Your trial runs until {{date}}.",
+      "notAccepted": "The account was not confirmed. Please check the password.",
+      "passwordRejected": "The password was not accepted. It must meet the policy and must not be your e-mail address.",
+      "accountExists": "An account with this e-mail address already exists. Sign in with it or sign up with a different address.",
+      "organizationTaken": "The organization name is already taken. Please sign up again with a different name.",
+      "unavailable": "Confirming is not possible on this server right now. Please try again later or contact the operator.",
+      "failed": "Confirming failed: {{detail}}",
+      "signedIn": "This tab is still signed in as {{user}}. The new account is created anyway; afterwards, sign out here before you sign in with the new account.",
+      "signOutFirst": "You are still signed in as {{user}}. Sign out first, otherwise signing in would use this account again instead of the new one. After signing out (the sign-in service may ask you to confirm), sign in with the new account on the sign-in page.",
+      "signOutAndSignIn": "Sign out and sign in with the new account"
     },
     "collector": {
       "hint": "Install the collector in your network and enter an enrollment code there.",

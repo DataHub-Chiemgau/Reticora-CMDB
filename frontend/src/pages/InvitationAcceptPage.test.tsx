@@ -78,6 +78,9 @@ describe('InvitationAcceptPage', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Anmelden' })).toBeInTheDocument();
+    // Another account still signed in in this browser would be signed in
+    // again instead of the new one: the login offers its sign-out (F-351).
+    expect(screen.getByRole('button', { name: 'Anderes Konto abmelden' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0]!;
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({

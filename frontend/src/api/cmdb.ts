@@ -158,11 +158,22 @@ export const attributeDefinitionApi = {
 
 // ─── Global + instance field definitions (§2) ────────────────────────────────
 
+/**
+ * A global field of GET /ci-fields/global (MET-13): an organization-wide
+ * field applies to every CI type of the organization, the system types
+ * included; a system field (is_system) is read-only.
+ */
+export type GlobalFieldDefinition = FieldDefinition & {
+  id?: string;
+  scope?: 'global' | 'type';
+  is_system?: boolean;
+};
+
 export const ciFieldApi = {
-  listGlobal(): Promise<{ data: FieldDefinition[] }> {
+  listGlobal(): Promise<{ data: GlobalFieldDefinition[] }> {
     return fetchAPI('/ci-fields/global');
   },
-  upsertGlobal(field: FieldDefinition): Promise<FieldDefinition> {
+  upsertGlobal(field: FieldDefinition): Promise<GlobalFieldDefinition> {
     return fetchAPI('/ci-fields/global', { method: 'PUT', body: JSON.stringify(field) });
   },
   deleteGlobal(name: string): Promise<void> {

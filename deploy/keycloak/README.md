@@ -35,6 +35,56 @@ required actions *update password* and *configure OTP*. It removes the demo
 user `admin@reticora.local` of earlier releases, whose password is publicly
 known. Re-runs leave an existing administrator alone.
 
+## Server admin client and realm SMTP (installer)
+
+The server creates the accounts of self-signups, accepted invitations and
+operator-created organizations and binds org_admins to MFA through the
+Keycloak admin REST API, as a confidential client with a service account
+(client credentials). `install-cloud.sh` creates that client on every run,
+after the initial administrator and before the server starts
+(`ensure_admin_client`):
+
+- client `reticora-server-admin` (`RETICORA_KEYCLOAK_ADMIN_CLIENT_ID`):
+  confidential (`client-secret`), service account only — no standard flow,
+  no implicit flow, no direct access grants;
+- its secret is `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` of `.env`, generated
+  once and never asked for; a different secret in `.env` is set in Keycloak
+  by the next run, over the admin CLI's stdin (never on a command line or in
+  the log);
+- the service account `service-account-reticora-server-admin` holds the
+  client roles `manage-users`, `view-users` and `query-users` of
+  `realm-management`; missing ones are added, drifted client settings are
+  reset, an unchanged client is not written.
+
+The realm files do not carry the client: the production realm ships without
+users (the service account is one), and `start --import-realm` skips an
+existing realm anyway. `manage-users` lets the service account manage every
+user and the group memberships of the realm, so keep the secret where the
+installer puts it (`.env`, mode `0600`, and the server's environment).
+
+With an SMTP server (`RETICORA_SMTP_HOST`, asked for by the installer) the
+installer also sets it as `smtpServer` of the realm (`apply_realm_smtp`:
+host, port, sender and display name, `starttls`/`ssl` from
+`RETICORA_SMTP_TLS`, authentication with user and password; other settings
+such as `replyTo` are kept). Keycloak sends its own e-mails over it — the
+invitation of the first administrator of an organization created with
+`POST /api/v1/admin/orgs` (`execute-actions-email`) and password resets.
+Without `RETICORA_SMTP_HOST` the realm's mail settings are left alone, and
+the server sends no such invitation: an operator-created organization then
+gets no IdP account for its first administrator (`admin_invited: false`),
+which is created by hand as in step 5 of the manual import above.
+
+Keep Keycloak's own registration off (`registrationAllowed` is not set in
+the realm files): an account registered in Keycloak has no
+`organization_id` and no app user and cannot sign in. Organizations are
+created only by the self-signup at `<RETICORA_PUBLIC_BASE_URL>/onboarding`
+(TLC-01, needs the SMTP server for its mandatory e-mail verification) and by
+operators (`POST /api/v1/admin/orgs`, see Operators).
+
+Once the admin client exists, the server binds the org_admins that exist
+already to MFA at its start (see Policies): they set up OTP at their next
+login, and accepted invitations get their Keycloak account from the server.
+
 ## Upgrade
 
 Keycloak starts with `start --import-realm` and imports the realm file only
@@ -75,9 +125,11 @@ an installation only through the installer: every run of `install-cloud.sh`
 Every change is logged (`Keycloak realm: …`), every stricter value that is
 kept as well (`Keycloak realm: kept …`); a run without anything to change
 reports `Keycloak realm settings match the bundled realm`. Users, the client
-(apart from the rotated secret, redirect URIs and web origins, see
-`docs/troubleshooting-installation.md`) and all other realm settings are left
-alone. A failing call aborts the installer with this section as the hint;
+`reticora-app` (apart from the rotated secret, redirect URIs and web origins,
+see `docs/troubleshooting-installation.md`, and its post-logout redirect URIs,
+see Sign-out) and all other realm settings are
+left alone; the server's admin client and the realm's SMTP server are the
+installer's (see Server admin client and realm SMTP). A failing call aborts the installer with this section as the hint;
 check the Keycloak log and re-run the installer.
 
 ## Policies (AUT-09, CH26)
@@ -100,10 +152,11 @@ check the Keycloak log and re-run the installer.
   - the initial administrator of `install-cloud.sh` (see above);
   - the first org_admin of a self-signup (`POST /api/v1/signup/verify`) and
     the first org_admin the operator path creates (`POST /api/v1/admin/orgs`,
-    invitation e-mail): the server maps `mfa_required` to the new account
-    with its Keycloak admin client and deletes the account again when the
-    mapping fails, so no org_admin is created without MFA. The client needs
-    nothing beyond `realm-management/manage-users`;
+    invitation e-mail with `RETICORA_SMTP_HOST`): the server maps
+    `mfa_required` to the new account with its Keycloak admin client and
+    deletes the account again when the mapping fails, so no org_admin is
+    created without MFA. The client needs nothing beyond
+    `realm-management/manage-users`;
   - every member of the group `reticora-admin`, which the app maps to
     org_admin: the group carries the realm role `mfa_required` (deliberately
     not `org_admin`: app rights come from the database, the realm only marks
@@ -144,11 +197,12 @@ check the Keycloak log and re-run the installer.
 
   **Prerequisite:** the Keycloak admin client
   (`RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET`,
-  service account with `realm-management/manage-users`). Without it, every
-  grant of org_admin answers 503 outside `RETICORA_ENVIRONMENT=development`
-  (fail closed); in development nothing is bound. The group `reticora-admin`
-  and the installer administrator are covered by the realm and need no
-  admin client.
+  service account with `realm-management/manage-users`); `install-cloud.sh`
+  creates it as `reticora-server-admin` (see Server admin client and realm
+  SMTP). Without it, every grant of org_admin answers 503 outside
+  `RETICORA_ENVIRONMENT=development` (fail closed); in development nothing
+  is bound. The group `reticora-admin` and the installer administrator are
+  covered by the realm and need no admin client.
 
 ## Operators (SEC-07)
 
@@ -196,6 +250,38 @@ of the realm group `operators` whose login used a second factor. The shared
   `frontend/e2e-real/support/stack.ts` (`operatorAuthorization`) builds this
   URL; `frontend/e2e-real/operator-login.spec.ts` runs the login against the
   installed stack.
+
+## Sign-out (RP-initiated logout, F-351)
+
+The sign-out of the SPA (`Abmelden` in the header, and the sign-out the
+onboarding and the login page offer after a self-signup or an accepted
+invitation, `frontend/src/auth/signOut.ts`) ends the Reticora session
+(`POST /api/v1/auth/logout`) and then Keycloak's single sign-on session: the
+browser goes to the `end_session_endpoint` of `GET /api/v1/auth/config` with
+`client_id=reticora-app` and
+`post_logout_redirect_uri=<origin of RETICORA_OIDC_REDIRECT_URL>/login`, and
+Keycloak sends it back to the sign-in page. Without that session the next
+sign-in asks for credentials, so an account created in a browser where
+another account (e.g. the installer's administrator) is still signed in signs
+in as itself. A fresh login with `prompt=login` instead does not work with
+Keycloak: while the session of another user is alive it ends on the error
+page "You are already authenticated as different user".
+
+- `reticora-app` accepts its redirect URIs as post-logout redirect URIs
+  (`"attributes": {"post.logout.redirect.uris": "+"}`); they include
+  `<origin>/*`. Keycloak imports the attribute only with a new realm, so every
+  run of `install-cloud.sh` sets it on the running client like the redirect
+  URIs (`sync_realm_client`, logged as
+  `Keycloak rotation: client reticora-app post.logout.redirect.uris set to +`).
+  A value set in the console, e.g. `-` (none), is reset; with a list that
+  lacks the origin Keycloak answers the sign-out with "Invalid redirect uri".
+- The SPA keeps no ID token (the server issues its own session), so the
+  request carries no `id_token_hint`: while its session is alive, Keycloak
+  asks once to confirm the logout and then returns to the sign-in page;
+  without a session it returns at once.
+- Without an `end_session_endpoint` only the Reticora session ends. Another
+  OpenID provider must accept `<origin>/login` as post-logout redirect URI
+  of the client.
 
 ## Notes on the bundled realm
 

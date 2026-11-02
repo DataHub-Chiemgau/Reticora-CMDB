@@ -365,7 +365,8 @@ installer_start_stack() {
         RETICORA_TLS_DOMAIN=""
         step() { printf 'step %s\n' "$1" >> "$TSDB_STUB_EVENTS"; }
         for f in wait_for_service sync_db_password run_migrations seed_default_organization ensure_runtime_login \
-            validate_keycloak_bootstrap create_initial_admin reload_frontend_after_bootstrap check_issuer_from_host \
+            validate_keycloak_bootstrap create_initial_admin ensure_admin_client apply_realm_smtp \
+            restart_frontend_after_server_start reload_frontend_after_bootstrap check_issuer_from_host \
             check_issuer_from_container show_service_logs; do
             eval "$f() { step $f; }"
         done

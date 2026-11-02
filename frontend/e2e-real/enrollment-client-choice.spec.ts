@@ -6,7 +6,7 @@ import {
   type Page,
   type Response,
 } from '@playwright/test';
-import { api, signupTenant, stamp, uiLogin, BASE } from './support/stack';
+import { api, invitationToken, signupTenant, stamp, uiLogin, BASE } from './support/stack';
 
 /*
  * The client choice of the enrollment code on the real stack (WP-696, F-425), nothing mocked:
@@ -148,15 +148,16 @@ test.describe('Enrollment code: a user restricted to several clients chooses the
     expect(viewerRole, 'system role viewer (RBA-02)').not.toBe('');
     const email = `enroll-ab-${s}@audit-e2e.de`;
     const password = `Audit-ab-${s}!aA`;
-    const invitation = await ok<{ token?: string }>('POST', '/invitations', {
+    await ok('POST', '/invitations', {
       email,
       role_id: viewerRole,
       scope_type: 'client',
       scope_id: w.clientC.id,
     });
-    expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+    // The token reaches the invited mailbox only: the server creates the IdP account.
+    const inviteToken = await invitationToken(rq, email);
     const accept = await rq.post(`${BASE}/api/v1/invitations/accept`, {
-      data: { token: invitation.token, password, display_name: 'Kunden A und B' },
+      data: { token: inviteToken, password, display_name: 'Kunden A und B' },
       failOnStatusCode: false,
     });
     expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

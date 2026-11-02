@@ -102,7 +102,7 @@ export interface paths {
     put?: never;
     /**
      * Create an organization with plan and limits (TLC-02)
-     * @description Runs the creation chain of the self-signup without verification: the organization with its slug (derived from the name unless given), the default VRF and standard roles, the first user as org_admin, and the entitlements of the plan (source manual) with the given limits in the limits of their feature. With an IdP admin client the first org_admin receives an account and the IdP's mail to set a password (`admin_invited`). The creation and its `org.create` entry in operator_audit are atomic. Reseller creation is phase 4.
+     * @description Runs the creation chain of the self-signup without verification: the organization with its slug (derived from the name unless given), the default VRF and standard roles, the first user as org_admin, and the entitlements of the plan (source manual) with the given limits in the limits of their feature. With an IdP admin client and the central SMTP server (RETICORA_SMTP_HOST, whose settings the IdP's realm also uses) the first org_admin receives an account and the IdP's mail to set a password (`admin_invited`); without the SMTP server no IdP account is created, since the IdP could not send the mail. The creation and its `org.create` entry in operator_audit are atomic. Reseller creation is phase 4.
      */
     post: operations['createOrganizationAsOperator'];
     delete?: never;
@@ -4331,7 +4331,7 @@ export interface paths {
     put?: never;
     /**
      * Invite an address with a predefined role and scope (TLC-03)
-     * @description The invitation is valid for seven days. The response carries the token once; only its hash is stored. Role and scope must exist in the organization (422 otherwise); a client role (scope client) is invited with scope_type client only, a site role with scope_type site only, an organization role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the issuer must hold user:manage and every permission of the role in a scope covering the invitation's scope (a client covers its sites, site.client_id); otherwise 403, nothing is stored or audited. A pending invitation for the same address is a conflict (renew it instead). In the same transaction the event invitation.created (NTF-05) mails the invitee the organization name, the expiry and the link RETICORA_INVITATION_ACCEPT_URL?token=<token>; a refused issue (403, 409, 422) creates no event. Webhook deliveries of the event leave out the link. Without RETICORA_INVITATION_ACCEPT_URL the server answers 503 (invitations not configured), like the signup without verification page. Requires user:manage.
+     * @description The invitation is valid for seven days; only the hash of its token is stored. The invitee gets a mail with the organization name, the expiry and the link RETICORA_INVITATION_ACCEPT_URL?token=<token> (NTF-05), and the issue writes the event invitation.created in the same transaction; a refused issue (403, 409, 422) creates neither. With the IdP admin client, which the server wires for invitations only with a central SMTP server (RETICORA_SMTP_HOST), the acceptance creates a verified account of the invited address, so the token reaches the invited mailbox only: the issue sends the mail straight to that address over the central SMTP server, never over a notification channel of the organization (also when the organization has none), and neither the response nor the event carries the token or the link. When the SMTP server does not take the mail, nothing is stored and the server answers 503 with the detail "the invitation e-mail could not be sent". Without the IdP admin client the response carries the token once, and the event carries the link, which the organization's e-mail channels mail to the invitee. Role and scope must exist in the organization (422 otherwise); a client role (scope client) is invited with scope_type client only, a site role with scope_type site only, an organization role with any scope_type (422 field scope_type otherwise, F-305). Grant ceiling (RBA-03, F-015): the issuer must hold user:manage and every permission of the role in a scope covering the invitation's scope (a client covers its sites, site.client_id); otherwise 403, nothing is stored or audited. A pending invitation for the same address is a conflict (renew it instead). Webhook deliveries of the event leave out the link. Without RETICORA_INVITATION_ACCEPT_URL the server answers 503 (invitations not configured), like the signup without verification page. Requires user:manage.
      */
     post: operations['issueInvitation'];
     delete?: never;
@@ -4374,7 +4374,7 @@ export interface paths {
     put?: never;
     /**
      * Renew a pending or expired invitation (TLC-03)
-     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. The grant ceiling of the issue applies to the renewing principal, not to the original issuer: it must hold user:manage and every permission of the invited role in a scope covering the invitation's scope (403 otherwise, nothing changes). Like the issue, the renewal mails the invitee the new link and expiry (invitation.created); without RETICORA_INVITATION_ACCEPT_URL it answers 503 (invitations not configured). Requires user:manage.
+     * @description A new token and seven more days; the old token stops working. An accepted invitation is 409. The grant ceiling of the issue applies to the renewing principal, not to the original issuer: it must hold user:manage and every permission of the invited role in a scope covering the invitation's scope (403 otherwise, nothing changes). Like the issue, the renewal mails the invitee the new link and expiry and writes invitation.created: with the IdP admin client straight over the central SMTP server, without token in the response or the event (when the SMTP server does not take the mail, the old token and expiry stay and the server answers 503 "the invitation e-mail could not be sent"); without it over the organization's e-mail channels, with the new token once in the response. Without RETICORA_INVITATION_ACCEPT_URL it answers 503 (invitations not configured). Requires user:manage.
      */
     post: operations['renewInvitation'];
     delete?: never;
@@ -5822,7 +5822,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage global CI field definitions */
+    /**
+     * Manage global CI field definitions
+     * @description The global fields (no CI type, MET-13): the organization's organization-wide fields, which apply to every CI type of the organization, and the read-only system fields (`is_system`).
+     */
     get: operations['listCiFieldsGlobal'];
     /** Manage global CI field definitions */
     put: operations['putCiFieldsGlobal'];
@@ -6041,7 +6044,10 @@ export interface paths {
     };
     /** Manage CI type field definitions */
     get: operations['listCiTypesIdFields'];
-    /** Manage CI type field definitions */
+    /**
+     * Manage CI type field definitions
+     * @description Creates or updates a field of a CI type of the organization (legacy view of attribute_definition). System CI types (`is_system`, no organization) are read-only for tenants until inheritance (MET-06): a field on them is refused with 422 on `ci_type_id`; organization-wide fields (PUT /api/v1/ci-fields/global) apply to every CI type including the system types. An unknown CI type, or one of another organization, is 404.
+     */
     put: operations['putCiTypesIdFields'];
     post?: never;
     delete?: never;
@@ -7141,7 +7147,7 @@ export interface components {
       accepted_at?: string;
       /** Format: date-time */
       created_at: string;
-      /** @description Only in the response of issue and renewal; shown once. */
+      /** @description Only in the response of issue and renewal, shown once, and only when the acceptance creates no IdP account (no IdP admin client); otherwise the token reaches the invitee only by the invitation mail, which the server sends straight over its central SMTP server. */
       token?: string;
     };
     InvitationListResponse: {
@@ -22093,7 +22099,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Invitation issued, with its token */
+      /** @description Invitation issued; with its token only when the acceptance creates no IdP account (no IdP admin client) */
       201: {
         headers: {
           [name: string]: unknown;
@@ -22162,7 +22168,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Invitation renewed, with its new token */
+      /** @description Invitation renewed; with its new token only when the acceptance creates no IdP account (no IdP admin client) */
       200: {
         headers: {
           [name: string]: unknown;
@@ -26665,12 +26671,43 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Manage global CI field definitions */
+      /** @description Every global field in one answer (legacy field view of attribute_definition); the list is not paged, so next_cursor is always absent. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+            next_cursor?: string;
+            data: {
+              id?: string;
+              /** @description Empty for global fields. */
+              ci_type_id?: string;
+              /** @enum {string} */
+              scope: 'global' | 'type';
+              name: string;
+              label?: string;
+              description?: string;
+              data_type: string;
+              required: boolean;
+              default_value?: string;
+              enum_values?: string[];
+              ui_group?: string;
+              sort_order: number;
+              validation?: components['schemas']['AttributeValidationLegacy'];
+              conditional?: {
+                [key: string]: unknown;
+              };
+              reference_target?: string;
+              is_system?: boolean;
+            }[];
+            total?: number;
+            limit?: number;
+            offset?: number;
+            has_more?: boolean;
+          };
+        };
       };
       /** @description Unauthorized */
       401: {

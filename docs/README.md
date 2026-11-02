@@ -414,19 +414,36 @@ form previews; both run the cases of `api/rules.conformance.json`.
 Users join an organization by invitation (`/api/v1/invitations`, TLC-03,
 `user:manage`): an invitation names the address, a role and its scope
 (org, client or site within the issuer's own scope), is valid for seven
-days and stores only the hash of its token, which the response shows once
-and the invitee receives by mail as link (`invitation.created`, NTF-05).
+days and stores only the hash of its token, which the invitee receives by
+mail as link (NTF-05).
 `POST /api/v1/invitations/accept` (public, pre-auth limit) consumes it
-atomically and once and creates the user with that role; with the Keycloak
-admin client the accepting person's password creates the IdP account.
+atomically and once and creates the user with that role. With the Keycloak
+admin client, which the server wires for invitations only together with the
+central SMTP server (`RETICORA_SMTP_HOST`), the accepting person's password
+creates a verified IdP account of the address; the token therefore reaches
+the invited mailbox only. Issue and renewal send the invitation mail
+straight to the invited address over the central SMTP server, in their
+transaction and never over a notification channel of the organization (an
+organization's own SMTP server could pass the link to its administrators;
+organizations without an e-mail channel, like the default organization of
+an installation, get it as well); neither their response nor
+`invitation.created` carries the token or the link. When the SMTP server
+does not take the mail, nothing is stored or renewed and the API answers
+503 ("the invitation e-mail could not be sent"). Without that client the
+response shows the token once, the organization's e-mail channels mail the
+link of `invitation.created`, and the invitee signs in with an existing IdP
+account of the address, which the first login links.
 Expired invitations are renewed with a new token; pending ones can be
 revoked. Every step is audited.
 Operators create organizations with plan and limits through
 `POST /api/v1/admin/orgs` (TLC-02): the same creation chain as the
 self-signup (slug, default VRF, first org_admin, entitlements of the plan
 with the given limits), atomically with an `org.create` entry in
-`operator_audit`; with the Keycloak admin client the first org_admin is
-invited by the IdP's mail to set a password.
+`operator_audit`; with the Keycloak admin client and the central SMTP
+server (`RETICORA_SMTP_HOST`, whose settings the installer also gives the
+realm) the first org_admin is invited by the IdP's mail to set a password
+(`admin_invited`), otherwise the organization is created without an IdP
+account.
 Plan matrix (ENT-06):
 
 | Plan | Features |
@@ -1017,11 +1034,11 @@ The server is configured via environment variables:
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production). The collector reads the same variable: it accepts `RETICORA_SIMULATE=true` (simulated device fleet, SIM-02) only with `development` or `test` (case-insensitive) and exits with code 1 and `collector.simulate.refused` for any other value, including an unset or empty one (F-276).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
-- `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `POST /api/v1/signup` answers 503.
+- `RETICORA_SIGNUP_VERIFY_URL` — page the self-signup verification link opens; the token is appended as `?token=` (TLC-01). Self-signup also needs `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID` / `RETICORA_KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential client of the realm in `RETICORA_OIDC_ISSUER_URL` whose service account holds `realm-management/manage-users`) and the central SMTP server (`RETICORA_SMTP_*`); until all exist, `GET /api/v1/signup/challenge` and `POST /api/v1/signup` answer 503. The value must be an absolute http or https URL with a host and without user info, otherwise the start check fails; a doubled leading slash in the path is collapsed, so a base URL ending in `/` still gives `/onboarding`; development defaults to `http://localhost:5173/onboarding`. Docker Compose derives the page as `<RETICORA_PUBLIC_BASE_URL>/onboarding` (a value in `.env` wins) and forwards the admin client, the SMTP settings, the captcha key, the domain lists and the trial settings from `.env`; `install-cloud.sh` creates the admin client (`reticora-server-admin`) and the captcha key and asks for the SMTP server (see "Creating organizations" below).
 - `RETICORA_KEYCLOAK_INTERNAL_URL` — optional base URL (`http(s)://host[:port]`) under which the server reaches Keycloak directly; the Keycloak admin client (signup, invitations, MFA binding) then sends its requests there with the public issuer host in `Host`/`X-Forwarded-*`, because the public reverse proxy does not expose `/admin/`. The compose stack sets `http://keycloak:8080`; empty means the issuer host.
 - `RETICORA_INVITATION_ACCEPT_URL` — page the link of the invitation mail opens; the token is appended as `?token=` (TLC-03, NTF-05). An absolute `http` or `https` URL (`http` is accepted in production for the HTTP default path); development defaults to `http://localhost:5173/invitations/accept`, Docker Compose derives it from `RETICORA_PUBLIC_BASE_URL`. Without it `POST /api/v1/invitations` and `/invitations/{id}/renew` answer 503. The mail goes over the organization's e-mail channels only; webhook deliveries of `invitation.created` leave out the link.
 - `RETICORA_MASTER_KEY_PREVIOUS` — master keys being rotated out (comma-separated, SEC-06): their data keys stay readable until the nightly `rotation.master_key` run has rewrapped them with `RETICORA_MASTER_KEY`; then remove them (see [`docs/ops/workers.md`](ops/workers.md)).
-- `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT` (587), `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD`, `RETICORA_SMTP_FROM`, `RETICORA_SMTP_TLS` (`starttls` default, `tls`, `none`) — the central SMTP server of the installation (TEC-13): verification e-mails of the self-signup and the `central_smtp` notification channels, which send with the organization as sender name; DKIM and SPF are set up for the sender domain at the relay. Organizations of dedicated, on-premises and air-gapped installations configure their own server as an `smtp` channel; its credentials are stored encrypted (NTF-01).
+- `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT` (587), `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD`, `RETICORA_SMTP_FROM`, `RETICORA_SMTP_TLS` (`starttls` default, `tls`, `none`; a user name needs `starttls` or `tls`, Go `net/smtp` sends no login unencrypted to a host other than `localhost`) — the central SMTP server of the installation (TEC-13): verification e-mails of the self-signup and the `central_smtp` notification channels, which send with the organization as sender name; DKIM and SPF are set up for the sender domain at the relay. Organizations of dedicated, on-premises and air-gapped installations configure their own server as an `smtp` channel; its credentials are stored encrypted (NTF-01).
 - `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP in any hour (sliding window in the shared cache, so it holds across replicas; Retry-After names the time until the oldest of them leaves the hour) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).
 - `RETICORA_SIGNUP_BLOCKED_DOMAINS`, `RETICORA_SIGNUP_ALLOWED_DOMAINS` — comma-separated operator entries that extend the disposable-domain blocklist and allowlist; a domain covers its subdomains, the allowlist wins.
 - `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS` — trial of a self-signed-up organization (ENT-07, defaults `standard`, `30`, `100`); features the `essential` plan lacks expire at the trial's end.
@@ -1151,6 +1168,62 @@ installation fails or misbehaves, see
 [troubleshooting-installation.md](troubleshooting-installation.md) for the
 known failure modes (container health, Keycloak/login, TLS, idempotent
 re-runs) and their fixes.
+
+### Creating organizations (tenants)
+
+`install-cloud.sh` creates one organization, the default organization with
+the initial administrator (`RETICORA_INITIAL_ADMIN_EMAIL`, org_admin of that
+organization, not a platform operator). Further organizations come from two
+places:
+
+- **Self-signup (TLC-01):** `<RETICORA_PUBLIC_BASE_URL>/onboarding` ("Create
+  account" on the login page). The visitor enters organization, e-mail
+  address and name (the browser solves a proof-of-work challenge); the server
+  sends a verification e-mail whose link (`/onboarding?token=…`), after the
+  password is set, creates the organization (trial
+  plan `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS`)
+  and its first org_admin with the chosen password (realm policy: 12
+  characters, upper and lower case, digit, special character) and OTP at the
+  first login. Open the page logged out or in a private window and the
+  verification link in a new tab; a signed-in session or its Keycloak SSO
+  session hides the steps. The e-mail verification is mandatory, so
+  self-signup needs the central SMTP server: without `RETICORA_SMTP_HOST`
+  the server answers `GET /api/v1/signup/challenge` with 503 ("self-signup is
+  not available") and the installer's summary says
+  `Self-signup disabled: no SMTP configured`. Keycloak's own registration
+  stays off; it would create accounts without an organization.
+- **Operators (SEC-07):** `POST /api/v1/admin/orgs` with an operator session
+  of a member of the Keycloak group `operators` (OTP; login flow in
+  [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Operators").
+  The installer's administrator is not an operator; add an account to the
+  group first. With `RETICORA_SMTP_HOST` the first administrator of the
+  organization gets an invitation e-mail from Keycloak over the realm's SMTP
+  server (`admin_invited: true`). Without it the organization is created
+  without an IdP account (`admin_invited: false`): create the account in
+  Keycloak by hand (same e-mail address, user attribute `organization_id` =
+  the `id` of the response, realm role `org_admin`, group `reticora-admin`;
+  [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Manual
+  import", step 5); it is linked at the first login. There is no UI for it.
+
+**Outgoing e-mail (SMTP):** the installer asks for the relay at "Outgoing
+e-mail (SMTP)" — host, TLS mode (`starttls` on 587, `tls` on 465, `none`),
+port, user name and password (optional, not asked with `none`), sender (`address` or
+`Name <address>`, checked like the server's Go `net/mail`: no `,` `;` `:`
+`@` `[` `]` `(` `)` `<` `>` in the name) — or takes `RETICORA_SMTP_HOST`,
+`RETICORA_SMTP_PORT`, `RETICORA_SMTP_TLS`, `RETICORA_SMTP_USERNAME`,
+`RETICORA_SMTP_PASSWORD` and `RETICORA_SMTP_FROM` from the environment,
+otherwise from `.env`, in a non-interactive run; an empty host keeps e-mail
+off. Without `RETICORA_SMTP_PORT` the port follows the TLS mode (465 for
+`tls`, 587 otherwise) unless `.env` holds a port other than the previous
+mode's default. It checks the relay
+over TCP before the start (with a host, `/readyz` depends on it), writes the
+settings to `.env` (mode `0600`), from where Docker Compose forwards them to
+the server, and sets the same server for the Keycloak realm. The relay
+sends the verification mails of the self-signup, invitations and the
+notification mails of the `central_smtp` channels; set up SPF/DKIM for the
+sender domain there. See
+[troubleshooting-installation.md](troubleshooting-installation.md),
+"Self-signup answers 503".
 
 ### Installer hardening (Epic A)
 

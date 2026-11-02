@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,6 +162,102 @@ func TestScopeChannelCarriesRunStateAndTimezone(t *testing.T) {
 		if s["timezone"] != "Europe/Berlin" {
 			t.Errorf("scope %s: timezone %v, want the organization's Europe/Berlin", id, s["timezone"])
 		}
+	}
+}
+
+// TestScopeChannelLogsCollectorWithoutScopes covers the feedback for a
+// collector that received no enabled scope (DIS-09, INS-06): the empty list
+// tells it to discover nothing, so the server logs
+// discovery.collector.no_scopes at INFO with the collector and the hint to
+// accept a suggested subnet or create a scope, once per collector while it
+// has none (not on every 15-minute refresh), and again once it lost its
+// last enabled scope.
+func TestScopeChannelLogsCollectorWithoutScopes(t *testing.T) {
+	ctx := context.Background()
+	// The logged set is per process and MemoryRepository hands out the same
+	// sequential collector IDs in every run: start empty and leave it empty,
+	// so neither -count=N nor another test's scopes.request skews the count.
+	collectorsWithoutScopes.Clear()
+	t.Cleanup(collectorsWithoutScopes.Clear)
+	logs := &bytes.Buffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	events := func(collectorID string) []map[string]any {
+		t.Helper()
+		var out []map[string]any
+		for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+			var rec map[string]any
+			if json.Unmarshal([]byte(line), &rec) == nil && rec["event"] == "discovery.collector.no_scopes" && rec["collector_id"] == collectorID {
+				out = append(out, rec)
+			}
+		}
+		return out
+	}
+	repo := NewMemoryRepository()
+	h := NewHandler(repo, nil)
+	register := func() *Collector {
+		t.Helper()
+		col := &Collector{OrganizationID: "org-1", Name: "col", Status: CollectorActive, Config: map[string]any{}}
+		if err := repo.RegisterCollector(ctx, col); err != nil {
+			t.Fatal(err)
+		}
+		return col
+	}
+	request := func(collectorID string) int {
+		t.Helper()
+		raw, err := json.Marshal(h.scopeHandlers()[ScopesRequestSuffix](ctx, "org-1", collectorID, []byte(`{}`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body struct {
+			Scopes []map[string]any `json:"scopes"`
+			Error  string           `json:"error"`
+		}
+		if err = json.Unmarshal(raw, &body); err != nil || body.Error != "" || body.Scopes == nil {
+			t.Fatalf("scopes.request = %s (%v), want a list without error", raw, err)
+		}
+		return len(body.Scopes)
+	}
+
+	col, other := register(), register()
+	for range 3 {
+		if n := request(col.ID); n != 0 {
+			t.Fatalf("scopes of a new collector = %d, want 0", n)
+		}
+	}
+	got := events(col.ID)
+	if len(got) != 1 {
+		t.Fatalf("%d discovery.collector.no_scopes events for three requests, want 1: %s", len(got), logs.String())
+	}
+	hint, _ := got[0]["hint"].(string)
+	if got[0]["level"] != "INFO" || got[0]["organization_id"] != "org-1" ||
+		!strings.Contains(hint, "accept a subnet") || !strings.Contains(hint, "create a scope") {
+		t.Errorf("event = %v, want INFO with organization, collector and the hint", got[0])
+	}
+	// Per collector: another collector without scopes is logged as well.
+	request(other.ID)
+	if n := len(events(other.ID)); n != 1 {
+		t.Errorf("%d events for a second collector without scopes, want 1", n)
+	}
+
+	// With an enabled scope nothing is logged; after its last enabled scope
+	// was switched off the collector is logged again, once.
+	s := NewScope("org-1", &ScopeInput{CollectorID: col.ID, Kind: ScopeKindCIDR, Target: "192.0.2.0/24"})
+	if err := repo.CreateScope(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	if n := request(col.ID); n != 1 || len(events(col.ID)) != 1 {
+		t.Fatalf("with a scope: %d scopes, %d events; want 1 scope and no new event", n, len(events(col.ID)))
+	}
+	off := false
+	if _, err := repo.UpdateScope(ctx, "org-1", s.ID, &ScopePatch{Enabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	request(col.ID)
+	request(col.ID)
+	if n := len(events(col.ID)); n != 2 {
+		t.Errorf("%d events after the last scope was switched off, want 2 (one more)", n)
 	}
 }
 

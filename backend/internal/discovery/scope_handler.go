@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -448,6 +449,29 @@ func (h *Handler) RecordCollectorScopeRun(ctx context.Context, orgID, collectorI
 	return repo.RecordScopeRun(ctx, orgID, rep.ScopeID, &ScopeRun{At: at, Result: result, NextRun: rep.NextRun})
 }
 
+// collectorsWithoutScopes holds the collectors this process logged as
+// having no enabled scope (noteCollectorScopes).
+var collectorsWithoutScopes sync.Map
+
+// noteCollectorScopes logs at INFO that a collector received no enabled
+// scope: an empty list tells it to discover nothing, while its subnet
+// reports only wait as scope_suggested reviews on the Discovery page
+// (INS-06). Once per collector and process while it has none, so the
+// refresh of its scopes (every 15 minutes) does not repeat it; once it has
+// a scope again, a later empty list is logged anew.
+func noteCollectorScopes(orgID, collectorID string, scopes int) {
+	if scopes > 0 {
+		collectorsWithoutScopes.Delete(collectorID)
+		return
+	}
+	if _, logged := collectorsWithoutScopes.LoadOrStore(collectorID, struct{}{}); logged {
+		return
+	}
+	slog.Info("collector has no enabled discovery scope; it discovers nothing", "event", "discovery.collector.no_scopes",
+		"organization_id", orgID, "collector_id", collectorID,
+		"hint", "accept a subnet the collector suggested or create a scope for it on the Discovery page")
+}
+
 // scopeHandlers are the handlers of the scope channel subjects by suffix;
 // they run only for a collector the dispatcher checked.
 func (h *Handler) scopeHandlers() map[string]func(ctx context.Context, orgID, collectorID string, data []byte) any {
@@ -458,6 +482,7 @@ func (h *Handler) scopeHandlers() map[string]func(ctx context.Context, orgID, co
 				slog.Warn("collector scopes refused", "collector_id", collectorID, "error", err)
 				return ScopesResponse{Scopes: []CollectorScope{}, Error: "not available"}
 			}
+			noteCollectorScopes(orgID, collectorID, len(scopes))
 			resp := ScopesResponse{Scopes: scopes}
 			if repo, ok := h.repo.(ScopeRepository); ok {
 				if iv, ierr := repo.DiscoveryIntervals(ctx, orgID); ierr == nil {

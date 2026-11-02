@@ -48,11 +48,14 @@ import (
 )
 
 type collectorConfig struct {
-	ServerURL      string
-	OrganizationID string
-	CollectorID    string
-	ScanSubnets    []string
-	Protocols      []string
+	ServerURL string
+	// ServerURLFromEnv is set when RETICORA_SERVER_URL set ServerURL; it
+	// then wins over the server URL of the enrollment.
+	ServerURLFromEnv bool
+	OrganizationID   string
+	CollectorID      string
+	ScanSubnets      []string
+	Protocols        []string
 	// Simulate replaces discovery by the deterministic 30-device fleet of
 	// plugins/simulate (RETICORA_SIMULATE, SIM-02); refused in production.
 	Simulate bool
@@ -118,6 +121,10 @@ type collectorConfig struct {
 	TLSCAFile       string
 	TLSServerName   string
 	CredentialsPath string
+	// NATSServerName (RETICORA_NATS_TLS_SERVER_NAME) is the one name the
+	// edge certificate must be valid for; empty accepts the dialled host,
+	// reticora-collector-nats and nats-edge (edgeTLSConfig).
+	NATSServerName string
 	// AgentRelayAddr, AgentRelayCertFile and AgentRelayKeyFile configure the
 	// agent relay (AGT-03). It runs over TLS only: without a server
 	// certificate the relay stays off.
@@ -218,7 +225,10 @@ func Main() {
 
 	slog.Info("collector configured",
 		"nats_url", natsEndpoint(collectorCfg.ServerURL),
+		"nats_tls_server_name", collectorCfg.NATSServerName,
 		"server_url", collectorCfg.ServerURL,
+		"organization_id", collectorCfg.OrganizationID,
+		"collector_id", collectorCfg.CollectorID,
 		"scan_subnets", collectorCfg.ScanSubnets,
 		"protocols", collectorCfg.Protocols,
 		"poll_interval", collectorCfg.DiscoveryInterval.String(),
@@ -239,8 +249,9 @@ func Main() {
 		go runUpdateLoop(ctx, collectorCfg.UpdateInterval, newUpdateChecker(&collectorCfg), confirmed, restart)
 	}
 	go runAgentRelay(ctx, collectorCfg, uploader)
-	// The collector's mTLS channel to the NATS endpoint (COL-08).
-	go runNATS(ctx, collectorCfg)
+	// The collector's mTLS channel to the NATS endpoint (COL-08); a
+	// collector enrolled after its start takes the identity over from it.
+	go runNATS(ctx, collectorCfg, uploader.adoptIdentity)
 	if collectorCfg.TrapListenAddr != "" {
 		go runTrapReceiver(ctx, collectorCfg, uploader)
 	}
@@ -286,6 +297,40 @@ type uploader struct {
 	// droppedSamples counts the metric samples and traps dropped since the
 	// last heartbeat the server accepted (E-79: counted, not spooled).
 	droppedSamples atomic.Int64
+	// monitoringRefusedAt is the time (Unix nanoseconds) the server last
+	// refused metric samples because monitoring is not licensed; 0 while
+	// they are sent (edge.go monitoringPaused).
+	monitoringRefusedAt atomic.Int64
+	// idMu guards the identity in cfg (ServerURL, OrganizationID,
+	// CollectorID): runNATS hands over the enrolled identity when the
+	// credentials file appears after the start (adoptIdentity). Read it
+	// with config().
+	idMu sync.RWMutex
+}
+
+// config returns the configuration of the uploader with its current
+// identity.
+func (u *uploader) config() collectorConfig {
+	u.idMu.RLock()
+	defer u.idMu.RUnlock()
+	return u.cfg
+}
+
+// adoptIdentity takes over server URL, organization and collector id of a
+// collector enrolled after its start (runNATS).
+func (u *uploader) adoptIdentity(enrolled collectorConfig) {
+	u.idMu.Lock()
+	u.cfg.ServerURL, u.cfg.OrganizationID, u.cfg.CollectorID = enrolled.ServerURL, enrolled.OrganizationID, enrolled.CollectorID
+	u.idMu.Unlock()
+	slog.Info("collector identity taken from the enrollment", "event", "collector.identity.adopted",
+		"server_url", enrolled.ServerURL, "organization_id", enrolled.OrganizationID, "collector_id", enrolled.CollectorID)
+}
+
+// withIdentity returns cfg with the uploader's current identity.
+func (u *uploader) withIdentity(cfg collectorConfig) collectorConfig {
+	id := u.config()
+	cfg.ServerURL, cfg.OrganizationID, cfg.CollectorID = id.ServerURL, id.OrganizationID, id.CollectorID
+	return cfg
 }
 
 // LicenseStatusHeader carries the discovery license status on heartbeat
@@ -751,53 +796,116 @@ func (u *uploader) uploadRecords(ctx context.Context, records []plugins.DeviceRe
 }
 
 // uploadRecordsAt sends the DeviceRecords of a discovery cycle that started at
-// sourceTime to the backend via compressed JSON POST. While older batches
-// wait in the spool the new batch is queued behind them, so the backend
-// receives data in source-time order (COL-05). When the upload fails and a
-// spool directory is configured, the batch is persisted and delivered by
-// flushSpool once the backend is reachable again.
+// sourceTime to the backend: over the edge, or compressed to the HTTP
+// ingest without it. The records go in payloads that fit the edge's
+// message size (recordbatch.go), in their order; a record larger than the
+// edge's own limit is quarantined and counted as lost (while that limit is
+// unknown, it waits in a payload of its own until the edge decides). While
+// older batches wait in the spool the payloads are queued behind them, so
+// the backend receives data in source-time order (COL-05). When a payload
+// fails transiently and a spool directory is configured, it and the
+// payloads after it are persisted and delivered by flushSpool once the
+// backend is reachable again. Every failure is returned, so the caller
+// never reports undelivered records as uploaded.
 func (u *uploader) uploadRecordsAt(ctx context.Context, records []plugins.DeviceRecord, sourceTime time.Time) error {
-	cfg := u.cfg
-	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
-		slog.Warn("skipping upload due to incomplete configuration")
-		return nil
-	}
-
 	if u.paused.Load() {
 		return errLicenseExpired
 	}
-	payload, err := json.Marshal(plugins.DeviceRecordBatch{Records: records})
+	raws, err := marshalRecords(records)
 	if err != nil {
-		return fmt.Errorf("marshal records: %w", err)
+		return err
+	}
+	limit, known := recordPayloadLimit()
+	payloads, oversized := splitRecords(raws, limit, known)
+	var errs []error
+	for _, p := range oversized {
+		u.quarantineOversized(ctx, p, sourceTime, limit)
+	}
+	if len(oversized) > 0 {
+		errs = append(errs, fmt.Errorf("%w (%d records, limit %d bytes)", errRecordTooLarge, len(oversized), limit))
 	}
 
-	if u.spool != nil {
-		if backlog, lenErr := u.spool.Len(ctx); lenErr == nil && backlog > 0 {
-			if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
-				return fmt.Errorf("queue behind spool backlog: %w", spoolErr)
+	for i, p := range payloads {
+		if u.spool != nil {
+			if backlog, lenErr := u.spool.Len(ctx); lenErr == nil && backlog > 0 {
+				if spoolErr := u.spoolPayloads(ctx, payloads[i:], sourceTime); spoolErr != nil {
+					return errors.Join(append(errs, fmt.Errorf("queue behind spool backlog: %w", spoolErr))...)
+				}
+				u.flushSpool(ctx)
+				return errors.Join(errs...)
 			}
-			u.flushSpool(ctx)
-			return nil
 		}
+		lost, postErr := u.postPayload(ctx, p.data)
+		switch {
+		case postErr == nil:
+			u.countRejected(ctx, lost)
+			continue
+		case errors.Is(postErr, errLicenseExpired):
+			return postErr
+		case errors.Is(postErr, errUploadRejected):
+			// A poison batch is never spooled: retrying it would only repeat
+			// the refusal and hold up the batches behind it (F-085).
+			u.quarantineBatch(ctx, p.data, sourceTime, postErr)
+			errs = append(errs, postErr)
+			continue
+		}
+		// Transient (no edge and a 401 of the HTTP path, 5xx, network), not
+		// enrolled yet, or larger than an edge with a smaller limit takes
+		// (flushSpool splits it): this payload and the ones behind it wait
+		// in the spool in their order.
+		if spoolErr := u.spoolPayloads(ctx, payloads[i:], sourceTime); spoolErr != nil {
+			return errors.Join(append(errs, fmt.Errorf("upload failed (%v) and spooling failed: %w", postErr, spoolErr))...)
+		}
+		return errors.Join(append(errs, postErr)...)
 	}
+	return errors.Join(errs...)
+}
 
-	lost, err := u.postPayload(ctx, payload)
-	switch {
-	case err == nil:
-		u.countRejected(ctx, lost)
-		return nil
-	case errors.Is(err, errLicenseExpired):
-		return err
-	case errors.Is(err, errUploadRejected):
-		// A poison batch is never spooled: retrying it would only repeat the
-		// refusal and hold up the batches behind it (F-085).
-		u.quarantineBatch(ctx, payload, sourceTime, err)
+// spoolPayloads persists payloads in their order with the source time of
+// their run (partSourceTime). When the spool is full, the payloads after
+// the refused one are not spooled either (a later one could fit and
+// overtake it): the spool counted the refused one, they are counted as
+// lost too (NFR-04: every loss is counted).
+func (u *uploader) spoolPayloads(ctx context.Context, payloads []recordsPayload, sourceTime time.Time) error {
+	for i, p := range payloads {
+		err := u.spoolResults(ctx, p.data, partSourceTime(sourceTime, i))
+		if err == nil {
+			continue
+		}
+		if rest := payloads[i+1:]; errors.Is(err, buffer.ErrSpoolFull) && len(rest) > 0 {
+			loss := buffer.Loss{Messages: len(rest), Reason: buffer.LossSpoolFull}
+			for _, q := range rest {
+				loss.Bytes += int64(len(q.data))
+			}
+			if lossErr := u.spool.RecordLoss(ctx, loss); lossErr != nil {
+				err = fmt.Errorf("%w; %w", err, lossErr)
+			}
+		}
 		return err
 	}
-	if spoolErr := u.spoolResults(ctx, payload, sourceTime); spoolErr != nil {
-		return fmt.Errorf("upload failed (%v) and spooling failed: %w", err, spoolErr)
+	return nil
+}
+
+// errIncompleteConfig: without the edge the HTTP path needs server URL,
+// organization and collector id, which a collector lacks before its
+// enrollment. The batch stays in the spool; once the collector is
+// enrolled, the edge delivers it.
+var errIncompleteConfig = errors.New("not delivered: no edge channel, and server URL, organization or collector id is missing (not enrolled yet)")
+
+// httpUnauthenticatedLogged is set once a 401 of the HTTP path was logged
+// in the current edge outage; natsConnLog.connected resets it.
+var httpUnauthenticatedLogged atomic.Bool
+
+// warnUnauthenticated logs, once per edge outage, that the HTTP path
+// refused the collector: the HTTP API authenticates no collector (F-046),
+// only the mTLS edge delivers.
+func warnUnauthenticated(cfg *collectorConfig) {
+	if httpUnauthenticatedLogged.Swap(true) {
+		return
 	}
-	return err
+	slog.Warn("HTTP ingest answered 401: the HTTP API authenticates no collector; records wait in the spool until the mTLS edge is connected",
+		"event", "collector.upload.unauthenticated", "nats_url", natsEndpoint(cfg.ServerURL),
+		"hint", "the collector.nats.unreachable messages name why the edge is not connected")
 }
 
 // errUploadRejected marks a batch the server refused for good (a poison
@@ -868,10 +976,18 @@ func (u *uploader) quarantineBatch(ctx context.Context, payload []byte, sourceTi
 // postPayload delivers a single JSON payload: over the edge when the
 // collector holds its NATS channel, else compressed to the HTTP ingest. It
 // returns the number of records the server rejected in an accepted batch;
-// a batch refused for good fails with errUploadRejected.
+// a batch refused for good fails with errUploadRejected. A payload larger
+// than the edge takes fails with errEdgeTooLarge and is never sent to the
+// HTTP path, which authenticates no collector (the caller splits it);
+// without the edge and the identity the HTTP path needs it fails with
+// errIncompleteConfig.
 func (u *uploader) postPayload(ctx context.Context, payload []byte) (lost int, err error) {
 	if lost, err = u.postViaEdge(ctx, payload); !errors.Is(err, errNoEdge) {
 		return lost, err
+	}
+	cfg := u.config()
+	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
+		return 0, errIncompleteConfig
 	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -882,15 +998,15 @@ func (u *uploader) postPayload(ctx context.Context, payload []byte) (lost int, e
 		return 0, fmt.Errorf("finalize compression: %w", err)
 	}
 
-	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/discovery/ingest"
+	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/discovery/ingest"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
 	if err != nil {
 		return 0, fmt.Errorf("build upload request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("X-Organization-ID", u.cfg.OrganizationID)
-	req.Header.Set("X-Collector-ID", u.cfg.CollectorID)
+	req.Header.Set("X-Organization-ID", cfg.OrganizationID)
+	req.Header.Set("X-Collector-ID", cfg.CollectorID)
 
 	resp, err := u.client.Do(req)
 	if err != nil {
@@ -908,6 +1024,9 @@ func (u *uploader) postPayload(ctx context.Context, payload []byte) (lost int, e
 		if resp.StatusCode == http.StatusForbidden && problem.Type == problemLicenseExpired {
 			u.setLicenseStatus("expired")
 			return 0, errLicenseExpired
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			warnUnauthenticated(&cfg)
 		}
 		return 0, uploadStatusError(resp.StatusCode, problem.Detail)
 	}
@@ -930,7 +1049,7 @@ func (u *uploader) postAgentTelemetry(ctx context.Context, token string, payload
 		return fmt.Errorf("finalize compression: %w", err)
 	}
 
-	endpoint := strings.TrimRight(u.cfg.ServerURL, "/") + "/api/v1/agents/telemetry"
+	endpoint := strings.TrimRight(u.config().ServerURL, "/") + "/api/v1/agents/telemetry"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
 	if err != nil {
 		return fmt.Errorf("build telemetry request: %w", err)
@@ -1007,9 +1126,12 @@ const spoolFlushBatch = 64
 // A batch the server refuses for good (4xx, a poison batch) is quarantined
 // and counted as lost, and the delivery continues with the next batch
 // (F-085); records rejected inside an accepted batch are counted as lost
-// before the batch is acknowledged.
+// before the batch is acknowledged. A records batch larger than the edge
+// takes is replaced by its parts (splitSpooledBatch), which are delivered
+// next; it never goes to the HTTP path and never blocks the batches behind
+// it.
 func (u *uploader) flushSpool(ctx context.Context) {
-	if u.spool == nil || u.cfg.ServerURL == "" || u.paused.Load() {
+	if u.spool == nil || u.config().ServerURL == "" || u.paused.Load() {
 		return
 	}
 	u.flushMu.Lock()
@@ -1026,8 +1148,10 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			slog.Error("read upload spool failed", "error", err)
 			return
 		}
-		progressed := false
-		for _, msg := range msgs {
+		progressed, split := false, false
+	batch:
+		for i := range msgs {
+			msg := &msgs[i]
 			if ctx.Err() != nil {
 				return
 			}
@@ -1046,6 +1170,19 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			case errors.Is(err, errLicenseExpired):
 				// The spooled batches stay until the license is renewed.
 				slog.Warn("spool flush postponed; discovery license expired", "message_id", msg.ID)
+				return
+			case errors.Is(err, errEdgeTooLarge) && msg.Topic == spoolTopic:
+				if serr := u.splitSpooledBatch(ctx, msg); serr != nil {
+					slog.Error("spool flush postponed; the batch larger than the edge takes was not split",
+						"message_id", msg.ID, "error", serr)
+					return
+				}
+				// The parts take the batch's place in the spool: read it anew.
+				progressed, split = true, true
+				break batch
+			case errors.Is(err, errIncompleteConfig):
+				// Not enrolled yet (logged by runNATS); the batches wait.
+				slog.Debug("spool flush postponed; not enrolled yet", "message_id", msg.ID)
 				return
 			case errors.Is(err, errUploadRejected):
 				if qErr := u.spool.Reject(ctx, msg.ID); qErr != nil {
@@ -1070,7 +1207,7 @@ func (u *uploader) flushSpool(ctx context.Context) {
 			progressed = true
 			slog.Info("spooled discovery results delivered", "message_id", msg.ID)
 		}
-		if len(msgs) < spoolFlushBatch || !progressed {
+		if !split && (len(msgs) < spoolFlushBatch || !progressed) {
 			return
 		}
 	}
@@ -1116,7 +1253,8 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 	defer ticker.Stop()
 
 	for {
-		status, ok := up.heartbeat(ctx, cfg)
+		// The identity of an enrollment after the start (adoptIdentity).
+		status, ok := up.heartbeat(ctx, up.withIdentity(cfg))
 		if status != "" {
 			up.setLicenseStatus(status)
 		}
@@ -1218,27 +1356,40 @@ func (u *uploader) dropSamples(n int) {
 	}
 }
 
-// postHeartbeat sends a heartbeat and returns the discovery license status of
-// the response ("" when unknown) and whether the server accepted it.
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) (status string, ok bool) {
-	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
-		slog.Warn("skipping heartbeat due to incomplete configuration",
-			"server_url", cfg.ServerURL,
-			"organization_id", cfg.OrganizationID,
-			"collector_id", cfg.CollectorID,
-		)
-		return "", false
-	}
+// heartbeatSkipLogged is set once a heartbeat without the identity of the
+// HTTP path was logged; an accepted heartbeat resets it.
+var heartbeatSkipLogged atomic.Bool
 
-	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/collectors/" + cfg.CollectorID + "/heartbeat"
+// postHeartbeat sends a heartbeat and returns the discovery license status of
+// the response ("" when unknown) and whether the server accepted it. The
+// edge takes organization and collector from the certificate; the HTTP
+// path needs them in cfg. A refused heartbeat is an error with the reason
+// (collector.heartbeat.refused): the server does not see the collector.
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) (status string, ok bool) {
 	body, err := json.Marshal(heartbeatBody{Spool: spool})
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
 		return "", false
 	}
-	if license, ok, handled := heartbeatViaEdge(ctx, body); handled {
-		return license, ok
+	if license, accepted, handled := heartbeatViaEdge(ctx, body); handled {
+		if accepted {
+			heartbeatSkipLogged.Store(false)
+		}
+		return license, accepted
 	}
+	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
+		if !heartbeatSkipLogged.Swap(true) {
+			slog.Warn("skipping heartbeat due to incomplete configuration",
+				"server_url", cfg.ServerURL,
+				"organization_id", cfg.OrganizationID,
+				"collector_id", cfg.CollectorID,
+				"hint", "without the edge the heartbeat needs organization and collector id; enrollment sets them",
+			)
+		}
+		return "", false
+	}
+
+	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/collectors/" + cfg.CollectorID + "/heartbeat"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("build heartbeat request failed", "error", err)
@@ -1255,10 +1406,18 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	}
 	defer resp.Body.Close()
 
-	slog.Info("heartbeat completed", "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds())
 	if resp.StatusCode >= 300 {
+		hint := "the server refused the heartbeat of the collector"
+		if resp.StatusCode == http.StatusUnauthorized {
+			hint = "collectors deliver over the mTLS edge " + natsEndpoint(cfg.ServerURL) +
+				"; the HTTP API authenticates no collector. The collector.nats.unreachable messages name why the edge is not connected"
+		}
+		slog.Error("heartbeat refused", "event", "collector.heartbeat.refused", "status", resp.StatusCode, "transport", "http",
+			"endpoint", endpoint, "hint", hint)
 		return "", false
 	}
+	heartbeatSkipLogged.Store(false)
+	slog.Info("heartbeat completed", "status", resp.StatusCode, "transport", "http", "duration_ms", time.Since(start).Milliseconds())
 	return resp.Header.Get(LicenseStatusHeader), true
 }
 
@@ -1331,10 +1490,14 @@ func runMetricsLoop(ctx context.Context, cfg collectorConfig, up *uploader) {
 
 	creds := plugins.CredentialsFor("snmp", cfg.Credentials)
 	for {
-		samples := pollTargets(ctx, expandSubnets(cfg.ScanSubnets), creds, poll)
-		if len(samples) > 0 {
-			if err := up.uploadMetricSamples(ctx, samples); err != nil {
-				slog.Error("metric sample upload failed", "count", len(samples), "error", err)
+		// While monitoring is not licensed the targets are not polled: the
+		// samples would not be sent (monitoringPaused).
+		if !up.monitoringPaused(time.Now()) {
+			samples := pollTargets(ctx, expandSubnets(cfg.ScanSubnets), creds, poll)
+			if len(samples) > 0 {
+				if err := up.uploadMetricSamples(ctx, samples); err != nil {
+					slog.Error("metric sample upload failed", "count", len(samples), "error", err)
+				}
 			}
 		}
 
@@ -1403,13 +1566,14 @@ func pollTargets(ctx context.Context, targets []string, creds map[string]string,
 // uploadMetricSamples converts collector metric samples into monitoring
 // ingest samples and sends them over the edge (postMetrics, edge.go).
 func (u *uploader) uploadMetricSamples(ctx context.Context, samples []plugins.MetricSample) error {
-	if u.cfg.ServerURL == "" || u.cfg.OrganizationID == "" || u.cfg.CollectorID == "" {
+	cfg := u.config()
+	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		return nil
 	}
 	metrics := make([]map[string]any, 0, len(samples))
 	now := time.Now().UTC()
 	for _, sample := range samples {
-		labels := map[string]string{"collector_id": u.cfg.CollectorID, "kind": "snmp_poll"}
+		labels := map[string]string{"collector_id": cfg.CollectorID, "kind": "snmp_poll"}
 		for k, v := range sample.Labels {
 			labels[k] = v
 		}
@@ -1427,12 +1591,13 @@ func (u *uploader) uploadMetricSamples(ctx context.Context, samples []plugins.Me
 // sends it to the monitoring ingest. The metric name is stable so alert rules
 // can target it; trap-specific context travels in the labels.
 func (u *uploader) uploadTrapEvent(ctx context.Context, ev snmp.TrapEvent) error {
-	if u.cfg.ServerURL == "" || u.cfg.OrganizationID == "" || u.cfg.CollectorID == "" {
+	cfg := u.config()
+	if cfg.ServerURL == "" || cfg.OrganizationID == "" || cfg.CollectorID == "" {
 		return nil
 	}
 	labels := map[string]string{
 		"source_ip":    ev.SourceIP,
-		"collector_id": u.cfg.CollectorID,
+		"collector_id": cfg.CollectorID,
 		"kind":         "snmp_trap",
 	}
 	if ev.TrapOID != "" {
@@ -1613,6 +1778,7 @@ func loadCollectorConfig() collectorConfig {
 		TLSKeyFile:         os.Getenv("RETICORA_TLS_CLIENT_KEY_FILE"),
 		TLSCAFile:          os.Getenv("RETICORA_TLS_CA_FILE"),
 		TLSServerName:      os.Getenv("RETICORA_TLS_SERVER_NAME"),
+		NATSServerName:     strings.TrimSpace(os.Getenv("RETICORA_NATS_TLS_SERVER_NAME")),
 		AgentRelayAddr:     envOrDefault("RETICORA_AGENT_RELAY_ADDR", ":9443"),
 		AgentRelayCertFile: os.Getenv("RETICORA_AGENT_RELAY_TLS_CERT_FILE"),
 		AgentRelayKeyFile:  os.Getenv("RETICORA_AGENT_RELAY_TLS_KEY_FILE"),
@@ -1622,9 +1788,12 @@ func loadCollectorConfig() collectorConfig {
 		UpdateChannel:      channel,
 		UpdateInterval:     durationEnvOrDefault("RETICORA_UPDATE_INTERVAL", 6*time.Hour),
 	}
+	cfg.ServerURLFromEnv = strings.TrimSpace(os.Getenv("RETICORA_SERVER_URL")) != ""
 	// After `enroll` the credentials file holds server URL and identity
-	// (INS-06); the environment still wins.
-	if err := applyEnrolledIdentity(context.Background(), &cfg, strings.TrimSpace(os.Getenv("RETICORA_SERVER_URL")) != ""); err != nil && !errors.Is(err, keystore.ErrNotFound) {
+	// (INS-06); the certificate's identity wins, RETICORA_SERVER_URL still
+	// wins over the enrolled server URL. A collector enrolled after its
+	// start applies it in runNATS.
+	if err := applyEnrolledIdentity(context.Background(), &cfg, cfg.ServerURLFromEnv); err != nil && !errors.Is(err, keystore.ErrNotFound) {
 		slog.Warn("enrolled identity not applied", "path", cfg.CredentialsPath, "error", err)
 	}
 	return cfg

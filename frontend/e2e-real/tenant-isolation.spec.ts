@@ -6,7 +6,15 @@ import {
   type BrowserContext,
   type Page,
 } from '@playwright/test';
-import { api, signupTenant, stamp, uiLogin, BASE, type Account } from './support/stack';
+import {
+  api,
+  invitationToken,
+  signupTenant,
+  stamp,
+  uiLogin,
+  BASE,
+  type Account,
+} from './support/stack';
 
 /*
  * Phase-1 acceptance audit – tenant isolation end-to-end (real stack, nothing mocked).
@@ -1308,7 +1316,7 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     const viewerRole = rows(roles).find((r) => r.name === 'viewer')?.id ?? '';
     expect(viewerRole, 'system role viewer (RBA-02)').not.toBe('');
     const account = { email: `${mark}@audit-e2e.de`, password: `Audit-t18-${w.s}!aA` };
-    const invitation = await ok<{ token?: string; scope_type: string; scope_id?: string }>(
+    const invitation = await ok<{ scope_type: string; scope_id?: string }>(
       w.rq,
       w.a.token,
       'POST',
@@ -1316,9 +1324,10 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
       { email: account.email, role_id: viewerRole, scope_type: 'site', scope_id: w.site.id },
     );
     expect(invitation).toMatchObject({ scope_type: 'site', scope_id: w.site.id });
-    expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+    // The token reaches the invited mailbox only: the server creates the IdP account.
+    const inviteToken = await invitationToken(w.rq, account.email);
     const accept = await w.rq.post(`${BASE}/api/v1/invitations/accept`, {
-      data: { token: invitation.token, password: account.password, display_name: 'Iso T18 Viewer' },
+      data: { token: inviteToken, password: account.password, display_name: 'Iso T18 Viewer' },
       failOnStatusCode: false,
     });
     expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

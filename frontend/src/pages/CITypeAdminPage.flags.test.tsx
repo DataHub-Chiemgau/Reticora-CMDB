@@ -91,9 +91,12 @@ function stubBackend({ patch, existing = false, jobStatus = 'queued' }: Backend 
         accepted = body as object;
         return json({ ...EXISTING.definition, ...accepted, updated_at: 'now' });
       }
+      if (url.includes('/attribute-definitions?scope=global')) return json({ data: [] });
       if (url.includes('/attribute-definitions')) {
         return json({ data: stored ? [{ ...EXISTING.definition, ...accepted }] : [] });
       }
+      // The organization-wide fields of the page (none here).
+      if (url.includes('/ci-fields/global')) return json({ data: [] });
       if (url.includes('/jobs')) {
         return json({
           data: [
@@ -272,6 +275,7 @@ describe('CITypeAdminPage index flags', () => {
         return problem(400, { title: 'Bad Request', detail: 'invalid field name' });
       }
       if (url.includes('/attribute-definitions')) return json({ data: [] });
+      if (url.includes('/ci-fields/global')) return json({ data: [] });
       if (/\/ci-types\/t1(\?|$)/.test(url)) return json({ ...TYPE, fields: [] });
       return json({
         data: [TYPE],

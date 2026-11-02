@@ -140,10 +140,18 @@ interface BackendOptions {
   post?: (body: Record<string, unknown>) => Response;
   /** Answer of GET /locations/tree; without it the request is unexpected. */
   tree?: unknown[];
+  /** Answer of GET /ci-fields/global (organization-wide fields, MET-13). */
+  globals?: FieldDefinition[];
 }
 
 /** Answers by exact API path; records the requests and the POST/PATCH bodies. */
-function stubBackend({ types = [serverType], hidden = [], post, tree }: BackendOptions = {}) {
+function stubBackend({
+  types = [serverType],
+  hidden = [],
+  post,
+  tree,
+  globals = [],
+}: BackendOptions = {}) {
   const posted: Array<Record<string, unknown>> = [];
   const patched: Array<Record<string, unknown>> = [];
   const requests: string[] = [];
@@ -159,6 +167,9 @@ function stubBackend({ types = [serverType], hidden = [], post, tree }: BackendO
     const known = [...types, ...hidden].find((ty) => path === `/ci-types/${ty.id}`);
     if (method === 'GET' && known) {
       return json(known);
+    }
+    if (method === 'GET' && path === '/ci-fields/global') {
+      return json({ data: globals });
     }
     if (method === 'GET' && path === '/locations/tree' && tree) {
       return json({ data: tree });
@@ -397,6 +408,34 @@ describe('CIFormModal type attributes', () => {
       discovery_source: 'manual',
       attributes: { rack_units: 4, airflow: 'back_to_front', dual_psu: true },
     });
+  });
+
+  it('renders the organization-wide fields also for a system type and posts them (MET-13)', async () => {
+    const { posted } = stubBackend({
+      types: [serverType, rackType],
+      globals: [
+        { name: 'cost_center', label: 'Kostenstelle', data_type: 'text' },
+        // A type field of the same name is the narrower definition and wins.
+        { name: 'rack_units', label: 'Globale Höhe', data_type: 'text' },
+      ],
+    });
+    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-01' } });
+    await chooseType(SERVER_TYPE_ID);
+    fireEvent.change(await screen.findByLabelText('Kostenstelle'), { target: { value: 'IT-42' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({
+      ci_type_id: SERVER_TYPE_ID,
+      attributes: { cost_center: 'IT-42' },
+    });
+
+    await chooseType(RACK_TYPE_ID);
+    expect(await screen.findByLabelText('Höheneinheiten *')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Globale Höhe')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Kostenstelle')).toBeInTheDocument();
   });
 
   it('sends no attributes of a type the user switched away from', async () => {

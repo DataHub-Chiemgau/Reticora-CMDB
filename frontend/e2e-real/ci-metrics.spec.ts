@@ -13,6 +13,7 @@ import {
 } from '@playwright/test';
 import {
   api,
+  invitationToken,
   keycloakAdminToken,
   operatorLogin,
   sessionToken,
@@ -447,15 +448,16 @@ test.describe('Collector metrics over the edge: sweep samples of the real collec
     expect(viewerRole, 'system role viewer (RBA-02)').not.toBe('');
     const s = stamp();
     const viewer = { email: `metrics-c2-${s}@audit-e2e.de`, password: `Audit-c2-${s}!aA` };
-    const invitation = await ok<{ token?: string }>('POST', '/invitations', {
+    await ok('POST', '/invitations', {
       email: viewer.email,
       role_id: viewerRole,
       scope_type: 'client',
       scope_id: w.client2,
     });
-    expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+    // The token reaches the invited mailbox only: the server creates the IdP account.
+    const inviteToken = await invitationToken(w.rq, viewer.email);
     const accept = await w.rq.post(`${BASE}/api/v1/invitations/accept`, {
-      data: { token: invitation.token, password: viewer.password, display_name: 'Metrics C2' },
+      data: { token: inviteToken, password: viewer.password, display_name: 'Metrics C2' },
       failOnStatusCode: false,
     });
     expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

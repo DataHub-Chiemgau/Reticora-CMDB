@@ -14,9 +14,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -50,6 +53,18 @@ const (
 	// connects again and passes the callout again, so a connection the cut
 	// of a disable missed ends at the latest then (COL-04).
 	EdgeUserValidity = 15 * time.Minute
+	// EdgeServerName is the DNS name every server certificate of the
+	// endpoint carries besides the configured hosts (RETICORA_NATS_EDGE_HOSTS),
+	// and its common name. A collector also accepts the endpoint under this
+	// name, so it connects when the host it dials is not among the
+	// configured hosts (an IP address, an internal or a NATed name). It
+	// does not lower the bar: the collector trusts only the collector CA it
+	// received at enrollment, and that CA issues a certificate for server
+	// authentication to nothing but this endpoint (collector certificates
+	// are for client authentication only). The collector, a Go module of
+	// its own, keeps the same name in collector/collectorcmd; the two must
+	// not change apart.
+	EdgeServerName = "reticora-collector-nats"
 )
 
 // CollectorSubject is the subject tree of one collector: it may publish
@@ -430,11 +445,17 @@ const edgePKILockWait = time.Minute
 // its TLS, account and callout configuration (edge.conf, included by
 // nats-edge.conf). Replicas sharing dir export under an advisory lock, each
 // file through a temporary file of its own, from the CA state current under
-// the lock (a change of the CA writes the files under the same lock). An
-// existing server key pair is kept only while key and certificate match,
+// the lock (a change of the CA writes the files under the same lock). The
+// server certificate names the hosts and EdgeServerName (edgeServerHosts).
+// An existing server key pair is kept only while key and certificate match,
 // the certificate stems from the edge issuer (the oldest trusted CA: the
-// previous one during a roll-over) and 60 % of its lifetime have not
-// passed; the endpoint picks up new files on reload.
+// previous one during a roll-over), 60 % of its lifetime have not passed
+// and it names every one of those hosts and EdgeServerName; further names
+// on it do not matter. A changed host list therefore reissues it once (a
+// certificate of an earlier version without EdgeServerName as well), and
+// the endpoint picks up new files on reload. Replicas sharing dir must be
+// configured with the same hosts, or each export of one replaces the
+// certificate of the other.
 func ExportEdgePKI(ctx context.Context, ca *CA, sec *EdgeSecrets, dir string, hosts []string, now time.Time) error {
 	_, _, err := exportEdgePKI(ctx, ca, sec, dir, hosts, now)
 	return err
@@ -498,16 +519,85 @@ func writeEdgePKI(st *caState, sec *EdgeSecrets, dir string, hosts []string, now
 			return nil, err
 		}
 	}
-	if keepServerPair(certPath, keyPath, st.edge.cert, now) {
+	if keepServerPair(certPath, keyPath, st.edge.cert, hosts, now) {
 		// A key written by an earlier version may be readable by others.
 		return ex, narrowMode(keyPath, edgeSecretMode)
 	}
-	certPEM, keyPEM, err := issueWithKey(st.edge, "reticora-collector-nats", hosts, EdgeServerCertValidity, x509.ExtKeyUsageServerAuth, issueAt)
+	names := edgeServerHosts(hosts)
+	certPEM, keyPEM, err := issueWithKey(st.edge, EdgeServerName, names, EdgeServerCertValidity, x509.ExtKeyUsageServerAuth, issueAt)
 	if err != nil {
 		return nil, err
 	}
+	// The running endpoint (a certificate was there) reloads the new pair:
+	// changed makes RunEdge, applyEdgeChange and restoreEdge do so.
 	ex.changed = true
-	return ex, writeServerPair(certPath, []byte(certPEM), keyPath, []byte(keyPEM))
+	if werr := writeServerPair(certPath, []byte(certPEM), keyPath, []byte(keyPEM)); werr != nil {
+		return nil, werr
+	}
+	slog.Info("issued the server certificate of the collector NATS endpoint", "event", "discovery.edge.server_certificate_issued",
+		"names", names, "replaced", ex.served != nil)
+	return ex, nil
+}
+
+// edgeServerHosts returns the names of the endpoint's server certificate:
+// the configured hosts, normalized (normalizeEdgeHost), and EdgeServerName,
+// each once, empty entries skipped. The issuance (writeEdgePKI,
+// IssueServer) and the check whether an existing certificate still names
+// the hosts (keepServerPair) use this one normalization, so an entry that a
+// certificate cannot name the way it is written (a port, brackets, upper
+// case) does not reissue the certificate on every export.
+func edgeServerHosts(hosts []string) []string {
+	out := make([]string, 0, len(hosts)+1)
+	for _, h := range append(slices.Clone(hosts), EdgeServerName) {
+		if n := normalizeEdgeHost(h); n != "" && !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// normalizeEdgeHost is the certificate name of one configured host: an IP
+// address, also in brackets ([::1]) or with a port (192.0.2.10:4222,
+// [2001:db8::1]:4222), in its canonical form (issueWithKey makes it an IP
+// SAN); anything else is a DNS name, trimmed, lower-cased, without a port
+// and without a trailing dot. An empty entry yields "".
+func normalizeEdgeHost(h string) string {
+	h = strings.TrimSpace(h)
+	if host, port, err := net.SplitHostPort(h); err == nil {
+		if _, perr := strconv.ParseUint(port, 10, 16); perr == nil {
+			h = host
+		}
+	}
+	if len(h) > 2 && h[0] == '[' && h[len(h)-1] == ']' {
+		if ip := net.ParseIP(h[1 : len(h)-1]); ip != nil {
+			return ip.String()
+		}
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.String()
+	}
+	return strings.TrimSuffix(strings.ToLower(h), ".")
+}
+
+// coversEdgeHosts reports whether cert names every name of
+// edgeServerHosts(hosts): an IP address among its IP SANs, a DNS name among
+// its DNS SANs (case-insensitive, as DNS names compare). It compares names,
+// not what cert.VerifyHostname would accept, so that a wildcard or an entry
+// no certificate verifies does not reissue it on every export; names on
+// cert beyond hosts do not matter.
+func coversEdgeHosts(cert *x509.Certificate, hosts []string) bool {
+	for _, name := range edgeServerHosts(hosts) {
+		if ip := net.ParseIP(name); ip != nil {
+			if !slices.ContainsFunc(cert.IPAddresses, ip.Equal) {
+				return false
+			}
+			continue
+		}
+		if !slices.ContainsFunc(cert.DNSNames, func(dns string) bool { return strings.EqualFold(dns, name) }) {
+			return false
+		}
+	}
+	return true
 }
 
 // withEdgePKILock runs export under the advisory lock of the export
@@ -574,14 +664,16 @@ func restoreEdge(ctx context.Context, ca *CA, edge *EdgeConfig) error {
 
 // keepServerPair reports whether the server key pair in the files stays: the
 // key matches the certificate (tls.X509KeyPair), the certificate was issued
-// by issuer and is not due for renewal at now.
-func keepServerPair(certPath, keyPath string, issuer *x509.Certificate, now time.Time) bool {
+// by issuer, is not due for renewal at now and names every configured host
+// and EdgeServerName (coversEdgeHosts).
+func keepServerPair(certPath, keyPath string, issuer *x509.Certificate, hosts []string, now time.Time) bool {
 	pair, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil || issuer == nil {
 		return false
 	}
 	cert, err := x509.ParseCertificate(pair.Certificate[0])
-	return err == nil && cert.CheckSignatureFrom(issuer) == nil && !NeedsRenewal(cert.NotBefore, cert.NotAfter, now)
+	return err == nil && cert.CheckSignatureFrom(issuer) == nil && !NeedsRenewal(cert.NotBefore, cert.NotAfter, now) &&
+		coversEdgeHosts(cert, hosts)
 }
 
 // narrowMode removes the permissions beyond mode from the file at path.

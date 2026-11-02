@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import {
   api,
+  invitationToken,
   keycloakAdminToken,
   operatorLogin,
   signupTenant,
@@ -764,15 +765,16 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
       const techRole = rows(roles).find((r) => r.name === 'client_technician')?.id ?? '';
       expect(techRole, 'system role client_technician (RBA-02)').not.toBe('');
       const account = { email: `bulk-c2-${s}@audit-e2e.de`, password: `Audit-c2-${s}!aA` };
-      const invitation = await ok<{ token?: string }>(c, 'POST', '/invitations', {
+      await ok(c, 'POST', '/invitations', {
         email: account.email,
         role_id: techRole,
         scope_type: 'client',
         scope_id: client2.id,
       });
-      expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+      // The token reaches the invited mailbox only: the server creates the IdP account.
+      const inviteToken = await invitationToken(rq, account.email);
       const accept = await rq.post(`${BASE}/api/v1/invitations/accept`, {
-        data: { token: invitation.token, password: account.password, display_name: 'Bulk C2' },
+        data: { token: inviteToken, password: account.password, display_name: 'Bulk C2' },
         failOnStatusCode: false,
       });
       expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

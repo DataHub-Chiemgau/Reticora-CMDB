@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -913,5 +915,156 @@ func TestAuditT3CorruptHeadDoesNotBlockSpool(t *testing.T) {
 	}
 	if st, statErr := b.Stats(ctx); statErr != nil || st.DroppedMessages < 1 {
 		t.Errorf("corrupt spool entry not counted as a loss: DroppedMessages=%d (%v), want >= 1", st.DroppedMessages, statErr)
+	}
+}
+
+// payloadsOf returns the payloads of the spool in delivery order.
+func payloadsOf(t *testing.T, b *DiskBuffer) []string {
+	t.Helper()
+	msgs, err := b.PeekBatch(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("peek: %v", err)
+	}
+	out := make([]string, len(msgs))
+	for i := range msgs {
+		out[i] = string(msgs[i].Payload)
+	}
+	return out
+}
+
+// Replace puts the parts in the place of the message they replace, also
+// when the spool is at its size limit: nothing is refused or dropped, no
+// loss is counted, the parts keep the message's age and sort ahead of
+// every younger message whatever their source time, also when a part is
+// replaced again.
+func TestReplaceKeepsThePlaceOutsideTheSizeLimit(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testCtx(t)
+	var losses []Loss
+	b := &DiskBuffer{Dir: dir, OnDrop: func(l Loss) { losses = append(losses, l) }}
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	var ids []string
+	for i, payload := range []string{"before", strings.Repeat("whole", 40), "after"} {
+		id, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte(payload), CreatedAt: base.Add(time.Duration(i) * time.Nanosecond)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	// The message to replace is older than the minimum retention: the size
+	// limit must not drop it for its own parts either.
+	backdate(t, dir, ids[1], 25*time.Hour)
+	b.MaxBytes = spoolSize(t, dir)
+
+	// The source times of the parts are those of the run's next payloads
+	// (partSourceTime): they must not sort behind "after".
+	parts := []Message{
+		{Topic: "t", Payload: []byte("part-0"), CreatedAt: base.Add(time.Nanosecond)},
+		{Topic: "t", Payload: []byte("part-1"), CreatedAt: base.Add(2 * time.Nanosecond)},
+		{Topic: "t", Payload: []byte("part-2"), CreatedAt: base.Add(3 * time.Nanosecond)},
+	}
+	partIDs, err := b.Replace(ctx, ids[1], parts)
+	if err != nil {
+		t.Fatalf("Replace at the size limit: %v", err)
+	}
+	if len(partIDs) != 3 || partIDs[0] != ids[1]+".0" || partIDs[2] != ids[1]+".2" {
+		t.Fatalf("part ids = %v, want %s.0 to %s.2", partIDs, ids[1], ids[1])
+	}
+	if got := payloadsOf(t, b); !slices.Equal(got, []string{"before", "part-0", "part-1", "part-2", "after"}) {
+		t.Fatalf("spool after Replace = %v, want the parts in the place of the replaced message", got)
+	}
+	if _, err = os.Stat(filepath.Join(dir, ids[1]+".json")); !os.IsNotExist(err) {
+		t.Fatalf("replaced message still in the spool: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dir, partIDs[1]+".json"))
+	if err != nil || time.Since(info.ModTime()) < 25*time.Hour-time.Minute {
+		t.Fatalf("part modification time (%v), want the age of the replaced message", err)
+	}
+
+	// A part replaced again keeps its place; ten parts sort by number.
+	var again []Message
+	for i := range 10 {
+		again = append(again, Message{Topic: "t", Payload: []byte(fmt.Sprintf("part-1-%d", i))})
+	}
+	if _, err = b.Replace(ctx, partIDs[1], again); err != nil {
+		t.Fatalf("Replace of a part: %v", err)
+	}
+	want := []string{"before", "part-0"}
+	for i := range 10 {
+		want = append(want, fmt.Sprintf("part-1-%d", i))
+	}
+	want = append(want, "part-2", "after")
+	if got := payloadsOf(t, b); !slices.Equal(got, want) {
+		t.Fatalf("spool after the second Replace = %v, want %v", got, want)
+	}
+	st, err := (&DiskBuffer{Dir: dir}).Stats(ctx)
+	if err != nil || len(losses) != 0 || st.DroppedMessages != 0 {
+		t.Fatalf("losses %+v, stats %+v (%v); want none", losses, st, err)
+	}
+
+	// Without parts the message is only removed.
+	if _, err = b.Replace(ctx, ids[0], nil); err != nil {
+		t.Fatalf("Replace without parts: %v", err)
+	}
+	if got := payloadsOf(t, b); len(got) != len(want)-1 || got[0] != "part-0" {
+		t.Fatalf("spool after Replace without parts = %v", got)
+	}
+}
+
+// A part that cannot be written leaves the message whole and no part
+// behind; a message no longer in the spool and an invalid id are refused
+// without writing anything.
+func TestReplaceRollsBackAndRefuses(t *testing.T) {
+	dir := t.TempDir()
+	ctx := testCtx(t)
+	b := &DiskBuffer{Dir: dir}
+	id, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("whole")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The second part cannot be renamed into place.
+	blocked := filepath.Join(dir, id+".1.json")
+	if err = os.Mkdir(blocked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	parts := []Message{{Topic: "t", Payload: []byte("a")}, {Topic: "t", Payload: []byte("b")}}
+	if _, err = b.Replace(ctx, id, parts); err == nil {
+		t.Fatal("Replace succeeded although a part could not be written")
+	}
+	if got := payloadsOf(t, b); !slices.Equal(got, []string{"whole"}) {
+		t.Fatalf("spool after the failed Replace = %v, want the message whole and no part", got)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, tempPrefix+"*")); len(matches) != 0 {
+		t.Fatalf("temp files left after a failed Replace: %v", matches)
+	}
+	if err = os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+
+	const unknown = "20261001T120000.000000000Z-00000000"
+	if _, err = b.Replace(ctx, unknown, parts); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("unknown message: %v, want os.ErrNotExist", err)
+	}
+	for _, tc := range []struct {
+		name  string
+		id    string
+		parts []Message
+	}{
+		{"id outside the spool", "../loss", parts},
+		{"part id outside the spool", id, []Message{{ID: "../x", Topic: "t"}}},
+		{"part id of the message", id, []Message{{ID: id, Topic: "t"}}},
+	} {
+		if _, err = b.Replace(ctx, tc.id, tc.parts); err == nil {
+			t.Errorf("%s: Replace succeeded", tc.name)
+		}
+	}
+	if got := payloadsOf(t, b); !slices.Equal(got, []string{"whole"}) {
+		t.Fatalf("spool after the refused Replaces = %v, want the message whole", got)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err = b.Replace(cancelled, id, parts); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Replace with a cancelled context: %v", err)
 	}
 }

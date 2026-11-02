@@ -378,8 +378,11 @@ func TestOwnSMTPServerEgressPolicy(t *testing.T) {
 			port int
 		}{{"127.0.0.1", srv.port()}, {"10.0.0.5", 587}, {"fd12:3456::25", 25}, {"relay.example.test", 587}, {"mail.example.test", 25},
 			{"relay.example.test", srv.port()}} {
+			// Without a login: Validate refuses one with tls none to
+			// another host than localhost before the egress check. A
+			// reached server records the mail.
 			ch := &Channel{Name: "own", Provider: ProviderSMTP, Enabled: true, Config: map[string]any{"host": c.host,
-				"port": float64(c.port), "tls": "none", "from": "cmdb@acme.example", "username": "cmdb", "password": "pw"}}
+				"port": float64(c.port), "tls": "none", "from": "cmdb@acme.example"}}
 			if _, err := provider.Send(ctx, ch, &Message{Subject: "s", Body: "b", To: []Recipient{{Email: "ops@acme.example"}}}); !errors.Is(err, egress.ErrBlockedDestination) {
 				t.Errorf("send to %s:%d: %v, want %v", c.host, c.port, err, egress.ErrBlockedDestination)
 			}

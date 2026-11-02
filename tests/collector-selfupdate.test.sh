@@ -356,7 +356,8 @@ echo 503 > "$STATE/heartbeat-status"
 for attempt in 1 2 3; do
     LOG="$TMP_ROOT/d-$attempt.log"
     start_collector "$LOG"
-    if wait_log "$LOG" '"msg":"heartbeat completed","status":503' 60; then
+    # A refused heartbeat is an error with the reason (collector.heartbeat.refused).
+    if wait_log "$LOG" '"msg":"heartbeat refused","event":"collector.heartbeat.refused","status":503' 60; then
         DETAIL="$(cat "$LOG")"
         check "d: start $attempt of v0.0.2 stays unconfirmed" \
             grep -q '"msg":"collector update awaiting confirmation","version":"v0.0.2"' "$LOG"

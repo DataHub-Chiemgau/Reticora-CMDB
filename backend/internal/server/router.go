@@ -230,7 +230,13 @@ type Options struct {
 	// in memory.
 	Notifications *notify.Center
 	// InvitationAccounts creates the IdP account of an accepted invitation.
+	// It is wired only together with InvitationMailer
+	// (user.InvitationHandler.WithAccounts).
 	InvitationAccounts user.InvitationAccounts
+	// InvitationMailer sends the invitation mail straight to the invited
+	// address over the central SMTP server where the acceptance creates the
+	// IdP account; nil without central SMTP.
+	InvitationMailer user.InvitationMailer
 	// InvitationAcceptURL is the page the link of the invitation mail opens
 	// (RETICORA_INVITATION_ACCEPT_URL); empty: issuing and renewing
 	// invitations answers 503.
@@ -328,12 +334,14 @@ func apiKeyHandler(repos *Repositories, opts *Options) *identity.APIKeyHandler {
 }
 
 // invitationHandler builds the invitations (TLC-03); the accept URL makes
-// the link of the invitation mail, with an IdP admin client the acceptance
-// creates the account; the acceptance counts against max_users (ENT-03).
+// the link of the invitation mail, with an IdP admin client and the
+// invitation mailer the acceptance creates the account and the mail goes
+// straight to the invitee; the acceptance counts against max_users
+// (ENT-03).
 func invitationHandler(repos *Repositories, opts *Options) *user.InvitationHandler {
 	h := user.NewInvitationHandler(repos.Invitations).WithAcceptURL(opts.InvitationAcceptURL).WithQuota(opts.Entitlements)
 	if opts.InvitationAccounts != nil {
-		h.WithAccounts(opts.InvitationAccounts)
+		h.WithAccounts(opts.InvitationAccounts, opts.InvitationMailer)
 	}
 	return h
 }

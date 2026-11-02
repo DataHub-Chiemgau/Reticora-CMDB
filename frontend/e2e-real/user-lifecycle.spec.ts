@@ -8,6 +8,7 @@ import {
 } from '@playwright/test';
 import {
   api,
+  invitationToken,
   keycloakLogin,
   signupTenant,
   stamp,
@@ -148,13 +149,14 @@ test.describe('user lifecycle in the UI (TLC-04, F-196)', () => {
     const s = stamp();
     const email = `lifecycle-b-${s}@audit-e2e.de`;
     const password = `Audit-b-${s}!aA`;
-    const invitation = await ok<{ token?: string }>('POST', '/invitations', {
+    await ok('POST', '/invitations', {
       email,
       role_id: viewer,
     });
-    expect(invitation.token, 'the token is returned once on issue').toBeTruthy();
+    // The token reaches the invited mailbox only: the server creates the IdP account.
+    const inviteToken = await invitationToken(rq, email);
     const accept = await rq.post(`${BASE}/api/v1/invitations/accept`, {
-      data: { token: invitation.token, password, display_name: 'Audit Lifecycle B' },
+      data: { token: inviteToken, password, display_name: 'Audit Lifecycle B' },
       failOnStatusCode: false,
     });
     expect(accept.status(), `accept the invitation: ${await accept.text()}`).toBe(201);

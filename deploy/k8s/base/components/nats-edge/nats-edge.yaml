@@ -3,8 +3,15 @@ kind: ConfigMap
 metadata:
   name: reticora-nats-edge
 data:
-  # Host names of the endpoint's server certificate: the public name the
-  # collectors use first, then the in-cluster service name.
+  # Host names of the endpoint's server certificate (RETICORA_NATS_EDGE_HOSTS
+  # of the server): the public name the collectors use first, then the
+  # in-cluster service name. A collector connects to tls://<host of the
+  # server URL it was enrolled with>:4222, so list that host (an IP address
+  # as such) and every alias collectors dial; replace nats.example.com in
+  # the overlay. The server adds the fixed name reticora-collector-nats,
+  # which current collectors also accept, and reissues the certificate when
+  # the list changes; all replicas must read the same list
+  # (docs/betrieb/firewall-matrix.md).
   hosts: "nats.example.com,reticora-nats-edge"
   leaf-url: "nats://nats:7422"
   # As deploy/docker-compose/nats-edge.conf; the file lives in conf/,

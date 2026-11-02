@@ -329,12 +329,17 @@ sudo ./install-vm.sh --build-from-source  # local build, not signature-verified
 
 The installer asks for:
 
-- **Cloud connection** — URL of the central Reticora cloud, organization ID
-  (tenant UUID from the cloud UI) and a unique collector ID (default:
-  hostname).
-- **Discovery scope** — subnets to scan (comma-separated CIDR), discovery
-  protocols (`sweep, snmp, ssh, wmi, ipmi, redfish, power, nas`), discovery
-  and heartbeat intervals.
+- **Cloud connection** — URL of the Reticora cloud as opened in the browser
+  (the `--server` of the enroll command; empty = the URL stored by the
+  enrollment). Organization and collector ID default to empty: the
+  enrollment sets them from the collector certificate. The placeholders of
+  older installers (`https://cmdb.example.com`, `reticora-demo`, the host
+  name) are not reused on a re-run.
+- **Discovery scope** — subnets to discover (comma-separated CIDR; reported
+  to the cloud as scope suggestions, together with the subnets of the VM's
+  interfaces, to confirm on the Discovery page), discovery protocols
+  (`sweep, snmp, ssh, wmi, ipmi, redfish, power, nas`), discovery and
+  heartbeat intervals.
 - **Device credentials** — SNMP community, optional SSH username/password used
   by the discovery plugins.
 - **Offline buffer** — spool directory where results are kept while the cloud
@@ -344,6 +349,13 @@ The installer asks for:
   off), see `docs/betrieb/collector-updates.md`.
 - **mTLS identity** — client certificate/key/CA files, or empty to use the
   enrollment keystore at `/var/lib/reticora-collector/credentials.json`.
+- **Enrollment** (optional) — the one-time code of the Discovery page (hidden
+  input; non-interactive: `RETICORA_ENROLL_CODE`). With it the installer runs
+  `reticora-collector enroll --server <url>` before the service starts (in
+  the Docker mode in the image, then restarts the container). The code
+  reaches the command in its environment (`RETICORA_ENROLL_TOKEN`), never on
+  a command line, and is never written to a file. Not asked when the
+  collector is enrolled already.
 
 It then writes `/opt/reticora-collector/collector.env` (mode `600`), installs
 the signed collector of the release — the binary `reticora-collector-linux-<arch>`
@@ -352,9 +364,14 @@ after `cosign verify-blob` and its sha256 in the signed `SHA256SUMS`, or with
 digest (Docker/Compose are installed when missing) — installs and starts a
 `reticora-collector.service` systemd unit — or, with `--docker`, a minimal
 compose project in `/opt/reticora-collector/` — and verifies that the
-collector is running. In the systemd mode the binary lives at
-`/opt/reticora-collector/collector` and is linked as
-`/usr/local/bin/reticora-collector`, the command the unit starts.
+collector is running and that its NATS endpoint `<host of the cloud
+URL>:4222` accepts a TCP connection: the collector delivers only over this
+mTLS connection, so a blocked 4222/TCP is reported as a warning. In the
+systemd mode the binary lives at `/opt/reticora-collector/collector` and is
+linked as `/usr/local/bin/reticora-collector`, the command the unit starts.
+In the Docker mode the spool directory belongs to the image user (65534).
+Connection rules, log events and diagnosis:
+`docs/betrieb/collector-verbindung.md`.
 
 With `RETICORA_UPDATE_URL` (systemd mode) the installer also installs cosign
 `v2.4.1` — the version the release is signed with, checked against its
@@ -367,8 +384,9 @@ signed image (re-run with `--release v<version>`) and ignores the update URL.
 ### Enrollment
 
 The Discovery page shows `reticora-collector enroll --server <url> --code
-<code>` with a one-time code (24 h). Run it on the collector VM as root and
-restart the service:
+<code>` with a one-time code (24 h). When the installer did not enroll the
+collector, run it on the collector VM as root; the running service picks the
+identity up within 30 seconds, a restart applies it at once:
 
 ```bash
 sudo reticora-collector enroll --server https://cmdb.example.com --code <code>
@@ -382,8 +400,10 @@ installer over an older installation switches `RETICORA_CREDENTIALS_PATH` from
 `/opt/reticora-collector/credentials.json` to that path and moves an identity
 found there. With `--docker`, the compose project mounts
 `/var/lib/reticora-collector` (mode `700`, owned by the image user `nobody`,
-65534), and the image runs `reticora-collector` as its entrypoint
-(`collector` remains as a link):
+65534) and, read-only at the same path, the CA bundle and client certificate
+files `collector.env` names outside the mounted directories (so `--ca-file`
+works in the container), and the image runs `reticora-collector` as its
+entrypoint (`collector` remains as a link):
 
 ```bash
 docker compose -f /opt/reticora-collector/docker-compose.yml run --rm collector \

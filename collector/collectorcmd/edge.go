@@ -32,9 +32,11 @@ const (
 // caller falls back to HTTP.
 var errNoEdge = errors.New("edge channel unavailable")
 
-// errEdgeTooLarge: the payload exceeds the edge's message size. Records
-// take the HTTP path as without the edge; a metric batch is dropped.
-var errEdgeTooLarge = fmt.Errorf("%w: payload exceeds the maximum message size", errNoEdge)
+// errEdgeTooLarge: the payload exceeds the edge's message size. It is no
+// errNoEdge: the HTTP path authenticates no collector, so an oversized
+// records payload is split (uploadRecordsAt, flushSpool), never sent there;
+// a metric batch is dropped.
+var errEdgeTooLarge = errors.New("payload exceeds the maximum message size of the edge")
 
 // edgeReply is the server's answer on the edge (discovery.EdgeReply).
 type edgeReply struct {
@@ -113,10 +115,13 @@ func heartbeatViaEdge(ctx context.Context, body []byte) (licenseStatus string, o
 		slog.Error("heartbeat over the edge: invalid reply", "error", err)
 		return "", false, true
 	}
-	slog.Info("heartbeat completed", "status", reply.Status, "transport", "edge", "duration_ms", time.Since(start).Milliseconds())
 	if reply.Status >= 300 {
+		slog.Error("heartbeat refused", "event", "collector.heartbeat.refused", "status", reply.Status, "transport", "edge",
+			"error", reply.Error, "collector_status", reply.CollectorStatus,
+			"hint", "the server refused the collector on its edge subject: check the collector on the Discovery page (disabled, deleted)")
 		return "", false, true
 	}
+	slog.Info("heartbeat completed", "status", reply.Status, "transport", "edge", "duration_ms", time.Since(start).Milliseconds())
 	return reply.LicenseStatus, true, true
 }
 
@@ -190,14 +195,65 @@ func (b *metricBuffer) len() int {
 	return len(b.batches)
 }
 
+// clear drops every buffered batch.
+func (b *metricBuffer) clear() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.batches = nil
+}
+
 // metricsRefusedError is the server's refusal of a metric batch.
 type metricsRefusedError struct {
-	status int
-	detail string
+	status  int
+	problem string
+	detail  string
 }
 
 func (e *metricsRefusedError) Error() string {
 	return fmt.Sprintf("metric samples refused with status %d: %s", e.status, e.detail)
+}
+
+// problemFeatureNotEntitled is the problem type of a request the server
+// refuses because the plan of the organization does not include the
+// feature (api.ProblemFeatureNotEntitled of the server).
+const problemFeatureNotEntitled = "https://reticora.io/problems/feature-not-entitled"
+
+// notLicensed reports a refusal because monitoring is not licensed.
+func (e *metricsRefusedError) notLicensed() bool {
+	return e.status == http.StatusForbidden && e.problem == problemFeatureNotEntitled
+}
+
+// monitoringProbeInterval is how long the collector sends no metric batch
+// after the server refused monitoring as not licensed; then one batch
+// probes whether it is licensed by now (tests shorten it).
+var monitoringProbeInterval = time.Hour
+
+// monitoringPaused reports whether metric samples are held back at now:
+// the server refused monitoring as not licensed less than
+// monitoringProbeInterval ago.
+func (u *uploader) monitoringPaused(now time.Time) bool {
+	at := u.monitoringRefusedAt.Load()
+	return at != 0 && now.Sub(time.Unix(0, at)) < monitoringProbeInterval
+}
+
+// monitoringNotLicensed records the refusal at now. The collector stops
+// sending metric batches until a later probe is accepted or it restarts
+// (like errLicenseExpired pauses discovery); this is logged once, not per
+// batch. The samples are not counted as lost: the server refuses the
+// feature, not the data.
+func (u *uploader) monitoringNotLicensed(now time.Time) {
+	if u.monitoringRefusedAt.Swap(now.UnixNano()) == 0 {
+		slog.Warn("monitoring not licensed; metric samples are not sent", "event", "collector.metrics.not_licensed",
+			"hint", "the plan of the organization does not include monitoring; discovery and inventory are not affected. "+
+				"The collector checks again every "+monitoringProbeInterval.String())
+	}
+}
+
+// monitoringLicensed records an accepted metric batch and ends a pause.
+func (u *uploader) monitoringLicensed() {
+	if u.monitoringRefusedAt.Swap(0) != 0 {
+		slog.Info("monitoring licensed; metric samples are sent again", "event", "collector.metrics.resumed")
+	}
 }
 
 // postMetrics sends monitoring ingest samples over the edge in batches of
@@ -223,8 +279,12 @@ func (u *uploader) postMetrics(ctx context.Context, metrics []map[string]any) er
 // credential goes to the HTTP API (F-046): without the edge the batch waits
 // in the buffer. It returns the refusal of this batch (status >= 400) or
 // its drop; a waiting batch is no error. Every dropped or refused sample is
-// counted (dropped_samples, E-79).
+// counted (dropped_samples, E-79). While monitoring is not licensed
+// (monitoringPaused) the batch is not sent and not counted.
 func (u *uploader) postMetricsPayload(ctx context.Context, payload []byte, count int) error {
+	if u.monitoringPaused(time.Now()) {
+		return nil
+	}
 	batch := &metricBatch{payload: payload, samples: count}
 	u.dropSamples(u.metrics.push(batch))
 	held, err := u.deliverMetrics(ctx, batch)
@@ -245,7 +305,9 @@ func (u *uploader) flushMetrics(ctx context.Context) {
 // the edge cannot take them or a request failed (held: batches wait); a
 // refused or oversized batch is dropped, counted (dropped_samples) and
 // logged as an error with its status and count, except own, whose refusal
-// or drop it returns to the caller.
+// or drop it returns to the caller. A refusal because monitoring is not
+// licensed pauses the metrics instead (monitoringNotLicensed): the buffered
+// batches are dropped without an error and without being counted.
 func (u *uploader) deliverMetrics(ctx context.Context, own *metricBatch) (held bool, ownErr error) {
 	u.metrics.sendMu.Lock()
 	defer u.metrics.sendMu.Unlock()
@@ -260,10 +322,16 @@ func (u *uploader) deliverMetrics(ctx context.Context, own *metricBatch) (held b
 			err = fmt.Errorf("metric samples dropped: %w", err)
 		case errors.Is(err, errNoEdge):
 			return true, ownErr
+		case errors.As(err, &refused) && refused.notLicensed():
+			u.monitoringNotLicensed(time.Now())
+			u.metrics.clear()
+			return false, ownErr
 		case errors.As(err, &refused):
 		case err != nil:
 			slog.Warn("metric samples over the edge failed; kept for the next attempt", "count", batch.samples, "error", err)
 			return true, ownErr
+		default:
+			u.monitoringLicensed()
 		}
 		u.metrics.remove(batch)
 		if err != nil {
@@ -295,7 +363,7 @@ func (u *uploader) sendMetricBatch(ctx context.Context, batch *metricBatch) erro
 		return fmt.Errorf("edge metrics reply: %w", err)
 	}
 	if reply.Status >= 400 {
-		return &metricsRefusedError{status: reply.Status, detail: reply.Error}
+		return &metricsRefusedError{status: reply.Status, problem: reply.Type, detail: reply.Error}
 	}
 	slog.Info("metric samples delivered", "count", batch.samples, "ingested", reply.Ingested,
 		"unassigned", reply.Unassigned, "transport", "edge")

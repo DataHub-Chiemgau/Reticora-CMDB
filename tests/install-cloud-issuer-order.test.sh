@@ -123,6 +123,8 @@ stub_stack() {
     seed_default_organization() { :; }
     ensure_runtime_login() { :; }
     create_initial_admin() { echo "create_initial_admin" >> "$CALLS"; }
+    ensure_admin_client() { echo "ensure_admin_client" >> "$CALLS"; }
+    apply_realm_smtp() { echo "apply_realm_smtp" >> "$CALLS"; }
     show_service_logs() { :; }
     tls_cert_is_selfsigned() { return 1; }
 }

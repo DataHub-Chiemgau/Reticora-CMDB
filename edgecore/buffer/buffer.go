@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,6 +88,8 @@ type Loss struct {
 //   - MaxBytes caps the total size. Over the cap, messages older than
 //     MinRetention are dropped oldest first; if that is not enough, Enqueue
 //     returns ErrSpoolFull without storing the new message (backpressure).
+//     Replace is not refused by it: its parts take the space of the
+//     message they replace.
 //
 // Every loss is counted (Stats.DroppedMessages/DroppedBytes) and reported to
 // OnDrop so the caller can raise an event and inform the server. The loss
@@ -570,6 +573,90 @@ func (b *DiskBuffer) Ack(ctx context.Context, ids []string) error {
 		}
 	}
 
+	return nil
+}
+
+// Replace stores parts in place of the spooled message id and then removes
+// it, under one lock (e.g. a batch split into smaller ones). A part without
+// an id gets "<id>.<n>", which sorts in the place of the message it
+// replaces: after every older and before every younger message, whatever
+// the source times of the parts, so the delivery order is kept, also when
+// a part is replaced again. The parts keep the age (modification time) of
+// the message for the age limits and Stats. The size limit does not apply
+// and nothing in the spool is dropped for them, as they take the space of
+// the message they replace. The message is removed only once every part is
+// stored: if a part cannot be written, the parts written so far are
+// removed and the message stays; a crash before the removal leaves both,
+// so the data is delivered twice (receivers deduplicate) but never lost. A
+// message no longer in the spool (acknowledged or dropped meanwhile) is not
+// replaced; the error then wraps os.ErrNotExist. With no parts the message
+// is only removed; the caller accounts for its content.
+func (b *DiskBuffer) Replace(ctx context.Context, id string, parts []Message) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if name := id + ".json"; filepath.Base(name) != name {
+		return nil, fmt.Errorf("buffer: invalid message id %q", id)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	info, statErr := os.Stat(b.messagePath(id))
+	if statErr != nil {
+		return nil, fmt.Errorf("buffer: replace %s: %w", id, statErr)
+	}
+	mtime := info.ModTime()
+	// One width for all parts, so their ids sort in their order.
+	width := len(strconv.Itoa(max(len(parts)-1, 0)))
+	ids := make([]string, 0, len(parts))
+	for i, msg := range parts {
+		if msg.CreatedAt.IsZero() {
+			msg.CreatedAt = time.Now().UTC()
+		}
+		if msg.ID == "" {
+			msg.ID = fmt.Sprintf("%s.%0*d", id, width, i)
+		}
+		err := b.writePartLocked(&msg, id, mtime)
+		if err == nil {
+			ids = append(ids, msg.ID)
+			continue
+		}
+		// The message stays whole; the parts written so far are removed.
+		for _, written := range ids {
+			if rmErr := os.Remove(b.messagePath(written)); rmErr != nil && !os.IsNotExist(rmErr) {
+				err = errors.Join(err, rmErr)
+			}
+		}
+		return nil, fmt.Errorf("buffer: replace %s: %w", id, err)
+	}
+	if err := os.Remove(b.messagePath(id)); err != nil && !os.IsNotExist(err) {
+		return ids, fmt.Errorf("buffer: remove replaced %s: %w", id, err)
+	}
+	if err := syncDir(b.Dir); err != nil {
+		return ids, fmt.Errorf("buffer: remove replaced %s: %w", id, err)
+	}
+	return ids, nil
+}
+
+// writePartLocked writes one part of Replace with the modification time
+// mtime of the message it replaces.
+func (b *DiskBuffer) writePartLocked(msg *Message, replaced string, mtime time.Time) error {
+	if name := msg.ID + ".json"; filepath.Base(name) != name || msg.ID == replaced {
+		return fmt.Errorf("invalid part id %q", msg.ID)
+	}
+	data, err := json.MarshalIndent(msg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode part: %w", err)
+	}
+	path := b.messagePath(msg.ID)
+	if err = b.writeFileAtomic(path, data); err != nil {
+		return fmt.Errorf("write part: %w", err)
+	}
+	if err = os.Chtimes(path, mtime, mtime); err != nil {
+		_ = os.Remove(path)
+		return fmt.Errorf("write part: %w", err)
+	}
 	return nil
 }
 

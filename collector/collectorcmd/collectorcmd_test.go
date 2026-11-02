@@ -847,6 +847,214 @@ func TestLocalSubnetsForScopeSuggestions(t *testing.T) {
 	}
 }
 
+// TestScanSubnetsReportedAsSuggestions (INS-06, DIS-09): the subnets the
+// installer asks for (RETICORA_SCAN_SUBNETS) become scope suggestions with
+// those of the interfaces; loopback, link-local, host entries and invalid
+// ones do not, nor the subnet of the simulated fleet.
+func TestScanSubnetsReportedAsSuggestions(t *testing.T) {
+	interfaces := func() ([]localInterface, error) {
+		return []localInterface{{Name: "eth0", Addrs: []net.Addr{fakeAddr("192.168.10.23/24")}}}, nil
+	}
+	cfg := collectorConfig{ScanSubnets: []string{"127.0.0.1/32", "192.168.10.0/24", " 10.20.0.0/16 ", "10.30.0.5", "10.30.0.6/32",
+		"10.40.1.1/24", "169.254.0.0/16", "224.0.0.0/4", "garbage"}}
+	if got := strings.Join(scopeSuggestions(&cfg, interfaces), ","); got != "192.168.10.0/24,10.20.0.0/16,10.40.1.0/24" {
+		t.Errorf("scope suggestions = %s, want the interface subnet and the configured networks", got)
+	}
+	cfg.Simulate = true
+	if got := strings.Join(scopeSuggestions(&cfg, interfaces), ","); got != "192.168.10.0/24" {
+		t.Errorf("scope suggestions of the simulation = %s, want the interface subnet only", got)
+	}
+}
+
+// TestEmptyScopeListIsWarnedOnce: an empty scope list from the server
+// means that nothing is discovered; it is a warning once per change
+// (collector.scopes.empty), not on every refresh.
+func TestEmptyScopeListIsWarnedOnce(t *testing.T) {
+	logs := captureLogs(t)
+	scopesEmptyWarned.Store(false)
+	t.Cleanup(func() { collectorScopes = &scopeCache{}; scopesEmptyWarned.Store(false) })
+	const empty = "no discovery scope: nothing is discovered until a scope is created or a suggested subnet is accepted on the Discovery page"
+	applyScopes([]collectorScope{}, nil)
+	applyScopes([]collectorScope{}, nil)
+	if lines := logLines(t, logs, empty); len(lines) != 1 || lines[0]["level"] != "WARN" || lines[0]["event"] != "collector.scopes.empty" {
+		t.Fatalf("empty scope list: %v, want one WARN collector.scopes.empty", lines)
+	}
+	applyScopes([]collectorScope{{ID: "s-1", Kind: "cidr", Target: "10.1.0.0/29", Plugins: []string{"sweep"}}}, nil)
+	applyScopes([]collectorScope{}, nil)
+	if n := len(logLines(t, logs, empty)); n != 2 {
+		t.Errorf("warnings after the list emptied again = %d, want 2", n)
+	}
+	if passes := discoveryPasses(&collectorConfig{ScanSubnets: []string{"192.0.2.0/30"}}); len(passes) != 0 {
+		t.Errorf("passes without scopes = %+v", passes)
+	}
+}
+
+// TestEnrolledIdentityWinsOverTheEnvironment: with a credentials file the
+// organization and collector id of the certificate replace other values of
+// RETICORA_ORGANIZATION_ID and RETICORA_COLLECTOR_ID (older installers
+// wrote "reticora-demo" and the host name), with a warning;
+// RETICORA_SERVER_URL still wins, with a warning when its host differs from
+// the enrolled one. A collector with a client certificate of its own keeps
+// the environment.
+func TestEnrolledIdentityWinsOverTheEnvironment(t *testing.T) {
+	logs := captureLogs(t)
+	const orgID, colID = "6f0b6f0e-0000-4000-8000-0000000000f1", "6f0b6f0e-0000-4000-8000-0000000000f2"
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	creds := collectorCreds(t, newAuditPKI(t), orgID, colID)
+	creds.Metadata = map[string]string{"server_url": "https://cmdb.example.com"}
+	if err := (&keystore.FileStore{Path: path}).Save(context.Background(), *creds); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("RETICORA_CREDENTIALS_PATH", path)
+	t.Setenv("RETICORA_ORGANIZATION_ID", "reticora-demo")
+	t.Setenv("RETICORA_COLLECTOR_ID", "collector-vm")
+	t.Setenv("RETICORA_SERVER_URL", "https://other.example.com")
+	t.Setenv("RETICORA_TLS_CLIENT_CERT", "")
+	t.Setenv("RETICORA_TLS_CLIENT_CERT_FILE", "")
+	t.Setenv("RETICORA_NATS_URL", "")
+
+	cfg := loadCollectorConfig()
+	if cfg.OrganizationID != orgID || cfg.CollectorID != colID || cfg.ServerURL != "https://other.example.com" || !cfg.ServerURLFromEnv {
+		t.Errorf("config: org %q collector %q server %q (from env %v)", cfg.OrganizationID, cfg.CollectorID, cfg.ServerURL, cfg.ServerURLFromEnv)
+	}
+	if n := len(logLines(t, logs, "RETICORA_ORGANIZATION_ID differs from the enrolled identity; the identity of the collector certificate is used")); n != 1 {
+		t.Errorf("organization warnings = %d, want 1", n)
+	}
+	if n := len(logLines(t, logs, "RETICORA_COLLECTOR_ID differs from the enrolled identity; the identity of the collector certificate is used")); n != 1 {
+		t.Errorf("collector warnings = %d, want 1", n)
+	}
+	const serverMismatch = "RETICORA_SERVER_URL differs from the server URL of the enrollment; the collector and its NATS endpoint follow RETICORA_SERVER_URL"
+	if lines := logLines(t, logs, serverMismatch); len(lines) != 1 || lines[0]["nats_url"] != "tls://other.example.com:4222" {
+		t.Errorf("server URL warning %v", lines)
+	}
+
+	// The same host (another scheme or port) is no mismatch; matching ids
+	// warn nothing.
+	t.Setenv("RETICORA_SERVER_URL", "http://CMDB.example.com:3000")
+	t.Setenv("RETICORA_ORGANIZATION_ID", orgID)
+	t.Setenv("RETICORA_COLLECTOR_ID", "")
+	before := len(strings.Split(logs.String(), "\n"))
+	if cfg = loadCollectorConfig(); cfg.OrganizationID != orgID || cfg.CollectorID != colID {
+		t.Errorf("config: org %q collector %q", cfg.OrganizationID, cfg.CollectorID)
+	}
+	if after := strings.Join(strings.Split(logs.String(), "\n")[before-1:], "\n"); strings.Contains(after, "collector.identity.mismatch") {
+		t.Errorf("mismatch warned for the same identity:\n%s", after)
+	}
+
+	// A client certificate of its own: the environment stays.
+	t.Setenv("RETICORA_TLS_CLIENT_CERT_FILE", filepath.Join(t.TempDir(), "client.pem"))
+	t.Setenv("RETICORA_ORGANIZATION_ID", "org-of-the-certificate-file")
+	t.Setenv("RETICORA_COLLECTOR_ID", "collector-of-the-certificate-file")
+	if cfg = loadCollectorConfig(); cfg.OrganizationID != "org-of-the-certificate-file" || cfg.CollectorID != "collector-of-the-certificate-file" {
+		t.Errorf("RETICORA_TLS_CLIENT_CERT_FILE setup: org %q collector %q", cfg.OrganizationID, cfg.CollectorID)
+	}
+}
+
+// TestUploadWithIncompleteConfigFails: without the edge and without the
+// identity the HTTP path needs (before the enrollment) the records are not
+// dropped and not reported as uploaded: the run fails and the batch waits
+// in the spool, which the edge delivers once the collector is enrolled;
+// the identity handed over then applies to the heartbeat.
+func TestUploadWithIncompleteConfigFails(t *testing.T) {
+	logs := captureLogs(t)
+	ctx := context.Background()
+	cfg := testConfig("http://127.0.0.1:1", t.TempDir())
+	cfg.OrganizationID, cfg.CollectorID = "", ""
+	withEdge(t, func(context.Context, string, []byte) ([]byte, error) { return nil, errNoEdge })
+	unspooled := cfg
+	unspooled.SpoolDir = ""
+	direct, err := newUploader(ctx, unspooled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = direct.uploadRecords(ctx, testRecords("direct")); !errors.Is(err, errIncompleteConfig) {
+		t.Fatalf("upload with incomplete configuration: %v, want errIncompleteConfig", err)
+	}
+
+	up, err := newUploader(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, runErr := uploadDiscovered(ctx, up, testRecords("pending"), time.Now()); runErr == nil {
+		t.Fatal("records reported as uploaded without edge and identity")
+	}
+	if n := len(logLines(t, logs, "discovery records uploaded")); n != 0 {
+		t.Errorf("%d 'discovery records uploaded' lines", n)
+	}
+	if n := len(logLines(t, logs, "failed to upload discovery records")); n != 1 {
+		t.Errorf("%d failure lines, want 1", n)
+	}
+	if n, _ := up.spool.Len(ctx); n != 1 {
+		t.Fatalf("spool holds %d batches, want the batch kept", n)
+	}
+
+	up.adoptIdentity(collectorConfig{ServerURL: "https://cmdb.example.com", OrganizationID: "org-1", CollectorID: "collector-1"})
+	if id := up.withIdentity(cfg); id.ServerURL != "https://cmdb.example.com" || id.OrganizationID != "org-1" || id.CollectorID != "collector-1" ||
+		id.SpoolDir != cfg.SpoolDir {
+		t.Errorf("heartbeat configuration after the enrollment = %+v", id)
+	}
+	edge := &limitedEdge{limit: 1 << 20}
+	withEdge(t, edge.request)
+	up.flushSpool(ctx)
+	if took, _ := edge.took(); len(took) != 1 || took[0] != "pending" {
+		t.Errorf("the edge took %v, want the spooled batch", took)
+	}
+	if n, _ := up.spool.Len(ctx); n != 0 {
+		t.Errorf("spool holds %d batches after the enrollment", n)
+	}
+}
+
+// TestHeartbeatRefusalIsLoggedAsError: a refused heartbeat (HTTP 401 as
+// the API answers every collector, or a refusal on the edge) is an error
+// with the reason (collector.heartbeat.refused), not "heartbeat completed";
+// an accepted one stays an info. The edge takes the heartbeat without the
+// identity of the HTTP path.
+func TestHeartbeatRefusalIsLoggedAsError(t *testing.T) {
+	logs := captureLogs(t)
+	t.Setenv("RETICORA_NATS_URL", "")
+	srv, _ := unauthenticatedAPI(t)
+	ctx := context.Background()
+	cfg := testConfig(srv.URL, "")
+	up, err := newUploader(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withEdge(t, func(context.Context, string, []byte) ([]byte, error) { return nil, errNoEdge })
+	if _, ok := up.heartbeat(ctx, cfg); ok {
+		t.Fatal("401 heartbeat accepted")
+	}
+	lines := logLines(t, logs, "heartbeat refused")
+	if len(lines) != 1 || lines[0]["level"] != "ERROR" || lines[0]["event"] != "collector.heartbeat.refused" || lines[0]["status"] != float64(401) ||
+		lines[0]["transport"] != "http" || !strings.Contains(fmt.Sprint(lines[0]["hint"]), "tls://127.0.0.1:4222") {
+		t.Fatalf("refused HTTP heartbeat: %v", lines)
+	}
+	if n := len(logLines(t, logs, "heartbeat completed")); n != 0 {
+		t.Errorf("a refused heartbeat logged as completed (%d)", n)
+	}
+
+	withEdge(t, func(context.Context, string, []byte) ([]byte, error) {
+		return []byte(`{"status":403,"error":"collector is disabled","collector_status":"disabled"}`), nil
+	})
+	if _, ok := up.heartbeat(ctx, cfg); ok {
+		t.Fatal("refused edge heartbeat accepted")
+	}
+	if lines = logLines(t, logs, "heartbeat refused"); len(lines) != 2 || lines[1]["transport"] != "edge" || lines[1]["level"] != "ERROR" {
+		t.Fatalf("refused edge heartbeat: %v", lines)
+	}
+
+	withEdge(t, func(context.Context, string, []byte) ([]byte, error) {
+		return []byte(`{"status":204,"license_status":"active"}`), nil
+	})
+	noID := cfg
+	noID.OrganizationID, noID.CollectorID = "", ""
+	if _, ok := up.heartbeat(ctx, noID); !ok {
+		t.Fatal("edge heartbeat without the identity of the HTTP path refused")
+	}
+	if lines = logLines(t, logs, "heartbeat completed"); len(lines) != 1 || lines[0]["level"] != "INFO" || lines[0]["transport"] != "edge" {
+		t.Fatalf("accepted heartbeat: %v", lines)
+	}
+}
+
 // TestScopeLimitContract: the collector expands as many addresses per
 // scope as the server accepts (testdata/scope-limits.json, checked
 // against discovery.MaxScopeAddresses by the backend's test; F-106).
@@ -931,14 +1139,26 @@ func TestEnrollCommand(t *testing.T) {
 	t.Setenv("RETICORA_SERVER_URL", "")
 	t.Setenv("RETICORA_ORGANIZATION_ID", "")
 	t.Setenv("RETICORA_COLLECTOR_ID", "")
+	t.Setenv("RETICORA_ENROLL_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
 	handled, code := runCommand(context.Background(), []string{"enroll", "--server", srv.URL + "/", "--code", "ABCD-EFGH", "--name", "site-a"}, &stdout, &stderr)
 	if !handled || code != 0 {
 		t.Fatalf("enroll exit %d: %s", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), colID) || !strings.Contains(stdout.String(), path) {
+	if !strings.Contains(stdout.String(), colID) || !strings.Contains(stdout.String(), path) ||
+		!strings.Contains(stdout.String(), "a running collector picks the identity up") {
 		t.Errorf("output = %s", stdout.String())
+	}
+	// Re-enrolled, a running collector keeps its old identity until it is
+	// restarted (it picks up only its first one, waitForEnrollment).
+	stdout.Reset()
+	if _, code = runCommand(context.Background(), []string{"enroll", "--server", srv.URL, "--code", "ABCD-EFGH", "--name", "site-a"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("re-enroll exit %d: %s", code, stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "replaces the identity stored there before") ||
+		!strings.Contains(out, "a running collector keeps the old identity\nuntil it is restarted") || strings.Contains(out, "picks the identity up") {
+		t.Errorf("re-enroll output = %s, want the restart required", out)
 	}
 	cfg := loadCollectorConfig()
 	if cfg.ServerURL != srv.URL || cfg.CollectorID != colID || cfg.OrganizationID != orgID || cfg.CredentialsPath != path {
@@ -966,6 +1186,20 @@ func TestEnrollCommand(t *testing.T) {
 		!strings.Contains(stderr.String(), "invalid or expired") {
 		t.Errorf("wrong code: exit %d, %s", code, stderr.String())
 	}
+	// The code from RETICORA_ENROLL_TOKEN stays out of the process list
+	// (install-vm.sh enrolls so).
+	envPath := filepath.Join(t.TempDir(), "env.json")
+	t.Setenv("RETICORA_ENROLL_TOKEN", "ABCD-EFGH")
+	stdout.Reset()
+	stderr.Reset()
+	if _, code = runCommand(context.Background(), []string{"enroll", "--server", srv.URL, "--credentials", envPath}, &stdout, &stderr); code != 0 ||
+		!strings.Contains(stdout.String(), colID) {
+		t.Errorf("enroll with the code from the environment: exit %d, %s %s", code, stdout.String(), stderr.String())
+	}
+	if _, err = (&keystore.FileStore{Path: envPath}).Load(context.Background()); err != nil {
+		t.Errorf("no identity after the enrollment with the code from the environment: %v", err)
+	}
+	t.Setenv("RETICORA_ENROLL_TOKEN", "")
 	stdout.Reset()
 	if handled, code = runCommand(context.Background(), []string{"version"}, &stdout, &stderr); !handled || code != 0 || !strings.Contains(stdout.String(), "reticora-collector") {
 		t.Errorf("version: %v %d %q", handled, code, stdout.String())
@@ -1038,6 +1272,22 @@ func quarantined(t *testing.T, spoolDir string) int {
 		t.Fatal(err)
 	}
 	return len(entries)
+}
+
+// backdateSpool rewinds the modification time (the spool's age) of every
+// spooled batch.
+func backdateSpool(t *testing.T, spoolDir string, age time.Duration) {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(spoolDir, "*.json"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no spooled batches (%v)", err)
+	}
+	stale := time.Now().Add(-age)
+	for _, f := range files {
+		if err = os.Chtimes(f, stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // TestSpoolPoisonBatchIsQuarantined covers F-085 (COL-05): a batch the

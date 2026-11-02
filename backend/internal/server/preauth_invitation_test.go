@@ -27,7 +27,7 @@ import (
 // unknownInvitations knows no invitation: every token is invalid.
 type unknownInvitations struct{}
 
-func (unknownInvitations) IssueInvitation(context.Context, *identity.Principal, *user.Invitation, string, string) error {
+func (unknownInvitations) IssueInvitation(context.Context, *identity.Principal, *user.Invitation, string, user.InvitationDelivery) error {
 	return user.ErrInvitationInvalid
 }
 
@@ -35,7 +35,7 @@ func (unknownInvitations) ListInvitations(context.Context, string, api.Paginatio
 	return nil, 0, nil
 }
 
-func (unknownInvitations) RenewInvitation(context.Context, string, string, *identity.Principal, string, string, time.Time) (*user.Invitation, error) {
+func (unknownInvitations) RenewInvitation(context.Context, string, string, *identity.Principal, string, user.InvitationDelivery, time.Time) (*user.Invitation, error) {
 	return nil, user.ErrInvitationNotFound
 }
 
