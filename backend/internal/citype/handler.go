@@ -74,6 +74,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/attribute-sets/{id}", h.DeleteAttributeSet)
 	r.Get("/api/v1/ci-types/{id}/attribute-sets", h.GetTypeAttributeSets)
 	r.Put("/api/v1/ci-types/{id}/attribute-sets", h.SetTypeAttributeSets)
+	// Templates with versions (WP-251, MET-16, API-06; module metamodel,
+	// E-105); GET /api/v1/ci-types/templates above stays the type template
+	// catalog.
+	h.registerTemplateRoutes(r)
 }
 
 // attributeStore returns the attribute-definitions store or answers 503

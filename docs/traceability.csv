@@ -1240,3 +1240,7 @@ IMP-11;[P2];B;backend/internal/topology/projection_integration_test.go;WP-298
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/lifecycle/model_api_integration_test.go;WP-723
 LCY-02;[P2];B;backend/internal/lifecycle/model_api_integration_test.go;WP-723
 MET-13;[P2];B;backend/internal/citype/global_attr_integration_test.go;WP-255
+MET-16;B/G1, Teil P2/G2;B;backend/internal/citype/template_integration_test.go;WP-251
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/template_integration_test.go;WP-251
+AUD-07;[B];B;backend/internal/citype/template_integration_test.go;WP-251
+MET-53;[P2];B;backend/internal/citype/template_integration_test.go;WP-251

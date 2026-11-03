@@ -119,7 +119,6 @@ var unroutedUntil = map[string]string{
 	"import:manage":           "import mapping profiles (WP-301, WP-774)",
 	"field_permission:manage": "field-permissions (WP-264, WP-726)",
 	"tag:manage":              "tags (WP-281, WP-753)",
-	"metamodel:publish":       "metamodel/drafts/{id}/publish (WP-261)",
 }
 
 // TestRBA01KeysGateTheirActions covers WP-068 and WP-363 (RBA-01): the

@@ -12458,6 +12458,374 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/templates:
+    x-phase: P2
+    get:
+      operationId: listTemplates
+      tags: [Metamodel]
+      summary: List templates (MET-16)
+      description: >-
+        The organization's templates and the read-only system templates
+        (`is_system`, WP-251), optionally of one CI type (`ci_type_id`). A
+        template is a versioned, ordered bundle of attribute definitions of
+        a CI type; it is no type template of GET /api/v1/ci-types/templates.
+        Pages newest first on (created_at, id) (API-02): `limit` (default
+        50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+        Requires ci:read.
+      parameters:
+        - name: ci_type_id
+          in: query
+          required: false
+          description: Only templates of this CI type.
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Templates, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createTemplate
+      tags: [Metamodel]
+      summary: Create a template (MET-16)
+      description: >-
+        A template of the organization for a CI type it sees (its own or a
+        system type); version 1 is created as an empty draft. An unknown CI
+        type is 422 on `ci_type_id`, a taken key 409. Requires
+        citype:manage; audited as `template.created` and
+        `template_version.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateCreate'
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getTemplate
+      tags: [Metamodel]
+      summary: Read a template
+      responses:
+        '200':
+          description: Template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateTemplate
+      tags: [Metamodel]
+      summary: Update a template
+      description: >-
+        Display name, description and `is_active`; `key` and `ci_type_id`
+        are immutable (422). System templates are read-only (403).
+        Requires citype:manage; audited as `template.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplatePatch'
+      responses:
+        '200':
+          description: Template updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteTemplate
+      tags: [Metamodel]
+      summary: Delete a template
+      description: >-
+        Deletes the template with its versions and items. System templates
+        are read-only (403). Requires citype:manage; audited as
+        `template.deleted`.
+      responses:
+        '204':
+          description: Template deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}/clone:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: cloneTemplate
+      tags: [Metamodel]
+      summary: Clone a template
+      description: >-
+        Copies a template, a system template as well, into a new template
+        of the organization on the same CI type with the new `key`. Its
+        version 1 is a draft with the items of the source's current
+        version (without a published one, of its highest version);
+        `cloned_from_id` names the source. A taken key is 409. Requires
+        citype:manage; audited as `template.cloned` and
+        `template_version.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateClone'
+      responses:
+        '201':
+          description: Template cloned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}/versions:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listTemplateVersions
+      tags: [Metamodel]
+      summary: List the versions of a template
+      description: >-
+        Versions newest first on (created_at, id) with the cursor of
+        API-02, each with its items. Requires ci:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Template versions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createTemplateVersion
+      tags: [Metamodel]
+      summary: Create a template version
+      description: >-
+        The next version as a draft copy of the current (last published)
+        version; without a published version a copy of the highest one.
+        System templates are read-only (403). Requires citype:manage;
+        audited as `template_version.created`.
+      responses:
+        '201':
+          description: Template version created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}/versions/{version}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: version
+        in: path
+        required: true
+        description: Version number of the template (from 1).
+        schema: { type: integer, minimum: 1 }
+    get:
+      operationId: getTemplateVersion
+      tags: [Metamodel]
+      summary: Read a template version with its items
+      responses:
+        '200':
+          description: Template version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: putTemplateVersion
+      tags: [Metamodel]
+      summary: Replace the items of a draft version
+      description: >-
+        The list replaces the items of a draft as a whole. Each item
+        references an attribute definition of the template's CI type, of
+        its type chain (MET-06) or a global one; set attributes (scope
+        `set`), unknown definitions and those of another organization are
+        422 on `items[<i>].attribute_definition_id`. Positions are distinct.
+        The overrides only narrow (MET-16): `required_override` is OR-ed,
+        `validation_override` composes with the definition like a layer
+        (a conflict is 422 with its `code`), `default_override` must be
+        valid. `searchable`, `unique`, `unique_scope` and `data_type`
+        cannot be overridden (422). Published and retired versions are
+        immutable (409); system templates are read-only (403). Requires
+        citype:manage; audited as `template_version.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateVersionItemsUpdate'
+      responses:
+        '200':
+          description: Items replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersion'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}/versions/{version}/publish:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: version
+        in: path
+        required: true
+        description: Version number of the template (from 1).
+        schema: { type: integer, minimum: 1 }
+    post:
+      operationId: publishTemplateVersion
+      tags: [Metamodel]
+      summary: Publish a draft template version (MET-53)
+      description: >-
+        Publishes a draft directly (MET-04): its items are checked again and
+        composed on the template's CI type after the system base, the
+        organization's global attributes, the type chain and the sets of the
+        type (MET-16). A conflict is 422 with the attribute key as `field`
+        and the `code` of the conflict. Then, in one transaction, the
+        version becomes published with `published_at` and `published_by`,
+        and the template's `current_version` names it; earlier published
+        versions stay referable. Only a draft newer than the current
+        version can be published (409); system templates are read-only
+        (403). Requires metamodel:publish; audited as
+        `template_version.published`. Publishing through drafts follows
+        with WP-260/WP-261.
+      responses:
+        '200':
+          description: Template version published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -16402,6 +16770,140 @@ components:
             properties:
               attribute_set_id: { type: string }
               position: { type: integer, minimum: 0, description: Unique within the type; the list is ordered by it. }
+    Template:
+      type: object
+      description: >-
+        A versioned, ordered bundle of attribute definitions of one CI type
+        (MET-16, WP-251). Templates introduce no attribute keys of their own
+        (E-37); a CI takes several templates in order (WP-710). It is no
+        type template of GET /api/v1/ci-types/templates.
+      required: [id, key, ci_type_id, display_name, is_system, is_active, current_version, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system templates. }
+        key: { type: string }
+        ci_type_id: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_system: { type: boolean, description: A read-only system template. }
+        is_active: { type: boolean }
+        current_version:
+          type: [integer, 'null']
+          description: The last published version; null until one is published.
+        cloned_from_id: { type: string, description: The template this one was cloned from. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TemplateCreate:
+      type: object
+      required: [key, ci_type_id]
+      additionalProperties: false
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100, description: Unique within the organization. }
+        ci_type_id: { type: string, description: A CI type of the organization or a system type. }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_active: { type: boolean, default: true }
+    TemplatePatch:
+      type: object
+      additionalProperties: false
+      description: key and ci_type_id are immutable; naming them is 422.
+      properties:
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_active: { type: boolean }
+        key: { type: string, description: Immutable (422). }
+        ci_type_id: { type: string, description: Immutable (422). }
+    TemplateClone:
+      type: object
+      required: [key]
+      additionalProperties: false
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100, description: Key of the new template. }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string, description: Default the source's description. }
+    TemplateListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Template'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    TemplateVersionItem:
+      type: object
+      description: >-
+        One attribute definition of a template version with the overrides
+        of the version; the overrides only narrow (MET-16).
+      required: [attribute_definition_id, position]
+      properties:
+        attribute_definition_id: { type: string }
+        key: { type: string, readOnly: true, description: Key of the attribute definition. }
+        position: { type: integer, minimum: 0, description: Unique within the version; the items are ordered by it. }
+        required_override: { type: boolean, description: OR-ed with required of the definition. }
+        default_override: { description: Any JSON value valid for the narrowed definition. }
+        validation_override:
+          $ref: '#/components/schemas/AttributeValidation'
+    TemplateVersion:
+      type: object
+      required: [id, template_id, version, status, created_at, updated_at, items]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for the versions of system templates. }
+        template_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [draft, published, retired] }
+        published_at: { type: string, format: date-time }
+        published_by: { type: string, description: User who published the version. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        items:
+          type: array
+          description: The items in position order.
+          items:
+            $ref: '#/components/schemas/TemplateVersionItem'
+    TemplateVersionItemsUpdate:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [attribute_definition_id, position]
+            properties:
+              attribute_definition_id: { type: string }
+              position: { type: integer, minimum: 0 }
+              required_override: { type: boolean }
+              default_override: { description: Any JSON value valid for the narrowed definition. }
+              validation_override:
+                $ref: '#/components/schemas/AttributeValidation'
+    TemplateVersionListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateVersion'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
     AttributeDefinitionPatch:
       type: object
       additionalProperties: false
@@ -16681,7 +17183,12 @@ components:
         parent_type_id:
           type: string
           description: Parent in the type chain (MET-06); absent for a root. The type inherits the inheritable attribute definitions of its ancestors.
-        template_key: { type: string }
+        template_key:
+          type: string
+          description: >-
+            Key of the type template of GET /api/v1/ci-types/templates the
+            type was created from; no template of MET-16 (those are
+            /api/v1/templates and use `key`, WP-251).
         lifecycle_model_id:
           type: string
           description: >-

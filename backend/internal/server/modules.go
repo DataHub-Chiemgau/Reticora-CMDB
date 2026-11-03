@@ -54,12 +54,12 @@ var LateModules = []Module{
 		"/api/v1/stock-movements", "/api/v1/compositions", "/api/v1/inventory",
 	}, Nav: []string{"assets", "assignments", "inventory"}},
 	{Key: "documents", Phase: "P2", Prefixes: []string{"/api/v1/documents"}, Nav: []string{"documents"}},
-	// Metamodel extensions of phase 2 (E-105): attribute sets (WP-250);
-	// templates, rules, layouts, drafts and field permissions add their
-	// prefixes with their first route. No feature key (cmdb_core, E-44);
-	// the page follows with WP-313.
+	// Metamodel extensions of phase 2 (E-105): attribute sets (WP-250),
+	// templates (WP-251); rules, layouts, drafts and field permissions add
+	// their prefixes with their first route. No feature key (cmdb_core,
+	// E-44); the page follows with WP-313.
 	{Key: ModuleMetamodel, Phase: "P2", Prefixes: []string{
-		"/api/v1/attribute-sets", "/api/v1/ci-types/{id}/attribute-sets",
+		"/api/v1/attribute-sets", "/api/v1/ci-types/{id}/attribute-sets", "/api/v1/templates",
 	}, Nav: []string{"metamodel"}},
 	// Import of CSV/XLSX files (IMP-IO-01, E-105; feature key import).
 	{Key: "import", Phase: "P2", Prefixes: []string{"/api/v1/imports", "/api/v1/import-profiles"}, Nav: []string{"import"}},

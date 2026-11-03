@@ -85,6 +85,8 @@ var matrixOverrides = map[string]map[string]string{
 	"attribute_definition": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "scope": "type", "ci_type_id": "@uuid"},
 	// A global set (organization_id NULL) must be a system set (WP-250).
 	"attribute_set": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "is_system": "true"},
+	// A global template (organization_id NULL) must be a system template (WP-251).
+	"template": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "is_system": "true"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

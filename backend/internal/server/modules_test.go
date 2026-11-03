@@ -49,7 +49,8 @@ func TestG1DefaultSwitchesLateModulesOff(t *testing.T) {
 	mux := testRouterWithModules(t, &audit.Handler{}, g1)
 	for _, path := range []string{"/api/v1/tickets", "/api/v1/assets", "/api/v1/workflows", "/api/v1/monitoring/alerts",
 		"/api/v1/agents", "/api/v1/iga/connectors", "/scim/v2/Users", "/api/v1/ai/conversations",
-		"/api/v1/attribute-sets", "/api/v1/ci-types/c0de0000-0000-4000-8000-000000000001/attribute-sets"} {
+		"/api/v1/attribute-sets", "/api/v1/ci-types/c0de0000-0000-4000-8000-000000000001/attribute-sets",
+		"/api/v1/templates", "/api/v1/templates/c0de0000-0000-4000-8000-000000000001/versions"} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusNotFound {
@@ -204,19 +205,20 @@ func TestModulePhasesFollowE44(t *testing.T) {
 		}
 	}
 	for route, want := range map[string]string{
-		"/api/v1/assets/{id}/locations":        "gps",
-		"/api/v1/assets/{assetID}/locations":   "gps",
-		"/api/v1/asset-locations":              "gps",
-		"/api/v1/assets/{id}":                  ModuleInventory,
-		"/api/v1/assets":                       ModuleInventory,
-		"/api/v1/assets/{id}/label.svg":        ModuleInventory,
-		"/api/v1/assets/locations":             ModuleInventory,
-		"/api/v1/assets/{id}/locationsx":       ModuleInventory,
-		"/api/v1/disposal-records/{id}":        "disposal",
-		"/api/v1/imports/{id}/report":          "import",
-		"/api/v1/import-profiles":              "import",
-		"/api/v1/attribute-sets/{id}":          ModuleMetamodel,
-		"/api/v1/ci-types/{id}/attribute-sets": ModuleMetamodel,
+		"/api/v1/assets/{id}/locations":                     "gps",
+		"/api/v1/assets/{assetID}/locations":                "gps",
+		"/api/v1/asset-locations":                           "gps",
+		"/api/v1/assets/{id}":                               ModuleInventory,
+		"/api/v1/assets":                                    ModuleInventory,
+		"/api/v1/assets/{id}/label.svg":                     ModuleInventory,
+		"/api/v1/assets/locations":                          ModuleInventory,
+		"/api/v1/assets/{id}/locationsx":                    ModuleInventory,
+		"/api/v1/disposal-records/{id}":                     "disposal",
+		"/api/v1/imports/{id}/report":                       "import",
+		"/api/v1/import-profiles":                           "import",
+		"/api/v1/attribute-sets/{id}":                       ModuleMetamodel,
+		"/api/v1/ci-types/{id}/attribute-sets":              ModuleMetamodel,
+		"/api/v1/templates/{id}/versions/{version}/publish": ModuleMetamodel,
 	} {
 		if m, ok := ModuleForRoute(route); !ok || m.Key != want {
 			t.Errorf("ModuleForRoute(%s) = %s (%v), want %s", route, m.Key, ok, want)
@@ -286,11 +288,11 @@ type e38Resource struct {
 // have no prefix of their own in the G1 release, after E-105.
 var e38Register = []e38Resource{
 	// Metamodel (MET-*): the module metamodel, created by WP-250 with the
-	// attribute sets; the other resources add their prefixes with their
-	// first route.
+	// attribute sets, templates since WP-251; the other resources add their
+	// prefixes with their first route.
 	{path: "/api/v1/attribute-sets", module: ModuleMetamodel},
 	{path: "/api/v1/ci-types/{id}/attribute-sets", module: ModuleMetamodel},
-	{path: "/api/v1/templates", module: ModuleMetamodel, owner: "WP-251"},
+	{path: "/api/v1/templates", module: ModuleMetamodel},
 	{path: "/api/v1/rules", module: ModuleMetamodel, owner: "WP-716"},
 	{path: "/api/v1/layouts", module: ModuleMetamodel, owner: "WP-259"},
 	{path: "/api/v1/metamodel/drafts", module: ModuleMetamodel, owner: "WP-721"},

@@ -306,6 +306,9 @@ var routeRules = []routeRule{
 	// Assigning roles to a service account is managing roles, as for users
 	// (RBA-08, RBA-01); the account itself stays user:manage.
 	{http.MethodPut, "service-accounts/*/roles", identity.PermRoleManage},
+	// Publishing a template version directly (MET-53, MET-04, E-106);
+	// the other template writes stay citype:manage through the segment.
+	{http.MethodPost, "templates/*/versions/*/publish", identity.PermMetamodelPublish},
 	// The structured search reads (F-055, SRC-03); the handler also
 	// requires the read right of the queried entity kind. Rebuilding the
 	// index (search/reindex) stays search:write.
@@ -595,23 +598,30 @@ var domainRecordedRoutes = map[string]string{
 	"PUT /api/v1/cis/{id}/fields/{name}/override":       "override.PGRepository",
 	"DELETE /api/v1/cis/{id}/fields/{name}/override":    "override.PGRepository",
 	// Metamodel (MET-15).
-	"POST /api/v1/ci-types":                            "citype.PGRepository",
-	"POST /api/v1/ci-types/{id}/activate":              "citype.PGRepository",
-	"POST /api/v1/ci-types/{id}/clone":                 "citype.PGRepository",
-	"POST /api/v1/ci-types/{id}/deactivate":            "citype.PGRepository",
-	"PUT /api/v1/ci-types/{id}/fields":                 "citype.PGRepository",
-	"DELETE /api/v1/ci-types/{id}/fields/{name}":       "citype.PGRepository",
-	"PUT /api/v1/ci-fields/global":                     "citype.PGRepository",
-	"DELETE /api/v1/ci-fields/global/{name}":           "citype.PGRepository",
-	"PUT /api/v1/cis/{id}/field-definitions":           "citype.PGRepository",
-	"DELETE /api/v1/cis/{id}/field-definitions/{name}": "citype.PGRepository",
-	"POST /api/v1/attribute-definitions":               "citype.PGRepository",
-	"PATCH /api/v1/attribute-definitions/{id}":         "citype.PGRepository",
-	"DELETE /api/v1/attribute-definitions/{id}":        "citype.PGRepository",
-	"POST /api/v1/attribute-sets":                      "citype.PGRepository",
-	"PATCH /api/v1/attribute-sets/{id}":                "citype.PGRepository",
-	"DELETE /api/v1/attribute-sets/{id}":               "citype.PGRepository",
-	"PUT /api/v1/ci-types/{id}/attribute-sets":         "citype.PGRepository",
+	"POST /api/v1/ci-types":                                  "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/activate":                    "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/clone":                       "citype.PGRepository",
+	"POST /api/v1/ci-types/{id}/deactivate":                  "citype.PGRepository",
+	"PUT /api/v1/ci-types/{id}/fields":                       "citype.PGRepository",
+	"DELETE /api/v1/ci-types/{id}/fields/{name}":             "citype.PGRepository",
+	"PUT /api/v1/ci-fields/global":                           "citype.PGRepository",
+	"DELETE /api/v1/ci-fields/global/{name}":                 "citype.PGRepository",
+	"PUT /api/v1/cis/{id}/field-definitions":                 "citype.PGRepository",
+	"DELETE /api/v1/cis/{id}/field-definitions/{name}":       "citype.PGRepository",
+	"POST /api/v1/attribute-definitions":                     "citype.PGRepository",
+	"PATCH /api/v1/attribute-definitions/{id}":               "citype.PGRepository",
+	"DELETE /api/v1/attribute-definitions/{id}":              "citype.PGRepository",
+	"POST /api/v1/attribute-sets":                            "citype.PGRepository",
+	"PATCH /api/v1/attribute-sets/{id}":                      "citype.PGRepository",
+	"DELETE /api/v1/attribute-sets/{id}":                     "citype.PGRepository",
+	"PUT /api/v1/ci-types/{id}/attribute-sets":               "citype.PGRepository",
+	"POST /api/v1/templates":                                 "citype.PGRepository",
+	"PATCH /api/v1/templates/{id}":                           "citype.PGRepository",
+	"DELETE /api/v1/templates/{id}":                          "citype.PGRepository",
+	"POST /api/v1/templates/{id}/clone":                      "citype.PGRepository",
+	"POST /api/v1/templates/{id}/versions":                   "citype.PGRepository",
+	"PUT /api/v1/templates/{id}/versions/{version}":          "citype.PGRepository",
+	"POST /api/v1/templates/{id}/versions/{version}/publish": "citype.PGRepository",
 	// Locations and rack placement (DOD-01).
 	"POST /api/v1/locations":                   "locations.PGRepository",
 	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",

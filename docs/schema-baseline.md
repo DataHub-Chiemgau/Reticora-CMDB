@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000204_instance_attribute_overrides
+Stand: Migration 000205_templates
 
 ## Prüfung
 
@@ -716,6 +716,25 @@ prüft `ci.lifecycle_state` gegen das wirksame `ci`-Modell. System-Seeds:
 die Systemtypen `application` und `software`), Zustände und Übergänge mit
 `organization_id` `NULL`.
 
+Templates (MET-16, MET-53, WP-251, Migration 000205): `template` hält
+versionierte, geordnete Attributbündel je CI-Typ (`organization_id` `NULL` =
+schreibgeschütztes Systemtemplate, `template_org_or_global`; Schlüssel über die
+partiellen Unique-Indizes `template_org_key` und `template_system_key`,
+`current_version` = zuletzt veröffentlichte Version, `cloned_from_id`).
+`template_version` (Status `draft`, `published`, `retired`, eindeutig je
+`template_id` und `version`, `published_by` ohne Fremdschlüssel) und
+`template_version_item` (Verweis auf `attribute_definition`, eindeutig je
+Version und Definition sowie je Version und `position`, Overrides
+`required_override`, `default_override`, `validation_override`) übernehmen die
+Organisation des Templates (`template_version_set_org`,
+`template_version_item_binding`). `template_binding` und
+`template_version_item_binding` weisen einen unter RLS unsichtbaren oder
+fremden CI-Typ, eine fremde Klonquelle und eine fremde Attributdefinition mit
+23503 ab. Seed: neun Systemtemplates der Collector-Profile (`physical_server`,
+`switch`, `router`, `firewall`, `access_point`, `hypervisor`, `storage`, `ups`,
+`pdu`) mit veröffentlichter Version 1 ohne Items (E-37). Das CI hat keine
+Template-Spalten; die Zuordnung folgt mit `ci_template` (WP-710).
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -847,6 +866,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |
 | `team` | ja | ja | team_tenant_isolation (ALL) |
 | `team_member` | ja | ja | team_member_isolation (ALL) |
+| `template` | ja | ja | template_isolation_delete (DELETE), template_isolation_insert (INSERT), template_isolation_select (SELECT), template_isolation_update (UPDATE) |
+| `template_version` | ja | ja | template_version_isolation_delete (DELETE), template_version_isolation_insert (INSERT), template_version_isolation_select (SELECT), template_version_isolation_update (UPDATE) |
+| `template_version_item` | ja | ja | template_version_item_isolation_delete (DELETE), template_version_item_isolation_insert (INSERT), template_version_item_isolation_select (SELECT), template_version_item_isolation_update (UPDATE) |
 | `ticket` | ja | ja | ticket_scoped_delete (DELETE), ticket_scoped_update (UPDATE), ticket_tenant_isolation (ALL) |
 | `ticket_comment` | ja | ja | ticket_comment_scoped_delete (DELETE), ticket_comment_scoped_update (UPDATE), ticket_comment_tenant_isolation (ALL) |
 | `ticket_sla` | ja | ja | ticket_sla_tenant_isolation (ALL) |

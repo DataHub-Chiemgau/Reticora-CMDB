@@ -50,6 +50,8 @@ var resourceTables = map[string][]string{
 	"review_item":              {"review_item"},
 	"role_assignment":          {"role_assignment", "user_custom_role"},
 	"service_account":          {"service_account"},
+	"template":                 {"template"},
+	"template_version":         {"template_version"},
 	"user":                     {"app_user"},
 	"user_invitation":          {"user_invitation"},
 	// Types of earlier recorders that entries in the log still carry.
@@ -126,6 +128,7 @@ var resourceTables = map[string][]string{
 	"stocktakes":                {"stocktake"},
 	"subnets":                   {"subnet"},
 	"teams":                     {"team"},
+	"templates":                 {"template"},
 	"tickets":                   {"ticket"},
 	"training-assignments":      {"training_assignment"},
 	"trainings":                 {"training"},

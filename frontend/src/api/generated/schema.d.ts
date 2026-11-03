@@ -5970,6 +5970,159 @@ export interface paths {
     patch: operations['updateAttributeSet'];
     trace?: never;
   };
+  '/api/v1/templates': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List templates (MET-16)
+     * @description The organization's templates and the read-only system templates (`is_system`, WP-251), optionally of one CI type (`ci_type_id`). A template is a versioned, ordered bundle of attribute definitions of a CI type; it is no type template of GET /api/v1/ci-types/templates. Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires ci:read.
+     */
+    get: operations['listTemplates'];
+    put?: never;
+    /**
+     * Create a template (MET-16)
+     * @description A template of the organization for a CI type it sees (its own or a system type); version 1 is created as an empty draft. An unknown CI type is 422 on `ci_type_id`, a taken key 409. Requires citype:manage; audited as `template.created` and `template_version.created`.
+     */
+    post: operations['createTemplate'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/templates/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Read a template */
+    get: operations['getTemplate'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a template
+     * @description Deletes the template with its versions and items. System templates are read-only (403). Requires citype:manage; audited as `template.deleted`.
+     */
+    delete: operations['deleteTemplate'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a template
+     * @description Display name, description and `is_active`; `key` and `ci_type_id` are immutable (422). System templates are read-only (403). Requires citype:manage; audited as `template.updated`.
+     */
+    patch: operations['updateTemplate'];
+    trace?: never;
+  };
+  '/api/v1/templates/{id}/clone': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Clone a template
+     * @description Copies a template, a system template as well, into a new template of the organization on the same CI type with the new `key`. Its version 1 is a draft with the items of the source's current version (without a published one, of its highest version); `cloned_from_id` names the source. A taken key is 409. Requires citype:manage; audited as `template.cloned` and `template_version.created`.
+     */
+    post: operations['cloneTemplate'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/templates/{id}/versions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the versions of a template
+     * @description Versions newest first on (created_at, id) with the cursor of API-02, each with its items. Requires ci:read.
+     */
+    get: operations['listTemplateVersions'];
+    put?: never;
+    /**
+     * Create a template version
+     * @description The next version as a draft copy of the current (last published) version; without a published version a copy of the highest one. System templates are read-only (403). Requires citype:manage; audited as `template_version.created`.
+     */
+    post: operations['createTemplateVersion'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/templates/{id}/versions/{version}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Version number of the template (from 1). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    /** Read a template version with its items */
+    get: operations['getTemplateVersion'];
+    /**
+     * Replace the items of a draft version
+     * @description The list replaces the items of a draft as a whole. Each item references an attribute definition of the template's CI type, of its type chain (MET-06) or a global one; set attributes (scope `set`), unknown definitions and those of another organization are 422 on `items[<i>].attribute_definition_id`. Positions are distinct. The overrides only narrow (MET-16): `required_override` is OR-ed, `validation_override` composes with the definition like a layer (a conflict is 422 with its `code`), `default_override` must be valid. `searchable`, `unique`, `unique_scope` and `data_type` cannot be overridden (422). Published and retired versions are immutable (409); system templates are read-only (403). Requires citype:manage; audited as `template_version.updated`.
+     */
+    put: operations['putTemplateVersion'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/templates/{id}/versions/{version}/publish': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Version number of the template (from 1). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish a draft template version (MET-53)
+     * @description Publishes a draft directly (MET-04): its items are checked again and composed on the template's CI type after the system base, the organization's global attributes, the type chain and the sets of the type (MET-16). A conflict is 422 with the attribute key as `field` and the `code` of the conflict. Then, in one transaction, the version becomes published with `published_at` and `published_by`, and the template's `current_version` names it; earlier published versions stay referable. Only a draft newer than the current version can be published (409); system templates are read-only (403). Requires metamodel:publish; audited as `template_version.published`. Publishing through drafts follows with WP-260/WP-261.
+     */
+    post: operations['publishTemplateVersion'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -8280,6 +8433,114 @@ export interface components {
         position: number;
       }[];
     };
+    /** @description A versioned, ordered bundle of attribute definitions of one CI type (MET-16, WP-251). Templates introduce no attribute keys of their own (E-37); a CI takes several templates in order (WP-710). It is no type template of GET /api/v1/ci-types/templates. */
+    Template: {
+      id: string;
+      /** @description Empty for system templates. */
+      organization_id?: string;
+      key: string;
+      ci_type_id: string;
+      display_name: components['schemas']['LocalizedText'];
+      description?: string;
+      /** @description A read-only system template. */
+      is_system: boolean;
+      is_active: boolean;
+      /** @description The last published version; null until one is published. */
+      current_version: number | null;
+      /** @description The template this one was cloned from. */
+      cloned_from_id?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    TemplateCreate: {
+      /** @description Unique within the organization. */
+      key: string;
+      /** @description A CI type of the organization or a system type. */
+      ci_type_id: string;
+      display_name?: components['schemas']['LocalizedText'];
+      description?: string;
+      /** @default true */
+      is_active: boolean;
+    };
+    /** @description key and ci_type_id are immutable; naming them is 422. */
+    TemplatePatch: {
+      display_name?: components['schemas']['LocalizedText'];
+      description?: string;
+      is_active?: boolean;
+      /** @description Immutable (422). */
+      key?: string;
+      /** @description Immutable (422). */
+      ci_type_id?: string;
+    };
+    TemplateClone: {
+      /** @description Key of the new template. */
+      key: string;
+      display_name?: components['schemas']['LocalizedText'];
+      /** @description Default the source's description. */
+      description?: string;
+    };
+    TemplateListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['Template'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    /** @description One attribute definition of a template version with the overrides of the version; the overrides only narrow (MET-16). */
+    TemplateVersionItem: {
+      attribute_definition_id: string;
+      /** @description Key of the attribute definition. */
+      readonly key?: string;
+      /** @description Unique within the version; the items are ordered by it. */
+      position: number;
+      /** @description OR-ed with required of the definition. */
+      required_override?: boolean;
+      /** @description Any JSON value valid for the narrowed definition. */
+      default_override?: unknown;
+      validation_override?: components['schemas']['AttributeValidation'];
+    };
+    TemplateVersion: {
+      id: string;
+      /** @description Empty for the versions of system templates. */
+      organization_id?: string;
+      template_id: string;
+      version: number;
+      /** @enum {string} */
+      status: 'draft' | 'published' | 'retired';
+      /** Format: date-time */
+      published_at?: string;
+      /** @description User who published the version. */
+      published_by?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /** @description The items in position order. */
+      items: components['schemas']['TemplateVersionItem'][];
+    };
+    TemplateVersionItemsUpdate: {
+      items: {
+        attribute_definition_id: string;
+        position: number;
+        required_override?: boolean;
+        /** @description Any JSON value valid for the narrowed definition. */
+        default_override?: unknown;
+        validation_override?: components['schemas']['AttributeValidation'];
+      }[];
+    };
+    TemplateVersionListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['TemplateVersion'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
     AttributeDefinitionPatch: {
       display_name?: components['schemas']['LocalizedText'] | string;
       description?: string;
@@ -8459,6 +8720,7 @@ export interface components {
       cloned_from_id?: string;
       /** @description Parent in the type chain (MET-06); absent for a root. The type inherits the inheritable attribute definitions of its ancestors. */
       parent_type_id?: string;
+      /** @description Key of the type template of GET /api/v1/ci-types/templates the type was created from; no template of MET-16 (those are /api/v1/templates and use `key`, WP-251). */
       template_key?: string;
       /** @description Lifecycle model of the type (MET-01); absent without one. A subtype without its own model inherits the nearest model of its type chain (MET-06); CIs only take a model that applies to `ci` (LCY-02, DB-05). */
       lifecycle_model_id?: string;
@@ -28960,6 +29222,363 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listTemplates: {
+    parameters: {
+      query?: {
+        /** @description Only templates of this CI type. */
+        ci_type_id?: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Templates, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TemplateListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateCreate'];
+      };
+    };
+    responses: {
+      /** @description Template created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Template'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Template */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Template'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Template deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplatePatch'];
+      };
+    };
+    responses: {
+      /** @description Template updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Template'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  cloneTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateClone'];
+      };
+    };
+    responses: {
+      /** @description Template cloned */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Template'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listTemplateVersions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Template versions, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TemplateVersionListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createTemplateVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Template version created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TemplateVersion'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getTemplateVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Version number of the template (from 1). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Template version */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TemplateVersion'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  putTemplateVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Version number of the template (from 1). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateVersionItemsUpdate'];
+      };
+    };
+    responses: {
+      /** @description Items replaced */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TemplateVersion'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  publishTemplateVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Version number of the template (from 1). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Template version published */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TemplateVersion'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
