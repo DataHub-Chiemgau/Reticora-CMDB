@@ -1,4 +1,4 @@
--- Down of 000204: the applicability columns and their CHECKs go away; every
+-- Down of 000203: the applicability columns and their CHECKs go away; every
 -- organization global applies to every type again.
 
 ALTER TABLE attribute_definition DROP CONSTRAINT attribute_definition_applies_to_list_check;

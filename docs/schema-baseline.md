@@ -686,7 +686,7 @@ Constraint-Trigger `trg_ci_type_attribute_set_regenerate` am Ende der
 Transaktion, damit ein PUT der Liste `schema_version` je Typ höchstens einmal
 erhöht). Org-globale Attribute bleiben Laufzeitebene (E-93, E-108).
 
-Anwendbarkeit globaler Attribute (MET-13, WP-255, Migration 000204):
+Anwendbarkeit globaler Attribute (MET-13, WP-255, Migration 000203):
 `attribute_definition.applies_to` (`all` | `categories` | `types`, Standard
 `all`, `attribute_definition_applies_to_check`) mit `applies_to_categories`
 (`TEXT[]`, Werte wie `ci_type.category`) und `applies_to_type_ids` (`UUID[]`,
