@@ -16,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // FormLayout is the layout of a form for a CI type or a template,
@@ -647,4 +648,103 @@ func cloneTypeLayoutsTx(ctx context.Context, tx pgx.Tx, orgID, sourceID, cloneID
 		return fmt.Errorf("clone layouts of ci type: %w", api.FieldDBError(err, layoutFields))
 	}
 	return nil
+}
+
+// FormRoles implements FormSource: the roles and custom roles of a user
+// (role_assignment ∪ user_custom_role, pattern visibleTo of savedview),
+// whatever the scope of the assignment (WP-719, E-110).
+func (r *PGRepository) FormRoles(ctx context.Context, orgID, userID string) ([]string, error) {
+	if !api.IsUUID(userID) {
+		return nil, nil
+	}
+	var roles []string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT ARRAY(SELECT ra.role_id::text FROM role_assignment ra WHERE ra.user_id = $1
+			UNION SELECT ucr.custom_role_id::text FROM user_custom_role ucr WHERE ucr.user_id = $1)`, userID).Scan(&roles)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read roles of user: %w", err)
+	}
+	return roles, nil
+}
+
+// FormRoleExists implements FormSource: roleID names a role or a custom
+// role of the organization (the id set of GET /api/v1/roles).
+func (r *PGRepository) FormRoleExists(ctx context.Context, orgID, roleID string) (bool, error) {
+	if !api.IsUUID(roleID) {
+		return false, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return checkLayoutRoleTx(ctx, tx, orgID, roleID)
+	})
+	var fe *api.FieldError
+	if errors.As(err, &fe) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// FormLayouts implements FormSource: the active layouts of the types and
+// templates that have no role or one of roleIDs, in one query.
+func (r *PGRepository) FormLayouts(ctx context.Context, orgID string, typeIDs, templateIDs, roleIDs []string) ([]FormLayout, error) {
+	out := []FormLayout{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+layoutColumns+` FROM form_layout
+			WHERE is_active AND (ci_type_id = ANY($1::uuid[]) OR template_id = ANY($2::uuid[]))
+				AND (role_id IS NULL OR role_id = ANY($3::uuid[]))`,
+			nonNilIDs(typeIDs), nonNilIDs(templateIDs), nonNilIDs(roleIDs))
+		if err != nil {
+			return fmt.Errorf("read form layouts: %w", err)
+		}
+		out, err = collectLayouts(rows)
+		return err
+	})
+	return out, err
+}
+
+// nonNilIDs is ids as an array argument (never NULL).
+func nonNilIDs(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
+}
+
+// FormSectionRules implements FormSource: the conditions of the active
+// catalog rules with these keys the organization sees, an own rule before
+// a system rule; rules without a condition are left out.
+func (r *PGRepository) FormSectionRules(ctx context.Context, orgID string, keys []string) (map[string]*rules.Rule, error) {
+	out := map[string]*rules.Rule{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT ON (key) key, condition FROM metamodel_rule
+			WHERE key = ANY($1) AND is_active ORDER BY key, organization_id NULLS LAST, template_version_id NULLS FIRST, id`,
+			nonNilIDs(keys))
+		if err != nil {
+			return fmt.Errorf("read section rules: %w", err)
+		}
+		type keyed struct {
+			key  string
+			cond []byte
+		}
+		found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (keyed, error) {
+			var k keyed
+			serr := row.Scan(&k.key, &k.cond)
+			return k, serr
+		})
+		if err != nil {
+			return fmt.Errorf("read section rules: %w", err)
+		}
+		for _, k := range found {
+			if isJSONNull(k.cond) {
+				continue
+			}
+			cond, perr := rules.ParseCondition(k.cond)
+			if perr != nil {
+				return fmt.Errorf("rule %s: condition: %w", k.key, perr)
+			}
+			out[k.key] = &cond
+		}
+		return nil
+	})
+	return out, err
 }

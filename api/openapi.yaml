@@ -15690,42 +15690,133 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/form:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getCIForm
       tags: [Metamodel]
       summary: Get the resolved form of a CI
-      description: Planned (E-38); WP-719 implements the operation.
+      description: >-
+        The form of the CI (WP-719, MET-50, MET-52): the effective fields of
+        its composition (system, organization, type chain, sets, templates,
+        instance; MET-16) arranged by the layout that applies to the caller
+        (/api/v1/layouts), without one by the standard layout (sections by
+        `ui_group`, fields by `sort_order`). Each field carries its composed
+        definition and its state after its conditions and the catalog rules
+        against the stored values; `rules` lets a client recompute the
+        states. Layout choice: template layouts before type layouts (of
+        several templates the highest position with an active layout),
+        type layouts from the CI's type to the root; per target a layout
+        with a role of the caller before the one without, then the smallest
+        `priority`, then `role_id`. The caller's roles are the roles and
+        custom roles assigned to the user, whatever their scope; standard
+        roles mapped from IdP groups do not count yet (E-110, until
+        WP-725). An API key gets the layout without a role. Instance
+        attributes stand in `_instance`, required fields the layout leaves
+        out or shows only in a hidden section in `_required`. Requires
+        ci:read; the client and site scope of the CI apply (404).
+        `preview=true` resolves the form as role `role_id` with template
+        `template_id` (MET-52) and requires citype:manage (403); so does a
+        `role_id` that is no role of the caller. A preview writes nothing.
+      parameters:
+        - name: preview
+          in: query
+          required: false
+          description: Resolve as role `role_id` with template `template_id`; requires citype:manage.
+          schema: { type: boolean, default: false }
+        - name: role_id
+          in: query
+          required: false
+          description: >-
+            A role or custom role of the organization; without preview one of
+            the caller's roles (another role requires citype:manage). Unknown
+            or foreign is 404.
+          schema: { type: string, format: uuid }
+        - name: template_id
+          in: query
+          required: false
+          description: >-
+            Only with preview=true (otherwise 400): the current published
+            version of this template replaces the CI's templates. Unknown or
+            foreign is 404, a template of a type outside the CI's type chain
+            422.
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Get the resolved form of a CI. The response schema comes with WP-719.
+          description: The resolved form
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolvedForm' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          description: Without a database there are no resolved forms.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/ci-types/{id}/form:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getCITypeForm
       tags: [Metamodel]
       summary: Get the resolved form of a CI type
-      description: Planned (E-38); WP-719 implements the operation.
+      description: >-
+        The form for creating a CI of the type (WP-719, MET-50): as GET
+        /api/v1/cis/{id}/form, the states evaluated against the defaults.
+        `template_id` sets the current published version of the template
+        (its overrides and catalog rules) and chooses among its layouts.
+        Requires ci:read; an invisible type is 404. `preview=true` or a
+        `role_id` that is no role of the caller requires citype:manage
+        (403).
+      parameters:
+        - name: template_id
+          in: query
+          required: false
+          description: >-
+            A template of the type chain; unknown or foreign is 404, a
+            template of a type outside the chain 422.
+          schema: { type: string, format: uuid }
+        - name: preview
+          in: query
+          required: false
+          description: Resolve as role `role_id`; requires citype:manage.
+          schema: { type: boolean, default: false }
+        - name: role_id
+          in: query
+          required: false
+          description: A role or custom role of the organization (see GET /api/v1/cis/{id}/form).
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Get the resolved form of a CI type. The response schema comes with WP-719.
+          description: The resolved form
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolvedForm' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          description: Without a database there are no resolved forms.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cis/{id}/templates:
     parameters:
@@ -18312,6 +18403,102 @@ components:
           $ref: '#/components/schemas/FormLayoutDocument'
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ResolvedForm:
+      type: object
+      description: >-
+        A resolved form (WP-719). `template_id`, `role_id` and `layout_id`
+        name the chosen layout; absent with the standard layout.
+      required: [ci_type_id, source, sections, rules]
+      properties:
+        ci_type_id: { type: string }
+        template_id: { type: string }
+        role_id: { type: string }
+        layout_id: { type: string }
+        source: { type: string, enum: [layout, default] }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/ResolvedFormSection' }
+        rules:
+          type: array
+          description: The active catalog rules of the CI (WP-257), in the order of their targets.
+          items: { $ref: '#/components/schemas/ResolvedFormRule' }
+    ResolvedFormSection:
+      type: object
+      required: [key, title, visible, fields]
+      properties:
+        key: { type: string, description: 'The key of the layout section, a ui_group, _default, _instance or _required.' }
+        title:
+          type: object
+          additionalProperties: { type: string }
+          properties:
+            de: { type: string }
+            en: { type: string }
+        visible: { type: boolean, description: False while a visible_when rule of the section does not hold. }
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/ResolvedFormField' }
+    ResolvedFormField:
+      type: object
+      required: [name, width, definition, state]
+      properties:
+        name: { type: string }
+        width: { type: integer, minimum: 1, maximum: 12 }
+        definition: { $ref: '#/components/schemas/FormFieldDefinition' }
+        state: { $ref: '#/components/schemas/FormFieldState' }
+    FormFieldDefinition:
+      type: object
+      description: The composed field definition (fieldmeta.FieldDefinition).
+      required: [name, data_type, required, sort_order]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        description: { type: string }
+        data_type: { type: string }
+        required: { type: boolean }
+        default_value: { type: string }
+        enum_values:
+          type: array
+          items: { type: string }
+        ui_group: { type: string }
+        sort_order: { type: integer }
+        validation:
+          type: object
+          additionalProperties: true
+        conditional:
+          type: object
+          additionalProperties: true
+        reference_target: { type: string }
+        computed:
+          type: object
+          additionalProperties: true
+    FormFieldState:
+      type: object
+      description: >-
+        The state of a field after its conditions and the catalog rules; a
+        required field stays visible. A field the caller may not change is
+        read only.
+      required: [visible, required, read_only]
+      properties:
+        visible: { type: boolean }
+        required: { type: boolean }
+        read_only: { type: boolean }
+        allowed_values:
+          type: array
+          items: { type: string }
+    ResolvedFormRule:
+      type: object
+      required: [key, attribute_key, kind]
+      properties:
+        key: { type: string }
+        attribute_key: { type: string }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        condition:
+          $ref: '#/components/schemas/RuleCondition'
+        ast:
+          $ref: '#/components/schemas/RuleAST'
+        message:
+          $ref: '#/components/schemas/RuleMessage'
     FormLayoutCreate:
       type: object
       required: [key, layout]

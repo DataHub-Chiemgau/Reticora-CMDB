@@ -89,6 +89,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/layouts/{id}", h.GetLayout)
 	r.Patch("/api/v1/layouts/{id}", h.UpdateLayout)
 	r.Delete("/api/v1/layouts/{id}", h.DeleteLayout)
+	// Resolved forms of a CI and of a type (WP-719, MET-50, MET-52; core
+	// prefixes, without layouts the standard layout).
+	h.registerFormRoutes(r)
 }
 
 // attributeStore returns the attribute-definitions store or answers 503

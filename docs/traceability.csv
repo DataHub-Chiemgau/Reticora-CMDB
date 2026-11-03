@@ -1272,3 +1272,7 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/
 EVT-03;[P2–P3];B;backend/internal/ticket/ticket_integration_test.go;WP-290
 MET-53;[P2];B;backend/internal/metamodel/draft_integration_test.go;WP-260
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/metamodel/draft_integration_test.go;WP-260
+MET-50;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
+MET-52;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
+GQL-03;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/form_integration_test.go;WP-719

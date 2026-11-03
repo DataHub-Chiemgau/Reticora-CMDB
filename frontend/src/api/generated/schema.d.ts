@@ -7435,7 +7435,7 @@ export interface paths {
     };
     /**
      * Get the resolved form of a CI
-     * @description Planned (E-38); WP-719 implements the operation.
+     * @description The form of the CI (WP-719, MET-50, MET-52): the effective fields of its composition (system, organization, type chain, sets, templates, instance; MET-16) arranged by the layout that applies to the caller (/api/v1/layouts), without one by the standard layout (sections by `ui_group`, fields by `sort_order`). Each field carries its composed definition and its state after its conditions and the catalog rules against the stored values; `rules` lets a client recompute the states. Layout choice: template layouts before type layouts (of several templates the highest position with an active layout), type layouts from the CI's type to the root; per target a layout with a role of the caller before the one without, then the smallest `priority`, then `role_id`. The caller's roles are the roles and custom roles assigned to the user, whatever their scope; standard roles mapped from IdP groups do not count yet (E-110, until WP-725). An API key gets the layout without a role. Instance attributes stand in `_instance`, required fields the layout leaves out or shows only in a hidden section in `_required`. Requires ci:read; the client and site scope of the CI apply (404). `preview=true` resolves the form as role `role_id` with template `template_id` (MET-52) and requires citype:manage (403); so does a `role_id` that is no role of the caller. A preview writes nothing.
      */
     get: operations['getCIForm'];
     put?: never;
@@ -7458,7 +7458,7 @@ export interface paths {
     };
     /**
      * Get the resolved form of a CI type
-     * @description Planned (E-38); WP-719 implements the operation.
+     * @description The form for creating a CI of the type (WP-719, MET-50): as GET /api/v1/cis/{id}/form, the states evaluated against the defaults. `template_id` sets the current published version of the template (its overrides and catalog rules) and chooses among its layouts. Requires ci:read; an invisible type is 404. `preview=true` or a `role_id` that is no role of the caller requires citype:manage (403).
      */
     get: operations['getCITypeForm'];
     put?: never;
@@ -9020,6 +9020,74 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description A resolved form (WP-719). `template_id`, `role_id` and `layout_id` name the chosen layout; absent with the standard layout. */
+    ResolvedForm: {
+      ci_type_id: string;
+      template_id?: string;
+      role_id?: string;
+      layout_id?: string;
+      /** @enum {string} */
+      source: 'layout' | 'default';
+      sections: components['schemas']['ResolvedFormSection'][];
+      /** @description The active catalog rules of the CI (WP-257), in the order of their targets. */
+      rules: components['schemas']['ResolvedFormRule'][];
+    };
+    ResolvedFormSection: {
+      /** @description The key of the layout section, a ui_group, _default, _instance or _required. */
+      key: string;
+      title: {
+        de?: string;
+        en?: string;
+      } & {
+        [key: string]: string;
+      };
+      /** @description False while a visible_when rule of the section does not hold. */
+      visible: boolean;
+      fields: components['schemas']['ResolvedFormField'][];
+    };
+    ResolvedFormField: {
+      name: string;
+      width: number;
+      definition: components['schemas']['FormFieldDefinition'];
+      state: components['schemas']['FormFieldState'];
+    };
+    /** @description The composed field definition (fieldmeta.FieldDefinition). */
+    FormFieldDefinition: {
+      name: string;
+      label?: string;
+      description?: string;
+      data_type: string;
+      required: boolean;
+      default_value?: string;
+      enum_values?: string[];
+      ui_group?: string;
+      sort_order: number;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      computed?: {
+        [key: string]: unknown;
+      };
+    };
+    /** @description The state of a field after its conditions and the catalog rules; a required field stays visible. A field the caller may not change is read only. */
+    FormFieldState: {
+      visible: boolean;
+      required: boolean;
+      read_only: boolean;
+      allowed_values?: string[];
+    };
+    ResolvedFormRule: {
+      key: string;
+      attribute_key: string;
+      kind: components['schemas']['MetamodelRuleKind'];
+      condition?: components['schemas']['condition'];
+      ast?: components['schemas']['rule'];
+      message?: components['schemas']['RuleMessage'];
     };
     /** @description Exactly one of ci_type_id and template_id is required (422). */
     FormLayoutCreate: {
@@ -33802,7 +33870,14 @@ export interface operations {
   };
   getCIForm: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Resolve as role `role_id` with template `template_id`; requires citype:manage. */
+        preview?: boolean;
+        /** @description A role or custom role of the organization; without preview one of the caller's roles (another role requires citype:manage). Unknown or foreign is 404. */
+        role_id?: string;
+        /** @description Only with preview=true (otherwise 400): the current published version of this template replaces the CI's templates. Unknown or foreign is 404, a template of a type outside the CI's type chain 422. */
+        template_id?: string;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -33812,21 +33887,41 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the resolved form of a CI. The response schema comes with WP-719. */
+      /** @description The resolved form */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ResolvedForm'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      /** @description Without a database there are no resolved forms. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getCITypeForm: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description A template of the type chain; unknown or foreign is 404, a template of a type outside the chain 422. */
+        template_id?: string;
+        /** @description Resolve as role `role_id`; requires citype:manage. */
+        preview?: boolean;
+        /** @description A role or custom role of the organization (see GET /api/v1/cis/{id}/form). */
+        role_id?: string;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -33836,16 +33931,29 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the resolved form of a CI type. The response schema comes with WP-719. */
+      /** @description The resolved form */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ResolvedForm'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      /** @description Without a database there are no resolved forms. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listCITemplates: {

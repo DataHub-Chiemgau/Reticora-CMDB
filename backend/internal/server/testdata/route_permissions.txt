@@ -107,6 +107,7 @@ GET /api/v1/ci-types/templates ci:read
 GET /api/v1/ci-types/{id} ci:read
 GET /api/v1/ci-types/{id}/attribute-sets ci:read
 GET /api/v1/ci-types/{id}/fields ci:read
+GET /api/v1/ci-types/{id}/form ci:read
 GET /api/v1/ci-types/{id}/versions ci:read
 GET /api/v1/cis ci:read
 GET /api/v1/cis/{id} ci:read
@@ -116,6 +117,7 @@ GET /api/v1/cis/{id}/contacts contact:read
 GET /api/v1/cis/{id}/dependencies topology:read
 GET /api/v1/cis/{id}/field-definitions ci:read
 GET /api/v1/cis/{id}/fields ci:read
+GET /api/v1/cis/{id}/form ci:read
 GET /api/v1/cis/{id}/instance-attributes ci:read
 GET /api/v1/cis/{id}/interfaces ipam:read
 GET /api/v1/cis/{id}/lifecycle-transitions ci:read
