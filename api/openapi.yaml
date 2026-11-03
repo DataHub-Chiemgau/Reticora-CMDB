@@ -13420,6 +13420,7 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/metamodel/drafts:
+    x-phase: P2
     get:
       operationId: listMetamodelDrafts
       tags: [Metamodel]
@@ -13496,6 +13497,7 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/metamodel/drafts/{id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -13504,7 +13506,9 @@ paths:
       summary: Read a metamodel draft
       description: >-
         A draft of the organization with its items; a draft of another
-        organization is 404. Requires citype:manage.
+        organization is 404. `test_report` carries the counters of the last
+        test run only; its violations name CIs and need metamodel:publish
+        (GET …/test). Requires citype:manage.
       responses:
         '200':
           description: Draft
@@ -13619,6 +13623,7 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/metamodel/drafts/{id}/items:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -13720,6 +13725,7 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/metamodel/drafts/{id}/items/{item_id}:
+    x-phase: P2
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: item_id
@@ -13767,6 +13773,94 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts/{id}/test:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: testMetamodelDraft
+      tags: [Metamodel]
+      summary: Test a metamodel draft against the inventory (MET-53)
+      description: >-
+        Starts the test run of the draft as a job of kind `metamodel.test`
+        (WP-721), on the job queue when there is one: 202 with the job
+        (GET /api/v1/jobs/{id}). While a test of the draft is queued or
+        running, a second request answers the same job. The job runs
+        organization-wide, whatever the scope of the caller. It lays the
+        items over the metamodel and composes every affected type (changed
+        types and their subtypes, the types of a changed set, the types an
+        organization's global attribute applies to, the targets of changed
+        rules) and every changed template version with its type (MET-16);
+        a composition conflict blocks and the draft stays `draft`.
+        Otherwise it validates every CI of the affected types that is not
+        deleted, with its templates, its instance attributes and the
+        catalog rules the draft leaves; violations do not block. Without a
+        blocking conflict and with unchanged items the draft becomes
+        `tested`. The violations stand only in the report of the draft
+        (GET …/test); the job result and the draft carry the counters. A
+        published or discarded draft is 409; without the database or the
+        job service 503. Requires metamodel:publish; a running test is
+        cancelled with DELETE /api/v1/jobs/{id} and the same permission.
+      responses:
+        '202':
+          description: The test runs as a job
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status, kind]
+                properties:
+                  job_id: { type: string }
+                  status: { type: string }
+                  kind: { type: string, enum: [metamodel.test] }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    get:
+      operationId: getMetamodelDraftTest
+      tags: [Metamodel]
+      summary: Read the test report of a metamodel draft
+      description: >-
+        The report of the last test run (WP-721): state, blocking
+        conflicts, counters per type and attribute, and the violations
+        (CI, type, field, code, rule, message; never a value) as pages of
+        `data` with `limit` (default 50, at most 200) and the signed cursor
+        `next_cursor` (API-02). `total` is the number of violations the run
+        counted; at most 10000 are stored (`truncated`). A draft that was
+        never tested, or whose items changed since, is 404. Requires
+        metamodel:publish: the report names CIs of every client.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: The test report with a page of violations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelTestReportPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -18581,7 +18675,12 @@ components:
             $ref: '#/components/schemas/MetamodelDraftItem'
         item_count: { type: integer }
         test_report:
-          description: The report of the last test run (WP-721); null after every item change.
+          description: >-
+            The counters of the last test run (WP-721) without the
+            violations (GET …/test); null after every item change.
+          oneOf:
+            - $ref: '#/components/schemas/MetamodelTestReport'
+            - type: 'null'
         version: { type: integer, description: Rises with every change; the ETag. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -18689,6 +18788,96 @@ components:
         limit: { type: integer }
         offset: { type: integer }
         has_more: { type: boolean }
+    MetamodelTestReport:
+      type: object
+      description: >-
+        The report of the test run of a metamodel draft (WP-721) without
+        its violations. `state` is running, completed or failed; `blocked`
+        names a composition conflict or an item that cannot be applied
+        (`conflicts`), `outdated` items changed while the test ran.
+      required: [job_id, state, draft_version, started_at, blocked, outdated, conflicts, totals, types, truncated]
+      properties:
+        job_id: { type: string }
+        state: { type: string, enum: [running, completed, failed] }
+        draft_version: { type: integer }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        blocked: { type: boolean }
+        outdated: { type: boolean }
+        conflicts:
+          type: array
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              ci_type_id: { type: string }
+              template_version_id: { type: string }
+              item_id: { type: string }
+              key: { type: string }
+              code:
+                type: string
+                description: >-
+                  A MET-16 code (datatype-conflict, enum-empty, range-empty,
+                  length-range-empty, computed-conflict,
+                  computed-constraint), item-not-applicable or
+                  invalid-template-item.
+              message: { type: string }
+        totals:
+          type: object
+          required: [types, cis, invalid_cis, violations]
+          properties:
+            types: { type: integer }
+            cis: { type: integer }
+            invalid_cis: { type: integer }
+            violations: { type: integer }
+        types:
+          type: array
+          items:
+            type: object
+            required: [ci_type_id, cis, invalid_cis, violations, attributes]
+            properties:
+              ci_type_id: { type: string }
+              cis: { type: integer }
+              invalid_cis: { type: integer }
+              violations: { type: integer }
+              attributes:
+                type: array
+                items:
+                  type: object
+                  required: [key, violations]
+                  properties:
+                    key: { type: string }
+                    violations: { type: integer }
+        truncated: { type: boolean }
+        error: { type: string }
+    MetamodelTestViolation:
+      type: object
+      description: A violation of a CI in a test run (WP-721); no attribute value.
+      required: [ci_id, ci_type_id, field, message]
+      properties:
+        ci_id: { type: string }
+        ci_type_id: { type: string }
+        field: { type: string }
+        code: { type: string }
+        rule: { type: string, description: The key of the violated catalog rule. }
+        message: { type: string }
+    MetamodelTestReportPage:
+      allOf:
+        - $ref: '#/components/schemas/MetamodelTestReport'
+        - type: object
+          required: [data, total]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/MetamodelTestViolation'
+            next_cursor:
+              type: string
+              description: Opaque signed cursor for the next page (API-02); absent on the last page.
+            total: { type: integer }
+            limit: { type: integer }
+            offset: { type: integer }
+            has_more: { type: boolean }
     LocalizedText:
       type: object
       description: A label per language (MET-01).

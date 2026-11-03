@@ -315,6 +315,10 @@ var routeRules = []routeRule{
 	// Publishing a template version directly (MET-53, MET-04, E-106);
 	// the other template writes stay citype:manage through the segment.
 	{http.MethodPost, "templates/*/versions/*/publish", identity.PermMetamodelPublish},
+	// The test run of a metamodel draft and its report (WP-721, MET-53):
+	// the report names CIs of every client, so reading it needs the
+	// publish right as well (E-106: org_admin only).
+	{"*", "metamodel/drafts/*/test", identity.PermMetamodelPublish},
 	// The structured search reads (F-055, SRC-03); the handler also
 	// requires the read right of the queried entity kind. Rebuilding the
 	// index (search/reindex) stays search:write.

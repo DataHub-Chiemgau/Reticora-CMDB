@@ -16,7 +16,9 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -35,17 +37,36 @@ type Repository interface {
 	// AddItem captures a checked item with the base of its target.
 	AddItem(ctx context.Context, orgID, id string, c *capture, ifMatch *int64) (*Draft, *Item, error)
 	RemoveItem(ctx context.Context, orgID, id, itemID string, ifMatch *int64) (*Draft, error)
+	// StartTest locks the draft (a published or discarded one is
+	// ErrDraftImmutable) and calls start with the job of a test the
+	// report names as running ("" for none) and the version of the
+	// draft. Unless start reuses that job, the report becomes the
+	// running report of the job start returns, without a new version.
+	StartTest(ctx context.Context, orgID, id string, start StartTestFunc) (*jobs.Job, error)
+	// TestReport returns the stored report of the draft with its
+	// violations; ErrNoTestReport when it was never tested.
+	TestReport(ctx context.Context, orgID, id string) (*TestReport, error)
+	// RunTest runs the test of the draft for job jobID started on
+	// version (publish_job.go) and returns the summary.
+	RunTest(ctx context.Context, orgID, draftID, jobID string, version int64) (*TestReport, error)
 }
 
+// StartTestFunc starts the test job of a draft (TestJobKind) or returns the
+// job running reports as still queued or running (reused true).
+type StartTestFunc func(ctx context.Context, running string, version int64) (job *jobs.Job, reused bool, err error)
+
 // PGRepository is the PostgreSQL Repository; it works only under the
-// request tenant (database.WithRequestTenant) and row level security.
+// request tenant (database.WithRequestTenant) and row level security. The
+// test run reads the metamodel through catalog (citype.PGRepository).
+
 type PGRepository struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	catalog Catalog
 }
 
 // NewPGRepository returns the PostgreSQL draft repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
-	return &PGRepository{pool: pool}
+	return &PGRepository{pool: pool, catalog: citype.NewPGRepository(pool)}
 }
 
 const draftColumns = `id::text, organization_id::text, name, status, created_by::text, items, test_report, version,
@@ -66,7 +87,8 @@ func scanDraft(row pgx.Row) (*Draft, error) {
 	}
 	d.ItemCount = len(d.Items)
 	if len(report) > 0 {
-		d.TestReport = report
+		d.report = report
+		d.TestReport = summarizeReport(report)
 	}
 	return &d, nil
 }
@@ -230,13 +252,81 @@ func (r *PGRepository) RemoveItem(ctx context.Context, orgID, id, itemID string,
 	})
 }
 
+// ErrNoTestReport: the draft was never tested, or an item change dropped
+// its report (404).
+var ErrNoTestReport = errors.New("the draft has no test report")
+
+// StartTest implements Repository.
+func (r *PGRepository) StartTest(ctx context.Context, orgID, id string, start StartTestFunc) (*jobs.Job, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrDraftNotFound
+	}
+	var out *jobs.Job
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		var status string
+		var version int64
+		var raw []byte
+		err := tx.QueryRow(txCtx, `SELECT status, version, test_report FROM metamodel_draft WHERE id = $1 FOR UPDATE`, id).
+			Scan(&status, &version, &raw)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDraftNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("lock metamodel draft: %w", err)
+		}
+		if status == StatusPublished || status == StatusDiscarded {
+			return ErrDraftImmutable
+		}
+		running := ""
+		if job, state := reportJob(raw); state == TestStateRunning {
+			running = job
+		}
+		// The job is created outside this transaction (ctx carries none);
+		// a second request waits for the lock and finds its id.
+		job, reused, err := start(ctx, running, version)
+		if err != nil {
+			return err
+		}
+		out = job
+		if reused {
+			return nil
+		}
+		body, err := json.Marshal(&TestReport{JobID: job.ID, State: TestStateRunning, DraftVersion: version,
+			StartedAt: time.Now().UTC(), Conflicts: []TestConflict{}, Types: []TestTypeCounts{}})
+		if err != nil {
+			return fmt.Errorf("encode test report: %w", err)
+		}
+		if _, err = tx.Exec(txCtx, `UPDATE metamodel_draft SET test_report = $2 WHERE id = $1`, id, body); err != nil {
+			return fmt.Errorf("start test of metamodel draft: %w", err)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// TestReport implements Repository.
+func (r *PGRepository) TestReport(ctx context.Context, orgID, id string) (*TestReport, error) {
+	d, err := r.GetDraft(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(d.report) == 0 {
+		return nil, ErrNoTestReport
+	}
+	var report TestReport
+	if err = json.Unmarshal(d.report, &report); err != nil || report.JobID == "" {
+		return nil, ErrNoTestReport
+	}
+	return &report, nil
+}
+
 // resetTest returns a tested draft to draft: its test report no longer
 // describes its items.
 func resetTest(d *Draft) {
 	if d.Status == StatusTested {
 		d.Status = StatusDraft
 	}
-	d.TestReport = nil
+	d.TestReport, d.report = nil, nil
 }
 
 // mutate locks a draft (SELECT … FOR UPDATE), refuses a final status (409)
@@ -274,8 +364,8 @@ func (r *PGRepository) mutate(ctx context.Context, orgID, id string, ifMatch *in
 			return fmt.Errorf("encode draft items: %w", err)
 		}
 		var report any
-		if len(d.TestReport) > 0 {
-			report = []byte(d.TestReport)
+		if len(d.report) > 0 {
+			report = []byte(d.report)
 		}
 		after, err := scanDraft(tx.QueryRow(ctx, `UPDATE metamodel_draft
 			SET name = $2, status = $3, items = $4, test_report = $5, version = version + 1

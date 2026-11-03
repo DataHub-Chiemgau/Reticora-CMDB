@@ -55,7 +55,9 @@ const (
 	OpPublish    = "publish"
 )
 
-// Draft is a metamodel draft (table metamodel_draft).
+// Draft is a metamodel draft (table metamodel_draft). TestReport is the
+// summary of the stored test report (WP-721): the counters without the
+// violations, which only GET …/test shows.
 type Draft struct {
 	ID             string          `json:"id"`
 	OrganizationID string          `json:"organization_id"`
@@ -69,6 +71,9 @@ type Draft struct {
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`
 	PublishedAt    *time.Time      `json:"published_at"`
+
+	// report is the stored test report with its violations.
+	report json.RawMessage
 }
 
 // Item is one typed operation of a draft. target_id is null for a new

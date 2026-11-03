@@ -6321,7 +6321,7 @@ export interface paths {
     };
     /**
      * Read a metamodel draft
-     * @description A draft of the organization with its items; a draft of another organization is 404. Requires citype:manage.
+     * @description A draft of the organization with its items; a draft of another organization is 404. `test_report` carries the counters of the last test run only; its violations name CIs and need metamodel:publish (GET …/test). Requires citype:manage.
      */
     get: operations['getMetamodelDraft'];
     put?: never;
@@ -6387,6 +6387,33 @@ export interface paths {
      * @description An item another item of the draft references is 409. A tested draft returns to `draft` and loses its test report; a published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.item_removed`.
      */
     delete: operations['removeMetamodelDraftItem'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts/{id}/test': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read the test report of a metamodel draft
+     * @description The report of the last test run (WP-721): state, blocking conflicts, counters per type and attribute, and the violations (CI, type, field, code, rule, message; never a value) as pages of `data` with `limit` (default 50, at most 200) and the signed cursor `next_cursor` (API-02). `total` is the number of violations the run counted; at most 10000 are stored (`truncated`). A draft that was never tested, or whose items changed since, is 404. Requires metamodel:publish: the report names CIs of every client.
+     */
+    get: operations['getMetamodelDraftTest'];
+    put?: never;
+    /**
+     * Test a metamodel draft against the inventory (MET-53)
+     * @description Starts the test run of the draft as a job of kind `metamodel.test` (WP-721), on the job queue when there is one: 202 with the job (GET /api/v1/jobs/{id}). While a test of the draft is queued or running, a second request answers the same job. The job runs organization-wide, whatever the scope of the caller. It lays the items over the metamodel and composes every affected type (changed types and their subtypes, the types of a changed set, the types an organization's global attribute applies to, the targets of changed rules) and every changed template version with its type (MET-16); a composition conflict blocks and the draft stays `draft`. Otherwise it validates every CI of the affected types that is not deleted, with its templates, its instance attributes and the catalog rules the draft leaves; violations do not block. Without a blocking conflict and with unchanged items the draft becomes `tested`. The violations stand only in the report of the draft (GET …/test); the job result and the draft carry the counters. A published or discarded draft is 409; without the database or the job service 503. Requires metamodel:publish; a running test is cancelled with DELETE /api/v1/jobs/{id} and the same permission.
+     */
+    post: operations['testMetamodelDraft'];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -9134,8 +9161,8 @@ export interface components {
       created_by?: string | null;
       items?: components['schemas']['MetamodelDraftItem'][];
       item_count: number;
-      /** @description The report of the last test run (WP-721); null after every item change. */
-      test_report?: unknown;
+      /** @description The counters of the last test run (WP-721) without the violations (GET …/test); null after every item change. */
+      test_report?: components['schemas']['MetamodelTestReport'] | null;
       /** @description Rises with every change; the ETag. */
       version: number;
       /** Format: date-time */
@@ -9235,6 +9262,65 @@ export interface components {
       next_cursor?: string;
       data: components['schemas']['MetamodelDraftItem'][];
       total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    /** @description The report of the test run of a metamodel draft (WP-721) without its violations. `state` is running, completed or failed; `blocked` names a composition conflict or an item that cannot be applied (`conflicts`), `outdated` items changed while the test ran. */
+    MetamodelTestReport: {
+      job_id: string;
+      /** @enum {string} */
+      state: 'running' | 'completed' | 'failed';
+      draft_version: number;
+      /** Format: date-time */
+      started_at: string;
+      /** Format: date-time */
+      finished_at?: string;
+      blocked: boolean;
+      outdated: boolean;
+      conflicts: {
+        ci_type_id?: string;
+        template_version_id?: string;
+        item_id?: string;
+        key?: string;
+        /** @description A MET-16 code (datatype-conflict, enum-empty, range-empty, length-range-empty, computed-conflict, computed-constraint), item-not-applicable or invalid-template-item. */
+        code: string;
+        message: string;
+      }[];
+      totals: {
+        types: number;
+        cis: number;
+        invalid_cis: number;
+        violations: number;
+      };
+      types: {
+        ci_type_id: string;
+        cis: number;
+        invalid_cis: number;
+        violations: number;
+        attributes: {
+          key: string;
+          violations: number;
+        }[];
+      }[];
+      truncated: boolean;
+      error?: string;
+    };
+    /** @description A violation of a CI in a test run (WP-721); no attribute value. */
+    MetamodelTestViolation: {
+      ci_id: string;
+      ci_type_id: string;
+      field: string;
+      code?: string;
+      /** @description The key of the violated catalog rule. */
+      rule?: string;
+      message: string;
+    };
+    MetamodelTestReportPage: components['schemas']['MetamodelTestReport'] & {
+      data: components['schemas']['MetamodelTestViolation'][];
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      total: number;
       limit?: number;
       offset?: number;
       has_more?: boolean;
@@ -31313,6 +31399,84 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getMetamodelDraftTest: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The test report with a page of violations */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelTestReportPage'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  testMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The test runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            /** @enum {string} */
+            kind: 'metamodel.test';
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

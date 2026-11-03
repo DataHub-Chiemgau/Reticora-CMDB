@@ -408,6 +408,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	var jobTracker jobs.Tracker
 	var bffJobs graphqlbff.JobSource
 	historyHandler := history.NewHandler(repos.History)
+	// The draft handler (WP-260) runs the test run of a draft as a job
+	// (WP-721, metamodel.test) with the job service, like historyHandler.
+	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
@@ -430,6 +433,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// A running template migration is cancelled with citype:manage
 			// like its start; it has no revert (E-25).
 			WithKind(ci.TemplateMigrateJobKind, identity.PermCITypeManage, nil).
+			// A running test of a metamodel draft is cancelled with
+			// metamodel:publish like its start (WP-721, E-106).
+			WithKind(metamodel.TestJobKind, identity.PermMetamodelPublish, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
@@ -462,7 +468,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
 		}
-		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs)
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -599,7 +605,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
-		metamodel.NewHandler(repos.MetamodelDraft),
+		draftHandler,
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
 			repos.LifecycleResolver),

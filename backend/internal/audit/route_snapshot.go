@@ -492,6 +492,11 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 			    WHERE rp.organization_id = t.organization_id AND rp.role_id = t.id
 			   UNION SELECT jsonb_array_elements_text(COALESCE(t.permissions, '[]'::jsonb))) k
 			  WHERE k.key IN (SELECT key FROM permission)))`}
+	// The test run of a metamodel draft (WP-721): the draft and the job
+	// its report names; an earlier report shows its counters only, its
+	// violations name CIs of every client (E-106).
+	m["POST /api/v1/metamodel/drafts/{id}/test"] = RouteSnapshot{Table: "metamodel_draft", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `to_jsonb(t) || jsonb_build_object('test_report', t.test_report - 'violations')`}
 	m["POST /api/v1/tickets/{id}/sla"] = RouteSnapshot{Table: "ticket_sla", Keys: []SnapshotKey{{"ticket_id", "id"}}}
 	// Relationship types are addressed by key; the organization's own type,
 	// not the built-in one of the same key.

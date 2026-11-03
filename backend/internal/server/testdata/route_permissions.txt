@@ -215,6 +215,7 @@ GET /api/v1/me/permissions authenticated
 GET /api/v1/metamodel/drafts citype:manage
 GET /api/v1/metamodel/drafts/{id} citype:manage
 GET /api/v1/metamodel/drafts/{id}/items citype:manage
+GET /api/v1/metamodel/drafts/{id}/test metamodel:publish
 GET /api/v1/modules entitlement:read
 GET /api/v1/monitoring/alerts monitoring:read
 GET /api/v1/monitoring/metrics monitoring:read
@@ -479,6 +480,7 @@ POST /api/v1/maintenance-windows maintenance:write
 POST /api/v1/maintenance-windows/{id}/notify maintenance:write
 POST /api/v1/metamodel/drafts citype:manage
 POST /api/v1/metamodel/drafts/{id}/items citype:manage
+POST /api/v1/metamodel/drafts/{id}/test metamodel:publish
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/mounts rack:write
