@@ -1293,3 +1293,4 @@ CI-07;[P2];B;backend/internal/ci/tags_integration_test.go;WP-281
 CI-12;[B];B;backend/internal/ci/merge_integration_test.go;WP-281
 LOC-08;P2/G2;B;backend/internal/locations/loc08_integration_test.go;WP-282
 LOC-08;P2/G2;B;frontend/src/pages/LocationTreePage.test.tsx;WP-282
+CI-08;[P2];B;backend/internal/ci/tags_filter_integration_test.go;WP-754

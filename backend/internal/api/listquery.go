@@ -20,6 +20,9 @@ const (
 	OpLTE   = "lte"
 	OpLike  = "like"
 	OpIn    = "in"
+	// OpAll matches a set field that holds every value (E-126, WP-754);
+	// on a set field OpIn means at least one of them.
+	OpAll = "all"
 )
 
 // Kinds of a filterable field: they decide how a value is checked and
@@ -30,13 +33,16 @@ const (
 	KindTime   = "time"
 	KindNumber = "number"
 	KindBool   = "bool"
+	// KindSet is a set of keys (the tags of a CI, WP-754): exact, in and
+	// all filter it, compared by the repository, never through Filter.SQL.
+	KindSet = "set"
 )
 
 // AttributePrefix addresses a JSONB attribute in filter and sort
 // (filter[attributes.ram_gb][gte]=16).
 const AttributePrefix = "attributes."
 
-// maxFilterValues caps the values of one in-filter.
+// maxFilterValues caps the values of one in- or all-filter.
 const maxFilterValues = 100
 
 // Filter is one filter[field][op]=value condition.
@@ -144,9 +150,9 @@ func parseFilter(field, op string, raw []string, spec ListFields) (Filter, error
 		op = OpExact
 	}
 	switch op {
-	case OpExact, OpGTE, OpLTE, OpLike, OpIn:
+	case OpExact, OpGTE, OpLTE, OpLike, OpIn, OpAll:
 	default:
-		return Filter{}, &FieldError{Field: "filter[" + field + "]", Message: fmt.Sprintf("unknown operator %q; use exact, gte, lte, like or in", op)}
+		return Filter{}, unknownOperator(field, op)
 	}
 	f := Filter{Field: field, Op: op}
 	if _, ok := f.Attribute(); ok {
@@ -161,18 +167,24 @@ func parseFilter(field, op string, raw []string, spec ListFields) (Filter, error
 		}
 		f.Kind = kind
 	}
+	// all exists only for set fields (E-126); an attribute is no set.
+	if op == OpAll && f.Kind != KindSet {
+		return Filter{}, unknownOperator(field, op)
+	}
 	value := ""
 	if len(raw) > 0 {
 		value = raw[len(raw)-1]
 	}
-	if op == OpIn {
+	if op == OpIn || op == OpAll {
 		for _, v := range strings.Split(value, ",") {
-			if v = strings.TrimSpace(v); v != "" {
+			// A set holds each value once: a duplicate would break the
+			// count of all.
+			if v = strings.TrimSpace(v); v != "" && (f.Kind != KindSet || !slices.Contains(f.Values, v)) {
 				f.Values = append(f.Values, v)
 			}
 		}
 		if len(f.Values) == 0 || len(f.Values) > maxFilterValues {
-			return Filter{}, &FieldError{Field: "filter[" + field + "][in]", Message: fmt.Sprintf("needs 1 to %d comma-separated values", maxFilterValues)}
+			return Filter{}, &FieldError{Field: "filter[" + field + "][" + op + "]", Message: fmt.Sprintf("needs 1 to %d comma-separated values", maxFilterValues)}
 		}
 	} else {
 		f.Values = []string{value}
@@ -185,16 +197,26 @@ func parseFilter(field, op string, raw []string, spec ListFields) (Filter, error
 	return f, nil
 }
 
+// unknownOperator is the 400 of an operator the field does not know: all
+// counts as unknown outside set fields (E-126).
+func unknownOperator(field, op string) error {
+	return &FieldError{Field: "filter[" + field + "]", Message: fmt.Sprintf("unknown operator %q; use exact, gte, lte, like or in", op)}
+}
+
 var uuidValue = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // Check validates the operator and values against the filter's kind:
-// like only on text, gte/lte not on uuid or bool, and every value parses.
+// like only on text, gte/lte not on uuid, bool or set, all only on set,
+// and every value parses.
 func (f Filter) Check() error {
 	name := "filter[" + f.Field + "][" + f.Op + "]"
+	if f.Op == OpAll && f.Kind != KindSet {
+		return unknownOperator(f.Field, f.Op)
+	}
 	if f.Op == OpLike && f.Kind != KindText {
 		return &FieldError{Field: name, Message: "like is only allowed on text fields"}
 	}
-	if (f.Op == OpGTE || f.Op == OpLTE) && (f.Kind == KindUUID || f.Kind == KindBool) {
+	if (f.Op == OpGTE || f.Op == OpLTE) && (f.Kind == KindUUID || f.Kind == KindBool || f.Kind == KindSet) {
 		return &FieldError{Field: name, Message: f.Op + " is not allowed on " + f.Kind + " fields"}
 	}
 	for _, v := range f.Values {
@@ -305,6 +327,19 @@ func (f Filter) Match(value string) bool {
 		return value != "" && compare(f.Kind, value, f.Values[0]) <= 0
 	}
 	return compare(f.Kind, value, f.Values[0]) == 0
+}
+
+// MatchSet evaluates a filter on a set field against the set's values in
+// memory: exact and in need one of the filter values, all every one. Keys
+// compare case-insensitively.
+func (f Filter) MatchSet(set []string) bool {
+	has := func(v string) bool {
+		return slices.ContainsFunc(set, func(s string) bool { return strings.EqualFold(s, v) })
+	}
+	if f.Op == OpAll {
+		return !slices.ContainsFunc(f.Values, func(v string) bool { return !has(v) })
+	}
+	return slices.ContainsFunc(f.Values, has)
 }
 
 func compare(kind, a, b string) int {

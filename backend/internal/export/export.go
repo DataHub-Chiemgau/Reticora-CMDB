@@ -195,6 +195,7 @@ func (rw *rowWriter) row(item ci.Item) {
 			item.DiscoverySource,
 			item.CreatedAt,
 			item.UpdatedAt,
+			strings.Join(item.Tags, "|"),
 		})
 	case "datev":
 		rw.writeCells([]string{
@@ -292,9 +293,10 @@ func attributeString(attrs map[string]any, keys ...string) string {
 // utf8BOM starts every CSV export (EXP-01).
 const utf8BOM = "\ufeff"
 
-// csvColumns are the CI fields of the CSV export, in this order.
+// csvColumns are the CI fields of the CSV export, in this order. tags holds
+// the tag keys separated by | (WP-754).
 var csvColumns = []string{"id", "name", "status", "ci_type_id", "manufacturer", "model", "serial_number", "management_ip",
-	"firmware_version", "discovery_source", "created_at", "updated_at"}
+	"firmware_version", "discovery_source", "created_at", "updated_at", "tags"}
 
 // datevFields are the CI fields the DATEV layout reads.
 var datevFields = []string{"id", "name", "manufacturer", "model", "serial_number", "attributes", "status"}

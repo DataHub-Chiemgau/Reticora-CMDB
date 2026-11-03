@@ -339,6 +339,12 @@ func toLower(r rune) rune {
 // a number when the filter value is one, otherwise as text.
 func matchesFilters(item *Item, filters []api.Filter) bool {
 	for _, f := range filters {
+		if f.Kind == api.KindSet {
+			if !f.MatchSet(item.Tags) {
+				return false
+			}
+			continue
+		}
 		if f.Kind == "" {
 			f.Kind = api.KindText
 			if _, err := strconv.ParseFloat(f.Values[0], 64); err == nil {

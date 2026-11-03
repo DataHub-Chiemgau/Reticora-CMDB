@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -311,11 +312,14 @@ func TestCSVNeutralizesFormulas(t *testing.T) {
 
 // TestCSVFormatAndManifest covers EXP-01 (WP-189): CSV in UTF-8 with BOM
 // and semicolons; the manifest lists the fields of the layout and the
-// visible CI fields it leaves out, also in a response header.
+// visible CI fields it leaves out, also in a response header. The tag keys
+// are the last column, separated by | (WP-754), and tags is no longer
+// omitted.
 func TestCSVFormatAndManifest(t *testing.T) {
 	repo := ci.NewMemoryRepository()
+	tags := []string{"Web", "prod"}
 	if err := repo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", CITypeID: "type-server",
-		Name: "srv; \"quoted\"", Status: "active", Hostname: "srv01", Attributes: map[string]any{}}); err != nil {
+		Name: "srv; \"quoted\"", Status: "active", Hostname: "srv01", Attributes: map[string]any{}, LegacyTags: &tags}); err != nil {
 		t.Fatal(err)
 	}
 	mux := chi.NewRouter()
@@ -323,14 +327,18 @@ func TestCSVFormatAndManifest(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format=csv", nil)))
 	body := w.Body.String()
-	if !strings.HasPrefix(body, "\ufeffid;name;status;ci_type_id;") {
-		t.Errorf("header: %q", body[:min(60, len(body))])
+	if !strings.HasPrefix(body, "\ufeffid;name;status;ci_type_id;") || !strings.Contains(body, ";created_at;updated_at;tags\n") {
+		t.Errorf("header: %q", body[:min(200, len(body))])
+	}
+	if !strings.HasSuffix(body, ";prod|web\n") {
+		t.Errorf("tags cell: %q", body)
 	}
 	// A value with the separator is quoted.
 	if !strings.Contains(body, `;"srv; ""quoted""";active;`) {
 		t.Errorf("row: %q", body)
 	}
-	if omitted := w.Header().Get("X-Export-Omitted-Fields"); !strings.Contains(omitted, "hostname") || strings.Contains(omitted, "serial_number") {
+	if omitted := w.Header().Get("X-Export-Omitted-Fields"); !strings.Contains(omitted, "hostname") || strings.Contains(omitted, "serial_number") ||
+		slices.Contains(strings.Split(omitted, ","), "tags") {
 		t.Errorf("omitted header %q", omitted)
 	}
 
@@ -342,6 +350,12 @@ func TestCSVFormatAndManifest(t *testing.T) {
 		if o.Reason == "" {
 			t.Errorf("omitted %s without reason", o.Field)
 		}
+		if o.Field == "tags" {
+			t.Error("csv manifest omits tags")
+		}
+	}
+	if !slices.Contains(m.Fields, "tags") {
+		t.Errorf("csv manifest fields %v without tags", m.Fields)
 	}
 	if j := ManifestFor("json"); len(j.Omitted) != 0 || len(j.Fields) != len(ciFieldNames) {
 		t.Errorf("json manifest %+v", j)

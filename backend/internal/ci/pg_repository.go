@@ -232,6 +232,35 @@ func typeScope(ctx context.Context, tx pgx.Tx, groups [][]string) ([]string, err
 	return types, nil
 }
 
+// tagIDsOf returns the IDs of the organization's tags that the
+// filter[tags] conditions name, by key (WP-754): one statement, none
+// without a tag filter. Row level security restricts tag to the
+// organization.
+func tagIDsOf(ctx context.Context, tx pgx.Tx, filters []api.Filter) (map[string]string, error) {
+	var keys []string
+	for _, f := range filters {
+		if f.Field == TagsField {
+			keys = append(keys, tagFilterKeys(f)...)
+		}
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT key, id::text FROM tag WHERE key = ANY($1::text[])`, keys)
+	if err != nil {
+		return nil, fmt.Errorf("tags of the filter: %w", err)
+	}
+	ids := map[string]string{}
+	var key, id string
+	if _, err = pgx.ForEachRow(rows, []any{&key, &id}, func() error {
+		ids[key] = id
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("tags of the filter: %w", err)
+	}
+	return ids, nil
+}
+
 // attributeFilterOf checks that an attribute may be filtered (API-02) and
 // returns its filter kind and the CI types the filter is restricted to (nil
 // for none). The definitions of a CI's type decide (WP-566, F-216): a
@@ -376,10 +405,21 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
 		}
+		tagIDs, terr := tagIDsOf(ctx, tx, filter.Filters)
+		if terr != nil {
+			return terr
+		}
 		orgNamed := false
 		for _, f := range filter.Filters {
 			if f.Field == "ci_type_id" && (f.Op == api.OpExact || f.Op == api.OpIn) {
 				continue // in the type filter above
+			}
+			if f.Field == TagsField {
+				clause, fargs := tagsPredicate(f, tagIDs, argPos)
+				whereParts = append(whereParts, clause)
+				args = append(args, fargs...)
+				argPos += len(fargs)
+				continue
 			}
 			expr := filterColumns[f.Field].expr
 			if key, ok := f.Attribute(); ok {

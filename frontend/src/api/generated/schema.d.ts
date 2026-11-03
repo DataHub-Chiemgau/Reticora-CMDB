@@ -15161,6 +15161,14 @@ export interface components {
      *     attributes may be filtered (otherwise 400 with a hint), and they
      *     compare by their data type. An unknown field yields 422, an unknown
      *     operator or a malformed value 400.
+     *
+     *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+     *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+     *     at least one of the tags, `filter[tags][all]=a,b` those with every
+     *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+     *     distinct values; an unknown key matches no tag. `all` is accepted
+     *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+     *     `gte` and `lte` on a set field are 400.
      */
     ListFilter: {
       [key: string]: unknown;
@@ -15843,6 +15851,14 @@ export interface operations {
          *     attributes may be filtered (otherwise 400 with a hint), and they
          *     compare by their data type. An unknown field yields 422, an unknown
          *     operator or a malformed value 400.
+         *
+         *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+         *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+         *     at least one of the tags, `filter[tags][all]=a,b` those with every
+         *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+         *     distinct values; an unknown key matches no tag. `all` is accepted
+         *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+         *     `gte` and `lte` on a set field are 400.
          */
         filter?: components['parameters']['ListFilter'];
         /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
