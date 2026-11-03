@@ -34,8 +34,9 @@ type FieldLister interface {
 // root → type (MET-06: of the ancestors only the inheritable definitions,
 // of the type all), the active attribute sets of that chain, one layer per
 // set in chain and position order (WP-709; of the sets of an ancestor only
-// the inheritable set attributes), and the attributes of the single CI
-// instance (MET-14).
+// the inheritable set attributes), one layer per template of the CI in
+// position order (ci_template with its versions, WP-710: Template 1 … n)
+// and the attributes of the single CI instance (MET-14).
 // A narrower layer tightens a wider one and cannot drop its rules;
 // conflicting definitions are a *CompositionError. The system,
 // organization, type and set layers come from attribute_definition only
@@ -50,7 +51,18 @@ type FieldLister interface {
 // category and the chain of the CI type decide (appliesTo). The category
 // is read only while a global of the organization is restricted to
 // categories.
+//
+// The template layer of a stored CI comes from ci_template, read with the
+// instance definitions in one statement where the lister offers it
+// (ciLayerLister); without it (MemoryRepository) a CI has no templates.
 func ResolveFields(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error) {
+	return resolveFields(ctx, r, orgID, ciTypeID, ciID, nil)
+}
+
+// resolveFields is ResolveFields; templates, when set, returns the template
+// layer in place of the stored one (ResolveFieldsWithTemplates).
+func resolveFields(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID string,
+	templates func(ctx context.Context) ([][]templateItem, error)) ([]fieldmeta.FieldDefinition, error) {
 	globals, err := r.ListGlobalFields(ctx, orgID)
 	if err != nil {
 		return nil, err
@@ -93,17 +105,37 @@ func ResolveFields(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID str
 		}
 	}
 
-	var instance []fieldmeta.FieldDefinition
-	if ciID != "" {
-		instanceFields, err := r.ListInstanceFields(ctx, orgID, ciID)
-		if err != nil {
+	var (
+		instanceFields []InstanceField
+		assigned       [][]templateItem
+	)
+	cl, combined := r.(ciLayerLister)
+	switch {
+	case templates != nil:
+		if assigned, err = templates(ctx); err != nil {
 			return nil, err
 		}
-		for _, f := range instanceFields {
-			instance = append(instance, f.Definition())
+		if ciID != "" {
+			instanceFields, err = r.ListInstanceFields(ctx, orgID, ciID)
 		}
+	case ciID != "" && combined:
+		instanceFields, assigned, err = cl.ciLayers(ctx, orgID, ciID)
+	case ciID != "":
+		instanceFields, err = r.ListInstanceFields(ctx, orgID, ciID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var instance []fieldmeta.FieldDefinition
+	for i := range instanceFields {
+		instance = append(instance, instanceFields[i].Definition())
 	}
 	layers := append([][]fieldmeta.FieldDefinition{system, org, typed}, sets...)
+	templateLayer, err := templateLayers(layers, assigned)
+	if err != nil {
+		return nil, err
+	}
+	layers = append(layers, templateLayer...)
 	return Compose(append(layers, instance)...)
 }
 

@@ -1250,3 +1250,6 @@ API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/rule_integration_test.go;WP-
 AUD-07;[B];B;backend/internal/citype/rule_integration_test.go;WP-716
 LCY-02;[P2];B;backend/internal/lifecycle/transition_integration_test.go;WP-724
 MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/lifecycle/transition_integration_test.go;WP-724
+MET-16;B/G1, Teil P2/G2;B;backend/internal/ci/template_assignment_integration_test.go;WP-710
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/ci/template_assignment_integration_test.go;WP-710
+AUD-07;[B];B;backend/internal/ci/template_assignment_integration_test.go;WP-710

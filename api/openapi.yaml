@@ -905,12 +905,21 @@ paths:
             names no system type and no type of the organization ("CI type
             not found", the same for an unknown ID and a type of another
             organization) or a deactivated type ("the CI type is
-            deactivated").
+            deactivated"). With templates (WP-710) also an entry the
+            assignment rules refuse (templates[i]) or an attribute the
+            schema composed with the templates does not allow.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ViolationProblem' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          description: >-
+            templates is not empty and the server runs without a database
+            (template assignments need it, WP-710).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cis/{id}:
     parameters:
@@ -15062,31 +15071,82 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/templates:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listCITemplates
       tags: [Metamodel]
       summary: List the templates assigned to a CI
-      description: Planned (E-38); WP-710 implements the operation.
+      description: >-
+        The templates of the CI in position order (MET-16, WP-710) with the
+        version each uses; they lie between the attribute sets and the
+        instance attributes in the composition of the CI's schema. Requires
+        ci:read; the client and site scope of the CI apply. The list is
+        bounded per CI and complete: no limit or cursor, next_cursor stays
+        absent.
       responses:
         '200':
-          description: List the templates assigned to a CI. The response schema comes with WP-710.
+          description: The templates of the CI
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent, the list is complete.
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CITemplate' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          description: The server runs without a database; template assignments need it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     put:
       operationId: replaceCITemplates
       tags: [Metamodel]
       summary: Replace the templates assigned to a CI
-      description: Planned (E-38); WP-710 implements the operation.
+      description: >-
+        Replaces the ordered template list of the CI (MET-16, WP-710); the
+        position is the index, an entry without version takes the
+        template's current version. Assignable are published versions of
+        active templates of the organization and system templates whose CI
+        type is the type of the CI or a type of its chain. The attributes of
+        the CI are validated against the schema composed with the new list.
+        Requires ci:write; a manual write like PATCH /cis/{id}: If-Match
+        (API-07; only the current version, else 412), the version rises when
+        the list changes, the history records the field templates in a
+        change set of its own, audit ci.templates_changed (list before and
+        after), event ci.changed with the changed field templates.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the current version of the CI, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetCITemplatesRequest' }
       responses:
         '200':
-          description: Replaced. The request and response schemas come with WP-710.
+          description: The CI with its new template list
+          headers:
+            ETag:
+              description: The new CI version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CI' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -15095,8 +15155,27 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '412':
+          description: If-Match missing although required, or not the current version of the CI
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            An entry the rules refuse (templates[i]: unknown or foreign
+            template, deactivated template, a template of a type outside the
+            chain of the CI, no or no published version, a template listed
+            twice), an attribute of the CI the composed schema does not
+            allow, or definitions that cannot be composed (MET-16, the key
+            as field).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
+        '503':
+          description: The server runs without a database; template assignments need it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cis/{id}/instance-attributes:
     parameters:
@@ -18540,11 +18619,56 @@ components:
                 type: integer
                 description: The HTTP status the single operation would have answered; 0 for a skipped id.
               error: { type: string }
+    CITemplate:
+      type: object
+      required: [template_id, key, version, position]
+      description: A template assigned to a CI (ci_template, MET-16, WP-710).
+      properties:
+        template_id: { type: string, format: uuid }
+        key:
+          type: string
+          description: Key of the template.
+        version:
+          type: integer
+          minimum: 1
+          description: The published version of the template the CI uses.
+        position:
+          type: integer
+          minimum: 0
+          description: Position in the order of the CI's templates (0 first).
+    CITemplateRef:
+      type: object
+      required: [template_id]
+      description: >-
+        An entry of a template list to assign: an active template of the
+        organization or a system template whose CI type is the type of the
+        CI or a type of its chain (WP-248), with a published version.
+      properties:
+        template_id: { type: string, format: uuid }
+        version:
+          type: integer
+          minimum: 1
+          description: Published version to use; absent, the template's current version.
+    SetCITemplatesRequest:
+      type: object
+      required: [templates]
+      properties:
+        templates:
+          type: array
+          description: The new ordered list; the position is the index. An empty list removes every template.
+          items: { $ref: '#/components/schemas/CITemplateRef' }
     CITypeChangeResult:
       type: object
-      required: [ci, findings, changed]
+      required: [ci, findings, changed, dropped_templates]
       properties:
         ci: { $ref: '#/components/schemas/CI' }
+        dropped_templates:
+          type: array
+          description: >-
+            Template assignments the change removed because their template
+            belongs to a CI type outside the target type and its chain
+            (WP-710).
+          items: { $ref: '#/components/schemas/CITemplate' }
         changed:
           type: boolean
           description: False when the CI already had the type.
@@ -19371,7 +19495,17 @@ components:
             system base composed with the type chain and its attribute sets
             (MET-16). Set by
             the server when the CI is created or its type or attributes
-            change.
+            change. The template layer is not materialized: the templates of
+            the CI with their versions (templates) complete the effective
+            schema (E-108).
+        templates:
+          type: array
+          readOnly: true
+          description: >-
+            Templates assigned to the CI in position order (MET-16, WP-710):
+            present in GET /cis/{id} and the answers of the write paths when
+            the CI has templates; GET /cis does not load them.
+          items: { $ref: '#/components/schemas/CITemplate' }
         site_id:
           type: string
           readOnly: true
@@ -19622,6 +19756,16 @@ components:
           description: >-
             Defaults to manual. With manual or import the CI is manual
             (is_manual); an unknown source is rejected (400 with the field).
+        templates:
+          type: array
+          description: >-
+            Templates assigned with the CI in this order (MET-16, WP-710);
+            the creation is validated against the schema composed with
+            them, atomically with the assignment. Without version an entry
+            takes the template's current version. The rules are those of
+            PUT /cis/{id}/templates (422 on templates[i]). Not empty without
+            a database: 503.
+          items: { $ref: '#/components/schemas/CITemplateRef' }
 
     UpdateCIRequest:
       description: >-

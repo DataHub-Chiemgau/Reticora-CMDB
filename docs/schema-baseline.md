@@ -735,6 +735,27 @@ fremden CI-Typ, eine fremde Klonquelle und eine fremde Attributdefinition mit
 `pdu`) mit veröffentlichter Version 1 ohne Items (E-37). Das CI hat keine
 Template-Spalten; die Zuordnung folgt mit `ci_template` (WP-710).
 
+Template-Zuordnung (MET-16, API-06, WP-710, Migration 000206): `ci_template`
+hält die Templates eines CI in definierter Reihenfolge (Primärschlüssel
+`ci_id`, `template_id`; `ci_template_ci_id_position_key` eindeutig je CI und
+`position`) mit der verwendeten veröffentlichten `version`. Das CI wird über
+`ci_template_ci_fkey` (`ci_id`, `organization_id`) → `ci` (`id`,
+`organization_id`) mit ON DELETE CASCADE referenziert (K19); Template und
+Version über `ci_template_template_id_fkey` und `ci_template_version_fkey`
+(`template_id`, `version`) → `template_version` ohne ON DELETE-Aktion, ein
+zugeordnetes Template lässt sich also nicht löschen (23503). Die
+Zuordnungsregeln (veröffentlichte Version eines aktiven Templates der
+Organisation oder eines Systemtemplates, Typ des CI oder seiner Typkette)
+prüft die Anwendung unter RLS. `client_id` und `site_id` setzt
+`derive_ci_scope('ci_id')` (`ci_template_scope`); `ci_template_scope_propagation`
+(AFTER UPDATE auf `ci` bei Wechsel von `client_id` oder `site_id`) leitet sie
+über `propagate_ci_template_scope()` mit erweitertem Scope
+(`app_scope_widen`/`app_scope_restore`) neu ab. Policies wie
+`ci_field_value` (Organisation, Client und Site; restriktive Update- und
+Delete-Policies), TRUNCATE-Schutz `reticora_truncate_guard`. Das wirksame
+Schema eines CI ergibt sich aus `ci.schema_version` und den referenzierten
+`ci_template.version` (E-108).
+
 Regelkatalog (MET-45, API-06, AUD-07, WP-716, Migration 000207):
 `metamodel_rule` hält benannte Regeln für das Attribut `attribute_key` genau
 eines Ziels (`metamodel_rule_one_target`: `ci_type_id`, `attribute_set_id` oder
@@ -793,6 +814,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_instance_field_definition` | ja | ja | ci_instance_field_definition_isolation (ALL), ci_instance_field_definition_scoped_delete (DELETE), ci_instance_field_definition_scoped_update (UPDATE) |
 | `ci_merge` | ja | ja | ci_merge_isolation (ALL), ci_merge_scoped_delete (DELETE), ci_merge_scoped_update (UPDATE) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL), ci_relationship_scoped_delete (DELETE), ci_relationship_scoped_update (UPDATE) |
+| `ci_template` | ja | ja | ci_template_isolation (ALL), ci_template_scoped_delete (DELETE), ci_template_scoped_update (UPDATE) |
 | `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
 | `ci_type_attribute_set` | ja | ja | ci_type_attribute_set_isolation_delete (DELETE), ci_type_attribute_set_isolation_insert (INSERT), ci_type_attribute_set_isolation_select (SELECT), ci_type_attribute_set_isolation_update (UPDATE) |
 | `client` | ja | ja | client_isolation (ALL) |

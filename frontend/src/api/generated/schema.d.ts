@@ -7296,12 +7296,12 @@ export interface paths {
     };
     /**
      * List the templates assigned to a CI
-     * @description Planned (E-38); WP-710 implements the operation.
+     * @description The templates of the CI in position order (MET-16, WP-710) with the version each uses; they lie between the attribute sets and the instance attributes in the composition of the CI's schema. Requires ci:read; the client and site scope of the CI apply. The list is bounded per CI and complete: no limit or cursor, next_cursor stays absent.
      */
     get: operations['listCITemplates'];
     /**
      * Replace the templates assigned to a CI
-     * @description Planned (E-38); WP-710 implements the operation.
+     * @description Replaces the ordered template list of the CI (MET-16, WP-710); the position is the index, an entry without version takes the template's current version. Assignable are published versions of active templates of the organization and system templates whose CI type is the type of the CI or a type of its chain. The attributes of the CI are validated against the schema composed with the new list. Requires ci:write; a manual write like PATCH /cis/{id}: If-Match (API-07; only the current version, else 412), the version rises when the list changes, the history records the field templates in a change set of its own, audit ci.templates_changed (list before and after), event ci.changed with the changed field templates.
      */
     put: operations['replaceCITemplates'];
     post?: never;
@@ -9464,8 +9464,32 @@ export interface components {
         error?: string;
       }[];
     };
+    /** @description A template assigned to a CI (ci_template, MET-16, WP-710). */
+    CITemplate: {
+      /** Format: uuid */
+      template_id: string;
+      /** @description Key of the template. */
+      key: string;
+      /** @description The published version of the template the CI uses. */
+      version: number;
+      /** @description Position in the order of the CI's templates (0 first). */
+      position: number;
+    };
+    /** @description An entry of a template list to assign: an active template of the organization or a system template whose CI type is the type of the CI or a type of its chain (WP-248), with a published version. */
+    CITemplateRef: {
+      /** Format: uuid */
+      template_id: string;
+      /** @description Published version to use; absent, the template's current version. */
+      version?: number;
+    };
+    SetCITemplatesRequest: {
+      /** @description The new ordered list; the position is the index. An empty list removes every template. */
+      templates: components['schemas']['CITemplateRef'][];
+    };
     CITypeChangeResult: {
       ci: components['schemas']['CI'];
+      /** @description Template assignments the change removed because their template belongs to a CI type outside the target type and its chain (WP-710). */
+      dropped_templates: components['schemas']['CITemplate'][];
       /** @description False when the CI already had the type. */
       changed: boolean;
       /** @description Required attributes of the target type the CI does not carry. */
@@ -9966,8 +9990,10 @@ export interface components {
       readonly health?: 'ok' | 'warning' | 'critical' | 'unknown';
       /** Format: date-time */
       readonly health_updated_at?: string;
-      /** @description Version of the materialized attribute schema of the CI type (ci_type.schema_version) the CI was last written against: the system base composed with the type chain and its attribute sets (MET-16). Set by the server when the CI is created or its type or attributes change. */
+      /** @description Version of the materialized attribute schema of the CI type (ci_type.schema_version) the CI was last written against: the system base composed with the type chain and its attribute sets (MET-16). Set by the server when the CI is created or its type or attributes change. The template layer is not materialized: the templates of the CI with their versions (templates) complete the effective schema (E-108). */
       readonly schema_version?: number;
+      /** @description Templates assigned to the CI in position order (MET-16, WP-710): present in GET /cis/{id} and the answers of the write paths when the CI has templates; GET /cis does not load them. */
+      readonly templates?: components['schemas']['CITemplate'][];
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
@@ -10096,6 +10122,8 @@ export interface components {
       };
       /** @description Defaults to manual. With manual or import the CI is manual (is_manual); an unknown source is rejected (400 with the field). */
       discovery_source?: components['schemas']['CIDiscoverySource'];
+      /** @description Templates assigned with the CI in this order (MET-16, WP-710); the creation is validated against the schema composed with them, atomically with the assignment. Without version an entry takes the template's current version. The rules are those of PUT /cis/{id}/templates (422 on templates[i]). Not empty without a database: 503. */
+      templates?: components['schemas']['CITemplateRef'][];
     };
     /** @description A manual change as an RFC 7396 merge patch (CI-04): an absent member stays unchanged; null clears a nullable field (the stored value becomes empty and its protected override holds null); null on name, status, attributes, discovery_source, last_seen_at or change_reason is refused with 422 naming the field. attributes merges nested objects, null removes a member. Every changed field gets a protected override that discovery does not overwrite. */
     UpdateCIRequest: {
@@ -14788,7 +14816,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). */
+      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). With templates (WP-710) also an entry the assignment rules refuse (templates[i]) or an attribute the schema composed with the templates does not allow. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14798,6 +14826,15 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+      /** @description templates is not empty and the server runs without a database (template assignments need it, WP-710). */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getCI: {
@@ -32716,42 +32753,94 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the templates assigned to a CI. The response schema comes with WP-710. */
+      /** @description The templates of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent, the list is complete. */
+            next_cursor?: string;
+            data: components['schemas']['CITemplate'][];
+          };
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The server runs without a database; template assignments need it. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   replaceCITemplates: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the current version of the CI, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetCITemplatesRequest'];
+      };
+    };
     responses: {
-      /** @description Replaced. The request and response schemas come with WP-710. */
+      /** @description The CI with its new template list */
       200: {
         headers: {
+          /** @description The new CI version. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description If-Match missing although required, or not the current version of the CI */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description An entry the rules refuse (templates[i]: unknown or foreign template, deactivated template, a template of a type outside the chain of the CI, no or no published version, a template listed twice), an attribute of the CI the composed schema does not allow, or definitions that cannot be composed (MET-16, the key as field). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+      /** @description The server runs without a database; template assignments need it. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listCIInstanceAttributes: {

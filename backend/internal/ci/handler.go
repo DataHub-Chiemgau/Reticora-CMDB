@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -81,6 +82,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/cis/{id}/instance-attributes", h.ListInstanceAttributes)
 	r.Put("/api/v1/cis/{id}/instance-attributes/{key}", h.SetInstanceAttribute)
 	r.Delete("/api/v1/cis/{id}/instance-attributes/{key}", h.DeleteInstanceAttribute)
+	// Templates of a CI (MET-16, WP-710).
+	r.Get("/api/v1/cis/{id}/templates", h.ListTemplates)
+	r.Put("/api/v1/cis/{id}/templates", h.SetTemplates)
 }
 
 // List handles GET /api/v1/cis
@@ -519,6 +523,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		SysObjectID:     req.SysObjectID,
 		Attributes:      req.Attributes,
 		DiscoverySource: req.DiscoverySource,
+		Templates:       req.Templates,
 	}
 	if item.Attributes == nil {
 		item.Attributes = make(map[string]any)
@@ -541,6 +546,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if writeValidationError(w, err) {
+			return
+		}
+		if writeTemplatesUnavailable(w, err) {
 			return
 		}
 		if api.WriteDBError(w, err) {
@@ -656,6 +664,93 @@ func (h *Handler) ListChanges(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// writeTemplatesUnavailable answers 503 for ErrTemplatesUnavailable
+// (WP-710: template assignments need the database). It reports whether err
+// was it.
+func writeTemplatesUnavailable(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, ErrTemplatesUnavailable) {
+		return false
+	}
+	api.WriteUnavailable(w, "template assignments need the database")
+	return true
+}
+
+// ListTemplates handles GET /api/v1/cis/{id}/templates: the templates of
+// the CI in position order, a complete, bounded list (api.CompleteList).
+func (h *Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	items, err := h.svc.ListTemplates(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	switch {
+	case writeTemplatesUnavailable(w, err):
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+	case err != nil:
+		api.WriteRepoError(w, err)
+	default:
+		api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
+	}
+}
+
+// SetTemplatesRequest is the body of PUT /api/v1/cis/{id}/templates: the
+// ordered list [{template_id, version}].
+type SetTemplatesRequest struct {
+	Templates []citype.CITemplate `json:"templates"`
+}
+
+// SetTemplates handles PUT /api/v1/cis/{id}/templates: replaces the ordered
+// template list of the CI (If-Match, API-07) and answers the CI with its
+// new ETag.
+func (h *Handler) SetTemplates(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if !h.svc.TemplatesAvailable() {
+		writeTemplatesUnavailable(w, ErrTemplatesUnavailable)
+		return
+	}
+	var req SetTemplatesRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.Templates == nil {
+		api.WriteFieldError(w, &api.FieldError{Field: "templates", Message: "templates is required (an empty list removes every template)"})
+		return
+	}
+	version, present, err := api.ParseIfMatch(r)
+	if err != nil {
+		api.WritePreconditionFailed(w, err.Error())
+		return
+	}
+	var ifMatch *int64
+	if present {
+		ifMatch = &version
+	}
+	item, err := h.svc.SetTemplates(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req.Templates, ifMatch, t.UserID)
+	switch {
+	case err == nil:
+	case writeConcurrencyError(w, err), writeValidationError(w, err), writeTemplatesUnavailable(w, err):
+		return
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+		return
+	default:
+		api.WriteRepoError(w, err)
+		return
+	}
+	if h.dispatcher != nil {
+		h.dispatcher.Dispatch(r.Context(), t.OrganizationID, "ci.updated", item)
+	}
+	w.Header().Set("ETag", api.ETag(item.Version))
+	api.WriteJSON(w, http.StatusOK, item)
 }
 
 // writeValidationError renders a field-metadata validation failure as an

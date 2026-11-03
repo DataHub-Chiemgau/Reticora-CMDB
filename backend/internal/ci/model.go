@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 )
 
 // Item represents a Configuration Item instance.
@@ -74,6 +75,11 @@ type Item struct {
 	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt     string     `json:"created_at"`
 	UpdatedAt     string     `json:"updated_at"`
+	// Templates are the templates assigned to the CI in position order
+	// (ci_template, MET-16, WP-710): GET /cis/{id} and the answers of the
+	// write paths carry them, GET /cis does not load them (K23). On a
+	// create they are the list to assign ([{template_id, version}]).
+	Templates []citype.CITemplate `json:"templates,omitempty"`
 	// ChosenType marks a create through the CI service (POST /cis): the
 	// writer chose the type, which must be an active system type or an
 	// active type of the organization, read in the writing transaction
@@ -162,6 +168,9 @@ type CreateRequest struct {
 	SysObjectID     string         `json:"sys_object_id,omitempty"`
 	Attributes      map[string]any `json:"attributes,omitempty"`
 	DiscoverySource string         `json:"discovery_source,omitempty"`
+	// Templates are assigned with the CI in this order (WP-710); the
+	// creation is validated against the composed schema.
+	Templates []citype.CITemplate `json:"templates,omitempty"`
 }
 
 // UpdateRequest is the payload for updating a CI.
@@ -191,6 +200,9 @@ type UpdateRequest struct {
 	LastSeenAt      *string        `json:"last_seen_at,omitempty"`
 	// ChangeReason is stored with the overrides a manual change creates.
 	ChangeReason string `json:"change_reason,omitempty"`
+	// Templates replaces the template list of the CI (PUT
+	// /cis/{id}/templates, WP-710); nil leaves it. Not a member of PATCH.
+	Templates *[]citype.CITemplate `json:"-"`
 	// IfMatch is the version the writer last read (If-Match); nil when the
 	// request carried none, api.IfMatchAny for "*". Checked for manual
 	// changes only.

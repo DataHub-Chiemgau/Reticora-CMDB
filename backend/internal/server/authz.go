@@ -597,6 +597,7 @@ var domainRecordedRoutes = map[string]string{
 	"POST /api/v1/cis/{id}/type":                        "ci.PGRepository.ChangeType",
 	"PUT /api/v1/cis/{id}/instance-attributes/{key}":    "ci.PGRepository.Update",
 	"DELETE /api/v1/cis/{id}/instance-attributes/{key}": "ci.PGRepository.Update",
+	"PUT /api/v1/cis/{id}/templates":                    "ci.PGRepository.Update",
 	"PUT /api/v1/cis/{id}/fields/{name}/override":       "override.PGRepository",
 	"DELETE /api/v1/cis/{id}/fields/{name}/override":    "override.PGRepository",
 	// Metamodel (MET-15).

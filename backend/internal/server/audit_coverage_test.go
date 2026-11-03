@@ -530,6 +530,7 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	// The value of the instance attribute a5_ci_field (MET-14, WP-256).
 	"PUT /api/v1/cis/{id}/instance-attributes/{key}":    {"/api/v1/cis/<id:/api/v1/cis>/instance-attributes/a5_ci_field", `{"value":"a5 value"}`},
 	"DELETE /api/v1/cis/{id}/instance-attributes/{key}": {"/api/v1/cis/<id:/api/v1/cis>/instance-attributes/a5_ci_field", ""},
+	"PUT /api/v1/cis/{id}/templates":                    {"/api/v1/cis/<ci2>/templates", `{"templates":[{"template_id":"<template>"}]}`}, // WP-710
 	"PUT /api/v1/ci-fields/global":                      {"", `{"name":"a5_global","data_type":"string"}`},
 	"PUT /api/v1/ci-types/{id}/fields":                  {"", `{"name":"a5_field","data_type":"string"}`},
 	"PUT /api/v1/cis/{id}/field-definitions":            {"", `{"name":"a5_ci_field","data_type":"string"}`},
@@ -604,6 +605,11 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&citype); err != nil {
 		t.Fatal(err)
 	}
+	// The system template of the server profiles for PUT /cis/{id}/templates (WP-710).
+	var systemTemplate string
+	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM template WHERE key = 'physical_server' AND organization_id IS NULL`).Scan(&systemTemplate); err != nil {
+		t.Fatal(err)
+	}
 	var citype2 string
 	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'application' AND organization_id IS NULL`).Scan(&citype2); err != nil {
 		t.Fatal(err)
@@ -612,7 +618,8 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		"<ci2>": f.CI(t, f.OrgA, f.Client1, "a5-ci2"), "<ci3>": f.CI(t, f.OrgA, f.Client1, "a5-ci3"),
 		"<ci4>": f.CI(t, f.OrgA, f.Client1, "a5-ci4"), "<ci5>": f.CI(t, f.OrgA, f.Client1, "a5-ci5"),
 		"<asset2>": f.Asset(t, f.OrgA, f.Client1, "a5-asset2"), "<citype2>": citype2,
-		"<user2>": f.AppUser(t, f.OrgA, "audit-a5-user2"), "<user3>": f.AppUser(t, f.OrgA, "audit-a5-user3")}
+		"<user2>": f.AppUser(t, f.OrgA, "audit-a5-user2"), "<user3>": f.AppUser(t, f.OrgA, "audit-a5-user3"),
+		"<template>": systemTemplate}
 	// A CI whose type has a ci lifecycle model (software) for POST
 	// /cis/{id}/lifecycle-transitions (WP-724).
 	fixed["<ci6>"] = f.CI(t, f.OrgA, f.Client1, "a5-ci6")

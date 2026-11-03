@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 )
 
@@ -19,10 +21,46 @@ type FieldResolver interface {
 	ResolveFields(ctx context.Context, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error)
 }
 
+// TemplateFieldResolver is the optional part of a FieldResolver that
+// composes the field definitions of a CI with a given template list in
+// place of the stored one (MET-16, WP-710): the list a creation (POST /cis
+// with templates) or a replacement (PUT /cis/{id}/templates) writes, so the
+// write is validated against the schema it leads to. It checks the list
+// like the write (422 on templates[i]). citype.PGRepository implements it;
+// the signature of FieldResolver and its test stubs stay unchanged. The
+// parameter type is citype's (no import cycle).
+type TemplateFieldResolver interface {
+	ResolveFieldsWithTemplates(ctx context.Context, orgID, ciTypeID, ciID string, templates []citype.CITemplate) ([]fieldmeta.FieldDefinition, error)
+}
+
+// ErrTemplatesUnavailable: the field resolver keeps no template
+// assignments (memory mode without a database); the handlers answer 503.
+var ErrTemplatesUnavailable = errors.New("template assignments need the database")
+
 // resolveFields resolves the field definitions; definitions that cannot be
 // composed (MET-16) reject the write as a violation of the attribute.
 func resolveFields(ctx context.Context, fields FieldResolver, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error) {
-	defs, err := fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	return resolveFieldsWith(ctx, fields, orgID, ciTypeID, ciID, nil)
+}
+
+// resolveFieldsWith is resolveFields with the template list templates in
+// place of the stored one when it is set (TemplateFieldResolver); a refused
+// entry of the list is a violation of templates[i].
+func resolveFieldsWith(ctx context.Context, fields FieldResolver, orgID, ciTypeID, ciID string,
+	templates *[]citype.CITemplate) ([]fieldmeta.FieldDefinition, error) {
+	var (
+		defs []fieldmeta.FieldDefinition
+		err  error
+	)
+	if templates == nil {
+		defs, err = fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	} else {
+		resolver, ok := fields.(TemplateFieldResolver)
+		if !ok {
+			return nil, ErrTemplatesUnavailable
+		}
+		defs, err = resolver.ResolveFieldsWithTemplates(ctx, orgID, ciTypeID, ciID, *templates)
+	}
 	var conflict interface {
 		CompositionKey() string
 		CompositionCode() string
@@ -31,7 +69,21 @@ func resolveFields(ctx context.Context, fields FieldResolver, orgID, ciTypeID, c
 		return nil, &ValidationError{Violations: []Violation{{Field: conflict.CompositionKey(), Detail: err.Error(),
 			Code: conflict.CompositionCode()}}}
 	}
-	return defs, err
+	if err != nil {
+		return nil, templateViolation(err)
+	}
+	return defs, nil
+}
+
+// templateViolation turns the refusal of a template list entry (a
+// *api.FieldError on templates[i], citype.ResolveTemplateRefsTx) into the
+// violation of that field; any other error stays.
+func templateViolation(err error) error {
+	var fe *api.FieldError
+	if errors.As(err, &fe) && strings.HasPrefix(fe.Field, "templates[") {
+		return &ValidationError{Violations: []Violation{{Field: fe.Field, Detail: fe.Message}}}
+	}
+	return err
 }
 
 // ValidationError reports one or more attribute values that violate the field
