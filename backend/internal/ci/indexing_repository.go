@@ -202,6 +202,26 @@ func (r *indexingRepository) ChangeType(ctx context.Context, orgID, ciID, typeID
 	return result, nil
 }
 
+// MigrateTemplate forwards the template migration of a CI (WP-253) and
+// indexes the migrated CI again, after the commit of a context transaction
+// (WP-712); a dry run or a skipped CI is not indexed.
+func (r *indexingRepository) MigrateTemplate(ctx context.Context, orgID, ciID string, plan TemplateMigrationPlan,
+	dryRun bool) (*TemplateMigrationResult, error) {
+	migrator, ok := r.Repository.(TemplateMigrator)
+	if !ok {
+		return nil, errors.New("template migration is not supported by this repository")
+	}
+	result, err := migrator.MigrateTemplate(ctx, orgID, ciID, plan, dryRun)
+	if err != nil {
+		return nil, err
+	}
+	if !dryRun && result.Outcome == TemplateMigrated {
+		item := snapshot(result.CI)
+		database.AfterCommit(ctx, func(ctx context.Context) { r.index(ctx, item) })
+	}
+	return result, nil
+}
+
 // UpdateRecord forwards the record update of the ingest (RecordUpdater,
 // AUD-03) with its transaction and indexes the changed CI after the commit,
 // together with the other CIs the transaction changed this way; a rollback

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000209_ci_snapshot
+Stand: Migration 000210_ci_change_template_migration
 
 ## Prüfung
 
@@ -603,6 +603,21 @@ OR UPDATE`) setzt `change_kind` für Schreiber, die es nicht setzen (ipam,
 rack, override), und speichert `type_change` als `type_changed`, auch wenn
 der Unmerge Zeilen aus einem älteren Merge-Snapshot zurückschreibt. Die
 Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
+
+Migration 000210 (WP-253) setzt `chk_ci_change_type` neu: die Liste aus
+000167 (`create`, `update`, `delete`, `status_change`,
+`relationship_change`, `attribute_change`, `type_changed`,
+`lifecycle_transition`, `location_change`, `movement`, `override`,
+`reconciliation_decision`, `parent_child_change`, `assignment`) plus
+`template_migration`. Eine Template-Migration eines CI (Zuordnung
+`ci_template` auf eine andere veröffentlichte Version) schreibt genau eine
+Zeile `template_migration` mit `field_name = 'attributes'`, der
+Attribut-Map vor und nach der Migration und in `comment` JSON mit
+`template_id`, `from_version`, `to_version`, `defaults`, `findings` und
+`job_id`; `change_kind` ist `updated` in einer eigenen Änderungsgruppe.
+`ci_change_kind` und `ci_schema_version()` (000183) bleiben unverändert.
+Die Down-Migration scheitert, solange Zeilen `template_migration`
+existieren. Keine neue Tabelle, RLS unverändert.
 
 ## CI-Snapshots `ci_snapshot` und Merge-Herkunft (AUD-08, WP-312)
 

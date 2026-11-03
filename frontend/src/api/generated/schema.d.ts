@@ -10167,14 +10167,26 @@ export interface components {
       organization_id: string;
       ci_id: string;
       actor_id?: string;
-      /** @enum {string} */
+      /**
+       * @description Class of the change, the vocabulary of chk_ci_change_type. template_migration is the migration of a template assignment of the CI to another published version (WP-253): field_name attributes with the attribute map before and after, comment a JSON object with template_id, from_version, to_version, defaults, findings and job_id.
+       * @enum {string}
+       */
       change_type:
         | 'create'
         | 'update'
         | 'delete'
         | 'status_change'
         | 'relationship_change'
-        | 'attribute_change';
+        | 'attribute_change'
+        | 'type_changed'
+        | 'lifecycle_transition'
+        | 'location_change'
+        | 'movement'
+        | 'override'
+        | 'reconciliation_decision'
+        | 'parent_child_change'
+        | 'assignment'
+        | 'template_migration';
       field_name?: string;
       old_value?: unknown;
       new_value?: unknown;
