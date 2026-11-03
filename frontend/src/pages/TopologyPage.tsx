@@ -477,7 +477,13 @@ export function TopologyPage() {
                       count: outageImpact.size,
                     })}
               </p>
-              {!outage?.preview && impact && isEnabled('topology') ? (
+              {outageImpact.size === 0 ? (
+                // Nothing depends on the failed CIs: the plain hint, also with the server analysis
+                // (ABN-01 d, frozen onboarding scenario).
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                  {t('topology.simulation.noImpact')}
+                </p>
+              ) : !outage?.preview && impact && isEnabled('topology') ? (
                 // The server analysis with the blocks of WP-297 (UI-14).
                 <div className="mt-3">
                   <ImpactPanel
@@ -485,7 +491,7 @@ export function TopologyPage() {
                     typeLabel={(type) => typeLabels.get(type) ?? type}
                   />
                 </div>
-              ) : outageImpact.size > 0 ? (
+              ) : (
                 <ul className="mt-2 flex flex-wrap gap-1 text-xs">
                   {[...outageImpact].map((id) => (
                     <li key={id}>
@@ -493,10 +499,6 @@ export function TopologyPage() {
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                  {t('topology.simulation.noImpact')}
-                </p>
               )}
             </Card>
           ) : null}
