@@ -85,11 +85,9 @@ afterEach(async () => {
   await i18n.changeLanguage('de-DE');
 });
 
-/** The list that follows the heading with the given text. */
+/** The list named by the heading with the given text (aria-labelledby). */
 function listAfter(heading: string): HTMLElement {
-  const list = screen.getByText(heading).parentElement?.querySelector('ul');
-  if (!list) throw new Error(`no list after ${heading}`);
-  return list;
+  return screen.getByRole('list', { name: heading });
 }
 
 function items(heading: string): string[] {

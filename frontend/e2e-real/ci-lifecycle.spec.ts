@@ -1085,10 +1085,14 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await page.getByRole('button', { name: 'Blast Radius berechnen' }).click();
     const impact = page.locator('details').filter({ hasText: 'Auswirkungsanalyse' });
     await expect(impact.getByText(/Betroffene CIs:\s*1\b/)).toBeVisible();
-    // The affected list names app with its type: "• <name> (<type>)".
-    await expect(
-      impact.getByRole('listitem').filter({ hasText: new RegExp(`${escapeRe(app.name)} \\(`) }),
-    ).toBeVisible();
+    // The list of the affected CIs names app with its type: "• <name> (<type>)". The panel
+    // (WP-818) also lists app under "Direkt betroffen ohne Alternative"; that list is a
+    // different one.
+    const affected = impact.getByRole('list', { name: 'Betroffen:', exact: true });
+    await expect(affected.getByRole('listitem')).toHaveCount(1);
+    await expect(affected.getByRole('listitem')).toHaveText(
+      new RegExp(`^• ${escapeRe(app.name)} \\(\\S[^()]*\\)$`),
+    );
   });
 
   test('L09 the CI is found through the list filter, the full-text search and the command palette', async () => {

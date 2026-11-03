@@ -562,7 +562,14 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'Ausfallsimulation', exact: true }) });
     await page.goto(`/topology?simulate=${provider.id}`);
-    await expect(simulation.getByText(dependent.name, { exact: true })).toBeVisible();
+    // The server analysis lists the dependent among the certainly affected CIs of the impact
+    // panel (WP-818) as "• <name> (<type>)".
+    const affected = simulation.getByRole('list', { name: 'Betroffen:', exact: true });
+    await expect(
+      affected.getByRole('listitem').filter({
+        hasText: new RegExp(`^• ${dependent.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(`),
+      }),
+    ).toHaveCount(1);
 
     // Negative case: a CI without any relationship impacts nothing, and the
     // failure simulation says so.

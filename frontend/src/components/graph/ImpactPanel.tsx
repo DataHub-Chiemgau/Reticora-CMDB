@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { components } from '../../api/generated/schema';
 import { useClients } from '../../api/cmdbHooks';
@@ -64,6 +65,10 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
   const siteIds = impact.site_ids ?? [];
   const clients = useClients(isEnabled('topology') && clientIds.length > 0);
   const sites = useSites();
+  // Each list is named by its heading (aria-labelledby), so a reader and a
+  // test reach the affected CIs apart from services, clients and sites.
+  const idBase = useId();
+  const headingId = (section: string) => `${idBase}-${section}`;
   if (!isEnabled('topology')) return null;
 
   const certain = impact.affected.filter((n) => !n.heuristic);
@@ -130,10 +135,13 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {services.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+          <p
+            id={headingId('services')}
+            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+          >
             {t('impact.servicesList')}
           </p>
-          <ul className="max-h-40 overflow-y-auto text-sm">
+          <ul aria-labelledby={headingId('services')} className="max-h-40 overflow-y-auto text-sm">
             {services.map((n) => (
               <li key={n.id}>
                 {ciItem(n)}
@@ -151,10 +159,13 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {clientIds.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+          <p
+            id={headingId('clients')}
+            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+          >
             {t('impact.clientsList')}
           </p>
-          <ul className="text-sm">
+          <ul aria-labelledby={headingId('clients')} className="text-sm">
             {clientIds.map((id) => (
               <li key={id}>• {nameOf(clientNames, id)}</li>
             ))}
@@ -164,10 +175,13 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {siteIds.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+          <p
+            id={headingId('sites')}
+            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+          >
             {t('impact.sitesList')}
           </p>
-          <ul className="text-sm">
+          <ul aria-labelledby={headingId('sites')} className="text-sm">
             {siteIds.map((id) => (
               <li key={id}>• {nameOf(siteNames, id)}</li>
             ))}
@@ -177,7 +191,10 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {spofs.length > 0 || impact.spof_truncated ? (
         <div>
-          <p className="text-xs font-semibold text-red-600 dark:text-red-400">
+          <p
+            id={headingId('spof')}
+            className="text-xs font-semibold text-red-600 dark:text-red-400"
+          >
             {t('impact.spofList')}
           </p>
           {impact.spof_truncated ? (
@@ -185,7 +202,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
               {t('impact.spofTruncated')}
             </p>
           ) : null}
-          <ul className="text-sm">
+          <ul aria-labelledby={headingId('spof')} className="text-sm">
             {spofs.map((n) => (
               <li key={n.id}>
                 {ciItem(n)} <Badge variant="danger">{t('impact.spofBadge')}</Badge>
@@ -205,10 +222,13 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {direct.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+          <p
+            id={headingId('direct')}
+            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+          >
             {t('impact.directList')}
           </p>
-          <ul className="text-sm">
+          <ul aria-labelledby={headingId('direct')} className="text-sm">
             {direct.map((n) => (
               <li key={n.id}>{ciItem(n)}</li>
             ))}
@@ -218,10 +238,13 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {redundant.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+          <p
+            id={headingId('redundant')}
+            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+          >
             {t('impact.redundantList')}
           </p>
-          <ul className="text-sm">
+          <ul aria-labelledby={headingId('redundant')} className="text-sm">
             {redundant.map((n) => (
               <li key={n.id}>{ciItem(n)}</li>
             ))}
@@ -231,10 +254,13 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {byCategory.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+          <p
+            id={headingId('category')}
+            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+          >
             {t('impact.byCategory')}
           </p>
-          <ul className="flex flex-wrap gap-x-4 text-sm">
+          <ul aria-labelledby={headingId('category')} className="flex flex-wrap gap-x-4 text-sm">
             {byCategory.map(([category, count]) => (
               <li key={category}>
                 {t(`impact.categories.${category}`, category)}: <strong>{count}</strong>
@@ -245,11 +271,14 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
       ) : null}
 
       <div>
-        <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+        <p
+          id={headingId('affected')}
+          className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+        >
           {t('impact.affectedList')}
         </p>
         {certain.length > 0 ? (
-          <ul className="max-h-40 overflow-y-auto text-sm">
+          <ul aria-labelledby={headingId('affected')} className="max-h-40 overflow-y-auto text-sm">
             {certain.map((n) => (
               <li key={n.id}>{ciItem(n)}</li>
             ))}
@@ -260,11 +289,14 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
       </div>
       {heuristic.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+          <p
+            id={headingId('heuristic')}
+            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+          >
             {t('impact.heuristicList')}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400">{t('impact.heuristicHint')}</p>
-          <ul className="max-h-40 overflow-y-auto text-sm">
+          <ul aria-labelledby={headingId('heuristic')} className="max-h-40 overflow-y-auto text-sm">
             {heuristic.map((n) => (
               <li key={n.id}>
                 {ciItem(n)} <Badge variant="warning">{t('impact.heuristicMarker')}</Badge>
