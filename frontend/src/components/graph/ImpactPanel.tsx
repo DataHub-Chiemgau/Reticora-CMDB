@@ -88,9 +88,11 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
   const serviceNames = new Map(services.map((service) => [service.id, service.name] as const));
   const nameOf = (names: Map<string, string | undefined>, id: string) => names.get(id) || id;
 
-  const ciItem = (n: ImpactPanelCI) => (
+  // In the list of certainly affected CIs the name stands in its own element, so it can be found by
+  // its exact text (ABN-01 d, frozen onboarding scenario); the other lists may repeat the same CI.
+  const ciItem = (n: ImpactPanelCI, ownNameElement = false) => (
     <>
-      • {n.name || n.id}
+      • {ownNameElement ? <span>{n.name || n.id}</span> : n.name || n.id}
       {n.ci_type ? (
         <>
           {' '}
@@ -280,7 +282,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
         {certain.length > 0 ? (
           <ul aria-labelledby={headingId('affected')} className="max-h-40 overflow-y-auto text-sm">
             {certain.map((n) => (
-              <li key={n.id}>{ciItem(n)}</li>
+              <li key={n.id}>{ciItem(n, true)}</li>
             ))}
           </ul>
         ) : (
