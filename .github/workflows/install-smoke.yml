@@ -602,6 +602,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The event stream RETICORA_EVENTS reserves RETICORA_EVENTS_MAX_BYTES
+      # (10 GiB) of JetStream file storage, and NATS grants at most 75 % of
+      # the free disk: on a runner with little free space the server cannot
+      # create the stream (err_code 10047, "insufficient storage resources
+      # available") and stays unhealthy. Remove preinstalled toolchains the
+      # stack does not use before it is pulled.
+      - name: Free disk space for the JetStream reservation
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh frontend/e2e-real/fixtures/*.sh
 
@@ -904,6 +916,18 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+
+      # The event stream RETICORA_EVENTS reserves RETICORA_EVENTS_MAX_BYTES
+      # (10 GiB) of JetStream file storage, and NATS grants at most 75 % of
+      # the free disk: on a runner with little free space the server cannot
+      # create the stream (err_code 10047, "insufficient storage resources
+      # available") and stays unhealthy. Remove preinstalled toolchains the
+      # stack does not use before it is pulled.
+      - name: Free disk space for the JetStream reservation
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
 
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
