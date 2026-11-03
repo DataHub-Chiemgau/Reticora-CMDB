@@ -1,0 +1,342 @@
+package document
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+)
+
+// ActionVersionCreated is the audit action of a new document version
+// (WP-731): written by the repository in the transaction of the version, so
+// the route audit adds no second entry.
+const ActionVersionCreated = "document.version_created"
+
+// StorageLimiter resolves the document storage limit of an organization in
+// bytes (entitlement.Service.StorageLimitBytes): nil is unlimited, an
+// organization without the feature documents fails with
+// *entitlement.FeatureNotEntitledError.
+type StorageLimiter interface {
+	StorageLimitBytes(ctx context.Context, orgID string) (*int64, error)
+}
+
+// WithLimits sets the storage limit of the uploads (MGT-01, E-44). Without
+// it (profile without database, tests) the storage is unlimited.
+func (h *Handler) WithLimits(limits StorageLimiter) *Handler {
+	if svc, ok := limits.(*entitlement.Service); ok && svc == nil {
+		limits = nil
+	}
+	h.limits = limits
+	return h
+}
+
+// storageLimit returns the storage limit of the organization in bytes, nil
+// when unlimited or without a limiter.
+func (h *Handler) storageLimit(ctx context.Context, orgID string) (*int64, error) {
+	if h.limits == nil {
+		return nil, nil
+	}
+	return h.limits.StorageLimitBytes(ctx, orgID)
+}
+
+// storageLimitError is the refusal of an upload that would exceed limit
+// with used bytes stored (ENT-03: 403 entitlement-limit). Limit and usage
+// are bytes; the usage is no secret of the organization (GET
+// /api/v1/documents/usage), so it is named to every caller.
+func storageLimitError(limit, used int64) error {
+	return &entitlement.LimitExceededError{FeatureKey: entitlement.LimitMaxStorageMB, Limit: limit, Current: used}
+}
+
+// versionCursorSort is the keyset order of GET …/versions.
+const versionCursorSort = "version"
+
+// versionCursorAfter returns the version number a keyset cursor of GET
+// …/versions points after; a cursor of another list fails with
+// api.ErrInvalidCursor.
+func versionCursorAfter(c *api.Cursor) (int, error) {
+	if !c.Matches(versionCursorSort, "desc") {
+		return 0, fmt.Errorf("%w: not issued for this list", api.ErrInvalidCursor)
+	}
+	n, err := strconv.Atoi(c.Value)
+	if err != nil {
+		return 0, fmt.Errorf("%w: not issued for this list", api.ErrInvalidCursor)
+	}
+	return n, nil
+}
+
+// errVersionCursor answers a cursor not issued by GET …/versions.
+var errVersionCursor = errors.New("invalid cursor: not issued for this list")
+
+// newVersionID returns a random UUID (v4) for the key of a new version.
+func newVersionID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// recordVersionAudit writes document.version_created with version, size,
+// MIME type and checksum as the last step of the transaction (WP-731).
+// Record marks the request as audited.
+func recordVersionAudit(ctx context.Context, tx pgx.Tx, v *Version) error {
+	actorID, actorType := auditActor(ctx)
+	checksum := ""
+	if v.ChecksumSHA256 != nil {
+		checksum = *v.ChecksumSHA256
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: v.OrganizationID,
+		ActorID:        actorID,
+		ActorType:      actorType,
+		Action:         ActionVersionCreated,
+		ResourceType:   "document",
+		ResourceID:     v.DocumentID,
+		Changes: map[string]any{
+			"version_id":      v.ID,
+			"version":         v.Version,
+			"size":            v.Size,
+			"mime_type":       v.MimeType,
+			"checksum_sha256": checksum,
+		},
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", ActionVersionCreated, err)
+	}
+	return nil
+}
+
+// CreateVersion handles POST /api/v1/documents/{id}/versions (E-38): the
+// binary body becomes the next version; 201 with the version.
+func (h *Handler) CreateVersion(w http.ResponseWriter, r *http.Request) {
+	_, v, ok := h.storeVersion(w, r)
+	if !ok {
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, v)
+}
+
+// UploadContent handles PUT /api/v1/documents/{id}/content: like POST
+// …/versions it stores the body as the next version (compatibility) and
+// answers 200 with the document, which mirrors the new version.
+func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
+	doc, _, ok := h.storeVersion(w, r)
+	if !ok {
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, doc)
+}
+
+// storeVersion stores the request body as the next version of the document
+// without a lock during the blob transfer (K20): (1) read the body and form
+// size and sha256, (2) check usage and limit without binding (403 before
+// any blob), (3) put the blob under org/<org>/documents/<id>/<version id>,
+// a key of its own per upload, so parallel uploads never overwrite each
+// other, (4) store the version in one transaction that counts the usage
+// within the limit (Repository.CreateVersion). A refusal or rollback in (4)
+// deletes the blob again. Only a writable document takes versions (WP-341);
+// any other answers 404 before anything is stored. It writes the error
+// response itself and reports whether the version was stored.
+func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Document, *Version, bool) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return nil, nil, false
+	}
+	if h.blobs == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "document content upload requires blob storage")
+		return nil, nil, false
+	}
+
+	id := chi.URLParam(r, "id")
+	doc, err := h.repo.GetWritable(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
+		return nil, nil, false
+	}
+
+	mimeType := r.Header.Get("Content-Type")
+	if idx := strings.Index(mimeType, ";"); idx >= 0 {
+		mimeType = strings.TrimSpace(mimeType[:idx])
+	}
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	allowed, known := allowedMimeTypes[mimeType]
+	if !known || !allowed {
+		api.WriteError(w, http.StatusUnsupportedMediaType, "Unsupported Media Type",
+			fmt.Sprintf("content type %q is not allowed for document uploads", mimeType))
+		return nil, nil, false
+	}
+
+	// (1) Body, size and checksum.
+	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDocumentUpload))
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large",
+				fmt.Sprintf("document content exceeds the %d MiB limit", maxDocumentUpload>>20))
+			return nil, nil, false
+		}
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "could not read request body")
+		return nil, nil, false
+	}
+	size := int64(len(payload))
+	sum := sha256.Sum256(payload)
+	checksum := hex.EncodeToString(sum[:])
+
+	// (2) Non-binding check against usage and limit: no blob for an upload
+	// that cannot fit.
+	limit, err := h.storageLimit(r.Context(), t.OrganizationID)
+	if err != nil {
+		if !api.WriteEntitlementError(w, err) {
+			api.WriteRepoError(w, err)
+		}
+		return nil, nil, false
+	}
+	if limit != nil {
+		used, usageErr := h.repo.StorageUsage(r.Context(), t.OrganizationID)
+		if usageErr != nil {
+			api.WriteRepoError(w, usageErr)
+			return nil, nil, false
+		}
+		if used+size > *limit {
+			api.WriteEntitlementError(w, storageLimitError(*limit, used))
+			return nil, nil, false
+		}
+	}
+
+	// (3) Blob under a key of its own.
+	v := &Version{
+		ID:             newVersionID(),
+		OrganizationID: t.OrganizationID,
+		DocumentID:     doc.ID,
+		Size:           size,
+		MimeType:       mimeType,
+		ChecksumSHA256: &checksum,
+		ScanStatus:     ScanPending,
+		UploadedBy:     t.UserID,
+	}
+	v.StorageKey = blob.OrgKey(t.OrganizationID, "documents", doc.ID, v.ID)
+	if err = h.blobs.Put(r.Context(), h.bucket, v.StorageKey, bytes.NewReader(payload), size, mimeType); err != nil {
+		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not store the document content")
+		return nil, nil, false
+	}
+
+	// (4) The binding transaction; its refusal removes the blob again.
+	updated, err := h.repo.CreateVersion(r.Context(), v, limit)
+	if err != nil {
+		_ = h.blobs.Delete(context.WithoutCancel(r.Context()), h.bucket, v.StorageKey)
+		switch {
+		case api.WriteEntitlementError(w, err):
+		case errors.Is(err, api.ErrNotFound):
+			api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
+		default:
+			api.WriteRepoError(w, err)
+		}
+		return nil, nil, false
+	}
+	return updated, v, true
+}
+
+// ListVersions handles GET /api/v1/documents/{id}/versions: the versions of
+// a visible document with size, MIME type, checksum and scan status,
+// highest first, paged with limit and the signed cursor (API-02).
+func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
+		return
+	}
+	items, total, err := h.repo.ListVersions(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
+	if err != nil {
+		switch {
+		case errors.Is(err, api.ErrInvalidCursor):
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", errVersionCursor.Error())
+		case errors.Is(err, api.ErrNotFound):
+			api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
+		default:
+			api.WriteRepoError(w, err)
+		}
+		return
+	}
+	if items == nil {
+		items = []Version{}
+	}
+	next := ""
+	if len(items) == page.Limit && len(items) > 0 {
+		next = api.EncodeCursor(api.Cursor{Sort: versionCursorSort, Dir: "desc",
+			Value: strconv.Itoa(items[len(items)-1].Version), ID: items[len(items)-1].ID})
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Version]{
+		Data:       items,
+		Total:      total,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
+		HasMore:    next != "",
+		NextCursor: next,
+	})
+}
+
+// Usage handles GET /api/v1/documents/usage: the stored bytes of the whole
+// organization from organization_usage and the limit of max_storage_mb in
+// MiB (null when unlimited).
+func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	limit, err := h.storageLimit(r.Context(), t.OrganizationID)
+	if err != nil {
+		if !api.WriteEntitlementError(w, err) {
+			api.WriteRepoError(w, err)
+		}
+		return
+	}
+	used, err := h.repo.StorageUsage(r.Context(), t.OrganizationID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	out := Usage{StorageBytes: used}
+	if limit != nil {
+		mb := *limit >> 20
+		out.LimitMB = &mb
+	}
+	api.WriteJSON(w, http.StatusOK, out)
+}
+
+// requestedVersion parses the query parameter version of GET …/content:
+// 0 without it, else a positive version number; ok is false for any other
+// value.
+func requestedVersion(r *http.Request) (n int, ok bool) {
+	raw := r.URL.Query().Get("version")
+	if raw == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n, true
+}

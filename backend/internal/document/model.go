@@ -72,3 +72,39 @@ type FilterParams struct {
 	EntityType string
 	EntityID   string
 }
+
+// ScanPending is the scan status of a new document version (SEC-09). This
+// package stores it only; WP-733 and WP-734 evaluate and change the status
+// (clean, infected, scan_failed).
+const ScanPending = "pending_scan"
+
+// Version is one stored content of a document (WP-731, MGT-01). The
+// document mirrors its highest version in version, storage_key, file_size
+// and mime_type.
+type Version struct {
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	DocumentID     string `json:"document_id"`
+	Version        int    `json:"version"`
+	// StorageKey is org/<org>/documents/<document>/<version id> (legacy:
+	// documents/<org>/<document>/…); it is served only as a presigned URL.
+	StorageKey string `json:"-"`
+	Size       int64  `json:"size"`
+	MimeType   string `json:"mime_type"`
+	// ChecksumSHA256 is the hex sha256 of the content; nil only for the
+	// versions of the backfill of migration 000220.
+	ChecksumSHA256 *string    `json:"checksum_sha256"`
+	ScanStatus     string     `json:"scan_status"`
+	ScannedAt      *time.Time `json:"scanned_at,omitempty"`
+	// UploadedBy is the user id without foreign key (uploaded_by_surrogate).
+	UploadedBy string    `json:"uploaded_by,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// Usage is the document storage of the organization (GET
+// /api/v1/documents/usage): the bytes of every stored version and the limit
+// of max_storage_mb in MiB, nil when unlimited.
+type Usage struct {
+	StorageBytes int64  `json:"storage_bytes"`
+	LimitMB      *int64 `json:"limit_mb"`
+}

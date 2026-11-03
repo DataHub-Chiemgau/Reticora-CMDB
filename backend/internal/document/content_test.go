@@ -3,9 +3,11 @@ package document
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -124,6 +126,117 @@ func TestUploadAndDownloadContent(t *testing.T) {
 	}
 	if !strings.Contains(payload.DownloadURL, updated.StorageKey) {
 		t.Fatalf("download URL %q does not reference %q", payload.DownloadURL, updated.StorageKey)
+	}
+}
+
+// TestUploadContentCreatesVersions (WP-731): every PUT …/content stores
+// the next version under a key of its own, the document mirrors the latest
+// one, the earlier version stays downloadable with ?version=n and the list
+// pages from the highest version down.
+func TestUploadContentCreatesVersions(t *testing.T) {
+	repo, mux := newDocumentFixture(t)
+	id := documentID(t, repo)
+
+	var keys []string
+	for i, body := range []string{"%PDF-one", "%PDF-second"} {
+		w := contentRequest(t, mux, "PUT", "/api/v1/documents/"+id+"/content", "application/pdf", body)
+		if w.Code != http.StatusOK {
+			t.Fatalf("upload %d: got %d: %s", i+1, w.Code, w.Body.String())
+		}
+		var d Document
+		if err := json.Unmarshal(w.Body.Bytes(), &d); err != nil {
+			t.Fatal(err)
+		}
+		if d.Version != i+1 || d.FileSize != int64(len(body)) || slices.Contains(keys, d.StorageKey) {
+			t.Fatalf("upload %d: document %+v, earlier keys %v", i+1, d, keys)
+		}
+		keys = append(keys, d.StorageKey)
+	}
+
+	for n, key := range map[string]string{"1": keys[0], "2": keys[1], "": keys[1]} {
+		url := "/api/v1/documents/" + id + "/content"
+		if n != "" {
+			url += "?version=" + n
+		}
+		w := contentRequest(t, mux, "GET", url, "", "")
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), key) {
+			t.Fatalf("download version %q: got %d %s, want key %s", n, w.Code, w.Body.String(), key)
+		}
+	}
+	for url, want := range map[string]int{"?version=3": http.StatusNotFound, "?version=0": http.StatusBadRequest, "?version=x": http.StatusBadRequest} {
+		if w := contentRequest(t, mux, "GET", "/api/v1/documents/"+id+"/content"+url, "", ""); w.Code != want {
+			t.Fatalf("download %s: got %d, want %d", url, w.Code, want)
+		}
+	}
+
+	w := contentRequest(t, mux, "POST", "/api/v1/documents/"+id+"/versions", "text/plain", "third")
+	var created Version
+	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &created) != nil || created.Version != 3 ||
+		created.ScanStatus != ScanPending || created.ChecksumSHA256 == nil || len(*created.ChecksumSHA256) != 64 {
+		t.Fatalf("POST versions: got %d %s", w.Code, w.Body.String())
+	}
+
+	var got []int
+	url := "/api/v1/documents/" + id + "/versions?limit=2"
+	for url != "" {
+		w = contentRequest(t, mux, "GET", url, "", "")
+		var page api.ListResponse[Version]
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &page) != nil {
+			t.Fatalf("list versions: got %d %s", w.Code, w.Body.String())
+		}
+		for _, v := range page.Data {
+			got = append(got, v.Version)
+		}
+		url = ""
+		if page.NextCursor != "" {
+			url = "/api/v1/documents/" + id + "/versions?limit=2&cursor=" + page.NextCursor
+		}
+	}
+	if !slices.Equal(got, []int{3, 2, 1}) {
+		t.Fatalf("versions %v, want [3 2 1]", got)
+	}
+
+	w = contentRequest(t, mux, "GET", "/api/v1/documents/usage", "", "")
+	want := fmt.Sprintf(`{"storage_bytes":%d,"limit_mb":null}`, len("%PDF-one")+len("%PDF-second")+len("third"))
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != want {
+		t.Fatalf("usage: got %d %s, want %s", w.Code, w.Body.String(), want)
+	}
+}
+
+// fixedLimit is a StorageLimiter with a fixed limit in bytes.
+type fixedLimit int64
+
+func (l fixedLimit) StorageLimitBytes(context.Context, string) (*int64, error) {
+	v := int64(l)
+	return &v, nil
+}
+
+// TestUploadBeyondStorageLimitStoresNothing (WP-731): an upload that does
+// not fit the limit answers 403 entitlement-limit and leaves no blob.
+func TestUploadBeyondStorageLimitStoresNothing(t *testing.T) {
+	repo := NewMemoryRepository()
+	doc := &Document{OrganizationID: "org-1", Title: "t", FileName: "f.txt", Category: "general"}
+	if err := repo.Create(context.Background(), doc); err != nil {
+		t.Fatal(err)
+	}
+	blobs := newFakeBlobStore()
+	mux := chi.NewRouter()
+	NewHandler(repo, blobs).WithLimits(fixedLimit(10)).RegisterRoutes(mux)
+
+	if w := contentRequest(t, mux, "PUT", "/api/v1/documents/"+doc.ID+"/content", "text/plain", "0123456789"); w.Code != http.StatusOK {
+		t.Fatalf("upload at the limit: got %d %s", w.Code, w.Body.String())
+	}
+	w := contentRequest(t, mux, "POST", "/api/v1/documents/"+doc.ID+"/versions", "text/plain", "x")
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), api.ProblemEntitlementLimit) ||
+		!strings.Contains(w.Body.String(), `"trace_id"`) {
+		t.Fatalf("upload beyond the limit: got %d %s", w.Code, w.Body.String())
+	}
+	if len(blobs.objects) != 1 {
+		t.Fatalf("blobs %d, want 1", len(blobs.objects))
+	}
+	w = contentRequest(t, mux, "GET", "/api/v1/documents/usage", "", "")
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"storage_bytes":10,"limit_mb":0}` {
+		t.Fatalf("usage: got %d %s", w.Code, w.Body.String())
 	}
 }
 

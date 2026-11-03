@@ -434,15 +434,248 @@ func (r *PGRepository) SetStorage(ctx context.Context, orgID, id, storageKey, mi
 	return doc, err
 }
 
-// Delete deletes a document. The document table has no deleted_at column, so this is a hard delete.
+// CreateVersion stores v as the next version of a writable document in one
+// transaction (WP-731, K20: the blob is already stored, no lock is held
+// during the transfer). It locks the document, adds v.Size to the usage of
+// the organization only within limit (the UPDATE on organization_usage
+// serializes parallel uploads of the organization, so exactly the uploads
+// that fit succeed), numbers v after the highest version, inserts it,
+// mirrors it in the document and records document.version_created last.
+// The usage row is counted org-wide: its policy checks only app.org_id, so
+// a scoped caller cannot hide stored bytes from the limit.
+func (r *PGRepository) CreateVersion(ctx context.Context, v *Version, limit *int64) (*Document, error) {
+	if err := blob.CheckOrgKey(v.OrganizationID, v.StorageKey); err != nil {
+		return nil, err
+	}
+	if !api.IsUUID(v.DocumentID) {
+		return nil, api.ErrNotFound
+	}
+	var doc *Document
+	err := database.WithRequestTenant(ctx, r.pool, v.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		var locked string
+		lockErr := tx.QueryRow(ctx, "SELECT id::text FROM document WHERE "+documentWritable+" AND id = $1 AND organization_id = $2 FOR UPDATE",
+			v.DocumentID, v.OrganizationID).Scan(&locked)
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if lockErr != nil {
+			return fmt.Errorf("lock document: %w", lockErr)
+		}
+		if err := addStorageUsage(ctx, tx, v.OrganizationID, v.Size, limit); err != nil {
+			return err
+		}
+		if v.ScanStatus == "" {
+			v.ScanStatus = ScanPending
+		}
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO document_version (id, organization_id, document_id, version, storage_key, size, mime,
+			                              checksum_sha256, scan_status, uploaded_by_surrogate)
+			SELECT $1, $2, $3, COALESCE(max(version), 0) + 1, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid
+			  FROM document_version WHERE document_id = $3
+			RETURNING version, created_at`,
+			v.ID, v.OrganizationID, v.DocumentID, v.StorageKey, v.Size, v.MimeType, v.ChecksumSHA256, v.ScanStatus,
+			uuidOrEmpty(v.UploadedBy)).Scan(&v.Version, &v.CreatedAt); err != nil {
+			return fmt.Errorf("insert document version: %w", err)
+		}
+		v.CreatedAt = v.CreatedAt.UTC()
+		var err error
+		if doc, err = scanDocument(tx.QueryRow(ctx, `
+			UPDATE document
+			SET version = $2, storage_key = $3, file_size = $4, mime_type = $5, updated_at = NOW()
+			WHERE id = $1 AND organization_id = $6
+			RETURNING `+documentSelectColumns, v.DocumentID, v.Version, v.StorageKey, v.Size, v.MimeType, v.OrganizationID)); err != nil {
+			return fmt.Errorf("mirror document version: %w", err)
+		}
+		return recordVersionAudit(ctx, tx, v)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// addStorageUsage adds size bytes to the usage of the organization when the
+// sum stays within limit (nil: unlimited); otherwise it fails with
+// *entitlement.LimitExceededError naming the usage.
+func addStorageUsage(ctx context.Context, tx pgx.Tx, orgID string, size int64, limit *int64) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO organization_usage (organization_id) VALUES ($1) ON CONFLICT DO NOTHING`, orgID); err != nil {
+		return fmt.Errorf("create storage usage: %w", err)
+	}
+	var used int64
+	err := tx.QueryRow(ctx, `
+		UPDATE organization_usage SET storage_bytes = storage_bytes + $2, updated_at = NOW()
+		WHERE organization_id = $1 AND ($3::bigint IS NULL OR storage_bytes + $2 <= $3)
+		RETURNING storage_bytes`, orgID, size, limit).Scan(&used)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err = tx.QueryRow(ctx, `SELECT storage_bytes FROM organization_usage WHERE organization_id = $1`, orgID).Scan(&used); err != nil {
+			return fmt.Errorf("read storage usage: %w", err)
+		}
+		return storageLimitError(*limit, used)
+	}
+	if err != nil {
+		return fmt.Errorf("count storage usage: %w", err)
+	}
+	return nil
+}
+
+const documentVersionSelectColumns = `
+	id::text,
+	organization_id::text,
+	document_id::text,
+	version,
+	storage_key,
+	size,
+	mime,
+	checksum_sha256,
+	scan_status,
+	scanned_at,
+	COALESCE(uploaded_by_surrogate::text, ''),
+	created_at
+`
+
+// ListVersions returns a page of the versions of a visible document,
+// highest first.
+func (r *PGRepository) ListVersions(ctx context.Context, orgID, docID string, page api.PaginationParams) ([]Version, int, error) {
+	if !api.IsUUID(docID) {
+		return nil, 0, api.ErrNotFound
+	}
+	after := 0
+	if page.Cursor != nil {
+		var err error
+		if after, err = versionCursorAfter(page.Cursor); err != nil {
+			return nil, 0, err
+		}
+	}
+	var out []Version
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireVisible(ctx, tx, "document", documentVisible, docID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM document_version WHERE document_id = $1`, docID).Scan(&total); err != nil {
+			return fmt.Errorf("count document versions: %w", err)
+		}
+		query := "SELECT " + documentVersionSelectColumns + " FROM document_version WHERE document_id = $1"
+		args := []any{docID, page.Limit}
+		if page.Cursor != nil {
+			query += " AND version < $3 ORDER BY version DESC LIMIT $2"
+			args = append(args, after)
+		} else {
+			query += " ORDER BY version DESC LIMIT $2 OFFSET $3"
+			args = append(args, page.Offset)
+		}
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list document versions: %w", err)
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Version, error) {
+			v, scanErr := scanVersion(row)
+			if scanErr != nil {
+				return Version{}, scanErr
+			}
+			return *v, nil
+		})
+		if err != nil {
+			return fmt.Errorf("scan document versions: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// GetVersion returns version n of a visible document.
+func (r *PGRepository) GetVersion(ctx context.Context, orgID, docID string, n int) (*Version, error) {
+	if !api.IsUUID(docID) {
+		return nil, api.ErrNotFound
+	}
+	var v *Version
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireVisible(ctx, tx, "document", documentVisible, docID); err != nil {
+			return err
+		}
+		var err error
+		v, err = scanVersion(tx.QueryRow(ctx, "SELECT "+documentVersionSelectColumns+
+			" FROM document_version WHERE document_id = $1 AND version = $2", docID, n))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get document version: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// StorageUsage returns the stored bytes of the organization from
+// organization_usage (no count over the versions); its policy checks only
+// the organization, so every caller gets the org-wide value.
+func (r *PGRepository) StorageUsage(ctx context.Context, orgID string) (int64, error) {
+	var used int64
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT storage_bytes FROM organization_usage WHERE organization_id = $1), 0)`,
+			orgID).Scan(&used); err != nil {
+			return fmt.Errorf("read storage usage: %w", err)
+		}
+		return nil
+	})
+	return used, err
+}
+
+func scanVersion(scanner documentScanner) (*Version, error) {
+	v := &Version{}
+	if err := scanner.Scan(&v.ID, &v.OrganizationID, &v.DocumentID, &v.Version, &v.StorageKey, &v.Size, &v.MimeType,
+		&v.ChecksumSHA256, &v.ScanStatus, &v.ScannedAt, &v.UploadedBy, &v.CreatedAt); err != nil {
+		return nil, err
+	}
+	v.CreatedAt = v.CreatedAt.UTC()
+	if v.ScannedAt != nil {
+		t := v.ScannedAt.UTC()
+		v.ScannedAt = &t
+	}
+	return v, nil
+}
+
+// uuidOrEmpty returns s when it is a UUID, else "" (stored as NULL): the
+// surrogate of a version names a user only by a valid id.
+func uuidOrEmpty(s string) string {
+	if api.IsUUID(s) {
+		return s
+	}
+	return ""
+}
+
+// Delete deletes a document. The document table has no deleted_at column,
+// so this is a hard delete; its versions go with it (ON DELETE CASCADE) and
+// their sizes leave the usage of the organization (WP-731).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
+	if !api.IsUUID(id) {
+		return fmt.Errorf("not found")
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var freed int64
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(size), 0) FROM document_version WHERE document_id = $1`, id).Scan(&freed); err != nil {
+			return fmt.Errorf("sum document versions: %w", err)
+		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE "+documentWritable+" AND id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete document: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
+		}
+		if freed == 0 {
+			return nil
+		}
+		if _, err = tx.Exec(ctx, `UPDATE organization_usage SET storage_bytes = GREATEST(storage_bytes - $2, 0), updated_at = NOW()
+			WHERE organization_id = $1`, orgID, freed); err != nil {
+			return fmt.Errorf("release storage usage: %w", err)
 		}
 		return nil
 	})

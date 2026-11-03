@@ -307,9 +307,11 @@ func TestDocumentContentClientScope(t *testing.T) {
 	if w := callAs(client1, http.MethodPut, content(ownDoc.ID), ownContent); w.Code != http.StatusOK {
 		t.Fatalf("client-1 upload: %d %s", w.Code, w.Body.String())
 	}
-	ownKey := blob.OrgKey(f.OrgA, "documents", ownDoc.ID, "1")
-	if got := storedKey(ownDoc.ID); got != ownKey {
-		t.Fatalf("storage key after the upload: %q, want %q", got, ownKey)
+	// Every upload is a version with a key of its own (WP-731):
+	// org/<org>/documents/<id>/<version id>.
+	ownKey := blob.OrgKey(f.OrgA, "documents", ownDoc.ID) + "/"
+	if got := storedKey(ownDoc.ID); !strings.HasPrefix(got, ownKey) || len(got) != len(ownKey)+36 {
+		t.Fatalf("storage key after the upload: %q, want %q<version id>", got, ownKey)
 	}
 	dl := callAs(client1, http.MethodGet, content(ownDoc.ID), "")
 	if dl.Code != http.StatusOK {

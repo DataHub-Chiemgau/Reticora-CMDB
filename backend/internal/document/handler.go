@@ -1,10 +1,7 @@
 package document
 
 import (
-	"bytes"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,14 +31,14 @@ var allowedMimeTypes = map[string]bool{
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
 	"application/vnd.ms-powerpoint":                                             true,
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
-	"application/octet-stream": true,
-	"image/png":                true,
-	"image/jpeg":               true,
-	"image/gif":                true,
-	"image/svg+xml":            false, // SVG can carry script — excluded
-	"image/webp":               true,
-	"text/plain":               true,
-	"text/csv":                 true,
+	"application/octet-stream":                                                  true,
+	"image/png":                                                                 true,
+	"image/jpeg":                                                                true,
+	"image/gif":                                                                 true,
+	"image/svg+xml":                                                             false, // SVG can carry script — excluded
+	"image/webp":                                                                true,
+	"text/plain":                                                                true,
+	"text/csv":                                                                  true,
 }
 
 // Handler provides HTTP handlers for document endpoints.
@@ -49,6 +46,8 @@ type Handler struct {
 	repo   Repository
 	blobs  blob.Store
 	bucket string
+	// limits resolves max_storage_mb (WithLimits); nil is unlimited.
+	limits StorageLimiter
 }
 
 // NewHandler creates a new document handler. blobs may be nil; content
@@ -67,11 +66,14 @@ const documentBucket = "reticora-documents"
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/documents", h.List)
 	r.Post("/api/v1/documents", h.Create)
+	r.Get("/api/v1/documents/usage", h.Usage)
 	r.Get("/api/v1/documents/{id}", h.Get)
 	r.Patch("/api/v1/documents/{id}", h.Update)
 	r.Delete("/api/v1/documents/{id}", h.Delete)
 	r.Put("/api/v1/documents/{id}/content", h.UploadContent)
 	r.Get("/api/v1/documents/{id}/content", h.DownloadContent)
+	r.Post("/api/v1/documents/{id}/versions", h.CreateVersion)
+	r.Get("/api/v1/documents/{id}/versions", h.ListVersions)
 	r.Post("/api/v1/documents/{id}/links", h.Link)
 	r.Get("/api/v1/documents/{id}/links", h.GetLinks)
 	r.Delete("/api/v1/documents/{id}/links/{link_id}", h.Unlink)
@@ -311,74 +313,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// UploadContent handles PUT /api/v1/documents/{id}/content. The request body
-// is stored as the document's object; the storage key is server-generated so
-// a client can never overwrite another tenant's blob.
-func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return
-	}
-	if h.blobs == nil {
-		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "document content upload requires blob storage")
-		return
-	}
-
-	// The object key is fixed per document version, so only a principal that
-	// may change the document may write it (WP-341): a document shared with
-	// another client or an org-wide one answers 404 before anything is stored.
-	id := chi.URLParam(r, "id")
-	doc, err := h.repo.GetWritable(r.Context(), t.OrganizationID, id)
-	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
-		return
-	}
-
-	mimeType := r.Header.Get("Content-Type")
-	if idx := strings.Index(mimeType, ";"); idx >= 0 {
-		mimeType = strings.TrimSpace(mimeType[:idx])
-	}
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-	allowed, known := allowedMimeTypes[mimeType]
-	if !known || !allowed {
-		api.WriteError(w, http.StatusUnsupportedMediaType, "Unsupported Media Type",
-			fmt.Sprintf("content type %q is not allowed for document uploads", mimeType))
-		return
-	}
-
-	body := http.MaxBytesReader(w, r.Body, maxDocumentUpload)
-	payload, err := io.ReadAll(body)
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large",
-				fmt.Sprintf("document content exceeds the %d MiB limit", maxDocumentUpload>>20))
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "could not read request body")
-		return
-	}
-
-	storageKey := blob.OrgKey(t.OrganizationID, "documents", doc.ID, strconv.Itoa(doc.Version))
-	if err := h.blobs.Put(r.Context(), h.bucket, storageKey,
-		bytes.NewReader(payload), int64(len(payload)), mimeType); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not store the document content")
-		return
-	}
-
-	updated, err := h.repo.SetStorage(r.Context(), t.OrganizationID, id, storageKey, mimeType, int64(len(payload)))
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-	api.WriteJSON(w, http.StatusOK, updated)
-}
-
 // DownloadContent handles GET /api/v1/documents/{id}/content and answers with
-// a time-limited presigned URL for the stored object.
+// a time-limited presigned URL for the stored object: of version n with
+// ?version=n (404 when the document has no such version), else of the
+// current version.
 func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -390,22 +328,40 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	version, ok := requestedVersion(r)
+	if !ok {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "version must be a positive integer")
+		return
+	}
 	id := chi.URLParam(r, "id")
 	doc, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return
 	}
-	if doc.StorageKey == "" {
+	key := doc.StorageKey
+	if version > 0 {
+		v, verr := h.repo.GetVersion(r.Context(), t.OrganizationID, doc.ID, version)
+		if verr != nil {
+			if errors.Is(verr, api.ErrNotFound) {
+				api.WriteError(w, http.StatusNotFound, "Not Found", "document version not found")
+				return
+			}
+			api.WriteRepoError(w, verr)
+			return
+		}
+		key = v.StorageKey
+	}
+	if key == "" {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document has no stored content")
 		return
 	}
-	if !ownsStorageKey(t.OrganizationID, doc.ID, doc.StorageKey) {
+	if !ownsStorageKey(t.OrganizationID, doc.ID, key) {
 		api.WriteError(w, http.StatusConflict, "Conflict", "document content is stored outside the organization")
 		return
 	}
 
-	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, doc.StorageKey)
+	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, key)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not create a download URL")
 		return

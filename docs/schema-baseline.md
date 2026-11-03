@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000219_import_profiles
+Stand: Migration 000220_document_versions_usage
 
 ## Prüfung
 
@@ -206,8 +206,8 @@ nur Prinzipale ohne jede Scope-Einschränkung, die Regeln prüft
 Die Testzeilen werden mit
 `session_replication_role = replica` synthetisiert (ohne Fremdschlüssel und
 Trigger, RLS bleibt aktiv). Tabellen, deren Policy den Scope über eine
-Unterabfrage erbt (`document`, `maintenance_window`, `review_item`,
-`training_assignment`), prüft die Matrix ebenfalls mit allen Prinzipalen
+Unterabfrage erbt (`document`, `document_version`, `maintenance_window`,
+`review_item`, `training_assignment`), prüft die Matrix ebenfalls mit allen Prinzipalen
 (WP-353, F-354): Ihre Zeilen entstehen über echte Elternzeilen (CIs mit
 Client und Standort, Benutzer mit Teammitgliedschaften) bei aktiven Triggern,
 einschließlich geteilter, einseitig verlinkter, unverlinkter und nur mit
@@ -251,6 +251,25 @@ das Team-Prädikat wie `ticket`; ein team-beschränkter Prinzipal gilt für
 `document` (Policies, `require_visible_parent`, `require_linked_row`)
 nicht mehr als org-weit. `app_scope_widen`/`app_scope_restore` leeren
 bzw. setzen auch `app.team_scope`.
+
+### Dokumentversionen und Speichernutzung (WP-731)
+
+`document_version` (Migration 000220) hält je Upload eine Version
+(`UNIQUE (document_id, version)`, Verweis `(document_id, organization_id)`
+auf `document (id, organization_id)` mit `ON DELETE CASCADE`), mit Größe,
+MIME-Typ, `checksum_sha256` (NULL nur aus dem Backfill), `scan_status`
+(`pending_scan`, `clean`, `infected`, `scan_failed`) und dem Uploader als
+Surrogat ohne Fremdschlüssel. `document.version`, `storage_key`,
+`file_size` und `mime_type` spiegeln die höchste Version. Die Policy
+`document_version_isolation` prüft die Organisation und, sobald ein Client-,
+Standort- oder Team-Scope gesetzt ist, die Sichtbarkeit des Dokuments; die
+BEFORE-Trigger `document_version_parent_visible` (`require_visible_parent`
+mit Team-Argument) und `document_version_storage_key` (Schlüssel unter
+`org/<org>/documents/<dokument>/` oder Legacy `documents/<org>/<dokument>/`,
+ohne `..`) prüfen jede neue Version. `organization_usage` zählt die
+gespeicherten Bytes je Organisation (`storage_bytes >= 0`); ihre Policy
+prüft nur `app.org_id`, die Nutzung zählt daher org-weit. Der Upload
+prüft sie in der Transaktion der Version gegen `max_storage_mb`.
 
 ### Standort von Assets und Mengenartikeln (WP-392)
 
@@ -1051,6 +1070,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `disposal_record` | ja | ja | disposal_record_isolation (ALL), disposal_record_scoped_delete (DELETE), disposal_record_scoped_update (UPDATE) |
 | `document` | ja | ja | document_scoped_delete (DELETE), document_scoped_insert (INSERT), document_scoped_update (UPDATE), document_tenant_isolation (ALL) |
 | `document_link` | ja | ja | document_link_scoped_delete (DELETE), document_link_scoped_update (UPDATE), document_link_tenant_isolation (ALL) |
+| `document_version` | ja | ja | document_version_isolation (ALL) |
 | `endpoint_agent` | ja | ja | endpoint_agent_isolation (ALL), endpoint_agent_scoped_delete (DELETE), endpoint_agent_scoped_update (UPDATE) |
 | `entitlement` | ja | ja | entitlement_isolation (ALL) |
 | `entity_change` | ja | ja | entity_change_isolation (ALL) |
@@ -1099,6 +1119,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `operator_audit` | ja | ja | operator_audit_operator (ALL) |
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
+| `organization_usage` | ja | ja | organization_usage_isolation (ALL) |
 | `permission` | nein | nein | – |
 | `pii_subject` | ja | ja | pii_subject_isolation (ALL) |
 | `platform_secret` | ja | ja | platform_secret_system_insert (INSERT), platform_secret_system_select (SELECT), platform_secret_system_update (UPDATE) |

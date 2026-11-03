@@ -161,9 +161,11 @@ GET /api/v1/discovery/review-items discovery:read
 GET /api/v1/disposal-records disposal:read
 GET /api/v1/disposal-records/{id} disposal:read
 GET /api/v1/documents document:read
+GET /api/v1/documents/usage document:read
 GET /api/v1/documents/{id} document:read
 GET /api/v1/documents/{id}/content document:read
 GET /api/v1/documents/{id}/links document:read
+GET /api/v1/documents/{id}/versions document:read
 GET /api/v1/entitlements entitlement:read
 GET /api/v1/entitlements/check/{feature} entitlement:read
 GET /api/v1/export/cis ci:read
@@ -451,6 +453,7 @@ POST /api/v1/discovery/review-items/{id}/resolve review:resolve
 POST /api/v1/disposal-records disposal:write
 POST /api/v1/documents document:write
 POST /api/v1/documents/{id}/links document:write
+POST /api/v1/documents/{id}/versions document:write
 POST /api/v1/export/jobs export:run
 POST /api/v1/exports export:run
 POST /api/v1/forms form:write

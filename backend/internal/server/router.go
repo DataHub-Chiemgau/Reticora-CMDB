@@ -576,7 +576,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}),
 		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
-		document.NewHandler(repos.Document, opts.Blobs),
+		document.NewHandler(repos.Document, opts.Blobs).WithLimits(opts.Entitlements),
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order).WithMovements(repos.Movement),

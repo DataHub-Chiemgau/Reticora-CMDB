@@ -4280,11 +4280,14 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a time-limited download URL for the document content */
+    /**
+     * Get a time-limited download URL for the document content
+     * @description The URL of the current version, or with `version` of that version; a version the document does not have answers 404.
+     */
     get: operations['downloadDocumentContent'];
     /**
      * Upload the binary content of a document
-     * @description Stores the request body as the document's object in blob storage. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB. A principal restricted to some clients or sites uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09).
+     * @description Stores the request body as the next version of the document, like POST /api/v1/documents/{id}/versions (kept for compatibility, E-38), and answers with the document, which mirrors the new version in version, storage_key, file_size and mime_type. Every upload gets an object key of its own. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB. A principal restricted to some clients, sites or teams uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09). An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44). The audit log records document.version_created.
      */
     put: operations['uploadDocumentContent'];
     post?: never;
@@ -8324,7 +8327,7 @@ export interface paths {
     };
     /**
      * Get the storage usage of the documents
-     * @description Planned (E-38); WP-731 implements the operation.
+     * @description The stored bytes of every document version of the whole organization (also of documents outside the caller's scope) and the limit max_storage_mb in MiB, null when unlimited (MGT-01, E-44). A value stored in the entitlement documents goes first; else the plan default applies (essential 1,000 MiB, standard 10,000 MiB, pro 50,000 MiB, enterprise unlimited).
      */
     get: operations['getDocumentUsage'];
     put?: never;
@@ -8347,13 +8350,13 @@ export interface paths {
     };
     /**
      * List the versions of a document
-     * @description Planned (E-38); WP-731 implements the operation.
+     * @description Version, size, MIME type, checksum and scan status of every version of a visible document, highest version first, paged with `limit` and the signed `cursor` (API-02). A document outside the caller's scope answers 404.
      */
     get: operations['listDocumentVersions'];
     put?: never;
     /**
      * Upload a new version of a document
-     * @description Planned (E-38); WP-731 implements the operation.
+     * @description Stores the request body as version n+1 of the document under an object key of its own; the document mirrors the new version. Only a document the caller may change takes versions (all its links in the caller's write scope, WP-341); any other answers 404 before anything is stored. The Content-Type header is validated against the whitelist of PUT /api/v1/documents/{id}/content, the body is limited to 25 MiB. An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44); of two parallel uploads at the limit only the one that fits succeeds. A new version has the scan status pending_scan. The audit log records document.version_created with version, size, MIME type and checksum.
      */
     post: operations['createDocumentVersion'];
     delete?: never;
@@ -11878,7 +11881,7 @@ export interface components {
       file_name: string;
       file_size: number;
       mime_type: string;
-      /** @description Server-generated object key below org/<organization_id>/, set by PUT /api/v1/documents/{id}/content; empty until content is uploaded. */
+      /** @description Server-generated object key of the current version below org/<organization_id>/, set by PUT /api/v1/documents/{id}/content or POST /api/v1/documents/{id}/versions; empty until content is uploaded. */
       readonly storage_key: string;
       version: number;
       category: string;
@@ -14613,6 +14616,43 @@ export interface components {
     };
     DocumentLinkListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['DocumentLink'][];
+    };
+    DocumentVersion: {
+      id: string;
+      organization_id: string;
+      document_id: string;
+      /** @description Version number, 1 for the first content; the document mirrors the highest. */
+      version: number;
+      /** Format: int64 */
+      size: number;
+      mime_type: string;
+      /** @description Hex sha256 of the content; null only for versions stored before versioning. */
+      checksum_sha256: string | null;
+      /**
+       * @description Malware scan status (SEC-09); a new version is pending_scan.
+       * @enum {string}
+       */
+      scan_status: 'pending_scan' | 'clean' | 'infected' | 'scan_failed';
+      /** Format: date-time */
+      scanned_at?: string;
+      uploaded_by?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    DocumentVersionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['DocumentVersion'][];
+    };
+    DocumentUsage: {
+      /**
+       * Format: int64
+       * @description Stored bytes of every document version of the organization.
+       */
+      storage_bytes: number;
+      /**
+       * Format: int64
+       * @description max_storage_mb in MiB (2^20 bytes); null when unlimited.
+       */
+      limit_mb: number | null;
     };
     CreateDocumentLinkRequest: {
       /** @description ci, asset, assignment, ticket, location, disposal_record or stocktake. */
@@ -25449,7 +25489,10 @@ export interface operations {
   };
   downloadDocumentContent: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Version number (GET /api/v1/documents/{id}/versions); default the current version. */
+        version?: number;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -25471,6 +25514,7 @@ export interface operations {
           };
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       /** @description Blob storage is not configured */
@@ -25511,6 +25555,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       /** @description Payload too large */
       413: {
@@ -36064,12 +36109,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the storage usage of the documents. The response schema comes with WP-731. */
+      /** @description Storage usage of the organization */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DocumentUsage'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -36098,12 +36145,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the versions of a document. The page follows the cursor contract (API-02); the item schema comes with WP-731. */
+      /** @description Paginated document versions */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DocumentVersionListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -36121,20 +36170,52 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/octet-stream': string;
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-731. */
+      /** @description Version created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DocumentVersion'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description Payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Unsupported media type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Blob storage is not configured */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   deleteDocumentLink: {

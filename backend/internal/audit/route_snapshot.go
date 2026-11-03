@@ -450,6 +450,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/desk-bookings/{id}/cancel":           "desk_booking",
 		"POST /api/v1/discovery/review-items/{id}/resolve": "review_item",
 		"PUT /api/v1/documents/{id}/content":               "document",
+		"POST /api/v1/documents/{id}/versions":             "document",
 		"POST /api/v1/iga/access-requests/{id}/approve":    "iga_access_request",
 		"POST /api/v1/iga/access-requests/{id}/reject":     "iga_access_request",
 		"POST /api/v1/iga/connectors/{id}/sync":            "iga_connector",
