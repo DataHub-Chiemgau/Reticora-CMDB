@@ -511,6 +511,7 @@ POST /api/v1/teams team:manage
 POST /api/v1/teams/{id}/members team:manage
 POST /api/v1/templates citype:manage
 POST /api/v1/templates/{id}/clone citype:manage
+POST /api/v1/templates/{id}/migrations citype:manage
 POST /api/v1/templates/{id}/versions citype:manage
 POST /api/v1/templates/{id}/versions/{version}/publish metamodel:publish
 POST /api/v1/tickets ticket:write

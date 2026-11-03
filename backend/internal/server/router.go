@@ -409,6 +409,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
+	// The template migration (WP-712) is a job of the module metamodel
+	// (E-105): its executor works on the decorated CI repository (WP-418),
+	// so the migrated CIs are indexed. Without the module neither route nor
+	// job kind exists.
+	var templateJobs *ci.TemplateMigrationJobs
+	if opts.Modules.Enabled(ModuleMetamodel) {
+		templateJobs = ci.NewTemplateMigrationJobs(repos.CI, repos.CIType)
+	}
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -417,6 +425,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		jobAPI = jobs.NewAPIHandler(jobService).
 			WithKind(ci.BulkJobKind, identity.PermCIWrite, nil).
 			WithKind("export", identity.PermExportRun, nil).
+			// A running template migration is cancelled with citype:manage
+			// like its start; it has no revert (E-25).
+			WithKind(ci.TemplateMigrateJobKind, identity.PermCITypeManage, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
@@ -449,7 +460,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
 		}
-		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler)
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -604,6 +615,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
 		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
 		modulesHandler{set: opts.Modules},
+	}
+	if templateJobs != nil {
+		registrars = append(registrars, templateJobs)
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(protected)

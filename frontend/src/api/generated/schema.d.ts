@@ -1176,7 +1176,7 @@ export interface paths {
     };
     /**
      * The result of a succeeded job
-     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled).
+     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled). The result of a job template.migrate is a TemplateMigrationReport; a cancelled template migration has none (409).
      */
     get: operations['getJobResult'];
     put?: never;
@@ -6074,6 +6074,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/templates/{id}/migrations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Migrate the CIs of a template version to another version (job template.migrate)
+     * @description Queues a job of kind template.migrate (API-09, JOB-04, OVR-03) and answers 202 with `Location: /api/v1/jobs/{id}`. The job migrates the CIs whose assignment names the template on `from_version` (ci_template, WP-710) to `to_version`: the defaults of the target version go into attribute fields without an effective value; overridden fields and instance attributes stay, findings of the validation do not block (WP-253). Without `ci_ids` and `where` every CI the caller sees with that assignment is selected, otherwise the ids (at most 500, API-08) or the filter AST (SRC-03), always intersected with the assignment; an id without it is reported as skipped. The job runs with the caller as actor and the caller's scope (a job without scope snapshot fails), in blocks of 100 CIs, one transaction per block and a savepoint per CI: a CI that fails (e.g. a unique conflict of a default) is discarded alone. Its progress counts the selected CIs; a running job can be cancelled with DELETE /api/v1/jobs/{id} between two blocks (citype:manage) and then has no result. `dry_run` computes the report and writes nothing. The report (TemplateMigrationReport) is the result of the succeeded job, GET /api/v1/jobs/{id}/result. A retry writes nothing twice; there is no revert (E-25). Requires citype:manage.
+     */
+    post: operations['migrateTemplate'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/templates/{id}/versions': {
     parameters: {
       query?: never;
@@ -8624,6 +8647,60 @@ export interface components {
       display_name?: components['schemas']['LocalizedText'];
       /** @description Default the source's description. */
       description?: string;
+    };
+    TemplateMigrationRequest: {
+      /** @description Published or retired version the CIs are on. */
+      from_version: number;
+      /** @description Published version the CIs move to. */
+      to_version: number;
+      /** @description Narrows the selection to these CIs; not together with where. */
+      ci_ids?: string[];
+      where?: components['schemas']['FilterExpr'];
+      /**
+       * @description Computes the report and writes nothing.
+       * @default false
+       */
+      dry_run: boolean;
+    };
+    /** @description Result of a job template.migrate (GET /api/v1/jobs/{id}/result). items lists only the CIs with a change, a finding, an override or an error, at most 10,000; beyond that truncated is true. */
+    TemplateMigrationReport: {
+      dry_run: boolean;
+      totals: {
+        /** @description CIs selected when the run started. */
+        selected: number;
+        migrated: number;
+        /** @description Also the ci_ids without the assignment on from_version. */
+        skipped: number;
+        failed: number;
+        with_findings: number;
+      };
+      items: {
+        ci_id: string;
+        /** @enum {string} */
+        outcome: 'migrated' | 'skipped' | 'failed';
+        /** @description Keys of the defaults written (or, in a dry run, to be written). */
+        defaults: string[];
+        /** @description Keys with a default of the target version an override keeps unchanged. */
+        overridden: string[];
+        /** @description Violations of the target version; they do not block. */
+        findings: {
+          field: string;
+          detail: string;
+          code?: string;
+          rule?: string;
+          message?: {
+            [key: string]: string;
+          };
+        }[];
+        error?: {
+          /** @enum {string} */
+          code: 'unique' | 'validation' | 'not_found' | 'internal';
+          /** @description The attribute */
+          field?: string;
+          detail: string;
+        };
+      }[];
+      truncated: boolean;
     };
     TemplateListResponse: {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
@@ -29997,6 +30074,53 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  migrateTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateMigrationRequest'];
+      };
+    };
+    responses: {
+      /** @description The migration runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            /** @enum {string} */
+            kind: 'template.migrate';
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description to_version is not published, from_version neither published nor retired, a version is unknown or both are equal; ci_ids is empty, has more than 500 entries or an entry that is no UUID; ci_ids and where together; where is no valid filter AST. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       503: components['responses']['ServiceUnavailable'];
     };
   };
