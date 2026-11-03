@@ -13,8 +13,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -241,6 +245,64 @@ func TestLocationDeleteRefusedWithDependencies(t *testing.T) {
 	expect("/api/v1/rooms/"+tr.room.ID, http.StatusNoContent)
 	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM location WHERE id = ANY($1::uuid[])`, []string{tr.building.ID, tr.room.ID, tr.rack.ID}).Scan(&left); err != nil || left != 1 {
 		t.Errorf("building, room and rack after deleting rack and room: %d, %v; want the building only", left, err)
+	}
+
+	// Reference attributes with target location keep the location (WP-713,
+	// MET-12): a global, a multi_value and an instance attribute of a
+	// visible CI; the stored id may differ in case.
+	orgCtx := tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	types := citype.NewPGRepository(f.App)
+	for _, d := range []citype.AttributeDefinition{
+		{Key: "wp713_place", DataType: fieldmeta.TypeLocation},
+		{Key: "wp713_places", DataType: fieldmeta.TypeReference, ReferenceTarget: "location", MultiValue: true},
+	} {
+		if err = types.CreateAttributeDefinition(orgCtx, f.OrgA, &d); err != nil {
+			t.Fatalf("definition %s: %v", d.Key, err)
+		}
+	}
+	setAttributes := func(ciID string, attrs map[string]any) {
+		t.Helper()
+		raw, _ := json.Marshal(attrs)
+		exec(`UPDATE ci SET attributes = $2::jsonb WHERE id = $1`, ciID, string(raw))
+	}
+	zone := func(name string) string {
+		return mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindZone, ParentID: tr.warehouse.ID, Name: name}).ID
+	}
+	placed, listed, spot := zone("del-placed"), zone("del-listed"), zone("del-spot")
+	holder := f.CI(t, f.OrgA, f.Client1, "del-holder")
+	setAttributes(holder, map[string]any{"wp713_place": strings.ToUpper(placed), "wp713_places": []any{tr.site.ID, listed}})
+	expect("/api/v1/locations/"+placed, http.StatusConflict, "ci_attribute")
+	expect("/api/v1/locations/"+listed, http.StatusConflict, "ci_attribute")
+	instanceHolder := f.CI(t, f.OrgA, f.Client1, "del-instance")
+	if _, err = types.UpsertInstanceField(orgCtx, f.OrgA, instanceHolder, citype.UpsertInstanceFieldRequest{
+		Name: "wp713_spot", DataType: fieldmeta.TypeLocation}); err != nil {
+		t.Fatalf("instance field: %v", err)
+	}
+	setAttributes(instanceHolder, map[string]any{"_instance": map[string]any{"wp713_spot": spot}})
+	expect("/api/v1/locations/"+spot, http.StatusConflict, "ci_attribute")
+	// A deleted CI keeps nothing.
+	exec(`UPDATE ci SET deleted_at = now() WHERE id = $1`, instanceHolder)
+	expect("/api/v1/locations/"+spot, http.StatusNoContent)
+
+	// A CI the caller cannot see is not counted (no foreign key): a
+	// principal of client 1 deletes the location a CI of client 2 refers
+	// to; the value reads as missing afterwards.
+	hidden := zone("del-hidden")
+	hiddenHolder := f.CI(t, f.OrgA, f.Client2, "del-hidden-holder")
+	setAttributes(hiddenHolder, map[string]any{"wp713_place": hidden})
+	w := httptest.NewRecorder()
+	clientCtx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/v1/locations/"+hidden, nil).WithContext(clientCtx))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete of a location only an invisible CI refers to: %d %s", w.Code, w.Body.String())
+	}
+	svc := ci.NewService(ci.NewPGRepository(f.App)).WithFieldResolver(types).WithReferences(ci.NewPGReferenceLookup(f.App))
+	refs, err := svc.References(identity.WithPermissions(orgCtx, []identity.Permission{identity.PermLocationRead}), f.OrgA, hiddenHolder)
+	if err != nil {
+		t.Fatalf("references: %v", err)
+	}
+	if view, ok := refs["wp713_place"].(*ci.ReferenceView); !ok || !view.Resolved() || !view.Missing || view.ID != hidden {
+		t.Errorf("reference to the deleted location: %+v, want missing", refs["wp713_place"])
 	}
 }
 
@@ -633,7 +695,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	kinds := []string{
 		locations.DependencyLocation, locations.DependencyCI, locations.DependencyAsset, locations.DependencyQuantityItem,
 		locations.DependencyAssetMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
-		"vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
+		locations.DependencyCIAttribute, "vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
 		"collector_enrollment_code",
 	}
 	if !slices.Equal(slices.Sorted(slices.Values(spec)), slices.Sorted(slices.Values(kinds))) {

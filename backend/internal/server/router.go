@@ -813,6 +813,12 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 			}
 			return contacts, total > len(contacts), err
 		},
+		// The targets of the reference values with their names (MET-12,
+		// WP-713); never capped.
+		ci.IncludeReferences: func(ctx context.Context, orgID, ciID string) (any, bool, error) {
+			refs, err := opts.CIService.References(ctx, orgID, ciID)
+			return refs, false, err
+		},
 	})
 }
 

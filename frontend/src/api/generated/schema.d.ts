@@ -9357,10 +9357,30 @@ export interface components {
       relationships?: components['schemas']['Relationship'][];
       /** @description At most 200 contact links of the CI the caller may see. */
       contacts?: components['schemas']['CIContact'][];
+      /** @description The targets of the reference values of the CI (MET-12), keyed by attribute name: type, global and instance attributes with a value of a reference type or file. A multi_value attribute yields a list. attributes keeps the ids. */
+      references?: {
+        [key: string]:
+          components['schemas']['CIReferenceView'] | components['schemas']['CIReferenceView'][];
+      };
       /** @description The embedded collections the server capped: the collection has more rows the caller may see than it embeds, e.g. relationships true. Absent when every embedded collection is complete. */
       truncated?: {
         [key: string]: true;
       };
+    };
+    /** @description One reference value of include=references (MET-12). display_name and missing are present only when the caller has the read permission of the target kind (ci:read, asset:read, user:read for users and teams, location:read, document:read) and a lookup is configured; otherwise the value is target and id alone. A target that is deleted, merged, not visible to the caller or stored without UUID form is missing with display_name null. */
+    CIReferenceView: {
+      /** @enum {string} */
+      target: 'ci' | 'asset' | 'user' | 'team' | 'location' | 'document' | 'contract';
+      /** @description The stored value. */
+      id: string;
+      /** @description ci.name, asset.name, app_user.display_name, team.name, location.name or document.title; null for a missing target. */
+      display_name?: string | null;
+      /** @description The target does not exist for the caller. */
+      missing?: boolean;
+      /** @description The kind of a location target (CH28, LOC-10). */
+      kind?: components['schemas']['LocationKind'];
+      /** @description The survivor of a merged CI target while the caller sees its tombstone (CI-12). */
+      merged_into?: string;
     };
     /** @description Canonical data of the linked asset, shown read-only on the CI (DB-05). */
     CIAssetFacts: {
@@ -11270,7 +11290,7 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -11279,6 +11299,7 @@ export interface components {
         | 'asset_movement'
         | 'rack_mount'
         | 'role_assignment'
+        | 'ci_attribute'
         | 'vlan'
         | 'subnet'
         | 'collector'
@@ -14062,7 +14083,7 @@ export interface operations {
   getCI: {
     parameters: {
       query?: {
-        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`. An unknown name yields 422. A collection embeds at most 200 rows; one with more rows the caller may see is named in `truncated` (CIWithIncludes). */
+        /** @description Comma-separated related collections to embed (API-05): `relationships`, `contacts`, `asset`, `references`. An unknown name yields 422. A collection embeds at most 200 rows; one with more rows the caller may see is named in `truncated` (CIWithIncludes). `references` resolves the reference values of the CI to their targets (MET-12) and is never capped. */
         include?: string;
       };
       header?: never;
