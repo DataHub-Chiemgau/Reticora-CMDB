@@ -153,7 +153,7 @@ mailpit_count() {
 
 smtp_outage() {
     local name="smtp outage" restarts failures=() started remaining hold=0 email role invite refusal rows
-    local export job initiator subject recovered sent_after="-" counts invitee r
+    local export_status job initiator subject recovered sent_after="-" counts invitee r
     if ! ready; then
         report FAIL "$name" "stack not ready before the outage: $(oneline "$(readyz)")"
         return
@@ -191,14 +191,14 @@ smtp_outage() {
     detail smtp "- Invitation to \`$email\` during the outage: HTTP $invite \"$refusal\", ${rows:-?} user_invitation rows (E-144: the invitation mail goes synchronously over the central SMTP server; refused and rolled back while it is down)"
 
     # Deferral and retry: export.completed to the initiator over central_smtp.
-    export="$(api POST /exports '{"format":"json"}')"
+    export_status="$(api POST /exports '{"format":"json"}')"
     job="$(jq -r '.id // empty' "$API_OUT" 2>/dev/null)"
-    if [ "$export" != 202 ] || [ -z "$job" ]; then
-        failures+=("export (POST /exports): HTTP $export $(oneline "$(head -c 200 "$API_OUT" 2>/dev/null)")")
+    if [ "$export_status" != 202 ] || [ -z "$job" ]; then
+        failures+=("export (POST /exports): HTTP $export_status $(oneline "$(head -c 200 "$API_OUT" 2>/dev/null)")")
     fi
     initiator="$(psql_exec -c "SELECT u.email FROM export_job j JOIN app_user u ON u.id = j.initiated_by WHERE j.organization_id = '$OUTAGE_ORG_ID' AND j.id::text = '${job:-none}'" 2>/dev/null)"
     [ -n "$initiator" ] || failures+=("export job ${job:--} has no initiator with an e-mail address (initiated_by of the API key)")
-    detail smtp "- E-mail channel \`$SMTP_CHANNEL_NAME\` ($SMTP_CHANNEL_ID, central_smtp); export ${job:--} (POST /exports: HTTP $export) during the outage, export.completed to its initiator \`${initiator:--}\`"
+    detail smtp "- E-mail channel \`$SMTP_CHANNEL_NAME\` ($SMTP_CHANNEL_ID, central_smtp); export ${job:--} (POST /exports: HTTP $export_status) during the outage, export.completed to its initiator \`${initiator:--}\`"
     if [ -n "$job" ] && wait_for "$SMTP_ATTEMPT_TIMEOUT" "a failed delivery attempt of export.completed of $job" smtp_export_attempt "$job"; then
         hold=$((SECONDS - started + SMTP_HOLD_AFTER_FAILURE))
         detail smtp "- During the outage: delivery $(delivery_text)"
