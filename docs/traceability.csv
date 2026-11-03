@@ -1229,3 +1229,4 @@ AUD-07;[B];B;backend/internal/citype/attribute_set_integration_test.go;WP-250
 MET-01;B/G1, Teil P2/G2;B;backend/internal/lifecycle/model_integration_test.go;WP-263
 MET-06;[P2];B;backend/internal/lifecycle/model_integration_test.go;WP-263
 LCY-02;[P2];B;backend/internal/lifecycle/model_integration_test.go;WP-263
+MET-14;P2/G2;B;backend/internal/ci/instance_integration_test.go;WP-256

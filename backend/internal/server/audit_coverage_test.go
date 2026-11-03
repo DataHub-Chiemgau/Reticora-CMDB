@@ -514,9 +514,12 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"DELETE /api/v1/ci-fields/global/{name}":           {"/api/v1/ci-fields/global/a5_global", ""},
 	"DELETE /api/v1/ci-types/{id}/fields/{name}":       {"/api/v1/ci-types/<id:/api/v1/ci-types>/fields/a5_field", ""},
 	"DELETE /api/v1/cis/{id}/field-definitions/{name}": {"/api/v1/cis/<id:/api/v1/cis>/field-definitions/a5_ci_field", ""},
-	"PUT /api/v1/ci-fields/global":                     {"", `{"name":"a5_global","data_type":"string"}`},
-	"PUT /api/v1/ci-types/{id}/fields":                 {"", `{"name":"a5_field","data_type":"string"}`},
-	"PUT /api/v1/cis/{id}/field-definitions":           {"", `{"name":"a5_ci_field","data_type":"string"}`},
+	// The value of the instance attribute a5_ci_field (MET-14, WP-256).
+	"PUT /api/v1/cis/{id}/instance-attributes/{key}":    {"/api/v1/cis/<id:/api/v1/cis>/instance-attributes/a5_ci_field", `{"value":"a5 value"}`},
+	"DELETE /api/v1/cis/{id}/instance-attributes/{key}": {"/api/v1/cis/<id:/api/v1/cis>/instance-attributes/a5_ci_field", ""},
+	"PUT /api/v1/ci-fields/global":                      {"", `{"name":"a5_global","data_type":"string"}`},
+	"PUT /api/v1/ci-types/{id}/fields":                  {"", `{"name":"a5_field","data_type":"string"}`},
+	"PUT /api/v1/cis/{id}/field-definitions":            {"", `{"name":"a5_ci_field","data_type":"string"}`},
 }
 
 // auditRouteSubCreates create rows under another resource; they run first
@@ -766,6 +769,10 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		di, dj := strings.Count(deletes[i], "/"), strings.Count(deletes[j], "/")
 		if di != dj {
 			return di > dj
+		}
+		// An instance value before its definition (WP-256).
+		if vi, vj := strings.Contains(deletes[i], "/instance-attributes/"), strings.Contains(deletes[j], "/instance-attributes/"); vi != vj {
+			return vi
 		}
 		ci := order[strings.Join(strings.Split(strings.TrimPrefix(deletes[i], "DELETE "), "/")[:4], "/")]
 		cj := order[strings.Join(strings.Split(strings.TrimPrefix(deletes[j], "DELETE "), "/")[:4], "/")]

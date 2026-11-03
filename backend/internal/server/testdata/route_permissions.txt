@@ -11,6 +11,7 @@ DELETE /api/v1/ci-types/{id}/fields/{name} citype:manage
 DELETE /api/v1/cis/{id} ci:delete
 DELETE /api/v1/cis/{id}/field-definitions/{name} ci_instance_attribute:manage
 DELETE /api/v1/cis/{id}/fields/{name}/override override:write
+DELETE /api/v1/cis/{id}/instance-attributes/{key} ci_instance_attribute:manage
 DELETE /api/v1/clients/{id} user:manage
 DELETE /api/v1/compliance/rules/{id} compliance:write
 DELETE /api/v1/compositions/{id} asset:write
@@ -107,6 +108,7 @@ GET /api/v1/cis/{id}/contacts contact:read
 GET /api/v1/cis/{id}/dependencies topology:read
 GET /api/v1/cis/{id}/field-definitions ci:read
 GET /api/v1/cis/{id}/fields ci:read
+GET /api/v1/cis/{id}/instance-attributes ci:read
 GET /api/v1/cis/{id}/interfaces ipam:read
 GET /api/v1/cis/{id}/metrics ci:read
 GET /api/v1/cis/{id}/parent ci:read
@@ -504,6 +506,7 @@ PUT /api/v1/ci-types/{id}/attribute-sets citype:manage
 PUT /api/v1/ci-types/{id}/fields citype:manage
 PUT /api/v1/cis/{id}/field-definitions ci_instance_attribute:manage
 PUT /api/v1/cis/{id}/fields/{name}/override override:write
+PUT /api/v1/cis/{id}/instance-attributes/{key} ci_instance_attribute:manage
 PUT /api/v1/documents/{id}/content document:write
 PUT /api/v1/notifications/preferences authenticated
 PUT /api/v1/privacy/retention user:manage

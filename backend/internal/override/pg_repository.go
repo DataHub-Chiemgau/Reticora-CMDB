@@ -400,8 +400,8 @@ func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, 
 // SetOverride sets or replaces the manual override of a field. The override
 // is a manual write: in the same transaction the CI takes the value, its
 // version rises and its history records the change (raiseVersion, API-07).
-// A reserved namespace is ErrReservedName, a structural column
-// ErrNotOverridable.
+// A reserved namespace is ErrReservedName, a structural column or an
+// instance attribute of the CI (MET-14, WP-256) ErrNotOverridable.
 func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error) {
 	if reason == "" {
 		return nil, fmt.Errorf("override reason is required")
@@ -416,6 +416,15 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := requireLiveCI(ctx, tx, ciID); err != nil {
 			return err
+		}
+		// An instance attribute of the CI has its own write path with its
+		// own permission (MET-14, WP-256): PUT /cis/{id}/instance-attributes.
+		_, instance, pathErr := attributePath(ctx, tx, ciID, fieldName)
+		if pathErr != nil {
+			return pathErr
+		}
+		if instance {
+			return ErrNotOverridable
 		}
 		before, err := ciFieldValue(ctx, tx, ciID, fieldName)
 		if err != nil {
@@ -717,7 +726,8 @@ func nilIfEmpty(value string) any {
 	return value
 }
 
-// ErrNotOverridable rejects an override of a structural CI column.
+// ErrNotOverridable rejects an override of a structural CI column or of an
+// instance attribute of the CI (MET-14).
 var ErrNotOverridable = errors.New("field cannot be overridden")
 
 // ErrReservedName rejects a reserved attribute namespace (_overrides,

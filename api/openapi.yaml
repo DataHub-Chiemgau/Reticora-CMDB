@@ -966,6 +966,9 @@ paths:
         workflow); observed discovery updates do not change the version.
         An organization can require If-Match (settings.require_if_match);
         then a request without it is 412, like an unknown version.
+        Changing the value of an instance attribute of the CI (MET-14)
+        additionally requires ci_instance_attribute:manage, otherwise 403;
+        an instance value sent unchanged is allowed.
       parameters:
         - name: If-Match
           in: header
@@ -993,6 +996,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -14157,22 +14162,34 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/cis/{id}/instance-attributes:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listCIInstanceAttributes
       tags: [CIs]
       summary: List the instance attribute values of a CI
-      description: Planned (E-38); WP-256 implements the operation.
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
+      description: >-
+        Every instance attribute definition of the CI (MET-14) with its
+        value, null while the CI holds none. The definitions are managed
+        under /cis/{id}/field-definitions (ci_instance_attribute:manage).
+        The list is bounded per CI and complete: no limit or cursor,
+        next_cursor stays absent. GET /cis/{id} shows the same values flat
+        under their names.
       responses:
         '200':
-          description: List the instance attribute values of a CI. The page follows the cursor contract (API-02); the item schema comes with WP-256.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+          description: The instance attributes of the CI
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent, the list is complete.
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CIInstanceAttribute' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -14181,7 +14198,6 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/instance-attributes/{key}:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: key
@@ -14189,15 +14205,40 @@ paths:
         required: true
         schema:
           type: string
-        description: Key of the instance attribute.
+        description: Key of the instance attribute (the name of its definition).
     put:
       operationId: setCIInstanceAttribute
       tags: [CIs]
       summary: Set an instance attribute value of a CI
-      description: Planned (E-38); WP-256 implements the operation.
+      description: >-
+        Replaces the value of the instance attribute (MET-14); requires
+        ci_instance_attribute:manage. A manual write like PATCH /cis/{id}:
+        If-Match (API-07), the CI version rises, the history records the
+        field attributes, audit ci.updated and event ci.changed. The value
+        is validated against the definition and stored under
+        attributes._instance. A key without a definition, a null value or a
+        value the definition does not allow is 422 with `violations`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetCIInstanceAttributeRequest' }
       responses:
         '200':
-          description: Replaced. The request and response schemas come with WP-256.
+          description: The instance attribute with its new value
+          headers:
+            ETag:
+              description: The new CI version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CIInstanceAttribute' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -14206,22 +14247,72 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The attributes changed since the If-Match version, or another
+            active CI holds the value of a unique attribute (MET-15)
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+        '412':
+          description: If-Match missing although required, or not a version of the CI
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: The CI has no instance attribute with this key, or the value is not allowed
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
     delete:
       operationId: deleteCIInstanceAttribute
       tags: [CIs]
       summary: Remove an instance attribute value of a CI
-      description: Planned (E-38); WP-256 implements the operation.
+      description: >-
+        Removes the value from attributes._instance (MET-14); the definition
+        stays. Requires ci_instance_attribute:manage; a manual write like
+        PATCH /cis/{id} (If-Match, version, history, audit ci.updated,
+        event ci.changed). A key without a definition is 422.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
       responses:
         '204':
-          description: Deleted.
+          description: Removed
+          headers:
+            ETag:
+              description: The CI version after the removal.
+              schema: { type: string }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The attributes changed since the If-Match version
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+        '412':
+          description: If-Match missing although required, or not a version of the CI
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: The CI has no instance attribute with this key
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
 
   /api/v1/tags:
     x-status: planned
@@ -20748,6 +20839,52 @@ components:
             later_merge_id: { type: string, format: uuid }
             later_merge_victim_id: { type: string, format: uuid }
             later_merge_survivor_id: { type: string, format: uuid }
+    CIInstanceField:
+      type: object
+      description: Definition of an instance attribute of a single CI (MET-14).
+      required: [ci_id, name, data_type, required, sort_order]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        ci_id: { type: string, format: uuid }
+        name: { type: string }
+        label: { type: string }
+        description: { type: string }
+        data_type: { type: string }
+        required: { type: boolean }
+        default_value: { type: string }
+        enum_values:
+          type: array
+          items: { type: string }
+        ui_group: { type: string }
+        sort_order: { type: integer }
+        validation:
+          type: object
+          additionalProperties: true
+        conditional:
+          type: object
+          additionalProperties: true
+        reference_target: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CIInstanceAttribute:
+      type: object
+      description: The value of an instance attribute of a CI with its definition (MET-14).
+      required: [key, definition, value]
+      properties:
+        key: { type: string }
+        definition: { $ref: '#/components/schemas/CIInstanceField' }
+        value:
+          description: The value, any JSON value of the data type; null while the CI holds none.
+    SetCIInstanceAttributeRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          description: >-
+            The new value, checked against the definition; an object
+            replaces the previous one. null is refused (422), DELETE
+            removes the value.
     ViolationProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'

@@ -446,7 +446,7 @@ export interface paths {
     head?: never;
     /**
      * Update a configuration item
-     * @description JSON merge patch (RFC 7396, CI-04): null clears a nullable field, absent members stay. 404 only for a CI that does not exist or is not visible; any other failure is 500. Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
+     * @description JSON merge patch (RFC 7396, CI-04): null clears a nullable field, absent members stay. 404 only for a CI that does not exist or is not visible; any other failure is 500. Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version. Changing the value of an instance attribute of the CI (MET-14) additionally requires ci_instance_attribute:manage, otherwise 403; an instance value sent unchanged is allowed.
      */
     patch: operations['updateCI'];
     trace?: never;
@@ -7079,7 +7079,7 @@ export interface paths {
     };
     /**
      * List the instance attribute values of a CI
-     * @description Planned (E-38); WP-256 implements the operation.
+     * @description Every instance attribute definition of the CI (MET-14) with its value, null while the CI holds none. The definitions are managed under /cis/{id}/field-definitions (ci_instance_attribute:manage). The list is bounded per CI and complete: no limit or cursor, next_cursor stays absent. GET /cis/{id} shows the same values flat under their names.
      */
     get: operations['listCIInstanceAttributes'];
     put?: never;
@@ -7097,7 +7097,7 @@ export interface paths {
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
-        /** @description Key of the instance attribute. */
+        /** @description Key of the instance attribute (the name of its definition). */
         key: string;
       };
       cookie?: never;
@@ -7105,13 +7105,13 @@ export interface paths {
     get?: never;
     /**
      * Set an instance attribute value of a CI
-     * @description Planned (E-38); WP-256 implements the operation.
+     * @description Replaces the value of the instance attribute (MET-14); requires ci_instance_attribute:manage. A manual write like PATCH /cis/{id}: If-Match (API-07), the CI version rises, the history records the field attributes, audit ci.updated and event ci.changed. The value is validated against the definition and stored under attributes._instance. A key without a definition, a null value or a value the definition does not allow is 422 with `violations`.
      */
     put: operations['setCIInstanceAttribute'];
     post?: never;
     /**
      * Remove an instance attribute value of a CI
-     * @description Planned (E-38); WP-256 implements the operation.
+     * @description Removes the value from attributes._instance (MET-14); the definition stays. Requires ci_instance_attribute:manage; a manual write like PATCH /cis/{id} (If-Match, version, history, audit ci.updated, event ci.changed). A key without a definition is 422.
      */
     delete: operations['deleteCIInstanceAttribute'];
     options?: never;
@@ -11217,6 +11217,46 @@ export interface components {
       /** Format: uuid */
       later_merge_survivor_id?: string;
     };
+    /** @description Definition of an instance attribute of a single CI (MET-14). */
+    CIInstanceField: {
+      /** Format: uuid */
+      id?: string;
+      /** Format: uuid */
+      organization_id?: string;
+      /** Format: uuid */
+      ci_id: string;
+      name: string;
+      label?: string;
+      description?: string;
+      data_type: string;
+      required: boolean;
+      default_value?: string;
+      enum_values?: string[];
+      ui_group?: string;
+      sort_order: number;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      /** Format: date-time */
+      created_at?: string;
+      /** Format: date-time */
+      updated_at?: string;
+    };
+    /** @description The value of an instance attribute of a CI with its definition (MET-14). */
+    CIInstanceAttribute: {
+      key: string;
+      definition: components['schemas']['CIInstanceField'];
+      /** @description The value, any JSON value of the data type; null while the CI holds none. */
+      value: unknown;
+    };
+    SetCIInstanceAttributeRequest: {
+      /** @description The new value, checked against the definition; an object replaces the previous one. null is refused (422), DELETE removes the value. */
+      value: unknown;
+    };
     ViolationProblem: components['schemas']['ProblemDetail'] & {
       violations: {
         field: string;
@@ -14121,6 +14161,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes; also a CI outside the client or site scope of the caller, which is never named) */
       409: {
@@ -31220,18 +31261,7 @@ export interface operations {
   };
   listCIInstanceAttributes: {
     parameters: {
-      query?: {
-        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
-        limit?: components['parameters']['Limit'];
-        /**
-         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
-         *     are HMAC-signed by the server (API-02); a forged or altered cursor
-         *     yields 400. Keyset cursors are bound to the sort order they were
-         *     issued for; sending one with a different `sort_by`/`sort_dir`
-         *     combination yields 400.
-         */
-        cursor?: components['parameters']['Cursor'];
-      };
+      query?: never;
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -31241,14 +31271,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the instance attribute values of a CI. The page follows the cursor contract (API-02); the item schema comes with WP-256. */
+      /** @description The instance attributes of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent, the list is complete. */
+            next_cursor?: string;
+            data: components['schemas']['CIInstanceAttribute'][];
+          };
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
@@ -31257,48 +31292,92 @@ export interface operations {
   setCIInstanceAttribute: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
-        /** @description Key of the instance attribute. */
+        /** @description Key of the instance attribute (the name of its definition). */
         key: string;
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetCIInstanceAttributeRequest'];
+      };
+    };
     responses: {
-      /** @description Replaced. The request and response schemas come with WP-256. */
+      /** @description The instance attribute with its new value */
       200: {
         headers: {
+          /** @description The new CI version. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIInstanceAttribute'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The attributes changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the CI */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The CI has no instance attribute with this key, or the value is not allowed */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   deleteCIInstanceAttribute: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
-        /** @description Key of the instance attribute. */
+        /** @description Key of the instance attribute (the name of its definition). */
         key: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Deleted. */
+      /** @description Removed */
       204: {
         headers: {
+          /** @description The CI version after the removal. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content?: never;
@@ -31306,6 +31385,35 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The attributes changed since the If-Match version */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the CI */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The CI has no instance attribute with this key */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   listTags: {

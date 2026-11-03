@@ -259,6 +259,10 @@ var routeRules = []routeRule{
 	// Instance attributes (MET-14, CI-10) and manual overrides (CI-10).
 	{http.MethodPut, "cis/*/field-definitions", identity.PermCIInstanceAttributeManage},
 	{http.MethodDelete, "cis/*/field-definitions/*", identity.PermCIInstanceAttributeManage},
+	// Instance attribute values have their own right (MET-14, WP-256);
+	// reading them is ci:read through the segment cis.
+	{http.MethodPut, "cis/*/instance-attributes/*", identity.PermCIInstanceAttributeManage},
+	{http.MethodDelete, "cis/*/instance-attributes/*", identity.PermCIInstanceAttributeManage},
 	{"*", "cis/*/fields/*/override", identity.PermOverrideWrite},
 	// Lifecycle transitions of CIs and assets (RBA-06).
 	{http.MethodPost, "cis/*/lifecycle-transitions", identity.PermLifecycleTransition},
@@ -579,15 +583,17 @@ var collectorRoutes = map[string]bool{
 // (audit_coverage_test.go) keeps this list and the recorders in step.
 var domainRecordedRoutes = map[string]string{
 	// CI writes (AUD-03 history with old and new values).
-	"POST /api/v1/cis":                               "ci.PGRepository.Create",
-	"PATCH /api/v1/cis/{id}":                         "ci.PGRepository.Update",
-	"DELETE /api/v1/cis/{id}":                        "ci.PGRepository.Delete",
-	"POST /api/v1/cis/bulk":                          "ci.PGRepository.Update per CI",
-	"POST /api/v1/cis/{id}/merge":                    "ci.PGRepository (merge)",
-	"POST /api/v1/cis/{id}/restore":                  "ci.PGRepository.RestoreDeleted",
-	"POST /api/v1/cis/{id}/type":                     "ci.PGRepository.ChangeType",
-	"PUT /api/v1/cis/{id}/fields/{name}/override":    "override.PGRepository",
-	"DELETE /api/v1/cis/{id}/fields/{name}/override": "override.PGRepository",
+	"POST /api/v1/cis":                                  "ci.PGRepository.Create",
+	"PATCH /api/v1/cis/{id}":                            "ci.PGRepository.Update",
+	"DELETE /api/v1/cis/{id}":                           "ci.PGRepository.Delete",
+	"POST /api/v1/cis/bulk":                             "ci.PGRepository.Update per CI",
+	"POST /api/v1/cis/{id}/merge":                       "ci.PGRepository (merge)",
+	"POST /api/v1/cis/{id}/restore":                     "ci.PGRepository.RestoreDeleted",
+	"POST /api/v1/cis/{id}/type":                        "ci.PGRepository.ChangeType",
+	"PUT /api/v1/cis/{id}/instance-attributes/{key}":    "ci.PGRepository.Update",
+	"DELETE /api/v1/cis/{id}/instance-attributes/{key}": "ci.PGRepository.Update",
+	"PUT /api/v1/cis/{id}/fields/{name}/override":       "override.PGRepository",
+	"DELETE /api/v1/cis/{id}/fields/{name}/override":    "override.PGRepository",
 	// Metamodel (MET-15).
 	"POST /api/v1/ci-types":                            "citype.PGRepository",
 	"POST /api/v1/ci-types/{id}/activate":              "citype.PGRepository",

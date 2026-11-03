@@ -9,8 +9,8 @@ package server_test
 // for _overrides, _observed, _provenance and _instance; attributes, with
 // the instance values in attributes._instance, stay unchanged and no
 // ci_field_value row is written (the CHECK constraint of migration 000166
-// refuses one as well). An override of a normal attribute and of an
-// instance attribute still answers 200 (control).
+// refuses one as well). An override of a normal attribute still answers
+// 200, one of an instance attribute 422 (WP-256) (control).
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_03?sslmode=disable \
@@ -42,15 +42,14 @@ func TestAuditT3OverrideRefusesReservedNames(t *testing.T) {
 	if w := r.call(identity.AllPermissions(), http.MethodDelete, base+"owner/override", ""); w.Code != http.StatusOK {
 		t.Fatalf("control DELETE override owner: %d %s", w.Code, w.Body.String())
 	}
-	// Control: an instance attribute override writes attributes._instance.slot.
-	if w := r.call(identity.AllPermissions(), http.MethodPut, base+"slot/override", `{"value":"8","reason":"audit"}`); w.Code != http.StatusOK {
-		t.Fatalf("control PUT override slot: %d %s", w.Code, w.Body.String())
+	// Control: an instance attribute is not overridable (MET-14, WP-256:
+	// its value is written through /cis/{id}/instance-attributes);
+	// attributes._instance.slot stays.
+	if w := r.call(identity.AllPermissions(), http.MethodPut, base+"slot/override", `{"value":"8","reason":"audit"}`); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("control PUT override slot: %d %s, want 422", w.Code, w.Body.String())
 	}
-	if got := r.str(`SELECT COALESCE(attributes -> '_instance' ->> 'slot', '') FROM ci WHERE id = $1`, device); got != "8" {
-		t.Fatalf("attributes._instance.slot after the override = %q, want 8", got)
-	}
-	if w := r.call(identity.AllPermissions(), http.MethodDelete, base+"slot/override", ""); w.Code != http.StatusOK {
-		t.Fatalf("control DELETE override slot: %d %s", w.Code, w.Body.String())
+	if got := r.str(`SELECT COALESCE(attributes -> '_instance' ->> 'slot', '') FROM ci WHERE id = $1`, device); got != "7" {
+		t.Fatalf("attributes._instance.slot after the refused override = %q, want 7", got)
 	}
 	before := r.str(`SELECT attributes::text FROM ci WHERE id = $1`, device)
 	beforeVersion := r.str(`SELECT version::text FROM ci WHERE id = $1`, device)
@@ -77,8 +76,8 @@ func TestAuditT3OverrideRefusesReservedNames(t *testing.T) {
 			if got := r.str(`SELECT attributes::text FROM ci WHERE id = $1`, device); got != before {
 				t.Errorf("attributes after override calls on %s = %s, want unchanged %s", name, got, before)
 			}
-			if got := r.str(`SELECT COALESCE(attributes -> '_instance' ->> 'slot', '') FROM ci WHERE id = $1`, device); got != "8" {
-				t.Errorf("instance value slot after override calls on %s = %q, want 8", name, got)
+			if got := r.str(`SELECT COALESCE(attributes -> '_instance' ->> 'slot', '') FROM ci WHERE id = $1`, device); got != "7" {
+				t.Errorf("instance value slot after override calls on %s = %q, want 7", name, got)
 			}
 			if got := r.str(`SELECT version::text FROM ci WHERE id = $1`, device); got != beforeVersion {
 				t.Errorf("CI version after override calls on %s = %s, want unchanged %s", name, got, beforeVersion)
