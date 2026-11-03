@@ -63,8 +63,9 @@ export function buildNeighborList(graph: TopologyGraphData, ciId: string): Neigh
       {
         id: node.id,
         name: node.name,
-        ciType: node.ci_type,
-        status: node.status,
+        // The neighbors of a CI are CIs, which always carry both (K27).
+        ciType: node.ci_type ?? '',
+        status: node.status ?? '',
         relType: edge.rel_type,
         direction: isOutgoing ? ('outgoing' as const) : ('incoming' as const),
       },

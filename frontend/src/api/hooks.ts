@@ -289,15 +289,18 @@ export const MAX_IMPACT_CIS = 100;
 /**
  * useImpactMany runs the joint impact analysis of the failed CIs (IMP-05).
  * Its error is the page's answer when the analysis fails: there is no
- * client-side replacement (F-326).
+ * client-side replacement (F-326). include asks for the blocks of WP-297
+ * (IMPACT_PANEL_INCLUDE: services, clients, sites, SPOF) next to the
+ * compact CIs; clients and sites come as aggregates, not as node fields.
  */
-export function useImpactMany(ids: string[], relType?: string) {
+export function useImpactMany(ids: string[], relType?: string, include?: string) {
   return useQuery({
-    queryKey: ['topology-impact-many', ids, relType],
+    queryKey: ['topology-impact-many', ids, relType, include],
     queryFn: () =>
       topologyApi.impactMany(ids, {
         rel_type: relType || undefined,
         fields: IMPACT_COMPACT_FIELDS,
+        include: include || undefined,
       }),
     enabled: ids.length > 0,
     retry: false,

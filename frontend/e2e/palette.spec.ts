@@ -12,6 +12,8 @@ test('navigates with the command palette', async ({ page }) => {
     // The palette also searches the CMDB for its input.
     { path: '/search', reply: () => ({ body: list([]) }) },
     { path: '/topology', reply: () => ({ body: { nodes: [], edges: [] } }) },
+    // The topology page labels its relationship filter from the types (WP-818).
+    { path: '/relationship-types', reply: () => ({ body: list([]) }) },
   ]);
   await signIn(page);
   await page.goto('/cmdb');

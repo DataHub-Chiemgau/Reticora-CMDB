@@ -14,6 +14,7 @@ import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
 import { TICKET_CATEGORIES, TICKET_STATUSES } from '../pages/TicketListPage';
+import { NODE_KINDS } from '../api/client';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -138,6 +139,11 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
 ];
 
 const enumerations: Array<[string, readonly string[]]> = [
+  // WP-818: the kinds of a topology node (IMP-11) and the relationship
+  // categories of summary.by_category in the impact panel.
+  ['topology.nodeKinds', NODE_KINDS],
+  ['topology.nodeKinds', specEnum('TopologyNode', 'node_kind')],
+  ['impact.categories', specEnum('RelationshipTypeCategory')],
   ['dashboard.roles', DASHBOARD_ROLES],
   ['stocktake.statuses', STOCKTAKE_STATUSES],
   ['stocktake.scopes', STOCKTAKE_SCOPES],
@@ -231,6 +237,10 @@ describe('i18n catalog', () => {
     expect([...TICKET_CATEGORIES]).toEqual(BACKEND_ENUMS.ticketCategories);
   });
 
+  it('offers exactly the node kinds of the OpenAPI types (WP-818)', () => {
+    expect([...NODE_KINDS]).toEqual(specEnum('TopologyNode', 'node_kind'));
+  });
+
   it('labels in_stock as "Auf Lager" in de and "In stock" in en', () => {
     expect(lookup(deDE, 'asset.statuses.in_stock')).toBe('Auf Lager');
     expect(lookup(enUS, 'asset.statuses.in_stock')).toBe('In stock');
@@ -249,6 +259,7 @@ describe('i18n catalog', () => {
     '../pages/DiscoveryPage.tsx',
     '../pages/StocktakeListPage.tsx',
     '../pages/CITypeAdminPage.tsx',
+    '../pages/TopologyPage.tsx',
   ])('%s has no literal option labels', (file) => {
     const source = pageSources[file];
     expect(source, file).toBeDefined();

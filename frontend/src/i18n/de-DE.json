@@ -842,13 +842,6 @@
     },
     "filterRelType": "Beziehungstyp",
     "allRelTypes": "Alle Beziehungen",
-    "relTypes": {
-      "connected_to": "verbunden",
-      "powered_by": "versorgt von",
-      "hosted_on": "gehostet auf",
-      "depends_on": "abhängig von",
-      "member_of": "Mitglied von"
-    },
     "filterSite": "Nach Standort filtern",
     "allSites": "Alle Standorte",
     "start": {
@@ -857,7 +850,20 @@
       "type": "CI-Typ",
       "show": "Topologie anzeigen"
     },
-    "graphUnavailable": "Die grafische Darstellung braucht WebGL, das in diesem Browser nicht verfügbar ist. Die Knotenliste unten zeigt dieselben Daten."
+    "graphUnavailable": "Die grafische Darstellung braucht WebGL, das in diesem Browser nicht verfügbar ist. Die Knotenliste unten zeigt dieselben Daten.",
+    "filterNetwork": "Subnetze und VLANs",
+    "nodeKinds": {
+      "ci": "CI",
+      "subnet": "Subnetz",
+      "vlan": "VLAN"
+    },
+    "legend": {
+      "title": "Legende",
+      "ci": "CI (Farbe nach Status)",
+      "subnet": "Subnetz (aus IPAM projiziert)",
+      "vlan": "VLAN (aus IPAM projiziert)",
+      "spof": "Single Point of Failure eines Services"
+    }
   },
   "rack": {
     "title": "Racks",
@@ -1472,7 +1478,7 @@
     "sites": "Standorte",
     "affected": "Betroffene CIs",
     "spof": "SPOF",
-    "spofList": "Single Points of Failure:",
+    "spofList": "Single Points of Failure der Services:",
     "clients": "Kunden",
     "title": "Auswirkungsanalyse",
     "compute": "Blast Radius berechnen",
@@ -1480,7 +1486,26 @@
     "heuristicList": "Möglicherweise betroffen:",
     "heuristicHint": "Nur über eine ungerichtete Netzverbindung (connected_to) erreicht; ob der Ausfall diese CIs trifft, ist nicht sicher. Sie zählen nicht zu den betroffenen CIs, Kunden und Standorten.",
     "heuristicMarker": "Netzheuristik",
-    "noneAffected": "Keine sicher betroffenen CIs."
+    "noneAffected": "Keine sicher betroffenen CIs.",
+    "services": "Services",
+    "servicesHeuristic": "+{{count}} über Netzheuristik",
+    "servicesList": "Betroffene Services:",
+    "clientsList": "Betroffene Kunden:",
+    "sitesList": "Betroffene Standorte:",
+    "spofBadge": "SPOF",
+    "spofFor": "für {{services}}",
+    "spofTruncated": "Die Liste ist gekürzt: Nur die 500 dem Ausfall nächsten Kandidaten wurden geprüft.",
+    "directList": "Direkt betroffen ohne Alternative:",
+    "redundantList": "Durch Redundanz geschützt:",
+    "byCategory": "Betroffen je Beziehungskategorie:",
+    "categories": {
+      "network": "Netzwerk",
+      "power": "Strom",
+      "hosting": "Hosting",
+      "logical": "Logisch",
+      "physical": "Physisch"
+    },
+    "truncated": "Die Analyse hat die Knotengrenze erreicht: Die Zahlen sind Untergrenzen, die Liste kann unvollständig sein."
   },
   "composition": {
     "inheritedHint": "Geteilte Inventardaten (Seriennummer, Kauf, Garantie, Standort) stammen vom Parent-Asset.",

@@ -33,6 +33,8 @@ import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Modal } from '../ui/Modal';
 import { SkeletonList } from '../ui/Skeleton';
+import { ImpactPanel } from '../graph/ImpactPanel';
+import { useEntitlements } from '../../hooks/useEntitlements';
 import { ErrorState } from '../ui/ErrorState';
 
 // ─── Location names and times (CI-06, DB-05) ────────────────────────────────
@@ -600,17 +602,17 @@ export function LifecycleSection({
   );
 }
 
-// ─── Impact analysis (§15) ───────────────────────────────────────────────────
+// ─── Impact analysis (§15, UI-14: ImpactPanel, WP-818) ───────────────────────────────────────────────────
 
 export function ImpactSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
+  const { isEnabled } = useEntitlements();
   const [enabled, setEnabled] = useState(false);
-  const blast = useBlastRadius(ciId, enabled);
-  // Certain hits and CIs reached only over connected_to (the network
-  // heuristic, IMP-03) are listed apart; affected_count counts the former.
-  const affected = blast.data?.affected_cis ?? [];
-  const certain = affected.filter((n) => !n.heuristic);
-  const heuristic = affected.filter((n) => n.heuristic);
+  const topology = isEnabled('topology');
+  const blast = useBlastRadius(ciId, enabled && topology);
+  // blast-radius hangs on the entitlement topology (gatedSuffixes): without
+  // it the section is not shown (UI-14, WP-818).
+  if (!topology) return null;
 
   return (
     <Section title={t('impact.title', 'Auswirkungsanalyse')}>
@@ -621,74 +623,8 @@ export function ImpactSection({ ciId }: { ciId: string }) {
       ) : blast.isLoading ? (
         <SkeletonList rows={3} label="…" />
       ) : blast.data ? (
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-4 text-sm">
-            <span>
-              {t('impact.affected', 'Betroffene CIs')}: <strong>{blast.data.affected_count}</strong>
-            </span>
-            <span>
-              {t('impact.heuristic')}: <strong>{blast.data.heuristic_count}</strong>
-            </span>
-            <span>
-              {t('impact.clients', 'Kunden')}: <strong>{blast.data.client_ids?.length ?? 0}</strong>
-            </span>
-            <span>
-              {t('impact.sites', 'Standorte')}: <strong>{blast.data.site_ids?.length ?? 0}</strong>
-            </span>
-            <span className="text-red-600 dark:text-red-400">
-              {t('impact.spof', 'SPOF')}:{' '}
-              <strong>{blast.data.single_points_of_failure?.length ?? 0}</strong>
-            </span>
-          </div>
-          {(blast.data.single_points_of_failure?.length ?? 0) > 0 ? (
-            <div>
-              <p className="text-xs font-semibold text-red-600 dark:text-red-400">
-                {t('impact.spofList', 'Single Points of Failure:')}
-              </p>
-              <ul className="text-sm">
-                {blast.data.single_points_of_failure!.map((n) => (
-                  <li key={n.id}>• {n.name}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <div>
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-              {t('impact.affectedList', 'Betroffen:')}
-            </p>
-            {certain.length > 0 ? (
-              <ul className="max-h-40 overflow-y-auto text-sm">
-                {certain.map((n) => (
-                  <li key={n.id}>
-                    • {n.name}{' '}
-                    <span className="text-xs text-gray-500 dark:text-gray-400">({n.ci_type})</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">{t('impact.noneAffected')}</p>
-            )}
-          </div>
-          {heuristic.length > 0 ? (
-            <div>
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                {t('impact.heuristicList')}
-              </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('impact.heuristicHint')}
-              </p>
-              <ul className="max-h-40 overflow-y-auto text-sm">
-                {heuristic.map((n) => (
-                  <li key={n.id}>
-                    • {n.name}{' '}
-                    <span className="text-xs text-gray-500 dark:text-gray-400">({n.ci_type})</span>{' '}
-                    <Badge variant="warning">{t('impact.heuristicMarker')}</Badge>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
+        // Of the nodes the CI detail uses id, name and ci_type only.
+        <ImpactPanel impact={{ ...blast.data, affected: blast.data.affected_cis }} />
       ) : null}
     </Section>
   );
