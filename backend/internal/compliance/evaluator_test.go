@@ -2,8 +2,9 @@ package compliance
 
 import (
 	"context"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"testing"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 )
 
 func TestEvaluatorScoresFailures(t *testing.T) {

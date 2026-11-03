@@ -279,6 +279,7 @@ func (b *OpenSearchBackend) Query(ctx context.Context, q Query) (Result, error) 
 	out.HasMore = out.Offset+len(out.Data) < out.Total
 	return out, nil
 }
+
 // excludedTypes lists the entity types a restricted principal never gets from
 // a remote index.
 func excludedTypes(scope *database.TenantScope) []string {

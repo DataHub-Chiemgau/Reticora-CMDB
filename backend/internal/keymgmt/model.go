@@ -12,7 +12,7 @@ type Item struct {
 	Name           string    `json:"name"`
 	KeyType        string    `json:"key_type"` // physical | digital
 	Identifier     string    `json:"identifier,omitempty"`
-	Status         string    `json:"status"`   // available | issued | lost | retired
+	Status         string    `json:"status"` // available | issued | lost | retired
 	Location       string    `json:"location,omitempty"`
 	Notes          string    `json:"notes,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
