@@ -5773,7 +5773,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /**
+     * List the lifecycle transitions allowed for an asset
+     * @description The effective lifecycle model of the asset (its type chain, otherwise physical_asset), its current state and the transitions possible from it with required fields and guard (LCY-02). Without a state the initial state is offered as well. An asset outside the caller's scope is 404.
+     */
+    get: operations['getAssetsIdLifecycleTransitionOptions'];
     put?: never;
     /** Execute a lifecycle transition on an asset */
     post: operations['createAssetsIdLifecycleTransitions'];
@@ -6322,7 +6326,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /**
+     * List the lifecycle transitions allowed for a CI
+     * @description The effective lifecycle model of the CI (its type chain), its current state and the transitions possible from it with required fields and guard (LCY-02). Without a state the initial state is offered as well. A CI whose type has no lifecycle model is 422; a CI outside the caller's scope is 404.
+     */
+    get: operations['getCisIdLifecycleTransitionOptions'];
     put?: never;
     /** Execute a lifecycle transition on a CI */
     post: operations['createCisIdLifecycleTransitions'];
@@ -6523,14 +6531,16 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Manage lifecycle definitions
-     * @description The planned successor is /api/v1/lifecycle-models (E-38); WP-723 deprecates this G1 path with at least 12 months of notice once the successor is implemented.
+     * List lifecycle models (deprecated alias)
+     * @deprecated
+     * @description Deprecated (E-38, WP-723): alias of GET /api/v1/lifecycle-models on the same handler. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     get: operations['listLifecycleDefinitions'];
     put?: never;
     /**
-     * Manage lifecycle definitions
-     * @description `applies_to` is asset (default), ci or both; another value is a 422 field error. A taken key is 409. The planned successor is /api/v1/lifecycle-models (E-38); WP-723 deprecates this G1 path with at least 12 months of notice once the successor is implemented.
+     * Create a lifecycle model (deprecated alias)
+     * @deprecated
+     * @description Deprecated (E-38, WP-723): alias of POST /api/v1/lifecycle-models on the same handler, with the same checks.
      */
     post: operations['createLifecycleDefinitions'];
     delete?: never;
@@ -6543,19 +6553,24 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     /**
-     * Read or delete a lifecycle definition
-     * @description The planned successor is /api/v1/lifecycle-models/{id} (E-38); WP-723 deprecates this G1 path once the successor is implemented.
+     * Get a lifecycle model (deprecated alias)
+     * @deprecated
+     * @description Deprecated (E-38, WP-723): alias of GET /api/v1/lifecycle-models/{id} on the same handler.
      */
     get: operations['getLifecycleDefinitionsId'];
     put?: never;
     post?: never;
     /**
-     * Read or delete a lifecycle definition
-     * @description The planned successor is /api/v1/lifecycle-models/{id} (E-38); WP-723 deprecates this G1 path once the successor is implemented.
+     * Delete a lifecycle model (deprecated alias)
+     * @deprecated
+     * @description Deprecated (E-38, WP-723): alias of DELETE /api/v1/lifecycle-models/{id} on the same handler, with the same protection of system and used models.
      */
     delete: operations['deleteLifecycleDefinitionsId'];
     options?: never;
@@ -6931,13 +6946,13 @@ export interface paths {
     };
     /**
      * List lifecycle models
-     * @description Planned (E-38); WP-723 implements the operation.
+     * @description The lifecycle models the organization sees (E-38, API-06): its own and the system models (physical_asset, software), ordered by key, without states and transitions (GET /lifecycle-models/{id} has them). The page follows the cursor contract (API-02).
      */
     get: operations['listLifecycleModels'];
     put?: never;
     /**
      * Create a lifecycle model
-     * @description Planned (E-38); WP-723 implements the operation.
+     * @description Creates a lifecycle model of the organization (LCY-02). Without `applies_to` the model applies to assets; another value than asset or ci is 422 on `applies_to`. An asset model must contain the states in_stock, reserved, deployed, repair, retired and disposed (422 on `states`). Transitions name known states; every guard rule passes the rule language (api/rules.schema.json), a refused rule is 422 with its path, e.g. `transitions[2].guard.fields.serial_number`. A taken key is 409.
      */
     post: operations['createLifecycleModel'];
     delete?: never;
@@ -6958,21 +6973,21 @@ export interface paths {
     };
     /**
      * Get a lifecycle model
-     * @description Planned (E-38); WP-723 implements the operation.
+     * @description The model with its states, transitions and their guards; the ETag is its version (API-07). A model of another organization is 404.
      */
     get: operations['getLifecycleModel'];
     put?: never;
     post?: never;
     /**
      * Delete a lifecycle model
-     * @description Planned (E-38); WP-723 implements the operation.
+     * @description Deletes an organization model. A system model is 403, a model of another organization 404. A model that a CI type binds (`lifecycle_model_id`) or that is the effective model of CIs or assets with a lifecycle state is 409 with the counts `ci_types`, `cis` and `assets`.
      */
     delete: operations['deleteLifecycleModel'];
     options?: never;
     head?: never;
     /**
      * Update a lifecycle model
-     * @description Planned (E-38); WP-723 implements the operation.
+     * @description Changes name, description, states and transitions of an organization model. States are matched by `key` and keep their id; new keys are added, missing ones removed. `transitions` replaces all transitions; without it the transitions between kept states stay. `key` and `applies_to` cannot change (422). The checks of POST apply. The version rises with every change. If-Match is optional (API-07); an older version is 412. A system model is 403, a model of another organization 404. Removing a state in which CIs or assets of the model stand is 409 with the number per state.
      */
     patch: operations['updateLifecycleModel'];
     trace?: never;
@@ -9116,6 +9131,144 @@ export interface components {
       field?: string;
       /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`) or `length-range-empty` (`min_length` > `max_length`). */
       code?: string;
+    };
+    /** @description A lifecycle model (LCY-02, MET-01): states and guarded transitions for CIs or assets. System models (is_system, no organization_id) are read-only. */
+    LifecycleModel: {
+      /** Format: uuid */
+      id: string;
+      /**
+       * Format: uuid
+       * @description Absent for a system model.
+       */
+      organization_id?: string;
+      key: string;
+      name: string;
+      /** @enum {string} */
+      applies_to: 'asset' | 'ci';
+      is_system: boolean;
+      description?: string;
+      /**
+       * Format: int64
+       * @description Rises with every change; the ETag of GET and PATCH (API-07).
+       */
+      version: number;
+      /** @description In the detail only. */
+      states?: components['schemas']['LifecycleModelState'][];
+      /** @description In the detail only. */
+      transitions?: components['schemas']['LifecycleModelTransition'][];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    LifecycleModelList: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['LifecycleModel'][];
+    };
+    LifecycleModelState: {
+      id: string;
+      definition_id: string;
+      key: string;
+      label: string;
+      is_initial: boolean;
+      is_terminal: boolean;
+      sort_order: number;
+      required_fields: string[];
+    };
+    LifecycleModelTransition: {
+      id: string;
+      definition_id: string;
+      /** @description Absent for a transition from any state. */
+      from_state_id?: string;
+      from_state_key?: string;
+      to_state_id: string;
+      to_state_key?: string;
+      key: string;
+      label: string;
+      required_fields: string[];
+      guard?: components['schemas']['LifecycleGuard'];
+      /** @description The stored content of the guard (lifecycle_transition.validation); kept for compatibility (API-01), read guard instead. */
+      validation?: {
+        [key: string]: unknown;
+      };
+    };
+    /** @description Guard of a transition: per field of the transition context a rule of the rule language (api/rules.schema.json). WP-724 evaluates it at the transition. */
+    LifecycleGuard: {
+      fields: {
+        [key: string]: components['schemas']['rule'];
+      };
+    };
+    LifecycleModelStateSpec: {
+      key: string;
+      label?: string;
+      is_initial?: boolean;
+      is_terminal?: boolean;
+      sort_order?: number;
+      required_fields?: string[];
+    };
+    LifecycleModelTransitionSpec: {
+      /** @description Empty for a transition from any state. */
+      from_state_key?: string;
+      to_state_key: string;
+      key: string;
+      label?: string;
+      required_fields?: string[];
+      guard?: components['schemas']['LifecycleGuard'];
+    };
+    CreateLifecycleModelRequest: {
+      key: string;
+      name: string;
+      /**
+       * @description Default asset; another value is 422.
+       * @enum {string}
+       */
+      applies_to?: 'asset' | 'ci';
+      description?: string;
+      states: components['schemas']['LifecycleModelStateSpec'][];
+      transitions?: components['schemas']['LifecycleModelTransitionSpec'][];
+    };
+    /** @description Fields of PATCH /lifecycle-models/{id}; an absent field stays. key and applies_to are accepted only with their current value (422 otherwise). */
+    UpdateLifecycleModelRequest: {
+      key?: string;
+      applies_to?: string;
+      name?: string;
+      description?: string;
+      states?: components['schemas']['LifecycleModelStateSpec'][];
+      transitions?: components['schemas']['LifecycleModelTransitionSpec'][];
+    };
+    /** @description The transitions the effective lifecycle model of an entity allows from its current state (LCY-02). */
+    LifecycleTransitionOptions: {
+      model: {
+        id: string;
+        key: string;
+        name: string;
+      };
+      /** @description Empty when the entity has no lifecycle state yet. */
+      current_state: string;
+      transitions: {
+        to_state: string;
+        key: string;
+        label: string;
+        /** @description Required fields of the target state and of the transition. */
+        required_fields: string[];
+        guard?: components['schemas']['LifecycleGuard'];
+      }[];
+    };
+    /** @description The lifecycle model is in use (409 of DELETE). */
+    LifecycleModelInUseProblem: components['schemas']['ProblemDetail'] & {
+      /** @description CI types that bind the model (lifecycle_model_id). */
+      ci_types: number;
+      /** @description CIs with a lifecycle state whose effective model it is. */
+      cis: number;
+      /** @description Assets with a lifecycle state whose effective model it is. */
+      assets: number;
+    };
+    /** @description CIs or assets stand in states a PATCH removes (409). */
+    LifecycleStatesInUseProblem: components['schemas']['ProblemDetail'] & {
+      field: string;
+      state_counts: {
+        state: string;
+        count: number;
+      }[];
     };
     PaginationEnvelope: {
       /**
@@ -28254,6 +28407,28 @@ export interface operations {
       };
     };
   };
+  getAssetsIdLifecycleTransitionOptions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Allowed transitions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LifecycleTransitionOptions'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
   createAssetsIdLifecycleTransitions: {
     parameters: {
       query?: never;
@@ -29477,6 +29652,29 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  getCisIdLifecycleTransitionOptions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Allowed transitions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LifecycleTransitionOptions'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
   createCisIdLifecycleTransitions: {
     parameters: {
       query?: never;
@@ -30039,27 +30237,35 @@ export interface operations {
   };
   listLifecycleDefinitions: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Manage lifecycle definitions */
+      /** @description Paginated lifecycle models */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['LifecycleModelList'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
     };
   };
   createLifecycleDefinitions: {
@@ -30069,23 +30275,25 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateLifecycleModelRequest'];
+      };
+    };
     responses: {
-      /** @description Manage lifecycle definitions */
+      /** @description The created lifecycle model */
       201: {
         headers: {
+          /** @description The version of the model (1). */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleModel'];
+        };
       };
       400: components['responses']['BadRequest'];
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
+      401: components['responses']['Unauthorized'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
@@ -30094,49 +30302,59 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read or delete a lifecycle definition */
+      /** @description The lifecycle model with states, transitions and guards */
       200: {
         headers: {
+          /** @description The version of the model. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['LifecycleModel'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   deleteLifecycleDefinitionsId: {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read or delete a lifecycle definition */
+      /** @description Deleted */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description Unauthorized */
-      401: {
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The model is in use; the counts name by what. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['LifecycleModelInUseProblem'];
+        };
       };
     };
   };
@@ -31115,12 +31333,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List lifecycle models. The page follows the cursor contract (API-02); the item schema comes with WP-723. */
+      /** @description Paginated lifecycle models */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleModelList'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -31134,18 +31354,27 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateLifecycleModelRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-723. */
+      /** @description The created lifecycle model */
       201: {
         headers: {
+          /** @description The version of the model (1). */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleModel'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -31161,12 +31390,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a lifecycle model. The response schema comes with WP-723. */
+      /** @description The lifecycle model */
       200: {
         headers: {
+          /** @description The version of the model; send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleModel'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -31195,31 +31428,69 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The model is in use; the counts name by what. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleModelInUseProblem'];
+        };
+      };
     };
   };
   updateLifecycleModel: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateLifecycleModelRequest'];
+      };
+    };
     responses: {
-      /** @description Updated. The request and response schemas come with WP-723. */
+      /** @description The changed lifecycle model */
       200: {
         headers: {
+          /** @description The new version of the model. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleModel'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description CIs or assets stand in states the change removes. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleStatesInUseProblem'];
+        };
+      };
+      /** @description The If-Match version is not the current version of the model. */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
     };
   };

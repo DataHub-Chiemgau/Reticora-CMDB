@@ -264,7 +264,13 @@ export interface LifecycleTransition {
   key: string;
   label: string;
   required_fields: string[];
+  guard?: LifecycleGuard;
 }
+
+// The guard of a transition and the allowed transitions of an entity
+// (LCY-02, WP-723); the types come from the OpenAPI specification.
+export type LifecycleGuard = components['schemas']['LifecycleGuard'];
+export type LifecycleTransitionOptions = components['schemas']['LifecycleTransitionOptions'];
 
 export interface LifecycleDefinition {
   id: string;
@@ -273,16 +279,19 @@ export interface LifecycleDefinition {
   applies_to: string;
   is_system: boolean;
   description?: string;
+  version: number;
   states?: LifecycleState[];
   transitions?: LifecycleTransition[];
 }
 
+// Lifecycle models live under /lifecycle-models (E-38); /lifecycle-definitions
+// is the deprecated alias (WP-723).
 export const lifecycleApi = {
   list(params: { limit?: number; offset?: number } = {}) {
-    return fetchAPI<PaginatedResponse<LifecycleDefinition>>(`/lifecycle-definitions${qs(params)}`);
+    return fetchAPI<PaginatedResponse<LifecycleDefinition>>(`/lifecycle-models${qs(params)}`);
   },
   get(id: string): Promise<LifecycleDefinition> {
-    return fetchAPI(`/lifecycle-definitions/${id}`);
+    return fetchAPI(`/lifecycle-models/${id}`);
   },
   create(data: {
     key: string;
@@ -292,7 +301,12 @@ export const lifecycleApi = {
     states: unknown[];
     transitions?: unknown[];
   }) {
-    return fetchAPI('/lifecycle-definitions', { method: 'POST', body: JSON.stringify(data) });
+    return fetchAPI('/lifecycle-models', { method: 'POST', body: JSON.stringify(data) });
+  },
+  // The transitions the effective model of the entity allows from its
+  // current state (GET /{cis|assets}/{id}/lifecycle-transitions).
+  options(entityType: 'assets' | 'cis', id: string): Promise<LifecycleTransitionOptions> {
+    return fetchAPI(`/${entityType}/${id}/lifecycle-transitions`);
   },
   transition(
     entityType: 'assets' | 'cis',

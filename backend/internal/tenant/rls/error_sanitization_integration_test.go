@@ -70,7 +70,7 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 	w.create(w.orgA, "/api/v1/relationship-types", relType)
 	ciType := map[string]any{"key": "t1_dup", "name": "T1 Dup"}
 	w.create(w.orgA, "/api/v1/ci-types", ciType)
-	lifecycle := map[string]any{"key": "t1_dup", "name": "T1", "applies_to": "asset",
+	lifecycle := map[string]any{"key": "t1_dup", "name": "T1", "applies_to": "ci",
 		"states": []any{map[string]any{"key": "a", "label": "A", "is_initial": true}}}
 	w.create(w.orgA, "/api/v1/lifecycle-definitions", lifecycle)
 	team := w.create(w.orgA, "/api/v1/teams", map[string]any{"name": "t1-err-team"})
@@ -117,7 +117,7 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 		{"WP-011", "lifecycle definition invalid applies_to", w.orgA, http.MethodPost, "/api/v1/lifecycle-definitions", map[string]any{"key": "t1_bad",
 			"name": "T1", "applies_to": "no-such-kind", "states": []any{map[string]any{"key": "a", "label": "A", "is_initial": true}}}, []int{422}, `"field":"applies_to"`},
 		{"WP-011", "lifecycle definition with a NUL byte", w.orgA, http.MethodPost, "/api/v1/lifecycle-definitions", map[string]any{"key": "t1_nul",
-			"name": nul, "states": []any{map[string]any{"key": "a", "label": "A", "is_initial": true}}}, []int{400}, "invalid format or is out of range"},
+			"name": nul, "applies_to": "ci", "states": []any{map[string]any{"key": "a", "label": "A", "is_initial": true}}}, []int{400}, "invalid format or is out of range"},
 		// WP-661 (F-390): the credential handler answers an id that is no
 		// UUID like an unknown one, not 500.
 		{"WP-011", "credential of an invalid id", w.orgA, http.MethodGet, "/api/v1/credentials/not-a-uuid", nil, []int{404}, "credential not found"},

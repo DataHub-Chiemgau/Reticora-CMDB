@@ -30,6 +30,7 @@ DELETE /api/v1/ips/{id} ipam:write
 DELETE /api/v1/jobs/{id} job:read
 DELETE /api/v1/keys/{id} key:write
 DELETE /api/v1/lifecycle-definitions/{id} lifecycle:manage
+DELETE /api/v1/lifecycle-models/{id} lifecycle:manage
 DELETE /api/v1/locations/{id} location:write
 DELETE /api/v1/maintenance-windows/{id} maintenance:write
 DELETE /api/v1/monitoring/alerts/{id} monitoring:write
@@ -75,6 +76,7 @@ GET /api/v1/assets asset:read
 GET /api/v1/assets/{id} asset:read
 GET /api/v1/assets/{id}/children asset:read
 GET /api/v1/assets/{id}/label.svg asset:read
+GET /api/v1/assets/{id}/lifecycle-transitions asset:read
 GET /api/v1/assets/{id}/locations asset:read
 GET /api/v1/assets/{id}/movements asset:read
 GET /api/v1/assets/{id}/state asset:read
@@ -110,6 +112,7 @@ GET /api/v1/cis/{id}/field-definitions ci:read
 GET /api/v1/cis/{id}/fields ci:read
 GET /api/v1/cis/{id}/instance-attributes ci:read
 GET /api/v1/cis/{id}/interfaces ipam:read
+GET /api/v1/cis/{id}/lifecycle-transitions ci:read
 GET /api/v1/cis/{id}/metrics ci:read
 GET /api/v1/cis/{id}/parent ci:read
 GET /api/v1/cis/{id}/provenance ci:read
@@ -187,6 +190,8 @@ GET /api/v1/keys/{id} key:read
 GET /api/v1/keys/{id}/assignments key:read
 GET /api/v1/lifecycle-definitions asset:read
 GET /api/v1/lifecycle-definitions/{id} asset:read
+GET /api/v1/lifecycle-models asset:read
+GET /api/v1/lifecycle-models/{id} asset:read
 GET /api/v1/locations location:read
 GET /api/v1/locations/tree location:read
 GET /api/v1/locations/{id} location:read
@@ -312,6 +317,7 @@ PATCH /api/v1/inventory/items/{id} stock:write
 PATCH /api/v1/ip-addresses/{id} ipam:write
 PATCH /api/v1/ips/{id} ipam:write
 PATCH /api/v1/keys/{id} key:write
+PATCH /api/v1/lifecycle-models/{id} lifecycle:manage
 PATCH /api/v1/locations/{id} location:write
 PATCH /api/v1/maintenance-windows/{id} maintenance:write
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
@@ -439,6 +445,7 @@ POST /api/v1/keys key:write
 POST /api/v1/keys/{id}/issue key:write
 POST /api/v1/keys/{id}/return key:write
 POST /api/v1/lifecycle-definitions lifecycle:manage
+POST /api/v1/lifecycle-models lifecycle:manage
 POST /api/v1/locations location:write
 POST /api/v1/maintenance-windows maintenance:write
 POST /api/v1/maintenance-windows/{id}/notify maintenance:write

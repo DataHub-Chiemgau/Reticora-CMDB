@@ -100,6 +100,7 @@ var resourceTables = map[string][]string{
 	"jobs":                      {"job"},
 	"keys":                      {"key_item"},
 	"lifecycle-definitions":     {"lifecycle_definition"},
+	"lifecycle-models":          {"lifecycle_definition"},
 	"locations":                 {"location"},
 	"maintenance-windows":       {"maintenance_window"},
 	"monitoring":                {"alert_rule"},

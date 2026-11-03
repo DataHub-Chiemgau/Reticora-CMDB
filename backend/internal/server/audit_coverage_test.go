@@ -453,7 +453,7 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/inventory/items", `{"name":"a5-item"}`},
 	{"POST /api/v1/credentials/", `{"name":"a5-credential","kind":"snmp_v2c","secret":{"community":"public"}}`},
 	{"POST /api/v1/asset-locations", `{"asset_id":"<id:/api/v1/assets>","lat":47.8,"lon":12.6}`},
-	{"POST /api/v1/lifecycle-definitions", `{"key":"a5_lc","name":"a5 lifecycle","applies_to":"asset","states":[{"key":"new","label":"New","is_initial":true},{"key":"used","label":"Used"}],"transitions":[{"from_state_key":"new","to_state_key":"used","key":"use"}]}`},
+	{"POST /api/v1/lifecycle-definitions", `{"key":"a5_lc","name":"a5 lifecycle","applies_to":"ci","states":[{"key":"new","label":"New","is_initial":true},{"key":"used","label":"Used"}],"transitions":[{"from_state_key":"new","to_state_key":"used","key":"use"}]}`},
 	{"POST /api/v1/reservations", `{"item_kind":"asset","asset_id":"<id:/api/v1/assets>","quantity":1}`},
 	{"POST /api/v1/stock-movements", `{"consumable_id":"<id:/api/v1/consumables>","direction":"in","quantity":1}`},
 	{"POST /api/v1/disposal-records", `{"method":"reuse","asset_id":"<asset2>"}`},

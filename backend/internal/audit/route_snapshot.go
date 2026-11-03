@@ -374,6 +374,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	m["POST "+v1+"credentials/"] = created("credential")
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
+	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)
 	crud(m, v1+"security/findings", "security_finding", "POST", "PATCH")
 	crud(m, v1+"invitations", "user_invitation", "POST", "DELETE")
 	crud(m, v1+"network-interfaces", "network_interface", "PATCH", "DELETE")

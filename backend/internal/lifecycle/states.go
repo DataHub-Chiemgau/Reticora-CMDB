@@ -85,31 +85,26 @@ func NewResolver(pool *pgxpool.Pool) *Resolver {
 // physicalAssetModelID is the system model physical_asset (000055).
 const physicalAssetModelID = "00000000-0000-0000-0000-000000000101"
 
+// LifecycleModelFor resolves the id of the effective lifecycle model of an
+// entity: an entity outside the caller's scope is "not found", a CI whose
+// type has no effective ci model ErrNoLifecycleModel.
+func (r *Resolver) LifecycleModelFor(req *http.Request, orgID, entityType, entityID string) (string, error) {
+	var definitionID string
+	err := database.WithRequestTenant(req.Context(), r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		definitionID, err = effectiveModelTx(ctx, tx, entityType, entityID)
+		return err
+	})
+	return definitionID, err
+}
+
 // LifecycleKeyFor resolves the lifecycle definition key for an entity.
 func (r *Resolver) LifecycleKeyFor(req *http.Request, orgID, entityType, entityID string) (string, error) {
 	var key string
 	err := database.WithRequestTenant(req.Context(), r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var definitionID string
-		var err error
-		switch entityType {
-		case "asset":
-			err = tx.QueryRow(ctx, `
-				SELECT COALESCE(lifecycle_model_effective(a.asset_type_id, 'asset'), $2::uuid)::text
-				FROM asset a WHERE a.id = $1`, entityID, physicalAssetModelID).Scan(&definitionID)
-		case "ci":
-			err = tx.QueryRow(ctx, `
-				SELECT COALESCE(lifecycle_model_effective(c.ci_type_id, 'ci')::text, '')
-				FROM ci c WHERE c.id = $1`, entityID).Scan(&definitionID)
-			if err == nil && definitionID == "" {
-				// Only CI types with an effective ci lifecycle model have
-				// a lifecycle state (DB-05).
-				return ErrNoLifecycleModel
-			}
-		default:
-			return fmt.Errorf("unsupported entity type %q", entityType)
-		}
-		if err != nil || definitionID == "" {
-			return fmt.Errorf("not found")
+		definitionID, err := effectiveModelTx(ctx, tx, entityType, entityID)
+		if err != nil {
+			return err
 		}
 		if err := tx.QueryRow(ctx,
 			"SELECT key FROM lifecycle_definition WHERE id = $1", definitionID).Scan(&key); err != nil {
@@ -120,12 +115,44 @@ func (r *Resolver) LifecycleKeyFor(req *http.Request, orgID, entityType, entityI
 	return key, err
 }
 
+// effectiveModelTx returns the id of the effective lifecycle model of the
+// entity (lifecycle_model_effective; an asset falls back to
+// physical_asset).
+func effectiveModelTx(ctx context.Context, tx pgx.Tx, entityType, entityID string) (string, error) {
+	var definitionID string
+	var err error
+	switch entityType {
+	case "asset":
+		err = tx.QueryRow(ctx, `
+			SELECT COALESCE(lifecycle_model_effective(a.asset_type_id, 'asset'), $2::uuid)::text
+			FROM asset a WHERE a.id = $1`, entityID, physicalAssetModelID).Scan(&definitionID)
+	case "ci":
+		err = tx.QueryRow(ctx, `
+			SELECT COALESCE(lifecycle_model_effective(c.ci_type_id, 'ci')::text, '')
+			FROM ci c WHERE c.id = $1`, entityID).Scan(&definitionID)
+		if err == nil && definitionID == "" {
+			// Only CI types with an effective ci lifecycle model have
+			// a lifecycle state (DB-05).
+			return "", ErrNoLifecycleModel
+		}
+	default:
+		return "", fmt.Errorf("unsupported entity type %q", entityType)
+	}
+	if err != nil || definitionID == "" {
+		return "", fmt.Errorf("not found")
+	}
+	return definitionID, nil
+}
+
 // MemoryStateStore implements StateStore and EntityResolver in memory for
 // tests and the --no-db development mode.
 type MemoryStateStore struct {
 	mu     sync.RWMutex
 	states map[string]string // entityType/entityID -> state
 	keys   map[string]string // entityType/entityID -> definition key
+	// defs resolves a definition key to the model id (LifecycleModelFor);
+	// NewHandler links the memory repository it serves.
+	defs *MemoryRepository
 }
 
 // NewMemoryStateStore creates an empty in-memory state store.
@@ -168,4 +195,33 @@ func (s *MemoryStateStore) LifecycleKeyFor(_ *http.Request, orgID, entityType, e
 		return "", fmt.Errorf("not found")
 	}
 	return key, nil
+}
+
+// LifecycleModelFor implements EntityResolver: the id of the model whose
+// key SeedEntity registered, looked up in the linked memory repository.
+func (s *MemoryStateStore) LifecycleModelFor(r *http.Request, orgID, entityType, entityID string) (string, error) {
+	key, err := s.LifecycleKeyFor(r, orgID, entityType, entityID)
+	if err != nil {
+		return "", err
+	}
+	s.mu.RLock()
+	defs := s.defs
+	s.mu.RUnlock()
+	if defs == nil {
+		return "", ErrNoLifecycleModel
+	}
+	id, ok := defs.lookupKey(orgID, key)
+	if !ok {
+		return "", ErrNoLifecycleModel
+	}
+	return id, nil
+}
+
+// linkDefinitions makes the store resolve model ids from repo.
+func (s *MemoryStateStore) linkDefinitions(repo *MemoryRepository) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.defs == nil {
+		s.defs = repo
+	}
 }
