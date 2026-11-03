@@ -549,6 +549,8 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"PATCH /api/v1/metamodel/drafts/{id}":                  {"", `{"name":"a5 draft renamed"}`},
 	"POST /api/v1/metamodel/drafts/{id}/items":             {"", `{"kind":"ci_type","op":"create","payload":{"key":"a5_draft_type","name":"a5 draft type"}}`},
 	"DELETE /api/v1/metamodel/drafts/{id}/items/{item_id}": {"/api/v1/metamodel/drafts/<id:/api/v1/metamodel/drafts>/items/<id:/api/v1/metamodel-draft-items>", ""},
+	// Document links (WP-267): the link the sub-create returned.
+	"DELETE /api/v1/documents/{id}/links/{link_id}": {"/api/v1/documents/<id:/api/v1/documents>/links/<id:/api/v1/document-links>", ""},
 }
 
 // auditRouteSubCreates create rows under another resource; they run first
@@ -565,6 +567,7 @@ var auditRouteSubCreates = []struct{ route, collection string }{
 	{"POST /api/v1/cis/{id}/merge", ""},
 	{"POST /api/v1/subnets/{id}/reservations", "/api/v1/ip-reservations"},
 	{"POST /api/v1/metamodel/drafts/{id}/items", "/api/v1/metamodel-draft-items"},
+	{"POST /api/v1/documents/{id}/links", "/api/v1/document-links"},
 }
 
 // TestEveryWriteRouteAuditedOnPostgreSQL runs every write route of the

@@ -675,6 +675,12 @@ var domainRecordedRoutes = map[string]string{
 	// in the transaction of the transition.
 	"POST /api/v1/cis/{id}/lifecycle-transitions":    "lifecycle.PGStateStore.RecordTransition",
 	"POST /api/v1/assets/{id}/lifecycle-transitions": "lifecycle.PGStateStore.RecordTransition",
+
+	// Document links (MGT-01, WP-267): document.linked and
+	// document.unlinked with link id and target, in the transaction of the
+	// change.
+	"POST /api/v1/documents/{id}/links":             "document.PGRepository.LinkDocument",
+	"DELETE /api/v1/documents/{id}/links/{link_id}": "document.PGRepository.UnlinkDocument",
 }
 
 // auditedRoutes records, per write route registered through an

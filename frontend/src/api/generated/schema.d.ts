@@ -4312,7 +4312,7 @@ export interface paths {
     put?: never;
     /**
      * Link a document to another entity
-     * @description A principal restricted to some clients or sites may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09).
+     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record and stocktake; any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). The audit log records document.linked with link_id, entity_type and entity_id.
      */
     post: operations['linkDocument'];
     delete?: never;
@@ -8297,7 +8297,7 @@ export interface paths {
     post?: never;
     /**
      * Remove a link of a document
-     * @description Planned (E-38); WP-267 implements the operation.
+     * @description Removes one link of the document (E-38, MGT-01). Only a link the caller sees and may write (client, site and team of its target in the caller's scope) is removed; any other link, also one of another document, answers 404. The audit log records document.unlinked with link_id, entity_type and entity_id.
      */
     delete: operations['deleteDocumentLink'];
     options?: never;
@@ -14135,6 +14135,7 @@ export interface components {
       data: components['schemas']['DocumentLink'][];
     };
     CreateDocumentLinkRequest: {
+      /** @description ci, asset, assignment, ticket, location, disposal_record or stocktake. */
       entity_type: string;
       entity_id: string;
     };
@@ -25094,6 +25095,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

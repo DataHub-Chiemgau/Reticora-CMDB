@@ -401,7 +401,6 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/desks/{id}/bookings":         "desk_booking",
 		"POST /api/v1/discovery/jobs":              "discovery_job",
 		"POST /api/v1/disposal-records":            "disposal_record",
-		"POST /api/v1/documents/{id}/links":        "document_link",
 		"POST /api/v1/export/jobs":                 "export_job",
 		"POST /api/v1/exports":                     "export_job",
 		"POST /api/v1/forms/{id}/submissions":      "form_submission",

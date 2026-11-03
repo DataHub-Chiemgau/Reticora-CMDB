@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -65,30 +66,25 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// Documents and their links carry no client or site column yet (WP-028). A
-// link is visible when its object is visible under the transaction's tenant
-// scope, whose policies filter the subqueries; a document is visible when it
-// is not linked at all or linked to at least one visible object.
-const (
-	linkVisible = `CASE document_link.entity_type
-	WHEN 'ci' THEN EXISTS (SELECT 1 FROM ci WHERE ci.id = document_link.entity_id)
-	WHEN 'asset' THEN EXISTS (SELECT 1 FROM asset WHERE asset.id = document_link.entity_id)
-	WHEN 'contact' THEN EXISTS (SELECT 1 FROM contact WHERE contact.id = document_link.entity_id)
-	WHEN 'ticket' THEN EXISTS (SELECT 1 FROM ticket WHERE ticket.id = document_link.entity_id)
-	WHEN 'location' THEN EXISTS (SELECT 1 FROM location WHERE location.id = document_link.entity_id)
-	ELSE true END`
+// A link is visible when its target is visible under the transaction's
+// tenant scope (linkVisible, links.go); a document is visible when it is not
+// linked at all or linked to at least one visible target. The policies of
+// document and document_link (migrations 000064, 000139, 000217) filter the
+// same rows; the predicates keep the repository exact without them.
+var (
 	documentVisible = "(NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
 		" OR EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id AND " + linkVisible + "))"
 	// documentWritable admits a document for UPDATE and DELETE (WP-341,
-	// migration 000139): an org-wide principal writes every document; a
-	// principal restricted in the client or site scope only a linked one whose
-	// links it sees completely and may write (client and site in its scope,
-	// migration 000146), so neither a document shared with another client or
-	// linked to an org-wide object nor an unlinked (org-wide) one is writable
-	// (E-09).
-	documentWritable = "(" + database.OrgWideScopeSQL +
+	// migration 000139): a principal restricted in none of the client, site
+	// and team scope writes every document; any other only a linked one
+	// whose links it sees completely and may write (client, site and team in
+	// its scope, migrations 000146 and 000217), so neither a document shared
+	// with another client or team or linked to an org-wide object nor an
+	// unlinked (org-wide) one is writable (E-09, E-11).
+	documentWritable = "(" + orgWideDocumentSQL +
 		" OR (document.link_count > 0 AND document.link_count = (SELECT count(*) FROM document_link" +
-		" WHERE document_link.document_id = document.id AND " + linkVisible + " AND " + database.ScopedWriteSQL + ")))"
+		" WHERE document_link.document_id = document.id AND " + linkVisible + " AND " + database.ScopedWriteSQL +
+		" AND " + teamWriteSQL + ")))"
 )
 
 // requireVisible fails with "not found" when the written row of table does not
@@ -100,7 +96,7 @@ func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) e
 		return fmt.Errorf("check %s visibility: %w", table, err)
 	}
 	if !ok {
-		return fmt.Errorf("not found")
+		return api.ErrNotFound
 	}
 	return nil
 }
@@ -370,9 +366,21 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
-// LinkDocument creates a link between a document and an entity.
+// LinkDocument creates a link between a document and an entity. The entity
+// type must stand in the registry (422) and the target must be visible under
+// the tenant scope (api.ErrNotFound), both checked before the INSERT; the
+// audit entry document.linked is the last step of the transaction.
 func (r *PGRepository) LinkDocument(ctx context.Context, link *DocumentLink) error {
+	if err := checkEntityType(link.EntityType); err != nil {
+		return err
+	}
+	if !api.IsUUID(link.EntityID) {
+		return errInvalidEntityID
+	}
 	return database.WithRequestTenant(ctx, r.pool, link.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := targetVisible(ctx, tx, link); err != nil {
+			return err
+		}
 		query := `
 			INSERT INTO document_link (organization_id, document_id, entity_type, entity_id)
 			VALUES ($1, $2, $3, $4)
@@ -391,7 +399,35 @@ func (r *PGRepository) LinkDocument(ctx context.Context, link *DocumentLink) err
 		if err := requireVisible(ctx, tx, "document", documentVisible, link.DocumentID); err != nil {
 			return err
 		}
-		return requireVisible(ctx, tx, "document_link", linkVisible, link.ID)
+		if err := requireVisible(ctx, tx, "document_link", linkVisible, link.ID); err != nil {
+			return err
+		}
+		return recordLinkAudit(ctx, tx, ActionLinked, link)
+	})
+}
+
+// UnlinkDocument removes link linkID of document docID when the link is
+// visible under the tenant scope and the caller may delete it (the
+// restrictive DELETE policy of document_link: client, site and team in its
+// scope); otherwise it fails with api.ErrNotFound. The audit entry
+// document.unlinked is the last step of the transaction.
+func (r *PGRepository) UnlinkDocument(ctx context.Context, orgID, docID, linkID string) error {
+	if !api.IsUUID(docID) || !api.IsUUID(linkID) {
+		return api.ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		link := &DocumentLink{ID: linkID, OrganizationID: orgID, DocumentID: docID}
+		err := tx.QueryRow(ctx, `
+			DELETE FROM document_link
+			WHERE id = $1 AND document_id = $2 AND organization_id = $3 AND `+linkVisible+`
+			RETURNING entity_type, entity_id::text`, linkID, docID, orgID).Scan(&link.EntityType, &link.EntityID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("unlink document: %w", err)
+		}
+		return recordLinkAudit(ctx, tx, ActionUnlinked, link)
 	})
 }
 

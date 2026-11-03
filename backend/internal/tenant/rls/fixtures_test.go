@@ -515,7 +515,7 @@ func (w *matrixWorld) parentWritable(p *matrixPrincipal, key string) bool {
 }
 
 // orgWideCS: no client or site restriction (team scopes do not restrict
-// documents, windows and review items).
+// windows and review items; for documents see documentModel).
 func (p *matrixPrincipal) orgWideCS() bool { return p.scope["client"] == nil && p.scope["site"] == nil }
 
 // linkedRows are the rows of document and maintenance_window: one per link
@@ -565,11 +565,25 @@ func linkedModel(ids matrixIDs, insert func(ctx context.Context, q matrixQuerier
 	}
 }
 
+// documentModel is linkedModel with the team scope (WP-267, migration
+// 000217): a team-restricted principal is not org-wide for documents. The
+// links of the matrix go to CIs, which carry no team, so it reads every
+// document of its organization (links without team are visible) but
+// creates, changes and deletes none (E-09, E-11).
+func documentModel(ids matrixIDs, insert func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error)) *inheritedModel {
+	m := linkedModel(ids, insert)
+	write := m.write
+	m.write = func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+		return write(w, p, r) && dimWrite(p.scope["team"], "")
+	}
+	return m
+}
+
 // inheritedModels lists every table whose policy takes its scope from
 // another table. A new one fails the matrix until it is modelled here.
 func inheritedModels(ids matrixIDs) map[string]*inheritedModel {
 	return map[string]*inheritedModel{
-		"document": linkedModel(ids, func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
+		"document": documentModel(ids, func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
 			var id string
 			if err := q.QueryRow(ctx, `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by)
 				VALUES ($1, 'matrix', 'f', '', $2) RETURNING id::text`, r.org, w.userFor(r.org)).Scan(&id); err != nil {

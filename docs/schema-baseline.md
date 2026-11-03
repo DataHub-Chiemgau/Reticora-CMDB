@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000218_business_calendar
+Stand: Migration 000217_document_link_targets
 
 ## Prüfung
 
@@ -233,6 +233,24 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
   löschen sie nur, wenn jeder Link in ihrem Schreib-Scope liegt (Migrationen
   000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
   und legen keine unverlinkten an (WP-341).
+
+### Linkziele von Dokumenten (WP-267)
+
+`document_link.entity_type` ist eines von `ci`, `asset`, `assignment`,
+`ticket`, `location`, `disposal_record` und `stocktake`
+(`doc_link_entity_type_check`, Migration 000217); die Registry in
+`backend/internal/document/links.go` hält dieselben Werte.
+`derive_document_link_scope` leitet `client_id`/`site_id` auch aus
+Location, Entsorgung und dem Standort von Asset und Zuweisung ab und
+`team_id` (Teilindex `idx_document_link_team`) aus dem Ticket. Neue
+AFTER-UPDATE-Trigger auf `location` und `disposal_record`
+(`propagate_document_link_scope`) sowie `asset_module_scope_propagation`
+(auch bei `site_id`) und `ticket_scope_propagation` (auch bei
+`team_id`) leiten die Links neu ab. Die Policy von `document_link` trägt
+das Team-Prädikat wie `ticket`; ein team-beschränkter Prinzipal gilt für
+`document` (Policies, `require_visible_parent`, `require_linked_row`)
+nicht mehr als org-weit. `app_scope_widen`/`app_scope_restore` leeren
+bzw. setzen auch `app.team_scope`.
 
 ### Standort von Assets und Mengenartikeln (WP-392)
 

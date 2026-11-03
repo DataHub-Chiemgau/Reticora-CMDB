@@ -25,7 +25,13 @@ type Repository interface {
 	// upload and returns the updated document.
 	SetStorage(ctx context.Context, orgID, id, storageKey, mimeType string, size int64) (*Document, error)
 	Delete(ctx context.Context, orgID, id string) error
+	// LinkDocument creates a link. An entity type outside the registry
+	// (links.go) fails with a 422 field error, an invisible or missing
+	// target with api.ErrNotFound.
 	LinkDocument(ctx context.Context, link *DocumentLink) error
+	// UnlinkDocument removes a link of the document that the caller sees
+	// and may delete; otherwise it fails with api.ErrNotFound (WP-267).
+	UnlinkDocument(ctx context.Context, orgID, docID, linkID string) error
 	GetLinks(ctx context.Context, orgID, docID string) ([]DocumentLink, error)
 	GetLinksForEntity(ctx context.Context, orgID, entityType, entityID string) ([]Document, error)
 }
@@ -201,7 +207,12 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	return nil
 }
 
+// LinkDocument checks the entity type against the registry like
+// PGRepository; the memory profile has no target tables to check further.
 func (r *MemoryRepository) LinkDocument(_ context.Context, link *DocumentLink) error {
+	if err := checkEntityType(link.EntityType); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -209,6 +220,21 @@ func (r *MemoryRepository) LinkDocument(_ context.Context, link *DocumentLink) e
 	link.ID = fmt.Sprintf("link-%d", r.nextLink)
 	link.CreatedAt = time.Now().UTC()
 	r.links[link.ID] = link
+	return nil
+}
+
+// UnlinkDocument removes link linkID of document docID. A link of another
+// document or organization, or whose entity type is not in the registry,
+// is not found.
+func (r *MemoryRepository) UnlinkDocument(_ context.Context, orgID, docID, linkID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	link, ok := r.links[linkID]
+	if !ok || link.OrganizationID != orgID || link.DocumentID != docID || checkEntityType(link.EntityType) != nil {
+		return api.ErrNotFound
+	}
+	delete(r.links, linkID)
 	return nil
 }
 

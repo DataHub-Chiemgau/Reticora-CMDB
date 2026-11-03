@@ -21,6 +21,7 @@ DELETE /api/v1/credentials/{id} credential:manage
 DELETE /api/v1/desks/{id} desk:write
 DELETE /api/v1/discovery-scopes/{id} discovery:manage
 DELETE /api/v1/documents/{id} document:write
+DELETE /api/v1/documents/{id}/links/{link_id} document:write
 DELETE /api/v1/forms/{id} form:write
 DELETE /api/v1/iga/connectors/{id} iga:write
 DELETE /api/v1/inventory/items/{id} stock:write
