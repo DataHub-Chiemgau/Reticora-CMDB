@@ -205,25 +205,61 @@ func withoutSort(ctx context.Context, tx pgx.Tx, restore bool, fn func() error) 
 	return ferr
 }
 
+// typeScope returns the CI types the type filters of a list query name
+// (namedTypes): per group the union of the subtrees of its types as the
+// organization sees them (ci_type_subtree), the intersection of the
+// groups. A value that is no UUID fails as the comparison with ci_type_id
+// did before (22P02, 400).
+func typeScope(ctx context.Context, tx pgx.Tx, groups [][]string) ([]string, error) {
+	var ids []string
+	var group []int32
+	for g, values := range groups {
+		for _, v := range values {
+			ids = append(ids, v)
+			group = append(group, int32(g)) //nolint:gosec // one group per type parameter
+		}
+	}
+	rows, err := tx.Query(ctx, `SELECT s.id::text FROM unnest($1::uuid[], $2::int[]) AS n(id, g), LATERAL ci_type_subtree(n.id) s
+		GROUP BY s.id HAVING count(DISTINCT n.g) = $3 ORDER BY 1`, ids, group, len(groups))
+	if err != nil {
+		return nil, fmt.Errorf("ci type subtrees: %w", err)
+	}
+	types, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("ci type subtrees: %w", err)
+	}
+	return types, nil
+}
+
 // attributeFilterOf checks that an attribute may be filtered (API-02) and
 // returns its filter kind and the CI types the filter is restricted to (nil
 // for none). The definitions of a CI's type decide (WP-566, F-216): a
-// definition of the type and the global ones (of the organization and the
+// definition of the type, the inheritable definitions of its ancestors
+// (MET-06, WP-708) and the global ones (of the organization and the
 // system; row level security hides those of other organizations) apply to
 // it, and the attribute is searchable for the type when one of them is.
-// types are the CI types the query names (named), else every type
-// counts. The attribute must be defined for one of them (else 422) and
-// searchable for one (else 400 with a hint); the searchable definitions
-// give the kind, and when they compare differently (integer in one type,
-// text in another) the filter is 400 with the hint to name the type. The
-// hits are restricted to the types the attribute is searchable for unless
-// a searchable global definition covers every type or every named type is
-// one of them, so a filter on a type definition keeps the query shape that
-// its index (partial on the type, WP-435) serves.
+// types are the CI types the query names (named) with their subtypes
+// (typeScope), as the type filter includes them, else every type counts.
+// The attribute must be defined for one of them (else 422) and searchable
+// for one (else 400 with a hint); the searchable definitions give the
+// kind, and when they compare differently (integer in one type, text in
+// another) the filter is 400 with the hint to name the type. The hits are
+// restricted to the types the attribute is searchable for (a type
+// definition with inheritable covers the subtree of its type, WP-708)
+// unless a searchable global definition covers every type. The
+// restriction is the list of types of the definitions, so a filter on a
+// type definition keeps the query shape whose predicate the index of the
+// definition (partial on the type or on its subtree, WP-435, WP-708)
+// proves in a custom plan, also when the named types are a part of it.
 func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string, types []string, named bool) (kind string, restrict []string, err error) {
-	query, args := `SELECT COALESCE(ci_type_id::text, ''), data_type, searchable FROM attribute_definition WHERE key = $1`, []any{key}
+	const covers = `CASE WHEN d.ci_type_id IS NULL OR NOT d.searchable THEN '{}'::text[]
+			WHEN d.inheritable THEN ARRAY(SELECT s.id::text FROM ci_type_subtree(d.ci_type_id) s)
+			ELSE ARRAY[d.ci_type_id::text] END`
+	query, args := `SELECT COALESCE(d.ci_type_id::text, ''), d.data_type, d.searchable, `+covers+`
+		FROM attribute_definition d WHERE d.key = $1`, []any{key}
 	if named {
-		query += ` AND (ci_type_id IS NULL OR ci_type_id::text = ANY($2::text[]))`
+		query += ` AND (d.ci_type_id IS NULL OR d.ci_type_id = ANY($2::uuid[])
+			OR (d.inheritable AND d.ci_type_id IN (SELECT a.id FROM unnest($2::uuid[]) AS n(id), LATERAL ci_type_ancestors(n.id) a)))`
 		args = append(args, types)
 	}
 	rows, err := tx.Query(ctx, query, args...)
@@ -234,9 +270,10 @@ func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string,
 		typeID, dataType string
 		searchable       bool
 		defined, global  bool
-		kinds, typed     []string
+		kinds, covered   []string
+		subtree          []string
 	)
-	if _, err = pgx.ForEachRow(rows, []any{&typeID, &dataType, &searchable}, func() error {
+	if _, err = pgx.ForEachRow(rows, []any{&typeID, &dataType, &searchable, &subtree}, func() error {
 		defined = true
 		if !searchable {
 			return nil
@@ -246,8 +283,11 @@ func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string,
 		}
 		if typeID == "" {
 			global = true
-		} else {
-			typed = append(typed, typeID)
+		}
+		for _, t := range subtree {
+			if !slices.Contains(covered, t) {
+				covered = append(covered, t)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -267,10 +307,11 @@ func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string,
 		return "", nil, &api.FieldError{Field: field,
 			Message: fmt.Sprintf("attribute %q has different data types in the CI types that make it searchable; give ci_type_id to filter on it", key)}
 	}
-	if global || (named && len(typed) == len(types)) {
+	if global {
 		return kinds[0], nil, nil
 	}
-	return kinds[0], typed, nil
+	slices.Sort(covered)
+	return kinds[0], covered, nil
 }
 
 // indexedSort are the sort columns whose order an index of the list holds
@@ -296,9 +337,22 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			args = append(args, filter.Status)
 			argPos++
 		}
-		if filter.TypeID != "" {
-			whereParts = append(whereParts, fmt.Sprintf("ci_type_id = $%d", argPos))
-			args = append(args, filter.TypeID)
+		// The type filters (ci_type_id, filter[ci_type_id] with exact or in)
+		// include the subtypes (MET-06, WP-708). The subtrees are read
+		// first and compared as a parameter: the planner estimates the
+		// list of types from the statistics of ci_type_id and reads the
+		// CIs of rare types through idx_ci_org_type, where it took a
+		// semi-join with ci_type_subtree for a match of every CI and read
+		// the whole organization in the sort order.
+		groups, typesNamed := filter.namedTypes()
+		var types []string
+		if typesNamed {
+			var serr error
+			if types, serr = typeScope(ctx, tx, groups); serr != nil {
+				return serr
+			}
+			whereParts = append(whereParts, fmt.Sprintf("ci_type_id = ANY($%d::uuid[])", argPos))
+			args = append(args, types)
 			argPos++
 		}
 		if filter.ClientID != "" {
@@ -322,8 +376,10 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			argPos++
 		}
 		orgNamed := false
-		types, typesNamed := filter.namedTypes()
 		for _, f := range filter.Filters {
+			if f.Field == "ci_type_id" && (f.Op == api.OpExact || f.Op == api.OpIn) {
+				continue // in the type filter above
+			}
 			expr := filterColumns[f.Field].expr
 			if key, ok := f.Attribute(); ok {
 				kind, restrict, err := attributeFilterOf(ctx, tx, f, key, types, typesNamed)
@@ -705,7 +761,9 @@ func applyNodeOverride(n *Node, field string, value any) {
 	}
 }
 
-// Create inserts a new CI.
+// Create inserts a new CI. A deactivated type writes nothing and is
+// ErrTypeInactive (MET-05): the insert reads the flag itself, so items
+// without ChosenType (discovery, agent) cost no statement more.
 func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 	err := database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if item.Attributes == nil {
@@ -739,13 +797,14 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				is_manual,
 				asset_id,
 				parent_ci_id
-			) VALUES (
+			)
+			SELECT
 				$1, $2, $3, $4, $5,
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
 				$21, $22, $23, $24, $25
-			)
+			WHERE NOT EXISTS (SELECT 1 FROM ci_type WHERE id = $4 AND NOT is_active)
 			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''),
 				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at
 		`
@@ -786,6 +845,10 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			nilIfEmpty(item.AssetID),
 			nilIfEmpty(item.ParentCIID),
 		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &item.SchemaVersion, &createdAt, &updatedAt); err != nil {
+			// No row: the type is deactivated (MET-05).
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrTypeInactive
+			}
 			return locationError(fmt.Errorf("create ci: %w", err))
 		}
 
@@ -813,7 +876,10 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 // its own; under row level security an error could not name it. The rows are
 // inserted in the order of serial number, hardware UUID and primary MAC, so
 // concurrent batches with the same identities wait for each other instead of
-// deadlocking on the unique indexes.
+// deadlocking on the unique indexes. A CI of a deactivated type is never
+// inserted: the statement flags it, CreateMany returns ErrTypeInactive and
+// the transaction rolls back (MET-05); it is never reported as refused,
+// which the discovery reads as a unique index refusal.
 func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*Item) (CreateManyResult, error) {
 	var res CreateManyResult
 	if len(items) == 0 {
@@ -832,6 +898,9 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 			return err
 		}
 		created, refused, err := insertCIs(ctx, tx, orgID, items)
+		if errors.Is(err, ErrTypeInactive) {
+			return err
+		}
 		if err != nil {
 			return locationError(fmt.Errorf("create cis: %w", err))
 		}
@@ -854,7 +923,8 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 }
 
 // insertCIs inserts the CI rows of items with one statement and returns the
-// created items and the positions of the refused ones.
+// created items and the positions of the refused ones; an item of a
+// deactivated type is ErrTypeInactive (MET-05).
 func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (created []*Item, refused []int, err error) {
 	n := len(items)
 	text := func(value string) *string {
@@ -894,7 +964,8 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 	args = append(args, firstSeen, lastSeen, manual)
 	rows, err := tx.Query(ctx, `
 		WITH input AS MATERIALIZED (
-			SELECT gen_random_uuid() AS id, r.*
+			SELECT gen_random_uuid() AS id, r.*,
+				EXISTS (SELECT 1 FROM ci_type t WHERE t.id = r.ci_type_id::uuid AND NOT t.is_active) AS type_inactive
 			FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
 			            $10::text[], $11::text[], $12::text[], $13::text[], $14::text[], $15::text[], $16::text[],
 			            $17::text[], $18::text[], $19::text[], $20::text[], $21::text[], $22::text[],
@@ -913,6 +984,7 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 				os_name, os_version, firmware_version, sys_object_id, attributes::jsonb, discovery_source,
 				first_seen_at, last_seen_at, is_manual, asset_id::uuid, parent_ci_id::uuid
 			FROM input
+			WHERE NOT type_inactive
 			ORDER BY serial_number, hardware_uuid, primary_mac, ord
 			ON CONFLICT DO NOTHING
 			RETURNING id, COALESCE(site_id::text, '') AS site_id, COALESCE(room_id::text, '') AS room_id,
@@ -920,23 +992,29 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 		)
 		SELECT input.ord, COALESCE(ins.id::text, ''), COALESCE(ins.site_id, ''), COALESCE(ins.room_id, ''),
 			COALESCE(ins.location_id, ''), COALESCE(ins.health, ''), COALESCE(ins.version, 0),
-			COALESCE(ins.schema_version, 0), ins.created_at, ins.updated_at
+			COALESCE(ins.schema_version, 0), ins.created_at, ins.updated_at, input.type_inactive
 		FROM input LEFT JOIN ins ON ins.id = input.id
 		ORDER BY input.ord`, args...)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rows.Close()
+	inactive := false
 	for rows.Next() {
 		var ord int64
 		var id, siteID, roomID, locationID, health string
 		var version, schemaVersion int64
 		var createdAt, updatedAt *time.Time
+		var typeInactive bool
 		if err := rows.Scan(&ord, &id, &siteID, &roomID, &locationID, &health, &version, &schemaVersion,
-			&createdAt, &updatedAt); err != nil {
+			&createdAt, &updatedAt, &typeInactive); err != nil {
 			return nil, nil, err
 		}
 		i := int(ord) - 1
+		if typeInactive {
+			inactive = true
+			continue
+		}
 		if id == "" {
 			refused = append(refused, i)
 			continue
@@ -948,7 +1026,13 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
 		created = append(created, item)
 	}
-	return created, refused, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	if inactive {
+		return nil, nil, ErrTypeInactive
+	}
+	return created, refused, nil
 }
 
 // recordCreates writes the history entry of each new CI, as Create does,
@@ -2381,9 +2465,11 @@ func (r *PGRepository) uniqueField(ctx context.Context, orgID string, err error)
 }
 
 // UniqueConflicts implements UniqueChecker: the unique attributes of the
-// CI type and the global ones whose value another active CI of the
-// organization (scope org) or of the same client (scope client) holds.
-// Soft-deleted CIs do not count (MET-15).
+// CI type, the inheritable ones of its ancestors and the global ones whose
+// value another active CI of the organization (scope org) or of the same
+// client (scope client) holds. A type definition with inheritable compares
+// with the CIs of the subtree of its type, one without only with the CIs
+// of the type (MET-06, WP-708). Soft-deleted CIs do not count (MET-15).
 //
 // The check covers the CIs the caller does not see (F-421): for a caller
 // restricted in the client or site scope it runs in an own transaction,
@@ -2406,14 +2492,18 @@ func (r *PGRepository) UniqueConflicts(ctx context.Context, orgID, ciTypeID, cli
 	check := func(ctx context.Context, tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx, `
 			SELECT d.key FROM attribute_definition d
-			WHERE d.is_unique AND (d.ci_type_id = $2::uuid OR d.ci_type_id IS NULL)
+			WHERE d.is_unique
+			  AND (d.ci_type_id = $2::uuid OR d.ci_type_id IS NULL
+			       OR (d.inheritable AND d.ci_type_id IN (SELECT a.id FROM ci_type_ancestors($2::uuid) a)))
 			  AND (d.organization_id = $1::uuid OR d.organization_id IS NULL)
 			  AND $5::jsonb ->> d.key IS NOT NULL
 			  AND EXISTS (
 				SELECT 1 FROM ci c
 				WHERE c.organization_id = $1::uuid AND c.deleted_at IS NULL
 				  AND ($4::uuid IS NULL OR c.id <> $4::uuid)
-				  AND (d.ci_type_id IS NULL OR c.ci_type_id = d.ci_type_id)
+				  AND (d.ci_type_id IS NULL
+				       OR (NOT d.inheritable AND c.ci_type_id = d.ci_type_id)
+				       OR (d.inheritable AND c.ci_type_id IN (SELECT s.id FROM ci_type_subtree(d.ci_type_id) s)))
 				  AND (d.unique_scope = 'org' OR c.client_id IS NOT DISTINCT FROM $3::uuid)
 				  AND c.attributes ->> d.key = $5::jsonb ->> d.key)
 			ORDER BY d.key`, orgID, ciTypeID, nilIfEmpty(clientID), nilIfEmpty(ciID), raw)
@@ -2539,9 +2629,13 @@ func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID
 		tc.result.CI = before
 		return tc, nil
 	}
-	// A person cannot choose a deactivated type (CI-01); discovery
-	// raises generic_device to the type it resolved, as it creates CIs.
-	if mode == TypeChangeManual && !active {
+	// A person cannot choose a deactivated type (CI-01); discovery does
+	// not raise generic_device to it either, the CI keeps its type
+	// (keepsType, MET-05).
+	if !active {
+		if mode == TypeChangeDiscovery {
+			return nil, ErrTypeInactive
+		}
 		return nil, ciTypeViolation(ciTypeDeactivated)
 	}
 	// The values the CI carries fall under the unique attributes of the

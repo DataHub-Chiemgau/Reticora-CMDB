@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -18,6 +19,35 @@ import (
 // (409; PostgreSQL reports the unique violation, 23505).
 var ErrConflict = errors.New("a CI type with this key or name already exists")
 
+// ErrTypeReadOnly: system CI types (organization_id NULL) are read-only for
+// tenants and cannot be deactivated or activated (E-10, MET-05; 403, like
+// ErrAttributeReadOnly). An organization replaces a system type by cloning.
+var ErrTypeReadOnly = errors.New("system ci types are read-only")
+
+// The invariant of MET-05: an active type has no deactivated parent.
+// validation: fixed texts.
+const (
+	typeDeactivated      = "the CI type is deactivated"
+	typeHasActiveSubtype = "the ci type has active subtypes; deactivate them first"
+)
+
+// errParentInactive refuses a deactivated parent_type_id on create and
+// update (422).
+func errParentInactive() error {
+	return &api.FieldError{Field: "parent_type_id", Message: typeDeactivated, Status: http.StatusUnprocessableEntity}
+}
+
+// errParentInactiveConflict refuses activating or cloning a type whose
+// parent is deactivated (409).
+func errParentInactiveConflict() error {
+	return &api.ConflictError{Field: "parent_type_id", Message: "the parent ci type is deactivated"}
+}
+
+// errActiveSubtypes refuses deactivating a type with active subtypes (409).
+func errActiveSubtypes() error {
+	return &api.ConflictError{Field: "is_active", Message: typeHasActiveSubtype}
+}
+
 // Repository defines persistence operations for CI types, field definitions
 // and CI-instance field definitions.
 type Repository interface {
@@ -25,10 +55,14 @@ type Repository interface {
 	GetByID(ctx context.Context, orgID, id string) (*Type, error)
 	Create(ctx context.Context, typ *Type) error
 	Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error)
-	// Clone copies a type (including its field definitions) under a new key.
+	// Clone copies a type (including its field definitions and its parent)
+	// under a new key; a deactivated parent is a conflict (409).
 	Clone(ctx context.Context, orgID, id string, req CloneRequest) (*Type, error)
 	// SetActive deactivates/reactivates a type. Deactivated types keep their
-	// CIs readable but cannot be selected for new CIs.
+	// CIs readable but cannot be selected for new CIs (MET-05). A system
+	// type is ErrTypeReadOnly; deactivating a type with active subtypes and
+	// activating one under a deactivated parent are conflicts (409), an
+	// unknown type is "not found".
 	SetActive(ctx context.Context, orgID, id string, active bool) (*Type, error)
 	// Versions returns the clone/version lineage of a type.
 	Versions(ctx context.Context, orgID, id string) ([]Type, error)
@@ -249,6 +283,9 @@ func (r *MemoryRepository) Clone(_ context.Context, orgID, id string, req CloneR
 	if !ok || (src.OrganizationID != "" && src.OrganizationID != orgID) {
 		return nil, fmt.Errorf("not found")
 	}
+	if parent, has := r.types[src.ParentTypeID]; has && !parent.IsActive {
+		return nil, errParentInactiveConflict()
+	}
 	name := req.Name
 	if name == "" {
 		name = src.Name + "_copy"
@@ -289,6 +326,20 @@ func (r *MemoryRepository) SetActive(_ context.Context, orgID, id string, active
 	t, ok := r.types[id]
 	if !ok || (t.OrganizationID != "" && t.OrganizationID != orgID) {
 		return nil, fmt.Errorf("not found")
+	}
+	if t.OrganizationID == "" {
+		return nil, ErrTypeReadOnly
+	}
+	if active {
+		if parent, has := r.types[t.ParentTypeID]; has && !parent.IsActive {
+			return nil, errParentInactiveConflict()
+		}
+	} else {
+		for _, child := range r.types {
+			if child.ParentTypeID == id && child.IsActive {
+				return nil, errActiveSubtypes()
+			}
+		}
 	}
 	t.IsActive = active
 	t.UpdatedAt = time.Now().UTC()
@@ -381,6 +432,9 @@ func (r *MemoryRepository) checkParentLocked(t *Type, parentID string) error {
 		return errParentSystem()
 	case parent.OrganizationID != "" && parent.OrganizationID != t.OrganizationID:
 		return errParentUnknown()
+	}
+	if !parent.IsActive {
+		return errParentInactive()
 	}
 	chain := r.chainLocked(t.OrganizationID, parentID)
 	height := 1

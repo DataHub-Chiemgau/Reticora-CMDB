@@ -14,10 +14,12 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
@@ -27,6 +29,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant/rls"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
@@ -74,9 +77,12 @@ func newChannelEnvWithBlobs(t *testing.T, f *scopetest.Fixture, blobs blob.Store
 		Blobs:        blobs,
 		Entitlements: entitlements,
 		Dispatcher:   webhook.NewDispatcher(repos.Webhook, nil, webhook.DispatcherOptions{Deliveries: repos.WebhookDeliveries}),
-		CIService:    ci.NewServiceWithLimits(repos.CI, entitlements),
-		Credentials:  credential.NewService(repos.Credential, encryptor),
-		OIDC:         identity.NewOIDCProvider(identity.OIDCConfig{}),
+		// As in cmd/server: attribute values are checked against the field
+		// metadata, reference values against their targets (WP-254).
+		CIService: ci.NewServiceWithLimits(repos.CI, entitlements).WithFieldResolver(repos.CIType).
+			WithReferences(ci.NewPGReferenceLookup(f.App)),
+		Credentials: credential.NewService(repos.Credential, encryptor),
+		OIDC:        identity.NewOIDCProvider(identity.OIDCConfig{}),
 		// As in cmd/server: the notification stores of the PostgreSQL profile.
 		Notifications: &notify.Center{
 			Channels:    notify.NewPGRepository(f.App, notify.NewSealer(encryptor)),
@@ -328,7 +334,10 @@ type channelMatrix struct {
 	vrfA, vrfB, roleA, roleB            string
 	contactA, contactB                  string
 	collectorA, collectorB, userForRole string
-	seq                                 int
+	// refTypeB is a CI type of organization B with reference attributes
+	// (ci_ref, location, user), ciRefB a CI of it (WP-254).
+	refTypeB, ciRefB, siteB string
+	seq                     int
 }
 
 func newChannelMatrix(t *testing.T) *channelMatrix {
@@ -527,6 +536,23 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 	m.contactB = m.scalar(t, `INSERT INTO contact (organization_id, client_id, display_name, email) VALUES ($1, $2, 'chm-contact-b', 'chm-b@example.org') RETURNING id::text`, f.OrgB, m.clientB)
 	m.collectorA = m.scalar(t, `INSERT INTO collector (organization_id, client_id, name, status) VALUES ($1, $2, 'chm-collector-a', 'active') RETURNING id::text`, f.OrgA, f.Client1)
 	m.collectorB = m.scalar(t, `INSERT INTO collector (organization_id, client_id, name, status) VALUES ($1, $2, 'chm-collector-b', 'active') RETURNING id::text`, f.OrgB, m.clientB)
+
+	// A CI type of organization B with reference attributes and a CI of it
+	// (WP-254): reference values name CIs, locations and users.
+	ctxB := tenant.WithTenant(f.OrgCtx(f.OrgB), tenant.TenantInfo{OrganizationID: f.OrgB, UserID: m.userB})
+	types := citype.NewPGRepository(f.App)
+	refType := &citype.Type{OrganizationID: f.OrgB, Key: "chm-ref", Name: "chm-ref", IsObservable: true}
+	if err := types.Create(ctxB, refType); err != nil {
+		t.Fatalf("setup: CI type of organization B: %v", err)
+	}
+	for key, dataType := range map[string]string{"chm_ref_ci": fieldmeta.TypeCIRef, "chm_ref_location": fieldmeta.TypeLocation, "chm_ref_user": fieldmeta.TypeUser} {
+		if err := types.CreateAttributeDefinition(ctxB, f.OrgB, &citype.AttributeDefinition{CITypeID: refType.ID, Key: key, DataType: dataType}); err != nil {
+			t.Fatalf("setup: attribute %s: %v", key, err)
+		}
+	}
+	m.refTypeB, m.siteB = refType.ID, siteB
+	m.ciRefB = m.create(t, m.orgB, "/api/v1/cis", map[string]any{"ci_type_id": m.refTypeB, "name": "chm-ref-b",
+		"attributes": map[string]any{"chm_ref_ci": m.ciB.id, "chm_ref_location": siteB, "chm_ref_user": m.userB}})
 	return m
 }
 
@@ -1299,6 +1325,35 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 			}
 			if w.own != "" && (p.kind == "org" || p.kind == "other-org") {
 				out = append(out, matrixProbe{name: w.name + " of the own organization", method: http.MethodPost, path: w.path, body: w.body(w.own), want: http.StatusCreated})
+			}
+		}
+		// Reference attributes (WP-254, MET-12): organization B writes a CI
+		// whose attribute references a CI, a location or a user of
+		// organization A, through POST and PATCH; the target is not found
+		// (422), as an unknown id, and nothing is stored. The own targets
+		// are written as positive control.
+		if p.org == f.OrgB {
+			for _, r := range []struct {
+				name, key, foreign, own string
+			}{
+				{"CI attribute referencing a CI", "chm_ref_ci", m.ci1.id, m.ciB2.id},
+				{"CI attribute referencing a location", "chm_ref_location", m.site1, m.siteB},
+				{"CI attribute referencing a user", "chm_ref_user", m.userA, m.otherB},
+			} {
+				for _, ref := range []struct{ id, name string }{{r.foreign, " of organization A"}, {unknownID, " unknown"}} {
+					name := m.name("chm-ref")
+					out = append(out,
+						matrixProbe{name: r.name + ref.name, method: http.MethodPost, path: "/api/v1/cis",
+							body: map[string]any{"ci_type_id": m.refTypeB, "name": name, "attributes": map[string]any{r.key: ref.id}},
+							want: http.StatusUnprocessableEntity, show: []string{"reference target not found"},
+							after: m.count(false, `SELECT count(*) FROM ci WHERE name = $1`, name)},
+						matrixProbe{name: r.name + ref.name, method: http.MethodPatch, path: "/api/v1/cis/" + m.ciRefB,
+							body: map[string]any{"attributes": map[string]any{r.key: ref.id}},
+							want: http.StatusUnprocessableEntity, show: []string{"reference target not found"},
+							after: m.count(false, `SELECT count(*) FROM ci WHERE id = $1 AND attributes->>$2 = $3`, m.ciRefB, r.key, ref.id)})
+				}
+				out = append(out, matrixProbe{name: r.name + " of the own organization", method: http.MethodPatch, path: "/api/v1/cis/" + m.ciRefB,
+					body: map[string]any{"attributes": map[string]any{r.key: r.own}}, want: http.StatusOK})
 			}
 		}
 		return out

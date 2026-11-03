@@ -62,28 +62,29 @@ var ListFields = func() api.ListFields {
 
 // namedTypes returns the CI types a list query restricts to (WP-566): the
 // parameter ci_type_id and filter[ci_type_id] with exact or in, in lower
-// case; several of them intersect. named is false when none names a type;
-// the attribute filters then follow the definitions of every type.
-func (p *FilterParams) namedTypes() (types []string, named bool) {
-	restrict := func(values []string) {
+// case, one group per parameter. Each type stands for its subtree (MET-06,
+// WP-708): a group names the union of its subtrees, several groups
+// intersect (PGRepository.typeScope). named is false when none names a
+// type; the attribute filters then follow the definitions of every type.
+func (p *FilterParams) namedTypes() (groups [][]string, named bool) {
+	add := func(values []string) {
 		set := make([]string, 0, len(values))
 		for _, v := range values {
-			v = strings.ToLower(strings.TrimSpace(v))
-			if !slices.Contains(set, v) && (!named || slices.Contains(types, v)) {
+			if v = strings.ToLower(strings.TrimSpace(v)); !slices.Contains(set, v) {
 				set = append(set, v)
 			}
 		}
-		types, named = set, true
+		groups = append(groups, set)
 	}
 	if p.TypeID != "" {
-		restrict([]string{p.TypeID})
+		add([]string{p.TypeID})
 	}
 	for _, f := range p.Filters {
 		if f.Field == "ci_type_id" && (f.Op == api.OpExact || f.Op == api.OpIn) {
-			restrict(f.Values)
+			add(f.Values)
 		}
 	}
-	return types, named
+	return groups, len(groups) > 0
 }
 
 // fieldValue returns the value of a filterable field (or an attribute) of

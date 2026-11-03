@@ -65,6 +65,15 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/attribute-definitions/{id}", h.GetAttributeDefinition)
 	r.Patch("/api/v1/attribute-definitions/{id}", h.UpdateAttributeDefinition)
 	r.Delete("/api/v1/attribute-definitions/{id}", h.DeleteAttributeDefinition)
+	// Attribute sets and their assignment to types (WP-250, API-06; module
+	// metamodel, E-105).
+	r.Get("/api/v1/attribute-sets", h.ListAttributeSets)
+	r.Post("/api/v1/attribute-sets", h.CreateAttributeSet)
+	r.Get("/api/v1/attribute-sets/{id}", h.GetAttributeSet)
+	r.Patch("/api/v1/attribute-sets/{id}", h.UpdateAttributeSet)
+	r.Delete("/api/v1/attribute-sets/{id}", h.DeleteAttributeSet)
+	r.Get("/api/v1/ci-types/{id}/attribute-sets", h.GetTypeAttributeSets)
+	r.Put("/api/v1/ci-types/{id}/attribute-sets", h.SetTypeAttributeSets)
 }
 
 // attributeStore returns the attribute-definitions store or answers 503
@@ -83,6 +92,8 @@ func writeAttributeError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", err.Error())
 	case errors.Is(err, ErrAttributeReadOnly):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
+	case errors.Is(err, ErrAttributeSetReadOnly):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrAttributeSetReadOnly.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		api.WriteRepoError(w, err)
@@ -90,7 +101,7 @@ func writeAttributeError(w http.ResponseWriter, err error) {
 }
 
 // ListAttributeDefinitions handles GET /api/v1/attribute-definitions
-// (?ci_type_id=, ?scope=type|global): a page newest first on (created_at,
+// (?ci_type_id=, ?attribute_set_id=, ?scope=type|global|set): a page newest first on (created_at,
 // id) with limit (default 50, at most 200) and the signed cursor of API-02
 // (F-215).
 func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +119,7 @@ func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Reques
 	}
 	q := r.URL.Query()
 	items, total, err := store.ListAttributeDefinitionPage(r.Context(), t.OrganizationID,
-		AttributeFilter{CITypeID: q.Get("ci_type_id"), Scope: q.Get("scope")}, page)
+		AttributeFilter{CITypeID: q.Get("ci_type_id"), AttributeSetID: q.Get("attribute_set_id"), Scope: q.Get("scope")}, page)
 	if err != nil {
 		writeAttributeError(w, err)
 		return
@@ -137,7 +148,8 @@ func (h *Handler) GetAttributeDefinition(w http.ResponseWriter, r *http.Request)
 }
 
 // CreateAttributeDefinition handles POST /api/v1/attribute-definitions; a
-// definition without ci_type_id is global.
+// definition without ci_type_id and attribute_set_id is global, one with
+// attribute_set_id a set attribute (WP-250).
 func (h *Handler) CreateAttributeDefinition(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
@@ -149,14 +161,16 @@ func (h *Handler) CreateAttributeDefinition(w http.ResponseWriter, r *http.Reque
 	}
 	var req struct {
 		AttributeDefinitionPatch
-		CITypeID string `json:"ci_type_id,omitempty"`
-		Key      string `json:"key"`
+		CITypeID       string `json:"ci_type_id,omitempty"`
+		AttributeSetID string `json:"attribute_set_id,omitempty"`
+		Key            string `json:"key"`
 	}
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	d := &AttributeDefinition{CITypeID: req.CITypeID, Key: req.Key, UniqueScope: "org", Inheritable: true}
+	d := &AttributeDefinition{CITypeID: req.CITypeID, AttributeSetID: req.AttributeSetID, Key: req.Key,
+		UniqueScope: "org", Inheritable: true}
 	if err := req.apply(d); err != nil {
 		writeAttributeError(w, err)
 		return
@@ -210,6 +224,201 @@ func (h *Handler) DeleteAttributeDefinition(w http.ResponseWriter, r *http.Reque
 	}
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", map[string]string{"id": id})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// attributeSetStore returns the attribute-sets store or answers 503
+// (in-memory mode has none).
+func (h *Handler) attributeSetStore(w http.ResponseWriter) (AttributeSetStore, bool) {
+	store, ok := h.repo.(AttributeSetStore)
+	if !ok {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "attribute sets need the database")
+	}
+	return store, ok
+}
+
+// writeAttributeSetError reports a failed attribute set request (RFC 7807).
+func writeAttributeSetError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrAttributeSetNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrAttributeSetNotFound.Error())
+	case errors.Is(err, ErrCITypeNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrCITypeNotFound.Error())
+	case errors.Is(err, ErrAttributeSetReadOnly):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrAttributeSetReadOnly.Error())
+	case errors.Is(err, ErrAttributeSetInUse):
+		api.WriteProblem(w, http.StatusConflict, "urn:reticora:problem:conflict", "Conflict", ErrAttributeSetInUse.Error())
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// ListAttributeSets handles GET /api/v1/attribute-sets: the organization's
+// and the system sets newest first on (created_at, id) with limit and the
+// signed cursor of API-02.
+func (h *Handler) ListAttributeSets(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeSetStore(w)
+	if !ok {
+		return
+	}
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := store.ListAttributeSetPage(r.Context(), t.OrganizationID, page)
+	if err != nil {
+		writeAttributeSetError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(items, total, page, func(s *AttributeSet) (time.Time, string) {
+		return s.CreatedAt, s.ID
+	}))
+}
+
+// GetAttributeSet handles GET /api/v1/attribute-sets/{id}.
+func (h *Handler) GetAttributeSet(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeSetStore(w)
+	if !ok {
+		return
+	}
+	s, err := store.GetAttributeSet(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeAttributeSetError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, s)
+}
+
+// CreateAttributeSet handles POST /api/v1/attribute-sets: a set of the
+// organization, active unless is_active is false.
+func (h *Handler) CreateAttributeSet(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeSetStore(w)
+	if !ok {
+		return
+	}
+	var req struct {
+		Key         string        `json:"key"`
+		DisplayName LocalizedText `json:"display_name,omitempty"`
+		Description string        `json:"description,omitempty"`
+		IsActive    *bool         `json:"is_active,omitempty"`
+	}
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	s := &AttributeSet{Key: req.Key, DisplayName: req.DisplayName, Description: req.Description, IsActive: true}
+	if req.IsActive != nil {
+		s.IsActive = *req.IsActive
+	}
+	if err := store.CreateAttributeSet(r.Context(), t.OrganizationID, s); err != nil {
+		writeAttributeSetError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, s)
+}
+
+// UpdateAttributeSet handles PATCH /api/v1/attribute-sets/{id}.
+func (h *Handler) UpdateAttributeSet(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeSetStore(w)
+	if !ok {
+		return
+	}
+	var patch AttributeSetPatch
+	if err := api.ReadJSON(r, &patch); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	s, err := store.UpdateAttributeSet(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &patch)
+	if err != nil {
+		writeAttributeSetError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, s)
+}
+
+// DeleteAttributeSet handles DELETE /api/v1/attribute-sets/{id}; an
+// assigned set is 409.
+func (h *Handler) DeleteAttributeSet(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeSetStore(w)
+	if !ok {
+		return
+	}
+	if err := store.DeleteAttributeSet(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+		writeAttributeSetError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetTypeAttributeSets handles GET /api/v1/ci-types/{id}/attribute-sets:
+// the assignment document of the type.
+func (h *Handler) GetTypeAttributeSets(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeSetStore(w)
+	if !ok {
+		return
+	}
+	doc, err := store.GetTypeAttributeSets(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeAttributeSetError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, doc)
+}
+
+// SetTypeAttributeSets handles PUT /api/v1/ci-types/{id}/attribute-sets:
+// the ordered list replaces the type's sets as a whole.
+func (h *Handler) SetTypeAttributeSets(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeSetStore(w)
+	if !ok {
+		return
+	}
+	var req struct {
+		CITypeID      string                   `json:"ci_type_id,omitempty"`
+		AttributeSets []AttributeSetAssignment `json:"attribute_sets"`
+	}
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	typeID := chi.URLParam(r, "id")
+	if req.CITypeID != "" && req.CITypeID != typeID {
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_type_id", Message: "ci_type_id differs from the path",
+			Status: http.StatusUnprocessableEntity})
+		return
+	}
+	doc, err := store.SetTypeAttributeSets(r.Context(), t.OrganizationID, typeID, req.AttributeSets)
+	if err != nil {
+		writeAttributeSetError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, doc)
 }
 
 func tenantOr401(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
@@ -393,7 +602,7 @@ func (h *Handler) Deactivate(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.SetActive(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), false)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+		writeSetActiveError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.deactivated", item)
@@ -408,7 +617,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.SetActive(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), true)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+		writeSetActiveError(w, err)
 		return
 	}
 	h.dispatch(r, t.OrganizationID, "ci_type.updated", item)
@@ -610,6 +819,22 @@ func writeTypeError(w http.ResponseWriter, err error) {
 		return
 	}
 	api.WriteRepoError(w, err)
+}
+
+// writeSetActiveError reports a refused deactivation or activation (MET-05):
+// an unknown type 404, a system type 403 (ErrTypeReadOnly), active subtypes
+// or a deactivated parent 409; everything else goes through
+// api.WriteRepoError (F-047). Nothing is dispatched.
+func writeSetActiveError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, api.ErrNotFound) || err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci type not found")
+	case errors.Is(err, ErrTypeReadOnly):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrTypeReadOnly.Error())
+	case api.WriteFieldError(w, err):
+	default:
+		api.WriteRepoError(w, err)
+	}
 }
 
 // writeTypeUpdateError reports a failed update of a CI type: an unknown

@@ -265,7 +265,22 @@ var closeDown = downLevels
 // steps.
 func downLevels(g *ciGraph, failed []int32, steps []stepRule) []downLevel {
 	g.indexIncidence()
-	providers := redundantProviders(g, steps)
+	return closeLevels(g, failed, steps, redundantProviders(g, steps), true)
+}
+
+// certainDown is the downward closure of downLevels over directed steps
+// only, with the providers of redundantProviders computed once for an
+// analysis: the single-failure simulation of the service SPOF (IMP-08)
+// closes down once per candidate on the same graph and steps. A CI it
+// marks levelCertain goes down; it never marks levelHeuristic.
+func certainDown(g *ciGraph, failed []int32, steps []stepRule, providers map[dependentType][]int32) []downLevel {
+	g.indexIncidence()
+	return closeLevels(g, failed, steps, providers, false)
+}
+
+// closeLevels is the closure of downLevels and certainDown; withHeuristic
+// adds the second pass over the undirected steps.
+func closeLevels(g *ciGraph, failed []int32, steps []stepRule, providers map[dependentType][]int32, withHeuristic bool) []downLevel {
 	level := make([]downLevel, len(g.ids))
 	queue := make([]int32, 0, len(failed))
 	for _, n := range failed {
@@ -304,7 +319,9 @@ func downLevels(g *ciGraph, failed []int32, steps []stepRule) []downLevel {
 					continue
 				}
 				if heuristic && mark == levelCertain {
-					undirected = append(undirected, step{i, to})
+					if withHeuristic {
+						undirected = append(undirected, step{i, to})
+					}
 					continue
 				}
 				take(i, to, rule, mark)
@@ -312,6 +329,9 @@ func downLevels(g *ciGraph, failed []int32, steps []stepRule) []downLevel {
 		}
 	}
 	drain(levelCertain)
+	if !withHeuristic {
+		return level
+	}
 	for _, s := range undirected {
 		if level[s.to] == levelUp {
 			take(s.edge, s.to, &steps[g.edges[s.edge].relType], levelHeuristic)

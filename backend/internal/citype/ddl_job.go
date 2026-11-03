@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -117,8 +119,11 @@ func indexRelevant(before, after *AttributeDefinition) bool {
 	if before == nil || after == nil {
 		return true
 	}
+	// inheritable decides whether the index of a type definition covers
+	// the type or its subtree (WP-708).
 	return before.Searchable != after.Searchable || before.Unique != after.Unique ||
-		(after.Unique && before.UniqueScope != after.UniqueScope)
+		(after.Unique && before.UniqueScope != after.UniqueScope) ||
+		(after.CITypeID != "" && before.Inheritable != after.Inheritable)
 }
 
 // ValueExpression is the attribute value as the indexes hold it and the
@@ -144,13 +149,38 @@ func KeyExpression(key string) string {
 // unique index holds the value once per organization, or per organization
 // and client (scope client, a CI without client counts as one client);
 // soft-deleted CIs and CIs without the attribute are left out (MET-15). A
-// type definition covers the CIs of its type, a global definition every CI
+// type definition covers the CIs of its type, with inheritable those of
+// the subtree of its type (MET-06, WP-708), a global definition every CI
 // of the organization; system definitions cover every organization.
-func IndexStatement(d *AttributeDefinition) string {
+//
+// subtree are the types of the subtree (IndexTypes) as the organization
+// sees them: an index predicate allows no subquery, so they stand in it as
+// literals, ci_type_id IN (…). Without them, or without inheritable, the
+// predicate is ci_type_id = '<type>'.
+func IndexStatement(d *AttributeDefinition, subtree ...string) string {
 	if d == nil || (!d.Searchable && !d.Unique) || UsesKeyIndex(d) {
 		return ""
 	}
-	return indexStatement(d, IndexName(d.ID, d.Unique))
+	return indexStatement(d, IndexName(d.ID, d.Unique), subtree...)
+}
+
+// IndexTypes are the CI types the predicate of a definition's index
+// names, sorted: none for a global definition, the type for one without
+// inheritable, else the subtree (without it the type alone).
+func IndexTypes(d *AttributeDefinition, subtree ...string) []string {
+	if d == nil || d.CITypeID == "" {
+		return nil
+	}
+	types := []string{strings.ToLower(d.CITypeID)}
+	if d.Inheritable {
+		for _, t := range subtree {
+			if t = strings.ToLower(t); !slices.Contains(types, t) {
+				types = append(types, t)
+			}
+		}
+	}
+	slices.Sort(types)
+	return types
 }
 
 // KeyIndexStatement is the CREATE INDEX statement of the index of key
@@ -163,7 +193,7 @@ func KeyIndexStatement(key string) string {
 }
 
 // indexStatement is IndexStatement with the index named name.
-func indexStatement(d *AttributeDefinition, name string) string {
+func indexStatement(d *AttributeDefinition, name string, subtree ...string) string {
 	value := ValueExpression(quoteLiteral(d.Key))
 	columns := "organization_id, " + value
 	nulls := ""
@@ -175,8 +205,14 @@ func indexStatement(d *AttributeDefinition, name string) string {
 	if d.OrganizationID != "" {
 		where = append(where, "organization_id = "+quoteLiteral(d.OrganizationID)+"::uuid")
 	}
-	if d.CITypeID != "" {
-		where = append(where, "ci_type_id = "+quoteLiteral(d.CITypeID)+"::uuid")
+	if types := IndexTypes(d, subtree...); len(types) == 1 {
+		where = append(where, "ci_type_id = "+quoteLiteral(types[0])+"::uuid")
+	} else if len(types) > 1 {
+		literals := make([]string, len(types))
+		for i, t := range types {
+			literals[i] = quoteLiteral(t) + "::uuid"
+		}
+		where = append(where, "ci_type_id IN ("+strings.Join(literals, ", ")+")")
 	}
 	unique := ""
 	if d.Unique {
@@ -287,19 +323,30 @@ func (j *DDLJob) RunDue(ctx context.Context) (int, error) {
 }
 
 // definition reads the definition in the organization; nil when it was
-// deleted.
-func (j *DDLJob) definition(ctx context.Context, orgID, defID string) (*AttributeDefinition, error) {
-	var out *AttributeDefinition
+// deleted. subtree are the types of the subtree of a type definition with
+// inheritable as the organization sees them (IndexTypes, WP-708).
+func (j *DDLJob) definition(ctx context.Context, orgID, defID string) (out *AttributeDefinition, subtree []string, err error) {
 	scope := database.OrgWideScope(orgID, "")
-	err := database.WithTenant(ctx, j.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		d, err := getAttributeTx(ctx, tx, defID, false)
-		if errors.Is(err, ErrAttributeNotFound) {
+	err = database.WithTenant(ctx, j.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		d, gerr := getAttributeTx(ctx, tx, defID, false)
+		if errors.Is(gerr, ErrAttributeNotFound) {
 			return nil
 		}
+		if gerr != nil {
+			return gerr
+		}
 		out = d
-		return err
+		if d.CITypeID == "" || !d.Inheritable {
+			return nil
+		}
+		rows, qerr := tx.Query(ctx, `SELECT s.id::text FROM ci_type_subtree($1::uuid) s ORDER BY 1`, d.CITypeID)
+		if qerr != nil {
+			return fmt.Errorf("read ci type subtree: %w", qerr)
+		}
+		subtree, qerr = pgx.CollectRows(rows, pgx.RowTo[string])
+		return qerr
 	})
-	return out, err
+	return out, subtree, err
 }
 
 // existingIndex is an attribute index found in the catalog.
@@ -310,6 +357,30 @@ type existingIndex struct {
 	// built before migration 000162 holds attributes ->> key, which the
 	// application role cannot use under row level security.
 	current bool
+	// types are the CI types its predicate names (IndexTypes), sorted.
+	types []string
+}
+
+// predicateUUID finds the UUID literals of an index predicate.
+var predicateUUID = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+
+// predicateTypeClause is the condition on ci_type_id at the end of an
+// index predicate as pg_get_expr prints it: = '<id>'::uuid, or = ANY
+// (ARRAY[…]) for IN (…). The key is a literal before it, so a key that
+// reads like the condition never matches here.
+var predicateTypeClause = regexp.MustCompile(`\(ci_type_id = ('[^']*'::uuid|ANY \(ARRAY\[[^\]]*\]\))\)\)?$`)
+
+// predicateTypes are the CI types the predicate of an index names
+// (pg_get_expr of indpred): the UUID literals of the condition on
+// ci_type_id, which indexStatement puts last; none without it.
+func predicateTypes(predicate string) []string {
+	m := predicateTypeClause.FindStringSubmatch(predicate)
+	if m == nil {
+		return nil
+	}
+	types := predicateUUID.FindAllString(strings.ToLower(m[1]), -1)
+	slices.Sort(types)
+	return slices.Compact(types)
 }
 
 // lockPoll is the interval in which Ensure tries the lock of a definition
@@ -343,7 +414,7 @@ func (j *DDLJob) Ensure(ctx context.Context, orgID, defID string) error {
 	if !isUUIDText(defID) {
 		return fmt.Errorf("%w: %q", ErrAttributeNotFound, defID)
 	}
-	d, err := j.definition(ctx, orgID, defID)
+	d, subtree, err := j.definition(ctx, orgID, defID)
 	if err != nil {
 		return fmt.Errorf("read attribute definition: %w", err)
 	}
@@ -370,7 +441,7 @@ func (j *DDLJob) Ensure(ctx context.Context, orgID, defID string) error {
 			return kerr
 		}
 	}
-	if derr := ensureDefinitionIndex(ctx, pc, d, defID); derr != nil {
+	if derr := ensureDefinitionIndex(ctx, pc, d, defID, subtree); derr != nil {
 		return derr
 	}
 	switch {
@@ -390,12 +461,18 @@ func (j *DDLJob) Ensure(ctx context.Context, orgID, defID string) error {
 }
 
 // ensureDefinitionIndex is the part of Ensure for the definition's own
-// index (IndexStatement): d is nil for a deleted definition.
-func ensureDefinitionIndex(ctx context.Context, pc *pgx.Conn, d *AttributeDefinition, defID string) error {
-	stmt, wanted, columns := IndexStatement(d), "", 0
+// index (IndexStatement): d is nil for a deleted definition, subtree the
+// types of the subtree of its type (IndexTypes). An index whose predicate
+// names other types (the subtree changed, inheritable changed, WP-708) is
+// rebuilt like one built before migration 000162.
+func ensureDefinitionIndex(ctx context.Context, pc *pgx.Conn, d *AttributeDefinition, defID string, subtree []string) error {
+	stmt, wanted, columns := IndexStatement(d, subtree...), "", 0
+	var types []string
 	if stmt != "" {
-		wanted, columns = IndexName(defID, d.Unique), indexColumns(d)
+		wanted, columns, types = IndexName(defID, d.Unique), indexColumns(d), IndexTypes(d, subtree...)
 	}
+	// fresh: built from the current statement.
+	fresh := func(idx existingIndex) bool { return idx.current && slices.Equal(idx.types, types) }
 	kept := map[string]existingIndex{}
 	for _, name := range []string{IndexName(defID, false), IndexName(defID, true)} {
 		for _, n := range []string{name, name + RebuildSuffix} {
@@ -408,7 +485,7 @@ func ensureDefinitionIndex(ctx context.Context, pc *pgx.Conn, d *AttributeDefini
 			}
 			// Kept: the wanted index, one over ->> as well until its
 			// rebuild is valid, and a valid rebuild of it.
-			if name == wanted && idx.valid && idx.columns == columns && (n == name || idx.current) {
+			if name == wanted && idx.valid && idx.columns == columns && (n == name || fresh(idx)) {
 				kept[n] = idx
 				continue
 			}
@@ -424,7 +501,7 @@ func ensureDefinitionIndex(ctx context.Context, pc *pgx.Conn, d *AttributeDefini
 	old, hasOld := kept[wanted]
 	_, hasNew := kept[rebuild]
 	switch {
-	case hasOld && old.current:
+	case hasOld && fresh(old):
 		if hasNew {
 			return dropIndex(ctx, pc, rebuild)
 		}
@@ -432,11 +509,11 @@ func ensureDefinitionIndex(ctx context.Context, pc *pgx.Conn, d *AttributeDefini
 	case !hasOld && !hasNew:
 		return build(ctx, pc, d.Key, stmt, wanted)
 	}
-	// The wanted index holds attributes ->> key, or it is gone after a
-	// rebuild was valid: build the new index (unless it is), drop the old
-	// one, rename.
+	// The wanted index holds attributes ->> key or names other types, or
+	// it is gone after a rebuild was valid: build the new index (unless it
+	// is), drop the old one, rename.
 	if !hasNew {
-		if berr := build(ctx, pc, d.Key, indexStatement(d, rebuild), rebuild); berr != nil {
+		if berr := build(ctx, pc, d.Key, indexStatement(d, rebuild, subtree...), rebuild); berr != nil {
 			return berr
 		}
 	}
@@ -644,19 +721,22 @@ func (j *DDLJob) keyIndexesInUse(ctx context.Context, names []string) (map[strin
 
 func lookupIndex(ctx context.Context, conn *pgx.Conn, name string) (existingIndex, bool, error) {
 	var idx existingIndex
+	var predicate string
 	err := conn.QueryRow(ctx, `
 		SELECT i.indisvalid, i.indnatts, EXISTS (
 			SELECT 1 FROM pg_depend d
 			WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.refclassid = 'pg_proc'::regclass
-			  AND d.refobjid = to_regprocedure('public.reticora_attr_text(jsonb, text)'))
+			  AND d.refobjid = to_regprocedure('public.reticora_attr_text(jsonb, text)')),
+			COALESCE(pg_get_expr(i.indpred, i.indrelid), '')
 		FROM pg_class c JOIN pg_index i ON i.indexrelid = c.oid
-		WHERE c.relname = $1 AND c.relnamespace = 'public'::regnamespace`, name).Scan(&idx.valid, &idx.columns, &idx.current)
+		WHERE c.relname = $1 AND c.relnamespace = 'public'::regnamespace`, name).Scan(&idx.valid, &idx.columns, &idx.current, &predicate)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return idx, false, nil
 	}
 	if err != nil {
 		return idx, false, fmt.Errorf("look up attribute index %s: %w", name, err)
 	}
+	idx.types = predicateTypes(predicate)
 	return idx, true, nil
 }
 

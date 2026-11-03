@@ -411,6 +411,21 @@ func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *Re
 			break
 		}
 	}
+	// The held type may be deactivated by now (MET-05): resolved together
+	// with generic_device in one lookup, the device then becomes a
+	// generic_device and a reviewer classifies it.
+	inactiveType := ""
+	types, err := h.lookupTypes(ctx, orgID, []string{typeID, ci.GenericDeviceType})
+	if err != nil {
+		return "", err
+	}
+	if held, generic := types[typeID], types[ci.GenericDeviceType]; held.ID != "" && !held.Active && generic.ID != "" {
+		inactiveType = payloadString(item.Payload, "ci_type_name")
+		if inactiveType == "" {
+			inactiveType = typeID
+		}
+		typeID = generic.ID
+	}
 	// The held values pass the field rules like a direct ingest.
 	if _, err = h.dropInvalidObserved(ctx, orgID, typeID, "", &device); err != nil {
 		return "", err
@@ -428,6 +443,11 @@ func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *Re
 				Message: ve.Violations[0].Detail}
 		}
 		return "", err
+	}
+	if inactiveType != "" {
+		if _, err = h.reviewTypeInactive(ctx, orgID, &device, &created, inactiveType); err != nil {
+			return "", err
+		}
 	}
 	if _, err = h.repo.ResolveReviewItem(ctx, orgID, item.ID, &Resolution{Status: ReviewStatusResolved, Action: reviews.ActionNew,
 		ResolvedBy: actorID, Note: "created CI " + created.ID + " within max_cis"}); err != nil {

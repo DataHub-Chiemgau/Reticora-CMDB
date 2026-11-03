@@ -439,6 +439,13 @@ func sortedBlastRadius(t *testing.T, body []byte) []byte {
 		SiteIDs               []string          `json:"site_ids,omitempty"`
 		SinglePointsOfFailure []json.RawMessage `json:"single_points_of_failure,omitempty"`
 		ProtectedByRedundancy []json.RawMessage `json:"protected_by_redundancy,omitempty"`
+		// The service chain of WP-297 (IMP-08) is additive: the handler
+		// of this test has no CI types, so it names no service and no
+		// SPOF, and the fields before it keep their bytes.
+		ServiceSPOFs  json.RawMessage `json:"service_spofs,omitempty"`
+		SPOFTruncated json.RawMessage `json:"spof_truncated,omitempty"`
+		Truncated     json.RawMessage `json:"truncated,omitempty"`
+		BlastRadius   json.RawMessage `json:"blast_radius,omitempty"`
 	}
 	if err := json.Unmarshal(body, &b); err != nil {
 		t.Fatal(err)
@@ -453,6 +460,11 @@ func sortedBlastRadius(t *testing.T, body []byte) []byte {
 	if !bytes.Equal(encode(), body) {
 		t.Fatalf("blast radius answer does not round-trip: %.300s", body)
 	}
+	if string(b.ServiceSPOFs) != "[]" || string(b.SPOFTruncated) != "false" || len(b.AffectedServices) != 0 {
+		t.Errorf("blast radius without CI types: service_spofs %s, spof_truncated %s, %d services",
+			b.ServiceSPOFs, b.SPOFTruncated, len(b.AffectedServices))
+	}
+	b.ServiceSPOFs, b.SPOFTruncated, b.Truncated, b.BlastRadius = nil, nil, nil, nil
 	sortRawByID(t, b.AffectedCIs)
 	slices.Sort(b.ClientIDs)
 	slices.Sort(b.SiteIDs)

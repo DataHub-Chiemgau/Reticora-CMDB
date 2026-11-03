@@ -677,17 +677,28 @@ func (h *Handler) loadCandidates(ctx context.Context, orgID string, ids [][]stri
 	return out, nil
 }
 
-// CITypeBatchLookup resolves several CI type names or keys at once. The
-// discovery PG repository implements it with one statement (NFR-03).
+// ResolvedType is a CI type a reported name, key or UUID resolved to: its
+// id and whether it is active (MET-05: a deactivated type gets no new CIs).
+type ResolvedType struct {
+	ID     string
+	Active bool
+}
+
+// CITypeBatchLookup resolves several CI type names, keys or UUIDs at once.
+// The discovery PG repository implements it with one statement (NFR-03).
 type CITypeBatchLookup interface {
-	// LookupCITypeIDs returns the type id per name; unknown names are
-	// missing from the map.
-	LookupCITypeIDs(ctx context.Context, orgID string, namesOrKeys []string) (map[string]string, error)
+	// LookupCITypeIDs returns the type per reported entry: an active type
+	// before a deactivated one, then an org type before a system type;
+	// UUIDs match regardless of case. Unknown entries are missing from the
+	// map.
+	LookupCITypeIDs(ctx context.Context, orgID string, namesOrKeys []string) (map[string]ResolvedType, error)
 }
 
 // lookupTypes resolves the type names of a batch: with one lookup where the
-// repository can, else name by name, skipping unknown names.
-func (h *Handler) lookupTypes(ctx context.Context, orgID string, names []string) (map[string]string, error) {
+// repository can, else name by name (LookupCITypeID), skipping unknown
+// names; there a hit counts as active and a UUID passes unchanged as an
+// active type.
+func (h *Handler) lookupTypes(ctx context.Context, orgID string, names []string) (map[string]ResolvedType, error) {
 	if batch, ok := h.repo.(CITypeBatchLookup); ok {
 		types, err := batch.LookupCITypeIDs(ctx, orgID, names)
 		if err != nil {
@@ -695,13 +706,17 @@ func (h *Handler) lookupTypes(ctx context.Context, orgID string, names []string)
 		}
 		return types, nil
 	}
-	types := map[string]string{}
-	if h.typeLookup == nil {
-		return types, nil
-	}
+	types := map[string]ResolvedType{}
 	for _, name := range names {
+		if isUUID(name) {
+			types[name] = ResolvedType{ID: name, Active: true}
+			continue
+		}
+		if h.typeLookup == nil {
+			continue
+		}
 		if id, err := h.typeLookup.LookupCITypeID(ctx, orgID, name); err == nil && id != "" {
-			types[name] = id
+			types[name] = ResolvedType{ID: id, Active: true}
 		}
 	}
 	return types, nil
@@ -709,10 +724,10 @@ func (h *Handler) lookupTypes(ctx context.Context, orgID string, names []string)
 
 // identityContext resolves the identity context of an ingest from the types
 // of its batch (lookupTypes) and the default VRF.
-func (h *Handler) identityContext(ctx context.Context, orgID string, types map[string]string) (*IdentityContext, error) {
-	ic := &IdentityContext{GenericDeviceTypeID: types[ci.GenericDeviceType], VirtualTypeIDs: map[string]bool{}}
+func (h *Handler) identityContext(ctx context.Context, orgID string, types map[string]ResolvedType) (*IdentityContext, error) {
+	ic := &IdentityContext{GenericDeviceTypeID: types[ci.GenericDeviceType].ID, VirtualTypeIDs: map[string]bool{}}
 	for _, key := range virtualTypeKeys {
-		if id := types[key]; id != "" {
+		if id := types[key].ID; id != "" {
 			ic.VirtualTypeIDs[id] = true
 		}
 	}

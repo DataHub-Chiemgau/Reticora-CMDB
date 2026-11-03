@@ -19,6 +19,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -119,13 +120,6 @@ func CanonicalType(dataType string) string {
 
 // IsMultiValue reports whether a type holds a list of values.
 func IsMultiValue(dataType string) bool { return CanonicalType(dataType) == TypeMultiselect }
-
-// ReferenceTargets lists the valid reference_target values for reference-typed
-// fields.
-var ReferenceTargets = map[string]bool{
-	"user": true, "team": true, "location": true,
-	"ci": true, "asset": true, "contract": true,
-}
 
 // FieldDefinition is the canonical shape of a field definition across all
 // three attribute scopes. Storage rows (attribute_definition,
@@ -239,8 +233,8 @@ func ValidateDefinition(def FieldDefinition) error {
 	if !ValidFieldTypes[def.DataType] {
 		return definitionError("data_type", "unsupported field type %q", def.DataType)
 	}
-	if def.ReferenceTarget != "" && !ReferenceTargets[def.ReferenceTarget] {
-		return definitionError("reference_target", "unsupported reference target %q", def.ReferenceTarget)
+	if err := validateReferenceTarget(&def); err != nil {
+		return err
 	}
 	for _, p := range def.Validation.AllPatterns() {
 		if _, err := regexp.Compile(p); err != nil {
@@ -262,6 +256,34 @@ func ValidateDefinition(def FieldDefinition) error {
 		}
 	}
 	return nil
+}
+
+// validateReferenceTarget checks the target of a definition (MET-11,
+// MET-12): reference_target only on a reference type, a known target that
+// agrees with an alias type, and an available one (E-03). A rejection names
+// reference_target, or data_type when the type alone names the target.
+func validateReferenceTarget(def *FieldDefinition) error {
+	if def.ReferenceTarget != "" {
+		if CanonicalType(def.DataType) != TypeReference {
+			return definitionError("reference_target", "reference_target is only allowed on a reference type, not on %q", def.DataType)
+		}
+		if !ReferenceTargets[def.ReferenceTarget] {
+			return definitionError("reference_target", "unsupported reference target %q", def.ReferenceTarget)
+		}
+		if alias, ok := aliasTargets[def.DataType]; ok && alias != def.ReferenceTarget {
+			return definitionError("reference_target", "reference target %q contradicts the type %q, which refers to %s",
+				def.ReferenceTarget, def.DataType, alias)
+		}
+	}
+	target := ReferenceTargetOf(def)
+	if target == "" || ReferenceTargetAvailable(target) {
+		return nil
+	}
+	attribute := "reference_target"
+	if def.ReferenceTarget == "" {
+		attribute = "data_type"
+	}
+	return definitionError(attribute, "reference target %s not available", target)
 }
 
 func (def FieldDefinition) allPredicates() []Predicate {
@@ -454,8 +476,9 @@ func toFloat(v any) (float64, bool) {
 	case int64:
 		return float64(t), true
 	case string:
-		var f float64
-		if _, err := fmt.Sscanf(t, "%g", &f); err == nil {
+		// The whole string is the number, as Number() in the TypeScript
+		// mirror: a UUID that starts with digits is no number (WP-254).
+		if f, err := strconv.ParseFloat(strings.TrimSpace(t), 64); err == nil && !math.IsNaN(f) {
 			return f, true
 		}
 	}
@@ -481,14 +504,40 @@ func ValidateValue(def FieldDefinition, value any) error {
 	if isEmpty(value) {
 		return nil
 	}
-	if err := checkType(def.DataType, value); err != nil {
-		return fmt.Errorf("field %s: %w", def.Name, err)
+	items := []any{value}
+	list, isList := value.([]any)
+	if isList && def.IsList() {
+		items = list
 	}
 	rule := def.Rule(false)
-	for _, v := range rules.Evaluate(&rule, value, true) {
-		return fmt.Errorf("field %s: %s", def.Name, v.Message)
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		if err := checkType(def.DataType, item); err != nil {
+			return fmt.Errorf("field %s: %w", def.Name, err)
+		}
+		if len(items) > 1 {
+			key := fmt.Sprint(item)
+			if uuidPattern.MatchString(key) {
+				// A UUID names the same id in either case.
+				key = strings.ToLower(key)
+			}
+			if seen[key] {
+				return fmt.Errorf("field %s: value %v is listed twice", def.Name, item)
+			}
+			seen[key] = true
+		}
+		for _, v := range rules.Evaluate(&rule, item, true) {
+			return fmt.Errorf("field %s: %s", def.Name, v.Message)
+		}
 	}
 	return nil
+}
+
+// IsList reports whether a definition holds a list of values of its type
+// (multi_value): the value is a list whose elements are checked one by one
+// and must not repeat. multiselect holds its list as its value.
+func (def *FieldDefinition) IsList() bool {
+	return def.MultiValue != nil && *def.MultiValue && !IsMultiValue(def.DataType)
 }
 
 // Rule is the rule AST (MET-45, internal/rules) of a definition: required
@@ -845,9 +894,11 @@ func checkType(dataType string, value any) error {
 	case TypeJSON:
 		// Any JSON value is valid.
 	case TypeFile, TypeReference:
-		// Files and references store the referenced entity's id.
-		if _, ok := value.(string); !ok {
-			return fmt.Errorf("expected reference id string")
+		// Files and references store the id of the referenced entity: a
+		// UUID, as for uuid (MET-11).
+		str, ok := value.(string)
+		if !ok || !uuidPattern.MatchString(str) {
+			return fmt.Errorf("expected the UUID of the referenced object")
 		}
 	default:
 		return fmt.Errorf("unknown field type %q", dataType)

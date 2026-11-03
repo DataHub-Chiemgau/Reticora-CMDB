@@ -615,7 +615,10 @@ func (r *PGRepository) SuppressedPairs(ctx context.Context, orgID string) (map[s
 // LookupCITypeID resolves a CI type name or key to its canonical UUID inside
 // the requesting tenant's RLS context. Global system types (organization_id
 // IS NULL) are readable by every tenant since migration 000040; org-specific
-// types are scoped to the requesting tenant by both the query and RLS.
+// types are scoped to the requesting tenant by both the query and RLS. An
+// active type comes before a deactivated one (MET-05), then an org type
+// before a system type: a deactivated org type with the key of a system
+// type does not hide it (the agent's endpoint types).
 func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error) {
 	var id string
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -623,7 +626,7 @@ func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID strin
 			SELECT id::text FROM ci_type
 			WHERE (key = $1 OR name = $1)
 			  AND (organization_id IS NULL OR organization_id = $2)
-			ORDER BY organization_id NULLS LAST
+			ORDER BY is_active DESC, organization_id NULLS LAST
 			LIMIT 1
 		`, nameOrID, orgID).Scan(&id)
 	})
@@ -633,32 +636,40 @@ func (r *PGRepository) LookupCITypeID(ctx context.Context, orgID, nameOrID strin
 	return id, nil
 }
 
-// LookupCITypeIDs resolves several type names or keys with one statement
-// (CITypeBatchLookup, NFR-03): per name the same type LookupCITypeID finds,
-// an org-specific type before a global one.
-func (r *PGRepository) LookupCITypeIDs(ctx context.Context, orgID string, namesOrKeys []string) (map[string]string, error) {
-	types := map[string]string{}
+// typeMatchSQL matches a reported entry k.name with a type t by key, name
+// or UUID, the UUID regardless of case (MET-05); the entry is cast only
+// when it is one.
+const typeMatchSQL = `(t.key = k.name OR t.name = k.name OR t.id = CASE
+	WHEN k.name ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN k.name::uuid END)`
+
+// LookupCITypeIDs resolves several type names, keys or UUIDs with one
+// statement (CITypeBatchLookup, NFR-03): per reported entry the type id and
+// its active flag, an active type before a deactivated one, then an
+// org-specific type before a global one, as LookupCITypeID orders.
+func (r *PGRepository) LookupCITypeIDs(ctx context.Context, orgID string, namesOrKeys []string) (map[string]ResolvedType, error) {
+	types := map[string]ResolvedType{}
 	if len(namesOrKeys) == 0 {
 		return types, nil
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT DISTINCT ON (k.name) k.name, t.id::text
+			SELECT DISTINCT ON (k.name) k.name, t.id::text, t.is_active
 			FROM unnest($1::text[]) AS k(name)
-			JOIN ci_type t ON (t.key = k.name OR t.name = k.name)
+			JOIN ci_type t ON `+typeMatchSQL+`
 			  AND (t.organization_id IS NULL OR t.organization_id = $2)
-			ORDER BY k.name, t.organization_id NULLS LAST, t.id
+			ORDER BY k.name, t.is_active DESC, t.organization_id NULLS LAST, t.id
 		`, namesOrKeys, orgID)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var name, id string
-			if err := rows.Scan(&name, &id); err != nil {
+			var name string
+			var typ ResolvedType
+			if err := rows.Scan(&name, &typ.ID, &typ.Active); err != nil {
 				return err
 			}
-			types[name] = id
+			types[name] = typ
 		}
 		return rows.Err()
 	})
@@ -669,38 +680,40 @@ func (r *PGRepository) LookupCITypeIDs(ctx context.Context, orgID string, namesO
 }
 
 // LookupCITypeIDsWithUnique implements CITypeUniqueLookup: the types of
-// LookupCITypeIDs and, in the same statement, per type id the keys of its
-// unique attributes and of the global ones (MET-15, F-432), as
-// ci.PGRepository.UniqueConflicts selects them.
+// LookupCITypeIDs with their active flag, in its order, and, in the same
+// statement, per type id the keys of its unique attributes and of the
+// global ones (MET-15, F-432), as ci.PGRepository.UniqueConflicts selects
+// them.
 func (r *PGRepository) LookupCITypeIDsWithUnique(ctx context.Context, orgID string, namesOrKeys []string) (
-	types map[string]string, unique map[string][]string, err error) {
-	types, unique = map[string]string{}, map[string][]string{}
+	types map[string]ResolvedType, unique map[string][]string, err error) {
+	types, unique = map[string]ResolvedType{}, map[string][]string{}
 	if len(namesOrKeys) == 0 {
 		return types, unique, nil
 	}
 	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx, `
-			SELECT DISTINCT ON (k.name) k.name, t.id::text,
+			SELECT DISTINCT ON (k.name) k.name, t.id::text, t.is_active,
 				ARRAY(SELECT d.key FROM attribute_definition d
 					WHERE d.is_unique AND (d.ci_type_id = t.id OR d.ci_type_id IS NULL)
 					  AND (d.organization_id = $2::uuid OR d.organization_id IS NULL)
 					ORDER BY d.key)
 			FROM unnest($1::text[]) AS k(name)
-			JOIN ci_type t ON (t.key = k.name OR t.name = k.name)
+			JOIN ci_type t ON `+typeMatchSQL+`
 			  AND (t.organization_id IS NULL OR t.organization_id = $2)
-			ORDER BY k.name, t.organization_id NULLS LAST, t.id
+			ORDER BY k.name, t.is_active DESC, t.organization_id NULLS LAST, t.id
 		`, namesOrKeys, orgID)
 		if qerr != nil {
 			return qerr
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var name, id string
+			var name string
+			var typ ResolvedType
 			var keys []string
-			if serr := rows.Scan(&name, &id, &keys); serr != nil {
+			if serr := rows.Scan(&name, &typ.ID, &typ.Active, &keys); serr != nil {
 				return serr
 			}
-			types[name], unique[id] = id, keys
+			types[name], unique[typ.ID] = typ, keys
 		}
 		return rows.Err()
 	})

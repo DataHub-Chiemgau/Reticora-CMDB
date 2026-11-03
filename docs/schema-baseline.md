@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000198_composition_codes
+Stand: Migration 000199_attribute_sets
 
 ## Prüfung
 
@@ -657,6 +657,22 @@ Funktion `reticora_validation_legacy` (Migration 000184) einen AST in diese
 Struktur, wie `fieldmeta.ValidationFromRule`; die Down-Migration schreibt
 AST-Zeilen in die frühere Struktur zurück.
 
+Attribute Sets (MET-16, WP-250, Migration 000199): `attribute_set` hält die
+Sets (`organization_id` `NULL` = schreibgeschütztes Systemset,
+`attribute_set_org_or_global`), ihre Attribute sind Zeilen von
+`attribute_definition` mit `scope = 'set'` und `attribute_set_id` (eindeutig
+je Set und Schlüssel, Organisation aus dem Set). `scope` trennt die Ebenen:
+`global` ohne Typ und Set, `type` mit Typ, `set` mit Set
+(`attribute_definition_scope_type_check`). System-Basis und org-globale Ebene
+sind nur `scope = 'global'` (`attribute_definition_global_key`,
+`attribute_definition_system_global_key`, `reticora_chain_attribute_schema`,
+`attribute_definition_regenerate`); Set-Attribute ändern bis WP-709 weder
+`ci_type.attribute_schema` noch `schema_version`. `ci_type_attribute_set`
+ordnet einem Typ der Organisation Sets geordnet zu (`position`); der Trigger
+`ci_type_attribute_set_binding` übernimmt die Organisation des Typs und weist
+ein unter RLS unsichtbares Set oder ein Set einer anderen Organisation ab
+(23503 unter `ci_type_attribute_set_attribute_set_id_fkey`).
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -678,6 +694,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `asset_movement` | ja | ja | asset_movement_isolation (ALL) |
 | `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
+| `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
 | `building` | ja | ja | building_isolation (ALL) |
@@ -691,6 +708,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_merge` | ja | ja | ci_merge_isolation (ALL), ci_merge_scoped_delete (DELETE), ci_merge_scoped_update (UPDATE) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL), ci_relationship_scoped_delete (DELETE), ci_relationship_scoped_update (UPDATE) |
 | `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
+| `ci_type_attribute_set` | ja | ja | ci_type_attribute_set_isolation_delete (DELETE), ci_type_attribute_set_isolation_insert (INSERT), ci_type_attribute_set_isolation_select (SELECT), ci_type_attribute_set_isolation_update (UPDATE) |
 | `client` | ja | ja | client_isolation (ALL) |
 | `collector` | ja | ja | collector_isolation (ALL), collector_scoped_delete (DELETE), collector_scoped_update (UPDATE) |
 | `collector_ca` | ja | ja | collector_ca_operator (ALL) |

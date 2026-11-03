@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -925,5 +927,174 @@ func TestIndexStatementLeakproof(t *testing.T) {
 	}
 	if got, want := reported[legacy], "ci: function jsonb_object_field_text(jsonb,text)"; got != want {
 		t.Errorf("the index over attributes ->> key is reported as %q, want %q", got, want)
+	}
+}
+
+// TestInheritedAttributeIndex covers WP-708 (MET-06, DB-04, MET-15): the
+// index of an indexed (searchable or unique) type definition with
+// inheritable covers the subtree of its type, with the type ids as
+// literals in its predicate (ci_type_id IN (…)). Creating a subtype and
+// moving a type queue the index jobs of the inheritable definitions of the
+// former and the new ancestors, and the job rebuilds an index whose
+// predicate no longer matches (Ensure compares it), also at the former
+// ancestor the type left. A change of inheritable queues the job as well;
+// with CIs of the subtree sharing a value of a unique definition it is
+// refused with 409 on inheritable.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestInheritedAttributeIndex(t *testing.T) {
+	f := scopetest.Seed(t, "a9")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	ddl := NewDDLJob(f.App, jobs.NewService(jobs.NewPGRepository(f.App)))
+	repo := NewPGRepository(f.App).WithIndexScheduler(ddl)
+	newType := func(key, parent string) string {
+		t.Helper()
+		typ := &Type{OrganizationID: f.OrgA, Key: key, Name: key, ParentTypeID: parent, IsObservable: true}
+		if err := repo.Create(ctx, typ); err != nil {
+			t.Fatalf("create type %s: %v", key, err)
+		}
+		return typ.ID
+	}
+	p, p2 := newType("wp708-idx-p", ""), newType("wp708-idx-p2", "")
+	rack := &AttributeDefinition{CITypeID: p, Key: "wp708_rack", DataType: "text", Searchable: true, Inheritable: true}
+	serial := &AttributeDefinition{CITypeID: p, Key: "wp708_serial", DataType: "text", Unique: true, UniqueScope: "org", Inheritable: true}
+	slot := &AttributeDefinition{CITypeID: p2, Key: "wp708_slot", DataType: "text", Searchable: true, Inheritable: true}
+	for _, d := range []*AttributeDefinition{rack, serial, slot} {
+		if err := repo.CreateAttributeDefinition(ctx, f.OrgA, d); err != nil {
+			t.Fatalf("create definition %s: %v", d.Key, err)
+		}
+	}
+	names := map[*AttributeDefinition]string{rack: IndexName(rack.ID, false), serial: IndexName(serial.ID, true), slot: IndexName(slot.ID, false)}
+	t.Cleanup(func() {
+		for _, name := range names {
+			_, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+name)
+			_, _ = f.Admin.Exec(bg, `DROP INDEX IF EXISTS `+name+RebuildSuffix)
+		}
+	})
+	run := func() {
+		t.Helper()
+		if _, err := ddl.RunDue(bg); err != nil {
+			t.Fatalf("run index jobs: %v", err)
+		}
+	}
+	// covers checks that the index of d is valid and its predicate names
+	// exactly the types.
+	covers := func(step string, d *AttributeDefinition, types ...string) {
+		t.Helper()
+		got := readIndex(t, f.Admin, names[d])
+		if !got.found || !got.valid || got.unique != d.Unique {
+			t.Fatalf("%s: index of %s = %+v", step, d.Key, got)
+		}
+		var predicate string
+		if err := f.Admin.QueryRow(bg, `SELECT pg_get_expr(indpred, indrelid) FROM pg_index WHERE indexrelid = to_regclass($1)`,
+			names[d]).Scan(&predicate); err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(types)
+		if pt := predicateTypes(predicate); !slices.Equal(pt, types) {
+			t.Errorf("%s: the index of %s covers %v, want %v\n%s", step, d.Key, pt, types, got.def)
+		}
+		if readIndex(t, f.Admin, names[d]+RebuildSuffix).found {
+			t.Errorf("%s: the rebuild of %s was left behind", step, d.Key)
+		}
+	}
+	run()
+	covers("root types", rack, p)
+	covers("root types", serial, p)
+	covers("root types", slot, p2)
+	if want := "ci_type_id = '" + p + "'::uuid"; !strings.Contains(readIndex(t, f.Admin, names[rack]).def, want) {
+		t.Errorf("index of a type without subtypes: %s, want %s", readIndex(t, f.Admin, names[rack]).def, want)
+	}
+
+	// A new subtype widens the indexes of its ancestors.
+	c := newType("wp708-idx-c", p)
+	run()
+	covers("subtype created", rack, p, c)
+	covers("subtype created", serial, p, c)
+	covers("subtype created", slot, p2)
+	if def := readIndex(t, f.Admin, names[serial]).def; !strings.Contains(def, "ANY (ARRAY[") {
+		t.Errorf("index over a subtree: %s, want ci_type_id IN (…)", def)
+	}
+	g := newType("wp708-idx-g", c)
+	run()
+	covers("grandchild created", rack, p, c, g)
+
+	// Moving C (with G) below P2: the former ancestor loses the subtree.
+	parent := p2
+	if _, err := repo.Update(ctx, f.OrgA, c, UpdateTypeRequest{ParentTypeID: &parent}); err != nil {
+		t.Fatalf("move the subtype: %v", err)
+	}
+	run()
+	covers("moved", rack, p)
+	covers("moved", serial, p)
+	covers("moved", slot, p2, c, g)
+
+	// inheritable off: the index covers the type alone.
+	no, yes := false, true
+	if _, err := repo.UpdateAttributeDefinition(ctx, f.OrgA, slot.ID, &AttributeDefinitionPatch{Inheritable: &no}); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	covers("inheritable off", slot, p2)
+	if _, err := repo.UpdateAttributeDefinition(ctx, f.OrgA, slot.ID, &AttributeDefinitionPatch{Inheritable: &yes}); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	covers("inheritable on", slot, p2, c, g)
+
+	// A unique definition without inheritable allows the value in a
+	// subtype; inheritable on is refused while the subtree shares it.
+	if _, err := repo.UpdateAttributeDefinition(ctx, f.OrgA, serial.ID, &AttributeDefinitionPatch{Inheritable: &no}); err != nil {
+		t.Fatal(err)
+	}
+	parent = p
+	if _, err := repo.Update(ctx, f.OrgA, c, UpdateTypeRequest{ParentTypeID: &parent}); err != nil {
+		t.Fatalf("move the subtype back: %v", err)
+	}
+	for i, typ := range []string{p, g} {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, ci_type_id, name, status, attributes)
+			VALUES ($1, $2, $3, 'active', '{"wp708_serial": "S-1"}')`, f.OrgA, typ, fmt.Sprintf("wp708-idx-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run()
+	serial.Inheritable = false
+	covers("unique without inheritable", serial, p)
+	_, err := repo.UpdateAttributeDefinition(ctx, f.OrgA, serial.ID, &AttributeDefinitionPatch{Inheritable: &yes})
+	var fe *api.FieldError
+	if !errors.As(err, &fe) || fe.Field != "inheritable" || fe.Status != http.StatusConflict {
+		t.Fatalf("inheritable over duplicates in the subtree: %v, want 409 on inheritable", err)
+	}
+	covers("refused inheritable", serial, p)
+}
+
+// TestPredicateTypes covers the reading of an index predicate (WP-708): the
+// types of the condition on ci_type_id at its end, also when the key reads
+// like that condition, and the predicate IndexStatement writes.
+func TestPredicateTypes(t *testing.T) {
+	const a, b = "0b5c1d7e-0000-4000-8000-000000000001", "0b5c1d7e-0000-4000-8000-000000000002"
+	const org = "0b5c1d7e-0000-4000-8000-0000000000ff"
+	for _, c := range []struct {
+		predicate string
+		want      []string
+	}{
+		{"", nil},
+		{"((deleted_at IS NULL) AND (reticora_attr_text(attributes, 'k'::text) IS NOT NULL) AND (organization_id = '" + org + "'::uuid))", nil},
+		{"((deleted_at IS NULL) AND (organization_id = '" + org + "'::uuid) AND (ci_type_id = '" + b + "'::uuid))", []string{b}},
+		{"((deleted_at IS NULL) AND (organization_id = '" + org + "'::uuid) AND (ci_type_id = ANY (ARRAY['" + b + "'::uuid, '" + a + "'::uuid])))", []string{a, b}},
+		{"((deleted_at IS NULL) AND (reticora_attr_text(attributes, '(ci_type_id = ''" + a + "''::uuid))'::text) IS NOT NULL) AND (organization_id = '" + org + "'::uuid))", nil},
+	} {
+		if got := predicateTypes(c.predicate); !slices.Equal(got, c.want) {
+			t.Errorf("predicateTypes(%q) = %v, want %v", c.predicate, got, c.want)
+		}
+	}
+	d := &AttributeDefinition{ID: a, CITypeID: b, Key: "k", Searchable: true, Inheritable: true, OrganizationID: org}
+	if got := IndexStatement(d, a, b); !strings.Contains(got, "ci_type_id IN ('"+a+"'::uuid, '"+b+"'::uuid)") {
+		t.Errorf("IndexStatement over a subtree: %s", got)
+	}
+	d.Inheritable = false
+	if got := IndexStatement(d, a, b); !strings.Contains(got, "ci_type_id = '"+b+"'::uuid") {
+		t.Errorf("IndexStatement without inheritable: %s", got)
 	}
 }

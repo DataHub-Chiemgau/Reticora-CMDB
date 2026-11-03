@@ -104,8 +104,14 @@ func (tr *txTrace) take() (txs [][]string, loose []string) {
 // expression on the lower-cased SQL).
 func count(tx []string, pattern string) int {
 	re := regexp.MustCompile(pattern)
+	insert := regexp.MustCompile(insertCI)
 	n := 0
 	for _, sql := range tx {
+		// The CI insert checks the type's active flag itself (MET-05,
+		// WP-249); that is no read of the types of its own.
+		if pattern == readsCITypes && insert.MatchString(sql) {
+			continue
+		}
 		if re.MatchString(sql) {
 			n++
 		}

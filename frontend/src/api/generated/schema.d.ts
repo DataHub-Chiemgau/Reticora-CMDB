@@ -2952,6 +2952,8 @@ export interface paths {
         categories?: string;
         /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
       path: {
@@ -5869,13 +5871,13 @@ export interface paths {
     };
     /**
      * List attribute definitions (MET-10)
-     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `scope` (type, global). Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `attribute_set_id`, `scope` (type, global, set). Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listAttributeDefinitions'];
     put?: never;
     /**
      * Create an attribute definition (MET-10)
-     * @description Without `ci_type_id` the definition is global (every type of the organization). Creating, changing or deleting a type's definition regenerates the type's `attribute_schema` and raises its `schema_version`. Requires ci_attribute:manage.
+     * @description Without `ci_type_id` the definition is global (every type of the organization); with `attribute_set_id` it is an attribute of that set (scope `set`, WP-250): a set the organization does not see is 422 with `field` = `attribute_set_id`, a system set 403. Set attributes do not enter the composition before WP-709; a searchable or unique one is indexed and checked organization-wide like a global attribute. Creating, changing or deleting a type's definition regenerates the type's `attribute_schema` and raises its `schema_version`. Requires ci_attribute:manage.
      */
     post: operations['createAttributeDefinition'];
     delete?: never;
@@ -5909,6 +5911,58 @@ export interface paths {
     patch: operations['updateAttributeDefinition'];
     trace?: never;
   };
+  '/api/v1/attribute-sets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List attribute sets (MET-16)
+     * @description The organization's attribute sets and the read-only system sets (`is_system`, WP-250). Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires ci:read. Until WP-709 a set does not enter the composition of its types.
+     */
+    get: operations['listAttributeSets'];
+    put?: never;
+    /**
+     * Create an attribute set (MET-16)
+     * @description A set of the organization; its attributes are attribute definitions with `attribute_set_id` (scope `set`, POST /api/v1/attribute-definitions). The key is unique within the organization (409). Requires citype:manage; audited as `attribute_set.created`.
+     */
+    post: operations['createAttributeSet'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/attribute-sets/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Read an attribute set */
+    get: operations['getAttributeSet'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete an attribute set
+     * @description A set assigned to a CI type is 409 (`urn:reticora:problem:conflict`). Otherwise its set attributes are deleted first, each audited as `attribute_definition.deleted`, and the indexes of searchable or unique ones are released by a job (DB-04). System sets are read-only (403). Requires citype:manage; audited as `attribute_set.deleted`.
+     */
+    delete: operations['deleteAttributeSet'];
+    options?: never;
+    head?: never;
+    /**
+     * Update an attribute set
+     * @description Display name, description and `is_active`; the key is immutable. System sets are read-only (403). An inactive set keeps its assignments but cannot be assigned anew. Requires citype:manage; audited as `attribute_set.updated`.
+     */
+    patch: operations['updateAttributeSet'];
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -5918,13 +5972,13 @@ export interface paths {
     };
     /**
      * List CI types
-     * @description The organization's types and the system types (MET-01 – MET-03).
+     * @description The organization's types and the system types (MET-01 – MET-03). Deactivated types are left out unless `include_inactive=true` (MET-05).
      */
     get: operations['listCiTypes'];
     put?: never;
     /**
      * Create a CI type
-     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01). `parent_type_id` makes the type a subtype of a type of the organization or a system type (MET-06): an unknown parent and one of another organization are both 422 on `parent_type_id`, as is a chain of more than 6 types; a taken key or name is 409.
+     * @description `display_name` is a map of languages (de, en); a missing language takes the other one or the name, a plain string is accepted for both. `is_observable` defaults to true for physical and false for logical types (MET-01). `parent_type_id` makes the type a subtype of a type of the organization or a system type (MET-06): an unknown parent and one of another organization are both 422 on `parent_type_id`, as is a chain of more than 6 types and a deactivated parent (MET-05: an active type has no deactivated parent); a taken key or name is 409.
      */
     post: operations['createCiTypes'];
     delete?: never;
@@ -5989,7 +6043,7 @@ export interface paths {
     head?: never;
     /**
      * Update a CI type
-     * @description `parent_type_id` moves the type below another type of the organization or a system type (MET-06); an empty string makes it a root. An unknown parent and one of another organization are both 422 on `parent_type_id`, a cycle is 409, a chain of more than 6 types (including the moved subtree) is 422, and a moved subtree whose attribute definitions cannot be composed is 422 naming the attribute key. An unknown CI type, or a system type, is 404.
+     * @description `parent_type_id` moves the type below another type of the organization or a system type (MET-06); an empty string makes it a root. An unknown parent and one of another organization are both 422 on `parent_type_id`, a cycle is 409, a chain of more than 6 types (including the moved subtree) is 422, a deactivated parent is 422 on `parent_type_id` (MET-05), and a moved subtree whose attribute definitions cannot be composed is 422 naming the attribute key. An unknown CI type, or a system type, is 404.
      */
     patch: operations['updateCiTypesId'];
     trace?: never;
@@ -6003,7 +6057,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Reactivate a CI type */
+    /**
+     * Reactivate a CI type
+     * @description Makes a deactivated type of the organization selectable for new CIs again (MET-05). System types are read-only (403); a type whose parent is deactivated is 409 on `parent_type_id`. A refused activation writes no audit entry and sends no webhook.
+     */
     post: operations['createCiTypesIdActivate'];
     delete?: never;
     options?: never;
@@ -6020,7 +6077,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Clone a CI type into a new version lineage */
+    /**
+     * Clone a CI type into a new version lineage
+     * @description Copies the type into the organization under a new key (`key`, else derived from `name`, else the name with `_copy`) with `cloned_from_id`: its attribute definitions, `compliance_rules`, `ui_schema`, `lifecycle_definition_id` and `parent_type_id` (MET-05). An organization replaces a system type this way. A taken key or name is 409, as is a source whose parent is deactivated.
+     */
     post: operations['createCiTypesIdClone'];
     delete?: never;
     options?: never;
@@ -6037,7 +6097,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Deactivate a CI type */
+    /**
+     * Deactivate a CI type
+     * @description A deactivated type gets no new CIs (MET-05): POST /api/v1/cis and the type change answer 422, discovery creates a generic_device with an unclassified_device review item (reason `type_inactive`). Its CIs stay readable and editable. System types are read-only (403); a type with active subtypes is 409. A refused deactivation writes no audit entry and sends no webhook.
+     */
     post: operations['createCiTypesIdDeactivate'];
     delete?: never;
     options?: never;
@@ -6100,6 +6163,33 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/ci-types/{id}/attribute-sets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read the attribute sets of a CI type (MET-16)
+     * @description The assignment document of the type: its sets ordered by `position`. It has no data array and is no list. Requires ci:read.
+     */
+    get: operations['getCiTypeAttributeSets'];
+    /**
+     * Replace the attribute sets of a CI type (MET-16)
+     * @description The ordered list replaces the type's sets as a whole; until WP-260 the change applies at once. The type must be a type of the organization (an unknown or a system type is 422 with `field` = `ci_type_id`); every set is listed once at its own `position` and is a set of the organization or a system set, and a set not yet assigned must be active (422 with `field` = `attribute_set_id` or `position`). Until WP-709 the sets do not enter the composition, the materialized schema or `schema_version` of the type. Requires citype:manage; audited as `ci_type.attribute_sets_changed` with the ordered list before and after.
+     */
+    put: operations['replaceCiTypeAttributeSets'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/blast-radius': {
     parameters: {
       query?: never;
@@ -6109,7 +6199,7 @@ export interface paths {
     };
     /**
      * Compute the blast radius of a CI failure
-     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed, also those outside the client or site scope of the caller, which the answer never names (IMP-07). single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids.
+     * @description Affected CIs after the redundancy postfilter (IMP-04): over a redundant type (powered_by, member_of_cluster) a CI is affected only when all its providers failed, also those outside the client or site scope of the caller, which the answer never names (IMP-07). single_points_of_failure lists the direct dependents without an alternative provider, protected_by_redundancy those that keep one. As in /api/v1/impact/{ci_id}, a CI reached only over an undirected network edge (connected_to) is a heuristic hit (IMP-03): listed in affected_cis with heuristic true and counted in heuristic_count, but not in affected_count, client_ids or site_ids. The service impact chain (IMP-08) is always computed: affected_services, service_spofs, spof_truncated and blast_radius, as /api/v1/impact/{ci_id} returns them with include=services,clients,sites,spof; truncated reports a walk the node limit cut.
      */
     get: operations['listCisIdBlastRadius'];
     put?: never;
@@ -8010,10 +8100,12 @@ export interface components {
       id: string;
       /** @description Empty for system definitions. */
       organization_id?: string;
-      /** @description Empty for global definitions. */
+      /** @description Empty for global and set definitions. */
       ci_type_id?: string;
+      /** @description The set of a set attribute (scope set); empty otherwise. */
+      attribute_set_id?: string;
       /** @enum {string} */
-      scope: 'type' | 'global';
+      scope: 'type' | 'global' | 'set';
       key: string;
       display_name: components['schemas']['LocalizedText'];
       description?: string;
@@ -8071,8 +8163,10 @@ export interface components {
       has_more?: boolean;
     };
     AttributeDefinitionCreate: {
-      /** @description Omitted for a global definition. */
+      /** @description Omitted for a global or set definition. */
       ci_type_id?: string;
+      /** @description The set of a set attribute (WP-250); not together with ci_type_id. Immutable like key and ci_type_id. */
+      attribute_set_id?: string;
       /** @description The reserved namespaces _overrides, _observed, _provenance and _instance are no keys (GLO-13): 400 with field key; the other definition checks name their own field (data_type, reference_target, validation, conditional, default; F-408). */
       key: string;
       display_name?: components['schemas']['LocalizedText'] | string;
@@ -8097,6 +8191,54 @@ export interface components {
       group?: string;
       order?: number;
       unit?: string;
+    };
+    /** @description A named, reusable group of attribute definitions (MET-16, WP-250). Its attributes are attribute definitions with scope `set`. */
+    AttributeSet: {
+      id: string;
+      /** @description Empty for system sets. */
+      organization_id?: string;
+      key: string;
+      display_name: components['schemas']['LocalizedText'];
+      description?: string;
+      /** @description A read-only system set. */
+      is_system: boolean;
+      /** @description An inactive set cannot be assigned anew. */
+      is_active: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AttributeSetCreate: {
+      /** @description Unique within the organization. */
+      key: string;
+      display_name?: components['schemas']['LocalizedText'];
+      description?: string;
+      /** @default true */
+      is_active: boolean;
+    };
+    AttributeSetPatch: {
+      display_name?: components['schemas']['LocalizedText'];
+      description?: string;
+      is_active?: boolean;
+    };
+    AttributeSetListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['AttributeSet'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    /** @description The attribute sets of a CI type ordered by position (WP-250). In a PUT, ci_type_id may be omitted; it must match the path otherwise. */
+    CITypeAttributeSets: {
+      ci_type_id?: string;
+      attribute_sets: {
+        attribute_set_id: string;
+        /** @description Unique within the type; the list is ordered by it. */
+        position: number;
+      }[];
     };
     AttributeDefinitionPatch: {
       display_name?: components['schemas']['LocalizedText'] | string;
@@ -8642,10 +8784,21 @@ export interface components {
       count: number;
       summary: components['schemas']['ImpactSummary'];
       /**
-       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01).
+       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01). With include the counts of blast_radius are then lower bounds (E-17).
        * @enum {boolean}
        */
       truncated?: true;
+      /** @description include=services (IMP-08): the impacted services, certain ones first, then by name; heuristic marks a service reached only over an undirected network edge (IMP-03). */
+      affected_services?: components['schemas']['AffectedService'][];
+      /** @description include=clients, the clients of the certainly impacted CIs, sorted. */
+      client_ids?: string[];
+      /** @description include=sites, the sites of the certainly impacted CIs, sorted. */
+      site_ids?: string[];
+      /** @description include=spof (IMP-08), see ServiceSPOF. */
+      service_spofs?: components['schemas']['ServiceSPOF'][];
+      /** @description include=spof, true when more than 500 CIs were candidates; only the 500 closest to the failure were simulated. */
+      spof_truncated?: boolean;
+      blast_radius?: components['schemas']['BlastCounts'];
     };
     /** @description The answer of /api/v1/impact and /api/v1/impact/{ci_id} with fields (API-02): the properties of ImpactAnalysis, but each impacted CI carries its id and the selected fields only (ImpactNodeFields). */
     ImpactAnalysisFields: {
@@ -8661,10 +8814,21 @@ export interface components {
       count: number;
       summary: components['schemas']['ImpactSummary'];
       /**
-       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01).
+       * @description true when the walk from the failed CIs reached the node limit (10,000 CIs) and kept only the CIs closest to them: the impacted CIs may then be incomplete (NFR-01). Returned with and without fields (E-57); absent when the walk was not cut, so that answer stays as before (API-01). With include the counts of blast_radius are then lower bounds (E-17).
        * @enum {boolean}
        */
       truncated?: true;
+      /** @description include=services (IMP-08): the impacted services, certain ones first, then by name; heuristic marks a service reached only over an undirected network edge (IMP-03). */
+      affected_services?: components['schemas']['AffectedService'][];
+      /** @description include=clients, the clients of the certainly impacted CIs, sorted. */
+      client_ids?: string[];
+      /** @description include=sites, the sites of the certainly impacted CIs, sorted. */
+      site_ids?: string[];
+      /** @description include=spof (IMP-08), see ServiceSPOF. */
+      service_spofs?: components['schemas']['ServiceSPOF'][];
+      /** @description include=spof, true when more than 500 CIs were candidates; only the 500 closest to the failure were simulated. */
+      spof_truncated?: boolean;
+      blast_radius?: components['schemas']['BlastCounts'];
     };
     BlastRadius: {
       ci_id: string;
@@ -8674,17 +8838,55 @@ export interface components {
       affected_count: number;
       /** @description The CIs reached only over an undirected network edge (connected_to). */
       heuristic_count: number;
-      affected_services?: components['schemas']['TopologyNode'][];
-      /** @description Clients of the affected CIs (heuristic hits not included). */
+      /** @description The affected CIs of type business_service or application or a type inheriting from one of them (IMP-08), certain ones first, then by name; heuristic hits carry heuristic true. Absent when none is affected. */
+      affected_services?: components['schemas']['BlastRadiusCI'][];
+      /** @description Clients of the affected CIs (heuristic hits not included), sorted. */
       client_ids?: string[];
-      /** @description Sites of the affected CIs (heuristic hits not included). */
+      /** @description Sites of the affected CIs (heuristic hits not included), sorted. */
       site_ids?: string[];
+      /** @description The direct dependents of the failed CI without an alternative provider (IMP-04); the SPOF of the services are service_spofs. */
       single_points_of_failure?: components['schemas']['TopologyNode'][];
       protected_by_redundancy?: components['schemas']['TopologyNode'][];
+      /** @description The single points of failure of the affected services (IMP-08), see ServiceSPOF. */
+      service_spofs: components['schemas']['ServiceSPOF'][];
+      /** @description true when more than 500 CIs were candidates; only the 500 closest to the failure were simulated. */
+      spof_truncated: boolean;
+      /**
+       * @description true when the walk from the CI reached the node limit (10,000 CIs): the affected CIs may then be incomplete and the counts of blast_radius are lower bounds (NFR-01, E-17); absent otherwise.
+       * @enum {boolean}
+       */
+      truncated?: true;
+      blast_radius: components['schemas']['BlastCounts'];
     };
     BlastRadiusCI: components['schemas']['TopologyNode'] & {
       /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
       heuristic: boolean;
+    };
+    /** @description An impacted service (IMP-08). */
+    AffectedService: {
+      id: string;
+      name: string;
+      /** @description The id of the CI type. */
+      ci_type: string;
+      /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
+      heuristic: boolean;
+    };
+    /** @description A single point of failure of the service chain (IMP-08): a failed or certainly affected CI whose failure alone takes down the certainly affected services service_ids over directed steps, the other failed CIs of the analysis kept up. A service is a SPOF only for another service; a service reached only heuristically has none. Ordered by distance from the failure, then by name. */
+    ServiceSPOF: {
+      id: string;
+      name: string;
+      /** @description The id of the CI type. */
+      ci_type: string;
+      service_ids: string[];
+    };
+    /** @description The blast radius in numbers (IMP-08): cis counts the certainly affected CIs; the other counts are present when their block was computed (include on /api/v1/impact, always on blast-radius). services and services_heuristic split the affected services like affected_count and heuristic_count. With truncated the counts are lower bounds (E-17). */
+    BlastCounts: {
+      cis: number;
+      services?: number;
+      services_heuristic?: number;
+      clients?: number;
+      sites?: number;
+      spof?: number;
     };
     DependencyResult: {
       ci_id: string;
@@ -9774,6 +9976,7 @@ export interface components {
     };
     ExportJobFilters: {
       status?: string;
+      /** @description CI type id; includes the subtypes (MET-06), as the parameter ci_type_id of the CI list. */
       ci_type_id?: string;
       client_id?: string;
     };
@@ -13022,6 +13225,8 @@ export interface components {
     ListFields: string;
     /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
     ImpactFields: string;
+    /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+    ImpactInclude: string;
     /** @description Free-text search. */
     ListQ: string;
     /**
@@ -13039,6 +13244,7 @@ export interface components {
     /** @description Sort direction. */
     SortDir: 'asc' | 'desc';
     CIStatus: components['schemas']['CIStatus'];
+    /** @description CI type id to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. The same holds for filter[ci_type_id] and filter[ci_type_id][in] (the union of the subtrees). An attribute filter then also follows the inheritable definitions of the ancestors of the named types. */
     CITypeID: string;
     ClientID: string;
     SiteID: string;
@@ -13678,6 +13884,7 @@ export interface operations {
         /** @description Sort direction. */
         sort_dir?: components['parameters']['SortDir'];
         status?: components['parameters']['CIStatus'];
+        /** @description CI type id to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. The same holds for filter[ci_type_id] and filter[ci_type_id][in] (the union of the subtrees). An attribute filter then also follows the inheritable definitions of the ancestors of the named types. */
         ci_type_id?: components['parameters']['CITypeID'];
         client_id?: components['parameters']['ClientID'];
         site_id?: components['parameters']['SiteID'];
@@ -15139,6 +15346,7 @@ export interface operations {
       query?: {
         format?: 'csv' | 'json' | 'datev';
         status?: components['parameters']['CIStatus'];
+        /** @description CI type id to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. The same holds for filter[ci_type_id] and filter[ci_type_id][in] (the union of the subtrees). An attribute filter then also follows the inheritable definitions of the ancestors of the named types. */
         ci_type_id?: components['parameters']['CITypeID'];
         client_id?: components['parameters']['ClientID'];
       };
@@ -19308,7 +19516,7 @@ export interface operations {
       query?: {
         client_id?: string;
         site_id?: string;
-        /** @description CI type id (ci.ci_type_id) to filter by. */
+        /** @description CI type id (ci.ci_type_id) to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. With root_ci_id the root is always kept. */
         ci_type?: string;
         /** @description When set, returns a subgraph reachable from this CI (a UUID). A CI the caller does not see is 404. */
         root_ci_id?: string;
@@ -19451,6 +19659,8 @@ export interface operations {
         depth?: number;
         /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
       path?: never;
@@ -19471,7 +19681,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Unknown category, unknown field in fields or more than 100 CIs. */
+      /** @description Unknown category, unknown field in fields, unknown value in include or more than 100 CIs. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -19493,6 +19703,8 @@ export interface operations {
         categories?: string;
         /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
       path: {
@@ -19524,7 +19736,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Unknown category or unknown field in fields. */
+      /** @description Unknown category, unknown field in fields or unknown value in include. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -28113,7 +28325,8 @@ export interface operations {
     parameters: {
       query?: {
         ci_type_id?: string;
-        scope?: 'type' | 'global';
+        attribute_set_id?: string;
+        scope?: 'type' | 'global' | 'set';
         /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
@@ -28265,9 +28478,185 @@ export interface operations {
       503: components['responses']['ServiceUnavailable'];
     };
   };
-  listCiTypes: {
+  listAttributeSets: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute sets, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeSetListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createAttributeSet: {
     parameters: {
       query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AttributeSetCreate'];
+      };
+    };
+    responses: {
+      /** @description Attribute set created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeSet'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getAttributeSet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute set */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeSet'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteAttributeSet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Attribute set deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateAttributeSet: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AttributeSetPatch'];
+      };
+    };
+    responses: {
+      /** @description Attribute set updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeSet'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listCiTypes: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        /** @description Only types of this category. */
+        category?: string;
+        /** @description Also list deactivated types (MET-05). */
+        include_inactive?: boolean;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -28455,12 +28844,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Reactivate a CI type */
+      /** @description The reactivated CI type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -28469,6 +28860,9 @@ export interface operations {
         };
         content?: never;
       };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   createCiTypesIdClone: {
@@ -28480,12 +28874,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Clone a CI type into a new version lineage */
-      200: {
+      /** @description The clone */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -28508,12 +28904,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Deactivate a CI type */
+      /** @description The deactivated CI type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIType'];
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -28522,6 +28920,9 @@ export interface operations {
         };
         content?: never;
       };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listCiTypesIdFields: {
@@ -28625,6 +29026,65 @@ export interface operations {
         };
         content?: never;
       };
+    };
+  };
+  getCiTypeAttributeSets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Assignment document */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CITypeAttributeSets'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  replaceCiTypeAttributeSets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CITypeAttributeSets'];
+      };
+    };
+    responses: {
+      /** @description Assignment document after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CITypeAttributeSets'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listCisIdBlastRadius: {

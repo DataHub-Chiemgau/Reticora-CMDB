@@ -9,6 +9,13 @@
 // cost_center) and the relationships of a CI (relationships; WP-437,
 // F-116).
 //
+// blast_radius is the blast radius of the core switch with its service
+// chain (GET /cis/{id}/blast-radius, IMP-08, WP-297): the seed has no
+// services (its servers hang off the switches over connected_to only), so
+// the scenario measures the time and, in blast_radius_bytes, the size of
+// the answer; the load of the SPOF simulation is covered by
+// TestServiceImpactWorstCase.
+//
 // list_sorted reads the first page of the CI list sorted by name (WP-839,
 // idx_ci_list_name); its total has the form of E-104 (exact up to 10,000,
 // beyond 10,000 with total_capped). LATENCY_BUDGETS selects the p95
@@ -48,6 +55,8 @@ const ATTR_VALUES = Number(__ENV.ATTR_VALUES || 50);
 const BULK_JOBS = 3;
 const bulkDuration = new Trend('bulk_500_duration', true);
 const bulkSucceeded = new Counter('bulk_jobs_succeeded');
+// The size of the blast radius answers of the core switch (WP-297).
+const blastRadiusBytes = new Trend('blast_radius_bytes');
 
 const reads = (exec) => ({ executor: 'constant-vus', exec, vus: VUS, duration: DURATION });
 
@@ -67,6 +76,7 @@ const scenarios = {
   topology: { ...reads('topology'), vus: 2 },
   impact: { ...reads('impact'), vus: 2 },
   impact_full: { ...reads('impactFull'), vus: 2 },
+  blast_radius: { ...reads('blastRadius'), vus: 2 },
   bulk: { executor: 'per-vu-iterations', exec: 'bulk', vus: 1, iterations: BULK_JOBS, maxDuration: '10m' },
 };
 
@@ -87,6 +97,7 @@ const latency = {
   topology: 3000,
   impact: 2000,
   impact_full: 2000,
+  blast_radius: 2000,
 };
 const latencyThresholds = Object.fromEntries(
   Object.entries(latency)
@@ -249,6 +260,18 @@ export function impactFull(data) {
   const res = get(`/impact/${data.core}?depth=20`, 'impact_full');
   const count = impactCount(res);
   check(res, { 'full impact covers the organization': () => count >= IMPACT_ALL });
+  sleep(1);
+}
+
+// blastRadius is the blast radius of the core switch with the service chain
+// (WP-297): the affected CIs, services, clients, sites and SPOF. It records
+// the size of the answer.
+export function blastRadius(data) {
+  const res = get(`/cis/${data.core}/blast-radius`, 'blast_radius');
+  if (res.status === 200) {
+    blastRadiusBytes.add((res.body || '').length);
+  }
+  check(res, { 'blast radius of the core switch': (r) => r.status === 200 });
   sleep(1);
 }
 

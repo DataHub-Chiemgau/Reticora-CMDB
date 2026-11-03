@@ -83,6 +83,8 @@ var matrixOverrides = map[string]map[string]string{
 	// under replica (MET-01, WP-115).
 	"ci_type":              {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "is_observable": "true"},
 	"attribute_definition": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "scope": "type", "ci_type_id": "@uuid"},
+	// A global set (organization_id NULL) must be a system set (WP-250).
+	"attribute_set": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "is_system": "true"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

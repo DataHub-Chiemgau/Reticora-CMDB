@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -130,6 +131,122 @@ func validateAttributes(defs []fieldmeta.FieldDefinition, values map[string]any,
 	}
 	sort.Slice(violations, func(i, j int) bool { return violations[i].Field < violations[j].Field })
 	return &ValidationError{Violations: violations}
+}
+
+// Details of a reference value refused by checkReferences (MET-12). A
+// target the caller cannot see is not found, exactly as one that does not
+// exist.
+const (
+	referenceNotFound    = "reference target not found"
+	referenceOtherClient = "reference target belongs to another client"
+)
+
+// referenceUse is one id a reference attribute of a write names.
+type referenceUse struct {
+	field, id string
+}
+
+// checkReferences checks the reference values of a write against their
+// targets (MET-12, WP-254): the target must be available (module gate,
+// E-03), exist, be visible in the caller's scope (lookup, under row level
+// security) and be compatible with the client of the CI, which is the case
+// when the CI is org-wide, the target is org-wide (TEN-02) or both have the
+// same client. Only values the write sets or changes are checked (keys of
+// incoming whose value differs from existing), all of them when the write
+// changes the client; a hidden field is skipped as in validateAttributes.
+// The lookup runs one query per target for all ids of the write; without
+// a lookup (memory mode) only the module gate applies.
+func checkReferences(ctx context.Context, lookup fieldmeta.ReferenceLookup, orgID string, defs []fieldmeta.FieldDefinition,
+	scope writeScope, values, incoming, existing map[string]any) error {
+	var violations []Violation
+	byTarget := map[string][]referenceUse{}
+	for i := range defs {
+		def := &defs[i]
+		target := fieldmeta.ReferenceTargetOf(def)
+		if target == "" {
+			continue
+		}
+		value, present := values[def.Name]
+		if !present || isBlank(value) {
+			continue
+		}
+		if !scope.clientChanged {
+			in, set := incoming[def.Name]
+			if !set || sameValue(existing[def.Name], in) {
+				continue
+			}
+		}
+		if !fieldmeta.Evaluate(*def, values).Visible {
+			continue
+		}
+		if !fieldmeta.ReferenceTargetAvailable(target) {
+			violations = append(violations, Violation{Field: def.Name, Detail: "reference target " + target + " not available"})
+			continue
+		}
+		if lookup == nil {
+			continue
+		}
+		for _, id := range referenceIDs(value) {
+			byTarget[target] = append(byTarget[target], referenceUse{field: def.Name, id: strings.ToLower(id)})
+		}
+	}
+	targets := make([]string, 0, len(byTarget))
+	for target := range byTarget {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+	refused := map[string]bool{}
+	for _, target := range targets {
+		uses := byTarget[target]
+		ids := make([]string, 0, len(uses))
+		for _, u := range uses {
+			if !slices.Contains(ids, u.id) {
+				ids = append(ids, u.id)
+			}
+		}
+		found, err := lookup.LookupReferences(ctx, orgID, target, ids)
+		if err != nil {
+			return fmt.Errorf("check references to %s: %w", target, err)
+		}
+		for _, u := range uses {
+			if refused[u.field] {
+				continue
+			}
+			client, ok := found[u.id]
+			switch {
+			case !ok:
+				violations = append(violations, Violation{Field: u.field, Detail: referenceNotFound})
+			case scope.clientID != "" && client != "" && !strings.EqualFold(client, scope.clientID):
+				violations = append(violations, Violation{Field: u.field, Detail: referenceOtherClient})
+			default:
+				continue
+			}
+			refused[u.field] = true
+		}
+	}
+	if len(violations) == 0 {
+		return nil
+	}
+	sort.Slice(violations, func(i, j int) bool { return violations[i].Field < violations[j].Field })
+	return &ValidationError{Violations: violations}
+}
+
+// referenceIDs returns the ids of a reference value: the value or, for a
+// list (multi_value), its elements. The form check has run before.
+func referenceIDs(value any) []string {
+	switch v := value.(type) {
+	case string:
+		return []string{v}
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // trimFieldPrefix removes the "field <name>: " prefix fieldmeta adds, because

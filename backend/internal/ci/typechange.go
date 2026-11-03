@@ -34,6 +34,13 @@ var ErrReclassificationRefused = errors.New("discovery may only raise generic_de
 // ErrUnknownType: the target type does not exist for the organization.
 var ErrUnknownType = errors.New("unknown CI type")
 
+// ErrTypeInactive: the type of a CI the writer did not choose (discovery,
+// agent, review new, unlicensed adoption) or the target of a discovery
+// reclassification is deactivated (MET-05). Nothing is written; a write
+// whose type the writer chose answers 422 on ci_type_id instead
+// (ciTypeDeactivated).
+var ErrTypeInactive = errors.New("the CI type is deactivated")
+
 // Violations of ci_type_id (CI-01, TEN-09; F-144, F-016): a CI has an active
 // system type or an active type of its organization, named by its ID. An
 // unknown ID and a private type of another organization get the same answer,
@@ -183,9 +190,9 @@ func UpdateRecord(ctx context.Context, repo Repository, orgID, id string, rec *R
 
 // keepsType reports whether the reclassification of an ingest record
 // (CI-11) leaves the CI's type as it is: discovery may not make it
-// (ErrReclassificationRefused, ErrUnknownType), or another active CI holds
-// a value the CI carries of a unique attribute of the target type (MET-15,
-// F-432, *UniqueError). Discovery cannot answer a person with the conflict:
+// (ErrReclassificationRefused, ErrUnknownType, ErrTypeInactive: MET-05),
+// or another active CI holds a value the CI carries of a unique attribute
+// of the target type (MET-15, F-432, *UniqueError). Discovery cannot answer a person with the conflict:
 // the CI stays a generic_device, its unclassified_device item stays open,
 // and the manual type change answers 409 with the attribute.
 func keepsType(ctx context.Context, err error, ciID, typeID string) bool {
@@ -195,5 +202,5 @@ func keepsType(ctx context.Context, err error, ciID, typeID string) bool {
 			"event", "ingest.reclassification.unique", "ci_id", ciID, "ci_type_id", typeID, "fields", taken.Fields)
 		return true
 	}
-	return errors.Is(err, ErrReclassificationRefused) || errors.Is(err, ErrUnknownType)
+	return errors.Is(err, ErrReclassificationRefused) || errors.Is(err, ErrUnknownType) || errors.Is(err, ErrTypeInactive)
 }
