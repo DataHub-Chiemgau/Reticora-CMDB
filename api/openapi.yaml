@@ -3055,6 +3055,23 @@ paths:
           in: query
           schema:
             type: string
+        - name: entity_type
+          in: query
+          description: >-
+            Only documents linked to this target (WP-811); requires entity_id.
+            One of ci, asset, assignment, ticket, location, disposal_record and
+            stocktake; any other value answers 422.
+          schema:
+            type: string
+        - name: entity_id
+          in: query
+          description: >-
+            Id of the target named by entity_type; requires entity_type. A
+            target that does not exist or lies outside the caller's scope
+            answers 404, only links visible in the scope count.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Paginated list of documents
@@ -3066,13 +3083,24 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
       operationId: createDocument
       tags: [Documents]
       summary: Create a document metadata record
-      description: A new document has no link and is org-wide; a principal restricted to some clients or sites gets 403 (E-09, transition rule of E-61).
+      description: >-
+        links creates the document and its links in one transaction (E-61,
+        option 1). Each target is checked like POST /api/v1/documents/{id}/links:
+        an unknown entity_type answers 422, a target that does not exist or
+        lies outside the caller's scope 404, and nothing is created. A document
+        without links is org-wide, so a principal restricted to some clients,
+        sites or teams needs at least one link, otherwise 403 (E-09, E-11), and
+        so does a link whose target lies outside its write scope.
       requestBody:
         required: true
         content:
@@ -3092,6 +3120,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -22872,6 +22904,14 @@ components:
           type: array
           items:
             type: string
+        links:
+          type: array
+          description: >-
+            Links created with the document (E-61, option 1); required (at
+            least one) for a principal restricted to some clients, sites or
+            teams.
+          items:
+            $ref: '#/components/schemas/CreateDocumentLinkRequest'
 
     UpdateDocumentRequest:
       type: object

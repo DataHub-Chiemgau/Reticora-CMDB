@@ -13,6 +13,10 @@ import (
 
 // Repository defines persistence operations for documents.
 type Repository interface {
+	// List returns a page of the visible documents. With filter.EntityType
+	// and filter.EntityID it returns only the documents linked to that
+	// target; an entity type outside the registry fails with a 422 field
+	// error, an invisible or missing target with api.ErrNotFound (WP-811).
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Document, error)
 	// GetWritable returns the document only when the caller may change it
@@ -20,6 +24,10 @@ type Repository interface {
 	// fails like GetByID for a missing document.
 	GetWritable(ctx context.Context, orgID, id string) (*Document, error)
 	Create(ctx context.Context, d *Document) error
+	// CreateWithLinks creates the document and its links in one transaction
+	// (E-61 option 1); the links get the document's id. A link fails like
+	// LinkDocument, and then no document is created.
+	CreateWithLinks(ctx context.Context, d *Document, links []DocumentLink) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Document, error)
 	// SetStorage stores the blob location, size and MIME type after an
 	// upload and returns the updated document.
@@ -57,9 +65,25 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	var linked map[string]bool
+	if filter.EntityType != "" || filter.EntityID != "" {
+		if err := checkEntityFilter(filter.EntityType, filter.EntityID); err != nil {
+			return nil, 0, err
+		}
+		linked = make(map[string]bool)
+		for _, l := range r.links {
+			if l.OrganizationID == orgID && l.EntityType == filter.EntityType && l.EntityID == filter.EntityID {
+				linked[l.DocumentID] = true
+			}
+		}
+	}
+
 	var result []Document
 	for _, d := range r.docs {
 		if d.OrganizationID != orgID {
+			continue
+		}
+		if linked != nil && !linked[d.ID] {
 			continue
 		}
 		if filter.Category != "" && d.Category != filter.Category {
@@ -140,6 +164,27 @@ func (r *MemoryRepository) Create(_ context.Context, d *Document) error {
 		d.Version = 1
 	}
 	r.docs[d.ID] = d
+	return nil
+}
+
+// CreateWithLinks checks every link against the registry before anything
+// is stored, then creates the document and its links; the memory profile
+// has no target tables to check further.
+func (r *MemoryRepository) CreateWithLinks(ctx context.Context, d *Document, links []DocumentLink) error {
+	for i := range links {
+		if err := checkEntityType(links[i].EntityType); err != nil {
+			return err
+		}
+	}
+	if err := r.Create(ctx, d); err != nil {
+		return err
+	}
+	for i := range links {
+		links[i].OrganizationID, links[i].DocumentID = d.OrganizationID, d.ID
+		if err := r.LinkDocument(ctx, &links[i]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

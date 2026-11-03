@@ -91,16 +91,28 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := FilterParams{
-		Category: r.URL.Query().Get("category"),
-		Search:   r.URL.Query().Get("search"),
-		SortBy:   r.URL.Query().Get("sort_by"),
-		SortDir:  r.URL.Query().Get("sort_dir"),
+		Category:   r.URL.Query().Get("category"),
+		Search:     r.URL.Query().Get("search"),
+		SortBy:     r.URL.Query().Get("sort_by"),
+		SortDir:    r.URL.Query().Get("sort_dir"),
+		EntityType: r.URL.Query().Get("entity_type"),
+		EntityID:   r.URL.Query().Get("entity_id"),
+	}
+	// entity_type and entity_id only together (400), a type of the registry
+	// (422); a target outside the scope or missing answers 404 (WP-811).
+	if ferr := checkEntityFilter(filter.EntityType, filter.EntityID); ferr != nil {
+		api.WriteRepoError(w, ferr)
+		return
 	}
 
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+		if errors.Is(err, api.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "linked object not found")
 			return
 		}
 		api.WriteRepoError(w, err)
@@ -147,14 +159,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A new document has no link and is therefore org-wide; the request
-	// cannot carry links, so a principal restricted in the client, site or
-	// team scope may not create one (E-09, E-11, transition rule of E-61).
-	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && !orgWideDocumentScope(&scope) {
-		api.WriteError(w, http.StatusForbidden, "Forbidden", "the operation is not permitted")
-		return
-	}
-
 	var req CreateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -163,6 +167,18 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if req.Title == "" || req.FileName == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "title and file_name are required")
+		return
+	}
+	if ferr := checkCreateLinks(req.Links); ferr != nil {
+		api.WriteRepoError(w, ferr)
+		return
+	}
+
+	// A document without links is org-wide, so a principal restricted in the
+	// client, site or team scope creates one only with at least one link to
+	// a target in its scope (E-09, E-11, E-61 option 1).
+	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && !orgWideDocumentScope(&scope) && len(req.Links) == 0 {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "the operation is not permitted")
 		return
 	}
 
@@ -192,12 +208,66 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		d.Tags = []string{}
 	}
 
-	if err := h.repo.Create(r.Context(), d); err != nil {
+	links := make([]DocumentLink, len(req.Links))
+	for i, l := range req.Links {
+		links[i] = DocumentLink{OrganizationID: t.OrganizationID, EntityType: l.EntityType, EntityID: l.EntityID}
+	}
+	// Document and links in one transaction: an invisible or missing target
+	// answers 404 and nothing is created.
+	if err := h.repo.CreateWithLinks(r.Context(), d, links); err != nil {
+		if errors.Is(err, api.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "linked object not found")
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, d)
+}
+
+// checkEntityFilter checks the query parameters entity_type and entity_id
+// of GET /api/v1/documents: both or none (400), entity_id a UUID (400) and
+// entity_type in the registry of links.go (422).
+//
+// validation: field errors with fixed texts.
+func checkEntityFilter(entityType, entityID string) error {
+	switch {
+	case entityType == "" && entityID == "":
+		return nil
+	case entityType == "":
+		return &api.FieldError{Field: "entity_type", Message: "is required together with entity_id"}
+	case entityID == "":
+		return &api.FieldError{Field: "entity_id", Message: "is required together with entity_type"}
+	case !api.IsUUID(entityID):
+		return errInvalidEntityID
+	}
+	return checkEntityType(entityType)
+}
+
+// checkCreateLinks checks the links of POST /api/v1/documents like
+// POST …/links: entity_type and entity_id required and entity_id a UUID
+// (400), entity_type in the registry (422). The field names the link,
+// e.g. links[1].entity_type.
+//
+// validation: field errors with fixed texts.
+func checkCreateLinks(links []LinkRequest) error {
+	for i, l := range links {
+		prefix := "links[" + strconv.Itoa(i) + "]."
+		switch {
+		case l.EntityType == "":
+			return &api.FieldError{Field: prefix + "entity_type", Message: "is required"}
+		case l.EntityID == "":
+			return &api.FieldError{Field: prefix + "entity_id", Message: "is required"}
+		case !api.IsUUID(l.EntityID):
+			return &api.FieldError{Field: prefix + "entity_id", Message: "must be a UUID"}
+		}
+		if _, ok := linkTargets[l.EntityType]; !ok {
+			return &api.FieldError{Field: prefix + "entity_type", Status: http.StatusUnprocessableEntity,
+				Message: "must be one of " + strings.Join(EntityTypes(), ", ")}
+		}
+	}
+	return nil
 }
 
 // Update handles PATCH /api/v1/documents/{id}

@@ -1435,7 +1435,7 @@ export interface paths {
     put?: never;
     /**
      * Create a document metadata record
-     * @description A new document has no link and is org-wide; a principal restricted to some clients or sites gets 403 (E-09, transition rule of E-61).
+     * @description links creates the document and its links in one transaction (E-61, option 1). Each target is checked like POST /api/v1/documents/{id}/links: an unknown entity_type answers 422, a target that does not exist or lies outside the caller's scope 404, and nothing is created. A document without links is org-wide, so a principal restricted to some clients, sites or teams needs at least one link, otherwise 403 (E-09, E-11), and so does a link whose target lies outside its write scope.
      */
     post: operations['createDocument'];
     delete?: never;
@@ -11666,6 +11666,8 @@ export interface components {
       storage_key?: string;
       category?: string;
       tags?: string[];
+      /** @description Links created with the document (E-61, option 1); required (at least one) for a principal restricted to some clients, sites or teams. */
+      links?: components['schemas']['CreateDocumentLinkRequest'][];
     };
     UpdateDocumentRequest: {
       title?: string;
@@ -17687,6 +17689,10 @@ export interface operations {
         /** @description Sort direction. */
         sort_dir?: components['parameters']['SortDir'];
         category?: string;
+        /** @description Only documents linked to this target (WP-811); requires entity_id. One of ci, asset, assignment, ticket, location, disposal_record and stocktake; any other value answers 422. */
+        entity_type?: string;
+        /** @description Id of the target named by entity_type; requires entity_type. A target that does not exist or lies outside the caller's scope answers 404, only links visible in the scope count. */
+        entity_id?: string;
       };
       header?: never;
       path?: never;
@@ -17705,6 +17711,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -17733,6 +17741,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
