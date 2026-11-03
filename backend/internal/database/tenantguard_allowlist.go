@@ -97,6 +97,10 @@ var withSystemCallers = map[string]string{
 	// their tenant transaction.
 	"internal/jobs/entitlement_notices.go": "organizations whose entitlement notices are sent",
 
+	// Weekly CI snapshot (WP-312): lists the organizations, each snapshot
+	// is written in its tenant transaction.
+	"internal/history/snapshot.go": "organizations whose weekly CI snapshot is written",
+
 	// Job queue (JOB-02): finds the due and the overdue jobs of every
 	// organization; claiming and failing stay in the tenant.
 	"internal/jobs/pg_repository.go": "due and overdue jobs of every organization",
