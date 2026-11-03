@@ -47,9 +47,10 @@
 # Usage: [SHELLCHECK=<shellcheck>] ./tests/outage/config.test.sh
 #
 # Single quotes hold patterns and JSON literally (SC2016); the stubs replace
-# functions of the suite and are called from it (SC2317); every stub run sets
-# the suite's variables in its own subshell (SC2030, SC2031).
-# shellcheck disable=SC2016,SC2317,SC2030,SC2031
+# functions of the suite and are called from it (SC2317, from shellcheck
+# 0.11 on also SC2329); every stub run sets the suite's variables in its own
+# subshell (SC2030, SC2031).
+# shellcheck disable=SC2016,SC2317,SC2329,SC2030,SC2031
 set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
