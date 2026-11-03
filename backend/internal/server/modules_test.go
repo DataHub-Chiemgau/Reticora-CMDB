@@ -51,7 +51,8 @@ func TestG1DefaultSwitchesLateModulesOff(t *testing.T) {
 		"/api/v1/agents", "/api/v1/iga/connectors", "/scim/v2/Users", "/api/v1/ai/conversations",
 		"/api/v1/attribute-sets", "/api/v1/ci-types/c0de0000-0000-4000-8000-000000000001/attribute-sets",
 		"/api/v1/templates", "/api/v1/templates/c0de0000-0000-4000-8000-000000000001/versions",
-		"/api/v1/rules", "/api/v1/rules/c0de0000-0000-4000-8000-000000000001"} {
+		"/api/v1/rules", "/api/v1/rules/c0de0000-0000-4000-8000-000000000001",
+		"/api/v1/layouts", "/api/v1/layouts/c0de0000-0000-4000-8000-000000000001"} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusNotFound {
@@ -221,6 +222,7 @@ func TestModulePhasesFollowE44(t *testing.T) {
 		"/api/v1/ci-types/{id}/attribute-sets":              ModuleMetamodel,
 		"/api/v1/templates/{id}/versions/{version}/publish": ModuleMetamodel,
 		"/api/v1/rules/{id}":                                ModuleMetamodel,
+		"/api/v1/layouts/{id}":                              ModuleMetamodel,
 	} {
 		if m, ok := ModuleForRoute(route); !ok || m.Key != want {
 			t.Errorf("ModuleForRoute(%s) = %s (%v), want %s", route, m.Key, ok, want)
@@ -290,13 +292,14 @@ type e38Resource struct {
 // have no prefix of their own in the G1 release, after E-105.
 var e38Register = []e38Resource{
 	// Metamodel (MET-*): the module metamodel, created by WP-250 with the
-	// attribute sets, templates since WP-251, rules since WP-716; the other
-	// resources add their prefixes with their first route.
+	// attribute sets, templates since WP-251, rules since WP-716, layouts
+	// since WP-259; the other resources add their prefixes with their first
+	// route.
 	{path: "/api/v1/attribute-sets", module: ModuleMetamodel},
 	{path: "/api/v1/ci-types/{id}/attribute-sets", module: ModuleMetamodel},
 	{path: "/api/v1/templates", module: ModuleMetamodel},
 	{path: "/api/v1/rules", module: ModuleMetamodel},
-	{path: "/api/v1/layouts", module: ModuleMetamodel, owner: "WP-259"},
+	{path: "/api/v1/layouts", module: ModuleMetamodel},
 	{path: "/api/v1/metamodel/drafts", module: ModuleMetamodel, owner: "WP-721"},
 	{path: "/api/v1/field-permissions", module: ModuleMetamodel, owner: "WP-726"},
 	// New prefixes of existing modules, set with their first route.

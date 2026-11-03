@@ -29,6 +29,7 @@ DELETE /api/v1/ip-addresses/{id} ipam:write
 DELETE /api/v1/ips/{id} ipam:write
 DELETE /api/v1/jobs/{id} job:read
 DELETE /api/v1/keys/{id} key:write
+DELETE /api/v1/layouts/{id} citype:manage
 DELETE /api/v1/lifecycle-definitions/{id} lifecycle:manage
 DELETE /api/v1/lifecycle-models/{id} lifecycle:manage
 DELETE /api/v1/locations/{id} location:write
@@ -192,6 +193,8 @@ GET /api/v1/jobs/{id}/result job:read
 GET /api/v1/keys key:read
 GET /api/v1/keys/{id} key:read
 GET /api/v1/keys/{id}/assignments key:read
+GET /api/v1/layouts ci:read
+GET /api/v1/layouts/{id} ci:read
 GET /api/v1/lifecycle-definitions asset:read
 GET /api/v1/lifecycle-definitions/{id} asset:read
 GET /api/v1/lifecycle-models asset:read
@@ -328,6 +331,7 @@ PATCH /api/v1/inventory/items/{id} stock:write
 PATCH /api/v1/ip-addresses/{id} ipam:write
 PATCH /api/v1/ips/{id} ipam:write
 PATCH /api/v1/keys/{id} key:write
+PATCH /api/v1/layouts/{id} citype:manage
 PATCH /api/v1/lifecycle-models/{id} lifecycle:manage
 PATCH /api/v1/locations/{id} location:write
 PATCH /api/v1/maintenance-windows/{id} maintenance:write
@@ -458,6 +462,7 @@ POST /api/v1/jobs/{id}/revert job:read
 POST /api/v1/keys key:write
 POST /api/v1/keys/{id}/issue key:write
 POST /api/v1/keys/{id}/return key:write
+POST /api/v1/layouts citype:manage
 POST /api/v1/lifecycle-definitions lifecycle:manage
 POST /api/v1/lifecycle-models lifecycle:manage
 POST /api/v1/locations location:write

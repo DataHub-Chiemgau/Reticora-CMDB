@@ -89,6 +89,8 @@ var matrixOverrides = map[string]map[string]string{
 	"template": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "is_system": "true"},
 	// A rule has exactly one target, ast only as a validation (WP-716).
 	"metamodel_rule": {"ci_type_id": "@uuid", "kind": "required"},
+	// A layout has exactly one target, a type or a template (WP-259).
+	"form_layout": {"ci_type_id": "@uuid"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

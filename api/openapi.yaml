@@ -13102,6 +13102,212 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/layouts:
+    x-phase: P2
+    get:
+      operationId: listLayouts
+      tags: [Metamodel]
+      summary: List form layouts (MET-50)
+      description: >-
+        The organization's form layouts per CI type, template and role
+        (WP-259), optionally filtered by `ci_type_id`, `template_id` and
+        `role_id`. Pages newest first on (created_at, id) (API-02): `limit`
+        (default 50, at most 200) and the signed keyset `cursor` from
+        `next_cursor`. Requires ci:read. Not /api/v1/forms (P3 workflows).
+      parameters:
+        - name: ci_type_id
+          in: query
+          required: false
+          description: Only layouts of this CI type.
+          schema: { type: string }
+        - name: template_id
+          in: query
+          required: false
+          description: Only layouts of this template.
+          schema: { type: string }
+        - name: role_id
+          in: query
+          required: false
+          description: Only layouts of this role or custom role.
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Layouts, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormLayoutListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createLayout
+      tags: [Metamodel]
+      summary: Create a form layout (MET-50)
+      description: >-
+        A layout of the organization for exactly one target it sees, a CI
+        type or a template (an own or a system row; otherwise 422 on the
+        target field), optionally bound to a role or custom role of the
+        organization (`role_id`, the ids of GET /api/v1/roles; otherwise
+        422). The fields are checked against the effective fields of the CI
+        type without a CI (for a template: of the template's type). 422 with
+        the path in `field` (e.g. `layout.sections[1].fields[0].name`) for an
+        unknown field, a field in two sections, a duplicate or reserved
+        section key (`_instance`, `_required`), a title without `de` or
+        `en`, a width outside 1 to 12 and a `visible_when` key that names
+        no catalog rule (/api/v1/rules). A taken key or a second layout for
+        the same target and role is 409. Requires citype:manage; audited as
+        `form_layout.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormLayoutCreate'
+      responses:
+        '201':
+          description: Layout created
+          headers:
+            ETag:
+              description: The layout version (API-07).
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormLayout'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/layouts/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getLayout
+      tags: [Metamodel]
+      summary: Read a form layout
+      description: A layout of the organization. Requires ci:read.
+      responses:
+        '200':
+          description: Layout
+          headers:
+            ETag:
+              description: The layout version (API-07); send it as If-Match with a PATCH or DELETE.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormLayout'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateLayout
+      tags: [Metamodel]
+      summary: Update a form layout
+      description: >-
+        `role_id` (null unbinds the role), `priority`, `is_active` and
+        `layout`, checked like a create. `key`, `ci_type_id` and
+        `template_id` are immutable (422). `version` rises by one. An
+        optional If-Match must name the current version, otherwise 412;
+        without If-Match the change is written (API-07). Requires
+        citype:manage; audited as `form_layout.updated` with before and
+        after.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormLayoutPatch'
+      responses:
+        '200':
+          description: Layout updated
+          headers:
+            ETag:
+              description: The new layout version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormLayout'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the layout
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteLayout
+      tags: [Metamodel]
+      summary: Delete a form layout
+      description: >-
+        An optional If-Match must name the current version, otherwise 412.
+        Requires citype:manage; audited as `form_layout.deleted`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the deletion is based on, or "*".
+          schema: { type: string }
+      responses:
+        '204':
+          description: Layout deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          description: If-Match does not name the current version of the layout
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -17479,6 +17685,112 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MetamodelRule'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    FormLayoutField:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, description: An effective field of the target. }
+        width: { type: integer, minimum: 1, maximum: 12, default: 12, description: Grid columns. }
+    FormLayoutSection:
+      type: object
+      required: [key, title, fields]
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Unique in the layout; `_instance` and `_required` are reserved.
+        title:
+          type: object
+          required: [de, en]
+          additionalProperties: false
+          properties:
+            de: { type: string, minLength: 1, maxLength: 200 }
+            en: { type: string, minLength: 1, maxLength: 200 }
+        visible_when:
+          type: array
+          description: Keys of catalog rules (/api/v1/rules) that show the section; empty shows it always.
+          items: { type: string }
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormLayoutField'
+    FormLayoutDocument:
+      type: object
+      required: [sections]
+      additionalProperties: false
+      properties:
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormLayoutSection'
+    FormLayout:
+      type: object
+      description: >-
+        The layout of a form for exactly one target, a CI type or a template
+        (table form_layout, WP-259); a template layout applies to every
+        version of the template (E-111). At most one layout per target and
+        role. There are no system layouts: a layout of a system type is a
+        row of the organization.
+      required: [id, organization_id, key, priority, version, is_active, layout, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        key: { type: string, description: Natural key per organization (export and import). }
+        ci_type_id: { type: string }
+        template_id: { type: string }
+        role_id: { type: string, description: A role or custom role of the organization; absent for every role. }
+        priority: { type: integer }
+        version: { type: integer, description: Rises with every change; the ETag. }
+        is_active: { type: boolean }
+        layout:
+          $ref: '#/components/schemas/FormLayoutDocument'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FormLayoutCreate:
+      type: object
+      required: [key, layout]
+      additionalProperties: false
+      description: Exactly one of ci_type_id and template_id is required (422).
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100 }
+        ci_type_id: { type: string }
+        template_id: { type: string }
+        role_id: { type: string }
+        priority: { type: integer, default: 0 }
+        is_active: { type: boolean, default: true }
+        layout:
+          $ref: '#/components/schemas/FormLayoutDocument'
+    FormLayoutPatch:
+      type: object
+      additionalProperties: false
+      description: key and the target are immutable; naming them is 422.
+      properties:
+        role_id: { type: [string, 'null'], description: null unbinds the role. }
+        priority: { type: integer }
+        is_active: { type: boolean }
+        layout:
+          $ref: '#/components/schemas/FormLayoutDocument'
+        key: { type: string, description: Immutable (422). }
+        ci_type_id: { type: string, description: Immutable (422). }
+        template_id: { type: string, description: Immutable (422). }
+    FormLayoutListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormLayout'
         total: { type: integer }
         limit: { type: integer }
         offset: { type: integer }

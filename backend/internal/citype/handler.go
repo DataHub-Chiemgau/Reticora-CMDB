@@ -82,6 +82,13 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Rule catalog metamodel_rule (WP-716, MET-45, API-06; module
 	// metamodel, E-105).
 	h.registerRuleRoutes(r)
+	// Form layouts per type, template and role (WP-259, MET-50, API-06;
+	// module metamodel, E-105).
+	r.Get("/api/v1/layouts", h.ListLayouts)
+	r.Post("/api/v1/layouts", h.CreateLayout)
+	r.Get("/api/v1/layouts/{id}", h.GetLayout)
+	r.Patch("/api/v1/layouts/{id}", h.UpdateLayout)
+	r.Delete("/api/v1/layouts/{id}", h.DeleteLayout)
 }
 
 // attributeStore returns the attribute-definitions store or answers 503
@@ -92,6 +99,149 @@ func (h *Handler) attributeStore(w http.ResponseWriter) (AttributeDefinitionStor
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "attribute definitions need the database")
 	}
 	return store, ok
+}
+
+// layoutStore returns the layout catalog or answers 503 (in-memory mode
+// has none, like attributeStore).
+func (h *Handler) layoutStore(w http.ResponseWriter, r *http.Request) (LayoutStore, tenant.TenantInfo, bool) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return nil, t, false
+	}
+	store, ok := h.repo.(LayoutStore)
+	if !ok {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "form layouts need the database")
+	}
+	return store, t, ok
+}
+
+// writeLayoutError reports a failed layout request (RFC 7807).
+func writeLayoutError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrLayoutNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrLayoutNotFound.Error())
+	case errors.Is(err, ErrLayoutVersionMismatch):
+		api.WritePreconditionFailed(w, ErrLayoutVersionMismatch.Error())
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// layoutIfMatch reads an optional If-Match (API-07); a value that is not a
+// version is answered with 412.
+func layoutIfMatch(w http.ResponseWriter, r *http.Request) (*int64, bool) {
+	version, present, err := api.ParseIfMatch(r)
+	if err != nil {
+		api.WritePreconditionFailed(w, err.Error())
+		return nil, false
+	}
+	if !present {
+		return nil, true
+	}
+	return &version, true
+}
+
+// ListLayouts handles GET /api/v1/layouts (?ci_type_id=, template_id=,
+// role_id=): the organization's layouts newest first on (created_at, id)
+// with limit and the signed cursor of API-02.
+func (h *Handler) ListLayouts(w http.ResponseWriter, r *http.Request) {
+	store, t, ok := h.layoutStore(w, r)
+	if !ok {
+		return
+	}
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	items, total, err := store.ListLayoutPage(r.Context(), t.OrganizationID, &LayoutFilter{
+		CITypeID: q.Get("ci_type_id"), TemplateID: q.Get("template_id"), RoleID: q.Get("role_id"),
+	}, page)
+	if err != nil {
+		writeLayoutError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(items, total, page, func(l *FormLayout) (time.Time, string) {
+		return l.CreatedAt, l.ID
+	}))
+}
+
+// GetLayout handles GET /api/v1/layouts/{id}; the ETag is the version.
+func (h *Handler) GetLayout(w http.ResponseWriter, r *http.Request) {
+	store, t, ok := h.layoutStore(w, r)
+	if !ok {
+		return
+	}
+	l, err := store.GetLayout(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeLayoutError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(l.Version))
+	api.WriteJSON(w, http.StatusOK, l)
+}
+
+// CreateLayout handles POST /api/v1/layouts.
+func (h *Handler) CreateLayout(w http.ResponseWriter, r *http.Request) {
+	store, t, ok := h.layoutStore(w, r)
+	if !ok {
+		return
+	}
+	var in LayoutInput
+	if err := api.ReadJSON(r, &in); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	l, err := store.CreateLayout(r.Context(), t.OrganizationID, &in)
+	if err != nil {
+		writeLayoutError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(l.Version))
+	api.WriteJSON(w, http.StatusCreated, l)
+}
+
+// UpdateLayout handles PATCH /api/v1/layouts/{id} with an optional
+// If-Match (API-07): a stale version is 412.
+func (h *Handler) UpdateLayout(w http.ResponseWriter, r *http.Request) {
+	store, t, ok := h.layoutStore(w, r)
+	if !ok {
+		return
+	}
+	ifMatch, ok := layoutIfMatch(w, r)
+	if !ok {
+		return
+	}
+	var patch LayoutPatch
+	if err := api.ReadJSON(r, &patch); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	l, err := store.UpdateLayout(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &patch, ifMatch)
+	if err != nil {
+		writeLayoutError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(l.Version))
+	api.WriteJSON(w, http.StatusOK, l)
+}
+
+// DeleteLayout handles DELETE /api/v1/layouts/{id} with an optional
+// If-Match (API-07).
+func (h *Handler) DeleteLayout(w http.ResponseWriter, r *http.Request) {
+	store, t, ok := h.layoutStore(w, r)
+	if !ok {
+		return
+	}
+	ifMatch, ok := layoutIfMatch(w, r)
+	if !ok {
+		return
+	}
+	if err := store.DeleteLayout(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), ifMatch); err != nil {
+		writeLayoutError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func writeAttributeError(w http.ResponseWriter, err error) {

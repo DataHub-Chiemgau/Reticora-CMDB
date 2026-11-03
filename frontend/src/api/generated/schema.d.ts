@@ -6207,6 +6207,61 @@ export interface paths {
     patch: operations['updateRule'];
     trace?: never;
   };
+  '/api/v1/layouts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List form layouts (MET-50)
+     * @description The organization's form layouts per CI type, template and role (WP-259), optionally filtered by `ci_type_id`, `template_id` and `role_id`. Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires ci:read. Not /api/v1/forms (P3 workflows).
+     */
+    get: operations['listLayouts'];
+    put?: never;
+    /**
+     * Create a form layout (MET-50)
+     * @description A layout of the organization for exactly one target it sees, a CI type or a template (an own or a system row; otherwise 422 on the target field), optionally bound to a role or custom role of the organization (`role_id`, the ids of GET /api/v1/roles; otherwise 422). The fields are checked against the effective fields of the CI type without a CI (for a template: of the template's type). 422 with the path in `field` (e.g. `layout.sections[1].fields[0].name`) for an unknown field, a field in two sections, a duplicate or reserved section key (`_instance`, `_required`), a title without `de` or `en`, a width outside 1 to 12 and a `visible_when` key that names no catalog rule (/api/v1/rules). A taken key or a second layout for the same target and role is 409. Requires citype:manage; audited as `form_layout.created`.
+     */
+    post: operations['createLayout'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/layouts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read a form layout
+     * @description A layout of the organization. Requires ci:read.
+     */
+    get: operations['getLayout'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a form layout
+     * @description An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `form_layout.deleted`.
+     */
+    delete: operations['deleteLayout'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a form layout
+     * @description `role_id` (null unbinds the role), `priority`, `is_active` and `layout`, checked like a create. `key`, `ci_type_id` and `template_id` are immutable (422). `version` rises by one. An optional If-Match must name the current version, otherwise 412; without If-Match the change is written (API-07). Requires citype:manage; audited as `form_layout.updated` with before and after.
+     */
+    patch: operations['updateLayout'];
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -8728,6 +8783,84 @@ export interface components {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
       next_cursor?: string;
       data: components['schemas']['MetamodelRule'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    FormLayoutField: {
+      /** @description An effective field of the target. */
+      name: string;
+      /**
+       * @description Grid columns.
+       * @default 12
+       */
+      width: number;
+    };
+    FormLayoutSection: {
+      /** @description Unique in the layout; `_instance` and `_required` are reserved. */
+      key: string;
+      title: {
+        de: string;
+        en: string;
+      };
+      /** @description Keys of catalog rules (/api/v1/rules) that show the section; empty shows it always. */
+      visible_when?: string[];
+      fields: components['schemas']['FormLayoutField'][];
+    };
+    FormLayoutDocument: {
+      sections: components['schemas']['FormLayoutSection'][];
+    };
+    /** @description The layout of a form for exactly one target, a CI type or a template (table form_layout, WP-259); a template layout applies to every version of the template (E-111). At most one layout per target and role. There are no system layouts: a layout of a system type is a row of the organization. */
+    FormLayout: {
+      id: string;
+      organization_id: string;
+      /** @description Natural key per organization (export and import). */
+      key: string;
+      ci_type_id?: string;
+      template_id?: string;
+      /** @description A role or custom role of the organization; absent for every role. */
+      role_id?: string;
+      priority: number;
+      /** @description Rises with every change; the ETag. */
+      version: number;
+      is_active: boolean;
+      layout: components['schemas']['FormLayoutDocument'];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description Exactly one of ci_type_id and template_id is required (422). */
+    FormLayoutCreate: {
+      key: string;
+      ci_type_id?: string;
+      template_id?: string;
+      role_id?: string;
+      /** @default 0 */
+      priority: number;
+      /** @default true */
+      is_active: boolean;
+      layout: components['schemas']['FormLayoutDocument'];
+    };
+    /** @description key and the target are immutable; naming them is 422. */
+    FormLayoutPatch: {
+      /** @description null unbinds the role. */
+      role_id?: string | null;
+      priority?: number;
+      is_active?: boolean;
+      layout?: components['schemas']['FormLayoutDocument'];
+      /** @description Immutable (422). */
+      key?: string;
+      /** @description Immutable (422). */
+      ci_type_id?: string;
+      /** @description Immutable (422). */
+      template_id?: string;
+    };
+    FormLayoutListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['FormLayout'][];
       total?: number;
       limit?: number;
       offset?: number;
@@ -30124,6 +30257,198 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listLayouts: {
+    parameters: {
+      query?: {
+        /** @description Only layouts of this CI type. */
+        ci_type_id?: string;
+        /** @description Only layouts of this template. */
+        template_id?: string;
+        /** @description Only layouts of this role or custom role. */
+        role_id?: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Layouts, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormLayoutListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createLayout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['FormLayoutCreate'];
+      };
+    };
+    responses: {
+      /** @description Layout created */
+      201: {
+        headers: {
+          /** @description The layout version (API-07). */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormLayout'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getLayout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Layout */
+      200: {
+        headers: {
+          /** @description The layout version (API-07); send it as If-Match with a PATCH or DELETE. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormLayout'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteLayout: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the deletion is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Layout deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description If-Match does not name the current version of the layout */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateLayout: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['FormLayoutPatch'];
+      };
+    };
+    responses: {
+      /** @description Layout updated */
+      200: {
+        headers: {
+          /** @description The new layout version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormLayout'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the layout */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };

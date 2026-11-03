@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000210_ci_change_template_migration
+Stand: Migration 000212_form_layout
 
 ## Prüfung
 
@@ -808,6 +808,23 @@ ist eine schreibgeschützte Systemregel. Schlüssel: `metamodel_rule_org_key` un
 `template_version`) kopiert die Regeln der Vorversion mit ihren Schlüsseln in
 eine neue Template-Version.
 
+Formular-Layouts (MET-50, API-06, AUD-07, WP-259, Migration 000212):
+`form_layout` hält das Layout eines Formulars für genau ein Ziel
+(`form_layout_one_target`: `ci_type_id` oder `template_id`, je ON DELETE
+CASCADE und eigener Index; Template-Layouts gelten für die Template-ID
+unabhängig von der Version, E-111), optional gebunden an eine Rolle
+(`role_id` aus `role` oder `custom_role`, kein Fremdschlüssel, Index
+`idx_form_layout_role`). `layout` (`jsonb`) hält die Abschnitte, `priority`,
+`is_active` und `version` (beginnt bei 1). Es gibt keine globalen Zeilen
+(`organization_id` NOT NULL). Schlüssel: `form_layout_org_key`
+(`organization_id`, `key`); je Ziel und Rolle höchstens ein Layout über die
+Teil-Unique-Indizes `form_layout_type_role` und `form_layout_template_role`
+(NULLS NOT DISTINCT). Die AFTER-DELETE-Trigger `trg_role_form_layout` und
+`trg_custom_role_form_layout` (Funktion `form_layout_delete_role`) entfernen
+die Layouts einer gelöschten Rolle unter RLS. RLS mit ENABLE/FORCE und der
+Policy `form_layout_isolation` (FOR ALL, `app.org_id`), TRUNCATE-Schutz
+`reticora_truncate_guard`.
+
 IP-Reservierungen (NET-09, WP-299, Migration 000208): `ip_address` erhält
 `reserved_until` (`timestamptz`, informativ, keine automatische Freigabe) und
 `reserved_by` (`uuid`, Surrogat des reservierenden Nutzers ohne Fremdschlüssel,
@@ -881,6 +898,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `event_outbox_counter` | ja | ja | event_outbox_counter_isolation (ALL), event_outbox_counter_system_select (SELECT) |
 | `export_job` | ja | ja | export_job_isolation (ALL), export_job_system_select (SELECT) |
 | `form_def` | ja | ja | form_def_scoped_delete (DELETE), form_def_scoped_update (UPDATE), form_def_tenant_isolation (ALL) |
+| `form_layout` | ja | ja | form_layout_isolation (ALL) |
 | `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |
 | `iga_access_request` | ja | ja | iga_access_request_tenant_isolation (ALL) |
 | `iga_access_review` | ja | ja | iga_review_tenant_isolation (ALL) |

@@ -123,6 +123,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"templates":             identity.PermCIRead,    // metamodel templates read like ci-types (E-38, E-106)
 	"attribute-sets":        identity.PermCIRead,    // attribute sets read like ci-types (WP-250, E-106)
 	"rules":                 identity.PermCIRead,    // rule catalog reads like ci-types (WP-716, E-106)
+	"layouts":               identity.PermCIRead,    // form layouts read like ci-types (WP-259, E-106)
 	"locations":             identity.PermLocationRead,
 	"stock-movements":       identity.PermAssetRead,
 	"inventory":             identity.PermStockRead, // inventory items and availability are stock (E-106)
@@ -213,6 +214,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"templates":             identity.PermCITypeManage, // metamodel resources write like ci-types (E-106)
 	"attribute-sets":        identity.PermCITypeManage, // like ci-types (WP-250, E-106)
 	"rules":                 identity.PermCITypeManage, // rule catalog writes like ci-types (WP-716, E-106)
+	"layouts":               identity.PermCITypeManage, // form layouts write like ci-types (WP-259, E-106)
 	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
@@ -628,6 +630,9 @@ var domainRecordedRoutes = map[string]string{
 	"POST /api/v1/rules":                                     "citype.PGRepository",
 	"PATCH /api/v1/rules/{id}":                               "citype.PGRepository",
 	"DELETE /api/v1/rules/{id}":                              "citype.PGRepository",
+	"POST /api/v1/layouts":                                   "citype.PGRepository",
+	"PATCH /api/v1/layouts/{id}":                             "citype.PGRepository",
+	"DELETE /api/v1/layouts/{id}":                            "citype.PGRepository",
 	// Locations and rack placement (DOD-01).
 	"POST /api/v1/locations":                   "locations.PGRepository",
 	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",

@@ -506,8 +506,9 @@ func checkLifecycleStatesTx(ctx context.Context, tx pgx.Tx, id, field string) er
 	return nil
 }
 
-// Clone copies a type row plus its field definitions and its attribute set
-// assignments with their positions (WP-709) under a new key/name; the audit
+// Clone copies a type row plus its field definitions, its attribute set
+// assignments with their positions (WP-709) and its type layouts (WP-259,
+// cloneTypeLayoutsTx) under a new key/name; the audit
 // entry ci_type.cloned lists the assignments.
 // The clone keeps the parent of the source (MET-05, MET-06); a deactivated
 // parent is a conflict (409), since an active type has no deactivated
@@ -583,6 +584,10 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 		if _, err = tx.Exec(ctx, `INSERT INTO ci_type_attribute_set (ci_type_id, attribute_set_id, position)
 			SELECT $1, attribute_set_id, position FROM ci_type_attribute_set WHERE ci_type_id = $2`, cloneID, id); err != nil {
 			return fmt.Errorf("clone attribute sets of ci type: %w", err)
+		}
+		// Copy the type layouts (WP-259, MET-50).
+		if lerr := cloneTypeLayoutsTx(ctx, tx, orgID, id, cloneID, key); lerr != nil {
+			return lerr
 		}
 		if src.ParentTypeID != "" || len(sets.AttributeSets) > 0 {
 			if cerr := checkSubtreeCompositionTx(ctx, tx, cloneID, "parent_type_id"); cerr != nil {
