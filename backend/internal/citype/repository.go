@@ -190,6 +190,7 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	}
 	typ.IsActive = true
 	typ.Version = 1
+	typ.mirrorLifecycle()
 	now := time.Now().UTC()
 	typ.CreatedAt = now
 	typ.UpdatedAt = now
@@ -215,6 +216,9 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	t, ok := r.types[id]
 	if !ok || (t.OrganizationID != "" && t.OrganizationID != orgID) {
 		return nil, fmt.Errorf("not found")
+	}
+	if _, err := req.LifecycleModel(); err != nil {
+		return nil, err
 	}
 	if req.ParentTypeID != nil && *req.ParentTypeID != t.ParentTypeID {
 		if err := r.checkParentLocked(t, *req.ParentTypeID); err != nil {
@@ -256,8 +260,9 @@ func applyTypeUpdate(t *Type, req UpdateTypeRequest) {
 	if req.IsLogical != nil {
 		t.IsLogical = *req.IsLogical
 	}
-	if req.LifecycleDefinitionID != nil {
-		t.LifecycleDefinitionID = *req.LifecycleDefinitionID
+	if model, err := req.LifecycleModel(); err == nil && model != nil {
+		t.LifecycleModelID = *model
+		t.mirrorLifecycle()
 	}
 	if req.Capabilities != nil {
 		t.Capabilities = req.Capabilities

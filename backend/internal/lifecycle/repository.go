@@ -46,10 +46,12 @@ type MemoryRepository struct {
 }
 
 // NewMemoryRepository creates an empty in-memory lifecycle repository seeded
-// with the default physical asset lifecycle (spec §8).
+// with the two system models: the physical asset lifecycle (spec §8) and the
+// software lifecycle (LCY-02), as in PostgreSQL (000055, 000201).
 func NewMemoryRepository() *MemoryRepository {
 	r := &MemoryRepository{defs: map[string]*Definition{}}
 	r.SeedDefinition(DefaultPhysicalAssetLifecycle())
+	r.SeedDefinition(DefaultSoftwareLifecycle())
 	return r
 }
 
@@ -123,6 +125,46 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	}
 	delete(r.defs, id)
 	return nil
+}
+
+// SoftwareLifecycleID is the fixed id of the system model software
+// (migration 000201).
+const SoftwareLifecycleID = "00000000-0000-0000-0000-000000000102"
+
+// DefaultSoftwareLifecycle returns the system lifecycle model of software
+// and applications (LCY-02, applies to CIs; bound to the system types
+// application and software, E-116): evaluation → approved → production ⇄
+// deprecated → eol, and approved → eol.
+func DefaultSoftwareLifecycle() Definition {
+	states := []State{
+		{Key: "evaluation", Label: "Evaluation", IsInitial: true, SortOrder: 10},
+		{Key: "approved", Label: "Approved", SortOrder: 20},
+		{Key: "production", Label: "Production", SortOrder: 30},
+		{Key: "deprecated", Label: "Deprecated", SortOrder: 40},
+		{Key: "eol", Label: "End of Life", IsTerminal: true, SortOrder: 50},
+	}
+	pairs := [][2]string{
+		{"evaluation", "approved"}, {"approved", "production"}, {"production", "deprecated"},
+		{"deprecated", "production"}, {"deprecated", "eol"}, {"approved", "eol"},
+	}
+	var transitions []Transition
+	for _, p := range pairs {
+		transitions = append(transitions, Transition{
+			Key:          p[0] + "_to_" + p[1],
+			FromStateKey: p[0],
+			ToStateKey:   p[1],
+		})
+	}
+	return Definition{
+		ID:          SoftwareLifecycleID,
+		Key:         "software",
+		Name:        "Software Lifecycle",
+		AppliesTo:   "ci",
+		IsSystem:    true,
+		Description: "Default lifecycle for software and applications",
+		States:      states,
+		Transitions: transitions,
+	}
 }
 
 // DefaultPhysicalAssetLifecycle returns the default physical asset lifecycle

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000199_attribute_sets
+Stand: Migration 000201_lifecycle_models
 
 ## Prüfung
 
@@ -672,6 +672,22 @@ ordnet einem Typ der Organisation Sets geordnet zu (`position`); der Trigger
 `ci_type_attribute_set_binding` übernimmt die Organisation des Typs und weist
 ein unter RLS unsichtbares Set oder ein Set einer anderen Organisation ab
 (23503 unter `ci_type_attribute_set_attribute_set_id_fkey`).
+
+Lifecycle-Modelle (MET-01, MET-06, LCY-02, WP-263, Migration 000201): Die
+Tabellen `lifecycle_definition`, `lifecycle_state` und `lifecycle_transition`
+behalten ihre Namen. `ci_type.lifecycle_model_id` (vorher
+`lifecycle_definition_id`) verweist über `ci_type_lifecycle_model_fk` ohne
+ON DELETE-Aktion auf das Modell; ein gebundenes Modell lässt sich nicht
+löschen, die Kaskade einer Organisationslöschung läuft durch.
+`lifecycle_definition.applies_to` ist nur `asset` oder `ci`
+(`lifecycle_definition_applies_to_check`), `version` (Standard 1) dient If-Match.
+`lifecycle_model_effective(ci_type_id, applies_to)` (STABLE, SECURITY
+INVOKER) liefert das blattnächste gesetzte Modell der Typkette
+(`ci_type_ancestors`) mit passendem `applies_to`; `ci_check_lifecycle_model`
+prüft `ci.lifecycle_state` gegen das wirksame `ci`-Modell. System-Seeds:
+`physical_asset` (`…0101`, `asset`) und `software` (`…0102`, `ci`, gebunden an
+die Systemtypen `application` und `software`), Zustände und Übergänge mit
+`organization_id` `NULL`.
 
 ## Tabellen, RLS und Policies
 

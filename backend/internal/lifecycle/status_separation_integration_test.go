@@ -41,7 +41,7 @@ func TestStatusAndLifecycleAreSeparate(t *testing.T) {
 	withModel := f.CI(t, f.OrgA, "", "lcy01-app")
 	withoutModel := f.CI(t, f.OrgA, "", "lcy01-switch")
 	if _, err := f.Admin.Exec(bg, `
-		WITH t AS (INSERT INTO ci_type (organization_id, key, name, lifecycle_definition_id)
+		WITH t AS (INSERT INTO ci_type (organization_id, key, name, lifecycle_model_id)
 		           VALUES ($1, 'lcy01-application', 'LCY-01 application', $2) RETURNING id)
 		UPDATE ci SET ci_type_id = (SELECT id FROM t) WHERE id = $3`, f.OrgA, software.ID, withModel); err != nil {
 		t.Fatalf("lifecycle type: %v", err)

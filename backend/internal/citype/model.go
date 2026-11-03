@@ -46,8 +46,12 @@ type Type struct {
 	ClonedFromID  string `json:"cloned_from_id,omitempty"`
 	// ParentTypeID is the parent in the type chain (MET-06): a type of the
 	// organization or a system type; empty for a root.
-	ParentTypeID             string         `json:"parent_type_id,omitempty"`
-	TemplateKey              string         `json:"template_key,omitempty"`
+	ParentTypeID string `json:"parent_type_id,omitempty"`
+	TemplateKey  string `json:"template_key,omitempty"`
+	// LifecycleModelID is the lifecycle model of the type (MET-01); a
+	// subtype without one inherits it along the type chain (MET-06).
+	LifecycleModelID string `json:"lifecycle_model_id,omitempty"`
+	// LifecycleDefinitionID mirrors LifecycleModelID (API-01, deprecated).
 	LifecycleDefinitionID    string         `json:"lifecycle_definition_id,omitempty"`
 	Capabilities             map[string]any `json:"capabilities"`
 	AllowedRelationshipTypes []string       `json:"allowed_relationship_types"`
@@ -159,8 +163,11 @@ type CreateTypeRequest struct {
 	// IsObservable defaults to !IsLogical.
 	IsObservable *bool `json:"is_observable,omitempty"`
 	// ParentTypeID makes the type a subtype (MET-06).
-	ParentTypeID             string         `json:"parent_type_id,omitempty"`
-	TemplateKey              string         `json:"template_key,omitempty"`
+	ParentTypeID     string `json:"parent_type_id,omitempty"`
+	TemplateKey      string `json:"template_key,omitempty"`
+	LifecycleModelID string `json:"lifecycle_model_id,omitempty"`
+	// LifecycleDefinitionID is the deprecated name of LifecycleModelID
+	// (API-01); a different value of both is 422.
 	LifecycleDefinitionID    string         `json:"lifecycle_definition_id,omitempty"`
 	Capabilities             map[string]any `json:"capabilities,omitempty"`
 	AllowedRelationshipTypes []string       `json:"allowed_relationship_types,omitempty"`
@@ -183,7 +190,10 @@ type UpdateTypeRequest struct {
 	IsObservable *bool         `json:"is_observable,omitempty"`
 	// ParentTypeID moves the type below another one; "" makes it a root
 	// (MET-06).
-	ParentTypeID             *string        `json:"parent_type_id,omitempty"`
+	ParentTypeID     *string `json:"parent_type_id,omitempty"`
+	LifecycleModelID *string `json:"lifecycle_model_id,omitempty"`
+	// LifecycleDefinitionID is the deprecated name of LifecycleModelID
+	// (API-01); a different value of both is 422.
 	LifecycleDefinitionID    *string        `json:"lifecycle_definition_id,omitempty"`
 	Capabilities             map[string]any `json:"capabilities,omitempty"`
 	AllowedRelationshipTypes []string       `json:"allowed_relationship_types,omitempty"`
@@ -350,6 +360,77 @@ func errParentDepth() error {
 // be composed (MET-16); the message names the attribute key.
 func errParentComposition(msg, code string) error {
 	return &api.FieldError{Field: "parent_type_id", Message: msg, Status: http.StatusUnprocessableEntity, Code: code}
+}
+
+// Errors of the lifecycle model of a type (MET-01), reported on
+// lifecycle_model_id (422): the deprecated field lifecycle_definition_id
+// with another value, and a model that is neither one of the organization
+// nor a system model.
+// validation: fixed texts.
+func errLifecycleModelMismatch() error {
+	return &api.FieldError{Field: "lifecycle_model_id",
+		Message: "lifecycle_model_id and lifecycle_definition_id name different lifecycle models",
+		Status:  http.StatusUnprocessableEntity}
+}
+
+func errLifecycleModelUnknown() error {
+	return &api.FieldError{Field: "lifecycle_model_id", Message: "lifecycle model not found",
+		Status: http.StatusUnprocessableEntity}
+}
+
+// LifecycleModel returns the requested lifecycle model: lifecycle_model_id
+// or its deprecated name lifecycle_definition_id (API-01); both with
+// different values are a 422 on lifecycle_model_id.
+func (r *CreateTypeRequest) LifecycleModel() (string, error) {
+	switch {
+	case r.LifecycleModelID == "":
+		return r.LifecycleDefinitionID, nil
+	case r.LifecycleDefinitionID != "" && r.LifecycleDefinitionID != r.LifecycleModelID:
+		return "", errLifecycleModelMismatch()
+	}
+	return r.LifecycleModelID, nil
+}
+
+// LifecycleModel returns the requested change of the lifecycle model (nil:
+// unchanged, "": none), as CreateTypeRequest.LifecycleModel.
+func (r *UpdateTypeRequest) LifecycleModel() (*string, error) {
+	switch {
+	case r.LifecycleModelID == nil:
+		return r.LifecycleDefinitionID, nil
+	case r.LifecycleDefinitionID != nil && *r.LifecycleDefinitionID != *r.LifecycleModelID:
+		return nil, errLifecycleModelMismatch()
+	}
+	return r.LifecycleModelID, nil
+}
+
+// mirrorLifecycle fills the deprecated lifecycle_definition_id with
+// lifecycle_model_id (API-01).
+func (t *Type) mirrorLifecycle() {
+	t.LifecycleDefinitionID = t.LifecycleModelID
+}
+
+// LifecycleStateCount is the number of CIs in one lifecycle state.
+type LifecycleStateCount struct {
+	State string `json:"state"`
+	Count int    `json:"count"`
+}
+
+// LifecycleStatesConflict refuses a change of lifecycle_model_id or
+// parent_type_id after which CIs of the type or of its subtypes carry
+// lifecycle states the new effective ci model does not contain (409 with
+// the number of CIs per state, MET-06, LCY-02).
+type LifecycleStatesConflict struct {
+	Field  string
+	Counts []LifecycleStateCount
+}
+
+// lifecycleStatesConflictDetail is the fixed text of LifecycleStatesConflict.
+const lifecycleStatesConflictDetail = "CIs of the type or of its subtypes have lifecycle states the new lifecycle model does not contain; " +
+	"move them to a state of the new model first"
+
+// validation: the field and a fixed text.
+func (e *LifecycleStatesConflict) Error() string {
+	return e.Field + ": " + lifecycleStatesConflictDetail
 }
 
 // observableDefault is the MET-01 default of is_observable.

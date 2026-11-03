@@ -518,6 +518,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	model, err := req.LifecycleModel()
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	typ := &Type{
 		OrganizationID:           t.OrganizationID,
 		Key:                      req.Key,
@@ -530,7 +535,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		IsObservable:             observableDefault(req.IsObservable, req.IsLogical),
 		ParentTypeID:             req.ParentTypeID,
 		TemplateKey:              req.TemplateKey,
-		LifecycleDefinitionID:    req.LifecycleDefinitionID,
+		LifecycleModelID:         model,
+		LifecycleDefinitionID:    model,
 		Capabilities:             req.Capabilities,
 		AllowedRelationshipTypes: req.AllowedRelationshipTypes,
 		UISchema:                 req.UISchema,
@@ -538,7 +544,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		DiscoveryMappings:        req.DiscoveryMappings,
 		Fields:                   req.Fields,
 	}
-	if err := h.repo.Create(r.Context(), typ); err != nil {
+	if err = h.repo.Create(r.Context(), typ); err != nil {
 		writeTypeError(w, err)
 		return
 	}
@@ -561,6 +567,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "display_name", Message: err.Error()})
 		return
 	}
+	// lifecycle_model_id and its deprecated name lifecycle_definition_id
+	// with different values are a 422 (API-01).
+	model, err := req.LifecycleModel()
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	req.LifecycleModelID, req.LifecycleDefinitionID = model, nil
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		writeTypeUpdateError(w, err)
@@ -807,7 +821,9 @@ func validateField(f Field) error {
 // writeTypeError reports a failed create or clone of a CI type: a taken key
 // or name is 409 (in memory ErrConflict, in PostgreSQL 23505), an error of
 // the parent or of the composition of the chain an RFC 7807 problem with
-// field parent_type_id (422, a cycle 409), every other repository error
+// field parent_type_id (422, a cycle 409), an invisible lifecycle model a
+// 422 on lifecycle_model_id, CIs whose lifecycle states the new effective
+// model lacks a 409 with the counts per state, every other repository error
 // goes through api.WriteRepoError, so no SQLSTATE, constraint or driver
 // text reaches the client (F-047).
 func writeTypeError(w http.ResponseWriter, err error) {
@@ -815,10 +831,33 @@ func writeTypeError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
 		return
 	}
+	var states *LifecycleStatesConflict
+	if errors.As(err, &states) {
+		writeLifecycleStatesConflict(w, states)
+		return
+	}
 	if api.WriteFieldError(w, err) {
 		return
 	}
 	api.WriteRepoError(w, err)
+}
+
+// writeLifecycleStatesConflict answers a refused change of the lifecycle
+// model or of the parent of a type (409): the field and the number of CIs
+// per lifecycle state the new effective model does not contain (MET-06,
+// LCY-02).
+func writeLifecycleStatesConflict(w http.ResponseWriter, c *LifecycleStatesConflict) {
+	api.WriteProblemBody(w, http.StatusConflict, struct {
+		api.FieldProblem
+		StateCounts []LifecycleStateCount `json:"state_counts"`
+	}{
+		FieldProblem: api.FieldProblem{
+			ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
+				Status: http.StatusConflict, Detail: lifecycleStatesConflictDetail},
+			Field: c.Field,
+		},
+		StateCounts: c.Counts,
+	})
 }
 
 // writeSetActiveError reports a refused deactivation or activation (MET-05):

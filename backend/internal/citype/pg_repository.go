@@ -39,7 +39,7 @@ const typeSelectColumns = `
 	COALESCE(cloned_from_id::text, ''),
 	COALESCE(parent_type_id::text, ''),
 	COALESCE(template_key, ''),
-	COALESCE(lifecycle_definition_id::text, ''),
+	COALESCE(lifecycle_model_id::text, ''),
 	capabilities,
 	allowed_relationship_types,
 	ui_schema,
@@ -141,7 +141,8 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Type, er
 
 // Create inserts a new type with its field definitions. A parent is
 // checked by trg_ci_type_parent_guard (MET-06); its errors and a chain that
-// cannot be composed are reported on parent_type_id.
+// cannot be composed are reported on parent_type_id. The lifecycle model
+// must be one the organization sees (checkLifecycleModelTx, MET-01).
 //
 // A new subtype widens the subtree of its ancestors: the indexes of their
 // indexed, inheritable definitions are rebuilt with it (WP-708).
@@ -157,22 +158,26 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 		if err := checkParentActiveTx(ctx, tx, typ.OrganizationID, typ.ParentTypeID, errParentInactive); err != nil {
 			return err
 		}
+		if err := checkLifecycleModelTx(ctx, tx, typ.LifecycleModelID); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, `
 			INSERT INTO ci_type (
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, template_key,
-				lifecycle_definition_id, capabilities, allowed_relationship_types,
+				lifecycle_model_id, capabilities, allowed_relationship_types,
 				ui_schema, compliance_rules, discovery_mappings, is_observable, parent_type_id
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 			RETURNING id::text, is_active, version, schema_version, created_at, updated_at`,
 			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, typ.DisplayName.WithFallback(typ.Name),
 			nilIfEmpty(typ.Icon), nilIfEmpty(typ.Description), nilIfEmpty(typ.Category),
-			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleDefinitionID),
+			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleModelID),
 			jsonOrDefault(typ.Capabilities, emptyObject), jsonOrDefault(typ.AllowedRelationshipTypes, emptyArray),
 			jsonOrDefault(typ.UISchema, emptyObject), jsonOrDefault(typ.ComplianceRules, emptyArray),
 			jsonOrDefault(typ.DiscoveryMappings, emptyArray), typ.IsObservable, nilIfEmpty(typ.ParentTypeID),
 		)
 		typ.DisplayName = typ.DisplayName.WithFallback(typ.Name)
+		typ.mirrorLifecycle()
 		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.SchemaVersion, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
 			return fmt.Errorf("create ci type: %w", typeDBError(err))
 		}
@@ -276,7 +281,10 @@ func typeDBError(err error) error {
 // the new ancestors' subtrees must not share a value of an inherited unique
 // attribute (409 on parent_type_id); the indexes of the indexed,
 // inheritable definitions of the former and the new ancestors are rebuilt
-// over their changed subtrees (WP-708).
+// over their changed subtrees (WP-708). A new lifecycle model must be
+// visible (checkLifecycleModelTx); after a change of the model or of the
+// parent the CIs of the subtree keep a state of their effective ci model
+// (checkLifecycleStatesTx, MET-06, LCY-02).
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
 	if !api.IsUUID(id) {
 		return nil, fmt.Errorf("not found")
@@ -315,8 +323,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 		if req.IsLogical != nil {
 			add("is_logical", *req.IsLogical)
 		}
-		if req.LifecycleDefinitionID != nil {
-			add("lifecycle_definition_id", nilIfEmpty(*req.LifecycleDefinitionID))
+		model, err := req.LifecycleModel()
+		if err != nil {
+			return err
 		}
 		if req.Capabilities != nil {
 			add("capabilities", req.Capabilities)
@@ -340,6 +349,13 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 				return fmt.Errorf("not found")
 			}
 			return err
+		}
+		modelChanged := model != nil && *model != before.LifecycleModelID
+		if modelChanged {
+			if merr := checkLifecycleModelTx(ctx, tx, *model); merr != nil {
+				return merr
+			}
+			add("lifecycle_model_id", nilIfEmpty(*model))
 		}
 		parentChanged := req.ParentTypeID != nil && *req.ParentTypeID != before.ParentTypeID
 		if parentChanged {
@@ -374,6 +390,17 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 				return fmt.Errorf("not found")
 			}
 			return fmt.Errorf("update ci type: %w", typeDBError(err))
+		}
+		if modelChanged || parentChanged {
+			// The CIs of the subtree keep a state of their new effective
+			// ci model (MET-06, LCY-02).
+			field := "parent_type_id"
+			if modelChanged {
+				field = "lifecycle_model_id"
+			}
+			if lerr := checkLifecycleStatesTx(ctx, tx, id, field); lerr != nil {
+				return lerr
+			}
 		}
 		if parentChanged {
 			// The moved subtree with the organization's layer; the database
@@ -413,10 +440,66 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 	return out, err
 }
 
+// checkLifecycleModelTx accepts an empty model or one the organization
+// sees under RLS: one of its own or a system model (MET-01). Any other id
+// is a 422 on lifecycle_model_id; the foreign key alone would accept the
+// model of another organization.
+func checkLifecycleModelTx(ctx context.Context, tx pgx.Tx, id string) error {
+	if id == "" {
+		return nil
+	}
+	if !api.IsUUID(id) {
+		return errLifecycleModelUnknown()
+	}
+	var visible bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM lifecycle_definition WHERE id = $1)`, id).Scan(&visible); err != nil {
+		return fmt.Errorf("check lifecycle model: %w", err)
+	}
+	if !visible {
+		return errLifecycleModelUnknown()
+	}
+	return nil
+}
+
+// checkLifecycleStatesTx runs after a change of the lifecycle model or of
+// the parent of the type id: CIs of the type and of its subtypes whose
+// lifecycle state is no state of their new effective ci model
+// (lifecycle_model_effective) refuse the change with their number per state
+// (*LifecycleStatesConflict, 409 on field); the transaction is rolled
+// back. Soft-deleted CIs count as well: a restore does not check the
+// state again.
+func checkLifecycleStatesTx(ctx context.Context, tx pgx.Tx, id, field string) error {
+	rows, err := tx.Query(ctx, `
+		WITH sub AS (
+			SELECT s.id, lifecycle_model_effective(s.id, 'ci') AS model FROM ci_type_subtree($1::uuid) s
+		)
+		SELECT c.lifecycle_state, count(*)::int
+		FROM ci c JOIN sub ON sub.id = c.ci_type_id
+		WHERE c.lifecycle_state IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM lifecycle_state ls WHERE ls.definition_id = sub.model AND ls.key = c.lifecycle_state)
+		GROUP BY c.lifecycle_state
+		ORDER BY c.lifecycle_state`, id)
+	if err != nil {
+		return fmt.Errorf("check lifecycle states: %w", err)
+	}
+	counts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (LifecycleStateCount, error) {
+		var c LifecycleStateCount
+		return c, row.Scan(&c.State, &c.Count)
+	})
+	if err != nil {
+		return fmt.Errorf("check lifecycle states: %w", err)
+	}
+	if len(counts) > 0 {
+		return &LifecycleStatesConflict{Field: field, Counts: counts}
+	}
+	return nil
+}
+
 // Clone copies a type row plus its field definitions under a new key/name.
 // The clone keeps the parent of the source (MET-05, MET-06); a deactivated
 // parent is a conflict (409), since an active type has no deactivated
-// parent.
+// parent. The clone keeps the lifecycle model of the source if the
+// organization sees it (422 on lifecycle_model_id otherwise, MET-01).
 func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneRequest) (*Type, error) {
 	if !api.IsUUID(id) {
 		return nil, fmt.Errorf("not found")
@@ -434,6 +517,9 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 		if perr := checkParentActiveTx(ctx, tx, orgID, src.ParentTypeID, errParentInactiveConflict); perr != nil {
 			return perr
 		}
+		if merr := checkLifecycleModelTx(ctx, tx, src.LifecycleModelID); merr != nil {
+			return merr
+		}
 		name := req.Name
 		if name == "" {
 			name = src.Name + "_copy"
@@ -447,14 +533,14 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 			INSERT INTO ci_type (
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, cloned_from_id,
-				template_key, lifecycle_definition_id, capabilities,
+				template_key, lifecycle_model_id, capabilities,
 				allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings,
 				is_observable, parent_type_id
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16,$17,$18)
 			RETURNING id::text`,
 			orgID, key, name, LocalizedText{}.WithFallback(name), nilIfEmpty(src.Icon), nilIfEmpty(src.Description),
 			nilIfEmpty(src.Category), src.IsLogical, src.Version+1, src.ID,
-			nilIfEmpty(src.LifecycleDefinitionID), src.Capabilities,
+			nilIfEmpty(src.LifecycleModelID), src.Capabilities,
 			src.AllowedRelationshipTypes, src.UISchema, src.ComplianceRules,
 			src.DiscoveryMappings, src.IsObservable, nilIfEmpty(src.ParentTypeID),
 		).Scan(&cloneID)
@@ -1183,11 +1269,12 @@ func scanType(scanner typeScanner) (*Type, error) {
 		&t.ID, &t.OrganizationID, &t.Key, &t.Name, &displayName, &t.Icon,
 		&t.Description, &t.Category, &t.IsBuiltin, &t.IsSystem, &t.IsActive,
 		&t.IsLogical, &t.IsObservable, &t.SchemaVersion, &t.Version, &t.ClonedFromID, &t.ParentTypeID, &t.TemplateKey,
-		&t.LifecycleDefinitionID, &capabilities, &allowedRels, &uiSchema,
+		&t.LifecycleModelID, &capabilities, &allowedRels, &uiSchema,
 		&compliance, &discovery, &attributeSchema, &t.RequiredFields, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
+	t.mirrorLifecycle()
 	if err := json.Unmarshal(displayName, &t.DisplayName); err != nil {
 		return nil, fmt.Errorf("decode display_name: %w", err)
 	}

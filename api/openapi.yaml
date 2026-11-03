@@ -12400,6 +12400,9 @@ paths:
         one of another organization are both 422 on `parent_type_id`, as is
         a chain of more than 6 types and a deactivated parent (MET-05: an
         active type has no deactivated parent); a taken key or name is 409.
+        `lifecycle_model_id` binds a lifecycle model of the organization or a
+        system model (MET-01), any other is 422 on `lifecycle_model_id`; the
+        deprecated `lifecycle_definition_id` is accepted as its mirror.
       requestBody:
         required: true
         content:
@@ -12489,7 +12492,13 @@ paths:
         (including the moved subtree) is 422, a deactivated parent is 422 on
         `parent_type_id` (MET-05), and a moved subtree whose attribute
         definitions cannot be composed is 422 naming the attribute key. An
-        unknown CI type, or a system type, is 404.
+        unknown CI type, or a system type, is 404. A lifecycle model the
+        organization does not see is 422 on `lifecycle_model_id`. A change of
+        `lifecycle_model_id` or `parent_type_id` after which CIs of the type
+        or of its subtypes carry lifecycle states their new effective model
+        (nearest model of the type chain that applies to `ci`) does not
+        contain is 409 with the field and `state_counts` (state and number
+        of CIs); nothing is changed (MET-06, LCY-02).
       requestBody:
         required: true
         content:
@@ -12547,9 +12556,11 @@ paths:
         Copies the type into the organization under a new key (`key`, else
         derived from `name`, else the name with `_copy`) with
         `cloned_from_id`: its attribute definitions, `compliance_rules`,
-        `ui_schema`, `lifecycle_definition_id` and `parent_type_id`
+        `ui_schema`, `lifecycle_model_id` and `parent_type_id`
         (MET-05). An organization replaces a system type this way. A taken
-        key or name is 409, as is a source whose parent is deactivated.
+        key or name is 409, as is a source whose parent is deactivated; a
+        lifecycle model the organization does not see is 422 with field
+        `lifecycle_model_id`.
       responses:
         '201':
           description: The clone
@@ -16213,7 +16224,17 @@ components:
           type: string
           description: Parent in the type chain (MET-06); absent for a root. The type inherits the inheritable attribute definitions of its ancestors.
         template_key: { type: string }
-        lifecycle_definition_id: { type: string }
+        lifecycle_model_id:
+          type: string
+          description: >-
+            Lifecycle model of the type (MET-01); absent without one. A
+            subtype without its own model inherits the nearest model of its
+            type chain (MET-06); CIs only take a model that applies to `ci`
+            (LCY-02, DB-05).
+        lifecycle_definition_id:
+          type: string
+          deprecated: true
+          description: Deprecated name of `lifecycle_model_id` with the same value (API-01).
         capabilities: { type: object, additionalProperties: true }
         allowed_relationship_types:
           type: array
@@ -16265,7 +16286,18 @@ components:
           format: uuid
           description: Parent type of the organization or a system type (MET-06).
         template_key: { type: string }
-        lifecycle_definition_id: { type: string }
+        lifecycle_model_id:
+          type: string
+          description: >-
+            Lifecycle model of the organization or a system model (MET-01);
+            any other id is 422 with field `lifecycle_model_id`.
+        lifecycle_definition_id:
+          type: string
+          deprecated: true
+          description: >-
+            Deprecated name of `lifecycle_model_id` (API-01); taken over when
+            `lifecycle_model_id` is absent, a different value of both is 422
+            with field `lifecycle_model_id`.
         capabilities: { type: object, additionalProperties: true }
         allowed_relationship_types:
           type: array
@@ -16295,8 +16327,27 @@ components:
         is_observable: { type: boolean }
         parent_type_id:
           type: string
-          description: New parent type (MET-06); an empty string makes the type a root.
-        lifecycle_definition_id: { type: string }
+          description: >-
+            New parent type (MET-06); an empty string makes the type a root.
+            409 with field `parent_type_id` and `state_counts` when CIs of the
+            type or of its subtypes would keep lifecycle states their new
+            effective model does not contain.
+        lifecycle_model_id:
+          type: string
+          description: >-
+            New lifecycle model of the organization or a system model
+            (MET-01), an empty string removes it; any other id is 422 with
+            field `lifecycle_model_id`. 409 with field `lifecycle_model_id`
+            and `state_counts` (CIs per state) when CIs of the type or of its
+            subtypes would keep lifecycle states the new effective model does
+            not contain.
+        lifecycle_definition_id:
+          type: string
+          deprecated: true
+          description: >-
+            Deprecated name of `lifecycle_model_id` (API-01); taken over when
+            `lifecycle_model_id` is absent, a different value of both is 422
+            with field `lifecycle_model_id`.
         capabilities: { type: object, additionalProperties: true }
         allowed_relationship_types:
           type: array

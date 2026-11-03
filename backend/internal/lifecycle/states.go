@@ -67,10 +67,12 @@ func (s *PGStateStore) SetState(ctx context.Context, orgID, entityType, entityID
 	})
 }
 
-// Resolver implements EntityResolver by reading the entity's type lifecycle
-// (asset: asset_type → ci_type.lifecycle_definition_id, falling back to the
-// default physical_asset lifecycle for inventory-capable assets; ci: the CI
-// type's lifecycle definition).
+// Resolver implements EntityResolver with the effective lifecycle model of
+// the entity's type chain (lifecycle_model_effective, MET-06, LCY-02): a CI
+// has the nearest model of its ci_type chain that applies to ci, none
+// otherwise (ErrNoLifecycleModel, DB-05); an asset has the nearest model of
+// the chain of its asset_type_id that applies to asset, otherwise the
+// system model physical_asset. A linked CI (asset.ci_id) does not count.
 type Resolver struct {
 	pool *pgxpool.Pool
 }
@@ -79,6 +81,9 @@ type Resolver struct {
 func NewResolver(pool *pgxpool.Pool) *Resolver {
 	return &Resolver{pool: pool}
 }
+
+// physicalAssetModelID is the system model physical_asset (000055).
+const physicalAssetModelID = "00000000-0000-0000-0000-000000000101"
 
 // LifecycleKeyFor resolves the lifecycle definition key for an entity.
 func (r *Resolver) LifecycleKeyFor(req *http.Request, orgID, entityType, entityID string) (string, error) {
@@ -89,24 +94,15 @@ func (r *Resolver) LifecycleKeyFor(req *http.Request, orgID, entityType, entityI
 		switch entityType {
 		case "asset":
 			err = tx.QueryRow(ctx, `
-				SELECT COALESCE(
-					(SELECT ct.lifecycle_definition_id::text
-					 FROM asset a JOIN ci_type ct ON ct.id = a.asset_type_id
-					 WHERE a.id = $1),
-					(SELECT ct.lifecycle_definition_id::text
-					 FROM asset a JOIN ci c ON c.id = a.ci_id JOIN ci_type ct ON ct.id = c.ci_type_id
-					 WHERE a.id = $1),
-					(SELECT ld.id::text FROM lifecycle_definition ld
-					 WHERE ld.key = 'physical_asset' AND ld.is_system)
-				)`, entityID).Scan(&definitionID)
+				SELECT COALESCE(lifecycle_model_effective(a.asset_type_id, 'asset'), $2::uuid)::text
+				FROM asset a WHERE a.id = $1`, entityID, physicalAssetModelID).Scan(&definitionID)
 		case "ci":
 			err = tx.QueryRow(ctx, `
-				SELECT COALESCE(ct.lifecycle_definition_id::text, '')
-				FROM ci c JOIN ci_type ct ON ct.id = c.ci_type_id
-				WHERE c.id = $1`, entityID).Scan(&definitionID)
+				SELECT COALESCE(lifecycle_model_effective(c.ci_type_id, 'ci')::text, '')
+				FROM ci c WHERE c.id = $1`, entityID).Scan(&definitionID)
 			if err == nil && definitionID == "" {
-				// Only CI types with a lifecycle model have a lifecycle
-				// state (DB-05).
+				// Only CI types with an effective ci lifecycle model have
+				// a lifecycle state (DB-05).
 				return ErrNoLifecycleModel
 			}
 		default:

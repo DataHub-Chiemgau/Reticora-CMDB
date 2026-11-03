@@ -52,10 +52,11 @@ func TestLifecycleModelAndHealth(t *testing.T) {
 		return errors.As(err, &pgErr) && pgErr.ConstraintName == constraint
 	}
 
-	// A type with the physical_asset lifecycle model and one without.
+	// A type with the software lifecycle model (applies to ci, WP-263) and
+	// one without.
 	var modelType string
-	if err := f.Admin.QueryRow(bg, `INSERT INTO ci_type (organization_id, key, name, lifecycle_definition_id)
-		VALUES ($1, 'lc-model-72', 'With lifecycle', '00000000-0000-0000-0000-000000000101') RETURNING id::text`,
+	if err := f.Admin.QueryRow(bg, `INSERT INTO ci_type (organization_id, key, name, lifecycle_model_id)
+		VALUES ($1, 'lc-model-72', 'With lifecycle', '00000000-0000-0000-0000-000000000102') RETURNING id::text`,
 		f.OrgA).Scan(&modelType); err != nil {
 		t.Fatal(err)
 	}
@@ -68,16 +69,16 @@ func TestLifecycleModelAndHealth(t *testing.T) {
 		}
 	}
 
-	if err := inTenant(`UPDATE ci SET lifecycle_state = 'deployed' WHERE id = $1`, plain); !violates(err, "ci_lifecycle_requires_model") {
+	if err := inTenant(`UPDATE ci SET lifecycle_state = 'production' WHERE id = $1`, plain); !violates(err, "ci_lifecycle_requires_model") {
 		t.Errorf("lifecycle state on a type without a model: %v", err)
 	}
 	if err := inTenant(`UPDATE ci SET lifecycle_state = 'flying' WHERE id = $1`, modeled); !violates(err, "ci_lifecycle_requires_model") {
 		t.Errorf("unknown lifecycle state: %v", err)
 	}
-	if err := inTenant(`UPDATE ci SET lifecycle_state = 'deployed' WHERE id = $1`, modeled); err != nil {
+	if err := inTenant(`UPDATE ci SET lifecycle_state = 'production' WHERE id = $1`, modeled); err != nil {
 		t.Errorf("state of the model: %v", err)
 	}
-	if got, err := repo.GetByID(ctx, f.OrgA, modeled); err != nil || got.LifecycleState != "deployed" {
+	if got, err := repo.GetByID(ctx, f.OrgA, modeled); err != nil || got.LifecycleState != "production" {
 		t.Errorf("lifecycle state read back: %+v, %v", got, err)
 	}
 
@@ -88,7 +89,7 @@ func TestLifecycleModelAndHealth(t *testing.T) {
 		lifecycle.NewResolver(f.App)).RegisterRoutes(router)
 	transition := func(ciID string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/cis/"+ciID+"/lifecycle-transitions",
-			strings.NewReader(`{"to_state":"ordered"}`))
+			strings.NewReader(`{"to_state":"evaluation"}`))
 		req = req.WithContext(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User}))
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -109,8 +110,8 @@ func TestLifecycleModelAndHealth(t *testing.T) {
 	if rec = transition(transitioned); rec.Code != http.StatusOK {
 		t.Errorf("transition of a CI with a lifecycle model: %d %s, want 200", rec.Code, rec.Body)
 	}
-	if got, err := repo.GetByID(ctx, f.OrgA, transitioned); err != nil || got.LifecycleState != "ordered" {
-		t.Errorf("lifecycle state after the transition: %+v, %v; want ordered", got, err)
+	if got, err := repo.GetByID(ctx, f.OrgA, transitioned); err != nil || got.LifecycleState != "evaluation" {
+		t.Errorf("lifecycle state after the transition: %+v, %v; want evaluation", got, err)
 	}
 
 	// Health from monitoring: critical, warning, ok, unknown.
