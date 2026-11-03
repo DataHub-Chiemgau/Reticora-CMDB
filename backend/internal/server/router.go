@@ -389,7 +389,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// attaches the permission middleware resolved from the route table.
 	// Routes without a mapping fail closed; the router test locks in that
 	// every route is mapped.
-	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules}
+	// The draft service captures metamodel writes with ?draft (WP-720)
+	// and lays a draft over the form preview (E-113).
+	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules,
+		drafts: repos.MetamodelDraft}
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
 		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).

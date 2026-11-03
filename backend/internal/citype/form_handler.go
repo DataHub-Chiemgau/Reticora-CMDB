@@ -40,7 +40,9 @@ func (h *Handler) GetCIForm(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetCITypeForm handles GET /api/v1/ci-types/{id}/form (?template_id=,
-// preview=, role_id=): the form for creating a CI of the type.
+// preview=, role_id=, draft=): the form for creating a CI of the type;
+// with draft the preview of that metamodel draft (E-113, WP-720), which
+// needs citype:manage like preview=true.
 func (h *Handler) GetCITypeForm(w http.ResponseWriter, r *http.Request) {
 	h.serveForm(w, r, FormRequest{CITypeID: chi.URLParam(r, "id")})
 }
@@ -72,9 +74,26 @@ func (h *Handler) serveForm(w http.ResponseWriter, r *http.Request, req FormRequ
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "a form preview requires citype:manage")
 		return
 	}
+	// The preview of a draft (E-113, WP-720): the form of a new CI of a
+	// type only; GET /api/v1/cis/{id}/form does not read the parameter.
+	draftID, withDraft := "", req.CITypeID != "" && q.Has("draft")
+	if withDraft {
+		if !manage {
+			api.WriteError(w, http.StatusForbidden, "Forbidden", "the preview of a draft requires citype:manage")
+			return
+		}
+		if draftID = strings.TrimSpace(q.Get("draft")); !api.IsUUID(draftID) {
+			api.WriteFieldError(w, &api.FieldError{Field: "draft", Message: "draft must be the id of a metamodel draft"})
+			return
+		}
+	}
 	resolver, ok := h.formResolver(w)
 	if !ok {
 		return
+	}
+	if withDraft {
+		drafts, _ := DraftFormsFromContext(r.Context())
+		resolver.WithDraft(drafts, draftID)
 	}
 	form, err := resolver.ResolveForm(r.Context(), t.OrganizationID, req)
 	if errors.Is(err, ErrFormRoleNotOwn) {
@@ -94,11 +113,19 @@ func (h *Handler) serveForm(w http.ResponseWriter, r *http.Request, req FormRequ
 
 // writeFormError reports a failed resolution (RFC 7807).
 func writeFormError(w http.ResponseWriter, err error) {
-	for _, notFound := range []error{ErrFormCINotFound, ErrFormTypeNotFound, ErrFormTemplateNotFound, ErrFormRoleNotFound} {
+	for _, notFound := range []error{ErrFormCINotFound, ErrFormTypeNotFound, ErrFormTemplateNotFound, ErrFormRoleNotFound,
+		ErrFormDraftNotFound} {
 		if errors.Is(err, notFound) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", notFound.Error())
 			return
 		}
 	}
-	api.WriteRepoError(w, err)
+	switch {
+	case errors.Is(err, ErrFormDraftFinal):
+		api.WriteProblem(w, http.StatusConflict, "urn:reticora:problem:conflict", "Conflict", ErrFormDraftFinal.Error())
+	case errors.Is(err, ErrFormDraftsUnavailable):
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrFormDraftsUnavailable.Error())
+	default:
+		api.WriteRepoError(w, err)
+	}
 }

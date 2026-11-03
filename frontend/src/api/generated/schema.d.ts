@@ -6413,7 +6413,7 @@ export interface paths {
     put?: never;
     /**
      * Capture an item in a metamodel draft
-     * @description A typed metamodel operation (`kind` and `op`, the permitted pairs in MetamodelDraftItemCreate). The payload is decoded strictly into the request type of the resource route the pair stands for; an unknown field is 400. A payload may carry `{"$item": "<item id>"}` instead of an id: the item must belong to the same draft and create a part (create or clone), and the references must form no cycle (422, E-112). `base` is the state of the target, read in the transaction of the capture: `updated_at` of the type, field, attribute definition, set or template, the ordered set ids of a type for `ci_type`/`assign`, the status of the version for `template_version` (`current_version` of the template for `create`), `version` of a rule or layout, null for a new part. A missing target is 404; a read-only system row is 403 or 404 as on the resource route. The caller needs the write permission of that route as well (403): `ci_attribute:manage` for `global_field` and `attribute_definition`, `metamodel:publish` for `template_version`/`publish`, otherwise `citype:manage`. A tested draft returns to `draft` and loses its test report; a published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.item_added`.
+     * @description A typed metamodel operation (`kind` and `op`, the permitted pairs in MetamodelDraftItemCreate). The payload is decoded strictly into the request type of the resource route the pair stands for; an unknown field is 400. It is checked like the resource route without the stored metamodel (400 or 422, WP-720). A payload may carry `{"$item": "<item id>"}` instead of an id: the item must belong to the same draft and create a part (create or clone), and the references must form no cycle (422, E-112). `base` is the state of the target, read in the transaction of the capture: `updated_at` of the type, field, attribute definition, set or template, the ordered set ids of a type for `ci_type`/`assign`, the status of the version for `template_version` (`current_version` of the template for `create`), `version` of a rule or layout, null for a new part. A missing target is 404; a read-only system row is 403 or 404 as on the resource route. The caller needs the write permission of that route as well (403): `ci_attribute:manage` for `global_field` and `attribute_definition`, `metamodel:publish` for `template_version`/`publish`, otherwise `citype:manage`. A tested draft returns to `draft` and loses its test report; a published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.item_added`.
      */
     post: operations['addMetamodelDraftItem'];
     delete?: never;
@@ -14674,6 +14674,17 @@ export interface components {
     } & (unknown & unknown & unknown & unknown);
   };
   responses: {
+    /** @description Written into the metamodel draft named by `draft` (WP-720): the captured item; the resource is unchanged. 404 when the module metamodel is switched off. */
+    DraftItemCaptured: {
+      headers: {
+        /** @description The new draft version. */
+        ETag?: string;
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['MetamodelDraftItem'];
+      };
+    };
     /** @description Bad request */
     BadRequest: {
       headers: {
@@ -14839,6 +14850,8 @@ export interface components {
     };
   };
   parameters: {
+    /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+    DraftId: string;
     /**
      * @description Deduplicates a POST for 24 hours (API-04); every POST endpoint
      *     accepts it. The key is bound to the caller (organization and
@@ -30189,7 +30202,10 @@ export interface operations {
   };
   putCiFieldsGlobal: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -30203,6 +30219,7 @@ export interface operations {
         };
         content?: never;
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
@@ -30217,13 +30234,17 @@ export interface operations {
   };
   deleteCiFieldsGlobalName: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
+      202: components['responses']['DraftItemCaptured'];
       /** @description Delete a global CI field definition */
       204: {
         headers: {
@@ -30287,7 +30308,10 @@ export interface operations {
   };
   createAttributeDefinition: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -30307,6 +30331,7 @@ export interface operations {
           'application/json': components['schemas']['AttributeDefinition'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -30343,7 +30368,10 @@ export interface operations {
   };
   deleteAttributeDefinition: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30353,6 +30381,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
+      202: components['responses']['DraftItemCaptured'];
       /** @description Attribute definition deleted */
       204: {
         headers: {
@@ -30368,7 +30397,10 @@ export interface operations {
   };
   updateAttributeDefinition: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30391,6 +30423,7 @@ export interface operations {
           'application/json': components['schemas']['AttributeDefinition'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -30481,7 +30514,10 @@ export interface operations {
   };
   createAttributeSet: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -30501,6 +30537,7 @@ export interface operations {
           'application/json': components['schemas']['AttributeSet'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -30537,7 +30574,10 @@ export interface operations {
   };
   deleteAttributeSet: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30547,6 +30587,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
+      202: components['responses']['DraftItemCaptured'];
       /** @description Attribute set deleted */
       204: {
         headers: {
@@ -30563,7 +30604,10 @@ export interface operations {
   };
   updateAttributeSet: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30586,6 +30630,7 @@ export interface operations {
           'application/json': components['schemas']['AttributeSet'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -30637,7 +30682,10 @@ export interface operations {
   };
   createTemplate: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -30657,6 +30705,7 @@ export interface operations {
           'application/json': components['schemas']['Template'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -30694,7 +30743,10 @@ export interface operations {
   };
   deleteTemplate: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30704,6 +30756,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
+      202: components['responses']['DraftItemCaptured'];
       /** @description Template deleted */
       204: {
         headers: {
@@ -30719,7 +30772,10 @@ export interface operations {
   };
   updateTemplate: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30742,6 +30798,7 @@ export interface operations {
           'application/json': components['schemas']['Template'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -30752,7 +30809,10 @@ export interface operations {
   };
   cloneTemplate: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30775,6 +30835,7 @@ export interface operations {
           'application/json': components['schemas']['Template'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -30876,7 +30937,10 @@ export interface operations {
   };
   createTemplateVersion: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30895,6 +30959,7 @@ export interface operations {
           'application/json': components['schemas']['TemplateVersion'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
@@ -30932,7 +30997,10 @@ export interface operations {
   };
   putTemplateVersion: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30957,6 +31025,7 @@ export interface operations {
           'application/json': components['schemas']['TemplateVersion'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -30968,7 +31037,10 @@ export interface operations {
   };
   publishTemplateVersion: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -30989,6 +31061,7 @@ export interface operations {
           'application/json': components['schemas']['TemplateVersion'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
@@ -31049,7 +31122,10 @@ export interface operations {
   };
   createRule: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -31069,6 +31145,7 @@ export interface operations {
           'application/json': components['schemas']['MetamodelRule'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -31106,7 +31183,10 @@ export interface operations {
   };
   deleteRule: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -31116,6 +31196,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
+      202: components['responses']['DraftItemCaptured'];
       /** @description Rule deleted */
       204: {
         headers: {
@@ -31132,7 +31213,10 @@ export interface operations {
   };
   updateRule: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -31155,6 +31239,7 @@ export interface operations {
           'application/json': components['schemas']['MetamodelRule'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -31212,7 +31297,10 @@ export interface operations {
   };
   createLayout: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -31234,6 +31322,7 @@ export interface operations {
           'application/json': components['schemas']['FormLayout'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -31273,7 +31362,10 @@ export interface operations {
   };
   deleteLayout: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: {
         /** @description ETag of the version the deletion is based on, or "*". */
         'If-Match'?: string;
@@ -31286,6 +31378,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
+      202: components['responses']['DraftItemCaptured'];
       /** @description Layout deleted */
       204: {
         headers: {
@@ -31310,7 +31403,10 @@ export interface operations {
   };
   updateLayout: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: {
         /** @description ETag of the version the change is based on, or "*". */
         'If-Match'?: string;
@@ -31338,6 +31434,7 @@ export interface operations {
           'application/json': components['schemas']['FormLayout'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -31813,7 +31910,10 @@ export interface operations {
   };
   createCiTypes: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -31833,6 +31933,7 @@ export interface operations {
           'application/json': components['schemas']['CIType'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
@@ -31932,7 +32033,10 @@ export interface operations {
   };
   updateCiTypesId: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -31952,6 +32056,7 @@ export interface operations {
           'application/json': components['schemas']['CIType'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
@@ -31967,7 +32072,10 @@ export interface operations {
   };
   createCiTypesIdActivate: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -31983,6 +32091,7 @@ export interface operations {
           'application/json': components['schemas']['CIType'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -31997,7 +32106,10 @@ export interface operations {
   };
   createCiTypesIdClone: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -32013,6 +32125,7 @@ export interface operations {
           'application/json': components['schemas']['CIType'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -32027,7 +32140,10 @@ export interface operations {
   };
   createCiTypesIdDeactivate: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -32043,6 +32159,7 @@ export interface operations {
           'application/json': components['schemas']['CIType'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -32082,7 +32199,10 @@ export interface operations {
   };
   putCiTypesIdFields: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -32096,6 +32216,7 @@ export interface operations {
         };
         content?: never;
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
@@ -32110,13 +32231,17 @@ export interface operations {
   };
   deleteCiTypesIdFieldsName: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
+      202: components['responses']['DraftItemCaptured'];
       /** @description Delete a CI type field definition */
       204: {
         headers: {
@@ -32188,7 +32313,10 @@ export interface operations {
   };
   replaceCiTypeAttributeSets: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -32211,6 +32339,7 @@ export interface operations {
           'application/json': components['schemas']['CITypeAttributeSets'];
         };
       };
+      202: components['responses']['DraftItemCaptured'];
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -34396,6 +34525,8 @@ export interface operations {
         preview?: boolean;
         /** @description A role or custom role of the organization (see GET /api/v1/cis/{id}/form). */
         role_id?: string;
+        /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
+        draft?: components['parameters']['DraftId'];
       };
       header?: never;
       path: {

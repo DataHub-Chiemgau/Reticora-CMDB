@@ -12396,7 +12396,11 @@ paths:
     put:
       operationId: putCiFieldsGlobal
       summary: Manage global CI field definitions
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Manage global CI field definitions
         '400':
@@ -12418,7 +12422,11 @@ paths:
         unique index `idx_attr_<id>_u` or own index, and the key index
         `idx_attr_key_<key>` once no definition uses the key (DB-04,
         WP-255). Values in the CIs' attributes stay.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '204':
           description: Delete a global CI field definition
         '401':
@@ -12491,7 +12499,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AttributeDefinitionCreate'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: Attribute definition created
           content:
@@ -12551,7 +12563,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AttributeDefinitionPatch'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Attribute definition updated
           content:
@@ -12575,7 +12591,11 @@ paths:
     delete:
       operationId: deleteAttributeDefinition
       summary: Delete an attribute definition
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '204':
           description: Attribute definition deleted
         '401':
@@ -12679,7 +12699,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AttributeSetCreate'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: Attribute set created
           content:
@@ -12735,7 +12759,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AttributeSetPatch'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Attribute set updated
           content:
@@ -12763,7 +12791,11 @@ paths:
         unique ones are released by a job (DB-04). System sets are
         read-only (403). Requires citype:manage; audited as
         `attribute_set.deleted`.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '204':
           description: Attribute set deleted
         '401':
@@ -12831,7 +12863,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/TemplateCreate'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: Template created
           content:
@@ -12888,7 +12924,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/TemplatePatch'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Template updated
           content:
@@ -12915,7 +12955,11 @@ paths:
         Deletes the template with its versions and items. System templates
         are read-only (403). Requires citype:manage; audited as
         `template.deleted`.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '204':
           description: Template deleted
         '401':
@@ -12949,7 +12993,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/TemplateClone'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: Template cloned
           content:
@@ -13081,7 +13129,11 @@ paths:
         version; without a published version a copy of the highest one.
         System templates are read-only (403). Requires citype:manage;
         audited as `template_version.created`.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: Template version created
           content:
@@ -13148,7 +13200,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/TemplateVersionItemsUpdate'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Items replaced
           content:
@@ -13196,7 +13252,11 @@ paths:
         (403). Requires metamodel:publish; audited as
         `template_version.published`. Publishing through drafts follows
         with WP-260/WP-261.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Template version published
           content:
@@ -13298,7 +13358,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MetamodelRuleCreate'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: Rule created
           content:
@@ -13361,7 +13425,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/MetamodelRulePatch'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Rule updated
           content:
@@ -13390,7 +13458,11 @@ paths:
         System rules are read-only (403); the rules of a published or
         retired template version are immutable (409). Requires
         citype:manage; audited as `metamodel_rule.deleted`.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '204':
           description: Rule deleted
         '401':
@@ -13474,7 +13546,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/FormLayoutCreate'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: Layout created
           headers:
@@ -13544,6 +13620,7 @@ paths:
           required: false
           description: ETag of the version the change is based on, or "*".
           schema: { type: string }
+        - $ref: '#/components/parameters/DraftId'
       requestBody:
         required: true
         content:
@@ -13551,6 +13628,8 @@ paths:
             schema:
               $ref: '#/components/schemas/FormLayoutPatch'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Layout updated
           headers:
@@ -13593,7 +13672,10 @@ paths:
           required: false
           description: ETag of the version the deletion is based on, or "*".
           schema: { type: string }
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '204':
           description: Layout deleted
         '401':
@@ -13854,7 +13936,8 @@ paths:
         A typed metamodel operation (`kind` and `op`, the permitted pairs in
         MetamodelDraftItemCreate). The payload is decoded strictly into the
         request type of the resource route the pair stands for; an unknown
-        field is 400. A payload may carry `{"$item": "<item id>"}` instead
+        field is 400. It is checked like the resource route without the
+        stored metamodel (400 or 422, WP-720). A payload may carry `{"$item": "<item id>"}` instead
         of an id: the item must belong to the same draft and create a part
         (create or clone), and the references must form no cycle (422,
         E-112). `base` is the state of the target, read in the transaction
@@ -14111,7 +14194,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CITypeCreateRequest'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: CI type created
           content:
@@ -14211,7 +14298,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CITypeUpdateRequest'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: CI type updated
           content:
@@ -14238,7 +14329,11 @@ paths:
         again (MET-05). System types are read-only (403); a type whose
         parent is deactivated is 409 on `parent_type_id`. A refused
         activation writes no audit entry and sends no webhook.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: The reactivated CI type
           content:
@@ -14267,7 +14362,11 @@ paths:
         key or name is 409, as is a source whose parent is deactivated; a
         lifecycle model the organization does not see is 422 with field
         `lifecycle_model_id`.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '201':
           description: The clone
           content:
@@ -14294,7 +14393,11 @@ paths:
         stay readable and editable. System types are read-only (403); a type
         with active subtypes is 409. A refused deactivation writes no audit
         entry and sends no webhook.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: The deactivated CI type
           content:
@@ -14331,7 +14434,11 @@ paths:
         including the system types unless `applies_to` restricts them
         (WP-255). An unknown CI type, or one of another
         organization, is 404.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Manage CI type field definitions
         '400':
@@ -14351,7 +14458,11 @@ paths:
         Deletes a field of the type only; a global field of the same name is
         not reached (404, WP-255). The index job drops the indexes of the
         deleted definition (DB-04). Values in the CIs' attributes stay.
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '204':
           description: Delete a CI type field definition
         '401':
@@ -14423,7 +14534,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CITypeAttributeSets'
+      parameters:
+        - $ref: '#/components/parameters/DraftId'
       responses:
+        '202':
+          $ref: '#/components/responses/DraftItemCaptured'
         '200':
           description: Assignment document after the change
           content:
@@ -16094,6 +16209,7 @@ paths:
           required: false
           description: A role or custom role of the organization (see GET /api/v1/cis/{id}/form).
           schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/DraftId'
       responses:
         '200':
           description: The resolved form
@@ -17576,6 +17692,27 @@ components:
       description: RETICORA_OPS_ALERT_TOKEN of the Alertmanager bridge (OPS-05), sent by Alertmanager from a credentials file.
 
   parameters:
+    DraftId:
+      name: draft
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: >-
+        Writes the change into this metamodel draft instead of the
+        published metamodel (MET-53, WP-720): the request becomes an item of
+        the draft as with POST /api/v1/metamodel/drafts/{id}/items and is
+        answered with 202 and the item; nothing else changes (no event, no
+        index job, no audit entry of the resource). Requires citype:manage in
+        addition to the permission of the route. A value that is no UUID is
+        400, an unknown draft or one of another organization 404, a
+        published or discarded draft 409, a server without database 503.
+        With the module metamodel switched off the parameter is answered
+        with 404 and nothing is written. At
+        GET /api/v1/ci-types/{id}/form it resolves the preview with the
+        items of the draft (E-113). Every other write route refuses the
+        parameter with 400 (`urn:reticora:problem:draft-unsupported`).
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -17778,6 +17915,19 @@ components:
       schema: { type: integer }
 
   responses:
+    DraftItemCaptured:
+      description: >-
+        Written into the metamodel draft named by `draft` (WP-720): the
+        captured item; the resource is unchanged. 404 when the module
+        metamodel is switched off.
+      headers:
+        ETag:
+          description: The new draft version.
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MetamodelDraftItem'
     BadRequest:
       description: Bad request
       content:

@@ -129,7 +129,44 @@ var (
 	// ErrFormRoleNotOwn: role_id outside a preview names no role of the
 	// caller; choosing another role needs citype:manage (403).
 	ErrFormRoleNotOwn = errors.New("role_id is not a role of the caller")
+	// ErrFormDraftNotFound: the draft of a preview does not exist or
+	// belongs to another organization (404).
+	ErrFormDraftNotFound = errors.New("metamodel draft not found")
+	// ErrFormDraftFinal: the draft of a preview is published or discarded
+	// (409).
+	ErrFormDraftFinal = errors.New("published and discarded drafts have no preview")
+	// ErrFormDraftsUnavailable: no draft source is wired (no database,
+	// 503).
+	ErrFormDraftsUnavailable = errors.New("the preview of a draft needs the database")
 )
+
+// DraftForms lays the items of a metamodel draft over the published
+// metamodel for the preview of a form (E-113, WP-720). The package
+// metamodel implements it (citype does not import metamodel); the server
+// hands it to the form route in the request context (WithDraftForms).
+type DraftForms interface {
+	// DraftFormSource returns a FormSource that reads published with the
+	// items of draft draftID laid over it: the fields, the catalog rules
+	// and the layouts; ErrFormDraftNotFound for an unknown draft or one of
+	// another organization, ErrFormDraftFinal for a published or
+	// discarded one.
+	DraftFormSource(ctx context.Context, orgID, draftID string, published FormSource) (FormSource, error)
+}
+
+type draftFormsKey struct{}
+
+// WithDraftForms returns ctx carrying the draft source of the form
+// preview.
+func WithDraftForms(ctx context.Context, d DraftForms) context.Context {
+	return context.WithValue(ctx, draftFormsKey{}, d)
+}
+
+// DraftFormsFromContext returns the draft source of the form preview, if
+// the request carries one.
+func DraftFormsFromContext(ctx context.Context) (DraftForms, bool) {
+	d, ok := ctx.Value(draftFormsKey{}).(DraftForms)
+	return d, ok && d != nil
+}
 
 // FormSubject is the CI or the type a form is resolved for: the type, its
 // chain root → type (WP-248), the stored attribute values (instance
@@ -178,6 +215,10 @@ type FormSource interface {
 type FormResolver struct {
 	source FormSource
 	policy FieldPolicy
+	// drafts and draftID lay the items of a metamodel draft over the
+	// published metamodel (WithDraft).
+	drafts  DraftForms
+	draftID string
 }
 
 // NewFormResolver returns a resolver over source; policy nil is
@@ -195,11 +236,36 @@ func formTemplateError(status int, message string) *api.FieldError {
 	return &api.FieldError{Field: "template_id", Message: message, Status: status}
 }
 
+// WithDraft resolves the forms over the published metamodel with the
+// items of metamodel draft draftID laid over it (E-113, WP-720): the
+// preview of a draft, for a new CI of a type only; the caller checks
+// citype:manage. Without a draft source (d nil) the resolution is
+// ErrFormDraftsUnavailable.
+func (f *FormResolver) WithDraft(d DraftForms, draftID string) *FormResolver {
+	f.drafts, f.draftID = d, draftID
+	return f
+}
+
 // ResolveForm resolves the form of req for the caller of ctx in orgID.
 // The caller's roles are the roles and custom roles of the user of the
 // tenant context; an API key has none (E-110: roles mapped from IdP
-// groups count only from WP-725 on).
+// groups count only from WP-725 on). With a draft (WithDraft) the form is
+// resolved over the published metamodel with the items of the draft laid
+// over it.
 func (f *FormResolver) ResolveForm(ctx context.Context, orgID string, req FormRequest) (*ResolvedForm, error) {
+	if f.draftID != "" {
+		if req.CIID != "" || req.CITypeID == "" {
+			return nil, &api.FieldError{Field: "draft", Message: "a draft preview resolves the form of a new CI of a type"}
+		}
+		if f.drafts == nil {
+			return nil, ErrFormDraftsUnavailable
+		}
+		source, err := f.drafts.DraftFormSource(ctx, orgID, f.draftID, f.source)
+		if err != nil {
+			return nil, err
+		}
+		return NewFormResolver(source, f.policy).ResolveForm(ctx, orgID, req)
+	}
 	subject, err := f.subject(ctx, orgID, &req)
 	if err != nil {
 		return nil, err
