@@ -6149,6 +6149,61 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/rules': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List catalog rules (MET-45)
+     * @description The organization's rules of the rule catalog and the read-only system rules (`is_system`, WP-716), optionally filtered by target (`ci_type_id`, `attribute_set_id`, `template_version_id`), by `attribute_key` and by `kind`. Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires ci:read. The catalog is not /api/v1/compliance/rules.
+     */
+    get: operations['listRules'];
+    put?: never;
+    /**
+     * Create a catalog rule (MET-45)
+     * @description A rule of the organization on exactly one target it sees (a CI type, an attribute set or a template version, its own or a system row; otherwise 422 on the target field). `condition` is checked strictly as a condition of api/rules.schema.json, `ast` as a value rule; an invalid expression is 422 with the parser's path in `field` (e.g. `condition.rules[1].field`). `ast` is required exactly for kind `validation`. A `visible` rule on a CI type for an attribute the type requires statically is 422 on `attribute_key`. A rule on a published or retired template version is 409, a taken key 409 (unique per organization for type and set rules, per version for template rules). Requires citype:manage; audited as `metamodel_rule.created`.
+     */
+    post: operations['createRule'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/rules/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read a catalog rule
+     * @description An own or a system rule. Requires ci:read.
+     */
+    get: operations['getRule'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a catalog rule
+     * @description System rules are read-only (403); the rules of a published or retired template version are immutable (409). Requires citype:manage; audited as `metamodel_rule.deleted`.
+     */
+    delete: operations['deleteRule'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a catalog rule
+     * @description `attribute_key`, `kind`, `condition`, `ast`, `message` and `is_active`; null removes `condition`, `ast` or `message`. A kind other than `validation` drops an `ast` the request does not send. `key` and the target are immutable (422). `version` rises by one. System rules are read-only (403); the rules of a published or retired template version are immutable (409). Requires citype:manage; audited as `metamodel_rule.updated` with before and after.
+     */
+    patch: operations['updateRule'];
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -8592,6 +8647,85 @@ export interface components {
       applies_to?: components['schemas']['AttributeAppliesTo'];
       applies_to_categories?: string[];
       applies_to_type_ids?: string[];
+    };
+    /**
+     * @description validation checks the value with `ast` (allowed values under a condition are a validation with enum); required, readonly and visible set the state of the attribute while the condition holds.
+     * @enum {string}
+     */
+    MetamodelRuleKind: 'validation' | 'required' | 'readonly' | 'visible';
+    /** @description A condition of the rule language (MET-45, WP-715): $defs/condition of api/rules.schema.json. */
+    RuleCondition: components['schemas']['condition'];
+    /** @description The message of a rule per language (MET-01). */
+    RuleMessage: {
+      de?: string;
+      en?: string;
+    };
+    /** @description A named rule of the rule catalog (table metamodel_rule, WP-716) for the attribute `attribute_key` of exactly one target: a CI type, an attribute set or a template version (E-111). A new template version takes over the rules of the previous version with their keys. The rules of the attribute definitions (validation, conditional) stay beside the catalog (E-114). */
+    MetamodelRule: {
+      id: string;
+      /** @description Empty for system rules. */
+      organization_id?: string;
+      key: string;
+      /** @description The target attribute. */
+      attribute_key: string;
+      kind: components['schemas']['MetamodelRuleKind'];
+      ci_type_id?: string;
+      attribute_set_id?: string;
+      template_version_id?: string;
+      /** @description The condition; null applies always. */
+      condition: components['schemas']['condition'] | null;
+      /** @description The value rule of a validation; null for the other kinds. */
+      ast: components['schemas']['rule'] | null;
+      message: components['schemas']['RuleMessage'] | null;
+      /** @description A read-only system rule. */
+      is_system: boolean;
+      is_active: boolean;
+      /** @description Rises with every change. */
+      version: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description Exactly one of ci_type_id, attribute_set_id and template_version_id is required (422). */
+    MetamodelRuleCreate: {
+      key: string;
+      attribute_key: string;
+      kind: components['schemas']['MetamodelRuleKind'];
+      ci_type_id?: string;
+      attribute_set_id?: string;
+      template_version_id?: string;
+      condition?: components['schemas']['condition'] | null;
+      ast?: components['schemas']['rule'] | null;
+      message?: components['schemas']['RuleMessage'] | null;
+      /** @default true */
+      is_active: boolean;
+    };
+    /** @description key and the target are immutable; naming them is 422. */
+    MetamodelRulePatch: {
+      attribute_key?: string;
+      kind?: components['schemas']['MetamodelRuleKind'];
+      condition?: components['schemas']['condition'] | null;
+      ast?: components['schemas']['rule'] | null;
+      message?: components['schemas']['RuleMessage'] | null;
+      is_active?: boolean;
+      /** @description Immutable (422). */
+      key?: string;
+      /** @description Immutable (422). */
+      ci_type_id?: string;
+      /** @description Immutable (422). */
+      attribute_set_id?: string;
+      /** @description Immutable (422). */
+      template_version_id?: string;
+    };
+    MetamodelRuleListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['MetamodelRule'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
     };
     /** @description A label per language (MET-01). */
     LocalizedText: {
@@ -13588,6 +13722,48 @@ export interface components {
       op: 'enum';
       values: (string | number | boolean)[];
     };
+    /** @description A condition (WP-715): true or false for the values of a record. */
+    condition:
+      | components['schemas']['condition_all']
+      | components['schemas']['any']
+      | components['schemas']['not']
+      | components['schemas']['compare'];
+    /** @description AND: every condition holds (no conditions: true). */
+    condition_all: {
+      /** @constant */
+      op: 'all';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description OR: at least one condition holds (no conditions: false). */
+    any: {
+      /** @constant */
+      op: 'any';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description NOT: the one condition does not hold. */
+    not: {
+      /** @constant */
+      op: 'not';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description A comparison of the value of field (fieldmeta.Predicate). empty and not_empty take no value; in and not_in a non-empty array of strings, numbers and booleans; gt, gte, lt and lte a number; eq, ne and contains a string, number or boolean. */
+    compare: {
+      /** @enum {unknown} */
+      op:
+        | 'eq'
+        | 'ne'
+        | 'in'
+        | 'not_in'
+        | 'gt'
+        | 'gte'
+        | 'lt'
+        | 'lte'
+        | 'contains'
+        | 'empty'
+        | 'not_empty';
+      field: string;
+      value?: unknown;
+    } & (unknown & unknown & unknown & unknown);
   };
   responses: {
     /** @description Bad request */
@@ -29654,6 +29830,173 @@ export interface operations {
           'application/json': components['schemas']['TemplateVersion'];
         };
       };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listRules: {
+    parameters: {
+      query?: {
+        /** @description Only rules of this CI type. */
+        ci_type_id?: string;
+        /** @description Only rules of this attribute set. */
+        attribute_set_id?: string;
+        /** @description Only rules of this template version. */
+        template_version_id?: string;
+        /** @description Only rules of this target attribute. */
+        attribute_key?: string;
+        /** @description Only rules of this kind. */
+        kind?: components['schemas']['MetamodelRuleKind'];
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rules, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelRuleListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelRuleCreate'];
+      };
+    };
+    responses: {
+      /** @description Rule created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rule */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelRule'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rule deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelRulePatch'];
+      };
+    };
+    responses: {
+      /** @description Rule updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];

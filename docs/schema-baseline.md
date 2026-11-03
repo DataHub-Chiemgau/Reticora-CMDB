@@ -735,6 +735,22 @@ fremden CI-Typ, eine fremde Klonquelle und eine fremde Attributdefinition mit
 `pdu`) mit veröffentlichter Version 1 ohne Items (E-37). Das CI hat keine
 Template-Spalten; die Zuordnung folgt mit `ci_template` (WP-710).
 
+Regelkatalog (MET-45, API-06, AUD-07, WP-716, Migration 000207):
+`metamodel_rule` hält benannte Regeln für das Attribut `attribute_key` genau
+eines Ziels (`metamodel_rule_one_target`: `ci_type_id`, `attribute_set_id` oder
+`template_version_id`, je ON DELETE CASCADE und eigener Index; Template-Regeln
+binden an die Version, E-111). `kind` ist `validation`, `required`,
+`readonly` oder `visible`; `ast` ist genau bei `validation` gesetzt
+(`metamodel_rule_ast_check`), `condition` NULL gilt immer, `message` prüft
+`reticora_i18n_text_valid`, `version` beginnt bei 1. `organization_id` `NULL`
+ist eine schreibgeschützte Systemregel. Schlüssel: `metamodel_rule_org_key` und
+`metamodel_rule_system_key` für Typ- und Set-Regeln,
+`metamodel_rule_template_version_key` je Template-Version.
+`metamodel_rule_binding` weist ein unter RLS unsichtbares oder fremdes Ziel mit
+23503 ab. Der Trigger `metamodel_rule_copy_template_version` (AFTER INSERT auf
+`template_version`) kopiert die Regeln der Vorversion mit ihren Schlüsseln in
+eine neue Template-Version.
+
 IP-Reservierungen (NET-09, WP-299, Migration 000208): `ip_address` erhält
 `reserved_until` (`timestamptz`, informativ, keine automatische Freigabe) und
 `reserved_by` (`uuid`, Surrogat des reservierenden Nutzers ohne Fremdschlüssel,
@@ -831,6 +847,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL), maintenance_notification_scoped_delete (DELETE), maintenance_notification_scoped_update (UPDATE) |
 | `maintenance_window` | ja | ja | maintenance_window_isolation (ALL), maintenance_window_scoped_delete (DELETE), maintenance_window_scoped_insert (INSERT), maintenance_window_scoped_update (UPDATE) |
 | `maintenance_window_ci` | ja | ja | maintenance_window_ci_isolation (ALL), maintenance_window_ci_scoped_delete (DELETE), maintenance_window_ci_scoped_update (UPDATE) |
+| `metamodel_rule` | ja | ja | metamodel_rule_isolation_delete (DELETE), metamodel_rule_isolation_insert (INSERT), metamodel_rule_isolation_select (SELECT), metamodel_rule_isolation_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |

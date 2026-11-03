@@ -87,6 +87,8 @@ var matrixOverrides = map[string]map[string]string{
 	"attribute_set": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "is_system": "true"},
 	// A global template (organization_id NULL) must be a system template (WP-251).
 	"template": {"display_name": `{"de": "Matrix", "en": "Matrix"}`, "is_system": "true"},
+	// A rule has exactly one target, ast only as a validation (WP-716).
+	"metamodel_rule": {"ci_type_id": "@uuid", "kind": "required"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

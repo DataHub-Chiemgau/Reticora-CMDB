@@ -12873,6 +12873,194 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/rules:
+    x-phase: P2
+    get:
+      operationId: listRules
+      tags: [Metamodel]
+      summary: List catalog rules (MET-45)
+      description: >-
+        The organization's rules of the rule catalog and the read-only
+        system rules (`is_system`, WP-716), optionally filtered by target
+        (`ci_type_id`, `attribute_set_id`, `template_version_id`), by
+        `attribute_key` and by `kind`. Pages newest first on (created_at,
+        id) (API-02): `limit` (default 50, at most 200) and the signed
+        keyset `cursor` from `next_cursor`. Requires ci:read. The catalog
+        is not /api/v1/compliance/rules.
+      parameters:
+        - name: ci_type_id
+          in: query
+          required: false
+          description: Only rules of this CI type.
+          schema: { type: string }
+        - name: attribute_set_id
+          in: query
+          required: false
+          description: Only rules of this attribute set.
+          schema: { type: string }
+        - name: template_version_id
+          in: query
+          required: false
+          description: Only rules of this template version.
+          schema: { type: string }
+        - name: attribute_key
+          in: query
+          required: false
+          description: Only rules of this target attribute.
+          schema: { type: string }
+        - name: kind
+          in: query
+          required: false
+          description: Only rules of this kind.
+          schema:
+            $ref: '#/components/schemas/MetamodelRuleKind'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Rules, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelRuleListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createRule
+      tags: [Metamodel]
+      summary: Create a catalog rule (MET-45)
+      description: >-
+        A rule of the organization on exactly one target it sees (a CI type,
+        an attribute set or a template version, its own or a system row;
+        otherwise 422 on the target field). `condition` is checked strictly
+        as a condition of api/rules.schema.json, `ast` as a value rule; an
+        invalid expression is 422 with the parser's path in `field` (e.g.
+        `condition.rules[1].field`). `ast` is required exactly for kind
+        `validation`. A `visible` rule on a CI type for an attribute the
+        type requires statically is 422 on `attribute_key`. A rule on a
+        published or retired template version is 409, a taken key 409
+        (unique per organization for type and set rules, per version for
+        template rules). Requires citype:manage; audited as
+        `metamodel_rule.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelRuleCreate'
+      responses:
+        '201':
+          description: Rule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/rules/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getRule
+      tags: [Metamodel]
+      summary: Read a catalog rule
+      description: An own or a system rule. Requires ci:read.
+      responses:
+        '200':
+          description: Rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateRule
+      tags: [Metamodel]
+      summary: Update a catalog rule
+      description: >-
+        `attribute_key`, `kind`, `condition`, `ast`, `message` and
+        `is_active`; null removes `condition`, `ast` or `message`. A kind
+        other than `validation` drops an `ast` the request does not send.
+        `key` and the target are immutable (422). `version` rises by one.
+        System rules are read-only (403); the rules of a published or
+        retired template version are immutable (409). Requires
+        citype:manage; audited as `metamodel_rule.updated` with before and
+        after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelRulePatch'
+      responses:
+        '200':
+          description: Rule updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteRule
+      tags: [Metamodel]
+      summary: Delete a catalog rule
+      description: >-
+        System rules are read-only (403); the rules of a published or
+        retired template version are immutable (409). Requires
+        citype:manage; audited as `metamodel_rule.deleted`.
+      responses:
+        '204':
+          description: Rule deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -17029,6 +17217,131 @@ components:
         applies_to_type_ids:
           type: array
           items: { type: string }
+    MetamodelRuleKind:
+      type: string
+      enum: [validation, required, readonly, visible]
+      description: >-
+        validation checks the value with `ast` (allowed values under a
+        condition are a validation with enum); required, readonly and
+        visible set the state of the attribute while the condition holds.
+    RuleCondition:
+      description: >-
+        A condition of the rule language (MET-45, WP-715):
+        $defs/condition of api/rules.schema.json.
+      $ref: './rules.schema.json#/$defs/condition'
+    RuleMessage:
+      type: object
+      description: The message of a rule per language (MET-01).
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        de: { type: string, minLength: 1, maxLength: 500 }
+        en: { type: string, minLength: 1, maxLength: 500 }
+    MetamodelRule:
+      type: object
+      description: >-
+        A named rule of the rule catalog (table metamodel_rule, WP-716) for
+        the attribute `attribute_key` of exactly one target: a CI type, an
+        attribute set or a template version (E-111). A new template version
+        takes over the rules of the previous version with their keys. The
+        rules of the attribute definitions (validation, conditional) stay
+        beside the catalog (E-114).
+      required: [id, key, attribute_key, kind, condition, ast, message, is_system, is_active, version, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system rules. }
+        key: { type: string }
+        attribute_key: { type: string, description: The target attribute. }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        ci_type_id: { type: string }
+        attribute_set_id: { type: string }
+        template_version_id: { type: string }
+        condition:
+          description: The condition; null applies always.
+          oneOf:
+            - $ref: '#/components/schemas/RuleCondition'
+            - type: 'null'
+        ast:
+          description: The value rule of a validation; null for the other kinds.
+          oneOf:
+            - $ref: '#/components/schemas/RuleAST'
+            - type: 'null'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RuleMessage'
+            - type: 'null'
+        is_system: { type: boolean, description: A read-only system rule. }
+        is_active: { type: boolean }
+        version: { type: integer, description: Rises with every change. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    MetamodelRuleCreate:
+      type: object
+      required: [key, attribute_key, kind]
+      additionalProperties: false
+      description: Exactly one of ci_type_id, attribute_set_id and template_version_id is required (422).
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100 }
+        attribute_key: { type: string, minLength: 1, maxLength: 100 }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        ci_type_id: { type: string }
+        attribute_set_id: { type: string }
+        template_version_id: { type: string }
+        condition:
+          oneOf:
+            - $ref: '#/components/schemas/RuleCondition'
+            - type: 'null'
+        ast:
+          oneOf:
+            - $ref: '#/components/schemas/RuleAST'
+            - type: 'null'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RuleMessage'
+            - type: 'null'
+        is_active: { type: boolean, default: true }
+    MetamodelRulePatch:
+      type: object
+      additionalProperties: false
+      description: key and the target are immutable; naming them is 422.
+      properties:
+        attribute_key: { type: string, minLength: 1, maxLength: 100 }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        condition:
+          oneOf:
+            - $ref: '#/components/schemas/RuleCondition'
+            - type: 'null'
+        ast:
+          oneOf:
+            - $ref: '#/components/schemas/RuleAST'
+            - type: 'null'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RuleMessage'
+            - type: 'null'
+        is_active: { type: boolean }
+        key: { type: string, description: Immutable (422). }
+        ci_type_id: { type: string, description: Immutable (422). }
+        attribute_set_id: { type: string, description: Immutable (422). }
+        template_version_id: { type: string, description: Immutable (422). }
+    MetamodelRuleListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetamodelRule'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
     LocalizedText:
       type: object
       description: A label per language (MET-01).

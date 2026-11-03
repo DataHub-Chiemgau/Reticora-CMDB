@@ -47,6 +47,7 @@ DELETE /api/v1/relationships/{id} relationship:write
 DELETE /api/v1/role-assignments/{id} role:manage
 DELETE /api/v1/roles/{id} role:manage
 DELETE /api/v1/rooms/{id} location:write
+DELETE /api/v1/rules/{id} citype:manage
 DELETE /api/v1/saved-views/{id} saved_view:write
 DELETE /api/v1/service-accounts/{id} user:manage
 DELETE /api/v1/sites/{id} location:write
@@ -239,6 +240,8 @@ GET /api/v1/roles/{id} role:read
 GET /api/v1/roles/{id}/permissions role:read
 GET /api/v1/rooms location:read
 GET /api/v1/rooms/{id} location:read
+GET /api/v1/rules ci:read
+GET /api/v1/rules/{id} ci:read
 GET /api/v1/saved-views saved_view:read
 GET /api/v1/saved-views/presets saved_view:read
 GET /api/v1/saved-views/{id} saved_view:read
@@ -339,6 +342,7 @@ PATCH /api/v1/relationship-types/{key} relationship_type:manage
 PATCH /api/v1/relationships/{id} relationship:write
 PATCH /api/v1/roles/{id} role:manage
 PATCH /api/v1/rooms/{id} location:write
+PATCH /api/v1/rules/{id} citype:manage
 PATCH /api/v1/saved-views/{id} saved_view:write
 PATCH /api/v1/security/findings/{id} security:write
 PATCH /api/v1/service-accounts/{id} user:manage
@@ -481,6 +485,7 @@ POST /api/v1/role-assignments role:manage
 POST /api/v1/roles role:manage
 POST /api/v1/roles/assign role:manage
 POST /api/v1/rooms location:write
+POST /api/v1/rules citype:manage
 POST /api/v1/saved-views saved_view:write
 POST /api/v1/search/query search:read
 POST /api/v1/search/reindex search:write

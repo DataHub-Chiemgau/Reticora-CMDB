@@ -79,6 +79,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// E-105); GET /api/v1/ci-types/templates above stays the type template
 	// catalog.
 	h.registerTemplateRoutes(r)
+	// Rule catalog metamodel_rule (WP-716, MET-45, API-06; module
+	// metamodel, E-105).
+	h.registerRuleRoutes(r)
 }
 
 // attributeStore returns the attribute-definitions store or answers 503
