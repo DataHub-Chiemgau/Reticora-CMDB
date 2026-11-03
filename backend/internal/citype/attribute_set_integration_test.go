@@ -460,10 +460,12 @@ func stateOf(t *testing.T, a *setAPI, org, typeID string) typeState {
 	return s
 }
 
-// TestAttributeSetScopeAgainstPostgres covers API-06 (WP-250, until
-// WP-709): a set attribute of an organization or of a system set, even of
-// a set assigned to the type, leaves ResolveFields, ci_type.attribute_schema
-// and schema_version of every type unchanged; GET /ci-fields/global does
+// TestAttributeSetScopeAgainstPostgres covers API-06 (WP-250): a set
+// attribute of an organization or of a system set is no global attribute.
+// It leaves ResolveFields, ci_type.attribute_schema and schema_version of
+// every type its set is not assigned to unchanged (since WP-709 it enters
+// the types of its set, attribute_set_compose_integration_test.go), also
+// those of the system types; GET /ci-fields/global does
 // not list it, and two system set attributes of one key do not collide in
 // attribute_definition_system_global_key.
 //
@@ -482,7 +484,8 @@ func TestAttributeSetScopeAgainstPostgres(t *testing.T) {
 
 	set := a.createSet(f.OrgA, "wp250-scope")
 	sysA, sysB := systemSet(t, f, "wp250-sys-scope-a"), systemSet(t, f, "wp250-sys-scope-b")
-	a.must(http.StatusOK, f.OrgA, http.MethodPut, "/api/v1/ci-types/"+typ.ID+"/attribute-sets", `{"attribute_sets":[
+	assigned := a.createType(f.OrgA, "wp250-scope-assigned")
+	a.must(http.StatusOK, f.OrgA, http.MethodPut, "/api/v1/ci-types/"+assigned.ID+"/attribute-sets", `{"attribute_sets":[
 		{"attribute_set_id":"`+set.ID+`","position":0},{"attribute_set_id":"`+sysA+`","position":1}]}`, nil)
 	if w := a.setAttribute(f.OrgA, set.ID, `{"key":"wp250_scoped","data_type":"text","required":true}`); w.Code != http.StatusCreated {
 		t.Fatalf("org set attribute: %d %s", w.Code, w.Body.String())

@@ -666,12 +666,25 @@ je Set und Schlüssel, Organisation aus dem Set). `scope` trennt die Ebenen:
 (`attribute_definition_scope_type_check`). System-Basis und org-globale Ebene
 sind nur `scope = 'global'` (`attribute_definition_global_key`,
 `attribute_definition_system_global_key`, `reticora_chain_attribute_schema`,
-`attribute_definition_regenerate`); Set-Attribute ändern bis WP-709 weder
-`ci_type.attribute_schema` noch `schema_version`. `ci_type_attribute_set`
+`attribute_definition_regenerate`); Set-Attribute sind keine globalen
+Attribute. `ci_type_attribute_set`
 ordnet einem Typ der Organisation Sets geordnet zu (`position`); der Trigger
 `ci_type_attribute_set_binding` übernimmt die Organisation des Typs und weist
 ein unter RLS unsichtbares Set oder ein Set einer anderen Organisation ab
 (23503 unter `ci_type_attribute_set_attribute_set_id_fkey`).
+
+Sets in der Komposition (MET-16, WP-709, Migration 000200):
+`reticora_chain_attribute_schema` (aufgerufen von `generate_attribute_schema`
+und `ci_type_schema_guard`) komponiert System-Basis → Typkette → aktive Sets
+der Typkette: je Typ der Kette von Root nach Blatt seine Sets in
+`position`-Reihenfolge, aus Sets eines Vorfahren nur Set-Attribute mit
+`inheritable`. Neu erzeugt werden die zugeordneten Typen samt Untertypen bei
+Änderungen an Set-Attributen (`attribute_definition_regenerate`, Hilfsfunktion
+`regenerate_attribute_set_types`), an `attribute_set.is_active`
+(`trg_attribute_set_regenerate`) und an `ci_type_attribute_set` (verzögerter
+Constraint-Trigger `trg_ci_type_attribute_set_regenerate` am Ende der
+Transaktion, damit ein PUT der Liste `schema_version` je Typ höchstens einmal
+erhöht). Org-globale Attribute bleiben Laufzeitebene (E-93, E-108).
 
 Lifecycle-Modelle (MET-01, MET-06, LCY-02, WP-263, Migration 000201): Die
 Tabellen `lifecycle_definition`, `lifecycle_state` und `lifecycle_transition`

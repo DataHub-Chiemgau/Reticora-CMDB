@@ -208,8 +208,16 @@ func TestComposeReferenceTargetOf(t *testing.T) {
 	}
 }
 
-// layeredLister serves one definition per layer.
-type layeredLister struct{ system, org, typed, instance Field }
+// layeredLister serves one definition per layer and the set layers
+// (WP-709) as given.
+type layeredLister struct {
+	system, org, typed, instance Field
+	sets                         [][]Field
+}
+
+func (l layeredLister) ListSetFields(context.Context, string, string) ([][]Field, error) {
+	return l.sets, nil
+}
 
 func (l layeredLister) ListGlobalFields(context.Context, string) ([]Field, error) {
 	return []Field{l.system, l.org}, nil
@@ -247,5 +255,60 @@ func TestResolveFieldsComposesLayers(t *testing.T) {
 	var conflict *CompositionError
 	if !errors.As(err, &conflict) || conflict.CompositionKey() != "size" {
 		t.Errorf("instance with another data type: %v", err)
+	}
+}
+
+// TestResolveFieldsComposesSetLayers (WP-709, MET-16): the set layers come
+// between the type chain and the instance, one per set in the order
+// ListSetFields gives: a set tightens the type (required OR, intersection
+// of the allowed values), the later set's default wins, the instance
+// tightens the sets; a set whose data type conflicts with the type is a
+// *CompositionError.
+func TestResolveFieldsComposesSetLayers(t *testing.T) {
+	lister := layeredLister{
+		system: Field{Name: "base", DataType: fieldmeta.TypeText, IsSystem: true},
+		org:    Field{Name: "org_only", DataType: fieldmeta.TypeText},
+		typed:  Field{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"a", "b", "c"}, DefaultValue: "a"},
+		instance: Field{Name: "tier", DataType: fieldmeta.TypeEnum, Required: true,
+			Validation: &fieldmeta.ValidationRules{Options: []any{"b"}}},
+		sets: [][]Field{
+			{{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"b", "c", "d"}, DefaultValue: "c"},
+				{Name: "rack", DataType: fieldmeta.TypeText, Required: true}},
+			{{Name: "tier", DataType: fieldmeta.TypeEnum, DefaultValue: "b"}},
+		},
+	}
+	defs, err := ResolveFields(context.Background(), lister, "org", "type", "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]fieldmeta.FieldDefinition{}
+	var names []string
+	for _, d := range defs {
+		names = append(names, d.Name)
+		byName[d.Name] = d
+	}
+	if want := []string{"base", "org_only", "tier", "rack"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("order = %v, want %v (system, org, type chain, sets)", names, want)
+	}
+	tier := byName["tier"]
+	if !tier.Required || !reflect.DeepEqual(tier.EnumValues, []string{"b"}) || tier.DefaultValue != "b" {
+		t.Errorf("tier = %+v, want required, values [b] (type, sets and instance intersected), default b of the later set", tier)
+	}
+	if !byName["rack"].Required {
+		t.Errorf("rack = %+v, want required from the set", byName["rack"])
+	}
+
+	// Without a type there is no set layer.
+	if defs, err = ResolveFields(context.Background(), lister, "org", "", ""); err != nil || len(defs) != 2 {
+		t.Errorf("without type: %+v %v", defs, err)
+	}
+
+	// A set with another data type than the type conflicts.
+	lister.sets = [][]Field{{{Name: "tier", DataType: fieldmeta.TypeInteger}}}
+	lister.instance = Field{Name: "other", DataType: fieldmeta.TypeText}
+	_, err = ResolveFields(context.Background(), lister, "org", "type", "")
+	var conflict *CompositionError
+	if !errors.As(err, &conflict) || conflict.Key != "tier" || conflict.Code != CodeDatatypeConflict {
+		t.Errorf("set with another data type: %v, want a %s on tier", err, CodeDatatypeConflict)
 	}
 }

@@ -374,12 +374,9 @@ func updateAttributeTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) e
 }
 
 // checkDefinitionCompositionTx runs checkCompositionTx for a written
-// definition. A set attribute enters no composition until WP-709 adds the
-// set layer, so it is skipped.
+// definition of any scope; a set attribute is checked against every type
+// its set is assigned to (WP-709).
 func checkDefinitionCompositionTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) error {
-	if d.Scope == ScopeSet {
-		return nil
-	}
 	return checkCompositionTx(ctx, tx, d.Key)
 }
 
@@ -402,15 +399,22 @@ func attributeDBError(err error) error {
 // checkCompositionTx publishes a definition only when every effective
 // schema that contains its key can still be composed (MET-16): system
 // base → organization's global attributes → type chain (of the ancestors
-// the inheritable definitions, of the type all, MET-06), for every type
-// that defines the key and every type in its subtree (ci_type_subtree).
-// The database checks the materialized schemas (system base and chain)
-// itself; this adds the organization's layer. A conflict is a 422 on key.
-// Set attributes are no layer of it until WP-709 (checkDefinitionCompositionTx).
+// the inheritable definitions, of the type all, MET-06) → active sets of
+// the chain (WP-709), for every type that defines the key, every type a
+// set with the key is assigned to, and every type in their subtrees
+// (ci_type_subtree). A type attribute is so checked against the sets of
+// its type, a set attribute against each type of its set. The database
+// checks the materialized schemas (system base, chain and sets) itself;
+// this adds the organization's layer. A conflict is a 422 on key.
 func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT s.id::text FROM attribute_definition a
-		CROSS JOIN LATERAL ci_type_subtree(a.ci_type_id) s
-		WHERE a.key = $1 AND a.ci_type_id IS NOT NULL`, key)
+	rows, err := tx.Query(ctx, `SELECT DISTINCT s.id::text FROM (
+			SELECT a.ci_type_id AS type_id FROM attribute_definition a
+			WHERE a.key = $1 AND a.ci_type_id IS NOT NULL
+			UNION
+			SELECT cs.ci_type_id FROM attribute_definition a
+			JOIN ci_type_attribute_set cs ON cs.attribute_set_id = a.attribute_set_id
+			WHERE a.key = $1 AND a.attribute_set_id IS NOT NULL
+		) types CROSS JOIN LATERAL ci_type_subtree(types.type_id) s`, key)
 	if err != nil {
 		return fmt.Errorf("read types of %s: %w", key, err)
 	}
@@ -418,7 +422,7 @@ func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
 	if err != nil {
 		return fmt.Errorf("read types of %s: %w", key, err)
 	}
-	if cerr := chainCompositionTx(ctx, tx, targets, key); cerr != nil {
+	if cerr := chainCompositionTx(ctx, tx, targets, key, nil); cerr != nil {
 		var conflict *CompositionError
 		if errors.As(cerr, &conflict) {
 			return &api.FieldError{Field: "key", Message: cerr.Error(), Status: http.StatusUnprocessableEntity, Code: conflict.Code}
@@ -441,7 +445,7 @@ func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID string) er
 	if err != nil {
 		return fmt.Errorf("read ci type subtree: %w", err)
 	}
-	if cerr := chainCompositionTx(ctx, tx, targets, ""); cerr != nil {
+	if cerr := chainCompositionTx(ctx, tx, targets, "", nil); cerr != nil {
 		var conflict *CompositionError
 		if errors.As(cerr, &conflict) {
 			return errParentComposition(cerr.Error(), conflict.Code)
@@ -453,10 +457,12 @@ func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID string) er
 
 // chainCompositionTx composes the definitions of key ("" every key) for
 // the system base with the organization's global attributes and, for
-// each target type, with its chain root → type (MET-16, MET-06). It
-// returns the first *CompositionError.
+// each target type, with its chain root → type (MET-16, MET-06) and the
+// active sets of that chain (setLayersTx, WP-709); override replaces the
+// set list of one type (nil: the stored lists). It returns the first
+// *CompositionError.
 // validation: the *CompositionError texts of Compose (MET-16), naming the key.
-func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key string) error {
+func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key string, override *setOverride) error {
 	collect := func(row pgx.CollectableRow) (*AttributeDefinition, error) { return scanAttribute(row) }
 	rows, err := tx.Query(ctx, `SELECT `+attributeColumns+` FROM attribute_definition
 		WHERE scope = 'global' AND ($1 = '' OR key = $1) ORDER BY sort_order, key`, key)
@@ -504,18 +510,103 @@ func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key st
 	if err != nil {
 		return fmt.Errorf("read chain definitions: %w", err)
 	}
-	for start := 0; start < len(defs); {
-		end := start
-		var typed []fieldmeta.FieldDefinition
-		for ; end < len(defs) && defs[end].target == defs[start].target; end++ {
-			typed = append(typed, defs[end].def.definition())
+	typed := map[string][]fieldmeta.FieldDefinition{}
+	for _, cd := range defs {
+		typed[cd.target] = append(typed[cd.target], cd.def.definition())
+	}
+	sets, err := setLayersTx(ctx, tx, targets, key, override)
+	if err != nil {
+		return err
+	}
+	for _, target := range targets {
+		layers := [][]fieldmeta.FieldDefinition{system, org, typed[target]}
+		for _, layer := range sets[target] {
+			layers = append(layers, definitionsOf(layer))
 		}
-		if _, err = Compose(system, org, typed); err != nil {
+		if _, err = Compose(layers...); err != nil {
 			return err
 		}
-		start = end
 	}
 	return nil
+}
+
+// definitionsOf returns the field definitions of stored definitions.
+func definitionsOf(defs []AttributeDefinition) []fieldmeta.FieldDefinition {
+	out := make([]fieldmeta.FieldDefinition, 0, len(defs))
+	for i := range defs {
+		out = append(out, defs[i].definition())
+	}
+	return out
+}
+
+// setOverride is the set list a type is about to get (the PUT of
+// /ci-types/{id}/attribute-sets before it is written).
+type setOverride struct {
+	typeID string
+	sets   []AttributeSetAssignment
+}
+
+// setLayersTx reads the set layers of each target type (MET-16, WP-709):
+// one layer per active set assigned along the chain root → target, the
+// sets of each type in position order, in the set by sort_order and key.
+// Of the sets of an ancestor only the inheritable set attributes count
+// (the rule of the type chain, WP-248). key "" reads every key, otherwise
+// that one. override replaces the stored set list of one type. It reads
+// under the caller's row level security.
+func setLayersTx(ctx context.Context, tx pgx.Tx, targets []string, key string, override *setOverride) (map[string][][]AttributeDefinition, error) {
+	overrideType := ""
+	setIDs, positions := []string{}, []int64{}
+	if override != nil {
+		overrideType = override.typeID
+		for _, a := range override.sets {
+			setIDs = append(setIDs, a.AttributeSetID)
+			positions = append(positions, int64(a.Position))
+		}
+	}
+	rows, err := tx.Query(ctx, `WITH assignment AS (
+			SELECT cs.ci_type_id, cs.attribute_set_id, cs.position FROM ci_type_attribute_set cs
+			WHERE cs.ci_type_id::text <> $3
+			UNION ALL
+			SELECT NULLIF($3, '')::uuid, x.set_id, x.pos::integer FROM unnest($4::uuid[], $5::bigint[]) AS x (set_id, pos)
+		)
+		SELECT target, set_level, set_position, `+attributeColumns+` FROM (
+			SELECT tt.id::text AS target, c.level AS set_level, asg.position AS set_position, a.*
+			FROM unnest($1::uuid[]) AS tt (id)
+			CROSS JOIN LATERAL ci_type_ancestors(tt.id) c
+			JOIN assignment asg ON asg.ci_type_id = c.id
+			JOIN attribute_set s ON s.id = asg.attribute_set_id AND s.is_active
+			JOIN attribute_definition a ON a.attribute_set_id = s.id
+			WHERE (a.inheritable OR c.id = tt.id) AND ($2 = '' OR a.key = $2)
+		) defs ORDER BY target, set_level, set_position, sort_order, key`,
+		targets, key, overrideType, setIDs, positions)
+	if err != nil {
+		return nil, fmt.Errorf("read set definitions: %w", err)
+	}
+	type setDefinition struct {
+		target          string
+		level, position int
+		def             *AttributeDefinition
+	}
+	defs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (setDefinition, error) {
+		var sd setDefinition
+		d, serr := scanAttribute(extraColumns{row: row, before: []any{&sd.target, &sd.level, &sd.position}})
+		sd.def = d
+		return sd, serr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read set definitions: %w", err)
+	}
+	out := map[string][][]AttributeDefinition{}
+	for i := range defs {
+		sd := &defs[i]
+		layers := out[sd.target]
+		if i == 0 || defs[i-1].target != sd.target || defs[i-1].level != sd.level || defs[i-1].position != sd.position {
+			layers = append(layers, nil)
+		}
+		layers[len(layers)-1] = append(layers[len(layers)-1], *sd.def)
+		out[sd.target] = layers
+	}
+	return out, nil
 }
 
 // errSystemTypeAttribute refuses an organization attribute on a system CI
@@ -591,8 +682,12 @@ func checkAttributeSetOfDefinition(ctx context.Context, tx pgx.Tx, setID string)
 // its materialized schema is shared by every organization, E-108); every
 // set is listed once at its own position (0 or more) and is visible to the
 // organization (its own or a system set), and a set that is not assigned
-// yet is active; otherwise a 422 on attribute_set_id or position. WP-709
-// adds the composition check of the type with its sets.
+// yet is active; otherwise a 422 on attribute_set_id or position. Before
+// anything is written the new list is composed (WP-709, MET-16) with the
+// system base, the organization's global attributes and the type chain,
+// for the type and each type of its subtree, which takes the inheritable
+// set attributes: a *CompositionError is a 422 on attribute_set_id with
+// the code of the conflict.
 func checkSetAssignmentTx(ctx context.Context, tx pgx.Tx, typeID string, sets []AttributeSetAssignment) (*TypeAttributeSets, error) {
 	if !api.IsUUID(typeID) {
 		return nil, &api.FieldError{Field: "ci_type_id", Message: "ci type not found", Status: http.StatusUnprocessableEntity}
@@ -638,6 +733,22 @@ func checkSetAssignmentTx(ctx context.Context, tx pgx.Tx, typeID string, sets []
 		case !active && !assigned[a.AttributeSetID]:
 			return nil, errSetNotAssignable("an inactive attribute set cannot be assigned")
 		}
+	}
+	rows, err := tx.Query(ctx, `SELECT s.id::text FROM ci_type_subtree($1::uuid) s`, typeID)
+	if err != nil {
+		return nil, fmt.Errorf("read ci type subtree: %w", err)
+	}
+	targets, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("read ci type subtree: %w", err)
+	}
+	if cerr := chainCompositionTx(ctx, tx, targets, "", &setOverride{typeID: typeID, sets: sets}); cerr != nil {
+		var conflict *CompositionError
+		if errors.As(cerr, &conflict) {
+			return nil, &api.FieldError{Field: "attribute_set_id", Message: cerr.Error(),
+				Status: http.StatusUnprocessableEntity, Code: conflict.Code}
+		}
+		return nil, cerr
 	}
 	return current, nil
 }

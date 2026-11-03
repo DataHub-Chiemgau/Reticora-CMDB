@@ -55,7 +55,8 @@ type Repository interface {
 	GetByID(ctx context.Context, orgID, id string) (*Type, error)
 	Create(ctx context.Context, typ *Type) error
 	Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error)
-	// Clone copies a type (including its field definitions and its parent)
+	// Clone copies a type (including its field definitions, its parent and,
+	// in PostgreSQL, its attribute set assignments with their positions)
 	// under a new key; a deactivated parent is a conflict (409).
 	Clone(ctx context.Context, orgID, id string, req CloneRequest) (*Type, error)
 	// SetActive deactivates/reactivates a type. Deactivated types keep their
@@ -506,6 +507,13 @@ func (r *MemoryRepository) TypeChain(_ context.Context, orgID, id string) ([]Typ
 		return nil, fmt.Errorf("not found")
 	}
 	return r.chainTypesLocked(r.chainLocked(orgID, id)), nil
+}
+
+// ListSetFields implements FieldLister: the in-memory repository keeps no
+// attribute sets (WP-250 stores them in PostgreSQL only), so there is no
+// set layer.
+func (r *MemoryRepository) ListSetFields(context.Context, string, string) ([][]Field, error) {
+	return nil, nil
 }
 
 // TypeSubtree implements Repository: id and its visible descendants by

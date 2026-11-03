@@ -5877,7 +5877,7 @@ export interface paths {
     put?: never;
     /**
      * Create an attribute definition (MET-10)
-     * @description Without `ci_type_id` the definition is global (every type of the organization); with `attribute_set_id` it is an attribute of that set (scope `set`, WP-250): a set the organization does not see is 422 with `field` = `attribute_set_id`, a system set 403. Set attributes do not enter the composition before WP-709; a searchable or unique one is indexed and checked organization-wide like a global attribute. Creating, changing or deleting a type's definition regenerates the type's `attribute_schema` and raises its `schema_version`. Requires ci_attribute:manage.
+     * @description Without `ci_type_id` the definition is global (every type of the organization); with `attribute_set_id` it is an attribute of that set (scope `set`, WP-250): a set the organization does not see is 422 with `field` = `attribute_set_id`, a system set 403. A set attribute enters the composition of every type its set is assigned to and of their subtypes (MET-16, after the type chain); a searchable or unique one is indexed and checked organization-wide like a global attribute. Creating, changing or deleting a type's or a set's definition regenerates the `attribute_schema` of the types concerned and raises their `schema_version` when the schema changes. A definition that cannot be composed with the system base, the organization's global attributes, a type chain or the sets of a type (data type, empty value set or range) is 422 with `field` = `key` and the code of the conflict. Requires ci_attribute:manage.
      */
     post: operations['createAttributeDefinition'];
     delete?: never;
@@ -6180,7 +6180,7 @@ export interface paths {
     get: operations['getCiTypeAttributeSets'];
     /**
      * Replace the attribute sets of a CI type (MET-16)
-     * @description The ordered list replaces the type's sets as a whole; until WP-260 the change applies at once. The type must be a type of the organization (an unknown or a system type is 422 with `field` = `ci_type_id`); every set is listed once at its own `position` and is a set of the organization or a system set, and a set not yet assigned must be active (422 with `field` = `attribute_set_id` or `position`). Until WP-709 the sets do not enter the composition, the materialized schema or `schema_version` of the type. Requires citype:manage; audited as `ci_type.attribute_sets_changed` with the ordered list before and after.
+     * @description The ordered list replaces the type's sets as a whole; until WP-260 the change applies at once. The type must be a type of the organization (an unknown or a system type is 422 with `field` = `ci_type_id`); every set is listed once at its own `position` and is a set of the organization or a system set, and a set not yet assigned must be active (422 with `field` = `attribute_set_id` or `position`). The active sets enter the composition after the type chain (MET-16), the type's in `position` order; its subtypes take their inheritable set attributes. Before anything is written the new list is composed with the system base, the organization's global attributes and the type chain, for the type and its subtypes: a conflict (data type, empty value set or range) is 422 with `field` = `attribute_set_id` and the code of the conflict, and nothing changes. A PUT regenerates `attribute_schema` once and raises `schema_version` once, and only when the schema changes. Requires citype:manage; audited as `ci_type.attribute_sets_changed` with the ordered list before and after.
      */
     put: operations['replaceCiTypeAttributeSets'];
     post?: never;
@@ -8405,9 +8405,9 @@ export interface components {
       is_logical: boolean;
       /** @description The offline detector watches CIs of the type (LCY-05); true for physical, false for logical types by default. */
       is_observable: boolean;
-      /** @description Version of the generated attribute schema. */
+      /** @description Version of the generated attribute schema; it rises once per change and only when `attribute_schema` changes, also through the type chain or an attribute set (assignment, activity or set attribute, MET-16). */
       schema_version: number;
-      /** @description JSON Schema 2020-12 generated from the type's attribute definitions; read-only (DB-03). */
+      /** @description JSON Schema 2020-12 generated from the attribute definitions (DB-03), read-only: system base, type chain (of the ancestors the inheritable definitions) and the active attribute sets of the chain, the sets of each type in `position` order (of an ancestor's sets the inheritable set attributes), composed per key by the rules of MET-16. The organization's global attributes, templates and instance attributes apply at runtime only (E-108). */
       readonly attribute_schema?: {
         [key: string]: unknown;
       };
@@ -9304,7 +9304,7 @@ export interface components {
       readonly health?: 'ok' | 'warning' | 'critical' | 'unknown';
       /** Format: date-time */
       readonly health_updated_at?: string;
-      /** @description Version of the materialized attribute schema of the CI type (ci_type.schema_version) the CI was last written against: the system base composed with the type's attributes (MET-16). Set by the server when the CI is created or its type or attributes change. */
+      /** @description Version of the materialized attribute schema of the CI type (ci_type.schema_version) the CI was last written against: the system base composed with the type chain and its attribute sets (MET-16). Set by the server when the CI is created or its type or attributes change. */
       readonly schema_version?: number;
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;

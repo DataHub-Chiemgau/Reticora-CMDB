@@ -495,7 +495,9 @@ func checkLifecycleStatesTx(ctx context.Context, tx pgx.Tx, id, field string) er
 	return nil
 }
 
-// Clone copies a type row plus its field definitions under a new key/name.
+// Clone copies a type row plus its field definitions and its attribute set
+// assignments with their positions (WP-709) under a new key/name; the audit
+// entry ci_type.cloned lists the assignments.
 // The clone keeps the parent of the source (MET-05, MET-06); a deactivated
 // parent is a conflict (409), since an active type has no deactivated
 // parent. The clone keeps the lifecycle model of the source if the
@@ -561,14 +563,25 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 			WHERE ci_type_id = $2`, cloneID, id); err != nil {
 			return fmt.Errorf("clone ci type fields: %w", err)
 		}
-		if src.ParentTypeID != "" {
+		// Copy the set assignments with their positions (WP-709); the
+		// deferred trigger materializes the sets of the clone at commit.
+		sets, err := typeAttributeSetsTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO ci_type_attribute_set (ci_type_id, attribute_set_id, position)
+			SELECT $1, attribute_set_id, position FROM ci_type_attribute_set WHERE ci_type_id = $2`, cloneID, id); err != nil {
+			return fmt.Errorf("clone attribute sets of ci type: %w", err)
+		}
+		if src.ParentTypeID != "" || len(sets.AttributeSets) > 0 {
 			if cerr := checkSubtreeCompositionTx(ctx, tx, cloneID); cerr != nil {
 				return cerr
 			}
 		}
 		out = &Type{ID: cloneID, OrganizationID: orgID, Key: key, Name: name}
 		return recordMetamodelAudit(ctx, tx, orgID, "ci_type.cloned", "ci_type", cloneID, nil,
-			map[string]any{"cloned_from_id": src.ID, "key": key, "name": name, "version": src.Version + 1})
+			map[string]any{"cloned_from_id": src.ID, "key": key, "name": name, "version": src.Version + 1,
+				"attribute_sets": sets.AttributeSets})
 	})
 	if err != nil {
 		return nil, err
@@ -741,6 +754,98 @@ func (r *PGRepository) TypeChain(ctx context.Context, orgID, id string) ([]Type,
 		return rows.Err()
 	})
 	return out, err
+}
+
+// ListSetFields implements FieldLister (WP-709, MET-16): one layer per
+// active attribute set of the chain root → id (TypeChainSets). A type the
+// organization does not see has no set layers.
+func (r *PGRepository) ListSetFields(ctx context.Context, orgID, id string) ([][]Field, error) {
+	_, sets, err := r.TypeChainSets(ctx, orgID, id)
+	return sets, err
+}
+
+// TypeChainSets returns the chain root → id as TypeChain does and its set
+// layers as ListSetFields does, both in one query under row level security:
+// ResolveFields runs on every CI write, also in the ingest record
+// transaction, whose statements are budgeted (TestIngestStatementBudget).
+// Each type of the chain brings its active sets in position order, each
+// set its definitions by sort_order and key; of the sets of an ancestor
+// only the inheritable set attributes count (WP-248).
+func (r *PGRepository) TypeChainSets(ctx context.Context, orgID, id string) ([]Type, [][]Field, error) {
+	chain := []Type{}
+	var sets [][]Field
+	if !api.IsUUID(id) {
+		return chain, sets, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE((
+				SELECT jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key)
+				FROM attribute_definition a WHERE a.ci_type_id = c.id), '[]'::jsonb),
+			COALESCE((
+				SELECT jsonb_agg(l.defs ORDER BY l.position, l.set_id) FROM (
+					SELECT cs.position, cs.attribute_set_id AS set_id,
+						jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key) AS defs
+					FROM ci_type_attribute_set cs
+					JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
+					JOIN attribute_definition a ON a.attribute_set_id = s.id
+					WHERE cs.ci_type_id = c.id
+					GROUP BY cs.position, cs.attribute_set_id) l), '[]'::jsonb)
+			FROM ci_type_ancestors($1::uuid) c ORDER BY c.level`, id)
+		if err != nil {
+			return fmt.Errorf("read ci type chain: %w", err)
+		}
+		type level struct {
+			typ  Type
+			sets []json.RawMessage
+		}
+		var levels []level
+		for rows.Next() {
+			var lv level
+			var defs, setDefs []byte
+			if err = rows.Scan(&lv.typ.ID, &defs, &setDefs); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan ci type chain: %w", err)
+			}
+			attrs, aerr := attributesFromJSON(defs)
+			if aerr != nil {
+				rows.Close()
+				return aerr
+			}
+			for i := range attrs {
+				lv.typ.Fields = append(lv.typ.Fields, attrs[i].Field())
+			}
+			if err = json.Unmarshal(setDefs, &lv.sets); err != nil {
+				rows.Close()
+				return fmt.Errorf("decode set definitions: %w", err)
+			}
+			levels = append(levels, lv)
+		}
+		rows.Close()
+		if rerr := rows.Err(); rerr != nil {
+			return rerr
+		}
+		for i := range levels {
+			chain = append(chain, levels[i].typ)
+			own := i == len(levels)-1
+			for _, raw := range levels[i].sets {
+				attrs, aerr := attributesFromJSON(raw)
+				if aerr != nil {
+					return aerr
+				}
+				var layer []Field
+				for j := range attrs {
+					if own || attrs[j].Inheritable {
+						layer = append(layer, attrs[j].Field())
+					}
+				}
+				if len(layer) > 0 {
+					sets = append(sets, layer)
+				}
+			}
+		}
+		return nil
+	})
+	return chain, sets, err
 }
 
 // TypeSubtree implements Repository: id and every descendant the
