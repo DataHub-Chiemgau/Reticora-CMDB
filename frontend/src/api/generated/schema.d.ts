@@ -28635,6 +28635,25 @@ export interface operations {
   listCiTypes: {
     parameters: {
       query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Free-text search term. */
+        search?: components['parameters']['Search'];
+        /** @description Only types of this category. */
+        category?: string;
         /** @description Also list deactivated types (MET-05). */
         include_inactive?: boolean;
       };

@@ -12362,6 +12362,16 @@ paths:
         Deactivated types are left out unless `include_inactive=true`
         (MET-05).
       parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Search'
+        - name: category
+          in: query
+          required: false
+          description: Only types of this category.
+          schema:
+            type: string
         - name: include_inactive
           in: query
           required: false
