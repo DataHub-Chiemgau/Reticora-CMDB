@@ -172,7 +172,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Location:          location.NewPGRepository(pool),
 		Agent:             agent.NewPGRepository(pool),
 		Security:          security.NewPGRepository(pool),
-		Ticket:            ticket.NewPGRepository(pool),
+		Ticket:            ticket.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),
 		Entitlement:       entitlement.NewPGRepository(pool),

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000213_ip_address_host
+Stand: Migration 000216_ticket_states_number
 
 ## Prüfung
 
@@ -855,6 +855,23 @@ ohne Präfixlänge mit der leakproof Textgleichheit, auch unter RLS; ein
 Ausdrucksindex über `host(address)` wäre als `reticora_app` nicht nutzbar.
 RLS und Policies von `ip_address` bleiben unverändert.
 
+Ticket-Zustände und Nummer je Organisation (TKT-01, WP-290, Migration 000214):
+`ticket_status_check` erlaubt zusätzlich `new`, der Default von `status` ist
+`new`; die Übergänge prüft die Anwendung (`backend/internal/ticket/states.go`).
+`ticket_number` hat keinen Default mehr (die Sequenz
+`ticket_ticket_number_seq` bleibt für die Down-Migration) und ist über
+`ticket_organization_number_key` (`organization_id`, `ticket_number`)
+eindeutig; der nicht eindeutige Index `idx_ticket_number` entfällt. Der
+BEFORE-INSERT-Trigger `ticket_number_assign` (Funktion
+`assign_ticket_number`) vergibt die Nummer aus `ticket_number_counter`
+(`organization_id` PRIMARY KEY, ON DELETE CASCADE, `last_number`) per
+`INSERT … ON CONFLICT (organization_id) DO UPDATE … RETURNING`; eine
+mitgegebene Nummer bleibt und hebt den Zähler höchstens an. Der Zähler
+startete je Organisation bei `max(ticket_number)`. RLS mit ENABLE/FORCE und
+der Policy `ticket_number_counter_isolation` (FOR ALL, nur `app.org_id`, damit
+gescopte Prinzipale denselben Zähler nutzen), TRUNCATE-Schutz
+`reticora_truncate_guard`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -995,6 +1012,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `template_version_item` | ja | ja | template_version_item_isolation_delete (DELETE), template_version_item_isolation_insert (INSERT), template_version_item_isolation_select (SELECT), template_version_item_isolation_update (UPDATE) |
 | `ticket` | ja | ja | ticket_scoped_delete (DELETE), ticket_scoped_update (UPDATE), ticket_tenant_isolation (ALL) |
 | `ticket_comment` | ja | ja | ticket_comment_scoped_delete (DELETE), ticket_comment_scoped_update (UPDATE), ticket_comment_tenant_isolation (ALL) |
+| `ticket_number_counter` | ja | ja | ticket_number_counter_isolation (ALL) |
 | `ticket_sla` | ja | ja | ticket_sla_tenant_isolation (ALL) |
 | `training` | ja | ja | training_isolation (ALL) |
 | `training_assignment` | ja | ja | training_assignment_isolation (ALL) |

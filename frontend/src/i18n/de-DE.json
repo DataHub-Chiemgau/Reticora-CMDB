@@ -656,6 +656,7 @@
     "createdAt": "Erstellt",
     "startWork": "Bearbeiten",
     "statuses": {
+      "new": "Neu",
       "open": "Offen",
       "in_progress": "In Bearbeitung",
       "waiting": "Wartend",

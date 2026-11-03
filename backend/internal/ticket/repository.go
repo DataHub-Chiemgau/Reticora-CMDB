@@ -29,12 +29,13 @@ type Repository interface {
 
 // MemoryRepository is an in-memory implementation of Repository.
 type MemoryRepository struct {
-	mu         sync.RWMutex
-	tickets    map[string]*Ticket
-	comments   map[string]*Comment
-	nextID     int
-	nextCmtID  int
-	nextNumber int
+	mu        sync.RWMutex
+	tickets   map[string]*Ticket
+	comments  map[string]*Comment
+	nextID    int
+	nextCmtID int
+	// numbers is the last ticket number per organization (WP-290).
+	numbers map[string]int
 }
 
 // NewMemoryRepository creates a new in-memory ticket repository.
@@ -42,6 +43,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
 		tickets:  make(map[string]*Ticket),
 		comments: make(map[string]*Comment),
+		numbers:  make(map[string]int),
 	}
 }
 
@@ -67,6 +69,11 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 			continue
 		}
 		if filter.ReporterID != "" && t.ReporterID != filter.ReporterID {
+			continue
+		}
+		// The memory repository knows no team memberships: team_id=mine
+		// (TeamMemberOf) lists nothing (E-143).
+		if filter.TeamMemberOf != "" {
 			continue
 		}
 		if filter.TeamID != "" && t.TeamID != filter.TeamID {
@@ -135,14 +142,20 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Ticket
 }
 
 func (r *MemoryRepository) Create(_ context.Context, t *Ticket) error {
+	if t.Status == "" {
+		t.Status = StatusNew
+	}
+	if err := CheckInitialStatus(t.Status); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.nextID++
-	r.nextNumber++
+	r.numbers[t.OrganizationID]++
 	// UUID form, as the handlers accept only UUID ids (API-03).
 	t.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID)
-	t.TicketNumber = r.nextNumber
+	t.TicketNumber = r.numbers[t.OrganizationID]
 	now := time.Now().UTC()
 	t.CreatedAt = now
 	t.UpdatedAt = now
@@ -159,20 +172,28 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 		return nil, ErrNotFound
 	}
 
+	if req.Status != nil && *req.Status != t.Status {
+		if err := CheckTransition(t.Status, *req.Status); err != nil {
+			return nil, err
+		}
+	}
 	if req.Title != nil {
 		t.Title = *req.Title
 	}
 	if req.Description != nil {
 		t.Description = *req.Description
 	}
-	if req.Status != nil {
+	if req.Status != nil && *req.Status != t.Status {
+		now := time.Now().UTC().Format(time.RFC3339)
+		switch {
+		case *req.Status == StatusResolved:
+			t.ResolvedAt = now
+		case *req.Status == StatusClosed:
+			t.ClosedAt = now
+		case IsReopen(t.Status, *req.Status):
+			t.ResolvedAt, t.ClosedAt = "", ""
+		}
 		t.Status = *req.Status
-		if *req.Status == "resolved" && t.ResolvedAt == "" {
-			t.ResolvedAt = time.Now().UTC().Format(time.RFC3339)
-		}
-		if *req.Status == "closed" && t.ClosedAt == "" {
-			t.ClosedAt = time.Now().UTC().Format(time.RFC3339)
-		}
 	}
 	if req.Priority != nil {
 		t.Priority = *req.Priority

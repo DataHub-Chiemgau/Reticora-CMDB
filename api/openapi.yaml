@@ -4837,11 +4837,11 @@ paths:
         - name: status
           in: query
           schema:
-            type: string
+            $ref: '#/components/schemas/TicketStatus'
         - name: priority
           in: query
           schema:
-            type: string
+            $ref: '#/components/schemas/TicketPriority'
         - name: category
           in: query
           schema:
@@ -4852,6 +4852,11 @@ paths:
             type: string
         - name: team_id
           in: query
+          description: >-
+            Tickets of one team (UUID), or `mine` for the tickets of every
+            team the caller is a member of (`team_member`, E-143), with
+            cursor, sort and `total` like a team id; without team membership
+            the list is empty.
           schema:
             type: string
       responses:
@@ -4892,9 +4897,10 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           description: >-
-            assignee_id, team_id, related_ci_id or related_asset_id is no UUID
-            or names an object that is unknown, of another organization or
-            outside the caller's scope (all alike, TEN-04); `field` names it.
+            priority is no ticket priority, or assignee_id, team_id,
+            related_ci_id or related_asset_id is no UUID or names an object
+            that is unknown, of another organization or outside the caller's
+            scope (all alike, TEN-04); `field` names it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -4946,11 +4952,21 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The status change is no transition of the ticket state machine
+            (TKT-01, e.g. new to waiting); the ticket is unchanged and the
+            detail names both states.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: >-
-            assignee_id, team_id, related_ci_id or related_asset_id is no UUID
-            or names an object that is unknown, of another organization or
-            outside the caller's scope (all alike, TEN-04); `field` names it.
+            status or priority is no ticket status or priority, or
+            assignee_id, team_id, related_ci_id or related_asset_id is no
+            UUID or names an object that is unknown, of another organization
+            or outside the caller's scope (all alike, TEN-04); `field` names
+            it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -22221,14 +22237,15 @@ components:
           type: string
         ticket_number:
           type: integer
+          description: Number of the ticket, consecutive per organization.
         title:
           type: string
         description:
           type: string
         status:
-          type: string
+          $ref: '#/components/schemas/TicketStatus'
         priority:
-          type: string
+          $ref: '#/components/schemas/TicketPriority'
         category:
           type: string
         reporter_id:
@@ -22264,13 +22281,14 @@ components:
     CreateTicketRequest:
       type: object
       required: [title]
+      description: A new ticket starts with status `new`.
       properties:
         title:
           type: string
         description:
           type: string
         priority:
-          type: string
+          $ref: '#/components/schemas/TicketPriority'
         category:
           type: string
         assignee_id:
@@ -22289,6 +22307,19 @@ components:
           items:
             type: string
 
+    TicketStatus:
+      type: string
+      description: >-
+        State of a ticket (TKT-01). Transitions: new to open, in_progress or
+        closed; open to in_progress, waiting, resolved or closed; in_progress
+        to open, waiting or resolved; waiting to in_progress or resolved;
+        resolved to closed or open (reopen); closed to open (reopen).
+      enum: [new, open, in_progress, waiting, resolved, closed]
+
+    TicketPriority:
+      type: string
+      enum: [low, medium, high, critical]
+
     UpdateTicketRequest:
       type: object
       properties:
@@ -22297,9 +22328,9 @@ components:
         description:
           type: string
         status:
-          type: string
+          $ref: '#/components/schemas/TicketStatus'
         priority:
-          type: string
+          $ref: '#/components/schemas/TicketPriority'
         category:
           type: string
         assignee_id:

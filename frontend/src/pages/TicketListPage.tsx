@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTicketList, useCreateTicket, useUpdateTicket, useDeleteTicket } from '../api/hooks';
+import { ApiError } from '../api/client';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -10,8 +11,15 @@ import { Select } from '../components/ui/Select';
 import { ScrollRegion } from '../components/ScrollRegion';
 
 // Stored ticket statuses and categories (English keys); the labels come
-// from the catalog.
-export const TICKET_STATUSES = ['open', 'in_progress', 'waiting', 'resolved', 'closed'] as const;
+// from the catalog. A new ticket starts as new (TKT-01, WP-290).
+export const TICKET_STATUSES = [
+  'new',
+  'open',
+  'in_progress',
+  'waiting',
+  'resolved',
+  'closed',
+] as const;
 
 export const TICKET_CATEGORIES = ['incident', 'request', 'problem', 'change', 'task'] as const;
 
@@ -25,6 +33,8 @@ const priorityOptions = [
 
 function statusVariant(status: string) {
   switch (status) {
+    case 'new':
+      return 'info' as const;
     case 'open':
       return 'warning' as const;
     case 'in_progress':
@@ -160,7 +170,7 @@ export function TicketListPage() {
                       {new Date(ticket.created_at).toLocaleDateString('de-DE')}
                     </td>
                     <td className="py-2 space-x-1">
-                      {ticket.status === 'open' && (
+                      {(ticket.status === 'new' || ticket.status === 'open') && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -195,6 +205,14 @@ export function TicketListPage() {
             </table>
           </ScrollRegion>
         </Card>
+      )}
+
+      {updateMutation.error && (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          {updateMutation.error instanceof ApiError && updateMutation.error.status === 409
+            ? (updateMutation.error.detail ?? updateMutation.error.message)
+            : updateMutation.error.message}
+        </p>
       )}
 
       <Modal

@@ -11400,11 +11400,12 @@ export interface components {
     Ticket: {
       id: string;
       organization_id: string;
+      /** @description Number of the ticket, consecutive per organization. */
       ticket_number: number;
       title: string;
       description?: string;
-      status: string;
-      priority: string;
+      status: components['schemas']['TicketStatus'];
+      priority: components['schemas']['TicketPriority'];
       category: string;
       reporter_id: string;
       assignee_id?: string;
@@ -11423,10 +11424,11 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description A new ticket starts with status `new`. */
     CreateTicketRequest: {
       title: string;
       description?: string;
-      priority?: string;
+      priority?: components['schemas']['TicketPriority'];
       category?: string;
       assignee_id?: string;
       team_id?: string;
@@ -11436,11 +11438,18 @@ export interface components {
       due_date?: string;
       tags?: string[];
     };
+    /**
+     * @description State of a ticket (TKT-01). Transitions: new to open, in_progress or closed; open to in_progress, waiting, resolved or closed; in_progress to open, waiting or resolved; waiting to in_progress or resolved; resolved to closed or open (reopen); closed to open (reopen).
+     * @enum {string}
+     */
+    TicketStatus: 'new' | 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
+    /** @enum {string} */
+    TicketPriority: 'low' | 'medium' | 'high' | 'critical';
     UpdateTicketRequest: {
       title?: string;
       description?: string;
-      status?: string;
-      priority?: string;
+      status?: components['schemas']['TicketStatus'];
+      priority?: components['schemas']['TicketPriority'];
       category?: string;
       assignee_id?: string;
       team_id?: string;
@@ -19672,10 +19681,11 @@ export interface operations {
         sort_by?: components['parameters']['SortBy'];
         /** @description Sort direction. */
         sort_dir?: components['parameters']['SortDir'];
-        status?: string;
-        priority?: string;
+        status?: components['schemas']['TicketStatus'];
+        priority?: components['schemas']['TicketPriority'];
         category?: string;
         assignee_id?: string;
+        /** @description Tickets of one team (UUID), or `mine` for the tickets of every team the caller is a member of (`team_member`, E-143), with cursor, sort and `total` like a team id; without team membership the list is empty. */
         team_id?: string;
       };
       header?: never;
@@ -19723,7 +19733,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
+      /** @description priority is no ticket priority, or assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -19812,7 +19822,16 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
+      /** @description The status change is no transition of the ticket state machine (TKT-01, e.g. new to waiting); the ticket is unchanged and the detail names both states. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description status or priority is no ticket status or priority, or assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;

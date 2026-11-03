@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,7 +61,8 @@ type matrixTable struct {
 }
 
 // matrixOverrides fixes values the generic rules cannot derive from the
-// catalog (cross-column checks, patterns).
+// catalog (cross-column checks, patterns). "@uuid" is a fresh UUID, "@text"
+// a fresh text, "@seq" the running number of the synthesized row.
 var matrixOverrides = map[string]map[string]string{
 	"asset_movement":       {"asset_id": "@uuid"},
 	"assignment":           {"asset_id": "@uuid"},
@@ -91,6 +93,9 @@ var matrixOverrides = map[string]map[string]string{
 	"metamodel_rule": {"ci_type_id": "@uuid", "kind": "required"},
 	// A layout has exactly one target, a type or a template (WP-259).
 	"form_layout": {"ci_type_id": "@uuid"},
+	// The number is unique per organization and assigned by a trigger the
+	// matrix skips (WP-290, 000214).
+	"ticket": {"ticket_number": "@seq"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)
@@ -243,6 +248,8 @@ func (col *matrixColumn) value(table string, seq int) string {
 			return matrixUUID()
 		case "@text":
 			return fmt.Sprintf("m%d-%s", seq, matrixUUID()[:8])
+		case "@seq":
+			return strconv.Itoa(seq)
 		}
 		return v
 	}

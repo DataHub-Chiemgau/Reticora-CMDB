@@ -81,7 +81,11 @@ type FilterParams struct {
 	AssigneeID string
 	ReporterID string
 	TeamID     string
-	Search     string
-	SortBy     string
-	SortDir    string
+	// TeamMemberOf is the user id of the principal for the filter value
+	// team_id=mine: tickets of every team the user is a member of
+	// (team_member, E-143). It replaces TeamID.
+	TeamMemberOf string
+	Search       string
+	SortBy       string
+	SortDir      string
 }
