@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000220_document_versions_usage
+Stand: Migration 000221_document_soft_delete
 
 ## Prüfung
 
@@ -270,6 +270,19 @@ ohne `..`) prüfen jede neue Version. `organization_usage` zählt die
 gespeicherten Bytes je Organisation (`storage_bytes >= 0`); ihre Policy
 prüft nur `app.org_id`, die Nutzung zählt daher org-weit. Der Upload
 prüft sie in der Transaktion der Version gegen `max_storage_mb`.
+
+### Soft-Delete von Dokumenten (WP-732)
+
+`document.deleted_at` (Migration 000221) markiert ein gelöschtes Dokument;
+der Teilindex `idx_document_deleted` auf `(organization_id, deleted_at)
+WHERE deleted_at IS NOT NULL` dient dem Retention-Lauf. Die Policies von
+`document` bleiben unverändert: Repository (`documentVisible`,
+`documentWritable`) und Suche (`hitVisible`, `ReindexTenant`) blenden
+gelöschte Dokumente aus, damit `retention.soft_deleted` sie unter
+`OrgWideScope` sieht. Versionen, Links und die Nutzung in
+`organization_usage` bleiben bis zum Purge; erst dieser löscht das Dokument
+(Versionen und Links per `ON DELETE CASCADE`) und verringert
+`storage_bytes`.
 
 ### Standort von Assets und Mengenartikeln (WP-392)
 

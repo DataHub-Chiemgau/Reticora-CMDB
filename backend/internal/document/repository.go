@@ -73,6 +73,9 @@ type MemoryRepository struct {
 	links    map[string]*DocumentLink
 	versions map[string][]Version // per document, ascending
 	usage    map[string]int64     // stored bytes per organization
+	// deleted holds the soft-deleted documents (WP-732): they stay with
+	// versions, links and usage, but every method treats them as missing.
+	deleted  map[string]time.Time
 	nextID   int
 	nextLink int
 }
@@ -84,7 +87,21 @@ func NewMemoryRepository() *MemoryRepository {
 		links:    make(map[string]*DocumentLink),
 		versions: make(map[string][]Version),
 		usage:    make(map[string]int64),
+		deleted:  make(map[string]time.Time),
 	}
+}
+
+// live returns the document id of organization orgID unless it is missing
+// or soft-deleted; the caller holds the lock.
+func (r *MemoryRepository) live(orgID, id string) (*Document, bool) {
+	d, ok := r.docs[id]
+	if !ok || d.OrganizationID != orgID {
+		return nil, false
+	}
+	if _, gone := r.deleted[id]; gone {
+		return nil, false
+	}
+	return d, true
 }
 
 func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error) {
@@ -106,7 +123,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 
 	var result []Document
 	for _, d := range r.docs {
-		if d.OrganizationID != orgID {
+		if _, ok := r.live(orgID, d.ID); !ok {
 			continue
 		}
 		if linked != nil && !linked[d.ID] {
@@ -170,8 +187,8 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Docume
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	d, ok := r.docs[id]
-	if !ok || d.OrganizationID != orgID {
+	d, ok := r.live(orgID, id)
+	if !ok {
 		return nil, fmt.Errorf("document not found")
 	}
 	return d, nil
@@ -223,8 +240,8 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	d, ok := r.docs[id]
-	if !ok || d.OrganizationID != orgID {
+	d, ok := r.live(orgID, id)
+	if !ok {
 		return nil, fmt.Errorf("document not found")
 	}
 
@@ -253,8 +270,8 @@ func (r *MemoryRepository) SetStorage(_ context.Context, orgID, id, storageKey, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	d, ok := r.docs[id]
-	if !ok || d.OrganizationID != orgID {
+	d, ok := r.live(orgID, id)
+	if !ok {
 		return nil, fmt.Errorf("document not found")
 	}
 	d.StorageKey = storageKey
@@ -275,8 +292,8 @@ func (r *MemoryRepository) CreateVersion(_ context.Context, v *Version, limit *i
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	d, ok := r.docs[v.DocumentID]
-	if !ok || d.OrganizationID != v.OrganizationID {
+	d, ok := r.live(v.OrganizationID, v.DocumentID)
+	if !ok {
 		return nil, api.ErrNotFound
 	}
 	used := r.usage[v.OrganizationID]
@@ -308,7 +325,7 @@ func (r *MemoryRepository) ListVersions(_ context.Context, orgID, docID string, 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if d, ok := r.docs[docID]; !ok || d.OrganizationID != orgID {
+	if _, ok := r.live(orgID, docID); !ok {
 		return nil, 0, api.ErrNotFound
 	}
 	all := r.versions[docID]
@@ -338,7 +355,7 @@ func (r *MemoryRepository) GetVersion(_ context.Context, orgID, docID string, n 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if d, ok := r.docs[docID]; !ok || d.OrganizationID != orgID {
+	if _, ok := r.live(orgID, docID); !ok {
 		return nil, api.ErrNotFound
 	}
 	versions := r.versions[docID]
@@ -358,37 +375,32 @@ func (r *MemoryRepository) StorageUsage(_ context.Context, orgID string) (int64,
 	return r.usage[orgID], nil
 }
 
+// Delete soft-deletes the document like PGRepository: versions, links and
+// usage stay; a second call fails with "not found".
 func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	d, ok := r.docs[id]
-	if !ok || d.OrganizationID != orgID {
+	if _, ok := r.live(orgID, id); !ok {
 		return fmt.Errorf("document not found")
 	}
-	delete(r.docs, id)
-	// The versions go with the document and stop counting (PGRepository).
-	for i := range r.versions[id] {
-		r.usage[orgID] = max(r.usage[orgID]-r.versions[id][i].Size, 0)
-	}
-	delete(r.versions, id)
-	// Remove associated links
-	for lid, link := range r.links {
-		if link.DocumentID == id {
-			delete(r.links, lid)
-		}
-	}
+	r.deleted[id] = time.Now().UTC()
 	return nil
 }
 
 // LinkDocument checks the entity type against the registry like
-// PGRepository; the memory profile has no target tables to check further.
+// PGRepository and refuses a soft-deleted document (api.ErrNotFound); the
+// memory profile has no target tables to check further.
 func (r *MemoryRepository) LinkDocument(_ context.Context, link *DocumentLink) error {
 	if err := checkEntityType(link.EntityType); err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if _, gone := r.deleted[link.DocumentID]; gone {
+		return api.ErrNotFound
+	}
 
 	r.nextLink++
 	link.ID = fmt.Sprintf("link-%d", r.nextLink)
@@ -398,8 +410,8 @@ func (r *MemoryRepository) LinkDocument(_ context.Context, link *DocumentLink) e
 }
 
 // UnlinkDocument removes link linkID of document docID. A link of another
-// document or organization, or whose entity type is not in the registry,
-// is not found.
+// document or organization, of a soft-deleted document, or whose entity
+// type is not in the registry, is not found.
 func (r *MemoryRepository) UnlinkDocument(_ context.Context, orgID, docID, linkID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -408,13 +420,22 @@ func (r *MemoryRepository) UnlinkDocument(_ context.Context, orgID, docID, linkI
 	if !ok || link.OrganizationID != orgID || link.DocumentID != docID || checkEntityType(link.EntityType) != nil {
 		return api.ErrNotFound
 	}
+	if _, gone := r.deleted[docID]; gone {
+		return api.ErrNotFound
+	}
 	delete(r.links, linkID)
 	return nil
 }
 
+// GetLinks returns the links of the document; a soft-deleted document
+// fails with api.ErrNotFound like in PGRepository.
 func (r *MemoryRepository) GetLinks(_ context.Context, orgID, docID string) ([]DocumentLink, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
+	if _, gone := r.deleted[docID]; gone {
+		return nil, api.ErrNotFound
+	}
 
 	var result []DocumentLink
 	for _, l := range r.links {
@@ -440,7 +461,7 @@ func (r *MemoryRepository) GetLinksForEntity(_ context.Context, orgID, entityTyp
 	var result []Document
 	for _, l := range r.links {
 		if l.OrganizationID == orgID && l.EntityType == entityType && l.EntityID == entityID {
-			if d, ok := r.docs[l.DocumentID]; ok {
+			if d, ok := r.live(orgID, l.DocumentID); ok {
 				result = append(result, *d)
 			}
 		}

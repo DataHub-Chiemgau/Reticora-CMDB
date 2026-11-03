@@ -324,6 +324,9 @@ type systemJobDeps struct {
 	jobQueue *jobs.Queue
 	// notifier bundles the digests (notify.digest); nil: no digest run.
 	notifier *notify.Notifier
+	// blobs holds the document content the soft-delete run deletes with
+	// the documents (WP-732); nil keeps documents with stored content.
+	blobs blob.Store
 }
 
 // registerSystemJobs registers the system jobs (systemJobs) with the
@@ -353,7 +356,7 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		systemJobs = append(systemJobs, jobs.NewRotation(pool, d.encryptor, dekRotator{repo: credential.NewPGRepository(pool)},
 			webhook.NewPGRepository(pool)).Schedules()...)
 		systemJobs = append(systemJobs, jobs.NewRetention(pool, jobs.RetentionFromDays(d.cfg.RetentionAuditYears,
-			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)).Schedules()...)
+			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)).WithBlobs(d.blobs).Schedules()...)
 		// Collector status: offline after five minutes without heartbeat,
 		// paused while the discovery license is not active (COL-01, COL-05).
 		collectorStatus := discovery.NewStatusMonitor(pool)

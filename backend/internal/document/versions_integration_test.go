@@ -215,12 +215,14 @@ func TestDocumentVersions(t *testing.T) {
 		t.Fatalf("client 2 uploads: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// Deleting the document releases its bytes.
+	// Deleting the document is a soft delete (WP-732): its bytes count
+	// until the retention run purges it.
+	before := w.usage(t)
 	if rec := w.call(w.orgScope(), http.MethodDelete, base, "", ""); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
 	}
-	if u := w.usage(t); u.StorageBytes != 0 {
-		t.Fatalf("usage after delete %+v", u)
+	if u := w.usage(t); u.StorageBytes != before.StorageBytes || u.StorageBytes == 0 {
+		t.Fatalf("usage after delete %+v, want %+v", u, before)
 	}
 }
 

@@ -1475,7 +1475,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a document
-     * @description A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     * @description Soft-deletes the document (MGT-01, WP-732): it sets deleted_at and writes the audit entry document.deleted. From then on list, detail, PATCH, content, versions and links treat the document as missing (404), and the search shows no hit; a second DELETE answers 404. Versions, links and stored content count against the storage usage until the retention run retention.soft_deleted removes the document after RETICORA_RETENTION_SOFT_DELETE_DAYS (at least 90 days) and writes document.purged. A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
      */
     delete: operations['deleteDocument'];
     options?: never;
@@ -18339,7 +18339,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Document deleted */
+      /** @description Document soft-deleted */
       204: {
         headers: {
           [name: string]: unknown;

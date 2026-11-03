@@ -703,6 +703,9 @@ var domainRecordedRoutes = map[string]string{
 	// change.
 	"POST /api/v1/documents/{id}/links":             "document.PGRepository.LinkDocument",
 	"DELETE /api/v1/documents/{id}/links/{link_id}": "document.PGRepository.UnlinkDocument",
+	// Soft delete of a document (MGT-01, WP-732): document.deleted in the
+	// transaction that sets deleted_at; the route audit stays the fallback.
+	"DELETE /api/v1/documents/{id}": "document.PGRepository.Delete",
 }
 
 // auditedRoutes records, per write route registered through an

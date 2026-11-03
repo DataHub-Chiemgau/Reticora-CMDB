@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -68,12 +69,15 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 
 // A link is visible when its target is visible under the transaction's
 // tenant scope (linkVisible, links.go); a document is visible when it is not
-// linked at all or linked to at least one visible target. The policies of
-// document and document_link (migrations 000064, 000139, 000217) filter the
-// same rows; the predicates keep the repository exact without them.
+// soft-deleted (WP-732) and not linked at all or linked to at least one
+// visible target. The policies of document and document_link (migrations
+// 000064, 000139, 000217) filter the same rows except the deleted ones,
+// which only the repository and the search hide (migration 000221: the
+// retention run sees them under its org-wide scope); the predicates keep
+// the repository exact without them.
 var (
-	documentVisible = "(NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
-		" OR EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id AND " + linkVisible + "))"
+	documentVisible = "(" + documentNotDeleted + " AND (NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
+		" OR EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id AND " + linkVisible + ")))"
 	// documentWritable admits a document for UPDATE and DELETE (WP-341,
 	// migration 000139): a principal restricted in none of the client, site
 	// and team scope writes every document; any other only a linked one
@@ -81,11 +85,16 @@ var (
 	// its scope, migrations 000146 and 000217), so neither a document shared
 	// with another client or team or linked to an org-wide object nor an
 	// unlinked (org-wide) one is writable (E-09, E-11).
-	documentWritable = "(" + orgWideDocumentSQL +
+	// A soft-deleted document is not writable either.
+	documentWritable = "(" + documentNotDeleted + " AND (" + orgWideDocumentSQL +
 		" OR (document.link_count > 0 AND document.link_count = (SELECT count(*) FROM document_link" +
 		" WHERE document_link.document_id = document.id AND " + linkVisible + " AND " + database.ScopedWriteSQL +
-		" AND " + teamWriteSQL + ")))"
+		" AND " + teamWriteSQL + "))))"
 )
+
+// documentNotDeleted is the SQL condition "the document is not
+// soft-deleted" (WP-732).
+const documentNotDeleted = "document.deleted_at IS NULL"
 
 // requireVisible fails with "not found" when the written row of table does not
 // satisfy visible, i.e. when a write pointed it at an object outside the
@@ -651,33 +660,28 @@ func uuidOrEmpty(s string) string {
 	return ""
 }
 
-// Delete deletes a document. The document table has no deleted_at column,
-// so this is a hard delete; its versions go with it (ON DELETE CASCADE) and
-// their sizes leave the usage of the organization (WP-731).
+// Delete soft-deletes a writable document (WP-732): it sets deleted_at, so
+// every read and write of the repository and the search treat it as
+// missing, and a second call fails with "not found". Versions, links, blobs
+// and the storage usage stay until the retention run retention.soft_deleted
+// purges the document after the soft-delete period. The audit entry
+// document.deleted is the last step of the transaction.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	if !api.IsUUID(id) {
 		return fmt.Errorf("not found")
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var freed int64
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(size), 0) FROM document_version WHERE document_id = $1`, id).Scan(&freed); err != nil {
-			return fmt.Errorf("sum document versions: %w", err)
+		var title string
+		var deletedAt time.Time
+		err := tx.QueryRow(ctx, "UPDATE document SET deleted_at = NOW() WHERE "+documentWritable+
+			" AND id = $1 AND organization_id = $2 RETURNING title, deleted_at", id, orgID).Scan(&title, &deletedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
 		}
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE "+documentWritable+" AND id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			return fmt.Errorf("delete document: %w", err)
 		}
-		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
-		}
-		if freed == 0 {
-			return nil
-		}
-		if _, err = tx.Exec(ctx, `UPDATE organization_usage SET storage_bytes = GREATEST(storage_bytes - $2, 0), updated_at = NOW()
-			WHERE organization_id = $1`, orgID, freed); err != nil {
-			return fmt.Errorf("release storage usage: %w", err)
-		}
-		return nil
+		return recordDeleteAudit(ctx, tx, orgID, id, title, deletedAt)
 	})
 }
 
@@ -724,6 +728,7 @@ func (r *PGRepository) UnlinkDocument(ctx context.Context, orgID, docID, linkID 
 		err := tx.QueryRow(ctx, `
 			DELETE FROM document_link
 			WHERE id = $1 AND document_id = $2 AND organization_id = $3 AND `+linkVisible+`
+			  AND EXISTS (SELECT 1 FROM document WHERE document.id = $2 AND `+documentNotDeleted+`)
 			RETURNING entity_type, entity_id::text`, linkID, docID, orgID).Scan(&link.EntityType, &link.EntityID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return api.ErrNotFound
@@ -735,11 +740,19 @@ func (r *PGRepository) UnlinkDocument(ctx context.Context, orgID, docID, linkID 
 	})
 }
 
-// GetLinks returns all entity links for a document.
+// GetLinks returns the visible entity links of a document; a soft-deleted
+// document fails with api.ErrNotFound (WP-732).
 func (r *PGRepository) GetLinks(ctx context.Context, orgID, docID string) ([]DocumentLink, error) {
 	var links []DocumentLink
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var deleted bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM document WHERE id = $1 AND deleted_at IS NOT NULL)`, docID).Scan(&deleted); err != nil {
+			return fmt.Errorf("get document links: %w", err)
+		}
+		if deleted {
+			return api.ErrNotFound
+		}
 		query := fmt.Sprintf("SELECT %s FROM document_link WHERE "+linkVisible+" AND document_id = $1 ORDER BY created_at DESC, id DESC", documentLinkSelectColumns)
 		rows, err := tx.Query(ctx, query, docID)
 		if err != nil {
@@ -771,7 +784,7 @@ func (r *PGRepository) GetLinksForEntity(ctx context.Context, orgID, entityType,
 			SELECT %s
 			FROM document d
 			JOIN document_link l ON l.document_id = d.id
-			WHERE l.entity_type = $1 AND l.entity_id = $2
+			WHERE l.entity_type = $1 AND l.entity_id = $2 AND d.deleted_at IS NULL
 			  AND EXISTS (SELECT 1 FROM document_link WHERE document_link.id = l.id AND `+linkVisible+`)
 			ORDER BY d.created_at DESC
 		`, documentSelectColumnsWithAlias)

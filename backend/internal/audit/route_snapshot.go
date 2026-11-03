@@ -356,7 +356,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	for collection, table := range map[string]string{
 		"assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
 		"compliance/rules": "compliance_rule", "compositions": "composition", "consumables": "consumable",
-		"contacts": "contact", "desks": "desk", "discovery-scopes": "discovery_scope", "documents": "document",
+		"contacts": "contact", "desks": "desk", "discovery-scopes": "discovery_scope",
 		"forms": "form_def", "iga/connectors": "iga_connector", "inventory/items": "quantity_item",
 		"ip-addresses": "ip_address", "ips": "ip_address", "keys": "key_item", "maintenance-windows": "maintenance_window",
 		"monitoring/alerts": "alert_rule", "notification-channels": "notification_channel", "orders": "internal_order",
@@ -367,6 +367,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	} {
 		crud(m, v1+collection, table, all...)
 	}
+	// DELETE /documents/{id} records document.deleted in its transaction
+	// (WP-732).
+	crud(m, v1+"documents", "document", "POST", "PATCH")
 	// DELETE /users/{id} records user.deleted in its transaction (F-393).
 	crud(m, v1+"users", "app_user", "POST", "PATCH")
 	crud(m, v1+"collectors", "collector", "POST", "PATCH")

@@ -2,7 +2,9 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
 
 // Retention runs of NFR-06 and AUD-09: system jobs of the scheduler that
@@ -57,11 +60,28 @@ type Retention struct {
 	pool   *pgxpool.Pool
 	policy RetentionPolicy
 	now    func() time.Time
+	// blobs holds the document content (WithBlobs); nil keeps every
+	// soft-deleted document with stored content.
+	blobs blob.Store
 }
+
+// documentBucket is the bucket of the document content (document.Handler).
+const documentBucket = "reticora-documents"
+
+// actionDocumentPurged is the audit action of a document the soft-delete
+// run removes for good (document.ActionPurged, WP-732).
+const actionDocumentPurged = "document.purged"
 
 // NewRetention creates the retention runs on pool.
 func NewRetention(pool *pgxpool.Pool, policy RetentionPolicy) *Retention {
 	return &Retention{pool: pool, policy: policy, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithBlobs sets the blob store of the document content, whose objects the
+// soft-delete run deletes with the documents (WP-732).
+func (r *Retention) WithBlobs(store blob.Store) *Retention {
+	r.blobs = store
+	return r
 }
 
 // WithClock replaces the clock (tests).
@@ -112,13 +132,17 @@ func (r *Retention) RunHistory(ctx context.Context) error {
 	})
 }
 
-// RunSoftDeleted removes CIs soft-deleted longer than the soft-delete
-// period (default 90 days) with HardDeleteCI: their IP addresses go, the
-// references of assets, assignments, tickets and scans are released. A CI
-// that still cannot be deleted stays and is counted as kept.
+// RunSoftDeleted removes CIs and documents soft-deleted longer than the
+// soft-delete period (default 90 days). CIs go with HardDeleteCI: their IP
+// addresses go, the references of assets, assignments, tickets and scans
+// are released. A CI that still cannot be deleted stays and is counted as
+// kept. Documents go first, outside the transaction of the CIs
+// (purgeDocuments); the run entry counts both.
 func (r *Retention) RunSoftDeleted(ctx context.Context) error {
 	cutoff := r.now().Add(-r.policy.SoftDeleted)
-	return r.eachOrganization(ctx, RetentionSoftDeleted, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
+	return r.eachOrganizationAfter(ctx, RetentionSoftDeleted, func(ctx context.Context, orgID string) (int, error) {
+		return r.purgeDocuments(ctx, orgID, cutoff)
+	}, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
 		rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE organization_id = $1 AND deleted_at < $2`, orgID, cutoff)
 		if err != nil {
 			return 0, fmt.Errorf("list soft-deleted CIs: %w", err)
@@ -146,6 +170,130 @@ func (r *Retention) RunSoftDeleted(ctx context.Context) error {
 		}
 		return deleted, nil
 	})
+}
+
+// expiredDocument is a soft-deleted document past the period with the
+// storage keys of its content.
+type expiredDocument struct {
+	id   string
+	keys []string
+}
+
+// purgeDocuments removes the documents of the organization soft-deleted
+// before cutoff (MGT-01, WP-732) in three steps without a lock during the
+// blob transfer (K20): (1) one transaction reads the documents and the
+// keys of their versions (and of the document itself) and ends; (2)
+// without an open transaction every key is deleted from the blob store (a
+// delete marker in the versioned bucket, NFR-05; the bucket lifecycle rule
+// removes the old object versions after the backup period, E-118); (3) a
+// document whose keys are all gone is deleted in a transaction of its own
+// that checks deleted_at again (versions and links follow by ON DELETE
+// CASCADE), lowers organization_usage by the sizes of its versions and
+// writes document.purged with source system last. A blob error, or a
+// missing blob store, keeps the document with stored content; it counts as
+// kept and the next run tries again. It returns the purged documents.
+func (r *Retention) purgeDocuments(ctx context.Context, orgID string, cutoff time.Time) (int, error) {
+	scope := database.OrgWideScope(orgID, "")
+	var expired []expiredDocument
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT d.id::text,
+			       ARRAY(SELECT k FROM (SELECT v.storage_key AS k FROM document_version v WHERE v.document_id = d.id
+			                            UNION SELECT d.storage_key) keys WHERE k <> '' ORDER BY k)
+			  FROM document d
+			 WHERE d.organization_id = $1 AND d.deleted_at < $2
+			 ORDER BY d.deleted_at, d.id`, orgID, cutoff)
+		if err != nil {
+			return fmt.Errorf("list soft-deleted documents: %w", err)
+		}
+		expired, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (expiredDocument, error) {
+			var d expiredDocument
+			scanErr := row.Scan(&d.id, &d.keys)
+			return d, scanErr
+		})
+		if err != nil {
+			return fmt.Errorf("list soft-deleted documents: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	purged, kept := 0, 0
+	for i := range expired {
+		if !r.deleteBlobs(ctx, orgID, &expired[i]) {
+			kept++
+			continue
+		}
+		ok, perr := r.purgeDocument(ctx, &scope, orgID, expired[i].id, cutoff)
+		if perr != nil {
+			return purged, perr
+		}
+		if ok {
+			purged++
+		}
+	}
+	if kept > 0 {
+		slog.Info("soft-deleted documents kept: content not deleted", "organization_id", orgID, "kept", kept)
+	}
+	return purged, nil
+}
+
+// deleteBlobs deletes the stored content of d and reports whether all of
+// it is gone; an object already missing counts as deleted.
+func (r *Retention) deleteBlobs(ctx context.Context, orgID string, d *expiredDocument) bool {
+	if len(d.keys) == 0 {
+		return true
+	}
+	if r.blobs == nil {
+		return false
+	}
+	for _, key := range d.keys {
+		if err := r.blobs.Delete(ctx, documentBucket, key); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			slog.Warn("retention: delete document content", "organization_id", orgID, "document_id", d.id, "error", err)
+			return false
+		}
+	}
+	return true
+}
+
+// purgeDocument deletes document id when it is still soft-deleted before
+// cutoff, releases the sizes of its versions from the usage of the
+// organization and writes document.purged; it reports whether it deleted.
+func (r *Retention) purgeDocument(ctx context.Context, scope *database.TenantScope, orgID, id string, cutoff time.Time) (bool, error) {
+	deleted := false
+	err := database.WithTenant(ctx, r.pool, scope, func(ctx context.Context, tx pgx.Tx) error {
+		var freed int64
+		var versions int
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(size), 0), count(*) FROM document_version WHERE document_id = $1`,
+			id).Scan(&freed, &versions); err != nil {
+			return fmt.Errorf("sum document versions: %w", err)
+		}
+		var title string
+		err := tx.QueryRow(ctx, `DELETE FROM document WHERE id = $1 AND organization_id = $2 AND deleted_at < $3 RETURNING title`,
+			id, orgID, cutoff).Scan(&title)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("purge document: %w", err)
+		}
+		if freed > 0 {
+			if _, err = tx.Exec(ctx, `UPDATE organization_usage SET storage_bytes = GREATEST(storage_bytes - $2, 0), updated_at = NOW()
+				WHERE organization_id = $1`, orgID, freed); err != nil {
+				return fmt.Errorf("release storage usage: %w", err)
+			}
+		}
+		if _, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+			OrganizationID: orgID, ActorType: "system", Action: actionDocumentPurged, ResourceType: "document", ResourceID: id,
+			Source: audit.SourceSystem, Changes: map[string]any{"title": title, "versions": versions, "released_bytes": freed},
+		}); err != nil {
+			return fmt.Errorf("audit %s: %w", actionDocumentPurged, err)
+		}
+		deleted = true
+		return nil
+	})
+	return deleted && err == nil, err
 }
 
 // RunReviewItems removes review items resolved longer than the review
@@ -192,6 +340,20 @@ func (r *Retention) RunMergeSnapshots(ctx context.Context) error {
 // same transaction. A failing organization does not stop the others.
 func (r *Retention) eachOrganization(ctx context.Context, kind string, selfAudit bool,
 	fn func(ctx context.Context, tx pgx.Tx, orgID string) (int, error)) error {
+	return r.runOrganizations(ctx, kind, selfAudit, nil, fn)
+}
+
+// eachOrganizationAfter is eachOrganization with self audit that first runs
+// before for the organization without an open transaction (K20); the run
+// entry counts what both deleted. A failing before does not stop fn.
+func (r *Retention) eachOrganizationAfter(ctx context.Context, kind string, before func(ctx context.Context, orgID string) (int, error),
+	fn func(ctx context.Context, tx pgx.Tx, orgID string) (int, error)) error {
+	return r.runOrganizations(ctx, kind, true, before, fn)
+}
+
+// runOrganizations implements eachOrganization and eachOrganizationAfter.
+func (r *Retention) runOrganizations(ctx context.Context, kind string, selfAudit bool, before func(ctx context.Context, orgID string) (int, error),
+	fn func(ctx context.Context, tx pgx.Tx, orgID string) (int, error)) error {
 	var orgs []string
 	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT id::text FROM organization ORDER BY id`)
@@ -206,9 +368,15 @@ func (r *Retention) eachOrganization(ctx context.Context, kind string, selfAudit
 	}
 	var firstErr error
 	for _, orgID := range orgs {
+		prior := 0
+		var beforeErr error
+		if before != nil {
+			prior, beforeErr = before(ctx, orgID)
+		}
 		scope := database.OrgWideScope(orgID, "")
 		err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 			n, err := fn(ctx, tx, orgID)
+			n += prior
 			if err != nil || !selfAudit || n == 0 {
 				return err
 			}
@@ -218,6 +386,7 @@ func (r *Retention) eachOrganization(ctx context.Context, kind string, selfAudit
 			})
 			return err
 		})
+		err = errors.Join(beforeErr, err)
 		if err != nil {
 			slog.Error("retention run", "kind", kind, "organization_id", orgID, "error", err)
 			if firstErr == nil {

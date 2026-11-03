@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -26,6 +27,34 @@ import (
 // (WP-731): written by the repository in the transaction of the version, so
 // the route audit adds no second entry.
 const ActionVersionCreated = "document.version_created"
+
+// Audit actions of the soft delete (WP-732): document.deleted is written by
+// the repository in the transaction of the soft delete (the route audit of
+// DELETE /api/v1/documents/{id} remains the fallback), document.purged by
+// the retention run retention.soft_deleted with source system when it
+// removes the document for good.
+const (
+	ActionDeleted = "document.deleted"
+	ActionPurged  = "document.purged"
+)
+
+// recordDeleteAudit writes document.deleted as the last step of the
+// transaction of the soft delete. Record marks the request as audited.
+func recordDeleteAudit(ctx context.Context, tx pgx.Tx, orgID, docID, title string, deletedAt time.Time) error {
+	actorID, actorType := auditActor(ctx)
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID,
+		ActorID:        actorID,
+		ActorType:      actorType,
+		Action:         ActionDeleted,
+		ResourceType:   "document",
+		ResourceID:     docID,
+		Changes:        map[string]any{"title": title, "deleted_at": deletedAt.UTC()},
+	}); err != nil {
+		return fmt.Errorf("audit %s: %w", ActionDeleted, err)
+	}
+	return nil
+}
 
 // StorageLimiter resolves the document storage limit of an organization in
 // bytes (entitlement.Service.StorageLimitBytes): nil is unlimited, an

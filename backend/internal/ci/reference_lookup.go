@@ -31,7 +31,7 @@ var referenceQueries = map[string]string{
 	fieldmeta.TargetAsset: `SELECT id::text, COALESCE(client_id::text, '') FROM asset
 		WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
 	fieldmeta.TargetDocument: `SELECT id::text, '' FROM document
-		WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
+		WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`,
 }
 
 // PGReferenceLookup is the existence check of reference values in
