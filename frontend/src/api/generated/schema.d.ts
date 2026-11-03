@@ -11811,7 +11811,13 @@ export interface components {
       resolution_time_minutes?: number;
       response_target_minutes: number;
       resolution_target_minutes: number;
+      /** @description false counts elapsed time; true counts only business time of the calendar chain (TKT-02). */
       business_calendar: boolean;
+      /**
+       * Format: uuid
+       * @description Business calendar of the policy (TKT-02). It must be visible under the caller's scope and belong to no client or to the policy's client; otherwise 400 on calendar_id. Null lets the calendar chain decide when business_calendar is true: default calendar of the ticket's client, default calendar of the organization, built-in standard (Monday to Friday, 08:00-18:00).
+       */
+      calendar_id?: string | null;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -12300,6 +12306,11 @@ export interface components {
       response_target_minutes: number;
       resolution_target_minutes: number;
       business_calendar?: boolean;
+      /**
+       * Format: uuid
+       * @description Business calendar of the policy (TKT-02). It must be visible under the caller's scope and belong to no client or to the policy's client; otherwise 400 on calendar_id. Null lets the calendar chain decide when business_calendar is true: default calendar of the ticket's client, default calendar of the organization, built-in standard (Monday to Friday, 08:00-18:00).
+       */
+      calendar_id?: string | null;
     };
     UpdateSLAPolicyRequest: {
       client_id?: string;
@@ -12309,6 +12320,11 @@ export interface components {
       response_target_minutes?: number;
       resolution_target_minutes?: number;
       business_calendar?: boolean;
+      /**
+       * Format: uuid
+       * @description Business calendar of the policy (TKT-02). It must be visible under the caller's scope and belong to no client or to the policy's client; otherwise 400 on calendar_id. null clears it; then the calendar chain decide when business_calendar is true: default calendar of the ticket's client, default calendar of the organization, built-in standard (Monday to Friday, 08:00-18:00).
+       */
+      calendar_id?: string | null;
     };
     SLAPolicyListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['SLAPolicy'][];
@@ -12328,6 +12344,17 @@ export interface components {
       resolved_at?: string;
       response_breached: boolean;
       resolution_breached: boolean;
+      /**
+       * Format: uuid
+       * @description Business calendar the due times were computed with (TKT-02); null means elapsed time or the built-in standard calendar. Later changes of a calendar do not change computed due times.
+       */
+      calendar_id?: string | null;
+      /** @description Minutes until response_due_at: business minutes of the calendar (built-in standard when calendar_id is null and the policy counts business time), otherwise elapsed minutes. Negative once overdue, null once first_response_at is set. */
+      response_remaining_minutes?: number | null;
+      /** @description Minutes until resolution_due_at, counted like response_remaining_minutes; null once resolved_at is set. */
+      resolution_remaining_minutes?: number | null;
+      /** @description true while the current moment lies outside business hours or on a holiday of the calendar; always false for elapsed time. */
+      paused?: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */

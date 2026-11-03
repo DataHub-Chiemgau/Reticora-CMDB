@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000215_metamodel_draft
+Stand: Migration 000218_business_calendar
 
 ## Prüfung
 
@@ -887,6 +887,38 @@ der Policy `ticket_number_counter_isolation` (FOR ALL, nur `app.org_id`, damit
 gescopte Prinzipale denselben Zähler nutzen), TRUNCATE-Schutz
 `reticora_truncate_guard`.
 
+Business-Kalender (TKT-02, LOC-01/02, WP-292, Migration 000216):
+`business_calendar` hält die Arbeitszeiten einer Organisation oder eines
+Clients (`client_id` NULL ist org-weit): `weekly_hours` (`jsonb`, Standard
+Mo–Fr 08:00–18:00, `business_calendar_weekly_hours_check`: Array) als Fenster
+`{weekday 1=Mo…7=So, start, end}` in lokaler Wandzeit, `holidays` (`jsonb`,
+Standard `[]`, `business_calendar_holidays_check`: Array) als
+`{date, name}`, optional `timezone` (`business_calendar_timezone_check` mit
+`reticora_is_iana_timezone`), `is_default` (Standard false). Die Inhalte prüft
+die Anwendung (`sla.Calendar.Validate`). Schlüssel
+`business_calendar_id_organization_key` (`id`, `organization_id`); der
+Client-Verweis `business_calendar_client_id_fkey` trägt die Organisation
+(`client_id`, `organization_id`, ON DELETE CASCADE, K19). Indizes
+`idx_business_calendar_client` (`organization_id`, `client_id`) und der
+Teil-Unique-Index `business_calendar_default` (`organization_id`,
+`client_id`) NULLS NOT DISTINCT WHERE `is_default`: ein Default je
+Organisation und Client. Trigger `trg_business_calendar_updated_at`. RLS mit
+ENABLE/FORCE: `business_calendar_isolation` (FOR ALL; USING lässt org-weite
+Kalender für Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im
+Client-Scope, E-09) und die RESTRICTIVE-Policies
+`business_calendar_scoped_update` und `business_calendar_scoped_delete`,
+TRUNCATE-Schutz `reticora_truncate_guard`. `sla` erhält `calendar_id`
+(`sla_calendar_id_fkey` auf (`calendar_id`, `organization_id`), ON DELETE SET
+NULL (`calendar_id`), Index `idx_sla_calendar`). `ticket_sla` erhält
+`calendar_id` (`ticket_sla_calendar_id_fkey` wie bei `sla`, Index
+`idx_ticket_sla_calendar`), `sla_explicit` (Standard false),
+`response_breach_notified_at` und `resolution_breach_notified_at` mit den
+Teilindizes `idx_ticket_sla_response_open` (`organization_id`,
+`response_due_at`) WHERE `first_response_at` und
+`response_breach_notified_at` NULL sowie `idx_ticket_sla_resolution_open`
+(`organization_id`, `resolution_due_at`) WHERE `resolved_at` und
+`resolution_breach_notified_at` NULL (Lauf aus WP-769).
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -912,6 +944,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
 | `building` | ja | ja | building_isolation (ALL) |
+| `business_calendar` | ja | ja | business_calendar_isolation (ALL), business_calendar_scoped_delete (DELETE), business_calendar_scoped_update (UPDATE) |
 | `cable` | ja | ja | org_isolation (ALL) |
 | `ci` | ja | ja | ci_isolation (ALL), ci_scoped_delete (DELETE), ci_scoped_update (UPDATE) |
 | `ci_change` | ja | ja | ci_change_scoped_delete (DELETE), ci_change_scoped_update (UPDATE), org_isolation (ALL) |

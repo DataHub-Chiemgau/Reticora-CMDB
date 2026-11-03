@@ -1276,3 +1276,4 @@ MET-50;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
 MET-52;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
 GQL-03;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/form_integration_test.go;WP-719
+TKT-02;[P2];B;backend/internal/sla/sla_integration_test.go;WP-292

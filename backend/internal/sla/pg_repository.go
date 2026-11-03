@@ -3,6 +3,7 @@ package sla
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -14,8 +15,36 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const policyColumns = `id::text, organization_id::text, COALESCE(client_id::text, ''), name, priority, response_target_minutes, resolution_target_minutes, business_calendar, created_at, updated_at`
-const ticketSLAColumns = `id::text, organization_id::text, ticket_id::text, sla_id::text, response_due_at, resolution_due_at, first_response_at, resolved_at, response_breached, resolution_breached, created_at, updated_at`
+const policyColumns = `id::text, organization_id::text, COALESCE(client_id::text, ''), name, priority, response_target_minutes, resolution_target_minutes, business_calendar, calendar_id::text, created_at, updated_at`
+const ticketSLAColumns = `id::text, organization_id::text, ticket_id::text, sla_id::text, response_due_at, resolution_due_at, first_response_at, resolved_at, response_breached, resolution_breached, calendar_id::text, created_at, updated_at`
+
+// errCalendarBinding: the calendar_id of a policy names no calendar
+// visible under the scope, or one bound to another client than the
+// policy's (TKT-02). 400 on calendar_id, alike for both.
+var errCalendarBinding = &api.FieldError{Field: "calendar_id", Message: "business calendar not found or bound to another client"}
+
+// checkCalendarBinding verifies that calendarID (if any) names a calendar
+// visible in the transaction whose client is NULL or clientID.
+func checkCalendarBinding(ctx context.Context, tx pgx.Tx, orgID string, calendarID *string, clientID string) error {
+	if calendarID == nil {
+		return nil
+	}
+	if !api.IsUUID(*calendarID) {
+		return errCalendarBinding
+	}
+	var calendarClient string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM business_calendar WHERE organization_id = $1 AND id = $2`, orgID, *calendarID).Scan(&calendarClient)
+	if err == pgx.ErrNoRows {
+		return errCalendarBinding
+	}
+	if err != nil {
+		return fmt.Errorf("read business calendar: %w", err)
+	}
+	if calendarClient != "" && calendarClient != clientID {
+		return errCalendarBinding
+	}
+	return nil
+}
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct{ pool *pgxpool.Pool }
@@ -84,10 +113,13 @@ func (r *PGRepository) GetPolicy(ctx context.Context, orgID, id string) (*Policy
 
 func (r *PGRepository) CreatePolicy(ctx context.Context, p *Policy) error {
 	return database.WithRequestTenant(ctx, r.pool, p.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := checkCalendarBinding(ctx, tx, p.OrganizationID, p.CalendarID, p.ClientID); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx, `
-			INSERT INTO sla (organization_id, client_id, name, priority, response_target_minutes, resolution_target_minutes, business_calendar)
-			VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7)
-			RETURNING id::text, created_at, updated_at`, p.OrganizationID, p.ClientID, p.Name, p.Priority, p.ResponseTargetMinutes, p.ResolutionTargetMinutes, p.BusinessCalendar).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
+			INSERT INTO sla (organization_id, client_id, name, priority, response_target_minutes, resolution_target_minutes, business_calendar, calendar_id)
+			VALUES ($1, NULLIF($2, '')::uuid, $3, $4, $5, $6, $7, $8::uuid)
+			RETURNING id::text, created_at, updated_at`, p.OrganizationID, p.ClientID, p.Name, p.Priority, p.ResponseTargetMinutes, p.ResolutionTargetMinutes, p.BusinessCalendar, p.CalendarID).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 	})
 }
 
@@ -127,6 +159,13 @@ func (r *PGRepository) UpdatePolicy(ctx context.Context, orgID, id string, req U
 			args = append(args, *req.BusinessCalendar)
 			pos++
 		}
+		if req.CalendarID.Set {
+			if req.CalendarID.Value != "" && !api.IsUUID(req.CalendarID.Value) {
+				return errCalendarBinding
+			}
+			set = append(set, fmt.Sprintf("calendar_id = NULLIF($%d, '')::uuid", pos))
+			args = append(args, req.CalendarID.Value)
+		}
 		if len(set) == 0 {
 			var err error
 			item, err = scanPolicy(tx.QueryRow(ctx, "SELECT "+policyColumns+" FROM sla WHERE id = $1 AND organization_id = $2", id, orgID))
@@ -141,7 +180,12 @@ func (r *PGRepository) UpdatePolicy(ctx context.Context, orgID, id string, req U
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		// The calendar stays bound to the policy's client, also when only
+		// client_id changes (TKT-02); a failed check rolls the update back.
+		return checkCalendarBinding(ctx, tx, orgID, item.CalendarID, item.ClientID)
 	})
 	return item, err
 }
@@ -159,6 +203,14 @@ func (r *PGRepository) DeletePolicy(ctx context.Context, orgID, id string) error
 	})
 }
 
+// ApplyForTicket selects the policy of the ticket (the named one or the
+// best match for its priority and client, a client policy before the org
+// policy) and computes the due times from the ticket's creation (TKT-02).
+// With business_calendar the first calendar of the chain applies: the
+// policy's calendar, the client's default, the organization's default,
+// the built-in standard; its zone is the calendar's, else the client's,
+// else the organization's. The chosen calendar is stored with the state;
+// a new computation resets the breach notifications.
 func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket, slaID string) (*TicketSLA, error) {
 	// The policy id reaches SQL only as a UUID (API-03, F-047); a malformed
 	// one names no policy.
@@ -167,9 +219,16 @@ func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *tick
 	}
 	var state *TicketSLA
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var clientID string
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM ticket WHERE organization_id = $1 AND id = $2`, orgID, t.ID).Scan(&clientID); err != nil {
+			if err == pgx.ErrNoRows {
+				return ticket.ErrNotFound
+			}
+			return fmt.Errorf("read ticket client: %w", err)
+		}
 		policyID := slaID
 		if policyID == "" {
-			if err := tx.QueryRow(ctx, `SELECT id::text FROM sla WHERE organization_id = $1 AND priority = $2 AND (client_id IS NULL OR client_id::text = $3) ORDER BY client_id NULLS LAST, created_at DESC LIMIT 1`, orgID, t.Priority, "").Scan(&policyID); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT id::text FROM sla WHERE organization_id = $1 AND priority = $2 AND (client_id IS NULL OR client_id = NULLIF($3, '')::uuid) ORDER BY client_id NULLS LAST, created_at DESC LIMIT 1`, orgID, t.Priority, clientID).Scan(&policyID); err != nil {
 				if err == pgx.ErrNoRows {
 					return ErrNotFound
 				}
@@ -182,22 +241,44 @@ func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *tick
 		}
 		var responseMinutes, resolutionMinutes int
 		var businessCalendar bool
-		if err := tx.QueryRow(ctx, "SELECT response_target_minutes, resolution_target_minutes, business_calendar FROM sla WHERE organization_id = $1 AND id = $2", orgID, policyID).Scan(&responseMinutes, &resolutionMinutes, &businessCalendar); err != nil {
+		var policyCalendar *string
+		if err := tx.QueryRow(ctx, "SELECT response_target_minutes, resolution_target_minutes, business_calendar, calendar_id::text FROM sla WHERE organization_id = $1 AND id = $2", orgID, policyID).Scan(&responseMinutes, &resolutionMinutes, &businessCalendar, &policyCalendar); err != nil {
 			if err == pgx.ErrNoRows {
 				return ErrNotFound
 			}
 			return fmt.Errorf("read sla policy: %w", err)
 		}
+		var calendarID *string
+		var cal *Calendar
+		var loc *time.Location
+		if businessCalendar {
+			var resolveErr error
+			calendarID, cal, loc, resolveErr = resolveCalendar(ctx, tx, orgID, clientID, policyCalendar)
+			if resolveErr != nil {
+				return resolveErr
+			}
+		}
+		responseDue, err := addTarget(created, responseMinutes, cal, loc)
+		if err != nil {
+			return err
+		}
+		resolutionDue, err := addTarget(created, resolutionMinutes, cal, loc)
+		if err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, `
-			INSERT INTO ticket_sla (organization_id, ticket_id, sla_id, response_due_at, resolution_due_at)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO ticket_sla (organization_id, ticket_id, sla_id, response_due_at, resolution_due_at, calendar_id, sla_explicit)
+			VALUES ($1, $2, $3, $4, $5, $6::uuid, $7)
 			ON CONFLICT (organization_id, ticket_id) DO UPDATE SET
 				sla_id = EXCLUDED.sla_id,
 				response_due_at = EXCLUDED.response_due_at,
 				resolution_due_at = EXCLUDED.resolution_due_at,
+				calendar_id = EXCLUDED.calendar_id,
+				sla_explicit = EXCLUDED.sla_explicit,
+				response_breach_notified_at = NULL,
+				resolution_breach_notified_at = NULL,
 				updated_at = now()
-			RETURNING `+ticketSLAColumns, orgID, t.ID, policyID, addTarget(created, responseMinutes, businessCalendar), addTarget(created, resolutionMinutes, businessCalendar))
-		var err error
+			RETURNING `+ticketSLAColumns, orgID, t.ID, policyID, responseDue, resolutionDue, calendarID, slaID != "")
 		state, err = scanTicketSLA(row)
 		if err != nil {
 			return fmt.Errorf("upsert ticket sla: %w", err)
@@ -208,6 +289,140 @@ func (r *PGRepository) ApplyForTicket(ctx context.Context, orgID string, t *tick
 		return nil, err
 	}
 	return r.GetForTicket(ctx, orgID, state.TicketID)
+}
+
+// resolveCalendar walks the calendar chain of TKT-02: the policy's
+// calendar, the default calendar of the ticket's client, the default
+// calendar of the organization, the built-in standard (calendarID nil).
+// The zone is the calendar's, else client.timezone of the ticket's
+// client, else organization.timezone.
+func resolveCalendar(ctx context.Context, tx pgx.Tx, orgID, clientID string, policyCalendar *string) (*string, *Calendar, *time.Location, error) {
+	var id, timezone string
+	var weekly, holidays []byte
+	err := tx.QueryRow(ctx, `
+		SELECT id::text, COALESCE(timezone, ''), weekly_hours, holidays FROM business_calendar
+		WHERE organization_id = $1
+		  AND (id = $2::uuid OR (is_default AND (client_id IS NULL OR client_id = NULLIF($3, '')::uuid)))
+		ORDER BY COALESCE(id = $2::uuid, false) DESC, client_id NULLS LAST
+		LIMIT 1`, orgID, policyCalendar, clientID).Scan(&id, &timezone, &weekly, &holidays)
+	var calendarID *string
+	cal := DefaultCalendar()
+	switch {
+	case err == pgx.ErrNoRows:
+	case err != nil:
+		return nil, nil, nil, fmt.Errorf("read business calendar: %w", err)
+	default:
+		calendarID = &id
+		if cal, err = decodeCalendar(timezone, weekly, holidays); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	if cal.Timezone == "" {
+		if err = tx.QueryRow(ctx, `SELECT COALESCE((SELECT timezone FROM client WHERE organization_id = $1 AND id = NULLIF($2, '')::uuid), (SELECT timezone FROM organization WHERE id = $1), 'UTC')`, orgID, clientID).Scan(&timezone); err != nil {
+			return nil, nil, nil, fmt.Errorf("read time zone: %w", err)
+		}
+		cal.Timezone = timezone
+	}
+	loc, err := time.LoadLocation(cal.Timezone)
+	if err != nil {
+		loc = time.UTC
+	}
+	return calendarID, &cal, loc, nil
+}
+
+// decodeCalendar builds a Calendar from the stored columns.
+func decodeCalendar(timezone string, weekly, holidays []byte) (Calendar, error) {
+	cal := Calendar{Timezone: timezone}
+	if err := json.Unmarshal(weekly, &cal.WeeklyHours); err != nil {
+		return cal, fmt.Errorf("decode weekly hours: %w", err)
+	}
+	if err := json.Unmarshal(holidays, &cal.Holidays); err != nil {
+		return cal, fmt.Errorf("decode holidays: %w", err)
+	}
+	return cal, nil
+}
+
+// annotate fills the remaining minutes and the paused flag of the states
+// (TKT-02): business minutes of the stored calendar, of the built-in
+// standard when the policy counts business time without a stored one, or
+// elapsed minutes. The zone follows the chain of resolveCalendar.
+func annotate(ctx context.Context, tx pgx.Tx, orgID string, states []TicketSLA, now time.Time) error {
+	if len(states) == 0 {
+		return nil
+	}
+	ids := make([]string, len(states))
+	for i := range states {
+		ids[i] = states[i].ID
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT ts.id::text, COALESCE(s.business_calendar, false), bc.id IS NOT NULL,
+		       COALESCE(bc.timezone, c.timezone, o.timezone, 'UTC'),
+		       COALESCE(bc.weekly_hours, '[]'::jsonb), COALESCE(bc.holidays, '[]'::jsonb)
+		  FROM ticket_sla ts
+		  LEFT JOIN sla s ON s.id = ts.sla_id AND s.organization_id = ts.organization_id
+		  LEFT JOIN ticket t ON t.id = ts.ticket_id AND t.organization_id = ts.organization_id
+		  LEFT JOIN business_calendar bc ON bc.id = ts.calendar_id AND bc.organization_id = ts.organization_id
+		  LEFT JOIN client c ON c.id = t.client_id AND c.organization_id = ts.organization_id
+		  LEFT JOIN organization o ON o.id = ts.organization_id
+		 WHERE ts.organization_id = $1 AND ts.id = ANY($2::uuid[])`, orgID, ids)
+	if err != nil {
+		return fmt.Errorf("read sla calendars: %w", err)
+	}
+	defer rows.Close()
+	schedules := map[string]*Schedule{}
+	for rows.Next() {
+		var id, timezone string
+		var business, stored bool
+		var weekly, holidays []byte
+		if scanErr := rows.Scan(&id, &business, &stored, &timezone, &weekly, &holidays); scanErr != nil {
+			return scanErr
+		}
+		var cal Calendar
+		switch {
+		case stored:
+			if cal, err = decodeCalendar(timezone, weekly, holidays); err != nil {
+				return err
+			}
+		case business:
+			cal = DefaultCalendar()
+		default:
+			continue
+		}
+		loc, locErr := time.LoadLocation(timezone)
+		if locErr != nil {
+			loc = time.UTC
+		}
+		schedules[id] = cal.In(loc)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return rowsErr
+	}
+	for i := range states {
+		fillRemaining(&states[i], schedules[states[i].ID], now)
+	}
+	return nil
+}
+
+// fillRemaining sets the remaining minutes and the paused flag of one
+// state; a nil schedule counts elapsed time.
+func fillRemaining(state *TicketSLA, s *Schedule, now time.Time) {
+	remaining := func(due time.Time) *int {
+		var v int
+		if s == nil {
+			v = int(due.Sub(now) / time.Minute)
+		} else {
+			v = s.BusinessMinutesBetween(now, due)
+		}
+		return &v
+	}
+	state.ResponseRemainingMinutes, state.ResolutionRemainingMinutes = nil, nil
+	if state.FirstResponseAt == nil {
+		state.ResponseRemainingMinutes = remaining(state.ResponseDueAt)
+	}
+	if state.ResolvedAt == nil {
+		state.ResolutionRemainingMinutes = remaining(state.ResolutionDueAt)
+	}
+	state.Paused = s != nil && !s.IsBusinessMoment(now)
 }
 
 func (r *PGRepository) GetForTicket(ctx context.Context, orgID, ticketID string) (*TicketSLA, error) {
@@ -225,7 +440,15 @@ func (r *PGRepository) GetForTicket(ctx context.Context, orgID, ticketID string)
 		}
 		var err error
 		state, err = scanTicketSLA(tx.QueryRow(ctx, "SELECT "+ticketSLAColumns+" FROM ticket_sla WHERE "+ticketSLAVisible+" AND id = $1 AND organization_id = $2", id, orgID))
-		return err
+		if err != nil {
+			return err
+		}
+		annotated := []TicketSLA{*state}
+		if annotateErr := annotate(ctx, tx, orgID, annotated, time.Now().UTC()); annotateErr != nil {
+			return annotateErr
+		}
+		*state = annotated[0]
+		return nil
 	})
 	return state, err
 }
@@ -279,7 +502,11 @@ func (r *PGRepository) ListBreaches(ctx context.Context, orgID string, filter Br
 			}
 			items = append(items, *item)
 		}
-		return rows.Err()
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return rowsErr
+		}
+		rows.Close()
+		return annotate(ctx, tx, orgID, items, time.Now().UTC())
 	})
 	return items, total, err
 }
@@ -288,7 +515,7 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanPolicy(s scanner) (*Policy, error) {
 	p := &Policy{}
-	if err := s.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.Name, &p.Priority, &p.ResponseTargetMinutes, &p.ResolutionTargetMinutes, &p.BusinessCalendar, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := s.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.Name, &p.Priority, &p.ResponseTargetMinutes, &p.ResolutionTargetMinutes, &p.BusinessCalendar, &p.CalendarID, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -297,7 +524,7 @@ func scanPolicy(s scanner) (*Policy, error) {
 func scanTicketSLA(s scanner) (*TicketSLA, error) {
 	state := &TicketSLA{}
 	var first, resolved sql.NullTime
-	if err := s.Scan(&state.ID, &state.OrganizationID, &state.TicketID, &state.SLAID, &state.ResponseDueAt, &state.ResolutionDueAt, &first, &resolved, &state.ResponseBreached, &state.ResolutionBreached, &state.CreatedAt, &state.UpdatedAt); err != nil {
+	if err := s.Scan(&state.ID, &state.OrganizationID, &state.TicketID, &state.SLAID, &state.ResponseDueAt, &state.ResolutionDueAt, &first, &resolved, &state.ResponseBreached, &state.ResolutionBreached, &state.CalendarID, &state.CreatedAt, &state.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if first.Valid {
