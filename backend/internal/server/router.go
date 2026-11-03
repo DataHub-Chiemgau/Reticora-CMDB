@@ -23,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -205,6 +206,9 @@ type Options struct {
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
+	// Documents are the upload limits of the document module (SEC-09,
+	// WP-268); the zero value uses the defaults of config.DocumentSettings.
+	Documents config.DocumentSettings
 	// Egress is the destination policy of webhook and connector URLs and
 	// of own SMTP servers (SEC-08), when they are stored (webhooks, IGA
 	// connectors, notification channels) and called; the zero value
@@ -578,7 +582,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}),
 		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
-		document.NewHandler(repos.Document, opts.Blobs).WithLimits(opts.Entitlements),
+		document.NewHandler(repos.Document, opts.Blobs).WithLimits(opts.Entitlements).WithUploads(opts.Documents),
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order).WithMovements(repos.Movement),

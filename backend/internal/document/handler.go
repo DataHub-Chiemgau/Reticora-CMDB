@@ -2,44 +2,19 @@ package document
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
-
-// maxDocumentUpload is the hard limit for a single document upload.
-const maxDocumentUpload = 25 << 20 // 25 MiB
-
-// allowedMimeTypes restricts uploads to common, safe office/image formats.
-// Executables, scripts and HTML are excluded on purpose: a stored file is
-// later downloaded by other users, and serving attacker-controlled HTML/JS
-// from our own origin would be an XSS vector.
-var allowedMimeTypes = map[string]bool{
-	"application/pdf":    true,
-	"application/json":   true,
-	"application/xml":    true,
-	"application/zip":    true,
-	"application/msword": true,
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
-	"application/vnd.ms-excel": true,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
-	"application/vnd.ms-powerpoint":                                             true,
-	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
-	"application/octet-stream":                                                  true,
-	"image/png":                                                                 true,
-	"image/jpeg":                                                                true,
-	"image/gif":                                                                 true,
-	"image/svg+xml":                                                             false, // SVG can carry script — excluded
-	"image/webp":                                                                true,
-	"text/plain":                                                                true,
-	"text/csv":                                                                  true,
-}
 
 // Handler provides HTTP handlers for document endpoints.
 type Handler struct {
@@ -48,15 +23,104 @@ type Handler struct {
 	bucket string
 	// limits resolves max_storage_mb (WithLimits); nil is unlimited.
 	limits StorageLimiter
+	// uploads are the size, parallelism and deadline of uploads
+	// (WithUploads, SEC-09).
+	uploads uploadLimits
 }
 
 // NewHandler creates a new document handler. blobs may be nil; content
 // upload/download then answer 503 while metadata CRUD keeps working.
+// Uploads use the defaults of config.DocumentSettings until WithUploads.
 func NewHandler(repo Repository, blobs blob.Store) *Handler {
-	if blobs == nil {
-		return &Handler{repo: repo}
+	h := &Handler{repo: repo, uploads: newUploadLimits(config.DocumentSettings{})}
+	if blobs != nil {
+		h.blobs, h.bucket = blobs, documentBucket
 	}
-	return &Handler{repo: repo, blobs: blobs, bucket: documentBucket}
+	return h
+}
+
+// WithUploads sets the upload limits (SEC-09, WP-268): the largest body
+// (RETICORA_DOCUMENT_MAX_UPLOAD_MB), the uploads running at the same time on
+// this instance (RETICORA_DOCUMENT_UPLOAD_CONCURRENCY) and the read and
+// write deadline of an upload request (RETICORA_DOCUMENT_UPLOAD_TIMEOUT). A
+// zero value keeps its default.
+func (h *Handler) WithUploads(settings config.DocumentSettings) *Handler {
+	h.uploads = newUploadLimits(settings)
+	return h
+}
+
+// uploadLimits are the limits of the upload paths PUT …/content and POST
+// …/versions.
+type uploadLimits struct {
+	maxBytes int64
+	timeout  time.Duration
+	// slots holds one token per running upload.
+	slots chan struct{}
+}
+
+func newUploadLimits(s config.DocumentSettings) uploadLimits {
+	if s.MaxUploadMB <= 0 {
+		s.MaxUploadMB = config.DefaultDocumentMaxUploadMB
+	}
+	if s.UploadConcurrency <= 0 {
+		s.UploadConcurrency = config.DefaultDocumentUploadConcurrency
+	}
+	if s.UploadTimeout <= 0 {
+		s.UploadTimeout = config.DefaultDocumentUploadTimeout
+	}
+	return uploadLimits{maxBytes: s.MaxUploadBytes(), timeout: s.UploadTimeout, slots: make(chan struct{}, s.UploadConcurrency)}
+}
+
+// uploadRetryAfter is the Retry-After (seconds) of an upload refused
+// because all upload slots are taken.
+const uploadRetryAfter = "5"
+
+// beginUpload takes an upload slot and extends the read and write deadline
+// of the connection to the upload timeout; the global 15 s of the server
+// stay in force for every other route. Without a free slot it answers 503
+// with Retry-After and reports false; otherwise the caller runs the
+// returned release when the upload is done.
+func (h *Handler) beginUpload(w http.ResponseWriter) (release func(), ok bool) {
+	select {
+	case h.uploads.slots <- struct{}{}:
+	default:
+		w.Header().Set("Retry-After", uploadRetryAfter)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable",
+			"too many document uploads in progress, retry later")
+		return nil, false
+	}
+	// A writer without deadlines (tests) keeps the server's; the
+	// middleware writers pass the controller through (Unwrap).
+	rc := http.NewResponseController(w)
+	deadline := time.Now().Add(h.uploads.timeout)
+	_ = rc.SetReadDeadline(deadline)
+	_ = rc.SetWriteDeadline(deadline)
+	return func() { <-h.uploads.slots }, true
+}
+
+// readUpload verifies and reads the body of an upload (sniff.go) and
+// answers a refusal itself: 415 for a missing or non-whitelisted
+// Content-Type, 413 above the size limit, 422 mime-mismatch for content
+// that does not match its type. It returns the verified type and the body.
+func (h *Handler) readUpload(w http.ResponseWriter, r *http.Request) (mimeType string, payload []byte, ok bool) {
+	mimeType, payload, err := verifyUpload(w, r, r.Header.Get("Content-Type"), h.uploads.maxBytes)
+	var maxErr *http.MaxBytesError
+	var mm *mismatchError
+	switch {
+	case err == nil:
+		return mimeType, payload, true
+	case errors.Is(err, errUnsupportedType):
+		api.WriteError(w, http.StatusUnsupportedMediaType, "Unsupported Media Type",
+			fmt.Sprintf("content type %q is not allowed for document uploads", mimeType))
+	case errors.As(err, &maxErr):
+		api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large",
+			fmt.Sprintf("document content exceeds the %d MiB limit", h.uploads.maxBytes>>20))
+	case errors.As(err, &mm):
+		api.WriteProblem(w, http.StatusUnprocessableEntity, ProblemMimeMismatch, "Content Type Mismatch", mm.detail)
+	default:
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "could not read request body")
+	}
+	return "", nil, false
 }
 
 // documentBucket is the blob bucket document content is stored in.

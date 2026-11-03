@@ -8,10 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -171,15 +169,19 @@ func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
 }
 
 // storeVersion stores the request body as the next version of the document
-// without a lock during the blob transfer (K20): (1) read the body and form
-// size and sha256, (2) check usage and limit without binding (403 before
-// any blob), (3) put the blob under org/<org>/documents/<id>/<version id>,
+// without a lock during the blob transfer (K20): (1) read the body within
+// the upload limits, verify its type against the whitelist and the content
+// signature (SEC-09, sniff.go) and form size and sha256, (2) check usage
+// and limit without binding (403 before any blob), (3) put the blob under
+// org/<org>/documents/<id>/<version id>,
 // a key of its own per upload, so parallel uploads never overwrite each
 // other, (4) store the version in one transaction that counts the usage
 // within the limit (Repository.CreateVersion). A refusal or rollback in (4)
 // deletes the blob again. Only a writable document takes versions (WP-341);
-// any other answers 404 before anything is stored. It writes the error
-// response itself and reports whether the version was stored.
+// any other answers 404 before anything is stored. Each upload takes one of
+// the upload slots of the instance (503 with Retry-After without one) and
+// runs under the upload deadline. It writes the error response itself and
+// reports whether the version was stored.
 func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Document, *Version, bool) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -191,6 +193,12 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 		return nil, nil, false
 	}
 
+	release, ok := h.beginUpload(w)
+	if !ok {
+		return nil, nil, false
+	}
+	defer release()
+
 	id := chi.URLParam(r, "id")
 	doc, err := h.repo.GetWritable(r.Context(), t.OrganizationID, id)
 	if err != nil {
@@ -198,30 +206,9 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 		return nil, nil, false
 	}
 
-	mimeType := r.Header.Get("Content-Type")
-	if idx := strings.Index(mimeType, ";"); idx >= 0 {
-		mimeType = strings.TrimSpace(mimeType[:idx])
-	}
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-	allowed, known := allowedMimeTypes[mimeType]
-	if !known || !allowed {
-		api.WriteError(w, http.StatusUnsupportedMediaType, "Unsupported Media Type",
-			fmt.Sprintf("content type %q is not allowed for document uploads", mimeType))
-		return nil, nil, false
-	}
-
-	// (1) Body, size and checksum.
-	payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDocumentUpload))
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large",
-				fmt.Sprintf("document content exceeds the %d MiB limit", maxDocumentUpload>>20))
-			return nil, nil, false
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "could not read request body")
+	// (1) Body, verified type (SEC-09, sniff.go), size and checksum.
+	mimeType, payload, ok := h.readUpload(w, r)
+	if !ok {
 		return nil, nil, false
 	}
 	size := int64(len(payload))

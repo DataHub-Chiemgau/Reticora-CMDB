@@ -84,7 +84,7 @@ func TestCreateIgnoresRequestedStorageKey(t *testing.T) {
 		t.Fatalf("created document storage key %q, want empty", created.StorageKey)
 	}
 
-	w = contentRequest(t, mux, http.MethodPut, "/api/v1/documents/"+created.ID+"/content", "application/pdf", "%PDF")
+	w = contentRequest(t, mux, http.MethodPut, "/api/v1/documents/"+created.ID+"/content", "application/pdf", "%PDF-1.7")
 	if w.Code != http.StatusOK {
 		t.Fatalf("upload: status %d: %s", w.Code, w.Body.String())
 	}

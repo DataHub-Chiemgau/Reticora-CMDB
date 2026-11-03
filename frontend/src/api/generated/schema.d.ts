@@ -4302,7 +4302,7 @@ export interface paths {
     get: operations['downloadDocumentContent'];
     /**
      * Upload the binary content of a document
-     * @description Stores the request body as the next version of the document, like POST /api/v1/documents/{id}/versions (kept for compatibility, E-38), and answers with the document, which mirrors the new version in version, storage_key, file_size and mime_type. Every upload gets an object key of its own. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB. A principal restricted to some clients, sites or teams uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09). An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44). The audit log records document.version_created.
+     * @description Stores the request body as the next version of the document, like POST /api/v1/documents/{id}/versions (kept for compatibility, E-38), and answers with the document, which mirrors the new version in version, storage_key, file_size and mime_type. Every upload gets an object key of its own. The Content-Type header must name one of the allowed types and the content must carry its signature (SEC-09); the stored MIME type is the verified one. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB). A principal restricted to some clients, sites or teams uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09). An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44). The audit log records document.version_created.
      */
     put: operations['uploadDocumentContent'];
     post?: never;
@@ -8371,7 +8371,7 @@ export interface paths {
     put?: never;
     /**
      * Upload a new version of a document
-     * @description Stores the request body as version n+1 of the document under an object key of its own; the document mirrors the new version. Only a document the caller may change takes versions (all its links in the caller's write scope, WP-341); any other answers 404 before anything is stored. The Content-Type header is validated against the whitelist of PUT /api/v1/documents/{id}/content, the body is limited to 25 MiB. An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44); of two parallel uploads at the limit only the one that fits succeeds. A new version has the scan status pending_scan. The audit log records document.version_created with version, size, MIME type and checksum.
+     * @description Stores the request body as version n+1 of the document under an object key of its own; the document mirrors the new version. Only a document the caller may change takes versions (all its links in the caller's write scope, WP-341); any other answers 404 before anything is stored. The Content-Type header must name one of the allowed types and the content must carry its signature (SEC-09); the stored MIME type is the verified one. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB). An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44); of two parallel uploads at the limit only the one that fits succeeds. A new version has the scan status pending_scan. The audit log records document.version_created with version, size, MIME type and checksum.
      */
     post: operations['createDocumentVersion'];
     delete?: never;
@@ -25633,9 +25633,25 @@ export interface operations {
       };
       cookie?: never;
     };
+    /** @description The binary content (SEC-09). The Content-Type names its type and must be one of the listed ones; the content must carry the signature of that type: %PDF- for PDF, the image signatures for PNG, JPEG, GIF and WebP, a ZIP archive for application/zip, a ZIP archive with [Content_Types].xml for the OOXML formats (docx, xlsx, pptx), a compound file (D0 CF 11 E0 A1 B1 1A E1) for doc, xls and ppt, an XML declaration for application/xml, and valid UTF-8 text that is no HTML for JSON, CSV and plain text. HTML, executables (PE, ELF, Mach-O) and scripts (#!) are refused whatever the declaration. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB, 413 above it). */
     requestBody: {
       content: {
-        'application/octet-stream': string;
+        'application/pdf': string;
+        'image/png': string;
+        'image/jpeg': string;
+        'image/gif': string;
+        'image/webp': string;
+        'application/zip': string;
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': string;
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': string;
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': string;
+        'application/msword': string;
+        'application/vnd.ms-excel': string;
+        'application/vnd.ms-powerpoint': string;
+        'application/xml': string;
+        'application/json': string;
+        'text/csv': string;
+        'text/plain': string;
       };
     };
     responses: {
@@ -25661,7 +25677,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Unsupported media type */
+      /** @description The Content-Type is missing or not one of the allowed types (application/octet-stream is not accepted). */
       415: {
         headers: {
           [name: string]: unknown;
@@ -25670,9 +25686,20 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Blob storage is not configured */
+      /** @description The content does not match its declared Content-Type (type https://reticora.io/problems/mime-mismatch), or it is HTML, an executable (PE, ELF, Mach-O) or a script (#!). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Blob storage is not configured, or the instance runs as many uploads as RETICORA_DOCUMENT_UPLOAD_CONCURRENCY allows (with Retry-After). */
       503: {
         headers: {
+          /** @description Seconds to wait before retrying when all upload slots are taken. */
+          'Retry-After'?: number;
           [name: string]: unknown;
         };
         content: {
@@ -36369,9 +36396,25 @@ export interface operations {
       };
       cookie?: never;
     };
+    /** @description The binary content (SEC-09). The Content-Type names its type and must be one of the listed ones; the content must carry the signature of that type: %PDF- for PDF, the image signatures for PNG, JPEG, GIF and WebP, a ZIP archive for application/zip, a ZIP archive with [Content_Types].xml for the OOXML formats (docx, xlsx, pptx), a compound file (D0 CF 11 E0 A1 B1 1A E1) for doc, xls and ppt, an XML declaration for application/xml, and valid UTF-8 text that is no HTML for JSON, CSV and plain text. HTML, executables (PE, ELF, Mach-O) and scripts (#!) are refused whatever the declaration. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB, 413 above it). */
     requestBody: {
       content: {
-        'application/octet-stream': string;
+        'application/pdf': string;
+        'image/png': string;
+        'image/jpeg': string;
+        'image/gif': string;
+        'image/webp': string;
+        'application/zip': string;
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': string;
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': string;
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': string;
+        'application/msword': string;
+        'application/vnd.ms-excel': string;
+        'application/vnd.ms-powerpoint': string;
+        'application/xml': string;
+        'application/json': string;
+        'text/csv': string;
+        'text/plain': string;
       };
     };
     responses: {
@@ -36397,7 +36440,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Unsupported media type */
+      /** @description The Content-Type is missing or not one of the allowed types (application/octet-stream is not accepted). */
       415: {
         headers: {
           [name: string]: unknown;
@@ -36406,9 +36449,20 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Blob storage is not configured */
+      /** @description The content does not match its declared Content-Type (type https://reticora.io/problems/mime-mismatch), or it is HTML, an executable (PE, ELF, Mach-O) or a script (#!). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Blob storage is not configured, or the instance runs as many uploads as RETICORA_DOCUMENT_UPLOAD_CONCURRENCY allows (with Retry-After). */
       503: {
         headers: {
+          /** @description Seconds to wait before retrying when all upload slots are taken. */
+          'Retry-After'?: number;
           [name: string]: unknown;
         };
         content: {

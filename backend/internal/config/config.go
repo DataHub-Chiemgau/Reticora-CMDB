@@ -227,6 +227,10 @@ type Config struct {
 	// G1 default after E-03), "all" switches them all on.
 	Modules string
 
+	// Documents holds the upload limits of the document module (SEC-09,
+	// WP-268).
+	Documents DocumentSettings
+
 	// workers holds the operator switch of every registered background
 	// worker (OPS-02, see WorkerNames).
 	workers map[string]bool
@@ -336,6 +340,12 @@ func Load() *Config {
 		LLMEmbeddingModel: l.str("RETICORA_LLM_EMBEDDING_MODEL", ""),
 		AirGapped:         l.boolean("RETICORA_AIR_GAPPED", false),
 		Modules:           l.str("RETICORA_MODULES", ""),
+
+		Documents: DocumentSettings{
+			MaxUploadMB:       l.integer("RETICORA_DOCUMENT_MAX_UPLOAD_MB", DefaultDocumentMaxUploadMB),
+			UploadConcurrency: l.integer("RETICORA_DOCUMENT_UPLOAD_CONCURRENCY", DefaultDocumentUploadConcurrency),
+			UploadTimeout:     l.duration("RETICORA_DOCUMENT_UPLOAD_TIMEOUT", DefaultDocumentUploadTimeout),
+		},
 
 		LogLevel: slog.LevelInfo,
 	}
@@ -640,6 +650,7 @@ func (c *Config) Validate(noDB bool) error {
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))
 	}
+	errs = append(errs, c.Documents.errors()...)
 	if !c.IsDevelopment() {
 		// The development login (unsigned session tokens) exists only in
 		// development (AUT-03).
@@ -684,6 +695,46 @@ func (c *Config) Validate(noDB bool) error {
 			"the HTTP ingest takes no identity locks and several instances can duplicate devices (docs/betrieb/ingest-spuren.md)", EnvProduction))
 	}
 	return errors.Join(errs...)
+}
+
+// Defaults of the document uploads (SEC-09, WP-268).
+const (
+	DefaultDocumentMaxUploadMB       = 50
+	DefaultDocumentUploadConcurrency = 4
+	DefaultDocumentUploadTimeout     = 5 * time.Minute
+)
+
+// DocumentSettings are the upload limits of the document module (SEC-09,
+// WP-268): RETICORA_DOCUMENT_MAX_UPLOAD_MB is the largest body of one upload
+// in MiB (default 50), RETICORA_DOCUMENT_UPLOAD_CONCURRENCY the uploads one
+// instance runs at the same time (default 4, beyond that 503), and
+// RETICORA_DOCUMENT_UPLOAD_TIMEOUT the read and write deadline of an upload
+// request (default 5 min) in place of the global 15 s. Later document
+// settings (clamd, WP-734) belong here as well.
+type DocumentSettings struct {
+	MaxUploadMB       int
+	UploadConcurrency int
+	UploadTimeout     time.Duration
+}
+
+// MaxUploadBytes is MaxUploadMB in bytes.
+func (d DocumentSettings) MaxUploadBytes() int64 {
+	return int64(d.MaxUploadMB) << 20
+}
+
+// errors rejects values of zero or below (fail-closed, OPS-01).
+func (d DocumentSettings) errors() []error {
+	var errs []error
+	if d.MaxUploadMB <= 0 || int64(d.MaxUploadMB) > math.MaxInt64>>20 {
+		errs = append(errs, fmt.Errorf("RETICORA_DOCUMENT_MAX_UPLOAD_MB must be positive, got %d", d.MaxUploadMB))
+	}
+	if d.UploadConcurrency <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_DOCUMENT_UPLOAD_CONCURRENCY must be positive, got %d", d.UploadConcurrency))
+	}
+	if d.UploadTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_DOCUMENT_UPLOAD_TIMEOUT must be positive, got %s", d.UploadTimeout))
+	}
+	return errs
 }
 
 // uuidValue matches a UUID in its canonical text form.

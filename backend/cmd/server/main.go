@@ -544,6 +544,7 @@ func main() {
 		AuditPool:            auditPool,
 		AIProvider:           aiProvider,
 		Blobs:                blobStore,
+		Documents:            cfg.Documents,
 		Egress:               egressPolicy,
 		Readiness:            readiness,
 		IngestQueue:          ingestQueue,

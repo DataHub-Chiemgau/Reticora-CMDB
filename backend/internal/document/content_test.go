@@ -1,6 +1,7 @@
 package document
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -21,13 +24,15 @@ import (
 type fakeBlobStore struct {
 	mu      sync.Mutex
 	objects map[string][]byte
+	// types holds the content type each object was stored with.
+	types map[string]string
 }
 
 func newFakeBlobStore() *fakeBlobStore {
-	return &fakeBlobStore{objects: map[string][]byte{}}
+	return &fakeBlobStore{objects: map[string][]byte{}, types: map[string]string{}}
 }
 
-func (s *fakeBlobStore) Put(_ context.Context, bucket, key string, reader io.Reader, _ int64, _ string) error {
+func (s *fakeBlobStore) Put(_ context.Context, bucket, key string, reader io.Reader, _ int64, contentType string) error {
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return err
@@ -35,6 +40,7 @@ func (s *fakeBlobStore) Put(_ context.Context, bucket, key string, reader io.Rea
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.objects[bucket+"/"+key] = data
+	s.types[bucket+"/"+key] = contentType
 	return nil
 }
 
@@ -252,21 +258,238 @@ func TestUploadRejectsDisallowedMimeType(t *testing.T) {
 	}
 }
 
+// TestUploadEnforcesSizeLimit (SEC-09, WP-268): the limit comes from the
+// configuration (RETICORA_DOCUMENT_MAX_UPLOAD_MB); a body above it answers
+// 413 and stores nothing, a body at it is stored.
 func TestUploadEnforcesSizeLimit(t *testing.T) {
+	repo := NewMemoryRepository()
+	doc := &Document{OrganizationID: "org-1", Title: "t", FileName: "f.txt", Category: "general"}
+	if err := repo.Create(context.Background(), doc); err != nil {
+		t.Fatal(err)
+	}
+	blobs := newFakeBlobStore()
+	mux := chi.NewRouter()
+	NewHandler(repo, blobs).WithUploads(config.DocumentSettings{MaxUploadMB: 1}).RegisterRoutes(mux)
+
+	upload := func(size int64) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/documents/"+doc.ID+"/content", io.LimitReader(&infiniteReader{}, size))
+		req.Header.Set("Content-Type", "text/plain")
+		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	if w := upload(1<<20 + 1); w.Code != http.StatusRequestEntityTooLarge || !strings.Contains(w.Body.String(), "1 MiB") {
+		t.Fatalf("above the limit: got %d %s, want 413", w.Code, w.Body.String())
+	}
+	if len(blobs.objects) != 0 {
+		t.Fatalf("blobs after a refused upload: %d", len(blobs.objects))
+	}
+	if w := upload(1 << 20); w.Code != http.StatusOK {
+		t.Fatalf("at the limit: got %d %s, want 200", w.Code, w.Body.String())
+	}
+
+	// The default is 50 MiB (52,428,800 bytes).
+	if got := NewHandler(repo, blobs).uploads.maxBytes; got != 52428800 {
+		t.Fatalf("default limit %d", got)
+	}
+}
+
+// TestUploadRequiresContentType (SEC-09, WP-268): without a Content-Type,
+// and with application/octet-stream, which is no longer a default nor on
+// the whitelist, an upload answers 415.
+func TestUploadRequiresContentType(t *testing.T) {
 	repo, mux := newDocumentFixture(t)
 	id := documentID(t, repo)
+	for _, ct := range []string{"", "application/octet-stream"} {
+		for _, method := range []string{http.MethodPut, http.MethodPost} {
+			url := "/api/v1/documents/" + id + "/content"
+			if method == http.MethodPost {
+				url = "/api/v1/documents/" + id + "/versions"
+			}
+			if w := contentRequest(t, mux, method, url, ct, "%PDF-1.7"); w.Code != http.StatusUnsupportedMediaType {
+				t.Fatalf("%s with Content-Type %q: got %d %s, want 415", method, ct, w.Code, w.Body.String())
+			}
+		}
+	}
+}
 
-	req := httptest.NewRequest("PUT", "/api/v1/documents/"+id+"/content",
-		io.LimitReader(strings.NewReader("x"), int64(maxDocumentUpload)+1024))
-	// Simulate a body larger than the limit: MaxBytesReader only trips when
-	// the reader actually yields more than the limit, so wrap accordingly.
-	req.Body = io.NopCloser(io.LimitReader(&infiniteReader{}, int64(maxDocumentUpload)+1))
-	req.Header.Set("Content-Type", "application/octet-stream")
-	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("got %d, want 413", w.Code)
+// TestUploadStoresVerifiedType (SEC-09, WP-268): the stored type is the
+// verified one on both paths, in the version, the document and the blob;
+// content that does not match its type answers 422 mime-mismatch and
+// stores nothing.
+func TestUploadStoresVerifiedType(t *testing.T) {
+	repo := NewMemoryRepository()
+	doc := &Document{OrganizationID: "org-1", Title: "t", FileName: "f.png", MimeType: "application/pdf", Category: "general"}
+	if err := repo.Create(context.Background(), doc); err != nil {
+		t.Fatal(err)
+	}
+	blobs := newFakeBlobStore()
+	mux := chi.NewRouter()
+	NewHandler(repo, blobs).RegisterRoutes(mux)
+	png := "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+
+	w := contentRequest(t, mux, http.MethodPut, "/api/v1/documents/"+doc.ID+"/content", "Image/PNG; name=x", png)
+	var d Document
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &d) != nil || d.MimeType != "image/png" {
+		t.Fatalf("PUT content: got %d %s", w.Code, w.Body.String())
+	}
+	if got := blobs.types[documentBucket+"/"+d.StorageKey]; got != "image/png" {
+		t.Fatalf("blob content type %q", got)
+	}
+	w = contentRequest(t, mux, http.MethodPost, "/api/v1/documents/"+doc.ID+"/versions", "text/csv; charset=utf-8", "a;b\n1;2\n")
+	var v Version
+	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &v) != nil || v.MimeType != "text/csv" {
+		t.Fatalf("POST versions: got %d %s", w.Code, w.Body.String())
+	}
+	current, err := repo.GetByID(context.Background(), "org-1", doc.ID)
+	if err != nil || current.MimeType != "text/csv" {
+		t.Fatalf("document mime type: %+v %v", current, err)
+	}
+	if got := blobs.types[documentBucket+"/"+current.StorageKey]; got != "text/csv" {
+		t.Fatalf("blob content type %q", got)
+	}
+
+	for _, method := range []string{http.MethodPut, http.MethodPost} {
+		url := "/api/v1/documents/" + doc.ID + "/content"
+		if method == http.MethodPost {
+			url = "/api/v1/documents/" + doc.ID + "/versions"
+		}
+		w = contentRequest(t, mux, method, url, "image/png", "%PDF-1.7 not an image")
+		if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), ProblemMimeMismatch) ||
+			!strings.Contains(w.Body.String(), `"trace_id"`) {
+			t.Fatalf("%s PDF as image/png: got %d %s, want 422 mime-mismatch", method, w.Code, w.Body.String())
+		}
+	}
+	if len(blobs.objects) != 2 {
+		t.Fatalf("blobs %d, want 2", len(blobs.objects))
+	}
+}
+
+// TestUploadConcurrencyLimit (SEC-09, WP-268): with four uploads running,
+// the fifth answers 503 with Retry-After; once they end, the next is taken.
+func TestUploadConcurrencyLimit(t *testing.T) {
+	repo, _ := newDocumentFixture(t)
+	id := documentID(t, repo)
+	h := NewHandler(repo, newFakeBlobStore()).WithUploads(config.DocumentSettings{UploadConcurrency: 4})
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+
+	var wg sync.WaitGroup
+	writers := make([]*io.PipeWriter, 4)
+	codes := make([]int, 4)
+	for i := range writers {
+		pr, pw := io.Pipe()
+		writers[i] = pw
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/"+id+"/versions", pr)
+		req.Header.Set("Content-Type", "text/plain")
+		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"}))
+		wg.Add(1)
+		go func(i int, req *http.Request) {
+			defer wg.Done()
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			codes[i] = rec.Code
+		}(i, req)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(h.uploads.slots) < 4 {
+		if time.Now().After(deadline) {
+			t.Fatalf("uploads running: %d, want 4", len(h.uploads.slots))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	w := contentRequest(t, mux, http.MethodPut, "/api/v1/documents/"+id+"/content", "text/plain", "fifth")
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+		t.Fatalf("fifth upload: got %d (Retry-After %q) %s, want 503", w.Code, w.Header().Get("Retry-After"), w.Body.String())
+	}
+
+	for _, pw := range writers {
+		_, _ = pw.Write([]byte("running upload"))
+		_ = pw.Close()
+	}
+	wg.Wait()
+	for i, code := range codes {
+		if code != http.StatusCreated {
+			t.Fatalf("upload %d: got %d, want 201", i+1, code)
+		}
+	}
+	if w = contentRequest(t, mux, http.MethodPut, "/api/v1/documents/"+id+"/content", "text/plain", "after"); w.Code != http.StatusOK {
+		t.Fatalf("upload after the others: got %d %s", w.Code, w.Body.String())
+	}
+}
+
+// slowReader yields its chunks with a pause before each.
+type slowReader struct {
+	chunks [][]byte
+	pause  time.Duration
+}
+
+func (s *slowReader) Read(p []byte) (int, error) {
+	if len(s.chunks) == 0 {
+		return 0, io.EOF
+	}
+	time.Sleep(s.pause)
+	n := copy(p, s.chunks[0])
+	s.chunks[0] = s.chunks[0][n:]
+	if len(s.chunks[0]) == 0 {
+		s.chunks = s.chunks[1:]
+	}
+	return n, nil
+}
+
+// TestSlowUploadOutlastsServerTimeout (SEC-09, WP-268): an upload throttled
+// over more than 2 s reaches a server with a ReadTimeout and WriteTimeout of
+// 1 s completely, because the upload extends its deadlines.
+func TestSlowUploadOutlastsServerTimeout(t *testing.T) {
+	repo, _ := newDocumentFixture(t)
+	id := documentID(t, repo)
+	blobs := newFakeBlobStore()
+	mux := chi.NewRouter()
+	NewHandler(repo, blobs).RegisterRoutes(mux)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := tenant.WithTenant(r.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"})
+		mux.ServeHTTP(w, r.WithContext(ctx))
+	}))
+	srv.Config.ReadTimeout = time.Second
+	srv.Config.WriteTimeout = time.Second
+	srv.Start()
+	defer srv.Close()
+
+	chunks := [][]byte{[]byte("%PDF-1.7\n")}
+	for i := range 5 {
+		chunks = append(chunks, fmt.Appendf(nil, "chunk %d\n", i))
+	}
+	want := string(bytes.Join(chunks, nil))
+	req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/v1/documents/"+id+"/content",
+		&slowReader{chunks: chunks, pause: 450 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/pdf")
+	start := time.Now()
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("slow upload: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("slow upload: got %d %s", resp.StatusCode, body)
+	}
+	if elapsed := time.Since(start); elapsed < 2*time.Second {
+		t.Fatalf("upload took %s, want more than 2 s", elapsed)
+	}
+	var d Document
+	if uerr := json.Unmarshal(body, &d); uerr != nil {
+		t.Fatal(uerr)
+	}
+	blobs.mu.Lock()
+	got := string(blobs.objects[documentBucket+"/"+d.StorageKey])
+	blobs.mu.Unlock()
+	if got != want {
+		t.Fatalf("stored %q, want %q", got, want)
 	}
 }
 

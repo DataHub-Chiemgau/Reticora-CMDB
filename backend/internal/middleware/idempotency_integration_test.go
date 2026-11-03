@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TestIdempotencyIsAtomicAndPrincipalBound covers WP-050 (API-04): parallel
@@ -208,8 +209,9 @@ func lowerIdempotentRequestBody(t *testing.T, limit int64) {
 // TestIdempotencyHashesTheWholeBody covers WP-778 (API-04): with an
 // Idempotency-Key a body over 1 MiB reaches the handler in full, two bodies
 // with the same first MiB are different requests (409 idempotency-mismatch),
-// and a body above maxIdempotentRequestBody gets 413 without the handler
-// and without reserving the key.
+// and a JSON body above maxIdempotentRequestBody gets 413 without the
+// handler and without reserving the key (a binary body is streamed since
+// WP-268, see TestIdempotencyStreamsBinaryBodies).
 func TestIdempotencyHashesTheWholeBody(t *testing.T) {
 	store := cache.NewMemoryStore()
 	var calls atomic.Int32
@@ -234,7 +236,7 @@ func TestIdempotencyHashesTheWholeBody(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Idempotency-Key", key)
-		req.Header.Set("Content-Type", "application/octet-stream")
+		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		return w
@@ -276,5 +278,184 @@ func TestIdempotencyHashesTheWholeBody(t *testing.T) {
 	if atCap.Code != http.StatusCreated || atCap.Header().Get("Idempotency-Replayed") != "" || calls.Load() != 2 || gotLen.Load() != 1<<10 {
 		t.Errorf("body at the cap after 413: %d replayed %q, handler ran %d times, got %d bytes",
 			atCap.Code, atCap.Header().Get("Idempotency-Replayed"), calls.Load(), gotLen.Load())
+	}
+}
+
+// TestIdempotencyStreamsBinaryBodies covers WP-268 (SEC-09): a 2 MiB
+// application/pdf body with an Idempotency-Key reaches the handler
+// completely and unbuffered, the replay of the same body returns the stored
+// response without the handler, another body gets 409 idempotency-mismatch,
+// also when the handler read only a part of the first one.
+func TestIdempotencyStreamsBinaryBodies(t *testing.T) {
+	store := cache.NewMemoryStore()
+	var calls atomic.Int32
+	var gotLen atomic.Int64
+	var readAll atomic.Bool
+	readAll.Store(true)
+	handler := Chain(
+		AuthMiddleware,
+		TenantMiddleware,
+		IdempotencyWithStore(store),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		var n int64
+		var err error
+		if readAll.Load() {
+			n, err = io.Copy(io.Discard, r.Body)
+		} else {
+			n, err = io.CopyN(io.Discard, r.Body, 10)
+		}
+		if err != nil {
+			t.Errorf("handler read: %v", err)
+		}
+		gotLen.Store(n)
+		api.WriteJSON(w, http.StatusCreated, map[string]int64{"length": n})
+	}))
+	post := func(key string, body []byte) *httptest.ResponseRecorder {
+		token := testToken(t, Claims{Subject: "alice", OrganizationID: "org-1", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/d-1/versions", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Idempotency-Key", key)
+		req.Header.Set("Content-Type", "application/pdf")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w
+	}
+
+	first := append([]byte("%PDF-1.7\n"), bytes.Repeat([]byte("a"), 2<<20)...)
+	second := bytes.Clone(first)
+	second[len(second)-1] = 'b'
+
+	w := post("k-pdf", first)
+	if w.Code != http.StatusCreated || calls.Load() != 1 || gotLen.Load() != int64(len(first)) {
+		t.Fatalf("2 MiB PDF: %d, handler ran %d times and read %d of %d bytes", w.Code, calls.Load(), gotLen.Load(), len(first))
+	}
+	if replay := post("k-pdf", first); replay.Code != http.StatusCreated || replay.Header().Get("Idempotency-Replayed") != "true" ||
+		calls.Load() != 1 {
+		t.Fatalf("replay: %d replayed %q, handler ran %d times", replay.Code, replay.Header().Get("Idempotency-Replayed"), calls.Load())
+	}
+	if mismatch := post("k-pdf", second); mismatch.Code != http.StatusConflict ||
+		!strings.Contains(mismatch.Body.String(), "idempotency-mismatch") || calls.Load() != 1 {
+		t.Fatalf("other body: %d, handler ran %d times: %s", mismatch.Code, calls.Load(), mismatch.Body.String())
+	}
+
+	// The handler stops after 10 bytes: the rest is hashed anyway, so a
+	// body that differs only at its end is another request.
+	readAll.Store(false)
+	if w = post("k-partial", first); w.Code != http.StatusCreated || calls.Load() != 2 {
+		t.Fatalf("partly read body: %d, handler ran %d times", w.Code, calls.Load())
+	}
+	if replay := post("k-partial", first); replay.Header().Get("Idempotency-Replayed") != "true" || calls.Load() != 2 {
+		t.Fatalf("replay of a partly read body: %d replayed %q", replay.Code, replay.Header().Get("Idempotency-Replayed"))
+	}
+	if mismatch := post("k-partial", second); mismatch.Code != http.StatusConflict || calls.Load() != 2 {
+		t.Fatalf("other body after a partly read one: %d, handler ran %d times", mismatch.Code, calls.Load())
+	}
+
+	// The body is not read ahead: the handler reads its start while the
+	// client still holds back the rest.
+	started := make(chan struct{})
+	streamHandler := Chain(AuthMiddleware, TenantMiddleware, IdempotencyWithStore(store))(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			head := make([]byte, 5)
+			if _, err := io.ReadFull(r.Body, head); err != nil {
+				t.Errorf("read the start: %v", err)
+			}
+			close(started)
+			rest, _ := io.ReadAll(r.Body)
+			api.WriteJSON(w, http.StatusCreated, map[string]int{"length": len(head) + len(rest)})
+		}))
+	pr, pw := io.Pipe()
+	go func() {
+		_, _ = pw.Write([]byte("%PDF-"))
+		select {
+		case <-started:
+			_, _ = pw.Write([]byte("1.7 rest"))
+			_ = pw.Close()
+		case <-time.After(5 * time.Second):
+			_ = pw.CloseWithError(io.ErrUnexpectedEOF)
+		}
+	}()
+	token := testToken(t, Claims{Subject: "alice", OrganizationID: "org-1", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/d-1/versions", pr)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Idempotency-Key", "k-stream")
+	req.Header.Set("Content-Type", "application/pdf")
+	rec := httptest.NewRecorder()
+	streamHandler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"length":13`) {
+		t.Fatalf("streamed body: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// A JSON POST stays buffered: replay and 409 as before.
+	jsonHandler := Chain(AuthMiddleware, TenantMiddleware, IdempotencyWithStore(store))(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			api.WriteJSON(w, http.StatusCreated, map[string]string{"id": "x"})
+		}))
+	jsonPost := func(body string) *httptest.ResponseRecorder {
+		token := testToken(t, Claims{Subject: "alice", OrganizationID: "org-1", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/cis", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Idempotency-Key", "k-json")
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		jsonHandler.ServeHTTP(rec, req)
+		return rec
+	}
+	if created := jsonPost(`{"name":"a"}`); created.Code != http.StatusCreated {
+		t.Fatalf("JSON POST: %d", created.Code)
+	}
+	if replay := jsonPost(`{"name":"a"}`); replay.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("JSON replay: %d", replay.Code)
+	}
+	if mismatch := jsonPost(`{"name":"b"}`); mismatch.Code != http.StatusConflict {
+		t.Fatalf("JSON mismatch: %d", mismatch.Code)
+	}
+}
+
+// TestResponseControllerReachesServer covers WP-268: behind Logger,
+// RegisterHTTPMetrics and IdempotencyWithStore a handler extends its read
+// and write deadline with http.NewResponseController (no
+// http.ErrNotSupported), because the writers of the middleware unwrap.
+func TestResponseControllerReachesServer(t *testing.T) {
+	var readErr, writeErr error
+	var ran atomic.Bool
+	handler := Chain(
+		Logger,
+		RegisterHTTPMetrics(prometheus.NewRegistry(), false),
+		AuthMiddleware,
+		TenantMiddleware,
+		IdempotencyWithStore(cache.NewMemoryStore()),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		readErr = rc.SetReadDeadline(time.Now().Add(time.Minute))
+		writeErr = rc.SetWriteDeadline(time.Now().Add(time.Minute))
+		ran.Store(true)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	for _, ct := range []string{"application/pdf", "application/json"} {
+		ran.Store(false)
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/documents/d-1/versions", strings.NewReader(`{"a":1}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		token := testToken(t, Claims{Subject: "alice", OrganizationID: "org-1", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Idempotency-Key", "k-"+ct)
+		req.Header.Set("Content-Type", ct)
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if !ran.Load() || resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("%s: status %d, handler ran %v", ct, resp.StatusCode, ran.Load())
+		}
+		if readErr != nil || writeErr != nil {
+			t.Fatalf("%s: SetReadDeadline %v, SetWriteDeadline %v", ct, readErr, writeErr)
+		}
 	}
 }

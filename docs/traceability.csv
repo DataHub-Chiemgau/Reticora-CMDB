@@ -1302,3 +1302,4 @@ API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/ci/tags_api_integration_test.go;WP-
 ENT-02;[B];C;backend/internal/export/datev_gate_test.go;WP-790
 ENT-05;[B];C;backend/internal/export/datev_gate_test.go;WP-790
 API-01;[B];C;backend/internal/export/datev_gate_test.go;WP-790
+SEC-09;[P2];B;backend/internal/document/sniff_test.go;WP-268

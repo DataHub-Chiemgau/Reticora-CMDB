@@ -32,6 +32,25 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 }
 
+// TestDocumentSettingsDefaults covers SEC-09 (WP-268): 50 MiB per upload,
+// 4 parallel uploads and 5 minutes per upload request; set values are read.
+func TestDocumentSettingsDefaults(t *testing.T) {
+	clearEnv(t)
+	cfg := Load()
+	want := DocumentSettings{MaxUploadMB: 50, UploadConcurrency: 4, UploadTimeout: 5 * time.Minute}
+	if cfg.Documents != want || cfg.Documents.MaxUploadBytes() != 52428800 {
+		t.Fatalf("defaults %+v, want %+v", cfg.Documents, want)
+	}
+	if err := cfg.Validate(false); err != nil {
+		t.Fatalf("Validate() = %v", err)
+	}
+	setAll(t, map[string]string{"RETICORA_DOCUMENT_MAX_UPLOAD_MB": "10", "RETICORA_DOCUMENT_UPLOAD_CONCURRENCY": "2",
+		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT": "90s"})
+	if got := Load().Documents; got != (DocumentSettings{MaxUploadMB: 10, UploadConcurrency: 2, UploadTimeout: 90 * time.Second}) {
+		t.Fatalf("from the environment %+v", got)
+	}
+}
+
 // clearEnv blanks every variable Validate looks at; an empty value counts as
 // unset.
 func clearEnv(t *testing.T) {
@@ -39,7 +58,8 @@ func clearEnv(t *testing.T) {
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
 		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
-		"RETICORA_EVENTS_MAX_BYTES",
+		"RETICORA_EVENTS_MAX_BYTES", "RETICORA_DOCUMENT_MAX_UPLOAD_MB", "RETICORA_DOCUMENT_UPLOAD_CONCURRENCY",
+		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -184,6 +204,14 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"no ingest lane", map[string]string{"RETICORA_INGEST_LANES": "0"}, false, "RETICORA_INGEST_LANES must be between 1 and 16, got 0"},
 		{"too many ingest lanes", map[string]string{"RETICORA_INGEST_LANES": "17"}, false, "RETICORA_INGEST_LANES must be between 1 and 16, got 17"},
 		{"unparsable ingest lanes", map[string]string{"RETICORA_INGEST_LANES": "x"}, false, "RETICORA_INGEST_LANES has an invalid value"},
+		{"no upload size", map[string]string{"RETICORA_DOCUMENT_MAX_UPLOAD_MB": "0"}, false, "RETICORA_DOCUMENT_MAX_UPLOAD_MB must be positive"},
+		{"negative upload size", map[string]string{"RETICORA_DOCUMENT_MAX_UPLOAD_MB": "-1"}, false, "RETICORA_DOCUMENT_MAX_UPLOAD_MB must be positive"},
+		{"no upload concurrency", map[string]string{"RETICORA_DOCUMENT_UPLOAD_CONCURRENCY": "0"}, false,
+			"RETICORA_DOCUMENT_UPLOAD_CONCURRENCY must be positive"},
+		{"no upload timeout", map[string]string{"RETICORA_DOCUMENT_UPLOAD_TIMEOUT": "0s"}, false, "RETICORA_DOCUMENT_UPLOAD_TIMEOUT must be positive"},
+		{"negative upload timeout", map[string]string{"RETICORA_DOCUMENT_UPLOAD_TIMEOUT": "-1m"}, false, "RETICORA_DOCUMENT_UPLOAD_TIMEOUT must be positive"},
+		{"unparsable upload timeout", map[string]string{"RETICORA_DOCUMENT_UPLOAD_TIMEOUT": "soon"}, false,
+			"RETICORA_DOCUMENT_UPLOAD_TIMEOUT has an invalid value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
