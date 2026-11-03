@@ -247,23 +247,63 @@ func (r *PGRepository) ciLayers(ctx context.Context, orgID, ciID string) ([]Inst
 		return fields, templates, nil
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var instanceRaw, templateRaw []byte
-		if err := tx.QueryRow(ctx, `SELECT
-				COALESCE((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.sort_order, d.name)
-					FROM ci_instance_field_definition d
-					WHERE d.ci_id = $1 AND d.organization_id = $2 AND EXISTS (SELECT 1 FROM ci WHERE ci.id = d.ci_id)), '[]'::jsonb),
-				COALESCE((SELECT jsonb_agg(`+templateItemsJSON("ct.template_id", "ct.version")+` ORDER BY ct.position)
-					FROM ci_template ct WHERE ct.ci_id = $1), '[]'::jsonb)`, ciID, orgID).Scan(&instanceRaw, &templateRaw); err != nil {
-			return fmt.Errorf("list instance fields and templates: %w", err)
-		}
 		var err error
-		if fields, err = instanceFieldsFromJSON(instanceRaw); err != nil {
-			return err
-		}
-		templates, err = templateLayersFromJSON(templateRaw)
+		fields, templates, err = ciLayersTx(ctx, tx, orgID, ciID)
 		return err
 	})
 	return fields, templates, err
+}
+
+// ciLayersTx is ciLayers in tx, one statement (also CheckComposition,
+// WP-252).
+func ciLayersTx(ctx context.Context, tx pgx.Tx, orgID, ciID string) ([]InstanceField, [][]templateItem, error) {
+	if !api.IsUUID(ciID) {
+		return nil, nil, nil
+	}
+	var instanceRaw, templateRaw []byte
+	if err := tx.QueryRow(ctx, `SELECT
+			COALESCE((SELECT jsonb_agg(to_jsonb(d) ORDER BY d.sort_order, d.name)
+				FROM ci_instance_field_definition d
+				WHERE d.ci_id = $1 AND d.organization_id = $2 AND EXISTS (SELECT 1 FROM ci WHERE ci.id = d.ci_id)), '[]'::jsonb),
+			COALESCE((SELECT jsonb_agg(`+templateItemsJSON("ct.template_id", "ct.version")+` ORDER BY ct.position)
+				FROM ci_template ct WHERE ct.ci_id = $1), '[]'::jsonb)`, ciID, orgID).Scan(&instanceRaw, &templateRaw); err != nil {
+		return nil, nil, fmt.Errorf("list instance fields and templates: %w", err)
+	}
+	fields, err := instanceFieldsFromJSON(instanceRaw)
+	if err != nil {
+		return nil, nil, err
+	}
+	templates, err := templateLayersFromJSON(templateRaw)
+	return fields, templates, err
+}
+
+// templateVersionLayersTx reads the items of the template versions ids
+// (template_version.id) in the given order, one layer per version, as the
+// template layer of CheckComposition (WP-252). An unknown or invisible
+// version is ErrTemplateVersionNotFound.
+func templateVersionLayersTx(ctx context.Context, tx pgx.Tx, ids []string) ([][]templateItem, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	for _, id := range ids {
+		if !api.IsUUID(id) {
+			return nil, ErrTemplateVersionNotFound
+		}
+	}
+	var (
+		found int
+		raw   []byte
+	)
+	if err := tx.QueryRow(ctx, `SELECT count(tv.id)::int, COALESCE(jsonb_agg(`+templateItemsJSON("tv.template_id", "tv.version")+`
+			ORDER BY r.ord) FILTER (WHERE tv.id IS NOT NULL), '[]'::jsonb)
+		FROM unnest($1::uuid[]) WITH ORDINALITY AS r(version_id, ord)
+		LEFT JOIN template_version tv ON tv.id = r.version_id`, ids).Scan(&found, &raw); err != nil {
+		return nil, fmt.Errorf("read template versions: %w", err)
+	}
+	if found != len(ids) {
+		return nil, ErrTemplateVersionNotFound
+	}
+	return templateLayersFromJSON(raw)
 }
 
 // instanceFieldsFromJSON decodes ci_instance_field_definition rows

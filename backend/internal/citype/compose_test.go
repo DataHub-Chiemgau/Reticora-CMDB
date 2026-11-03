@@ -217,6 +217,7 @@ type layeredLister struct {
 	sets                         [][]Field
 	globals                      []Field
 	chain                        []Type
+	templates                    [][]templateItem
 }
 
 func (l layeredLister) ListSetFields(context.Context, string, string) ([][]Field, error) {
@@ -256,7 +257,18 @@ func (l layeredLister) TypeCategory(_ context.Context, _, typeID string) (string
 
 func (l layeredLister) ListInstanceFields(context.Context, string, string) ([]InstanceField, error) {
 	in := l.instance
-	return []InstanceField{{Name: in.Name, DataType: in.DataType, Required: in.Required, Validation: in.Validation}}, nil
+	if in.Name == "" {
+		return nil, nil
+	}
+	return []InstanceField{{Name: in.Name, DataType: in.DataType, Required: in.Required, Validation: in.Validation,
+		DefaultValue: in.DefaultValue, EnumValues: in.EnumValues, ReferenceTarget: in.ReferenceTarget}}, nil
+}
+
+// ciLayers implements ciLayerLister: the instance layer and the templates
+// of the CI (WP-710) in position order.
+func (l layeredLister) ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, error) {
+	in, err := l.ListInstanceFields(ctx, orgID, ciID)
+	return in, l.templates, err
 }
 
 // TestResolveFieldsComposesLayers: the effective fields compose system
@@ -282,6 +294,331 @@ func TestResolveFieldsComposesLayers(t *testing.T) {
 	var conflict *CompositionError
 	if !errors.As(err, &conflict) || conflict.CompositionKey() != "size" {
 		t.Errorf("instance with another data type: %v", err)
+	}
+
+	// Every layer (WP-252): system base → organization → chain root →
+	// parent → type (WP-248) → set (WP-709) → two templates (WP-710) →
+	// instance, each narrowing size once.
+	yes := true
+	full := layeredLister{
+		globals: []Field{
+			{Name: "size", DataType: fieldmeta.TypeInteger, IsSystem: true, Validation: &fieldmeta.ValidationRules{Min: f64(0)}},
+			{Name: "size", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Max: f64(1000)}},
+		},
+		chain: []Type{
+			{ID: "root", Fields: []Field{{Name: "size", DataType: fieldmeta.TypeInteger, Inheritable: true,
+				Validation: &fieldmeta.ValidationRules{Max: f64(500)}}}},
+			{ID: "parent", ParentTypeID: "root", Fields: []Field{{Name: "size", DataType: fieldmeta.TypeInteger, Inheritable: true,
+				Validation: &fieldmeta.ValidationRules{Min: f64(2)}}}},
+			{ID: "type", ParentTypeID: "parent", Fields: []Field{{Name: "size", DataType: fieldmeta.TypeInteger,
+				Validation: &fieldmeta.ValidationRules{Max: f64(400)}}}},
+		},
+		sets: [][]Field{{{Name: "size", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Max: f64(300)}}}},
+		templates: [][]templateItem{
+			{templateItemOf(AttributeDefinition{Key: "size", DataType: fieldmeta.TypeInteger}, nil, `"7"`)},
+			{templateItemOf(AttributeDefinition{Key: "size", DataType: fieldmeta.TypeInteger}, &yes, "")},
+		},
+		instance: Field{Name: "size", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Max: f64(200)}},
+	}
+	defs, err = ResolveFields(context.Background(), full, "org", "type", "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 || !defs[0].Required || *defs[0].Validation.Min != 2 || *defs[0].Validation.Max != 200 ||
+		defs[0].DefaultValue != "7" {
+		t.Fatalf("resolved over every layer = %+v %+v, want required, 2..200, default 7", defs, defs[0].Validation)
+	}
+}
+
+// templateItemOf is an item of a template version over def with the
+// required and default overrides (WP-251).
+func templateItemOf(def AttributeDefinition, required *bool, defaultJSON string) templateItem {
+	it := templateItem{def: def, item: TemplateVersionItem{Key: def.Key, RequiredOverride: required}}
+	if defaultJSON != "" {
+		it.item.DefaultOverride = []byte(defaultJSON)
+	}
+	return it
+}
+
+// TestCompositionConformanceMatrix is the conformance matrix of MET-16
+// (WP-252, TST-01 part "template composition"): for each rule a case that
+// composes and a case with the expected code where the rule can fail
+// (required-OR, allOf and the default cannot; their second case shows that
+// a later layer does not loosen them), then the layer cases: a type chain
+// of three levels, two sets in position order, two combined templates
+// (ABN-01 c, E-37), the organization's globals after the system base, the
+// instance refinement and a type with several conflicts (ComposeAll). A
+// case either lists layers or a lister whose layers compositionLayers
+// builds (the one layer order of ResolveFields and CheckComposition).
+func TestCompositionConformanceMatrix(t *testing.T) {
+	type def = fieldmeta.FieldDefinition
+	yes, no := true, false
+	text := func(name string) def { return def{Name: name, DataType: fieldmeta.TypeText} }
+	withV := func(d def, v fieldmeta.ValidationRules) def { d.Validation = &v; return d }
+	enum := func(name string, values ...string) def {
+		return def{Name: name, DataType: fieldmeta.TypeEnum, EnumValues: values}
+	}
+	cases := []struct {
+		name   string
+		layers [][]def
+		lister *layeredLister
+		// codes are the expected conflicts in order ("" none).
+		codes []string
+		// check inspects the composed definition of k (rule cases) or the
+		// composed list (layer cases); "" is fine.
+		check func(byName map[string]def) string
+	}{
+		{name: "required-OR: a narrower layer makes it required",
+			layers: [][]def{{text("k")}, {{Name: "k", DataType: fieldmeta.TypeText, Required: true}}},
+			check:  wantField("k", func(d def) bool { return d.Required })},
+		{name: "required-OR: a later layer cannot drop it",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeText, Required: true}}, {text("k")}},
+			check:  wantField("k", func(d def) bool { return d.Required })},
+		{name: "enum_values intersect",
+			layers: [][]def{{enum("k", "a", "b", "c")}, {enum("k", "c", "b", "d")}},
+			check:  wantField("k", func(d def) bool { return reflect.DeepEqual(d.EnumValues, []string{"b", "c"}) })},
+		{name: "enum_values without a common value",
+			layers: [][]def{{enum("k", "a")}, {enum("k", "b")}}, codes: []string{CodeEnumEmpty}},
+		{name: "validation.options intersect",
+			layers: [][]def{{withV(text("k"), fieldmeta.ValidationRules{Options: []any{"x", "y"}})},
+				{withV(text("k"), fieldmeta.ValidationRules{Options: []any{"y", "z"}})}},
+			check: wantField("k", func(d def) bool { return reflect.DeepEqual(d.Validation.Options, []any{"y"}) })},
+		{name: "validation.options without a common value",
+			layers: [][]def{{withV(text("k"), fieldmeta.ValidationRules{Options: []any{"x"}})},
+				{withV(text("k"), fieldmeta.ValidationRules{Options: []any{"z"}})}},
+			codes: []string{CodeEnumEmpty}},
+		{name: "enum_values and validation.options intersect",
+			layers: [][]def{{enum("k", "a", "b")}, {{Name: "k", DataType: fieldmeta.TypeEnum,
+				Validation: &fieldmeta.ValidationRules{Options: []any{"b", "c"}}}}},
+			check: wantField("k", func(d def) bool { return reflect.DeepEqual(d.EnumValues, []string{"b"}) })},
+		{name: "min/max take the narrowest range",
+			layers: [][]def{{withV(def{Name: "k", DataType: fieldmeta.TypeInteger}, fieldmeta.ValidationRules{Min: f64(1), Max: f64(100)})},
+				{withV(def{Name: "k", DataType: fieldmeta.TypeInteger}, fieldmeta.ValidationRules{Min: f64(5), Max: f64(200)})}},
+			check: wantField("k", func(d def) bool { return *d.Validation.Min == 5 && *d.Validation.Max == 100 })},
+		{name: "min/max with an empty range",
+			layers: [][]def{{withV(def{Name: "k", DataType: fieldmeta.TypeInteger}, fieldmeta.ValidationRules{Max: f64(4)})},
+				{withV(def{Name: "k", DataType: fieldmeta.TypeInteger}, fieldmeta.ValidationRules{Min: f64(5)})}},
+			codes: []string{CodeRangeEmpty}},
+		{name: "min_length/max_length take the narrowest range",
+			layers: [][]def{{withV(text("k"), fieldmeta.ValidationRules{MinLength: intp(1), MaxLength: intp(20)})},
+				{withV(text("k"), fieldmeta.ValidationRules{MinLength: intp(3), MaxLength: intp(30)})}},
+			check: wantField("k", func(d def) bool { return *d.Validation.MinLength == 3 && *d.Validation.MaxLength == 20 })},
+		{name: "min_length/max_length with an empty range",
+			layers: [][]def{{withV(text("k"), fieldmeta.ValidationRules{MaxLength: intp(2)})},
+				{withV(text("k"), fieldmeta.ValidationRules{MinLength: intp(3)})}},
+			codes: []string{CodeLengthRangeEmpty}},
+		{name: "patterns all apply (allOf)",
+			layers: [][]def{{withV(text("k"), fieldmeta.ValidationRules{Pattern: "^a"})},
+				{withV(text("k"), fieldmeta.ValidationRules{Pattern: "z$"})}},
+			check: wantField("k", func(d def) bool {
+				return d.Validation.Pattern == "^a" && reflect.DeepEqual(d.Validation.Patterns, []string{"z$"}) &&
+					fieldmeta.ValidateValue(d, "abz") == nil && fieldmeta.ValidateValue(d, "ab") != nil
+			})},
+		{name: "patterns: a later layer cannot drop one",
+			layers: [][]def{{withV(text("k"), fieldmeta.ValidationRules{Pattern: "^a"})}, {text("k")}},
+			check:  wantField("k", func(d def) bool { return d.Validation != nil && d.Validation.Pattern == "^a" })},
+		{name: "default of the last layer that sets one",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeText, DefaultValue: "a"}},
+				{{Name: "k", DataType: fieldmeta.TypeText, DefaultValue: "b"}}},
+			check: wantField("k", func(d def) bool { return d.DefaultValue == "b" })},
+		{name: "default: a layer without one keeps it",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeText, DefaultValue: "a"}}, {text("k")}},
+			check:  wantField("k", func(d def) bool { return d.DefaultValue == "a" })},
+		{name: "data type: former names compose with the MET-11 name",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeTextarea}}, {{Name: "k", DataType: fieldmeta.TypeMultiline}}},
+			check:  wantField("k", func(d def) bool { return d.DataType == fieldmeta.TypeMultiline })},
+		{name: "data type differs",
+			layers: [][]def{{text("k")}, {{Name: "k", DataType: fieldmeta.TypeInteger}}}, codes: []string{CodeDatatypeConflict}},
+		{name: "reference target: alias and reference with the same target",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeUser}}, {{Name: "k", DataType: fieldmeta.TypeReference, ReferenceTarget: "user"}}}},
+		{name: "reference target differs",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeReference, ReferenceTarget: "user"}},
+				{{Name: "k", DataType: fieldmeta.TypeReference, ReferenceTarget: "team"}}},
+			codes: []string{CodeDatatypeConflict}},
+		{name: "multi_value equal",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeText, MultiValue: &yes}}, {{Name: "k", DataType: fieldmeta.TypeText, MultiValue: &yes}}},
+			check:  wantField("k", func(d def) bool { return d.MultiValue != nil && *d.MultiValue })},
+		{name: "multi_value differs",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeText, MultiValue: &yes}}, {{Name: "k", DataType: fieldmeta.TypeText, MultiValue: &no}}},
+			codes:  []string{CodeDatatypeConflict}},
+		{name: "multi_value missing on the instance is no conflict",
+			layers: [][]def{{{Name: "k", DataType: fieldmeta.TypeText, MultiValue: &yes}}, {text("k")}},
+			check:  wantField("k", func(d def) bool { return d.MultiValue != nil && *d.MultiValue })},
+
+		{name: "type chain of three levels root → leaf",
+			lister: &layeredLister{chain: []Type{
+				{ID: "root", Fields: []Field{{Name: "k", DataType: fieldmeta.TypeInteger, Inheritable: true,
+					Validation: &fieldmeta.ValidationRules{Max: f64(100)}}, {Name: "private", DataType: fieldmeta.TypeText}}},
+				{ID: "mid", ParentTypeID: "root", Fields: []Field{{Name: "k", DataType: fieldmeta.TypeInteger, Inheritable: true,
+					Validation: &fieldmeta.ValidationRules{Min: f64(10)}}}},
+				{ID: "leaf", ParentTypeID: "mid", Fields: []Field{{Name: "k", DataType: fieldmeta.TypeInteger, Required: true}}},
+			}, globals: []Field{}},
+			check: func(m map[string]def) string {
+				k, ok := m["k"]
+				switch {
+				case !ok || !k.Required || *k.Validation.Min != 10 || *k.Validation.Max != 100:
+					return "k is not composed root → mid → leaf"
+				case len(m) != 1:
+					return "a definition of an ancestor that is not inheritable reached the leaf"
+				}
+				return ""
+			}},
+		{name: "two sets in position order",
+			lister: &layeredLister{globals: []Field{}, typed: Field{Name: "k", DataType: fieldmeta.TypeEnum, EnumValues: []string{"a", "b", "c"}},
+				sets: [][]Field{
+					{{Name: "k", DataType: fieldmeta.TypeEnum, EnumValues: []string{"b", "c"}, DefaultValue: "b"}},
+					{{Name: "k", DataType: fieldmeta.TypeEnum, DefaultValue: "c"}},
+				}},
+			check: wantField("k", func(d def) bool { return reflect.DeepEqual(d.EnumValues, []string{"b", "c"}) && d.DefaultValue == "c" })},
+		{name: "two combined templates (ABN-01 c, E-37)",
+			lister: &layeredLister{globals: []Field{}, typed: Field{Name: "k", DataType: fieldmeta.TypeText},
+				templates: [][]templateItem{
+					{templateItemOf(AttributeDefinition{Key: "k", DataType: fieldmeta.TypeText}, &yes, `"first"`),
+						templateItemOf(AttributeDefinition{Key: "only_first", DataType: fieldmeta.TypeText}, nil, "")},
+					{templateItemOf(AttributeDefinition{Key: "k", DataType: fieldmeta.TypeText}, &no, `"second"`)},
+				}},
+			check: func(m map[string]def) string {
+				if k := m["k"]; !k.Required || k.DefaultValue != "second" {
+					return "k: want required from the first template, default of the second"
+				}
+				if _, ok := m["only_first"]; !ok {
+					return "a key of a template alone is missing"
+				}
+				return ""
+			}},
+		{name: "organization's globals after the system base",
+			lister: &layeredLister{
+				system: Field{Name: "k", DataType: fieldmeta.TypeInteger, IsSystem: true, Validation: &fieldmeta.ValidationRules{Max: f64(10)}},
+				org:    Field{Name: "k", DataType: fieldmeta.TypeInteger, Required: true, Validation: &fieldmeta.ValidationRules{Max: f64(5)}},
+				typed:  Field{Name: "other", DataType: fieldmeta.TypeText}},
+			check: wantField("k", func(d def) bool { return d.Required && *d.Validation.Max == 5 })},
+		{name: "organization's global against the system base",
+			lister: &layeredLister{
+				system: Field{Name: "k", DataType: fieldmeta.TypeInteger, IsSystem: true},
+				org:    Field{Name: "k", DataType: fieldmeta.TypeText},
+				typed:  Field{Name: "other", DataType: fieldmeta.TypeText}},
+			codes: []string{CodeDatatypeConflict}},
+		{name: "instance refines the type as the last layer",
+			lister: &layeredLister{globals: []Field{},
+				typed:    Field{Name: "k", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Max: f64(100)}},
+				instance: Field{Name: "k", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Max: f64(50)}}},
+			check: wantField("k", func(d def) bool { return *d.Validation.Max == 50 })},
+		{name: "instance with another data type",
+			lister: &layeredLister{globals: []Field{},
+				typed:    Field{Name: "k", DataType: fieldmeta.TypeInteger},
+				instance: Field{Name: "k", DataType: fieldmeta.TypeText}},
+			codes: []string{CodeDatatypeConflict}},
+		{name: "a type with several conflicts reports all (ComposeAll)",
+			lister: &layeredLister{globals: []Field{
+				{Name: "a", DataType: fieldmeta.TypeInteger, IsSystem: true, Validation: &fieldmeta.ValidationRules{Max: f64(1)}},
+				{Name: "b", DataType: fieldmeta.TypeText, IsSystem: true},
+			}, chain: []Type{{ID: "type", Fields: []Field{
+				{Name: "b", DataType: fieldmeta.TypeInteger},
+				{Name: "a", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Min: f64(2)}},
+			}}}, sets: [][]Field{{{Name: "a", DataType: fieldmeta.TypeText}}}},
+			// b conflicts first in the type layer, a in the same layer; a's
+			// set conflict is not reported a second time.
+			codes: []string{CodeDatatypeConflict, CodeRangeEmpty}},
+	}
+	if len(cases) < 25 {
+		t.Fatalf("the matrix has %d cases, want at least 25", len(cases))
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			layers := tc.layers
+			if tc.lister != nil {
+				typeID := "type"
+				if tc.lister.chain != nil {
+					typeID = tc.lister.chain[len(tc.lister.chain)-1].ID
+				}
+				var err error
+				if layers, err = compositionLayers(context.Background(), tc.lister, "org", typeID, "ci", layerSource{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, conflicts := ComposeAll(layers...)
+			var codes []string
+			for _, c := range conflicts {
+				codes = append(codes, c.Code)
+			}
+			if !slices.Equal(codes, tc.codes) {
+				t.Fatalf("conflicts = %v, want codes %v", conflicts, tc.codes)
+			}
+			// Compose keeps its behavior: the first conflict, or the list.
+			composed, err := Compose(layers...)
+			if len(tc.codes) > 0 {
+				var conflict *CompositionError
+				if !errors.As(err, &conflict) || conflict.Key != conflicts[0].Key || conflict.Code != conflicts[0].Code {
+					t.Errorf("Compose = %v, want the first conflict %v", err, conflicts[0])
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(composed, got) {
+				t.Errorf("Compose = %+v %v, want %+v", composed, err, got)
+			}
+			if tc.check != nil {
+				byName := map[string]def{}
+				for _, d := range got {
+					byName[d.Name] = d
+				}
+				if problem := tc.check(byName); problem != "" {
+					t.Errorf("%s: %+v", problem, got)
+				}
+			}
+		})
+	}
+}
+
+// wantField checks the composed definition of name.
+func wantField(name string, ok func(fieldmeta.FieldDefinition) bool) func(map[string]fieldmeta.FieldDefinition) string {
+	return func(m map[string]fieldmeta.FieldDefinition) string {
+		d, found := m[name]
+		if !found || !ok(d) {
+			return "unexpected composition of " + name
+		}
+		return ""
+	}
+}
+
+// TestComposeAllCollectsConflicts (WP-252): ComposeAll reports each key in
+// conflict once, with its key and code, in the order of the conflicts;
+// keys without a conflict compose; Compose returns the first conflict.
+func TestComposeAllCollectsConflicts(t *testing.T) {
+	base := []fieldmeta.FieldDefinition{
+		{Name: "a", DataType: fieldmeta.TypeText},
+		{Name: "b", DataType: fieldmeta.TypeEnum, EnumValues: []string{"x"}},
+		{Name: "c", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Max: f64(1)}},
+		{Name: "ok", DataType: fieldmeta.TypeText},
+	}
+	top := []fieldmeta.FieldDefinition{
+		{Name: "b", DataType: fieldmeta.TypeEnum, EnumValues: []string{"y"}},
+		{Name: "a", DataType: fieldmeta.TypeInteger},
+		{Name: "ok", DataType: fieldmeta.TypeText, Required: true},
+	}
+	third := []fieldmeta.FieldDefinition{
+		{Name: "a", DataType: fieldmeta.TypeBoolean},
+		{Name: "c", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Min: f64(2)}},
+	}
+	got, conflicts := ComposeAll(base, top, third)
+	type kc struct{ key, code string }
+	var keys []kc
+	for _, c := range conflicts {
+		keys = append(keys, kc{c.Key, c.Code})
+	}
+	want := []kc{{"b", CodeEnumEmpty}, {"a", CodeDatatypeConflict}, {"c", CodeRangeEmpty}}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("conflicts = %v, want %v", keys, want)
+	}
+	if len(got) != 4 || !got[3].Required {
+		t.Errorf("composed = %+v, want every key, ok required", got)
+	}
+	_, err := Compose(base, top, third)
+	var conflict *CompositionError
+	if !errors.As(err, &conflict) || conflict.Key != "b" {
+		t.Errorf("Compose = %v, want the first conflict (b)", err)
+	}
+	if out, none := ComposeAll(base); none != nil || len(out) != 4 {
+		t.Errorf("one layer: %+v %v", out, none)
 	}
 }
 

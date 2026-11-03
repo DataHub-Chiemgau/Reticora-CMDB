@@ -46,31 +46,61 @@ func (e *CompositionError) CompositionKey() string { return e.Key }
 func (e *CompositionError) CompositionCode() string { return e.Code }
 
 // Compose composes the effective schema from layers, the base first
-// (MET-16): system base → type chain → (phase 2: sets, templates) →
-// instance. Definitions of the same key are merged: required is OR-ed,
-// the allowed values are intersected (empty → error), min/max and the
-// length bounds take the narrowest range (empty → error), all patterns
-// apply (allOf), the default and the presentation of the last layer that
-// sets them win; a different data type is an error. Keys keep the order
-// of their first appearance. multi_value is part of the data type: two
-// set values that differ are a conflict, an unset one (nil, an instance
-// definition) takes the other.
+// (MET-16): system base → organization's global attributes → type chain
+// root → type → sets → templates → instance (the one layer order,
+// compositionLayers in resolver.go). Definitions of the same key are
+// merged: required is OR-ed, the allowed values are intersected (empty →
+// error), min/max and the length bounds take the narrowest range (empty →
+// error), all patterns apply (allOf), the default and the presentation of
+// the last layer that sets them win; a different data type is an error.
+// Keys keep the order of their first appearance. multi_value is part of
+// the data type: two set values that differ are a conflict, an unset one
+// (nil, an instance definition) takes the other.
+// It returns the first conflict of ComposeAll, as before WP-252.
 // validation: CompositionError names the key and the rule that fails.
 func Compose(layers ...[]fieldmeta.FieldDefinition) ([]fieldmeta.FieldDefinition, error) {
+	out, conflicts := ComposeAll(layers...)
+	if len(conflicts) > 0 {
+		return nil, conflicts[0]
+	}
+	return out, nil
+}
+
+// ComposeAll composes layers by the rules of Compose and collects every
+// conflict instead of stopping at the first (WP-252): for each key the
+// first conflict, in the order they occur (layer by layer, within a layer
+// by position). A key in conflict keeps the definition composed before the
+// conflict and skips its later layers, so it reports no second conflict;
+// the composed definitions are therefore meaningful only without
+// conflicts. CheckComposition reports the list; Compose returns its first
+// entry.
+func ComposeAll(layers ...[]fieldmeta.FieldDefinition) ([]fieldmeta.FieldDefinition, []*CompositionError) {
 	order := make([]string, 0, 16)
 	byName := make(map[string]fieldmeta.FieldDefinition, 16)
+	var (
+		conflicts []*CompositionError
+		failed    map[string]bool
+	)
 	for _, layer := range layers {
 		for i := range layer {
 			def := layer[i]
 			prev, seen := byName[def.Name]
-			if !seen {
+			switch {
+			case !seen:
 				order = append(order, def.Name)
 				byName[def.Name] = def
 				continue
+			case failed[def.Name]:
+				continue
 			}
-			merged, err := composeField(&prev, &def)
-			if err != nil {
-				return nil, err
+			merged, conflict := composeField(&prev, &def)
+			if conflict != nil {
+				if failed == nil {
+					failed = map[string]bool{}
+				}
+				failed[def.Name] = true
+				conflicts = append(conflicts, conflict)
+				continue
 			}
 			byName[def.Name] = merged
 		}
@@ -79,7 +109,7 @@ func Compose(layers ...[]fieldmeta.FieldDefinition) ([]fieldmeta.FieldDefinition
 	for _, name := range order {
 		out = append(out, byName[name])
 	}
-	return out, nil
+	return out, conflicts
 }
 
 // referenceTarget is the target of a reference-typed or file definition
@@ -101,8 +131,8 @@ func allowedValues(def *fieldmeta.FieldDefinition) []any {
 	return nil
 }
 
-func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefinition, error) {
-	conflict := func(code, format string, args ...any) error {
+func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefinition, *CompositionError) {
+	conflict := func(code, format string, args ...any) *CompositionError {
 		return &CompositionError{Key: top.Name, Reason: fmt.Sprintf(format, args...), Code: code}
 	}
 	if fieldmeta.CanonicalType(base.DataType) != fieldmeta.CanonicalType(top.DataType) ||

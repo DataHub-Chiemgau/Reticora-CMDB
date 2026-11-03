@@ -576,15 +576,19 @@ func attributeDBError(err error) error {
 }
 
 // checkCompositionTx publishes a definition only when every effective
-// schema that contains its key can still be composed (MET-16): system
-// base → organization's global attributes → type chain (of the ancestors
-// the inheritable definitions, of the type all, MET-06) → active sets of
-// the chain (WP-709), for every type that defines the key, every type a
-// set with the key is assigned to, and every type in their subtrees
-// (ci_type_subtree). A type attribute is so checked against the sets of
-// its type, a set attribute against each type of its set. The database
-// checks the materialized schemas (system base, chain and sets) itself;
-// this adds the organization's layer. A conflict is a 422 on key.
+// schema that contains its key can still be composed (MET-16, WP-252): it
+// runs CheckComposition for the global layers and for every type that
+// defines the key, every type a set with the key is assigned to, and every
+// type in their subtrees (ci_type_subtree), each as system base →
+// organization's global attributes that apply to it → type chain (of the
+// ancestors the inheritable definitions, of the type all, MET-06) →
+// active sets of the chain (WP-709). A type attribute is so checked
+// against the sets of its type, a set attribute against each type of its
+// set. The database checks the materialized schemas (system base, chain
+// and sets) itself; this adds the organization's layer. A conflict of the
+// key is a 422 on key with its code. It serves POST/PATCH
+// /attribute-definitions and the legacy paths PUT /ci-types/{id}/fields
+// and PUT /ci-fields/global (upsertFieldTx).
 func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
 	rows, err := tx.Query(ctx, `SELECT DISTINCT s.id::text FROM (
 			SELECT a.ci_type_id AS type_id FROM attribute_definition a
@@ -635,133 +639,30 @@ func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID, field str
 	return nil
 }
 
-// chainCompositionTx composes the definitions of key ("" every key) for
-// the system base with the organization's global attributes and, for
-// each target type, with the global attributes that apply to it
-// (applies_to, MET-13, WP-255), its chain root → type (MET-16, MET-06) and the
-// active sets of that chain (setLayersTx, WP-709); override replaces the
-// set list of one type (nil: the stored lists). It returns the first
-// *CompositionError.
+// chainCompositionTx runs CheckComposition for the global layers and for
+// each target type (system base → the organization's global attributes
+// that apply to it, MET-13, WP-255 → chain root → type, MET-06 → active
+// sets of that chain, WP-709), all with one reading of the global
+// attributes; override replaces the set list of one type (nil: the stored
+// lists). It returns the first *CompositionError of key ("" any key).
 // validation: the *CompositionError texts of Compose (MET-16), naming the key.
 func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key string, override *setOverride) error {
-	collect := func(row pgx.CollectableRow) (*AttributeDefinition, error) { return scanAttribute(row) }
-	rows, err := tx.Query(ctx, `SELECT `+attributeColumns+` FROM attribute_definition
-		WHERE scope = 'global' AND ($1 = '' OR key = $1) ORDER BY sort_order, key`, key)
-	if err != nil {
-		return fmt.Errorf("read global definitions: %w", err)
-	}
-	globals, err := pgx.CollectRows(rows, collect)
-	if err != nil {
-		return fmt.Errorf("read global definitions: %w", err)
-	}
-	var system, org []fieldmeta.FieldDefinition
-	var orgDefs []*AttributeDefinition
-	restricted := false
-	for _, d := range globals {
-		if d.IsSystem {
-			system = append(system, d.definition())
-		} else {
-			org = append(org, d.definition())
-			orgDefs = append(orgDefs, d)
-			restricted = restricted || d.AppliesTo != AppliesToAll
-		}
-	}
-	if _, err = Compose(system, org); err != nil {
-		return err
-	}
-	if len(targets) == 0 {
-		return nil
-	}
-	// An organization's global attribute enters the composition of the
-	// types it applies to only (MET-13, WP-255).
-	var scopes map[string]typeScope
-	if restricted {
-		if scopes, err = typeScopesTx(ctx, tx, targets); err != nil {
-			return err
-		}
-	}
-	rows, err = tx.Query(ctx, `SELECT target, `+attributeColumns+` FROM (
-			SELECT tt.id::text AS target, c.level AS lvl, a.*
-			FROM unnest($1::uuid[]) AS tt (id)
-			CROSS JOIN LATERAL ci_type_ancestors(tt.id) c
-			JOIN attribute_definition a ON a.ci_type_id = c.id
-			WHERE (a.inheritable OR c.id = tt.id) AND ($2 = '' OR a.key = $2)
-		) defs ORDER BY target, lvl, sort_order, key`, targets, key)
-	if err != nil {
-		return fmt.Errorf("read chain definitions: %w", err)
-	}
-	type chainDefinition struct {
-		target string
-		def    *AttributeDefinition
-	}
-	defs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (chainDefinition, error) {
-		var cd chainDefinition
-		d, serr := scanAttribute(extraColumns{row: row, before: []any{&cd.target}})
-		cd.def = d
-		return cd, serr
-	})
-	if err != nil {
-		return fmt.Errorf("read chain definitions: %w", err)
-	}
-	typed := map[string][]fieldmeta.FieldDefinition{}
-	for _, cd := range defs {
-		typed[cd.target] = append(typed[cd.target], cd.def.definition())
-	}
-	sets, err := setLayersTx(ctx, tx, targets, key, override)
-	if err != nil {
-		return err
-	}
+	lister := newTxLister(tx, override)
+	scopes := make([]CompositionScope, 0, len(targets)+1)
+	scopes = append(scopes, CompositionScope{})
 	for _, target := range targets {
-		orgLayer := org
-		if restricted {
-			orgLayer = nil
-			for _, d := range orgDefs {
-				if d.appliesTo(scopes[target]) {
-					orgLayer = append(orgLayer, d.definition())
-				}
-			}
-		}
-		layers := [][]fieldmeta.FieldDefinition{system, orgLayer, typed[target]}
-		for _, layer := range sets[target] {
-			layers = append(layers, definitionsOf(layer))
-		}
-		if _, err = Compose(layers...); err != nil {
+		scopes = append(scopes, CompositionScope{TypeID: target})
+	}
+	for _, scope := range scopes {
+		conflicts, err := lister.check(ctx, scope)
+		if err != nil {
 			return err
+		}
+		if c := firstConflict(conflicts, func(k string) bool { return key == "" || k == key }); c != nil {
+			return c
 		}
 	}
 	return nil
-}
-
-// typeScopesTx reads the category and the chain root → type of each
-// target type, which decide the applicability of the organization's
-// global attributes (appliesToScope).
-func typeScopesTx(ctx context.Context, tx pgx.Tx, targets []string) (map[string]typeScope, error) {
-	rows, err := tx.Query(ctx, `SELECT tt.id::text, COALESCE(t.category, ''),
-			ARRAY(SELECT c.id::text FROM ci_type_ancestors(tt.id) c ORDER BY c.level)
-		FROM unnest($1::uuid[]) AS tt (id) JOIN ci_type t ON t.id = tt.id`, targets)
-	if err != nil {
-		return nil, fmt.Errorf("read ci type scopes: %w", err)
-	}
-	defer rows.Close()
-	out := make(map[string]typeScope, len(targets))
-	for rows.Next() {
-		var id string
-		var s typeScope
-		if err = rows.Scan(&id, &s.category, &s.chain); err != nil {
-			return nil, fmt.Errorf("scan ci type scope: %w", err)
-		}
-		out[id] = s
-	}
-	return out, rows.Err()
-}
-
-// definitionsOf returns the field definitions of stored definitions.
-func definitionsOf(defs []AttributeDefinition) []fieldmeta.FieldDefinition {
-	out := make([]fieldmeta.FieldDefinition, 0, len(defs))
-	for i := range defs {
-		out = append(out, defs[i].definition())
-	}
-	return out
 }
 
 // setOverride is the set list a type is about to get (the PUT of
@@ -769,69 +670,6 @@ func definitionsOf(defs []AttributeDefinition) []fieldmeta.FieldDefinition {
 type setOverride struct {
 	typeID string
 	sets   []AttributeSetAssignment
-}
-
-// setLayersTx reads the set layers of each target type (MET-16, WP-709):
-// one layer per active set assigned along the chain root → target, the
-// sets of each type in position order, in the set by sort_order and key.
-// Of the sets of an ancestor only the inheritable set attributes count
-// (the rule of the type chain, WP-248). key "" reads every key, otherwise
-// that one. override replaces the stored set list of one type. It reads
-// under the caller's row level security.
-func setLayersTx(ctx context.Context, tx pgx.Tx, targets []string, key string, override *setOverride) (map[string][][]AttributeDefinition, error) {
-	overrideType := ""
-	setIDs, positions := []string{}, []int64{}
-	if override != nil {
-		overrideType = override.typeID
-		for _, a := range override.sets {
-			setIDs = append(setIDs, a.AttributeSetID)
-			positions = append(positions, int64(a.Position))
-		}
-	}
-	rows, err := tx.Query(ctx, `WITH assignment AS (
-			SELECT cs.ci_type_id, cs.attribute_set_id, cs.position FROM ci_type_attribute_set cs
-			WHERE cs.ci_type_id::text <> $3
-			UNION ALL
-			SELECT NULLIF($3, '')::uuid, x.set_id, x.pos::integer FROM unnest($4::uuid[], $5::bigint[]) AS x (set_id, pos)
-		)
-		SELECT target, set_level, set_position, `+attributeColumns+` FROM (
-			SELECT tt.id::text AS target, c.level AS set_level, asg.position AS set_position, a.*
-			FROM unnest($1::uuid[]) AS tt (id)
-			CROSS JOIN LATERAL ci_type_ancestors(tt.id) c
-			JOIN assignment asg ON asg.ci_type_id = c.id
-			JOIN attribute_set s ON s.id = asg.attribute_set_id AND s.is_active
-			JOIN attribute_definition a ON a.attribute_set_id = s.id
-			WHERE (a.inheritable OR c.id = tt.id) AND ($2 = '' OR a.key = $2)
-		) defs ORDER BY target, set_level, set_position, sort_order, key`,
-		targets, key, overrideType, setIDs, positions)
-	if err != nil {
-		return nil, fmt.Errorf("read set definitions: %w", err)
-	}
-	type setDefinition struct {
-		target          string
-		level, position int
-		def             *AttributeDefinition
-	}
-	defs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (setDefinition, error) {
-		var sd setDefinition
-		d, serr := scanAttribute(extraColumns{row: row, before: []any{&sd.target, &sd.level, &sd.position}})
-		sd.def = d
-		return sd, serr
-	})
-	if err != nil {
-		return nil, fmt.Errorf("read set definitions: %w", err)
-	}
-	out := map[string][][]AttributeDefinition{}
-	for i := range defs {
-		sd := &defs[i]
-		layers := out[sd.target]
-		if i == 0 || defs[i-1].target != sd.target || defs[i-1].level != sd.level || defs[i-1].position != sd.position {
-			layers = append(layers, nil)
-		}
-		layers[len(layers)-1] = append(layers[len(layers)-1], *sd.def)
-		out[sd.target] = layers
-	}
-	return out, nil
 }
 
 // errSystemTypeAttribute refuses an organization attribute on a system CI
