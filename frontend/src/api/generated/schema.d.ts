@@ -1078,8 +1078,13 @@ export interface paths {
      *     response is chunked and neither the server nor the client has to hold
      *     the full result set in memory. There is no row limit. CSV and DATEV
      *     are UTF-8 with BOM and semicolons (EXP-01); X-Export-Omitted-Fields
-     *     names the CI fields the layout leaves out. The export job resource
-     *     /api/v1/exports (202, presigned download, manifest) replaces it.
+     *     names the CI fields the layout leaves out. format=datev is gated
+     *     (WP-790): it needs the module inventory (otherwise 400 like an
+     *     unknown format), the entitlements export_datev and assets_basic
+     *     (otherwise 403 feature-not-entitled) and the permission asset:read
+     *     (otherwise 403). On this path DATEV keeps the CI layout until the
+     *     sunset (E-141). The export job resource /api/v1/exports (202,
+     *     presigned download, manifest) replaces it.
      */
     get: operations['exportCIs'];
     put?: never;
@@ -1112,6 +1117,11 @@ export interface paths {
      *     exactly this scope in the requested format into object storage. Once
      *     the job is `completed` it exposes a signed download URL until
      *     `expires_at`. Requires blob storage to be configured — otherwise 503.
+     *     The format datev is gated (WP-790): module inventory (otherwise
+     *     400), entitlements export_datev and assets_basic (otherwise 403
+     *     feature-not-entitled) and permission asset:read (otherwise 403); the
+     *     worker checks module and entitlements again and fails the job if
+     *     one of them is gone.
      */
     post: operations['createExportJobLegacy'];
     delete?: never;
@@ -1230,6 +1240,11 @@ export interface paths {
      *     exactly this scope in the requested format into object storage. Once
      *     the job is `completed` it exposes a signed download URL until
      *     `expires_at`. Requires blob storage to be configured — otherwise 503.
+     *     The format datev is gated (WP-790): module inventory (otherwise
+     *     400), entitlements export_datev and assets_basic (otherwise 403
+     *     feature-not-entitled) and permission asset:read (otherwise 403); the
+     *     worker checks module and entitlements again and fails the job if
+     *     one of them is gone.
      */
     post: operations['createExportJob'];
     delete?: never;
@@ -11561,6 +11576,7 @@ export interface components {
     };
     CreateExportJobRequest: {
       /**
+       * @description Output format. datev requires the module inventory, the entitlements export_datev and assets_basic and the permission asset:read (WP-790).
        * @default json
        * @enum {string}
        */
@@ -17431,6 +17447,7 @@ export interface operations {
   exportCIs: {
     parameters: {
       query?: {
+        /** @description Output format. datev requires the module inventory, the entitlements export_datev and assets_basic and the permission asset:read. */
         format?: 'csv' | 'json' | 'datev';
         status?: components['parameters']['CIStatus'];
         /** @description CI type id to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. The same holds for filter[ci_type_id] and filter[ci_type_id][in] (the union of the subtrees). An attribute filter then also follows the inheritable definitions of the ancestors of the named types. */
@@ -17455,6 +17472,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -17519,6 +17537,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -17769,6 +17788,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

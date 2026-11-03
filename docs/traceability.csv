@@ -1298,3 +1298,6 @@ MGT-01;[P2];B;backend/internal/document/versions_integration_test.go;WP-731
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/document/versions_integration_test.go;WP-731
 CI-08;[P2];B;backend/internal/ci/tags_api_integration_test.go;WP-753
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/ci/tags_api_integration_test.go;WP-753
+ENT-02;[B];C;backend/internal/export/datev_gate_test.go;WP-790
+ENT-05;[B];C;backend/internal/export/datev_gate_test.go;WP-790
+API-01;[B];C;backend/internal/export/datev_gate_test.go;WP-790

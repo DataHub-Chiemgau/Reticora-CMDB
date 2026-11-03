@@ -63,6 +63,9 @@ type workerDeps struct {
 	// entitlements checks the discovery license on the collectors' scope
 	// channel (F-400); nil treats every organization as licensed.
 	entitlements *entitlement.Service
+	// modules are the late modules; the export worker checks inventory for
+	// DATEV jobs (WP-790).
+	modules *server.ModuleSet
 	// cycle replaces the intervals of the polling workers and of the
 	// cycles of the workers that answer requests (tests); 0 keeps them.
 	cycle time.Duration
@@ -109,6 +112,13 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		if d.repos.Jobs != nil {
 			exportWorker.Tracker = jobs.NewService(d.repos.Jobs)
 		}
+		// DATEV jobs are checked again before rendering (WP-790); without
+		// entitlements DATEV is refused instead of licensed.
+		var datevEntitlements export.EntitlementChecker
+		if d.entitlements != nil {
+			datevEntitlements = d.entitlements
+		}
+		exportWorker.DATEV = export.NewDATEVGate(datevEntitlements, d.modules.Enabled(server.ModuleInventory))
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, d.every(2*time.Second)) },

@@ -72,6 +72,9 @@ type JobWorker struct {
 	onError        func(jobID string, err error)
 	// failures counts the errors of the current cycle (OPS-05).
 	failures int
+	// DATEV checks the module and the entitlements again before a DATEV
+	// job is rendered (WP-790); nil refuses DATEV jobs (fail closed).
+	DATEV *DATEVGate
 	// Tracker mirrors the export job into the generic job model (JOB-01);
 	// optional. export.completed (NTF-05) is written by Jobs.CompleteJob
 	// in the transaction that completes the job (WP-550).
@@ -227,6 +230,15 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 	}
 	scope := job.Scope.TenantScope(job.OrganizationID, job.InitiatedBy)
 	renderCtx := database.ContextWithTenantScope(ctx, &scope)
+	// A plan or module may have changed since the job was queued; the
+	// entitlements are read in the scope of the job (WithRequestTenant).
+	// asset:read counts as checked when the job was created.
+	if job.Format == FormatDATEV {
+		if err := w.DATEV.Allow(renderCtx, job.OrganizationID); err != nil {
+			w.fail(ctx, &job, err)
+			return
+		}
+	}
 	var buf bytes.Buffer
 	rowCount, err := RenderFormat(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, &buf)
 	if err != nil {

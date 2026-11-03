@@ -10,6 +10,7 @@ import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ScrollRegion } from '../components/ScrollRegion';
+import { useEntitlements, useModules } from '../hooks/useEntitlements';
 import { downloadExport } from '../lib/exportDownload';
 
 const statusVariants: Record<
@@ -28,6 +29,13 @@ export function ExportPage() {
   const jobs = useExportJobs();
   const createJob = useCreateExportJob();
   const [format, setFormat] = useState<ExportJob['format']>('csv');
+  const { isEnabled } = useEntitlements();
+  const { isModuleEnabled } = useModules();
+  // DATEV is offered only with export_datev, assets_basic and the module
+  // inventory, as the server gates it (ENT-05, WP-790).
+  const datevAvailable =
+    isEnabled('export_datev') && isEnabled('assets_basic') && isModuleEnabled('inventory');
+  const selectedFormat = format === 'datev' && !datevAvailable ? 'csv' : format;
   const [downloadFailed, setDownloadFailed] = useState(false);
 
   // The file is fetched and saved as a same-origin blob: browsers ignore the
@@ -42,7 +50,7 @@ export function ExportPage() {
   };
 
   const submit = () => {
-    createJob.mutate({ format });
+    createJob.mutate({ format: selectedFormat });
   };
 
   if (jobs.isLoading) {
@@ -71,10 +79,10 @@ export function ExportPage() {
         <div className="grid gap-4 md:grid-cols-3 md:items-end">
           <Select
             label={t('export.format')}
-            value={format}
+            value={selectedFormat}
             options={[
               { value: 'csv', label: 'CSV' },
-              { value: 'datev', label: 'DATEV' },
+              ...(datevAvailable ? [{ value: 'datev', label: 'DATEV' }] : []),
               { value: 'json', label: 'JSON' },
             ]}
             onChange={(event) => setFormat(event.target.value as ExportJob['format'])}

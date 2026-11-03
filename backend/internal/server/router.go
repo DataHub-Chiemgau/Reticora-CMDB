@@ -477,6 +477,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
+	datevGate := exportDATEVGate(&opts)
+	exportWorker.DATEV = datevGate
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
@@ -570,8 +572,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
 		topologyHandler,
-		export.NewHandler(repos.CI),
-		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs),
+		export.NewHandler(repos.CI).WithDATEVGate(datevGate),
+		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
 		asset.NewHandler(repos.Asset).
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}),
@@ -936,4 +938,16 @@ func (a roleExport) ExportRoles(ctx context.Context, orgID string) ([]citype.Exp
 			return out, nil
 		}
 	}
+}
+
+// exportDATEVGate is the gate of the export format datev (WP-790): the
+// entitlements of the organization and the module inventory, passed as a
+// value because export does not import server. Without entitlements DATEV
+// is refused.
+func exportDATEVGate(opts *Options) *export.DATEVGate {
+	var entitlements export.EntitlementChecker
+	if opts.Entitlements != nil {
+		entitlements = opts.Entitlements
+	}
+	return export.NewDATEVGate(entitlements, opts.Modules.Enabled(ModuleInventory))
 }

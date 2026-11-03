@@ -596,7 +596,7 @@ func main() {
 	workers, err := buildWorkers(&workerDeps{cfg: cfg, pool: auditPool, encryptor: encryptor, repos: &repos, mfa: mfa,
 		dispatcher: webhookDispatcher, scheduler: systemScheduler, blobs: blobStore, eventStream: eventStream,
 		notifier: notifier, collectorPKI: collectorPKI, coreNATS: coreNATS, credentials: credentialService,
-		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc})
+		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc, modules: modules})
 	if err != nil {
 		slog.Error("failed to set up the workers", "error", err)
 		os.Exit(1)

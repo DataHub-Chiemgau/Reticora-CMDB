@@ -28,6 +28,8 @@ type JobHandler struct {
 	worker *JobWorker
 	blobs  blob.Store
 	bucket string
+	// datev guards the format datev (WP-790); nil refuses it.
+	datev *DATEVGate
 }
 
 // NewJobHandler creates the handler. worker may be nil (or disabled) when no
@@ -38,6 +40,13 @@ func NewJobHandler(jobs JobRepository, worker *JobWorker, blobs blob.Store) *Job
 		bucket = worker.Bucket
 	}
 	return &JobHandler{jobs: jobs, worker: worker, blobs: blobs, bucket: bucket}
+}
+
+// WithDATEVGate sets the gate of the format datev; without one DATEV is
+// refused (fail closed).
+func (h *JobHandler) WithDATEVGate(gate *DATEVGate) *JobHandler {
+	h.datev = gate
+	return h
 }
 
 // RegisterRoutes registers the export job routes.
@@ -75,6 +84,9 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := req.Validate(); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if !guardDATEV(w, r, h.datev, t.OrganizationID, req.Format) {
 		return
 	}
 

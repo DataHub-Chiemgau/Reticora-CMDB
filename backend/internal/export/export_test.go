@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -21,6 +22,22 @@ func tenantCtx(r *http.Request) *http.Request {
 	ctx := tenant.WithTenant(r.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"})
 	scope := database.OrgWideScope("org-1", "user-1")
 	return r.WithContext(database.ContextWithTenantScope(ctx, &scope))
+}
+
+// allowAll is an entitlement checker that enables every feature.
+type allowAll struct{}
+
+func (allowAll) IsEnabled(context.Context, string, string) bool { return true }
+
+// openDATEVGate is a DATEV gate with the module inventory on and every
+// entitlement granted (WP-790).
+func openDATEVGate() *DATEVGate { return NewDATEVGate(allowAll{}, true) }
+
+// assetReader adds a principal with asset:read to a request, as DATEV
+// requires (WP-790).
+func assetReader(r *http.Request) *http.Request {
+	return r.WithContext(identity.WithPrincipal(r.Context(), identity.Principal{Subject: "user-1",
+		Permissions: []identity.Permission{identity.PermExportRun, identity.PermCIRead, identity.PermAssetRead}}))
 }
 
 func TestExportJSON(t *testing.T) {
@@ -110,12 +127,12 @@ func TestExportDATEV(t *testing.T) {
 		},
 	})
 
-	h := NewHandler(repo)
+	h := NewHandler(repo).WithDATEVGate(openDATEVGate())
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest("GET", "/api/v1/export/cis?format=datev", nil)
-	req = tenantCtx(req)
+	req = assetReader(tenantCtx(req))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -147,7 +164,7 @@ func TestExportStreamsBeyondOneBatch(t *testing.T) {
 		}
 	}
 
-	h := NewHandler(repo)
+	h := NewHandler(repo).WithDATEVGate(openDATEVGate())
 	h.batchSize = 5 // force several streaming batches
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
@@ -155,7 +172,7 @@ func TestExportStreamsBeyondOneBatch(t *testing.T) {
 	for _, format := range []string{"json", "csv", "datev"} {
 		t.Run(format, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/api/v1/export/cis?format="+format, nil)
-			req = tenantCtx(req)
+			req = assetReader(tenantCtx(req))
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
 
@@ -220,7 +237,7 @@ func TestCSVNeutralizesFormulas(t *testing.T) {
 		}
 	}
 	mux := chi.NewRouter()
-	NewHandler(repo).RegisterRoutes(mux)
+	NewHandler(repo).WithDATEVGate(openDATEVGate()).RegisterRoutes(mux)
 
 	read := func(t *testing.T, body string) [][]string {
 		t.Helper()
@@ -251,7 +268,7 @@ func TestCSVNeutralizesFormulas(t *testing.T) {
 	} {
 		t.Run(c.format, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format="+c.format, nil)))
+			mux.ServeHTTP(w, assetReader(tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format="+c.format, nil))))
 			if w.Code != http.StatusOK {
 				t.Fatalf("export: %d %s", w.Code, w.Body.String())
 			}
