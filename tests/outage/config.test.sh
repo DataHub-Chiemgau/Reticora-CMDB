@@ -27,9 +27,13 @@
 #     lost record (also OUTAGE_SELFTEST_DROP=1), a late record, an answer
 #     other than 2xx/429/503, a non-empty ingest queue and an unpublished
 #     outbox entry fail the scenario;
-#   - smtp_scenario_*: smtp_outage against stubs: pending with attempts and
-#     last_error, then sent and exactly one mail → PASS; two mails, no failed
-#     attempt, never sent, no smtp check → FAIL;
+#   - smtp_scenario_*: smtp_outage against stubs (E-144): the invitation
+#     refused with 503 "the invitation e-mail could not be sent", no row, no
+#     mail to the invitee; export.completed to the initiator pending with
+#     attempts and last_error, then sent and exactly one mail with its
+#     subject → PASS; an invitation accepted (201), stored or mailed despite
+#     the outage, an export refused, two mails, no failed attempt, never
+#     sent, no smtp check → FAIL;
 #   - load_setup_db_url: load_setup hands cmd/seed the bootstrap password of
 #     the installation's .env, also though the seed runs in backend/;
 #   - collector_scenario_*: collector_outage (collector.sh, WP-587) against
@@ -90,11 +94,13 @@ else
     printf '%s' "$smtp_case" | grep -q 'smtp_outage' || missing="$missing run.sh-calls-smtp_outage"
     for needle in 'compose stop mailpit' 'check_unavailable smtp' '.status == "pending" and .attempts >= 1' \
         'last_error' 'compose start mailpit' 'SMTP_SENT_TIMEOUT:-120' '.status == "sent"' '/api/v1/search?query=' \
-        '= 1 ] || failures+=("Mailpit holds' 'load_send smtp' 'load_verify smtp'; do
+        '= 1 ] || failures+=("Mailpit holds' 'load_send smtp' 'load_verify smtp' \
+        'api POST /invitations' '[ "$invite" != 503 ]' 'the invitation e-mail could not be sent' 'FROM user_invitation' \
+        '= 0 ] || failures+=("Mailpit holds' 'api POST /exports' "type = 'export.completed'" 'subject:\"$subject\"'; do
         grep -qF -- "$needle" tests/outage/smtp.sh || missing="$missing [$needle]"
     done
     if [ -z "$missing" ]; then
-        ok "outage_smtp: tests/outage/run.sh simulates the SMTP outage (smtp.sh: pending with attempts and last_error, smtp unavailable, sent within 120 s, one mail, load)"
+        ok "outage_smtp: tests/outage/run.sh simulates the SMTP outage (smtp.sh: invitation refused with 503 without row or mail (E-144); export.completed pending with attempts and last_error, smtp unavailable, sent within 120 s, one mail; load)"
     else
         fail "outage_smtp: tests/outage/run.sh simulates the SMTP outage instead of reporting N/A" "missing:$missing"
     fi
@@ -402,13 +408,24 @@ stub_run() {
             fi
         }
         nats_jsz() { printf '{"account_details":[{"name":"$G","stream_detail":[{"name":"RETICORA_INGEST","state":{"messages":%s}}]}]}' "$(cat "$S/queue")"; }
-        mailpit_get() { printf '{"messages_count":%s,"total":%s}' "${FAKE_MAILS:-1}" "${FAKE_MAILS:-1}"; }
+        # Mailpit: FAKE_INVITE_MAILS to the invitee (default 0), FAKE_MAILS
+        # to the initiator with the subject of the export (default 1).
+        mailpit_get() {
+            case "$1" in
+                *reticora-outage.example*) printf '{"messages_count":%s,"total":3}' "${FAKE_INVITE_MAILS:-0}" ;;
+                *"admin%40demo.local"*Export%20ready*) printf '{"messages_count":%s,"total":3}' "${FAKE_MAILS:-1}" ;;
+                *) printf '{"messages_count":0,"total":3}' ;;
+            esac
+        }
         psql_exec() {
             local sql="$*" prefix
             case "$sql" in
                 *"FROM organization"*) echo org-1 ;;
                 *"FROM ci_type"*) echo type-1 ;;
                 *"FROM role "*) echo role-1 ;;
+                *"FROM user_invitation"*) cat "$S/invitation-rows" 2>/dev/null || echo 0 ;;
+                *"type = 'export.completed'"*) [ -f "$S/exported" ] && [ -z "${FAKE_EXPORT_PENDING:-}" ] && echo evt-1 ;;
+                *"FROM export_job j JOIN app_user"*) [ -z "${FAKE_NO_INITIATOR:-}" ] && echo admin@demo.local ;;
                 *"FROM outage_marker"*) echo 1 ;;
                 *"last_heartbeat_at"*) cat "$S/col-heartbeat" ;;
                 *"FROM collector WHERE organization_id"*) echo col-1 ;;
@@ -437,17 +454,45 @@ stub_run() {
             echo '{"received":1,"queued":1,"rejected_future":0}' > "$API_OUT"
             printf '%s' "$ok"
         }
+        # The deliveries: a review digest to the same administrator (another
+        # subject) and, once the export is completed, its export.completed.
         stub_deliveries() {
-            local email status=pending attempts=1 err="central_smtp: smtp connect mailpit:1025: dial tcp: lookup mailpit: no such host"
-            email="$(cat "$S/invited" 2>/dev/null)"
-            if [ -z "$email" ] || [ -n "${FAKE_NO_ATTEMPT:-}" ]; then
-                echo '{"data":[]}' > "$API_OUT"; printf 200; return
+            local status=pending attempts=1 err="central_smtp: smtp connect mailpit:1025: dial tcp: lookup mailpit: no such host"
+            if [ ! -f "$S/exported" ] || [ -n "${FAKE_NO_ATTEMPT:-}" ]; then
+                echo '{"data":[{"id":"d-0","channel_id":"ch-1","recipient":{"email":"admin@demo.local"},"category":"review","subject":"Digest: 3 reviews","dedup_key":"digest:1","status":"sent","attempts":1}]}' > "$API_OUT"
+                printf 200; return
             fi
             if [ ! -s "$S/down" ] && [ -z "${FAKE_NEVER_SENT:-}" ]; then status=sent attempts=2 err=""; fi
-            jq -n --arg e "$email" --arg s "$status" --argjson a "$attempts" --arg err "$err" \
-                '{data: [{id: "d-1", channel_id: "ch-1", recipient: {email: $e}, status: $s, attempts: $a,
-                  last_error: (if $err == "" then null else $err end), next_attempt_at: "2026-10-26T00:02:00Z", sent_at: null}]}' > "$API_OUT"
+            jq -n --arg s "$status" --argjson a "$attempts" --arg err "$err" \
+                '{data: [{id: "d-1", channel_id: "ch-1", recipient: {user_id: "u-1", email: "admin@demo.local"}, category: "export",
+                  subject: "Export ready (json)", dedup_key: "export.completed:evt-1", status: $s, attempts: $a,
+                  last_error: (if $err == "" then null else $err end), next_attempt_at: "2026-10-26T00:02:00Z", sent_at: null},
+                  {id: "d-0", channel_id: "ch-1", recipient: {email: "admin@demo.local"}, category: "review",
+                  subject: "Digest: 3 reviews", dedup_key: "digest:1", status: "pending", attempts: 3, last_error: "other"}]}' > "$API_OUT"
             printf 200
+        }
+        # POST /invitations: 503 ErrInvitationMail while Mailpit is down;
+        # FAKE_INVITE_STATUS answers otherwise, FAKE_INVITE_ROW stores the
+        # row anyway.
+        stub_invite() {
+            printf '%s' "$1" | jq -r .email > "$S/invited"
+            [ -n "${FAKE_INVITE_ROW:-}" ] && echo 1 > "$S/invitation-rows"
+            if [ -n "${FAKE_INVITE_STATUS:-}" ]; then
+                echo '{"id":"inv-1"}' > "$API_OUT"; printf '%s' "$FAKE_INVITE_STATUS"; return
+            fi
+            if [ -s "$S/down" ]; then
+                echo '{"status":503,"title":"Service Unavailable","detail":"the invitation e-mail could not be sent"}' > "$API_OUT"; printf 503
+            else
+                echo '{"id":"inv-1"}' > "$API_OUT"; printf 201
+            fi
+        }
+        stub_export() {
+            if [ -n "${FAKE_EXPORT_STATUS:-}" ]; then
+                echo '{"detail":"asynchronous export requires blob storage"}' > "$API_OUT"; printf '%s' "$FAKE_EXPORT_STATUS"; return
+            fi
+            [ "$1" = '{"format":"json"}' ] || { printf 400; return; }
+            : > "$S/exported"
+            echo '{"id":"job-1","status":"pending","format":"json"}' > "$API_OUT"; printf 202
         }
         api() {
             local method="$1" path="$2" body="${3:-}"
@@ -456,7 +501,8 @@ stub_run() {
                 "POST /ingest/bulk") stub_write INGEST "$(printf '%s' "$body" | jq -r '.records[0].identity.serial_number')" 202 ;;
                 "GET /notification-channels") echo '{"data":[]}' > "$API_OUT"; printf 200 ;;
                 "POST /notification-channels") echo '{"id":"ch-1"}' > "$API_OUT"; printf 201 ;;
-                "POST /invitations") printf '%s' "$body" | jq -r .email > "$S/invited"; echo '{"id":"inv-1"}' > "$API_OUT"; printf 201 ;;
+                "POST /invitations") stub_invite "$body" ;;
+                "POST /exports") stub_export "$body" ;;
                 "POST /collectors/enrollment-codes") echo '{"id":"ec-1","code":"code-1"}' > "$API_OUT"; printf 201 ;;
                 "GET /notification-deliveries"*) stub_deliveries ;;
                 *) printf 404 ;;
@@ -529,23 +575,56 @@ else
 
     d="$TMP_ROOT/smtp-ok"
     rc="$(FAKE_LOAD=10 stub_run "$d" smtp)"
-    expect_case "smtp_scenario_ok: pending with attempts 1 and last_error during the outage, sent after the restart, exactly one mail → PASS" 0 "$d" "$rc" \
-        '^\| smtp outage \| PASS \| readiness 503 with smtp unavailable; delivery pending .*api 10/10 accepted = 10 persisted; ingest 10/10 accepted = 10 persisted' \
-        '^- During the outage: delivery id d-1, status pending, attempts 1, last_error "central_smtp: smtp connect mailpit:1025' \
+    expect_case "smtp_scenario_ok: invitation refused with 503 (no row, no mail); export.completed pending with attempts 1 and last_error during the outage, sent after the restart, exactly one mail to the initiator → PASS" 0 "$d" "$rc" \
+        '^\| smtp outage \| PASS \| readiness 503 with smtp unavailable; invitation refused with 503, no row, no mail \(E-144\); export.completed pending .*api 10/10 accepted = 10 persisted; ingest 10/10 accepted = 10 persisted' \
+        '^- Invitation to `outage-[0-9]+-[0-9]+@reticora-outage.example` during the outage: HTTP 503 "the invitation e-mail could not be sent", 0 user_invitation rows' \
+        '^- E-mail channel `outage-central-smtp` \(ch-1, central_smtp\); export job-1 \(POST /exports: HTTP 202\) during the outage, export.completed to its initiator `admin@demo.local`$' \
+        '^- During the outage: delivery id d-1, to admin@demo.local, subject "Export ready \(json\)", status pending, attempts 1, last_error "central_smtp: smtp connect mailpit:1025' \
         '^- /readyz during the outage: `503 .*"smtp":"unavailable"' \
-        '^- After Mailpit was started again: sent after [0-9]+s \(limit 2s\), delivery id d-1, status sent, attempts 2' \
-        '^- Mailpit: 1 message\(s\) to `outage-[0-9]+-[0-9]+@reticora-outage.example`' \
+        '^- After Mailpit was started again: sent after [0-9]+s \(limit 2s\), delivery id d-1, to admin@demo.local, subject "Export ready \(json\)", status sent, attempts 2' \
+        '^- Mailpit: 1 message\(s\) to `admin@demo.local` with the subject "Export ready \(json\)", 3 in the mailbox$' \
+        '^- Mailpit: 0 message\(s\) to the refused invitee `outage-[0-9]+-[0-9]+@reticora-outage.example`$' \
         '^\| smtp \| api \| 10 \| 10 \| 0 \| 0 \| 0 \| 10 \| 0 \| 0 \|$'
 
     d="$TMP_ROOT/smtp-two"
     rc="$(FAKE_LOAD=2 FAKE_MAILS=2 stub_run "$d" smtp)"
-    expect_case "smtp_scenario_two_mails: two mails to the invitee → FAIL" 1 "$d" "$rc" \
-        '^\| smtp outage \| FAIL \| Mailpit holds 2 messages to outage-'
+    expect_case "smtp_scenario_two_mails: two mails with the subject of the export to the initiator → FAIL" 1 "$d" "$rc" \
+        '^\| smtp outage \| FAIL \| Mailpit holds 2 messages to admin@demo.local with the subject "Export ready \(json\)", want exactly 1'
+
+    d="$TMP_ROOT/smtp-invite-accepted"
+    rc="$(FAKE_LOAD=2 FAKE_INVITE_STATUS=201 stub_run "$d" smtp)"
+    expect_case "smtp_scenario_invitation_accepted: invitation answered 201 during the outage → FAIL" 1 "$d" "$rc" \
+        '^\| smtp outage \| FAIL \| invitation to outage-[0-9]+-[0-9]+@reticora-outage.example: HTTP 201 "", want 503 "the invitation e-mail could not be sent" \(E-144\)'
+
+    d="$TMP_ROOT/smtp-invite-row"
+    rc="$(FAKE_LOAD=2 FAKE_INVITE_ROW=1 stub_run "$d" smtp)"
+    expect_case "smtp_scenario_invitation_row: invitation refused with 503 but stored → FAIL" 1 "$d" "$rc" \
+        '^\| smtp outage \| FAIL \| invitation to outage-[0-9]+-[0-9]+@reticora-outage.example stored although refused: 1 user_invitation rows, want 0'
+
+    d="$TMP_ROOT/smtp-invite-mail"
+    rc="$(FAKE_LOAD=2 FAKE_INVITE_MAILS=1 stub_run "$d" smtp)"
+    expect_case "smtp_scenario_invitation_mail: a mail to the refused invitee after the restart → FAIL" 1 "$d" "$rc" \
+        '^\| smtp outage \| FAIL \| Mailpit holds 1 messages to the refused invitee outage-[0-9]+-[0-9]+@reticora-outage.example, want 0'
+
+    d="$TMP_ROOT/smtp-export-refused"
+    rc="$(FAKE_LOAD=2 FAKE_EXPORT_STATUS=503 stub_run "$d" smtp)"
+    expect_case "smtp_scenario_export_refused: POST /exports refused → FAIL" 1 "$d" "$rc" \
+        '^\| smtp outage \| FAIL \| export \(POST /exports\): HTTP 503 '
+
+    d="$TMP_ROOT/smtp-noinitiator"
+    rc="$(FAKE_LOAD=2 FAKE_NO_INITIATOR=1 stub_run "$d" smtp)"
+    expect_case "smtp_scenario_no_initiator: export job without an initiator with an e-mail address → FAIL" 1 "$d" "$rc" \
+        '^\| smtp outage \| FAIL \| export job job-1 has no initiator with an e-mail address'
 
     d="$TMP_ROOT/smtp-noattempt"
     rc="$(FAKE_LOAD=2 FAKE_NO_ATTEMPT=1 stub_run "$d" smtp)"
-    expect_case "smtp_scenario_no_attempt: no pending delivery with a failed attempt → FAIL" 1 "$d" "$rc" \
-        '^\| smtp outage \| FAIL \| no pending delivery with a failed attempt and last_error'
+    expect_case "smtp_scenario_no_attempt: no pending delivery of export.completed with a failed attempt → FAIL" 1 "$d" "$rc" \
+        '^\| smtp outage \| FAIL \| no pending delivery of export.completed with a failed attempt and last_error'
+
+    d="$TMP_ROOT/smtp-export-pending"
+    rc="$(FAKE_LOAD=2 FAKE_EXPORT_PENDING=1 stub_run "$d" smtp)"
+    expect_case "smtp_scenario_export_not_completed: export never completed (no export.completed) → FAIL" 1 "$d" "$rc" \
+        '^\| smtp outage \| FAIL \| no pending delivery of export.completed with a failed attempt and last_error: id -'
 
     d="$TMP_ROOT/smtp-unsent"
     rc="$(FAKE_LOAD=2 FAKE_NEVER_SENT=1 stub_run "$d" smtp)"
