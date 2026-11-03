@@ -48,6 +48,10 @@ const (
 	ReasonLowerRank        = "lower_rank"
 	ReasonStale            = "stale"
 	ReasonError            = "error"
+	// ReasonInstanceAttribute refuses a write of an instance attribute of
+	// the CI: automation never writes one, and the refusal is no conflict
+	// (MET-14, CI-10, OVR-02).
+	ReasonInstanceAttribute = "instance_attribute"
 )
 
 // Decision is the outcome of DecideAutomatedWrite.
@@ -76,7 +80,10 @@ type Write struct {
 	FallbackSource string
 }
 
-// FieldReader reads the provenance and override of a field.
+// FieldReader reads the provenance and override of a field. Get sets
+// FieldValue.InstanceAttribute when the field is an instance attribute of
+// the CI, also for a field without provenance row: then it returns a
+// FieldValue with only the keys and that flag instead of ErrNotFound.
 type FieldReader interface {
 	Get(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error)
 }
@@ -103,6 +110,8 @@ func RegisterMetrics(reg prometheus.Registerer) {
 //
 //   - It fails closed: when the field's provenance or override cannot be
 //     read, nothing is written and the failure is counted.
+//   - An instance attribute of the CI is never written, with or without
+//     override; the refusal is no conflict (MET-14, OVR-02).
 //   - A manual override is never overwritten, by any source. A differing
 //     value is a conflict for the review queue; an equal one needs no write.
 //   - An empty current value may be filled by any source.
@@ -125,6 +134,9 @@ func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Dec
 		}
 	}
 
+	if fv != nil && fv.InstanceAttribute {
+		return Decision{Reason: ReasonInstanceAttribute}
+	}
 	if fv != nil && fv.OverrideAt != nil {
 		if valuesEqual(fv.OverrideValue, w.Value) {
 			return Decision{Reason: ReasonOverride}

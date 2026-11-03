@@ -419,3 +419,123 @@ func nilIfEmpty(v string) any {
 	}
 	return v
 }
+
+// NetworkProjection is the network of a set of CIs as the topology and the
+// impact project it (IMP-11, WP-298): the subnets and VLANs the CIs hang
+// off, read from the IPAM tables and never stored. A subnet belongs to a CI
+// when an address of the subnet sits on an interface of the CI, a VLAN when
+// an interface of the CI is in the VLAN; the VLANs of these subnets are
+// listed as well. Only subnets and VLANs the caller sees are listed, and
+// only links to them; each link once.
+type NetworkProjection struct {
+	Subnets []ProjectedSubnet
+	VLANs   []ProjectedVLAN
+	// CISubnets links a CI to a subnet (in_subnet), CIVLANs a CI to a VLAN
+	// (in_vlan); Target is the id of the subnet or the VLAN.
+	CISubnets []NetworkLink
+	CIVLANs   []NetworkLink
+}
+
+// ProjectedSubnet is a subnet of a NetworkProjection. VLANID is its VLAN
+// when the caller sees it (the VLAN is then among the VLANs of the
+// projection), else empty.
+type ProjectedSubnet struct {
+	ID       string
+	Name     string
+	CIDR     string
+	VRFID    string
+	ClientID string
+	SiteID   string
+	VLANID   string
+}
+
+// ProjectedVLAN is a VLAN of a NetworkProjection; Number is the VLAN
+// number (vlan.vlan_id).
+type ProjectedVLAN struct {
+	ID       string
+	Name     string
+	Number   int
+	ClientID string
+	SiteID   string
+}
+
+// NetworkLink links a CI to a subnet or a VLAN of a NetworkProjection.
+type NetworkLink struct {
+	CIID   string
+	Target string
+}
+
+// sortProjection orders a projection by id, so both repositories answer
+// alike.
+func sortProjection(p *NetworkProjection) {
+	sort.Slice(p.Subnets, func(i, j int) bool { return p.Subnets[i].ID < p.Subnets[j].ID })
+	sort.Slice(p.VLANs, func(i, j int) bool { return p.VLANs[i].ID < p.VLANs[j].ID })
+	for _, links := range [][]NetworkLink{p.CISubnets, p.CIVLANs} {
+		sort.Slice(links, func(i, j int) bool {
+			if links[i].CIID != links[j].CIID {
+				return links[i].CIID < links[j].CIID
+			}
+			return links[i].Target < links[j].Target
+		})
+	}
+}
+
+// NetworkProjection reads the network of the CIs ciIDs (IMP-11); the
+// in-memory repository knows no client or site scope.
+func (r *MemoryRepository) NetworkProjection(_ context.Context, orgID string, ciIDs []string) (NetworkProjection, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	wanted := make(map[string]bool, len(ciIDs))
+	for _, id := range ciIDs {
+		wanted[id] = true
+	}
+	vlanOf := func(id string) (*VLAN, bool) {
+		v, ok := r.vlans[id]
+		return v, ok && v.OrganizationID == orgID
+	}
+	subnets, vlans := map[string]bool{}, map[string]bool{}
+	ciSubnets, ciVLANs := map[NetworkLink]bool{}, map[NetworkLink]bool{}
+	nicCI := map[string]string{}
+	for _, ni := range r.interfaces {
+		if ni.OrganizationID != orgID || !wanted[ni.CIID] {
+			continue
+		}
+		nicCI[ni.ID] = ni.CIID
+		if v, ok := vlanOf(ni.VLANID); ok {
+			ciVLANs[NetworkLink{CIID: ni.CIID, Target: v.ID}] = true
+			vlans[v.ID] = true
+		}
+	}
+	for _, a := range r.addresses {
+		ciID, ok := nicCI[a.InterfaceID]
+		if !ok || a.OrganizationID != orgID {
+			continue
+		}
+		if s, found := r.subnets[a.SubnetID]; found && s.OrganizationID == orgID {
+			ciSubnets[NetworkLink{CIID: ciID, Target: s.ID}] = true
+			subnets[s.ID] = true
+		}
+	}
+	var p NetworkProjection
+	for id := range subnets {
+		s := r.subnets[id]
+		ps := ProjectedSubnet{ID: s.ID, Name: s.Name, CIDR: s.CIDR, VRFID: s.VRFID, ClientID: s.ClientID, SiteID: s.SiteID}
+		if v, ok := vlanOf(s.VLANID); ok {
+			ps.VLANID = v.ID
+			vlans[v.ID] = true
+		}
+		p.Subnets = append(p.Subnets, ps)
+	}
+	for id := range vlans {
+		v := r.vlans[id]
+		p.VLANs = append(p.VLANs, ProjectedVLAN{ID: v.ID, Name: v.Name, Number: v.VLANID, ClientID: v.ClientID, SiteID: v.SiteID})
+	}
+	for l := range ciSubnets {
+		p.CISubnets = append(p.CISubnets, l)
+	}
+	for l := range ciVLANs {
+		p.CIVLANs = append(p.CIVLANs, l)
+	}
+	sortProjection(&p)
+	return p, nil
+}

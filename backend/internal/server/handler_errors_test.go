@@ -74,6 +74,7 @@ var handlerErrorAllowlist = []errorEchoAllowance{
 	{"ci/handler.go", "Handler.Unmerge", "err", 3, "", "validation: ErrSnapshotExpired, ErrMergeConflict, ErrMergeUnsupported, returned unwrapped"},
 	{"ci/handler.go", "writeConcurrencyError", "err", 1, "", "validation: ErrPreconditionRequired, ErrPreconditionFailed, returned unwrapped"},
 	{"citype/attribute_definition.go", "attributeDBError", "pgErr.Message", 1, "", "validation: only for constraint attribute_definition_composition, the RAISE texts of the composition rules (MET-16, migration 000107)"},
+	{"citype/attribute_set.go", "reactivationDBError", "pgErr.Message", 1, "", "validation: only for constraint attribute_definition_composition, the RAISE texts of the composition rules (MET-16, migrations 000107, 000200)"},
 	{"citype/handler.go", "writeAttributeError", "err", 2, "", "validation: ErrAttributeNotFound, ErrAttributeReadOnly, returned unwrapped"},
 	{"composition/handler.go", "Handler.Create", "err", 1, "", "validation: the fixed rule texts of the repository and the RAISE text of trg_composition_no_cycle, selected by prefix"},
 	{"discovery/devicerecord.go", "readIngestItems", "err", 1, "", "validation: gzip.NewReader of the request body (header), like api.ReadJSON"},

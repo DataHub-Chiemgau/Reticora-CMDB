@@ -19,6 +19,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 )
@@ -996,4 +998,315 @@ func redundancyFindings(failedID string, graph Graph, hits map[string]impactHit,
 		}
 	}
 	return redundancyOf(g, number[failedID], impacted, rules)
+}
+
+// networkSeed builds the memory fixture of the projected network (IMP-11,
+// WP-298): srv1 powered_by pdu; other is not connected. srv1 has nic1 in
+// VLAN v20 with two addresses in s1 (one edge) and one without subnet; s1
+// is in VLAN v10. pdu has an address in s2 (no name, no VLAN); other has an
+// address in s1, and an address of s2 hangs on no interface.
+func networkSeed(t *testing.T) (*ci.MemoryRepository, *relationship.MemoryRepository, *ipam.MemoryRepository, map[string]string) {
+	t.Helper()
+	ctx := context.Background()
+	ciRepo := ci.NewMemoryRepository()
+	relRepo := relationship.NewMemoryRepository().WithNodeVisibility(ci.VisibleIDs(ciRepo))
+	net := ipam.NewMemoryRepository()
+	ids := map[string]string{}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"pdu", "srv1", "other"} {
+		item := &ci.Item{OrganizationID: "org-1", Name: name, CITypeID: "server", Status: "active"}
+		must(ciRepo.Create(ctx, item))
+		ids[name] = item.ID
+	}
+	must(relRepo.Create(ctx, &relationship.Relationship{OrganizationID: "org-1", SourceCIID: ids["srv1"], TargetCIID: ids["pdu"], RelType: "powered_by"}))
+	v10 := &ipam.VLAN{OrganizationID: "org-1", VLANID: 10, Name: "prod"}
+	v20 := &ipam.VLAN{OrganizationID: "org-1", VLANID: 20, Name: "mgmt"}
+	must(net.CreateVLAN(ctx, v10))
+	must(net.CreateVLAN(ctx, v20))
+	s1 := &ipam.Subnet{OrganizationID: "org-1", CIDR: "10.0.0.0/24", Name: "lan", VLANID: v10.ID}
+	s2 := &ipam.Subnet{OrganizationID: "org-1", CIDR: "10.1.0.0/24"}
+	must(net.CreateSubnet(ctx, s1))
+	must(net.CreateSubnet(ctx, s2))
+	nic := func(ciID, vlan string) string {
+		ni := &ipam.NetworkInterface{OrganizationID: "org-1", CIID: ciID, Name: "eth0", VLANID: vlan}
+		must(net.CreateInterface(ctx, ni))
+		return ni.ID
+	}
+	nic1, nicPDU, nicOther := nic(ids["srv1"], v20.ID), nic(ids["pdu"], ""), nic(ids["other"], "")
+	for _, a := range []ipam.IPAddress{
+		{SubnetID: s1.ID, InterfaceID: nic1, Address: "10.0.0.1"},
+		{SubnetID: s1.ID, InterfaceID: nic1, Address: "10.0.0.2"},
+		{InterfaceID: nic1, Address: "192.0.2.1"},
+		{SubnetID: s2.ID, InterfaceID: nicPDU, Address: "10.1.0.1"},
+		{SubnetID: s2.ID, Address: "10.1.0.9"},
+		{SubnetID: s1.ID, InterfaceID: nicOther, Address: "10.0.0.3"},
+	} {
+		a.OrganizationID = "org-1"
+		must(net.CreateIPAddress(ctx, &a))
+	}
+	ids["s1"], ids["s2"], ids["v10"], ids["v20"] = SubnetNodeID(s1.ID), SubnetNodeID(s2.ID), VLANNodeID(v10.ID), VLANNodeID(v20.ID)
+	ids["vrf"] = s1.VRFID
+	return ciRepo, relRepo, net, ids
+}
+
+// ipamReader is a GET of org-1 by a principal with topology:read and, when
+// ipamRead is set, ipam:read.
+func ipamReader(path string, ipamRead bool) *http.Request {
+	r := tenantReq("GET", path)
+	perms := []identity.Permission{identity.PermTopologyRead}
+	if ipamRead {
+		perms = append(perms, identity.PermIPAMRead)
+	}
+	return r.WithContext(identity.WithPrincipal(r.Context(), identity.Principal{OrganizationID: "org-1", Permissions: perms}))
+}
+
+// TestImpactProjectsNetworkAsLeaves covers IMP-11 (WP-298, E-131) on the
+// impact: with include=network the subnets and VLANs of the failed and
+// impacted CIs follow the CIs as heuristic leaves (kind, name, id), with
+// the hops of their CI + 1 and the VLAN of a subnet via the subnet; the
+// failure does not travel over a shared subnet to other CIs; count and the
+// summary count CIs only, summary.projected the leaves; depth bounds the
+// leaves, and categories without network leave them out.
+func TestImpactProjectsNetworkAsLeaves(t *testing.T) {
+	ciRepo, relRepo, net, ids := networkSeed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).WithNetworkProjection(net).RegisterRoutes(mux)
+	type answer struct {
+		Count    int           `json:"count"`
+		Impacted []ImpactNode  `json:"impacted"`
+		Summary  ImpactSummary `json:"summary"`
+	}
+	get := func(path string) answer {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, ipamReader(path, true))
+		var body answer
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		return body
+	}
+	for _, path := range []string{"/api/v1/impact/" + ids["pdu"] + "?include=network", "/api/v1/impact?include=network&ci_ids=" + ids["pdu"]} {
+		body := get(path)
+		var got []string
+		for i := range body.Impacted {
+			n := &body.Impacted[i]
+			got = append(got, fmt.Sprintf("%s/%s/%d/%s/%s/%v", n.ID, n.NodeKind, n.Hops, n.Via.CIID, n.Via.RelType, n.Heuristic))
+		}
+		want := []string{
+			ids["srv1"] + "//1/" + ids["pdu"] + "/powered_by/false",
+			ids["s2"] + "/subnet/1/" + ids["pdu"] + "/in_subnet/true",
+			ids["s1"] + "/subnet/2/" + ids["srv1"] + "/in_subnet/true",
+			ids["v10"] + "/vlan/3/" + ids["s1"] + "/in_vlan/true",
+			ids["v20"] + "/vlan/2/" + ids["srv1"] + "/in_vlan/true",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: impacted\n%v\nwant\n%v", path, got, want)
+		}
+		if body.Count != 1 || body.Summary.Impacted != 1 || body.Summary.Certain != 1 || body.Summary.Heuristic != 0 ||
+			!reflect.DeepEqual(body.Summary.ByCategory, map[string]int{"power": 1}) || body.Summary.Projected == nil || *body.Summary.Projected != 4 {
+			t.Errorf("%s: count %d, summary %+v", path, body.Count, body.Summary)
+		}
+		for i := range body.Impacted {
+			n := &body.Impacted[i]
+			switch n.ID {
+			case ids["other"]:
+				t.Errorf("%s: other is reached over the shared subnet", path)
+			case ids["s1"]:
+				if n.Name != "lan" || n.CIDR != "10.0.0.0/24" || n.VRFID != ids["vrf"] || n.CIType != "" || n.Status != "" {
+					t.Errorf("subnet s1: %+v", n.Node)
+				}
+			case ids["s2"]:
+				if n.Name != "10.1.0.0/24" {
+					t.Errorf("subnet s2 without name: %+v", n.Node)
+				}
+			case ids["v10"]:
+				wantPath := []PathStep{
+					{FromCIID: ids["pdu"], ToCIID: ids["srv1"], RelType: "powered_by", Category: "power"},
+					{FromCIID: ids["srv1"], ToCIID: ids["s1"], RelType: RelInSubnet, Category: "network", Heuristic: true},
+					{FromCIID: ids["s1"], ToCIID: ids["v10"], RelType: RelInVLAN, Category: "network", Heuristic: true},
+				}
+				if n.Name != "VLAN 10 prod" || n.VLANNumber != 10 || !reflect.DeepEqual(n.Path, wantPath) {
+					t.Errorf("vlan v10: %+v path %+v", n.Node, n.Path)
+				}
+			}
+		}
+	}
+	// depth bounds the leaves; rel_type narrows the CI edges only.
+	if body := get("/api/v1/impact/" + ids["pdu"] + "?include=network&depth=2&rel_type=powered_by"); *body.Summary.Projected != 3 || len(body.Impacted) != 4 {
+		t.Errorf("depth 2: %+v", body)
+	}
+	// categories without network: no leaves, the CIs as before.
+	for c, want := range map[string]int{"power": 0, "power,network": 4} {
+		body := get("/api/v1/impact/" + ids["pdu"] + "?include=network&categories=" + c)
+		if *body.Summary.Projected != want || len(body.Impacted) != 1+want || body.Count != 1 {
+			t.Errorf("categories=%s: %+v", c, body)
+		}
+	}
+}
+
+// TestImpactNetworkFields covers the compact form with include=network
+// (IMP-11, API-02): node_kind, cidr, vrf_id and vlan_number on request;
+// a projected node carries no ci_type and no status, a CI no node_kind.
+func TestImpactNetworkFields(t *testing.T) {
+	ciRepo, relRepo, net, ids := networkSeed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).WithNetworkProjection(net).RegisterRoutes(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, ipamReader("/api/v1/impact/"+ids["pdu"]+"?include=network&fields=node_kind,ci_type,status,cidr,vrf_id,vlan_number", true))
+	var body struct {
+		Impacted []map[string]any `json:"impacted"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil || len(body.Impacted) != 5 {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	keys := map[string]string{}
+	for _, entry := range body.Impacted {
+		id, _ := entry["id"].(string)
+		keys[id] = strings.Join(slices.Sorted(maps.Keys(entry)), ",")
+	}
+	for id, want := range map[string]string{
+		ids["srv1"]: "ci_type,id,status",
+		ids["s1"]:   "cidr,id,node_kind,vrf_id",
+		ids["v20"]:  "id,node_kind,vlan_number",
+	} {
+		if keys[id] != want {
+			t.Errorf("%s: fields %s, want %s", id, keys[id], want)
+		}
+	}
+	// Without node_kind in fields= the compact form leaves it out.
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, ipamReader("/api/v1/impact/"+ids["pdu"]+"?include=network&fields=hops", true))
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "node_kind") {
+		t.Errorf("fields=hops: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestImpactWithoutNetworkUnchanged: without include=network the answers
+// of the topology and the impact are byte-equal with and without a wired
+// projector (API-01, E-57); network needs ipam:read (403) and a projector
+// (422 without one, like any unknown value); the deprecated path ignores
+// include; a projected id is no CI (404).
+func TestImpactWithoutNetworkUnchanged(t *testing.T) {
+	ciRepo, relRepo, net, ids := networkSeed(t)
+	plain, projected := chi.NewRouter(), chi.NewRouter()
+	NewHandler(ciRepo, relRepo).RegisterRoutes(plain)
+	NewHandler(ciRepo, relRepo).WithNetworkProjection(net).RegisterRoutes(projected)
+	serve := func(mux *chi.Mux, path string, ipamRead bool) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, ipamReader(path, ipamRead))
+		return w
+	}
+	for _, path := range []string{
+		"/api/v1/impact/" + ids["pdu"], "/api/v1/impact?ci_ids=" + ids["pdu"] + "," + ids["other"],
+		"/api/v1/impact/" + ids["pdu"] + "?fields=hops,via&include=services,clients",
+		"/api/v1/topology", "/api/v1/topology?root_ci_id=" + ids["pdu"],
+		"/api/v1/topology/cis/" + ids["pdu"] + "/impact?include=network",
+	} {
+		a, b := serve(plain, path, true), serve(projected, path, true)
+		if a.Code != http.StatusOK || a.Body.String() != b.Body.String() {
+			t.Errorf("%s: %d %s\nwith projector %d %s", path, a.Code, a.Body.String(), b.Code, b.Body.String())
+		}
+		if strings.Contains(b.Body.String(), "node_kind") || strings.Contains(b.Body.String(), "projected") {
+			t.Errorf("%s: projected network without include: %s", path, b.Body.String())
+		}
+	}
+	for _, c := range []struct {
+		mux      *chi.Mux
+		path     string
+		ipamRead bool
+		want     int
+	}{
+		{projected, "/api/v1/impact/" + ids["pdu"] + "?include=network", false, http.StatusForbidden},
+		{projected, "/api/v1/impact?include=services,network&ci_ids=" + ids["pdu"], false, http.StatusForbidden},
+		{projected, "/api/v1/topology?include=network", false, http.StatusForbidden},
+		{projected, "/api/v1/impact/" + ids["pdu"] + "?include=networks", true, http.StatusUnprocessableEntity},
+		{projected, "/api/v1/topology?include=services", true, http.StatusUnprocessableEntity},
+		{plain, "/api/v1/impact/" + ids["pdu"] + "?include=network", true, http.StatusUnprocessableEntity},
+		{plain, "/api/v1/topology?include=network", true, http.StatusUnprocessableEntity},
+		{projected, "/api/v1/impact/" + ids["s1"] + "?include=network", true, http.StatusNotFound},
+		{projected, "/api/v1/impact?include=network&ci_ids=" + ids["pdu"] + "," + ids["v10"], true, http.StatusNotFound},
+	} {
+		w := serve(c.mux, c.path, c.ipamRead)
+		if w.Code != c.want || (c.want == http.StatusUnprocessableEntity && !strings.Contains(w.Body.String(), `"field":"include"`)) {
+			t.Errorf("%s (ipam:read %v): %d %s, want %d", c.path, c.ipamRead, w.Code, w.Body.String(), c.want)
+		}
+	}
+}
+
+// TestTopologyProjectsNetwork covers IMP-11 on GET /topology against the
+// memory repositories: the projected nodes after the CIs with in_subnet
+// and in_vlan edges of source projection and stable ids; a duplicate
+// assignment is one edge, an address without interface or subnet none.
+func TestTopologyProjectsNetwork(t *testing.T) {
+	ciRepo, relRepo, net, ids := networkSeed(t)
+	mux := chi.NewRouter()
+	NewHandler(ciRepo, relRepo).WithNetworkProjection(net).RegisterRoutes(mux)
+	read := func(path string) Graph {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, ipamReader(path, true))
+		var g Graph
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &g) != nil {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		return g
+	}
+	g := read("/api/v1/topology?include=network")
+	var nodes, edges []string
+	for i := range g.Nodes {
+		nodes = append(nodes, g.Nodes[i].ID+"/"+g.Nodes[i].NodeKind)
+	}
+	for _, e := range g.Edges {
+		if e.RelType == "powered_by" {
+			continue
+		}
+		edges = append(edges, e.SourceCIID+">"+e.TargetCIID+"/"+e.RelType+"/"+e.Source)
+		if e.ID != projectedEdgeID(e.RelType, e.SourceCIID, e.TargetCIID) {
+			t.Errorf("edge %+v: unstable id", e)
+		}
+	}
+	slices.Sort(edges)
+	if len(nodes) > 3 {
+		// The CIs in the order of the CI list.
+		slices.Sort(nodes[:3])
+	}
+	wantNodes := []string{ids["pdu"] + "/", ids["srv1"] + "/", ids["other"] + "/",
+		ids["s2"] + "/subnet", ids["s1"] + "/subnet", ids["v10"] + "/vlan", ids["v20"] + "/vlan"}
+	wantEdges := []string{
+		ids["other"] + ">" + ids["s1"] + "/in_subnet/projection",
+		ids["pdu"] + ">" + ids["s2"] + "/in_subnet/projection",
+		ids["s1"] + ">" + ids["v10"] + "/in_vlan/projection",
+		ids["srv1"] + ">" + ids["s1"] + "/in_subnet/projection",
+		ids["srv1"] + ">" + ids["v20"] + "/in_vlan/projection",
+	}
+	slices.Sort(wantEdges)
+	if !slices.Equal(nodes, wantNodes) || !slices.Equal(edges, wantEdges) {
+		t.Errorf("nodes %v\nwant  %v\nedges %v\nwant  %v", nodes, wantNodes, edges, wantEdges)
+	}
+	// From a root the projection hangs off the walked CIs only.
+	g = read("/api/v1/topology?include=network&depth=1&root_ci_id=" + ids["pdu"])
+	if len(g.Nodes) != 6 {
+		t.Errorf("from pdu: %d nodes, want pdu, srv1, s1, s2, v10, v20: %+v", len(g.Nodes), g.Nodes)
+	}
+}
+
+// TestValidateRejectsProjectedKeys: in_subnet and in_vlan are projected
+// from IPAM and no type may define them, a system type neither (IMP-11,
+// WP-298).
+func TestValidateRejectsProjectedKeys(t *testing.T) {
+	for _, key := range relationshiptype.ProjectedKeys {
+		for _, system := range []bool{false, true} {
+			typ := relationshiptype.Type{Key: key, Category: "network", ImpactDirection: relationshiptype.ImpactNone,
+				Directed: true, Cardinality: relationshiptype.CardinalityManyToMany, IsSystem: system}
+			if err := typ.Validate(); err == nil || !strings.Contains(err.Error(), "projected") {
+				t.Errorf("%s (system %v): %v", key, system, err)
+			}
+		}
+	}
 }

@@ -24,6 +24,10 @@ const (
 	DependencyRackMount      = "rack_mount"
 	DependencyRoleAssignment = "role_assignment"
 
+	// DependencyCIAttribute is a CI whose reference attribute with target
+	// location names the location (MET-12, WP-713).
+	DependencyCIAttribute = "ci_attribute"
+
 	// Network and discovery objects bound to a site (E-71); the kind is the
 	// name of their table.
 	DependencyVLAN            = "vlan"
@@ -55,7 +59,34 @@ var dependencies = []dependency{
 	{DependencyAssetMovement, `EXISTS (SELECT 1 FROM asset_movement m WHERE m.from_location_id = $1 OR m.to_location_id = $1)`},
 	{DependencyRackMount, `EXISTS (SELECT 1 FROM rack_mount rm WHERE rm.rack_id = $1)`},
 	{DependencyRoleAssignment, `EXISTS (SELECT 1 FROM role_assignment ra WHERE ra.scope_site_id = $1)`},
+	{DependencyCIAttribute, ciAttributeReference},
 }
+
+// ciAttributeReference is the condition of DependencyCIAttribute (MET-12,
+// WP-713): a visible CI that is not deleted (nor merged) holds the id of the
+// location $1 as the value of an attribute with target location. Type,
+// set and global definitions name the target through
+// reticora_reference_target (a list of a multi_value attribute counts with
+// each element); the key together with a value that is the id of this very
+// location suffices, the applicability of a type definition to the type of
+// the CI is not checked again. Instance definitions (ci_instance_field_
+// definition) are those of the CI with data_type location or reference with
+// reference_target location and their values in attributes->'_instance'.
+// The comparison ignores the case of the stored id. A JSONB value has no
+// foreign key: a CI the caller cannot see does not keep the location, its
+// value then reads as missing (include=references).
+const ciAttributeReference = `(EXISTS (SELECT 1 FROM attribute_definition d
+		JOIN ci ON ci.attributes ? d.key AND (d.organization_id IS NULL OR d.organization_id = ci.organization_id)
+		WHERE reticora_reference_target(d) = 'location' AND ci.deleted_at IS NULL
+		AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE jsonb_typeof(ci.attributes -> d.key)
+			WHEN 'array' THEN ci.attributes -> d.key
+			WHEN 'string' THEN jsonb_build_array(ci.attributes -> d.key)
+			ELSE '[]'::jsonb END) v WHERE lower(v) = $1::text))
+	OR EXISTS (SELECT 1 FROM ci_instance_field_definition f
+		JOIN ci ON ci.id = f.ci_id
+		WHERE ci.deleted_at IS NULL
+		AND (f.data_type = 'location' OR (f.data_type = 'reference' AND f.reference_target = 'location'))
+		AND lower(ci.attributes -> '_instance' ->> f.name) = $1::text))`
 
 // siteObject is a kind of object bound to a site by its site_id. lapsed,
 // when set, is the condition under which a row no longer keeps the site.

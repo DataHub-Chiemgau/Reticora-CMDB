@@ -925,9 +925,11 @@ paths:
           schema: { type: string }
           description: >-
             Comma-separated related collections to embed (API-05):
-            `relationships`, `contacts`, `asset`. An unknown name yields 422.
-            A collection embeds at most 200 rows; one with more rows the
-            caller may see is named in `truncated` (CIWithIncludes).
+            `relationships`, `contacts`, `asset`, `references`. An unknown
+            name yields 422. A collection embeds at most 200 rows; one with
+            more rows the caller may see is named in `truncated`
+            (CIWithIncludes). `references` resolves the reference values of
+            the CI to their targets (MET-12) and is never capped.
       responses:
         '200':
           description: Configuration item details
@@ -966,6 +968,9 @@ paths:
         workflow); observed discovery updates do not change the version.
         An organization can require If-Match (settings.require_if_match);
         then a request without it is 412, like an unknown version.
+        Changing the value of an instance attribute of the CI (MET-14)
+        additionally requires ci_instance_attribute:manage, otherwise 403;
+        an instance value sent unchanged is allowed.
       parameters:
         - name: If-Match
           in: header
@@ -993,6 +998,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1754,8 +1761,15 @@ paths:
             allowed_source_types or allowed_target_types of the relationship
             type names source_ci_id, target_ci_id or both ("the type of the
             source CI is not in allowed_source_types of the relationship
-            type"); an empty list allows every type, nothing is stored
-            (REL-01, E-95, F-313).
+            type"); an empty list allows every type, a subtype of a listed
+            CI type (parent_type_id) is allowed, nothing is stored (REL-01,
+            REL-06, E-95, F-313).
+            An edge that would exceed the cardinality of the relationship
+            type names rel_type ("the edge would exceed the cardinality of
+            the relationship type"): one_to_one allows the source one
+            outgoing and the target one incoming edge of the type,
+            one_to_many the target one incoming, many_to_one the source one
+            outgoing; nothing is stored (REL-06, E-125).
             Without violations: a structural relationship type, which is
             projected and cannot be stored, or an interface of another CI.
           content:
@@ -5828,6 +5842,23 @@ paths:
           schema:
             type: integer
             minimum: 1
+        - name: include
+          in: query
+          description: >-
+            network adds the subnets and VLANs projected from IPAM (IMP-11):
+            a node of node_kind subnet or vlan for each subnet and VLAN a CI
+            of the graph hangs off (an address of the subnet on an interface
+            of the CI, an interface in the VLAN) and the VLANs of those
+            subnets, with the edges in_subnet and in_vlan (source
+            projection). Only subnets and VLANs the caller sees appear; the
+            projection does not widen the walk, and the ci_type filter
+            narrows the CIs only. Without root_ci_id the projected nodes
+            count towards the 2,000 nodes. The only value is network; any
+            other is 422 (field include). It needs ipam:read besides
+            topology:read. Without include the answer is unchanged.
+          schema:
+            type: string
+            enum: [network]
       responses:
         '200':
           description: Topology graph
@@ -5855,13 +5886,20 @@ paths:
         '422':
           description: >-
             Without root_ci_id the filtered topology holds more than 2,000
-            CIs (IMP-06); narrow it with site_id, client_id or ci_type (a CI
-            type id) or set root_ci_id.
+            CIs (IMP-06), or with include=network more than 2,000 CIs,
+            subnets and VLANs together (the message names include); narrow
+            it with site_id, client_id or ci_type (a CI type id) or set
+            root_ci_id. An unknown include value is 422 with field include.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: include=network without the permission ipam:read.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -6005,6 +6043,11 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: include=network without the permission ipam:read.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -6073,6 +6116,11 @@ paths:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: include=network without the permission ipam:read.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: Unknown category, unknown field in fields or unknown value in include.
           content:
@@ -11931,6 +11979,25 @@ paths:
   /api/v1/assets/{id}/lifecycle-transitions:
     x-phase: P2
     x-feature: assets_basic
+    get:
+      operationId: getAssetsIdLifecycleTransitionOptions
+      summary: List the lifecycle transitions allowed for an asset
+      description: >-
+        The effective lifecycle model of the asset (its type chain,
+        otherwise physical_asset), its
+        current state and the transitions possible from it with required
+        fields and guard (LCY-02). Without a state the initial state is
+        offered as well. An asset outside the caller's scope is 404.
+      responses:
+        '200':
+          description: Allowed transitions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionOptions' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     post:
       operationId: createAssetsIdLifecycleTransitions
       summary: Execute a lifecycle transition on an asset
@@ -11994,8 +12061,12 @@ paths:
       summary: Manage global CI field definitions
       description: >-
         The global fields (no CI type, MET-13): the organization's
-        organization-wide fields, which apply to every CI type of the
-        organization, and the read-only system fields (`is_system`).
+        organization-wide fields, which apply to the CI types of their
+        `applies_to` (every type by default, WP-255), and the read-only
+        system fields (`is_system`), which apply to every type. PUT creates
+        a new global field with `applies_to` all and keeps the
+        applicability of an existing one; it is changed through
+        /attribute-definitions.
       responses:
         '200':
           description: >-
@@ -12036,6 +12107,14 @@ paths:
                         conditional: { type: object, additionalProperties: true }
                         reference_target: { type: string }
                         is_system: { type: boolean }
+                        applies_to:
+                          $ref: '#/components/schemas/AttributeAppliesTo'
+                        applies_to_categories:
+                          type: array
+                          items: { type: string }
+                        applies_to_type_ids:
+                          type: array
+                          items: { type: string }
                   total: { type: integer }
                   limit: { type: integer }
                   offset: { type: integer }
@@ -12061,11 +12140,19 @@ paths:
     delete:
       operationId: deleteCiFieldsGlobalName
       summary: Delete a global CI field definition
+      description: >-
+        Deletes a global field of the organization; system fields and the
+        fields of other organizations are 404. The index job drops its
+        unique index `idx_attr_<id>_u` or own index, and the key index
+        `idx_attr_key_<key>` once no definition uses the key (DB-04,
+        WP-255). Values in the CIs' attributes stay.
       responses:
         '204':
           description: Delete a global CI field definition
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/attribute-definitions:
     get:
@@ -12075,13 +12162,19 @@ paths:
         The single source of attribute validation and indexing (DB-03): the
         organization's definitions and the read-only system definitions
         (`is_system`). Filters: `ci_type_id`, `attribute_set_id`, `scope`
-        (type, global, set). Pages
+        (type, global, set) and `applicable_to` (WP-255): the definitions of
+        that CI type together with the global definitions that apply to it
+        (system globals, globals with `applies_to` = all, categories listing
+        the type's category, types listing the type or one of its
+        ancestors); a type the organization does not see selects nothing.
+        Pages
         newest first on (created_at, id) (API-02, F-215): `limit` (default
         50, at most 200) and the signed keyset `cursor` from `next_cursor`.
       parameters:
         - { name: ci_type_id, in: query, schema: { type: string } }
         - { name: attribute_set_id, in: query, schema: { type: string } }
         - { name: scope, in: query, schema: { type: string, enum: [type, global, set] } }
+        - { name: applicable_to, in: query, description: 'A CI type ID: its definitions and the global definitions that apply to it (MET-13, WP-255).', schema: { type: string } }
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Cursor'
@@ -12105,12 +12198,20 @@ paths:
         Without `ci_type_id` the definition is global (every type of the
         organization); with `attribute_set_id` it is an attribute of that
         set (scope `set`, WP-250): a set the organization does not see is
-        422 with `field` = `attribute_set_id`, a system set 403. Set
-        attributes do not enter the composition before WP-709; a searchable
-        or unique one is indexed and checked organization-wide like a
-        global attribute. Creating, changing or deleting a type's definition
-        regenerates the type's `attribute_schema` and raises its
-        `schema_version`. Requires ci_attribute:manage.
+        422 with `field` = `attribute_set_id`, a system set 403. A set
+        attribute enters the composition of every type its set is assigned
+        to and of their subtypes (MET-16, after the type chain); a
+        searchable or unique one is indexed and checked organization-wide
+        like a global attribute. Creating, changing or deleting a type's or
+        a set's definition regenerates the `attribute_schema` of the types
+        concerned and raises their `schema_version` when the schema changes.
+        A definition that cannot be composed with the system base, the
+        organization's global attributes, a type chain or the sets of a type
+        (data type, empty value set or range) is 422 with `field` = `key`
+        and the code of the conflict. A global definition of the
+        organization can be restricted with `applies_to` (MET-13, WP-255);
+        it is then composed and enforced only for the types it applies to.
+        Requires ci_attribute:manage.
       requestBody:
         required: true
         content:
@@ -12165,7 +12266,11 @@ paths:
         queues an `attribute.index` job that builds the index concurrently
         (DB-04); making an attribute unique while active CIs share a value is
         409. A definition that cannot be composed with the other layers of
-        its key (MET-16) is 422 with `field` = `key` and a `code`.
+        its key (MET-16) is 422 with `field` = `key` and a `code`; this
+        includes a change of `applies_to`, `applies_to_categories` or
+        `applies_to_type_ids` that extends a global definition to a type
+        with a conflicting definition (MET-13, WP-255). A change of the
+        applicability rebuilds no index and raises no `schema_version`.
       requestBody:
         required: true
         content:
@@ -12353,6 +12458,374 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/templates:
+    x-phase: P2
+    get:
+      operationId: listTemplates
+      tags: [Metamodel]
+      summary: List templates (MET-16)
+      description: >-
+        The organization's templates and the read-only system templates
+        (`is_system`, WP-251), optionally of one CI type (`ci_type_id`). A
+        template is a versioned, ordered bundle of attribute definitions of
+        a CI type; it is no type template of GET /api/v1/ci-types/templates.
+        Pages newest first on (created_at, id) (API-02): `limit` (default
+        50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+        Requires ci:read.
+      parameters:
+        - name: ci_type_id
+          in: query
+          required: false
+          description: Only templates of this CI type.
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Templates, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createTemplate
+      tags: [Metamodel]
+      summary: Create a template (MET-16)
+      description: >-
+        A template of the organization for a CI type it sees (its own or a
+        system type); version 1 is created as an empty draft. An unknown CI
+        type is 422 on `ci_type_id`, a taken key 409. Requires
+        citype:manage; audited as `template.created` and
+        `template_version.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateCreate'
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getTemplate
+      tags: [Metamodel]
+      summary: Read a template
+      responses:
+        '200':
+          description: Template
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateTemplate
+      tags: [Metamodel]
+      summary: Update a template
+      description: >-
+        Display name, description and `is_active`; `key` and `ci_type_id`
+        are immutable (422). System templates are read-only (403).
+        Requires citype:manage; audited as `template.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplatePatch'
+      responses:
+        '200':
+          description: Template updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteTemplate
+      tags: [Metamodel]
+      summary: Delete a template
+      description: >-
+        Deletes the template with its versions and items. System templates
+        are read-only (403). Requires citype:manage; audited as
+        `template.deleted`.
+      responses:
+        '204':
+          description: Template deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}/clone:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: cloneTemplate
+      tags: [Metamodel]
+      summary: Clone a template
+      description: >-
+        Copies a template, a system template as well, into a new template
+        of the organization on the same CI type with the new `key`. Its
+        version 1 is a draft with the items of the source's current
+        version (without a published one, of its highest version);
+        `cloned_from_id` names the source. A taken key is 409. Requires
+        citype:manage; audited as `template.cloned` and
+        `template_version.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateClone'
+      responses:
+        '201':
+          description: Template cloned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}/versions:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listTemplateVersions
+      tags: [Metamodel]
+      summary: List the versions of a template
+      description: >-
+        Versions newest first on (created_at, id) with the cursor of
+        API-02, each with its items. Requires ci:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Template versions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersionListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createTemplateVersion
+      tags: [Metamodel]
+      summary: Create a template version
+      description: >-
+        The next version as a draft copy of the current (last published)
+        version; without a published version a copy of the highest one.
+        System templates are read-only (403). Requires citype:manage;
+        audited as `template_version.created`.
+      responses:
+        '201':
+          description: Template version created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}/versions/{version}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: version
+        in: path
+        required: true
+        description: Version number of the template (from 1).
+        schema: { type: integer, minimum: 1 }
+    get:
+      operationId: getTemplateVersion
+      tags: [Metamodel]
+      summary: Read a template version with its items
+      responses:
+        '200':
+          description: Template version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: putTemplateVersion
+      tags: [Metamodel]
+      summary: Replace the items of a draft version
+      description: >-
+        The list replaces the items of a draft as a whole. Each item
+        references an attribute definition of the template's CI type, of
+        its type chain (MET-06) or a global one; set attributes (scope
+        `set`), unknown definitions and those of another organization are
+        422 on `items[<i>].attribute_definition_id`. Positions are distinct.
+        The overrides only narrow (MET-16): `required_override` is OR-ed,
+        `validation_override` composes with the definition like a layer
+        (a conflict is 422 with its `code`), `default_override` must be
+        valid. `searchable`, `unique`, `unique_scope` and `data_type`
+        cannot be overridden (422). Published and retired versions are
+        immutable (409); system templates are read-only (403). Requires
+        citype:manage; audited as `template_version.updated`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateVersionItemsUpdate'
+      responses:
+        '200':
+          description: Items replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersion'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/templates/{id}/versions/{version}/publish:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: version
+        in: path
+        required: true
+        description: Version number of the template (from 1).
+        schema: { type: integer, minimum: 1 }
+    post:
+      operationId: publishTemplateVersion
+      tags: [Metamodel]
+      summary: Publish a draft template version (MET-53)
+      description: >-
+        Publishes a draft directly (MET-04): its items are checked again and
+        composed on the template's CI type after the system base, the
+        organization's global attributes, the type chain and the sets of the
+        type (MET-16). A conflict is 422 with the attribute key as `field`
+        and the `code` of the conflict. Then, in one transaction, the
+        version becomes published with `published_at` and `published_by`,
+        and the template's `current_version` names it; earlier published
+        versions stay referable. Only a draft newer than the current
+        version can be published (409); system templates are read-only
+        (403). Requires metamodel:publish; audited as
+        `template_version.published`. Publishing through drafts follows
+        with WP-260/WP-261.
+      responses:
+        '200':
+          description: Template version published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateVersion'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -12400,6 +12873,9 @@ paths:
         one of another organization are both 422 on `parent_type_id`, as is
         a chain of more than 6 types and a deactivated parent (MET-05: an
         active type has no deactivated parent); a taken key or name is 409.
+        `lifecycle_model_id` binds a lifecycle model of the organization or a
+        system model (MET-01), any other is 422 on `lifecycle_model_id`; the
+        deprecated `lifecycle_definition_id` is accepted as its mirror.
       requestBody:
         required: true
         content:
@@ -12488,8 +12964,18 @@ paths:
         on `parent_type_id`, a cycle is 409, a chain of more than 6 types
         (including the moved subtree) is 422, a deactivated parent is 422 on
         `parent_type_id` (MET-05), and a moved subtree whose attribute
-        definitions cannot be composed is 422 naming the attribute key. An
-        unknown CI type, or a system type, is 404.
+        definitions cannot be composed is 422 naming the attribute key. A
+        new `category` changes the organization's global attributes that
+        apply to the type (`applies_to`, MET-13, WP-255): when the type or a
+        subtype cannot be composed with them, the change is 422 on
+        `category` naming the key and nothing is stored. An
+        unknown CI type, or a system type, is 404. A lifecycle model the
+        organization does not see is 422 on `lifecycle_model_id`. A change of
+        `lifecycle_model_id` or `parent_type_id` after which CIs of the type
+        or of its subtypes carry lifecycle states their new effective model
+        (nearest model of the type chain that applies to `ci`) does not
+        contain is 409 with the field and `state_counts` (state and number
+        of CIs); nothing is changed (MET-06, LCY-02).
       requestBody:
         required: true
         content:
@@ -12547,9 +13033,11 @@ paths:
         Copies the type into the organization under a new key (`key`, else
         derived from `name`, else the name with `_copy`) with
         `cloned_from_id`: its attribute definitions, `compliance_rules`,
-        `ui_schema`, `lifecycle_definition_id` and `parent_type_id`
+        `ui_schema`, `lifecycle_model_id` and `parent_type_id`
         (MET-05). An organization replaces a system type this way. A taken
-        key or name is 409, as is a source whose parent is deactivated.
+        key or name is 409, as is a source whose parent is deactivated; a
+        lifecycle model the organization does not see is 422 with field
+        `lifecycle_model_id`.
       responses:
         '201':
           description: The clone
@@ -12611,7 +13099,8 @@ paths:
         organization) are read-only for tenants until inheritance (MET-06):
         a field on them is refused with 422 on `ci_type_id`; organization-wide
         fields (PUT /api/v1/ci-fields/global) apply to every CI type
-        including the system types. An unknown CI type, or one of another
+        including the system types unless `applies_to` restricts them
+        (WP-255). An unknown CI type, or one of another
         organization, is 404.
       responses:
         '200':
@@ -12629,11 +13118,17 @@ paths:
     delete:
       operationId: deleteCiTypesIdFieldsName
       summary: Delete a CI type field definition
+      description: >-
+        Deletes a field of the type only; a global field of the same name is
+        not reached (404, WP-255). The index job drops the indexes of the
+        deleted definition (DB-04). Values in the CIs' attributes stay.
       responses:
         '204':
           description: Delete a CI type field definition
         '401':
           description: Unauthorized
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/ci-types/{id}/versions:
     get:
@@ -12682,8 +13177,15 @@ paths:
         `ci_type_id`); every set is listed once at its own `position` and
         is a set of the organization or a system set, and a set not yet
         assigned must be active (422 with `field` = `attribute_set_id` or
-        `position`). Until WP-709 the sets do not enter the composition,
-        the materialized schema or `schema_version` of the type. Requires
+        `position`). The active sets enter the composition after the type
+        chain (MET-16), the type's in `position` order; its subtypes take
+        their inheritable set attributes. Before anything is written the new
+        list is composed with the system base, the organization's global
+        attributes and the type chain, for the type and its subtypes: a
+        conflict (data type, empty value set or range) is 422 with `field` =
+        `attribute_set_id` and the code of the conflict, and nothing
+        changes. A PUT regenerates `attribute_schema` once and raises
+        `schema_version` once, and only when the schema changes. Requires
         citype:manage; audited as `ci_type.attribute_sets_changed` with the
         ordered list before and after.
       requestBody:
@@ -12936,6 +13438,27 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
 
   /api/v1/cis/{id}/lifecycle-transitions:
+    get:
+      operationId: getCisIdLifecycleTransitionOptions
+      summary: List the lifecycle transitions allowed for a CI
+      description: >-
+        The effective lifecycle model of the CI (its type chain), its
+        current state and the transitions possible from it with required
+        fields and guard (LCY-02). Without a state the initial state is
+        offered as well. A CI whose type has no lifecycle model is 422; a CI
+        outside the caller's scope is 404.
+      responses:
+        '200':
+          description: Allowed transitions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionOptions' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     post:
       operationId: createCisIdLifecycleTransitions
       summary: Execute a lifecycle transition on a CI
@@ -13286,59 +13809,114 @@ paths:
   /api/v1/lifecycle-definitions:
     get:
       operationId: listLifecycleDefinitions
-      summary: Manage lifecycle definitions
+      deprecated: true
+      x-deprecated-at: '2026-11-03'
+      x-sunset: '2027-11-04'
+      x-successor: '/api/v1/lifecycle-models'
+      summary: List lifecycle models (deprecated alias)
       description: >-
-        The planned successor is /api/v1/lifecycle-models (E-38); WP-723
-        deprecates this G1 path with at least 12 months of notice once the
-        successor is implemented.
+        Deprecated (E-38, WP-723): alias of GET /api/v1/lifecycle-models on
+        the same handler. The path answers until x-sunset with the
+        Deprecation, Sunset and successor-version Link headers.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: Manage lifecycle definitions
-        '401':
-          description: Unauthorized
-    post:
-      operationId: createLifecycleDefinitions
-      summary: Manage lifecycle definitions
-      description: >-
-        `applies_to` is asset (default), ci or both; another value is a 422
-        field error. A taken key is 409. The planned successor is
-        /api/v1/lifecycle-models (E-38); WP-723 deprecates this G1 path with
-        at least 12 months of notice once the successor is implemented.
-      responses:
-        '201':
-          description: Manage lifecycle definitions
+          description: Paginated lifecycle models
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleModelList' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createLifecycleDefinitions
+      deprecated: true
+      x-deprecated-at: '2026-11-03'
+      x-sunset: '2027-11-04'
+      x-successor: '/api/v1/lifecycle-models'
+      summary: Create a lifecycle model (deprecated alias)
+      description: >-
+        Deprecated (E-38, WP-723): alias of POST /api/v1/lifecycle-models on
+        the same handler, with the same checks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLifecycleModelRequest' }
+      responses:
+        '201':
+          description: The created lifecycle model
+          headers:
+            ETag:
+              description: The version of the model (1).
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleModel' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/lifecycle-definitions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getLifecycleDefinitionsId
-      summary: Read or delete a lifecycle definition
+      deprecated: true
+      x-deprecated-at: '2026-11-03'
+      x-sunset: '2027-11-04'
+      x-successor: '/api/v1/lifecycle-models/{id}'
+      summary: Get a lifecycle model (deprecated alias)
       description: >-
-        The planned successor is /api/v1/lifecycle-models/{id} (E-38);
-        WP-723 deprecates this G1 path once the successor is implemented.
+        Deprecated (E-38, WP-723): alias of GET
+        /api/v1/lifecycle-models/{id} on the same handler.
       responses:
         '200':
-          description: Read or delete a lifecycle definition
+          description: The lifecycle model with states, transitions and guards
+          headers:
+            ETag:
+              description: The version of the model.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleModel' }
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteLifecycleDefinitionsId
-      summary: Read or delete a lifecycle definition
+      deprecated: true
+      x-deprecated-at: '2026-11-03'
+      x-sunset: '2027-11-04'
+      x-successor: '/api/v1/lifecycle-models/{id}'
+      summary: Delete a lifecycle model (deprecated alias)
       description: >-
-        The planned successor is /api/v1/lifecycle-models/{id} (E-38);
-        WP-723 deprecates this G1 path once the successor is implemented.
+        Deprecated (E-38, WP-723): alias of DELETE
+        /api/v1/lifecycle-models/{id} on the same handler, with the same
+        protection of system and used models.
       responses:
         '204':
-          description: Read or delete a lifecycle definition
+          description: Deleted
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The model is in use; the counts name by what.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleModelInUseProblem' }
 
   /api/v1/locations:
     get:
@@ -13514,6 +14092,10 @@ paths:
     get:
       operationId: listRelationshipTypes
       summary: List the relationship types (system catalogue and the organization's)
+      description: >-
+        One entry per key. An organization row with the key of a system type
+        (created before REL-06) is listed instead of the system row; total
+        counts the keys (REL-06).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -13541,7 +14123,11 @@ paths:
         allowed_source_types and allowed_target_types name CI type keys the
         organization sees (system types and its own); an unknown key is
         refused with 400 and `field` allowed_source_types or
-        allowed_target_types, nothing is stored (REL-01, E-95, F-313).
+        allowed_target_types, nothing is stored (REL-01, E-95, F-313). An
+        unknown cardinality and an undirected type outside the category
+        network are 400 (REL-06). The key of a system type is taken: 409,
+        an organization type no longer shadows a system type (REL-06,
+        E-125).
       requestBody:
         required: true
         content:
@@ -13558,7 +14144,12 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >-
+            The key is taken by a type of the organization or by a system
+            type (REL-06, E-125).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/relationship-types/{key}:
     parameters:
@@ -13607,6 +14198,10 @@ paths:
     delete:
       operationId: deleteRelationshipTypesKey
       summary: Delete a relationship type of the organization (system types stay)
+      description: >-
+        A system type, a type of another organization and an unknown key are
+        404. A type a relationship of the organization or a relationship
+        suppression uses stays: 409 (REL-06, E-125).
       responses:
         '204':
           description: Relationship type deleted
@@ -13614,6 +14209,11 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The type is used by relationships or suppressions of the organization (REL-06).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/reservations:
     x-phase: P2
@@ -13965,18 +14565,24 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/lifecycle-models:
-    x-status: planned
     get:
       operationId: listLifecycleModels
       tags: [Metamodel]
       summary: List lifecycle models
-      description: Planned (E-38); WP-723 implements the operation.
+      description: >-
+        The lifecycle models the organization sees (E-38, API-06): its own
+        and the system models (physical_asset, software), ordered by key,
+        without states and transitions (GET /lifecycle-models/{id} has
+        them). The page follows the cursor contract (API-02).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List lifecycle models. The page follows the cursor contract (API-02); the item schema comes with WP-723.
+          description: Paginated lifecycle models
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleModelList' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -13987,31 +14593,61 @@ paths:
       operationId: createLifecycleModel
       tags: [Metamodel]
       summary: Create a lifecycle model
-      description: Planned (E-38); WP-723 implements the operation.
+      description: >-
+        Creates a lifecycle model of the organization (LCY-02). Without
+        `applies_to` the model applies to assets; another value than asset
+        or ci is 422 on `applies_to`. An asset model must contain the states
+        in_stock, reserved, deployed, repair, retired and disposed (422 on
+        `states`). Transitions name known states; every guard rule passes
+        the rule language (api/rules.schema.json), a refused rule is 422
+        with its path, e.g. `transitions[2].guard.fields.serial_number`. A
+        taken key is 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateLifecycleModelRequest' }
       responses:
         '201':
-          description: Created. The request and response schemas come with WP-723.
+          description: The created lifecycle model
+          headers:
+            ETag:
+              description: The version of the model (1).
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleModel' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/lifecycle-models/{id}:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getLifecycleModel
       tags: [Metamodel]
       summary: Get a lifecycle model
-      description: Planned (E-38); WP-723 implements the operation.
+      description: >-
+        The model with its states, transitions and their guards; the ETag
+        is its version (API-07). A model of another organization is 404.
       responses:
         '200':
-          description: Get a lifecycle model. The response schema comes with WP-723.
+          description: The lifecycle model
+          headers:
+            ETag:
+              description: The version of the model; send it as If-Match with a PATCH.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleModel' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -14022,10 +14658,37 @@ paths:
       operationId: updateLifecycleModel
       tags: [Metamodel]
       summary: Update a lifecycle model
-      description: Planned (E-38); WP-723 implements the operation.
+      description: >-
+        Changes name, description, states and transitions of an organization
+        model. States are matched by `key` and keep their id; new keys are
+        added, missing ones removed. `transitions` replaces all transitions;
+        without it the transitions between kept states stay. `key` and
+        `applies_to` cannot change (422). The checks of POST apply. The
+        version rises with every change. If-Match is optional (API-07); an
+        older version is 412. A system model is 403, a model of another
+        organization 404. Removing a state in which CIs or assets of the
+        model stand is 409 with the number per state.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateLifecycleModelRequest' }
       responses:
         '200':
-          description: Updated. The request and response schemas come with WP-723.
+          description: The changed lifecycle model
+          headers:
+            ETag:
+              description: The new version of the model.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleModel' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -14034,13 +14697,28 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: CIs or assets stand in states the change removes.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleStatesInUseProblem' }
+        '412':
+          description: The If-Match version is not the current version of the model.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteLifecycleModel
       tags: [Metamodel]
       summary: Delete a lifecycle model
-      description: Planned (E-38); WP-723 implements the operation.
+      description: >-
+        Deletes an organization model. A system model is 403, a model of
+        another organization 404. A model that a CI type binds
+        (`lifecycle_model_id`) or that is the effective model of CIs or
+        assets with a lifecycle state is 409 with the counts `ci_types`,
+        `cis` and `assets`.
       responses:
         '204':
           description: Deleted.
@@ -14050,6 +14728,11 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The model is in use; the counts name by what.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleModelInUseProblem' }
 
   /api/v1/cis/{id}/as-of:
     x-status: planned
@@ -14146,22 +14829,34 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/cis/{id}/instance-attributes:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listCIInstanceAttributes
       tags: [CIs]
       summary: List the instance attribute values of a CI
-      description: Planned (E-38); WP-256 implements the operation.
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
+      description: >-
+        Every instance attribute definition of the CI (MET-14) with its
+        value, null while the CI holds none. The definitions are managed
+        under /cis/{id}/field-definitions (ci_instance_attribute:manage).
+        The list is bounded per CI and complete: no limit or cursor,
+        next_cursor stays absent. GET /cis/{id} shows the same values flat
+        under their names.
       responses:
         '200':
-          description: List the instance attribute values of a CI. The page follows the cursor contract (API-02); the item schema comes with WP-256.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+          description: The instance attributes of the CI
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent, the list is complete.
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CIInstanceAttribute' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -14170,7 +14865,6 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/instance-attributes/{key}:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: key
@@ -14178,15 +14872,40 @@ paths:
         required: true
         schema:
           type: string
-        description: Key of the instance attribute.
+        description: Key of the instance attribute (the name of its definition).
     put:
       operationId: setCIInstanceAttribute
       tags: [CIs]
       summary: Set an instance attribute value of a CI
-      description: Planned (E-38); WP-256 implements the operation.
+      description: >-
+        Replaces the value of the instance attribute (MET-14); requires
+        ci_instance_attribute:manage. A manual write like PATCH /cis/{id}:
+        If-Match (API-07), the CI version rises, the history records the
+        field attributes, audit ci.updated and event ci.changed. The value
+        is validated against the definition and stored under
+        attributes._instance. A key without a definition, a null value or a
+        value the definition does not allow is 422 with `violations`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetCIInstanceAttributeRequest' }
       responses:
         '200':
-          description: Replaced. The request and response schemas come with WP-256.
+          description: The instance attribute with its new value
+          headers:
+            ETag:
+              description: The new CI version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CIInstanceAttribute' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -14195,22 +14914,72 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The attributes changed since the If-Match version, or another
+            active CI holds the value of a unique attribute (MET-15)
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+        '412':
+          description: If-Match missing although required, or not a version of the CI
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: The CI has no instance attribute with this key, or the value is not allowed
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
     delete:
       operationId: deleteCIInstanceAttribute
       tags: [CIs]
       summary: Remove an instance attribute value of a CI
-      description: Planned (E-38); WP-256 implements the operation.
+      description: >-
+        Removes the value from attributes._instance (MET-14); the definition
+        stays. Requires ci_instance_attribute:manage; a manual write like
+        PATCH /cis/{id} (If-Match, version, history, audit ci.updated,
+        event ci.changed). A key without a definition is 422.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
       responses:
         '204':
-          description: Deleted.
+          description: Removed
+          headers:
+            ETag:
+              description: The CI version after the removal.
+              schema: { type: string }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The attributes changed since the If-Match version
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+        '412':
+          description: If-Match missing although required, or not a version of the CI
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: The CI has no instance attribute with this key
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
 
   /api/v1/tags:
     x-status: planned
@@ -15467,8 +16236,9 @@ components:
         type: string
       description: >-
         Sparse fieldset of the impacted CIs (API-02): comma-separated fields
-        of ImpactNode (name, ci_type, status, client_id, site_id,
-        management_ip, heuristic, hops, via, relay, path); `id` is always
+        of ImpactNode (node_kind, name, ci_type, status, client_id, site_id,
+        management_ip, cidr, vrf_id, vlan_number, heuristic, hops, via,
+        relay, path); `id` is always
         returned, an unknown field yields 422. Without it every field is
         returned (ImpactAnalysis); with it the answer is an
         ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths
@@ -15490,8 +16260,19 @@ components:
         adds blast_radius with the counts of the blocks asked for. An
         unknown value yields 422 (field include). Without include the
         answer is unchanged (API-01); with services or spof the CI types
-        are read once per analysis. The deprecated path
-        /api/v1/topology/cis/{id}/impact ignores include.
+        are read once per analysis. network (IMP-11) appends the subnets and
+        VLANs of the failed and impacted CIs to impacted as leaves, after
+        the CIs, ordered by node_kind, name and id: a subnet or VLAN of a CI
+        has the hops of the CI + 1 and via the CI, the VLAN of such a subnet
+        the hops of the subnet + 1 and via subnet:{id}; the shortest path
+        wins, at equal length the one from the smaller id, never beyond
+        depth. They are heuristic, the failure does not travel on over them
+        to other CIs, and they are only added when categories is empty or
+        takes network (rel_type narrows the CI edges only).
+        summary.projected counts them; count and the other counts stay CIs
+        only. network needs ipam:read besides topology:read (403
+        otherwise). The deprecated path /api/v1/topology/cis/{id}/impact
+        ignores include.
     ListQ:
       name: q
       in: query
@@ -15744,7 +16525,7 @@ components:
   schemas:
     AttributeDefinition:
       type: object
-      required: [id, scope, key, display_name, data_type, required, multi_value, searchable, unique, unique_scope, inheritable, order, is_system, created_at, updated_at]
+      required: [id, scope, key, display_name, data_type, required, multi_value, searchable, unique, unique_scope, inheritable, order, is_system, applies_to, applies_to_categories, applies_to_type_ids, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string, description: Empty for system definitions. }
@@ -15799,8 +16580,37 @@ components:
         order: { type: integer }
         unit: { type: string }
         is_system: { type: boolean }
+        applies_to:
+          $ref: '#/components/schemas/AttributeAppliesTo'
+        applies_to_categories:
+          type: array
+          items: { type: string }
+          description: The categories (`ci_type.category`) of applies_to categories; empty otherwise.
+        applies_to_type_ids:
+          type: array
+          items: { type: string }
+          description: >-
+            The CI types of applies_to types, their subtypes included; empty
+            otherwise. IDs of types deleted since are kept and match nothing.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AttributeAppliesTo:
+      type: string
+      enum: [all, categories, types]
+      description: >-
+        The applicability of a global attribute of the organization (MET-13,
+        WP-255): `all` (default) every CI type, `categories` the types whose
+        `category` is in `applies_to_categories`, `types` the types in
+        `applies_to_type_ids` and their subtypes (type chain, MET-06). Only
+        an organization's global definition (scope global) can be
+        restricted, otherwise 400; the list of the mode must not be empty
+        and the other list must be (400); a type ID that is neither a type
+        of the organization nor a system type is 422 on
+        `applies_to_type_ids`. A changed mode drops the lists of the former
+        mode unless the request sends them. `required`, validation and
+        default of a restricted global apply only to the CIs of the types
+        it applies to; indexes and uniqueness stay organization-wide. System
+        globals and type or set definitions are always `all`.
     AttributeValidation:
       description: >-
         The validation of an attribute definition (MET-10): a rule AST of
@@ -15885,6 +16695,14 @@ components:
         group: { type: string }
         order: { type: integer }
         unit: { type: string }
+        applies_to:
+          $ref: '#/components/schemas/AttributeAppliesTo'
+        applies_to_categories:
+          type: array
+          items: { type: string }
+        applies_to_type_ids:
+          type: array
+          items: { type: string }
     AttributeSet:
       type: object
       description: >-
@@ -15952,6 +16770,140 @@ components:
             properties:
               attribute_set_id: { type: string }
               position: { type: integer, minimum: 0, description: Unique within the type; the list is ordered by it. }
+    Template:
+      type: object
+      description: >-
+        A versioned, ordered bundle of attribute definitions of one CI type
+        (MET-16, WP-251). Templates introduce no attribute keys of their own
+        (E-37); a CI takes several templates in order (WP-710). It is no
+        type template of GET /api/v1/ci-types/templates.
+      required: [id, key, ci_type_id, display_name, is_system, is_active, current_version, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system templates. }
+        key: { type: string }
+        ci_type_id: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_system: { type: boolean, description: A read-only system template. }
+        is_active: { type: boolean }
+        current_version:
+          type: [integer, 'null']
+          description: The last published version; null until one is published.
+        cloned_from_id: { type: string, description: The template this one was cloned from. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    TemplateCreate:
+      type: object
+      required: [key, ci_type_id]
+      additionalProperties: false
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100, description: Unique within the organization. }
+        ci_type_id: { type: string, description: A CI type of the organization or a system type. }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_active: { type: boolean, default: true }
+    TemplatePatch:
+      type: object
+      additionalProperties: false
+      description: key and ci_type_id are immutable; naming them is 422.
+      properties:
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_active: { type: boolean }
+        key: { type: string, description: Immutable (422). }
+        ci_type_id: { type: string, description: Immutable (422). }
+    TemplateClone:
+      type: object
+      required: [key]
+      additionalProperties: false
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100, description: Key of the new template. }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string, description: Default the source's description. }
+    TemplateListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Template'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    TemplateVersionItem:
+      type: object
+      description: >-
+        One attribute definition of a template version with the overrides
+        of the version; the overrides only narrow (MET-16).
+      required: [attribute_definition_id, position]
+      properties:
+        attribute_definition_id: { type: string }
+        key: { type: string, readOnly: true, description: Key of the attribute definition. }
+        position: { type: integer, minimum: 0, description: Unique within the version; the items are ordered by it. }
+        required_override: { type: boolean, description: OR-ed with required of the definition. }
+        default_override: { description: Any JSON value valid for the narrowed definition. }
+        validation_override:
+          $ref: '#/components/schemas/AttributeValidation'
+    TemplateVersion:
+      type: object
+      required: [id, template_id, version, status, created_at, updated_at, items]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for the versions of system templates. }
+        template_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [draft, published, retired] }
+        published_at: { type: string, format: date-time }
+        published_by: { type: string, description: User who published the version. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        items:
+          type: array
+          description: The items in position order.
+          items:
+            $ref: '#/components/schemas/TemplateVersionItem'
+    TemplateVersionItemsUpdate:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [attribute_definition_id, position]
+            properties:
+              attribute_definition_id: { type: string }
+              position: { type: integer, minimum: 0 }
+              required_override: { type: boolean }
+              default_override: { description: Any JSON value valid for the narrowed definition. }
+              validation_override:
+                $ref: '#/components/schemas/AttributeValidation'
+    TemplateVersionListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateVersion'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
     AttributeDefinitionPatch:
       type: object
       additionalProperties: false
@@ -15982,6 +16934,14 @@ components:
         group: { type: string }
         order: { type: integer }
         unit: { type: string }
+        applies_to:
+          $ref: '#/components/schemas/AttributeAppliesTo'
+        applies_to_categories:
+          type: array
+          items: { type: string }
+        applies_to_type_ids:
+          type: array
+          items: { type: string }
     LocalizedText:
       type: object
       description: A label per language (MET-01).
@@ -16197,12 +17157,23 @@ components:
         schema_version:
           type: integer
           minimum: 1
-          description: Version of the generated attribute schema.
+          description: >-
+            Version of the generated attribute schema; it rises once per
+            change and only when `attribute_schema` changes, also through
+            the type chain or an attribute set (assignment, activity or set
+            attribute, MET-16).
         attribute_schema:
           type: object
           readOnly: true
           additionalProperties: true
-          description: JSON Schema 2020-12 generated from the type's attribute definitions; read-only (DB-03).
+          description: >-
+            JSON Schema 2020-12 generated from the attribute definitions
+            (DB-03), read-only: system base, type chain (of the ancestors the
+            inheritable definitions) and the active attribute sets of the
+            chain, the sets of each type in `position` order (of an
+            ancestor's sets the inheritable set attributes), composed per
+            key by the rules of MET-16. The organization's global attributes,
+            templates and instance attributes apply at runtime only (E-108).
         required_fields:
           type: array
           readOnly: true
@@ -16212,12 +17183,31 @@ components:
         parent_type_id:
           type: string
           description: Parent in the type chain (MET-06); absent for a root. The type inherits the inheritable attribute definitions of its ancestors.
-        template_key: { type: string }
-        lifecycle_definition_id: { type: string }
+        template_key:
+          type: string
+          description: >-
+            Key of the type template of GET /api/v1/ci-types/templates the
+            type was created from; no template of MET-16 (those are
+            /api/v1/templates and use `key`, WP-251).
+        lifecycle_model_id:
+          type: string
+          description: >-
+            Lifecycle model of the type (MET-01); absent without one. A
+            subtype without its own model inherits the nearest model of its
+            type chain (MET-06); CIs only take a model that applies to `ci`
+            (LCY-02, DB-05).
+        lifecycle_definition_id:
+          type: string
+          deprecated: true
+          description: Deprecated name of `lifecycle_model_id` with the same value (API-01).
         capabilities: { type: object, additionalProperties: true }
         allowed_relationship_types:
           type: array
           items: { type: string }
+          description: >-
+            Informative and not enforced; which CI types an edge may connect
+            is set on the relationship type (allowed_source_types,
+            allowed_target_types of GET /api/v1/relationship-types).
         ui_schema: { type: object, additionalProperties: true }
         compliance_rules:
           type: array
@@ -16265,11 +17255,26 @@ components:
           format: uuid
           description: Parent type of the organization or a system type (MET-06).
         template_key: { type: string }
-        lifecycle_definition_id: { type: string }
+        lifecycle_model_id:
+          type: string
+          description: >-
+            Lifecycle model of the organization or a system model (MET-01);
+            any other id is 422 with field `lifecycle_model_id`.
+        lifecycle_definition_id:
+          type: string
+          deprecated: true
+          description: >-
+            Deprecated name of `lifecycle_model_id` (API-01); taken over when
+            `lifecycle_model_id` is absent, a different value of both is 422
+            with field `lifecycle_model_id`.
         capabilities: { type: object, additionalProperties: true }
         allowed_relationship_types:
           type: array
           items: { type: string }
+          description: >-
+            Informative and not enforced; which CI types an edge may connect
+            is set on the relationship type (allowed_source_types,
+            allowed_target_types of GET /api/v1/relationship-types).
         ui_schema: { type: object, additionalProperties: true }
         compliance_rules:
           type: array
@@ -16295,12 +17300,35 @@ components:
         is_observable: { type: boolean }
         parent_type_id:
           type: string
-          description: New parent type (MET-06); an empty string makes the type a root.
-        lifecycle_definition_id: { type: string }
+          description: >-
+            New parent type (MET-06); an empty string makes the type a root.
+            409 with field `parent_type_id` and `state_counts` when CIs of the
+            type or of its subtypes would keep lifecycle states their new
+            effective model does not contain.
+        lifecycle_model_id:
+          type: string
+          description: >-
+            New lifecycle model of the organization or a system model
+            (MET-01), an empty string removes it; any other id is 422 with
+            field `lifecycle_model_id`. 409 with field `lifecycle_model_id`
+            and `state_counts` (CIs per state) when CIs of the type or of its
+            subtypes would keep lifecycle states the new effective model does
+            not contain.
+        lifecycle_definition_id:
+          type: string
+          deprecated: true
+          description: >-
+            Deprecated name of `lifecycle_model_id` (API-01); taken over when
+            `lifecycle_model_id` is absent, a different value of both is 422
+            with field `lifecycle_model_id`.
         capabilities: { type: object, additionalProperties: true }
         allowed_relationship_types:
           type: array
           items: { type: string }
+          description: >-
+            Informative and not enforced; which CI types an edge may connect
+            is set on the relationship type (allowed_source_types,
+            allowed_target_types of GET /api/v1/relationship-types).
         ui_schema: { type: object, additionalProperties: true }
         compliance_rules:
           type: array
@@ -16931,6 +17959,12 @@ components:
           type: object
           description: Impacted CIs per category of the last hop of their path.
           additionalProperties: { type: integer }
+        projected:
+          type: integer
+          description: >-
+            The projected subnets and VLANs in impacted (include=network,
+            IMP-11); absent without it. impacted, certain, heuristic,
+            by_category and count count CIs only.
     ImpactNode:
       allOf:
         - $ref: '#/components/schemas/TopologyNode'
@@ -16966,12 +18000,19 @@ components:
         relay are absent when empty).
       properties:
         id: { type: string }
+        node_kind:
+          type: string
+          enum: [ci, subnet, vlan]
+          description: Absent for a CI (see TopologyNode).
         name: { type: string }
         ci_type: { type: string }
         status: { type: string }
         client_id: { type: string }
         site_id: { type: string }
         management_ip: { type: string }
+        cidr: { type: string }
+        vrf_id: { type: string }
+        vlan_number: { type: integer }
         heuristic: { type: boolean }
         hops: { type: integer }
         via:
@@ -16986,7 +18027,9 @@ components:
       required: [ci_id, rel_type]
       description: >-
         The last step of the shortest path (IMP-02): the CI the failure comes
-        from and the relationship type it passes.
+        from and the relationship type it passes. On a projected subnet or
+        VLAN (include=network, IMP-11) ci_id is the CI it hangs off or, for
+        the VLAN of a subnet, subnet:{id}; rel_type is in_subnet or in_vlan.
       properties:
         ci_id: { type: string }
         rel_type: { type: string }
@@ -17000,6 +18043,11 @@ components:
     ImpactPathStep:
       type: object
       required: [from_ci_id, to_ci_id, rel_type, category]
+      description: >-
+        One hop of an impact path. The last step to a projected subnet or
+        VLAN (include=network, IMP-11) has from_ci_id and to_ci_id of the
+        form subnet:{id} or vlan:{id} where they name one, rel_type
+        in_subnet or in_vlan, category network and heuristic true.
       properties:
         from_ci_id: { type: string }
         to_ci_id: { type: string }
@@ -17188,6 +18236,228 @@ components:
             allowed value is left), `range-empty` (`min` > `max`) or
             `length-range-empty` (`min_length` > `max_length`).
 
+    LifecycleModel:
+      type: object
+      description: >-
+        A lifecycle model (LCY-02, MET-01): states and guarded transitions
+        for CIs or assets. System models (is_system, no organization_id) are
+        read-only.
+      required: [id, key, name, applies_to, is_system, version, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id:
+          type: string
+          format: uuid
+          description: Absent for a system model.
+        key: { type: string }
+        name: { type: string }
+        applies_to:
+          type: string
+          enum: [asset, ci]
+        is_system: { type: boolean }
+        description: { type: string }
+        version:
+          type: integer
+          format: int64
+          description: Rises with every change; the ETag of GET and PATCH (API-07).
+        states:
+          type: array
+          description: In the detail only.
+          items: { $ref: '#/components/schemas/LifecycleModelState' }
+        transitions:
+          type: array
+          description: In the detail only.
+          items: { $ref: '#/components/schemas/LifecycleModelTransition' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LifecycleModelList:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/LifecycleModel' }
+    LifecycleModelState:
+      type: object
+      required: [id, definition_id, key, label, is_initial, is_terminal, sort_order, required_fields]
+      properties:
+        id: { type: string }
+        definition_id: { type: string }
+        key: { type: string }
+        label: { type: string }
+        is_initial: { type: boolean }
+        is_terminal: { type: boolean }
+        sort_order: { type: integer }
+        required_fields:
+          type: array
+          items: { type: string }
+    LifecycleModelTransition:
+      type: object
+      required: [id, definition_id, to_state_id, key, label, required_fields]
+      properties:
+        id: { type: string }
+        definition_id: { type: string }
+        from_state_id:
+          type: string
+          description: Absent for a transition from any state.
+        from_state_key: { type: string }
+        to_state_id: { type: string }
+        to_state_key: { type: string }
+        key: { type: string }
+        label: { type: string }
+        required_fields:
+          type: array
+          items: { type: string }
+        guard: { $ref: '#/components/schemas/LifecycleGuard' }
+        validation:
+          type: object
+          additionalProperties: true
+          description: >-
+            The stored content of the guard (lifecycle_transition.validation);
+            kept for compatibility (API-01), read guard instead.
+    LifecycleGuard:
+      type: object
+      additionalProperties: false
+      required: [fields]
+      description: >-
+        Guard of a transition: per field of the transition context a rule of
+        the rule language (api/rules.schema.json). WP-724 evaluates it at
+        the transition.
+      properties:
+        fields:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/RuleAST' }
+    LifecycleModelStateSpec:
+      type: object
+      additionalProperties: false
+      required: [key]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        is_initial: { type: boolean }
+        is_terminal: { type: boolean }
+        sort_order: { type: integer }
+        required_fields:
+          type: array
+          items: { type: string }
+    LifecycleModelTransitionSpec:
+      type: object
+      additionalProperties: false
+      required: [to_state_key, key]
+      properties:
+        from_state_key:
+          type: string
+          description: Empty for a transition from any state.
+        to_state_key: { type: string }
+        key: { type: string }
+        label: { type: string }
+        required_fields:
+          type: array
+          items: { type: string }
+        guard: { $ref: '#/components/schemas/LifecycleGuard' }
+    CreateLifecycleModelRequest:
+      type: object
+      additionalProperties: false
+      required: [key, name, states]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        applies_to:
+          type: string
+          enum: [asset, ci]
+          description: Default asset; another value is 422.
+        description: { type: string }
+        states:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/LifecycleModelStateSpec' }
+        transitions:
+          type: array
+          items: { $ref: '#/components/schemas/LifecycleModelTransitionSpec' }
+    UpdateLifecycleModelRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Fields of PATCH /lifecycle-models/{id}; an absent field stays. key
+        and applies_to are accepted only with their current value (422
+        otherwise).
+      properties:
+        key: { type: string }
+        applies_to: { type: string }
+        name: { type: string }
+        description: { type: string }
+        states:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/LifecycleModelStateSpec' }
+        transitions:
+          type: array
+          items: { $ref: '#/components/schemas/LifecycleModelTransitionSpec' }
+    LifecycleTransitionOptions:
+      type: object
+      description: >-
+        The transitions the effective lifecycle model of an entity allows
+        from its current state (LCY-02).
+      required: [model, current_state, transitions]
+      properties:
+        model:
+          type: object
+          required: [id, key, name]
+          properties:
+            id: { type: string }
+            key: { type: string }
+            name: { type: string }
+        current_state:
+          type: string
+          description: Empty when the entity has no lifecycle state yet.
+        transitions:
+          type: array
+          items:
+            type: object
+            required: [to_state, key, label, required_fields]
+            properties:
+              to_state: { type: string }
+              key: { type: string }
+              label: { type: string }
+              required_fields:
+                type: array
+                description: Required fields of the target state and of the transition.
+                items: { type: string }
+              guard: { $ref: '#/components/schemas/LifecycleGuard' }
+    LifecycleModelInUseProblem:
+      description: The lifecycle model is in use (409 of DELETE).
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          required: [ci_types, cis, assets]
+          properties:
+            ci_types:
+              type: integer
+              description: CI types that bind the model (lifecycle_model_id).
+            cis:
+              type: integer
+              description: CIs with a lifecycle state whose effective model it is.
+            assets:
+              type: integer
+              description: Assets with a lifecycle state whose effective model it is.
+    LifecycleStatesInUseProblem:
+      description: CIs or assets stand in states a PATCH removes (409).
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          required: [field, state_counts]
+          properties:
+            field: { type: string }
+            state_counts:
+              type: array
+              items:
+                type: object
+                required: [state, count]
+                properties:
+                  state: { type: string }
+                  count: { type: integer }
     PaginationEnvelope:
       type: object
       required: [total, limit, offset, has_more]
@@ -17549,7 +18819,8 @@ components:
           description: >-
             Version of the materialized attribute schema of the CI type
             (ci_type.schema_version) the CI was last written against: the
-            system base composed with the type's attributes (MET-16). Set by
+            system base composed with the type chain and its attribute sets
+            (MET-16). Set by
             the server when the CI is created or its type or attributes
             change.
         site_id:
@@ -17654,6 +18925,18 @@ components:
               type: array
               description: At most 200 contact links of the CI the caller may see.
               items: { $ref: '#/components/schemas/CIContact' }
+            references:
+              type: object
+              description: >-
+                The targets of the reference values of the CI (MET-12), keyed
+                by attribute name: type, global and instance attributes with
+                a value of a reference type or file. A multi_value attribute
+                yields a list. attributes keeps the ids.
+              additionalProperties:
+                oneOf:
+                  - $ref: '#/components/schemas/CIReferenceView'
+                  - type: array
+                    items: { $ref: '#/components/schemas/CIReferenceView' }
             truncated:
               type: object
               description: >-
@@ -17664,6 +18947,42 @@ components:
               additionalProperties:
                 type: boolean
                 enum: [true]
+
+    CIReferenceView:
+      type: object
+      readOnly: true
+      description: >-
+        One reference value of include=references (MET-12). display_name and
+        missing are present only when the caller has the read permission of
+        the target kind (ci:read, asset:read, user:read for users and teams,
+        location:read, document:read) and a lookup is configured; otherwise
+        the value is target and id alone. A target that is deleted, merged,
+        not visible to the caller or stored without UUID form is missing
+        with display_name null.
+      required: [target, id]
+      properties:
+        target:
+          type: string
+          enum: [ci, asset, user, team, location, document, contract]
+        id:
+          type: string
+          description: The stored value.
+        display_name:
+          type: [string, 'null']
+          description: >-
+            ci.name, asset.name, app_user.display_name, team.name,
+            location.name or document.title; null for a missing target.
+        missing:
+          type: boolean
+          description: The target does not exist for the caller.
+        kind:
+          $ref: '#/components/schemas/LocationKind'
+          description: The kind of a location target (CH28, LOC-10).
+        merged_into:
+          type: string
+          description: >-
+            The survivor of a merged CI target while the caller sees its
+            tombstone (CI-12).
 
     CIAssetFacts:
       type: object
@@ -18003,19 +19322,19 @@ components:
           type: array
           items: { type: string }
           description: >-
-            CI type keys an edge of the type may start at; POST
-            /relationships refuses a source CI of another type (422,
-            source_ci_id). Empty allows every type (REL-01, E-95).
+            CI type keys an edge of the type may start at, their subtypes
+            (parent_type_id) included; POST /relationships refuses a source
+            CI of another type (422, source_ci_id). Empty allows every type
+            (REL-01, REL-06, E-95).
         allowed_target_types:
           type: array
           items: { type: string }
           description: >-
-            CI type keys an edge of the type may end at; POST
-            /relationships refuses a target CI of another type (422,
-            target_ci_id). Empty allows every type (REL-01, E-95).
-        cardinality:
-          type: string
-          description: Informative until REL-06 [P2]; not enforced (E-95).
+            CI type keys an edge of the type may end at, their subtypes
+            (parent_type_id) included; POST /relationships refuses a target
+            CI of another type (422, target_ci_id). Empty allows every type
+            (REL-01, REL-06, E-95).
+        cardinality: { $ref: '#/components/schemas/RelationshipTypeCardinality' }
         is_system: { type: boolean, readOnly: true }
         description: { type: string }
         created_at: { type: string, format: date-time }
@@ -18025,8 +19344,9 @@ components:
       type: object
       description: >-
         Create (key, display_name, reverse_name required; defaults directed,
-        logical, source_depends_on_target) or change a relationship type.
-        impact_direction undirected belongs to undirected types only.
+        logical, source_depends_on_target, many_to_many) or change a
+        relationship type. impact_direction undirected belongs to undirected
+        types of the category network only (400, REL-06).
       properties:
         key: { type: string }
         display_name: { type: string }
@@ -18038,19 +19358,27 @@ components:
         allowed_source_types:
           type: array
           items: { type: string }
-          description: CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type.
+          description: CI type keys the organization sees (system types and its own), their subtypes included on POST /relationships; an unknown key is 400. Empty allows every type.
         allowed_target_types:
           type: array
           items: { type: string }
-          description: CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type.
-        cardinality:
-          type: string
-          description: Informative until REL-06 [P2]; not enforced (E-95).
+          description: CI type keys the organization sees (system types and its own), their subtypes included on POST /relationships; an unknown key is 400. Empty allows every type.
+        cardinality: { $ref: '#/components/schemas/RelationshipTypeCardinality' }
         description: { type: string }
+
+    RelationshipTypeCardinality:
+      type: string
+      enum: [one_to_one, one_to_many, many_to_one, many_to_many]
+      description: >-
+        Enforced on POST /relationships (REL-06): one_to_one allows the source
+        one outgoing and the target one incoming edge of the type,
+        one_to_many the target one incoming, many_to_one the source one
+        outgoing edge; many_to_many has no bound. Another value is 400.
+        Discovery edges are not checked.
 
     RelationshipType:
       type: string
-      enum: [connected_to, hosted_on, depends_on, member_of, powers, powered_by, stores, monitors, backs_up]
+      description: Key of a relationship_type of the organization or the system (GET /api/v1/relationship-types).
 
     Relationship:
       type: object
@@ -20697,6 +22025,52 @@ components:
             later_merge_id: { type: string, format: uuid }
             later_merge_victim_id: { type: string, format: uuid }
             later_merge_survivor_id: { type: string, format: uuid }
+    CIInstanceField:
+      type: object
+      description: Definition of an instance attribute of a single CI (MET-14).
+      required: [ci_id, name, data_type, required, sort_order]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        ci_id: { type: string, format: uuid }
+        name: { type: string }
+        label: { type: string }
+        description: { type: string }
+        data_type: { type: string }
+        required: { type: boolean }
+        default_value: { type: string }
+        enum_values:
+          type: array
+          items: { type: string }
+        ui_group: { type: string }
+        sort_order: { type: integer }
+        validation:
+          type: object
+          additionalProperties: true
+        conditional:
+          type: object
+          additionalProperties: true
+        reference_target: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CIInstanceAttribute:
+      type: object
+      description: The value of an instance attribute of a CI with its definition (MET-14).
+      required: [key, definition, value]
+      properties:
+        key: { type: string }
+        definition: { $ref: '#/components/schemas/CIInstanceField' }
+        value:
+          description: The value, any JSON value of the data type; null while the CI holds none.
+    SetCIInstanceAttributeRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          description: >-
+            The new value, checked against the definition; an object
+            replaces the previous one. null is refused (422), DELETE
+            removes the value.
     ViolationProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'
@@ -20744,10 +22118,12 @@ components:
                 child locations; vlan, subnet, collector, discovery_scope,
                 agent_enrollment_token (unexpired), collector_enrollment_code
                 (neither used nor expired) and ci_merge (tombstone within
-                tombstone_until) are bound to a site (E-71).
+                tombstone_until) are bound to a site (E-71). ci_attribute
+                means a visible CI whose reference attribute with target
+                location names the location (MET-12).
               items:
                 type: string
-                enum: [location, ci, asset, quantity_item, asset_movement, rack_mount, role_assignment, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge]
+                enum: [location, ci, asset, quantity_item, asset_movement, rack_mount, role_assignment, ci_attribute, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge]
     LocationKind:
       type: string
       enum: [site, building, room, rack, warehouse, zone, shelf, bin]
@@ -21885,22 +23261,48 @@ components:
 
     TopologyNode:
       type: object
-      required: [id, name, ci_type, status]
+      required: [id, name]
+      description: >-
+        A node of the topology: a CI, or with include=network a subnet or a
+        VLAN projected from IPAM (IMP-11). A CI (node_kind absent or ci)
+        always carries ci_type and status. A projected node is no CI: its
+        id is subnet:{id} or vlan:{id}, it carries no ci_type and no status
+        (also not when fields selects them), its name is the subnet name
+        (else the cidr) or "VLAN <vlan_number> <name>", and it carries
+        client_id and site_id where set, cidr and vrf_id (subnet) or
+        vlan_number (VLAN).
       properties:
         id:
           type: string
+        node_kind:
+          type: string
+          enum: [ci, subnet, vlan]
+          description: >-
+            The kind of the node; absent for a CI, so answers without
+            include stay unchanged (API-01). Absent means ci.
         name:
           type: string
         ci_type:
           type: string
+          description: The id of the CI type; always set when node_kind is ci.
         status:
           type: string
+          description: The status of the CI; always set when node_kind is ci.
         client_id:
           type: string
         site_id:
           type: string
         management_ip:
           type: string
+        cidr:
+          type: string
+          description: The network of a projected subnet.
+        vrf_id:
+          type: string
+          description: The VRF of a projected subnet.
+        vlan_number:
+          type: integer
+          description: The VLAN number (1-4094) of a projected VLAN (vlan.vlan_id).
 
     TopologyEdge:
       type: object
@@ -21914,10 +23316,19 @@ components:
           type: string
         rel_type:
           type: string
-          enum: [connected_to, hosted_on, depends_on, member_of, powers, powered_by, stores, monitors, backs_up]
+          description: >-
+            The relationship type: a key of GET /api/v1/relationship-types
+            (built-in or custom), contains for the containment projected
+            from the structure, or in_subnet and in_vlan for the network
+            edges of include=network (IMP-11). A projected network edge
+            runs from a CI to subnet:{id} (in_subnet) or vlan:{id}
+            (in_vlan), or from subnet:{id} to vlan:{id} (in_vlan); its id
+            is the md5 of type and ends, stable across reads.
         source:
           type: string
-          description: Provenance of the edge (e.g. manual, discovery).
+          description: >-
+            Provenance of the edge (e.g. manual, discovery); projection for
+            the projected containment and network edges.
 
     TopologyGraph:
       type: object

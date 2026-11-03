@@ -55,7 +55,8 @@ type Repository interface {
 	GetByID(ctx context.Context, orgID, id string) (*Type, error)
 	Create(ctx context.Context, typ *Type) error
 	Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error)
-	// Clone copies a type (including its field definitions and its parent)
+	// Clone copies a type (including its field definitions, its parent and,
+	// in PostgreSQL, its attribute set assignments with their positions)
 	// under a new key; a deactivated parent is a conflict (409).
 	Clone(ctx context.Context, orgID, id string, req CloneRequest) (*Type, error)
 	// SetActive deactivates/reactivates a type. Deactivated types keep their
@@ -190,6 +191,7 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	}
 	typ.IsActive = true
 	typ.Version = 1
+	typ.mirrorLifecycle()
 	now := time.Now().UTC()
 	typ.CreatedAt = now
 	typ.UpdatedAt = now
@@ -201,7 +203,7 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 		flds[i].Inheritable = true
 	}
 	r.fields[typ.ID] = flds
-	if err := r.checkSubtreeCompositionLocked(stored.OrganizationID, typ.ID); err != nil {
+	if err := r.checkSubtreeCompositionLocked(stored.OrganizationID, typ.ID, "parent_type_id"); err != nil {
 		delete(r.types, typ.ID)
 		delete(r.fields, typ.ID)
 		return err
@@ -216,14 +218,27 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	if !ok || (t.OrganizationID != "" && t.OrganizationID != orgID) {
 		return nil, fmt.Errorf("not found")
 	}
-	if req.ParentTypeID != nil && *req.ParentTypeID != t.ParentTypeID {
-		if err := r.checkParentLocked(t, *req.ParentTypeID); err != nil {
-			return nil, err
+	if _, err := req.LifecycleModel(); err != nil {
+		return nil, err
+	}
+	parentChanged := req.ParentTypeID != nil && *req.ParentTypeID != t.ParentTypeID
+	categoryChanged := req.Category != nil && *req.Category != t.Category
+	if parentChanged || categoryChanged {
+		if parentChanged {
+			if err := r.checkParentLocked(t, *req.ParentTypeID); err != nil {
+				return nil, err
+			}
 		}
-		previous := t.ParentTypeID
-		t.ParentTypeID = *req.ParentTypeID
-		if err := r.checkSubtreeCompositionLocked(orgID, id); err != nil {
-			t.ParentTypeID = previous
+		previousParent, previousCategory := t.ParentTypeID, t.Category
+		field := "category"
+		if parentChanged {
+			t.ParentTypeID, field = *req.ParentTypeID, "parent_type_id"
+		}
+		if categoryChanged {
+			t.Category = *req.Category
+		}
+		if err := r.checkSubtreeCompositionLocked(orgID, id, field); err != nil {
+			t.ParentTypeID, t.Category = previousParent, previousCategory
 			return nil, err
 		}
 	}
@@ -256,8 +271,9 @@ func applyTypeUpdate(t *Type, req UpdateTypeRequest) {
 	if req.IsLogical != nil {
 		t.IsLogical = *req.IsLogical
 	}
-	if req.LifecycleDefinitionID != nil {
-		t.LifecycleDefinitionID = *req.LifecycleDefinitionID
+	if model, err := req.LifecycleModel(); err == nil && model != nil {
+		t.LifecycleModelID = *model
+		t.mirrorLifecycle()
 	}
 	if req.Capabilities != nil {
 		t.Capabilities = req.Capabilities
@@ -464,29 +480,31 @@ func (r *MemoryRepository) chainTypesLocked(chain []*Type) []Type {
 	return out
 }
 
-// checkSubtreeCompositionLocked composes system → organization → chain
-// for id and each descendant (MET-16); a conflict is a 422 on
-// parent_type_id naming the key.
-func (r *MemoryRepository) checkSubtreeCompositionLocked(orgID, id string) error {
-	var system, org []fieldmeta.FieldDefinition
+// checkSubtreeCompositionLocked composes system → organization (the
+// global fields that apply to the type, WP-255) → chain for id and each
+// descendant (MET-16); a conflict is a 422 on field naming the key.
+func (r *MemoryRepository) checkSubtreeCompositionLocked(orgID, id, field string) error {
 	globals := r.globals[orgID]
-	for i := range globals {
-		if globals[i].IsSystem {
-			system = append(system, globals[i].Definition())
-		} else {
-			org = append(org, globals[i].Definition())
-		}
-	}
 	subtree, _ := r.subtreeLocked(orgID, id)
 	for _, t := range subtree {
-		typed := chainDefinitions(r.chainTypesLocked(r.chainLocked(orgID, t.ID)))
-		if _, err := Compose(system, org, typed); err != nil {
+		chain := r.chainTypesLocked(r.chainLocked(orgID, t.ID))
+		scope := scopeOfChain(chain)
+		var system, org []fieldmeta.FieldDefinition
+		for i := range globals {
+			switch {
+			case globals[i].IsSystem:
+				system = append(system, globals[i].Definition())
+			case globals[i].appliesTo(scope):
+				org = append(org, globals[i].Definition())
+			}
+		}
+		if _, err := Compose(system, org, chainDefinitions(chain)); err != nil {
 			var conflict *CompositionError
 			code := ""
 			if errors.As(err, &conflict) {
 				code = conflict.Code
 			}
-			return errParentComposition(err.Error(), code)
+			return errTypeComposition(field, err.Error(), code)
 		}
 	}
 	return nil
@@ -501,6 +519,24 @@ func (r *MemoryRepository) TypeChain(_ context.Context, orgID, id string) ([]Typ
 		return nil, fmt.Errorf("not found")
 	}
 	return r.chainTypesLocked(r.chainLocked(orgID, id)), nil
+}
+
+// TypeCategory implements FieldLister: the category of a visible type, ""
+// otherwise (WP-255).
+func (r *MemoryRepository) TypeCategory(_ context.Context, orgID, id string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if t, ok := r.visibleLocked(orgID, id); ok {
+		return t.Category, nil
+	}
+	return "", nil
+}
+
+// ListSetFields implements FieldLister: the in-memory repository keeps no
+// attribute sets (WP-250 stores them in PostgreSQL only), so there is no
+// set layer.
+func (r *MemoryRepository) ListSetFields(context.Context, string, string) ([][]Field, error) {
+	return nil, nil
 }
 
 // TypeSubtree implements Repository: id and its visible descendants by
@@ -555,13 +591,15 @@ func (r *MemoryRepository) UpsertField(_ context.Context, orgID, typeID string, 
 		list := r.globals[orgID]
 		for i, existing := range list {
 			if existing.Name == f.Name {
-				f.ID = existing.ID
+				// The legacy upsert keeps the applicability (WP-255).
+				f.ID, f.AppliesTo = existing.ID, existing.AppliesTo
+				f.AppliesToCategories, f.AppliesToTypeIDs = existing.AppliesToCategories, existing.AppliesToTypeIDs
 				list[i] = f
 				r.globals[orgID] = list
 				return &f, nil
 			}
 		}
-		f.ID = r.nextID()
+		f.ID, f.AppliesTo = r.nextID(), AppliesToAll
 		r.globals[orgID] = append(list, f)
 		return &f, nil
 	}
@@ -590,21 +628,25 @@ func (r *MemoryRepository) UpsertField(_ context.Context, orgID, typeID string, 
 	return &f, nil
 }
 
+// DeleteField removes a field by name: of the type, or with typeID "" the
+// organization's global one. As in PostgreSQL a type path does not fall
+// back to a global field of the same name (WP-255).
 func (r *MemoryRepository) DeleteField(_ context.Context, orgID, typeID, name string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if typeID == "" {
+		globals := r.globals[orgID]
+		i := slices.IndexFunc(globals, func(f Field) bool { return f.Name == name && !f.IsSystem })
+		if i < 0 {
+			return fmt.Errorf("not found")
+		}
+		r.globals[orgID] = append(globals[:i], globals[i+1:]...)
+		return nil
+	}
 	list := r.fields[typeID]
 	for i, existing := range list {
 		if existing.Name == name {
 			r.fields[typeID] = append(list[:i], list[i+1:]...)
-			return nil
-		}
-	}
-	// Fall back to the org-global definitions.
-	globals := r.globals[orgID]
-	for i, existing := range globals {
-		if existing.Name == name {
-			r.globals[orgID] = append(globals[:i], globals[i+1:]...)
 			return nil
 		}
 	}

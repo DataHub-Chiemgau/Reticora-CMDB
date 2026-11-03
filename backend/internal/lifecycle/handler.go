@@ -2,20 +2,28 @@ package lifecycle
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
-// EntityResolver resolves the lifecycle definition key applicable to an
-// entity (asset: its type's lifecycle or the default physical_asset; ci: the
-// CI type's lifecycle definition).
+// EntityResolver resolves the lifecycle model applicable to an entity
+// (asset: the effective asset model of its type chain or the default
+// physical_asset; ci: the effective ci model of its type chain).
 type EntityResolver interface {
 	// LifecycleKeyFor returns the lifecycle definition key for an entity and
 	// whether the entity exists in the tenant scope.
 	LifecycleKeyFor(r *http.Request, orgID, entityType, entityID string) (string, error)
+	// LifecycleModelFor returns the id of the effective lifecycle model of
+	// an entity; an entity outside the scope is "not found", a CI without
+	// a model ErrNoLifecycleModel.
+	LifecycleModelFor(r *http.Request, orgID, entityType, entityID string) (string, error)
 }
 
 // Handler provides HTTP handlers for lifecycle definitions and transitions.
@@ -26,17 +34,34 @@ type Handler struct {
 }
 
 // NewHandler creates a lifecycle handler. resolver may be nil when transition
-// endpoints are not served.
+// endpoints are not served. A MemoryStateStore resolver is linked to a
+// MemoryRepository repo, so it resolves model ids (--no-db).
 func NewHandler(repo Repository, service *Service, resolver EntityResolver) *Handler {
+	if store, ok := resolver.(*MemoryStateStore); ok {
+		if defs, ok := repo.(*MemoryRepository); ok {
+			store.linkDefinitions(defs)
+		}
+	}
 	return &Handler{repo: repo, service: service, resolver: resolver}
 }
 
-// RegisterRoutes registers lifecycle routes on the given mux.
+// lifecycleBases are the collection paths of lifecycle models:
+// lifecycle-models is the catalog path (E-38, API-06), lifecycle-definitions
+// the deprecated G1 alias that answers until its sunset (API-01).
+var lifecycleBases = []string{"/api/v1/lifecycle-models", "/api/v1/lifecycle-definitions"}
+
+// RegisterRoutes registers lifecycle routes on the given mux. PATCH exists
+// only under lifecycle-models.
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	r.Get("/api/v1/lifecycle-definitions", h.List)
-	r.Post("/api/v1/lifecycle-definitions", h.Create)
-	r.Get("/api/v1/lifecycle-definitions/{id}", h.Get)
-	r.Delete("/api/v1/lifecycle-definitions/{id}", h.Delete)
+	for _, base := range lifecycleBases {
+		r.Get(base, h.List)
+		r.Post(base, h.Create)
+		r.Get(base+"/{id}", h.Get)
+		r.Delete(base+"/{id}", h.Delete)
+	}
+	r.Patch("/api/v1/lifecycle-models/{id}", h.Update)
+	r.Get("/api/v1/assets/{id}/lifecycle-transitions", h.OptionsAsset)
+	r.Get("/api/v1/cis/{id}/lifecycle-transitions", h.OptionsCI)
 	r.Post("/api/v1/assets/{id}/lifecycle-transitions", h.TransitionAsset)
 	r.Post("/api/v1/cis/{id}/lifecycle-transitions", h.TransitionCI)
 }
@@ -47,15 +72,21 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	page := api.ParsePagination(r)
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
+	if items == nil {
+		items = []Definition{}
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Definition]{
 		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
-		HasMore: page.Offset+page.Limit < total,
+		HasMore: page.Offset+len(items) < total,
 	})
 }
 
@@ -67,9 +98,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "lifecycle definition not found")
+		writeModelError(w, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
@@ -89,29 +121,27 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validAppliesTo[req.AppliesTo] {
-		api.WriteFieldError(w, &api.FieldError{Field: "applies_to", Message: "applies_to must be asset, ci or both",
+		api.WriteFieldError(w, &api.FieldError{Field: "applies_to", Message: "applies_to must be asset or ci",
 			Status: http.StatusUnprocessableEntity})
 		return
+	}
+	appliesTo := req.AppliesTo
+	if appliesTo == "" {
+		appliesTo = "asset"
 	}
 	def := &Definition{
 		OrganizationID: t.OrganizationID,
 		Key:            req.Key,
 		Name:           req.Name,
-		AppliesTo:      req.AppliesTo,
+		AppliesTo:      appliesTo,
 		Description:    req.Description,
 	}
-	for _, s := range req.States {
-		def.States = append(def.States, State{
-			Key: s.Key, Label: s.Label, IsInitial: s.IsInitial,
-			IsTerminal: s.IsTerminal, SortOrder: s.SortOrder, RequiredFields: s.RequiredFields,
-		})
+	states, transitions, err := buildModel(appliesTo, req.States, req.Transitions)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
 	}
-	for _, tr := range req.Transitions {
-		def.Transitions = append(def.Transitions, Transition{
-			FromStateKey: tr.FromStateKey, ToStateKey: tr.ToStateKey,
-			Key: tr.Key, Label: tr.Label, RequiredFields: tr.RequiredFields,
-		})
-	}
+	def.States, def.Transitions = states, transitions
 	if err := h.repo.Create(r.Context(), def); err != nil {
 		// A taken key is 409 (in memory ErrConflict, in PostgreSQL 23505);
 		// no SQLSTATE or constraint text reaches the client (F-047).
@@ -122,7 +152,90 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(def.Version))
 	api.WriteJSON(w, http.StatusCreated, def)
+}
+
+// Update handles PATCH /api/v1/lifecycle-models/{id}: name, description,
+// states (matched by key, a kept state keeps its id) and transitions
+// (replaced; without transitions the existing ones between kept states
+// stay). key and applies_to cannot change (422). If-Match is optional
+// (API-07); an older version is 412. A system model is 403, the model of
+// another organization 404, a removed state with entities 409.
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	expected, _, err := api.ParseIfMatch(r)
+	if err != nil {
+		api.WritePreconditionFailed(w, err.Error())
+		return
+	}
+	var req UpdateDefinitionRequest
+	if err = api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	current, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeModelError(w, err)
+		return
+	}
+	if current.IsSystem || current.OrganizationID == "" {
+		writeModelError(w, ErrSystemModel)
+		return
+	}
+	if req.Key != nil && *req.Key != current.Key {
+		api.WriteFieldError(w, &api.FieldError{Field: "key", Message: "the key of a lifecycle model cannot change",
+			Status: http.StatusUnprocessableEntity})
+		return
+	}
+	if req.AppliesTo != nil && *req.AppliesTo != current.AppliesTo {
+		api.WriteFieldError(w, &api.FieldError{Field: "applies_to", Message: "applies_to of a lifecycle model cannot change",
+			Status: http.StatusUnprocessableEntity})
+		return
+	}
+	def := &Definition{ID: current.ID, OrganizationID: t.OrganizationID, Name: current.Name, Description: current.Description}
+	if req.Name != nil {
+		if strings.TrimSpace(*req.Name) == "" {
+			api.WriteFieldError(w, &api.FieldError{Field: "name", Message: "name is required",
+				Status: http.StatusUnprocessableEntity})
+			return
+		}
+		def.Name = *req.Name
+	}
+	if req.Description != nil {
+		def.Description = *req.Description
+	}
+	stateSpecs := specsOfStates(current.States)
+	if req.States != nil {
+		stateSpecs = *req.States
+	}
+	var transitionSpecs []TransitionSpec
+	if req.Transitions != nil {
+		transitionSpecs = *req.Transitions
+	} else {
+		transitionSpecs = keptTransitions(current.Transitions, stateSpecs)
+	}
+	if len(stateSpecs) == 0 {
+		api.WriteFieldError(w, &api.FieldError{Field: "states", Message: "at least one state is required",
+			Status: http.StatusUnprocessableEntity})
+		return
+	}
+	states, transitions, err := buildModel(current.AppliesTo, stateSpecs, transitionSpecs)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	def.States, def.Transitions = states, transitions
+	if err := h.repo.Update(r.Context(), def, expected); err != nil {
+		writeModelError(w, err)
+		return
+	}
+	w.Header().Set("ETag", api.ETag(def.Version))
+	api.WriteJSON(w, http.StatusOK, def)
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -132,10 +245,282 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "lifecycle definition not found or protected")
+		writeModelError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeModelError answers a refused read or write of a lifecycle model: an
+// unknown or foreign model 404, a system model 403, an older If-Match
+// version 412, a used model or removed states with entities 409 with their
+// counts; everything else goes through api.WriteRepoError (F-047).
+func writeModelError(w http.ResponseWriter, err error) {
+	var inUse *ModelInUseConflict
+	var statesInUse *StatesInUseConflict
+	switch {
+	case errors.Is(err, api.ErrNotFound) || err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "lifecycle model not found")
+	case errors.Is(err, ErrSystemModel):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrSystemModel.Error())
+	case errors.Is(err, ErrVersionMismatch):
+		api.WritePreconditionFailed(w, ErrVersionMismatch.Error())
+	case errors.As(err, &inUse):
+		api.WriteProblemBody(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			*ModelInUseConflict
+		}{
+			ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
+				Status: http.StatusConflict, Detail: inUse.Error()},
+			ModelInUseConflict: inUse,
+		})
+	case errors.As(err, &statesInUse):
+		api.WriteProblemBody(w, http.StatusConflict, struct {
+			api.FieldProblem
+			StateCounts []StateCount `json:"state_counts"`
+		}{
+			FieldProblem: api.FieldProblem{
+				ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
+					Status: http.StatusConflict, Detail: statesInUse.Error()},
+				Field: "states",
+			},
+			StateCounts: statesInUse.Counts,
+		})
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// requiredAssetStates are the states an organization asset model must
+// contain: reservation/availability.go and savedview/filter.go evaluate
+// these keys, the system checks of WP-279 hang on in_stock, deployed and
+// disposed.
+var requiredAssetStates = []string{"in_stock", "reserved", "deployed", "repair", "retired", "disposed"}
+
+// buildModel checks the states and transitions of a POST or PATCH and
+// returns them: state keys are set and unique, an asset model has the
+// required asset states, transitions name known states and have a key,
+// and every guard rule passes rules.Parse (422 with the path, e.g.
+// transitions[2].guard.fields.serial_number).
+func buildModel(appliesTo string, stateSpecs []StateSpec, transitionSpecs []TransitionSpec) ([]State, []Transition, error) {
+	unprocessable := func(field, format string, args ...any) error {
+		return &api.FieldError{Field: field, Message: fmt.Sprintf(format, args...), Status: http.StatusUnprocessableEntity}
+	}
+	known := map[string]bool{}
+	states := make([]State, 0, len(stateSpecs))
+	for i, s := range stateSpecs {
+		if strings.TrimSpace(s.Key) == "" {
+			return nil, nil, unprocessable(fmt.Sprintf("states[%d].key", i), "the state key is required")
+		}
+		if known[s.Key] {
+			return nil, nil, unprocessable(fmt.Sprintf("states[%d].key", i), "the state key %q is taken", s.Key)
+		}
+		known[s.Key] = true
+		states = append(states, State{
+			Key: s.Key, Label: s.Label, IsInitial: s.IsInitial,
+			IsTerminal: s.IsTerminal, SortOrder: s.SortOrder, RequiredFields: s.RequiredFields,
+		})
+	}
+	if appliesTo == "asset" {
+		var missing []string
+		for _, key := range requiredAssetStates {
+			if !known[key] {
+				missing = append(missing, key)
+			}
+		}
+		if len(missing) > 0 {
+			return nil, nil, unprocessable("states", "an asset lifecycle model needs the states %s; missing: %s",
+				strings.Join(requiredAssetStates, ", "), strings.Join(missing, ", "))
+		}
+	}
+	transitions := make([]Transition, 0, len(transitionSpecs))
+	for i, tr := range transitionSpecs {
+		path := fmt.Sprintf("transitions[%d]", i)
+		if strings.TrimSpace(tr.Key) == "" {
+			return nil, nil, unprocessable(path+".key", "the transition key is required")
+		}
+		if !known[tr.ToStateKey] {
+			return nil, nil, unprocessable(path+".to_state_key", "unknown state %q", tr.ToStateKey)
+		}
+		if tr.FromStateKey != "" && !known[tr.FromStateKey] {
+			return nil, nil, unprocessable(path+".from_state_key", "unknown state %q", tr.FromStateKey)
+		}
+		guard, err := parseGuard(path+".guard", tr.Guard)
+		if err != nil {
+			return nil, nil, err
+		}
+		transitions = append(transitions, Transition{
+			FromStateKey: tr.FromStateKey, ToStateKey: tr.ToStateKey,
+			Key: tr.Key, Label: tr.Label, RequiredFields: tr.RequiredFields,
+			Guard: guard, Validation: guardValidation(guard),
+		})
+	}
+	return states, transitions, nil
+}
+
+// parseGuard checks every rule of a guard with rules.Parse; a refused rule
+// is 422 on path.fields.<field>.
+func parseGuard(path string, spec *GuardSpec) (*Guard, error) {
+	if spec == nil {
+		return nil, nil
+	}
+	if spec.Fields == nil {
+		return nil, &api.FieldError{Field: path + ".fields", Message: "the guard needs fields",
+			Status: http.StatusUnprocessableEntity}
+	}
+	fields := make([]string, 0, len(spec.Fields))
+	for field := range spec.Fields {
+		fields = append(fields, field)
+	}
+	slices.Sort(fields)
+	guard := &Guard{Fields: map[string]rules.Rule{}}
+	for _, field := range fields {
+		if strings.TrimSpace(field) == "" {
+			return nil, &api.FieldError{Field: path + ".fields", Message: "a guard field needs a name",
+				Status: http.StatusUnprocessableEntity}
+		}
+		rule, err := parseRule(spec.Fields[field])
+		if err != nil {
+			return nil, &api.FieldError{Field: path + ".fields." + field, Message: err.Error(),
+				Status: http.StatusUnprocessableEntity}
+		}
+		guard.Fields[field] = rule
+	}
+	return guard, nil
+}
+
+// parseRule checks one guard rule strictly (rules.Parse).
+// validation: the texts of rules.Parse name the operator and the property
+// of the rule that fail, or the JSON decoding error of the request value.
+func parseRule(raw []byte) (rules.Rule, error) {
+	return rules.Parse(raw)
+}
+
+// specsOfStates returns the stored states as request specs (a PATCH
+// without states keeps them).
+func specsOfStates(states []State) []StateSpec {
+	out := make([]StateSpec, 0, len(states))
+	for _, s := range states {
+		out = append(out, StateSpec{Key: s.Key, Label: s.Label, IsInitial: s.IsInitial,
+			IsTerminal: s.IsTerminal, SortOrder: s.SortOrder, RequiredFields: s.RequiredFields})
+	}
+	return out
+}
+
+// keptTransitions returns the stored transitions whose states the PATCH
+// keeps, as request specs with their guard.
+func keptTransitions(transitions []Transition, states []StateSpec) []TransitionSpec {
+	kept := map[string]bool{}
+	for _, s := range states {
+		kept[s.Key] = true
+	}
+	out := make([]TransitionSpec, 0, len(transitions))
+	for i := range transitions {
+		tr := &transitions[i]
+		if !kept[tr.ToStateKey] || (tr.FromStateKey != "" && !kept[tr.FromStateKey]) {
+			continue
+		}
+		spec := TransitionSpec{FromStateKey: tr.FromStateKey, ToStateKey: tr.ToStateKey,
+			Key: tr.Key, Label: tr.Label, RequiredFields: tr.RequiredFields}
+		if tr.Guard != nil {
+			spec.Guard = guardSpecOf(tr.Guard)
+		}
+		out = append(out, spec)
+	}
+	return out
+}
+
+// OptionsAsset handles GET /api/v1/assets/{id}/lifecycle-transitions.
+func (h *Handler) OptionsAsset(w http.ResponseWriter, r *http.Request) {
+	h.options(w, r, "asset")
+}
+
+// OptionsCI handles GET /api/v1/cis/{id}/lifecycle-transitions.
+func (h *Handler) OptionsCI(w http.ResponseWriter, r *http.Request) {
+	h.options(w, r, "ci")
+}
+
+// options answers the transitions the effective model of the entity
+// allows from its current state (LifecycleTransitionOptions): a CI without
+// a model is 422 (ErrNoLifecycleModel), an entity outside the scope 404.
+func (h *Handler) options(w http.ResponseWriter, r *http.Request, entityType string) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if h.service == nil || h.resolver == nil {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "lifecycle transitions are not configured")
+		return
+	}
+	entityID, ok := api.ParseUUIDParam(w, r, "id", "entity not found")
+	if !ok {
+		return
+	}
+	modelID, err := h.resolver.LifecycleModelFor(r, t.OrganizationID, entityType, entityID)
+	if errors.Is(err, ErrNoLifecycleModel) {
+		writeNoLifecycleModel(w)
+		return
+	}
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "entity not found")
+		return
+	}
+	def, err := h.repo.GetByID(r.Context(), t.OrganizationID, modelID)
+	if err != nil {
+		writeTransitionError(w, err)
+		return
+	}
+	current, err := h.service.states.CurrentState(r.Context(), t.OrganizationID, entityType, entityID)
+	if err != nil {
+		writeTransitionError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, transitionOptions(def, current))
+}
+
+// transitionOptions lists the transitions of def from current; a
+// transition without from state applies from every state. An entity
+// without a state may enter the initial state as well (Service.Transition).
+func transitionOptions(def *Definition, current string) TransitionOptions {
+	stateByKey := map[string]State{}
+	for _, st := range def.States {
+		stateByKey[st.Key] = st
+	}
+	out := TransitionOptions{
+		Model:        ModelRef{ID: def.ID, Key: def.Key, Name: def.Name},
+		CurrentState: current,
+		Transitions:  []TransitionOption{},
+	}
+	targets := map[string]bool{}
+	for i := range def.Transitions {
+		tr := &def.Transitions[i]
+		if tr.FromStateKey != "" && tr.FromStateKey != current {
+			continue
+		}
+		label := tr.Label
+		if label == "" {
+			label = tr.Key
+		}
+		required := append(slices.Clone(nonNil(stateByKey[tr.ToStateKey].RequiredFields)), tr.RequiredFields...)
+		out.Transitions = append(out.Transitions, TransitionOption{
+			ToState: tr.ToStateKey, Key: tr.Key, Label: label,
+			RequiredFields: required, Guard: tr.Guard,
+		})
+		targets[tr.ToStateKey] = true
+	}
+	if initial := initialKey(def); current == "" && initial != "" && !targets[initial] {
+		st := stateByKey[initial]
+		label := st.Label
+		if label == "" {
+			label = initial
+		}
+		out.Transitions = append(out.Transitions, TransitionOption{
+			ToState: initial, Key: "initial", Label: label,
+			RequiredFields: slices.Clone(nonNil(st.RequiredFields)),
+		})
+	}
+	return out
 }
 
 // TransitionAsset handles POST /api/v1/assets/{id}/lifecycle-transitions
@@ -184,9 +569,10 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
-// validAppliesTo are the entity kinds of a lifecycle definition (the CHECK
-// of lifecycle_definition.applies_to); empty means asset.
-var validAppliesTo = map[string]bool{"": true, "asset": true, "ci": true, "both": true}
+// validAppliesTo are the entity kinds of a lifecycle model (the CHECK of
+// lifecycle_definition.applies_to since 000201); empty means asset. "both"
+// is a 422 on applies_to, not a check violation of the database.
+var validAppliesTo = map[string]bool{"": true, "asset": true, "ci": true}
 
 // writeTransitionError reports a failed transition: the rejection of the
 // definition (422 with the field), a definition that cannot be resolved

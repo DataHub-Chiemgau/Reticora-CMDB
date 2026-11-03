@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -23,9 +24,8 @@ const ScopeSet = "set"
 // AttributeSet is a named, reusable group of attribute definitions (MET-16,
 // WP-250). Its attributes are rows of attribute_definition with scope "set"
 // (DB-03); a type takes sets in an ordered list (ci_type_attribute_set).
-// organization_id NULL marks a read-only system set (E-10). Until WP-709
-// sets do not enter the composition: ResolveFields, the materialized schema
-// and schema_version stay as they are.
+// organization_id NULL marks a read-only system set (E-10). The active sets
+// of a type enter its composition after its type chain (WP-709).
 type AttributeSet struct {
 	ID             string        `json:"id"`
 	OrganizationID string        `json:"organization_id,omitempty"`
@@ -254,10 +254,58 @@ func (r *PGRepository) UpdateAttributeSet(ctx context.Context, orgID, id string,
 		if err != nil {
 			return api.FieldDBError(err, attributeSetFields)
 		}
+		if !before.IsActive && updated.IsActive {
+			if cerr := checkReactivatedSetTx(ctx, tx, id); cerr != nil {
+				return cerr
+			}
+		}
 		out = updated
 		return recordMetamodelAudit(ctx, tx, orgID, "attribute_set.updated", "attribute_set", id, &before, updated)
 	})
-	return out, err
+	return out, reactivationDBError(err)
+}
+
+// checkReactivatedSetTx checks a set that becomes active again (WP-709):
+// its attributes enter the composition of every type it is assigned to and
+// of their subtypes, so each of these types must still compose with the
+// system base, the organization's global attributes, its type chain and its
+// other sets. A conflict is a 422 on is_active with the code of the
+// conflict; nothing changes.
+func checkReactivatedSetTx(ctx context.Context, tx pgx.Tx, id string) error {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT s.id::text FROM ci_type_attribute_set cs
+		CROSS JOIN LATERAL ci_type_subtree(cs.ci_type_id) s WHERE cs.attribute_set_id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("read types of attribute set: %w", err)
+	}
+	targets, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read types of attribute set: %w", err)
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	if cerr := chainCompositionTx(ctx, tx, targets, "", nil); cerr != nil {
+		var conflict *CompositionError
+		if errors.As(cerr, &conflict) {
+			return &api.FieldError{Field: "is_active", Message: cerr.Error(),
+				Status: http.StatusUnprocessableEntity, Code: conflict.Code}
+		}
+		return cerr
+	}
+	return nil
+}
+
+// reactivationDBError maps the composition check of the materialization
+// (attribute_definition_composition, raised by the deferred regeneration at
+// the commit) onto the 422 on is_active, with the code the database reports
+// in DETAIL; any other error stays as it is.
+func reactivationDBError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == compositionConstraint {
+		return &api.FieldError{Field: "is_active", Message: pgErr.Message, Code: pgErr.Detail,
+			Status: http.StatusUnprocessableEntity}
+	}
+	return err
 }
 
 // DeleteAttributeSet implements AttributeSetStore: a set assigned to a type

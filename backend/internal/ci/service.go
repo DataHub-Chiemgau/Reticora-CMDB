@@ -431,6 +431,11 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 		if err != nil {
 			return nil, err
 		}
+		// A manual change of an instance attribute needs its own right
+		// (MET-14, WP-256).
+		if err := s.checkInstanceWrite(ctx, orgID, before, &req); err != nil {
+			return nil, err
+		}
 		// The client the CI has after the write: references are checked
 		// against it, all of them when the write changes it (WP-254).
 		clientID := before.ClientID

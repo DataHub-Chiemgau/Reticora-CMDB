@@ -1694,9 +1694,10 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 				OrganizationID: orgID, CIID: matched.ID, Field: field, Value: value,
 				Source: source, ObservedAt: observedAt, Current: current, FallbackSource: matched.DiscoverySource,
 			})
-			if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
-				// Observed under an override or written: the provenance
-				// keeps the reported value (REC-12, REC-10).
+			if d.Write || d.Conflict || d.Reason == override.ReasonOverride || d.Reason == override.ReasonInstanceAttribute {
+				// Observed under an override, observed for an instance
+				// attribute (no conflict, MET-14) or written: the
+				// provenance keeps the reported value (REC-12, REC-10).
 				if txErr = h.recordDiscovered(ctx, orgID, matched.ID, field, value, source, observedAt); txErr != nil {
 					return false
 				}

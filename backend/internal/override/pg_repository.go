@@ -207,20 +207,43 @@ func authorNamesTx(ctx context.Context, tx pgx.Tx, values []*FieldValue) (map[st
 	return names, nil
 }
 
-// Get returns one field value.
+// Get returns one field value. It marks an instance attribute of the CI
+// (FieldValue.InstanceAttribute, MET-14, WP-714); for an instance attribute
+// without provenance row it returns a FieldValue with only the keys and
+// that mark instead of ErrNotFound, so the central write decision refuses
+// it (ReasonInstanceAttribute).
 func (r *PGRepository) Get(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		fv, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
-			"SELECT %s FROM ci_field_value WHERE ci_id = $1 AND field_name = $2 AND "+visibleCI,
-			selectColumns), ciID, fieldName))
+		// One statement: the row, if any, and whether the field is an
+		// instance attribute; without a row, an instance attribute yields
+		// one row with an empty id.
+		var instance bool
+		fv, err := scan(instanceScanner{tx.QueryRow(ctx, fmt.Sprintf(`
+			WITH inst AS (
+				SELECT EXISTS (SELECT 1 FROM ci_instance_field_definition d
+					WHERE d.ci_id = $1 AND d.name = $2 AND EXISTS (SELECT 1 FROM ci WHERE ci.id = d.ci_id)) AS instance
+			)
+			SELECT %[1]s, inst.instance FROM ci_field_value, inst
+			WHERE ci_id = $1 AND field_name = $2 AND %[2]s
+			UNION ALL
+			SELECT '', '', '', '', NULL::jsonb, '', NULL::timestamptz, NULL::jsonb, '', '', NULL::timestamptz, false,
+				now(), now(), 0, NULL::timestamptz, true
+			FROM inst WHERE inst.instance AND NOT EXISTS (
+				SELECT 1 FROM ci_field_value WHERE ci_id = $1 AND field_name = $2 AND %[2]s)`,
+			selectColumns, visibleCI), ciID, fieldName), &instance})
 		if err != nil {
-			if err == pgx.ErrNoRows {
+			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
 			return fmt.Errorf("get field value: %w", err)
 		}
+		if fv.ID == "" {
+			out = &FieldValue{OrganizationID: orgID, CIID: ciID, FieldName: fieldName, InstanceAttribute: true}
+			return nil
+		}
 		out = r.withEffectiveTx(ctx, tx, fv)
+		out.InstanceAttribute = instance
 		return nil
 	})
 	return out, err
@@ -400,8 +423,8 @@ func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, 
 // SetOverride sets or replaces the manual override of a field. The override
 // is a manual write: in the same transaction the CI takes the value, its
 // version rises and its history records the change (raiseVersion, API-07).
-// A reserved namespace is ErrReservedName, a structural column
-// ErrNotOverridable.
+// A reserved namespace is ErrReservedName, a structural column or an
+// instance attribute of the CI (MET-14, WP-256) ErrNotOverridable.
 func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName string, value any, author, reason string, protected bool) (*FieldValue, error) {
 	if reason == "" {
 		return nil, fmt.Errorf("override reason is required")
@@ -416,6 +439,15 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := requireLiveCI(ctx, tx, ciID); err != nil {
 			return err
+		}
+		// An instance attribute of the CI has its own write path with its
+		// own permission (MET-14, WP-256): PUT /cis/{id}/instance-attributes.
+		_, instance, pathErr := attributePath(ctx, tx, ciID, fieldName)
+		if pathErr != nil {
+			return pathErr
+		}
+		if instance {
+			return ErrNotOverridable
 		}
 		before, err := ciFieldValue(ctx, tx, ciID, fieldName)
 		if err != nil {
@@ -506,7 +538,8 @@ func userID(author string) any {
 }
 
 // ClearOverride removes the manual override of a field. In the same
-// transaction the CI returns to the observed value, when there is one, its
+// transaction the CI returns to the observed value, when there is one and
+// the field is no instance attribute of the CI (MET-14, WP-714), its
 // version rises and its history records the change (raiseVersion, API-07),
 // and the change is audited (OVR-01). An unknown, invisible or soft-deleted
 // CI (F-422) and a field without a value are ErrNotFound, a reserved
@@ -552,7 +585,16 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 		}
 		changes := map[string]any{"field": fieldName}
 		after := before
-		if fv.DiscoveredAt != nil && !structuralFields[fieldName] {
+		// An instance attribute keeps its manual value: an observed value
+		// never reaches attributes._instance (MET-14, WP-714).
+		instance := false
+		if !isColumn(fieldName) {
+			var pathErr error
+			if _, instance, pathErr = attributePath(ctx, tx, ciID, fieldName); pathErr != nil {
+				return pathErr
+			}
+		}
+		if fv.DiscoveredAt != nil && !structuralFields[fieldName] && !instance {
 			if syncErr := syncCIField(ctx, tx, ciID, fieldName, fv.DiscoveredValue); syncErr != nil {
 				return syncErr
 			}
@@ -675,6 +717,17 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+// instanceScanner scans a row of selectColumns followed by the instance
+// attribute flag (Get).
+type instanceScanner struct {
+	row      pgx.Row
+	instance *bool
+}
+
+func (s instanceScanner) Scan(dest ...any) error {
+	return s.row.Scan(append(dest, s.instance)...)
+}
+
 func scan(s scanner) (*FieldValue, error) {
 	fv := &FieldValue{}
 	var discoveredRaw, overrideRaw []byte
@@ -717,7 +770,8 @@ func nilIfEmpty(value string) any {
 	return value
 }
 
-// ErrNotOverridable rejects an override of a structural CI column.
+// ErrNotOverridable rejects an override of a structural CI column or of an
+// instance attribute of the CI (MET-14).
 var ErrNotOverridable = errors.New("field cannot be overridden")
 
 // ErrReservedName rejects a reserved attribute namespace (_overrides,

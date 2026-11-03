@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -208,15 +209,49 @@ func TestComposeReferenceTargetOf(t *testing.T) {
 	}
 }
 
-// layeredLister serves one definition per layer.
-type layeredLister struct{ system, org, typed, instance Field }
+// layeredLister serves one definition per layer and the set layers
+// (WP-709) as given; globals and chain, when set, replace the system and
+// organization layer and the one-type chain (WP-255).
+type layeredLister struct {
+	system, org, typed, instance Field
+	sets                         [][]Field
+	globals                      []Field
+	chain                        []Type
+}
+
+func (l layeredLister) ListSetFields(context.Context, string, string) ([][]Field, error) {
+	return l.sets, nil
+}
 
 func (l layeredLister) ListGlobalFields(context.Context, string) ([]Field, error) {
+	if l.globals != nil {
+		return l.globals, nil
+	}
 	return []Field{l.system, l.org}, nil
 }
 
 func (l layeredLister) TypeChain(_ context.Context, _, typeID string) ([]Type, error) {
+	if l.chain != nil {
+		// The chain root → typeID along ParentTypeID.
+		out := []Type{}
+		for cur := typeID; cur != ""; {
+			i := slices.IndexFunc(l.chain, func(t Type) bool { return t.ID == cur })
+			if i < 0 {
+				break
+			}
+			out = append([]Type{l.chain[i]}, out...)
+			cur = l.chain[i].ParentTypeID
+		}
+		return out, nil
+	}
 	return []Type{{ID: typeID, Fields: []Field{l.typed}}}, nil
+}
+
+func (l layeredLister) TypeCategory(_ context.Context, _, typeID string) (string, error) {
+	if i := slices.IndexFunc(l.chain, func(t Type) bool { return t.ID == typeID }); i >= 0 {
+		return l.chain[i].Category, nil
+	}
+	return "", nil
 }
 
 func (l layeredLister) ListInstanceFields(context.Context, string, string) ([]InstanceField, error) {
@@ -247,5 +282,136 @@ func TestResolveFieldsComposesLayers(t *testing.T) {
 	var conflict *CompositionError
 	if !errors.As(err, &conflict) || conflict.CompositionKey() != "size" {
 		t.Errorf("instance with another data type: %v", err)
+	}
+}
+
+// TestResolveFieldsComposesSetLayers (WP-709, MET-16): the set layers come
+// between the type chain and the instance, one per set in the order
+// ListSetFields gives: a set tightens the type (required OR, intersection
+// of the allowed values), the later set's default wins, the instance
+// tightens the sets; a set whose data type conflicts with the type is a
+// *CompositionError.
+func TestResolveFieldsComposesSetLayers(t *testing.T) {
+	lister := layeredLister{
+		system: Field{Name: "base", DataType: fieldmeta.TypeText, IsSystem: true},
+		org:    Field{Name: "org_only", DataType: fieldmeta.TypeText},
+		typed:  Field{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"a", "b", "c"}, DefaultValue: "a"},
+		instance: Field{Name: "tier", DataType: fieldmeta.TypeEnum, Required: true,
+			Validation: &fieldmeta.ValidationRules{Options: []any{"b"}}},
+		sets: [][]Field{
+			{{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"b", "c", "d"}, DefaultValue: "c"},
+				{Name: "rack", DataType: fieldmeta.TypeText, Required: true}},
+			{{Name: "tier", DataType: fieldmeta.TypeEnum, DefaultValue: "b"}},
+		},
+	}
+	defs, err := ResolveFields(context.Background(), lister, "org", "type", "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]fieldmeta.FieldDefinition{}
+	var names []string
+	for _, d := range defs {
+		names = append(names, d.Name)
+		byName[d.Name] = d
+	}
+	if want := []string{"base", "org_only", "tier", "rack"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("order = %v, want %v (system, org, type chain, sets)", names, want)
+	}
+	tier := byName["tier"]
+	if !tier.Required || !reflect.DeepEqual(tier.EnumValues, []string{"b"}) || tier.DefaultValue != "b" {
+		t.Errorf("tier = %+v, want required, values [b] (type, sets and instance intersected), default b of the later set", tier)
+	}
+	if !byName["rack"].Required {
+		t.Errorf("rack = %+v, want required from the set", byName["rack"])
+	}
+
+	// Without a type there is no set layer.
+	if defs, err = ResolveFields(context.Background(), lister, "org", "", ""); err != nil || len(defs) != 2 {
+		t.Errorf("without type: %+v %v", defs, err)
+	}
+
+	// A set with another data type than the type conflicts.
+	lister.sets = [][]Field{{{Name: "tier", DataType: fieldmeta.TypeInteger}}}
+	lister.instance = Field{Name: "other", DataType: fieldmeta.TypeText}
+	_, err = ResolveFields(context.Background(), lister, "org", "type", "")
+	var conflict *CompositionError
+	if !errors.As(err, &conflict) || conflict.Key != "tier" || conflict.Code != CodeDatatypeConflict {
+		t.Errorf("set with another data type: %v, want a %s on tier", err, CodeDatatypeConflict)
+	}
+}
+
+// TestResolveFieldsAppliesTo covers the applicability of global attributes
+// (MET-13, WP-255) with layeredLister: a system global applies to every
+// type, an organization's global with applies_to all as well; categories
+// applies to the types of a listed category (the type's own category, not
+// that of an ancestor); types applies to a listed type and its subtypes,
+// not to a sibling; an ID of a type that no longer exists matches nothing;
+// without a type only all applies.
+func TestResolveFieldsAppliesTo(t *testing.T) {
+	lister := layeredLister{
+		globals: []Field{
+			{Name: "sys_base", DataType: fieldmeta.TypeText, IsSystem: true, Scope: "global"},
+			{Name: "org_all", DataType: fieldmeta.TypeText, Scope: "global", AppliesTo: AppliesToAll},
+			{Name: "org_infra", DataType: fieldmeta.TypeText, Scope: "global", AppliesTo: AppliesToCategories,
+				AppliesToCategories: []string{"infrastructure"}},
+			{Name: "org_x", DataType: fieldmeta.TypeText, Scope: "global", AppliesTo: AppliesToTypes,
+				AppliesToTypeIDs: []string{"x", "gone"}},
+		},
+		chain: []Type{
+			{ID: "root", Category: "service"},
+			{ID: "x", ParentTypeID: "root", Category: "infrastructure"},
+			{ID: "x-sub", ParentTypeID: "x", Category: "service"},
+			{ID: "y", ParentTypeID: "root", Category: "infrastructure"},
+		},
+	}
+	for typeID, want := range map[string][]string{
+		"root":  {"sys_base", "org_all"},
+		"x":     {"sys_base", "org_all", "org_infra", "org_x"},
+		"x-sub": {"sys_base", "org_all", "org_x"},
+		"y":     {"sys_base", "org_all", "org_infra"},
+		"":      {"sys_base", "org_all"},
+	} {
+		defs, err := ResolveFields(context.Background(), lister, "org", typeID, "")
+		if err != nil {
+			t.Fatalf("%q: %v", typeID, err)
+		}
+		var names []string
+		for _, d := range defs {
+			names = append(names, d.Name)
+		}
+		if !reflect.DeepEqual(names, want) {
+			t.Errorf("type %q resolves %v, want %v", typeID, names, want)
+		}
+	}
+
+	// A system global is not restricted even when it carried a mode.
+	lister.globals[0].AppliesTo, lister.globals[0].AppliesToCategories = AppliesToCategories, []string{"none"}
+	defs, err := ResolveFields(context.Background(), lister, "org", "root", "")
+	if err != nil || len(defs) != 2 || defs[0].Name != "sys_base" {
+		t.Errorf("system global with a mode: %+v %v", defs, err)
+	}
+}
+
+// TestMemoryDeleteFieldNoGlobalFallback (WP-255): DELETE of a type field
+// does not fall back to an organization's global field of the same name;
+// the global path deletes it.
+func TestMemoryDeleteFieldNoGlobalFallback(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	repo.SeedType(Type{ID: "t1", OrganizationID: "org", Key: "t1", Name: "t1", IsActive: true})
+	if _, err := repo.UpsertField(ctx, "org", "", UpsertFieldRequest{Scope: "global", Name: "cost_center", DataType: "text"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteField(ctx, "org", "t1", "cost_center"); err == nil {
+		t.Error("type path deleted the global field")
+	}
+	if globals, _ := repo.ListGlobalFields(ctx, "org"); len(globals) != 1 {
+		t.Errorf("globals after the type path = %+v, want cost_center kept", globals)
+	}
+	if err := repo.DeleteField(ctx, "org", "", "cost_center"); err != nil {
+		t.Errorf("global path: %v", err)
+	}
+	if globals, _ := repo.ListGlobalFields(ctx, "org"); len(globals) != 0 {
+		t.Errorf("globals after the global path = %+v", globals)
 	}
 }

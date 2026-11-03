@@ -761,7 +761,8 @@ func (h *Handler) resolveUnknownRelationship(ctx context.Context, item *ReviewIt
 		switch {
 		case errors.Is(err, relationship.ErrSourceCINotFound), errors.Is(err, relationship.ErrTargetCINotFound):
 			return false, refused(http.StatusNotFound, "the source or target CI was not found")
-		case errors.Is(err, relationship.ErrSourceCITypeNotAllowed), errors.Is(err, relationship.ErrTargetCITypeNotAllowed):
+		case errors.Is(err, relationship.ErrSourceCITypeNotAllowed), errors.Is(err, relationship.ErrTargetCITypeNotAllowed),
+			errors.Is(err, relationship.ErrCardinalityExceeded):
 			return false, refused(http.StatusUnprocessableEntity, err.Error())
 		}
 		return false, err

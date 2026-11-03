@@ -77,6 +77,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/cis/{id}/merge", h.Merge)
 	r.Post("/api/v1/cis/bulk", h.Bulk)
 	r.Post("/api/v1/cis/{id}/unmerge", h.Unmerge)
+	// Instance attribute values (MET-14, WP-256).
+	r.Get("/api/v1/cis/{id}/instance-attributes", h.ListInstanceAttributes)
+	r.Put("/api/v1/cis/{id}/instance-attributes/{key}", h.SetInstanceAttribute)
+	r.Delete("/api/v1/cis/{id}/instance-attributes/{key}", h.DeleteInstanceAttribute)
 }
 
 // List handles GET /api/v1/cis
@@ -584,6 +588,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if writeValidationError(w, err) {
+			return
+		}
+		// A changed instance attribute without its right (MET-14, WP-256).
+		if errors.Is(err, ErrInstanceAttributeForbidden) {
+			api.WriteError(w, http.StatusForbidden, "Forbidden", instanceForbiddenDetail)
 			return
 		}
 		// Only a missing CI is 404; any other failure is not hidden as one

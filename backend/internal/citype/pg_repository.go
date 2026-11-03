@@ -39,7 +39,7 @@ const typeSelectColumns = `
 	COALESCE(cloned_from_id::text, ''),
 	COALESCE(parent_type_id::text, ''),
 	COALESCE(template_key, ''),
-	COALESCE(lifecycle_definition_id::text, ''),
+	COALESCE(lifecycle_model_id::text, ''),
 	capabilities,
 	allowed_relationship_types,
 	ui_schema,
@@ -141,7 +141,8 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Type, er
 
 // Create inserts a new type with its field definitions. A parent is
 // checked by trg_ci_type_parent_guard (MET-06); its errors and a chain that
-// cannot be composed are reported on parent_type_id.
+// cannot be composed are reported on parent_type_id. The lifecycle model
+// must be one the organization sees (checkLifecycleModelTx, MET-01).
 //
 // A new subtype widens the subtree of its ancestors: the indexes of their
 // indexed, inheritable definitions are rebuilt with it (WP-708).
@@ -157,22 +158,26 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 		if err := checkParentActiveTx(ctx, tx, typ.OrganizationID, typ.ParentTypeID, errParentInactive); err != nil {
 			return err
 		}
+		if err := checkLifecycleModelTx(ctx, tx, typ.LifecycleModelID); err != nil {
+			return err
+		}
 		row := tx.QueryRow(ctx, `
 			INSERT INTO ci_type (
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, template_key,
-				lifecycle_definition_id, capabilities, allowed_relationship_types,
+				lifecycle_model_id, capabilities, allowed_relationship_types,
 				ui_schema, compliance_rules, discovery_mappings, is_observable, parent_type_id
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,1,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 			RETURNING id::text, is_active, version, schema_version, created_at, updated_at`,
 			nilIfEmpty(typ.OrganizationID), typ.Key, typ.Name, typ.DisplayName.WithFallback(typ.Name),
 			nilIfEmpty(typ.Icon), nilIfEmpty(typ.Description), nilIfEmpty(typ.Category),
-			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleDefinitionID),
+			typ.IsLogical, nilIfEmpty(typ.TemplateKey), nilIfEmpty(typ.LifecycleModelID),
 			jsonOrDefault(typ.Capabilities, emptyObject), jsonOrDefault(typ.AllowedRelationshipTypes, emptyArray),
 			jsonOrDefault(typ.UISchema, emptyObject), jsonOrDefault(typ.ComplianceRules, emptyArray),
 			jsonOrDefault(typ.DiscoveryMappings, emptyArray), typ.IsObservable, nilIfEmpty(typ.ParentTypeID),
 		)
 		typ.DisplayName = typ.DisplayName.WithFallback(typ.Name)
+		typ.mirrorLifecycle()
 		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.SchemaVersion, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
 			return fmt.Errorf("create ci type: %w", typeDBError(err))
 		}
@@ -188,7 +193,7 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 			}
 		}
 		if typ.ParentTypeID != "" {
-			if err := checkSubtreeCompositionTx(ctx, tx, typ.ID); err != nil {
+			if err := checkSubtreeCompositionTx(ctx, tx, typ.ID, "parent_type_id"); err != nil {
 				return err
 			}
 			var ierr error
@@ -276,7 +281,13 @@ func typeDBError(err error) error {
 // the new ancestors' subtrees must not share a value of an inherited unique
 // attribute (409 on parent_type_id); the indexes of the indexed,
 // inheritable definitions of the former and the new ancestors are rebuilt
-// over their changed subtrees (WP-708).
+// over their changed subtrees (WP-708). A new lifecycle model must be
+// visible (checkLifecycleModelTx); after a change of the model or of the
+// parent the CIs of the subtree keep a state of their effective ci model
+// (checkLifecycleStatesTx, MET-06, LCY-02). A new category changes the
+// organization's global attributes that apply (MET-13, WP-255): the type
+// and its subtypes stay composable with them, otherwise a 422 on category
+// and nothing is stored.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
 	if !api.IsUUID(id) {
 		return nil, fmt.Errorf("not found")
@@ -315,8 +326,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 		if req.IsLogical != nil {
 			add("is_logical", *req.IsLogical)
 		}
-		if req.LifecycleDefinitionID != nil {
-			add("lifecycle_definition_id", nilIfEmpty(*req.LifecycleDefinitionID))
+		model, err := req.LifecycleModel()
+		if err != nil {
+			return err
 		}
 		if req.Capabilities != nil {
 			add("capabilities", req.Capabilities)
@@ -340,6 +352,13 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 				return fmt.Errorf("not found")
 			}
 			return err
+		}
+		modelChanged := model != nil && *model != before.LifecycleModelID
+		if modelChanged {
+			if merr := checkLifecycleModelTx(ctx, tx, *model); merr != nil {
+				return merr
+			}
+			add("lifecycle_model_id", nilIfEmpty(*model))
 		}
 		parentChanged := req.ParentTypeID != nil && *req.ParentTypeID != before.ParentTypeID
 		if parentChanged {
@@ -375,10 +394,28 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 			}
 			return fmt.Errorf("update ci type: %w", typeDBError(err))
 		}
+		if modelChanged || parentChanged {
+			// The CIs of the subtree keep a state of their new effective
+			// ci model (MET-06, LCY-02).
+			field := "parent_type_id"
+			if modelChanged {
+				field = "lifecycle_model_id"
+			}
+			if lerr := checkLifecycleStatesTx(ctx, tx, id, field); lerr != nil {
+				return lerr
+			}
+		}
+		if !parentChanged && req.Category != nil && *req.Category != before.Category {
+			// The organization's global attributes that apply after the
+			// new category (MET-13, WP-255) with the type and its subtypes.
+			if cerr := checkSubtreeCompositionTx(ctx, tx, id, "category"); cerr != nil {
+				return cerr
+			}
+		}
 		if parentChanged {
 			// The moved subtree with the organization's layer; the database
 			// composed system base and chain while regenerating it.
-			if cerr := checkSubtreeCompositionTx(ctx, tx, id); cerr != nil {
+			if cerr := checkSubtreeCompositionTx(ctx, tx, id, "parent_type_id"); cerr != nil {
 				return cerr
 			}
 			if uerr := checkInheritedUniqueTx(ctx, tx, id); uerr != nil {
@@ -413,10 +450,68 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 	return out, err
 }
 
-// Clone copies a type row plus its field definitions under a new key/name.
+// checkLifecycleModelTx accepts an empty model or one the organization
+// sees under RLS: one of its own or a system model (MET-01). Any other id
+// is a 422 on lifecycle_model_id; the foreign key alone would accept the
+// model of another organization.
+func checkLifecycleModelTx(ctx context.Context, tx pgx.Tx, id string) error {
+	if id == "" {
+		return nil
+	}
+	if !api.IsUUID(id) {
+		return errLifecycleModelUnknown()
+	}
+	var visible bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM lifecycle_definition WHERE id = $1)`, id).Scan(&visible); err != nil {
+		return fmt.Errorf("check lifecycle model: %w", err)
+	}
+	if !visible {
+		return errLifecycleModelUnknown()
+	}
+	return nil
+}
+
+// checkLifecycleStatesTx runs after a change of the lifecycle model or of
+// the parent of the type id: CIs of the type and of its subtypes whose
+// lifecycle state is no state of their new effective ci model
+// (lifecycle_model_effective) refuse the change with their number per state
+// (*LifecycleStatesConflict, 409 on field); the transaction is rolled
+// back. Soft-deleted CIs count as well: a restore does not check the
+// state again.
+func checkLifecycleStatesTx(ctx context.Context, tx pgx.Tx, id, field string) error {
+	rows, err := tx.Query(ctx, `
+		WITH sub AS (
+			SELECT s.id, lifecycle_model_effective(s.id, 'ci') AS model FROM ci_type_subtree($1::uuid) s
+		)
+		SELECT c.lifecycle_state, count(*)::int
+		FROM ci c JOIN sub ON sub.id = c.ci_type_id
+		WHERE c.lifecycle_state IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM lifecycle_state ls WHERE ls.definition_id = sub.model AND ls.key = c.lifecycle_state)
+		GROUP BY c.lifecycle_state
+		ORDER BY c.lifecycle_state`, id)
+	if err != nil {
+		return fmt.Errorf("check lifecycle states: %w", err)
+	}
+	counts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (LifecycleStateCount, error) {
+		var c LifecycleStateCount
+		return c, row.Scan(&c.State, &c.Count)
+	})
+	if err != nil {
+		return fmt.Errorf("check lifecycle states: %w", err)
+	}
+	if len(counts) > 0 {
+		return &LifecycleStatesConflict{Field: field, Counts: counts}
+	}
+	return nil
+}
+
+// Clone copies a type row plus its field definitions and its attribute set
+// assignments with their positions (WP-709) under a new key/name; the audit
+// entry ci_type.cloned lists the assignments.
 // The clone keeps the parent of the source (MET-05, MET-06); a deactivated
 // parent is a conflict (409), since an active type has no deactivated
-// parent.
+// parent. The clone keeps the lifecycle model of the source if the
+// organization sees it (422 on lifecycle_model_id otherwise, MET-01).
 func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneRequest) (*Type, error) {
 	if !api.IsUUID(id) {
 		return nil, fmt.Errorf("not found")
@@ -434,6 +529,9 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 		if perr := checkParentActiveTx(ctx, tx, orgID, src.ParentTypeID, errParentInactiveConflict); perr != nil {
 			return perr
 		}
+		if merr := checkLifecycleModelTx(ctx, tx, src.LifecycleModelID); merr != nil {
+			return merr
+		}
 		name := req.Name
 		if name == "" {
 			name = src.Name + "_copy"
@@ -447,14 +545,14 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 			INSERT INTO ci_type (
 				organization_id, key, name, display_name, icon, description, category,
 				is_builtin, is_system, is_active, is_logical, version, cloned_from_id,
-				template_key, lifecycle_definition_id, capabilities,
+				template_key, lifecycle_model_id, capabilities,
 				allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings,
 				is_observable, parent_type_id
 			) VALUES ($1,$2,$3,$4,$5,$6,$7,false,false,true,$8,$9,$10,NULL,$11,$12,$13,$14,$15,$16,$17,$18)
 			RETURNING id::text`,
 			orgID, key, name, LocalizedText{}.WithFallback(name), nilIfEmpty(src.Icon), nilIfEmpty(src.Description),
 			nilIfEmpty(src.Category), src.IsLogical, src.Version+1, src.ID,
-			nilIfEmpty(src.LifecycleDefinitionID), src.Capabilities,
+			nilIfEmpty(src.LifecycleModelID), src.Capabilities,
 			src.AllowedRelationshipTypes, src.UISchema, src.ComplianceRules,
 			src.DiscoveryMappings, src.IsObservable, nilIfEmpty(src.ParentTypeID),
 		).Scan(&cloneID)
@@ -475,14 +573,25 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 			WHERE ci_type_id = $2`, cloneID, id); err != nil {
 			return fmt.Errorf("clone ci type fields: %w", err)
 		}
-		if src.ParentTypeID != "" {
-			if cerr := checkSubtreeCompositionTx(ctx, tx, cloneID); cerr != nil {
+		// Copy the set assignments with their positions (WP-709); the
+		// deferred trigger materializes the sets of the clone at commit.
+		sets, err := typeAttributeSetsTx(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO ci_type_attribute_set (ci_type_id, attribute_set_id, position)
+			SELECT $1, attribute_set_id, position FROM ci_type_attribute_set WHERE ci_type_id = $2`, cloneID, id); err != nil {
+			return fmt.Errorf("clone attribute sets of ci type: %w", err)
+		}
+		if src.ParentTypeID != "" || len(sets.AttributeSets) > 0 {
+			if cerr := checkSubtreeCompositionTx(ctx, tx, cloneID, "parent_type_id"); cerr != nil {
 				return cerr
 			}
 		}
 		out = &Type{ID: cloneID, OrganizationID: orgID, Key: key, Name: name}
 		return recordMetamodelAudit(ctx, tx, orgID, "ci_type.cloned", "ci_type", cloneID, nil,
-			map[string]any{"cloned_from_id": src.ID, "key": key, "name": name, "version": src.Version + 1})
+			map[string]any{"cloned_from_id": src.ID, "key": key, "name": name, "version": src.Version + 1,
+				"attribute_sets": sets.AttributeSets})
 	})
 	if err != nil {
 		return nil, err
@@ -621,7 +730,8 @@ func (r *PGRepository) Versions(ctx context.Context, orgID, id string) ([]Type, 
 // on every attribute validation of a CI write (ResolveFields), also in the
 // ingest record transaction, which reads no ci_type rows (budget of
 // TestIngestStatementBudget): each level carries its ID and its
-// definitions only; GetByID and TypeSubtree read the type columns. A type
+// definitions only; GetByID, TypeSubtree and TypeCategory read the type
+// columns. A type
 // the organization does not see has an empty chain.
 func (r *PGRepository) TypeChain(ctx context.Context, orgID, id string) ([]Type, error) {
 	out := []Type{}
@@ -655,6 +765,121 @@ func (r *PGRepository) TypeChain(ctx context.Context, orgID, id string) ([]Type,
 		return rows.Err()
 	})
 	return out, err
+}
+
+// TypeCategory implements FieldLister (WP-255): the category of a type the
+// organization sees, "" for an unknown type or one without category.
+// ResolveFields reads it only while a global attribute of the
+// organization is restricted to categories, so the ingest reads no type
+// row otherwise (TestIngestStatementBudget).
+func (r *PGRepository) TypeCategory(ctx context.Context, orgID, id string) (string, error) {
+	var category string
+	if !api.IsUUID(id) {
+		return category, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT COALESCE(category, '') FROM ci_type WHERE id = $1`, id).Scan(&category)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read ci type category: %w", err)
+		}
+		return nil
+	})
+	return category, err
+}
+
+// ListSetFields implements FieldLister (WP-709, MET-16): one layer per
+// active attribute set of the chain root → id (TypeChainSets). A type the
+// organization does not see has no set layers.
+func (r *PGRepository) ListSetFields(ctx context.Context, orgID, id string) ([][]Field, error) {
+	_, sets, err := r.TypeChainSets(ctx, orgID, id)
+	return sets, err
+}
+
+// TypeChainSets returns the chain root → id as TypeChain does and its set
+// layers as ListSetFields does, both in one query under row level security:
+// ResolveFields runs on every CI write, also in the ingest record
+// transaction, whose statements are budgeted (TestIngestStatementBudget).
+// Each type of the chain brings its active sets in position order, each
+// set its definitions by sort_order and key; of the sets of an ancestor
+// only the inheritable set attributes count (WP-248).
+func (r *PGRepository) TypeChainSets(ctx context.Context, orgID, id string) ([]Type, [][]Field, error) {
+	chain := []Type{}
+	var sets [][]Field
+	if !api.IsUUID(id) {
+		return chain, sets, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE((
+				SELECT jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key)
+				FROM attribute_definition a WHERE a.ci_type_id = c.id), '[]'::jsonb),
+			COALESCE((
+				SELECT jsonb_agg(l.defs ORDER BY l.position, l.set_id) FROM (
+					SELECT cs.position, cs.attribute_set_id AS set_id,
+						jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key) AS defs
+					FROM ci_type_attribute_set cs
+					JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
+					JOIN attribute_definition a ON a.attribute_set_id = s.id
+					WHERE cs.ci_type_id = c.id
+					GROUP BY cs.position, cs.attribute_set_id) l), '[]'::jsonb)
+			FROM ci_type_ancestors($1::uuid) c ORDER BY c.level`, id)
+		if err != nil {
+			return fmt.Errorf("read ci type chain: %w", err)
+		}
+		type level struct {
+			typ  Type
+			sets []json.RawMessage
+		}
+		var levels []level
+		for rows.Next() {
+			var lv level
+			var defs, setDefs []byte
+			if err = rows.Scan(&lv.typ.ID, &defs, &setDefs); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan ci type chain: %w", err)
+			}
+			attrs, aerr := attributesFromJSON(defs)
+			if aerr != nil {
+				rows.Close()
+				return aerr
+			}
+			for i := range attrs {
+				lv.typ.Fields = append(lv.typ.Fields, attrs[i].Field())
+			}
+			if err = json.Unmarshal(setDefs, &lv.sets); err != nil {
+				rows.Close()
+				return fmt.Errorf("decode set definitions: %w", err)
+			}
+			levels = append(levels, lv)
+		}
+		rows.Close()
+		if rerr := rows.Err(); rerr != nil {
+			return rerr
+		}
+		for i := range levels {
+			chain = append(chain, levels[i].typ)
+			own := i == len(levels)-1
+			for _, raw := range levels[i].sets {
+				attrs, aerr := attributesFromJSON(raw)
+				if aerr != nil {
+					return aerr
+				}
+				var layer []Field
+				for j := range attrs {
+					if own || attrs[j].Inheritable {
+						layer = append(layer, attrs[j].Field())
+					}
+				}
+				if len(layer) > 0 {
+					sets = append(sets, layer)
+				}
+			}
+		}
+		return nil
+	})
+	return chain, sets, err
 }
 
 // TypeSubtree implements Repository: id and every descendant the
@@ -722,6 +947,10 @@ type attributeRowJSON struct {
 	GroupName       *string         `json:"group_name"`
 	SortOrder       int             `json:"sort_order"`
 	Unit            *string         `json:"unit"`
+	// AppliesTo and its lists (WP-255); type and set rows are all.
+	AppliesTo           string   `json:"applies_to"`
+	AppliesToCategories []string `json:"applies_to_categories"`
+	AppliesToTypeIDs    []string `json:"applies_to_type_ids"`
 }
 
 // attributesFromJSON decodes a JSON array of attribute_definition rows the
@@ -747,6 +976,7 @@ func attributesFromJSON(raw []byte) ([]AttributeDefinition, error) {
 			MultiValue: row.MultiValue, Searchable: row.Searchable, Unique: row.IsUnique, UniqueScope: row.UniqueScope,
 			Inheritable: row.Inheritable, ReferenceTarget: str(row.ReferenceTarget), Group: str(row.GroupName),
 			Order: row.SortOrder, Unit: str(row.Unit),
+			AppliesTo: row.AppliesTo, AppliesToCategories: row.AppliesToCategories, AppliesToTypeIDs: row.AppliesToTypeIDs,
 		}
 		if err := json.Unmarshal(row.DisplayName, &d.DisplayName); err != nil {
 			return nil, fmt.Errorf("decode display_name: %w", err)
@@ -765,6 +995,7 @@ func attributesFromJSON(raw []byte) ([]AttributeDefinition, error) {
 			}
 		}
 		d.IsSystem = d.OrganizationID == ""
+		d.normalizeAppliesTo()
 		out = append(out, d)
 	}
 	return out, nil
@@ -901,14 +1132,16 @@ func findAttributeTx(ctx context.Context, tx pgx.Tx, typeID, key string) (*Attri
 	return d, nil
 }
 
-// DeleteField removes a field definition by name: of the type, otherwise
-// the organization's global one.
+// DeleteField removes a field definition by name: of the type, or with
+// typeID "" the organization's global one (WP-255: a type path does not
+// fall back to a global field of the same name, which applies to other
+// types as well). After the commit the index job drops the indexes of the
+// definition, as DeleteAttributeDefinition does (DB-04); the key index of
+// WP-607 goes only when no definition uses the key any more.
 func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name string) error {
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	var deleted *AttributeDefinition
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		before, err := findAttributeTx(ctx, tx, typeID, name)
-		if errors.Is(err, ErrAttributeNotFound) {
-			before, err = findAttributeTx(ctx, tx, "", name)
-		}
 		if errors.Is(err, ErrAttributeNotFound) {
 			return fmt.Errorf("not found")
 		}
@@ -922,8 +1155,13 @@ func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name stri
 		if cmd.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
 		}
+		deleted = before
 		return recordAttributeAudit(ctx, tx, orgID, before, nil)
 	})
+	if err == nil {
+		r.scheduleIndex(ctx, orgID, deleted, nil)
+	}
+	return err
 }
 
 func listFieldsTx(ctx context.Context, tx pgx.Tx, typeID string) ([]Field, error) {
@@ -1069,6 +1307,11 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 		if err = rows.Err(); err != nil || out == nil {
 			return err
 		}
+		if before == nil {
+			if moveErr := moveIntoInstance(ctx, tx, ciID, out.Name); moveErr != nil {
+				return moveErr
+			}
+		}
 		action, changes := "ci_instance_field.created", map[string]any{"after": out}
 		if before != nil {
 			action, changes = "ci_instance_field.updated", map[string]any{"before": before, "after": out}
@@ -1095,8 +1338,53 @@ func (r *PGRepository) DeleteInstanceField(ctx context.Context, orgID, ciID, nam
 			"DELETE FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2 AND "+visibleCI, ciID, name); err != nil {
 			return fmt.Errorf("delete instance field: %w", err)
 		}
+		if moveErr := moveOutOfInstance(ctx, tx, ciID, name); moveErr != nil {
+			return moveErr
+		}
 		return recordInstanceFieldAudit(ctx, tx, "ci_instance_field.deleted", before, map[string]any{"before": before})
 	})
+}
+
+// moveIntoInstance moves a value the CI holds on the top level of its
+// attributes under the name of a new instance attribute into
+// attributes._instance, in the transaction of the definition (MET-14,
+// CI-10, WP-714): the read view keeps the value, the storage follows the
+// definition. A manual override of the field is removed as by migration
+// 000204; instance attributes carry none (CI-04).
+func moveIntoInstance(ctx context.Context, tx pgx.Tx, ciID, name string) error {
+	if _, err := tx.Exec(ctx, `UPDATE ci SET attributes = (attributes - $2::text) || jsonb_build_object('_instance',
+			COALESCE(attributes -> '_instance', '{}'::jsonb) || jsonb_build_object($2::text, attributes -> $2::text))
+		WHERE id = $1 AND attributes ? $2::text`, ciID, name); err != nil {
+		return fmt.Errorf("move %s into _instance: %w", name, err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM ci_field_value WHERE ci_id = $1 AND field_name = $2 AND discovered_at IS NULL`,
+		ciID, name); err != nil {
+		return fmt.Errorf("remove override of %s: %w", name, err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE ci_field_value SET override_value = NULL, override_author = NULL,
+			override_reason = NULL, override_at = NULL, protected = false
+		WHERE ci_id = $1 AND field_name = $2 AND (override_at IS NOT NULL OR override_value IS NOT NULL OR protected)`,
+		ciID, name); err != nil {
+		return fmt.Errorf("remove override of %s: %w", name, err)
+	}
+	return nil
+}
+
+// moveOutOfInstance returns the value of a deleted instance attribute from
+// attributes._instance to the top level of the CI's attributes, in the
+// transaction of the deletion (MET-14, WP-714): it stays visible as an
+// ordinary attribute and no stale _instance value hides a later one. An
+// emptied _instance is removed.
+func moveOutOfInstance(ctx context.Context, tx pgx.Tx, ciID, name string) error {
+	if _, err := tx.Exec(ctx, `UPDATE ci SET attributes = CASE
+			WHEN (attributes -> '_instance') - $2::text = '{}'::jsonb THEN attributes - '_instance'
+			ELSE attributes #- ARRAY['_instance', $2::text] END
+			|| jsonb_build_object($2::text, attributes -> '_instance' -> $2::text)
+		WHERE id = $1 AND jsonb_typeof(attributes -> '_instance') = 'object' AND attributes -> '_instance' ? $2::text`,
+		ciID, name); err != nil {
+		return fmt.Errorf("move %s out of _instance: %w", name, err)
+	}
+	return nil
 }
 
 // getInstanceField returns the visible instance field ciID/name or nil.
@@ -1183,11 +1471,12 @@ func scanType(scanner typeScanner) (*Type, error) {
 		&t.ID, &t.OrganizationID, &t.Key, &t.Name, &displayName, &t.Icon,
 		&t.Description, &t.Category, &t.IsBuiltin, &t.IsSystem, &t.IsActive,
 		&t.IsLogical, &t.IsObservable, &t.SchemaVersion, &t.Version, &t.ClonedFromID, &t.ParentTypeID, &t.TemplateKey,
-		&t.LifecycleDefinitionID, &capabilities, &allowedRels, &uiSchema,
+		&t.LifecycleModelID, &capabilities, &allowedRels, &uiSchema,
 		&compliance, &discovery, &attributeSchema, &t.RequiredFields, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
+	t.mirrorLifecycle()
 	if err := json.Unmarshal(displayName, &t.DisplayName); err != nil {
 		return nil, fmt.Errorf("decode display_name: %w", err)
 	}

@@ -1226,3 +1226,21 @@ MET-11;B/G1, Teil P2/G2;B;backend/internal/ci/reference_integration_test.go;WP-2
 MET-05;[P2];B;backend/internal/citype/deactivate_integration_test.go;WP-249
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/attribute_set_integration_test.go;WP-250
 AUD-07;[B];B;backend/internal/citype/attribute_set_integration_test.go;WP-250
+MET-01;B/G1, Teil P2/G2;B;backend/internal/lifecycle/model_integration_test.go;WP-263
+MET-06;[P2];B;backend/internal/lifecycle/model_integration_test.go;WP-263
+LCY-02;[P2];B;backend/internal/lifecycle/model_integration_test.go;WP-263
+MET-14;P2/G2;B;backend/internal/ci/instance_integration_test.go;WP-256
+MET-12;P2/G2;B;backend/internal/ci/reference_view_integration_test.go;WP-713
+MET-16;B/G1, Teil P2/G2;B;backend/internal/citype/attribute_set_compose_integration_test.go;WP-709
+REL-06;[P2];B;backend/internal/relationshiptype/seed_integration_test.go;WP-294
+IMP-10;[P2];B;backend/internal/topology/custom_types_test.go;WP-294
+MET-14;P2/G2;B;backend/internal/ci/instance_lifecycle_integration_test.go;WP-714
+OVR-02;[B];B;backend/internal/override/decide_test.go;WP-714
+IMP-11;[P2];B;backend/internal/topology/projection_integration_test.go;WP-298
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/lifecycle/model_api_integration_test.go;WP-723
+LCY-02;[P2];B;backend/internal/lifecycle/model_api_integration_test.go;WP-723
+MET-13;[P2];B;backend/internal/citype/global_attr_integration_test.go;WP-255
+MET-16;B/G1, Teil P2/G2;B;backend/internal/citype/template_integration_test.go;WP-251
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/template_integration_test.go;WP-251
+AUD-07;[B];B;backend/internal/citype/template_integration_test.go;WP-251
+MET-53;[P2];B;backend/internal/citype/template_integration_test.go;WP-251

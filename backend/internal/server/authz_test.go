@@ -229,6 +229,10 @@ func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
 		{http.MethodPut, "/api/v1/cis/{id}/field-definitions", identity.PermCIInstanceAttributeManage},
 		{http.MethodDelete, "/api/v1/cis/{id}/field-definitions/{name}", identity.PermCIInstanceAttributeManage},
 		{http.MethodGet, "/api/v1/cis/{id}/field-definitions", identity.PermCIRead},
+		// Instance attribute values (MET-14, WP-256).
+		{http.MethodGet, "/api/v1/cis/{id}/instance-attributes", identity.PermCIRead},
+		{http.MethodPut, "/api/v1/cis/{id}/instance-attributes/{key}", identity.PermCIInstanceAttributeManage},
+		{http.MethodDelete, "/api/v1/cis/{id}/instance-attributes/{key}", identity.PermCIInstanceAttributeManage},
 		{http.MethodPut, "/api/v1/cis/{id}/fields/{name}/override", identity.PermOverrideWrite},
 		{http.MethodDelete, "/api/v1/cis/{id}/fields/{name}/override", identity.PermOverrideWrite},
 		{http.MethodPost, "/api/v1/cis/{id}/lifecycle-transitions", identity.PermLifecycleTransition},

@@ -1528,6 +1528,7 @@
       "asset_movement": "Bewegungen",
       "rack_mount": "Rack-Montagen",
       "role_assignment": "Rollenzuweisungen",
+      "ci_attribute": "CI-Attribute mit Standortverweis",
       "vlan": "VLANs",
       "subnet": "Subnetze",
       "collector": "Collectors",

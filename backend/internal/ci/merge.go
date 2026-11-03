@@ -206,17 +206,28 @@ func newMergeID() string {
 // mergedAttributes unites the business attributes of both CIs: keys only
 // the victim carries are taken, for keys both carry the value of the higher
 // ranked discovery source wins (the survivor on a tie); tags are united.
-// The reserved namespaces are left to the field values.
-func mergedAttributes(survivor, victim *Item) map[string]any {
+// The reserved namespaces are left to the field values. Instance
+// attributes are no business attributes (MET-14, CI-12, WP-714): those of
+// both CIs (survivorInstance, victimInstance) are left out, so none lands
+// on the top level of the survivor; the survivor keeps its _instance, the
+// victim's stay in its row and the snapshot.
+func mergedAttributes(survivor, victim *Item, survivorInstance, victimInstance []string) map[string]any {
+	instance := make(map[string]bool, len(survivorInstance)+len(victimInstance))
+	for _, name := range survivorInstance {
+		instance[name] = true
+	}
+	for _, name := range victimInstance {
+		instance[name] = true
+	}
 	out := map[string]any{}
 	for k, v := range survivor.Attributes {
-		if !IsReservedKey(k) {
+		if !IsReservedKey(k) && !instance[k] {
 			out[k] = v
 		}
 	}
 	victimWins := override.SourceRank(victim.DiscoverySource) > override.SourceRank(survivor.DiscoverySource)
 	for k, v := range victim.Attributes {
-		if IsReservedKey(k) || v == nil {
+		if IsReservedKey(k) || instance[k] || v == nil {
 			continue
 		}
 		current, ok := out[k]
@@ -387,7 +398,15 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 				result.Moved["asset"] = 1
 			}
 		}
-		attrs, err := json.Marshal(mergedAttributes(survivor, victim))
+		survivorInstance, err := instanceFieldNames(ctx, tx, survivorID)
+		if err != nil {
+			return err
+		}
+		victimInstance, err := instanceFieldNames(ctx, tx, victimID)
+		if err != nil {
+			return err
+		}
+		attrs, err := json.Marshal(mergedAttributes(survivor, victim, survivorInstance, victimInstance))
 		if err != nil {
 			return fmt.Errorf("encode merged attributes: %w", err)
 		}
@@ -424,7 +443,7 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 			}
 			result.Moved[ref.key] += n
 		}
-		conflicts, opened, err := mergeFieldValues(ctx, tx, orgID, survivorID, victimID, &snap)
+		conflicts, opened, err := mergeFieldValues(ctx, tx, orgID, survivorID, victimID, survivorInstance, &snap)
 		if err != nil {
 			return err
 		}
@@ -564,8 +583,14 @@ type mergeFieldValue struct {
 // keep the survivor's and open an override_conflict review with the
 // victim's value. Victim rows that do not move are removed (snapshot). It
 // returns the contradicting fields and the review.created events of the
-// conflict reviews it opened.
-func mergeFieldValues(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimID string, snap *mergeSnapshot) ([]string, []*events.Event, error) {
+// conflict reviews it opened. A field that is an instance attribute of the
+// survivor (survivorInstance) takes nothing of the victim: no override, no
+// conflict; the victim's row is removed (snapshot) (MET-14, WP-714).
+func mergeFieldValues(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimID string, survivorInstance []string, snap *mergeSnapshot) ([]string, []*events.Event, error) {
+	instance := make(map[string]bool, len(survivorInstance))
+	for _, name := range survivorInstance {
+		instance[name] = true
+	}
 	load := func(ciID string) (map[string]mergeFieldValue, error) {
 		rows, err := tx.Query(ctx, "SELECT id::text, field_name, override_value FROM ci_field_value WHERE ci_id = $1", ciID)
 		if err != nil {
@@ -606,6 +631,15 @@ func mergeFieldValues(ctx context.Context, tx pgx.Tx, orgID, survivorID, victimI
 			return cerr
 		}
 		s, onSurvivor := survivorValues[field]
+		if instance[field] {
+			if serr := rowSnap(&snap.Removed, v.id); serr != nil {
+				return nil, nil, serr
+			}
+			if _, err = tx.Exec(ctx, "DELETE FROM ci_field_value WHERE id = $1", v.id); err != nil {
+				return nil, nil, fmt.Errorf("remove field value %s: %w", field, err)
+			}
+			continue
+		}
 		switch {
 		case !onSurvivor:
 			if serr := rowSnap(&snap.Changed, v.id); serr != nil {

@@ -510,6 +510,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if repos.CIType != nil {
 		topologyHandler.WithTypeSubtrees(repos.CIType)
 	}
+	// include=network projects subnets and VLANs from IPAM (IMP-11, WP-298).
+	if projector, ok := repos.IPAM.(topology.NetworkProjector); ok {
+		topologyHandler.WithNetworkProjection(projector)
+	}
 	// The Ask path sends the question and the CI context to the provider only
 	// with the organization's opt-in and the ai add-on (AI-02); the same
 	// consent as the CI chunk indexer of cmd/server.
@@ -812,6 +816,12 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 				contacts = []contact.CIContact{}
 			}
 			return contacts, total > len(contacts), err
+		},
+		// The targets of the reference values with their names (MET-12,
+		// WP-713); never capped.
+		ci.IncludeReferences: func(ctx context.Context, orgID, ciID string) (any, bool, error) {
+			refs, err := opts.CIService.References(ctx, orgID, ciID)
+			return refs, false, err
 		},
 	})
 }

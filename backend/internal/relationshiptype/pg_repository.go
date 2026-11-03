@@ -30,34 +30,58 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// List returns global system types plus tenant-specific types.
+// resolvedTypes selects one row per key of the types the organization sees
+// (RLS: system rows and its own), the organization's row before the system
+// row of the same key (REL-06). An organization row with a system key comes
+// from before WP-294; Create no longer accepts one.
+const resolvedTypes = "SELECT DISTINCT ON (key) %s FROM relationship_type ORDER BY key, organization_id NULLS LAST"
+
+// List returns the types the organization sees, one per key.
 func (r *PGRepository) List(ctx context.Context, orgID string, page api.PaginationParams) ([]Type, int, error) {
 	var out []Type
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM relationship_type").Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(DISTINCT key) FROM relationship_type").Scan(&total); err != nil {
 			return fmt.Errorf("count relationship types: %w", err)
 		}
-		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM relationship_type ORDER BY key ASC LIMIT $1 OFFSET $2",
-			selectColumns), page.Limit, page.Offset)
-		if err != nil {
-			return fmt.Errorf("list relationship types: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			t, err := scan(rows)
-			if err != nil {
-				return err
-			}
-			out = append(out, *t)
-		}
-		return rows.Err()
+		var err error
+		out, err = queryTypes(ctx, tx, fmt.Sprintf(resolvedTypes, selectColumns)+" LIMIT $1 OFFSET $2", page.Limit, page.Offset)
+		return err
 	})
 	return out, total, err
 }
 
-// GetByKey resolves a key within the tenant scope (tenant shadows global).
+// ListAll returns every type the organization sees, one per key, in one
+// statement without a page bound (IMP-10).
+func (r *PGRepository) ListAll(ctx context.Context, orgID string) ([]Type, error) {
+	var out []Type
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = queryTypes(ctx, tx, fmt.Sprintf(resolvedTypes, selectColumns))
+		return err
+	})
+	return out, err
+}
+
+func queryTypes(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Type, error) {
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list relationship types: %w", err)
+	}
+	defer rows.Close()
+	out := []Type{}
+	for rows.Next() {
+		t, serr := scan(rows)
+		if serr != nil {
+			return nil, serr
+		}
+		out = append(out, *t)
+	}
+	return out, rows.Err()
+}
+
+// GetByKey resolves a key within the tenant scope: the organization's row
+// before the system row (REL-06, as List).
 func (r *PGRepository) GetByKey(ctx context.Context, orgID, key string) (*Type, error) {
 	var out *Type
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -78,20 +102,29 @@ func (r *PGRepository) GetByKey(ctx context.Context, orgID, key string) (*Type, 
 		return rows.Err()
 	})
 	if out == nil && err == nil {
-		return nil, fmt.Errorf("not found")
+		return nil, ErrNotFound
 	}
 	return out, err
 }
 
-// Create inserts a tenant-specific relationship type.
+// Create inserts a tenant-specific relationship type; the key of a system
+// type is taken (ErrConflict, REL-06), so no organization type shadows one.
 func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 	if typ.Cardinality == "" {
-		typ.Cardinality = "many_to_many"
+		typ.Cardinality = CardinalityManyToMany
 	}
 	if err := typ.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return database.WithRequestTenant(ctx, r.pool, typ.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		var system bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM relationship_type WHERE key = $1 AND organization_id IS NULL)",
+			typ.Key).Scan(&system); err != nil {
+			return fmt.Errorf("check system relationship type: %w", err)
+		}
+		if system {
+			return ErrConflict
+		}
 		if err := checkCITypeKeys(ctx, tx, ciTypeLists(typ.AllowedSourceTypes, typ.AllowedTargetTypes)); err != nil {
 			return err
 		}
@@ -154,16 +187,32 @@ func (r *PGRepository) Update(ctx context.Context, orgID, key string, req Upsert
 	return out, err
 }
 
-// Delete removes a tenant-owned non-system relationship type.
+// Delete removes a tenant-owned non-system relationship type. A type a
+// relationship of the organization (ci_relationship.rel_type, index
+// idx_ci_rel_type) or a suppression (relationship_suppression.
+// relationship_type_id, 000178) uses stays: ErrInUse (409, REL-06). A
+// missing, foreign or system type is ErrNotFound (404).
 func (r *PGRepository) Delete(ctx context.Context, orgID, key string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmd, err := tx.Exec(ctx,
-			"DELETE FROM relationship_type WHERE key = $1 AND organization_id IS NOT NULL AND NOT is_system", key)
-		if err != nil {
-			return fmt.Errorf("delete relationship type: %w", err)
+		var id string
+		err := tx.QueryRow(ctx, `SELECT id::text FROM relationship_type
+			WHERE key = $1 AND organization_id IS NOT NULL AND NOT is_system FOR UPDATE`, key).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
 		}
-		if cmd.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+		if err != nil {
+			return fmt.Errorf("read relationship type: %w", err)
+		}
+		var used bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci_relationship WHERE rel_type = $1 AND organization_id = $3::uuid)
+			OR EXISTS (SELECT 1 FROM relationship_suppression WHERE relationship_type_id = $2::uuid)`, key, id, orgID).Scan(&used); err != nil {
+			return fmt.Errorf("check use of relationship type: %w", err)
+		}
+		if used {
+			return ErrInUse
+		}
+		if _, err = tx.Exec(ctx, "DELETE FROM relationship_type WHERE id = $1", id); err != nil {
+			return fmt.Errorf("delete relationship type: %w", err)
 		}
 		return nil
 	})
@@ -173,7 +222,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, key string) error {
 func (r *PGRepository) Exists(ctx context.Context, orgID, key string) (bool, error) {
 	_, err := r.GetByKey(ctx, orgID, key)
 	if err != nil {
-		if err.Error() == "not found" {
+		if errors.Is(err, ErrNotFound) {
 			return false, nil
 		}
 		return false, err

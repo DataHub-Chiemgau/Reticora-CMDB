@@ -322,8 +322,18 @@ export function useRelationshipTypes(enabled = true) {
 // Lifecycle
 export function useLifecycleDefinitions() {
   return useQuery({
-    queryKey: ['lifecycle-definitions'],
+    queryKey: ['lifecycle-models'],
     queryFn: () => lifecycleApi.list({ limit: 100 }),
+  });
+}
+
+// The allowed transitions of an entity (WP-723); a transition invalidates
+// them through the entity's query key.
+export function useLifecycleOptions(entityType: 'assets' | 'cis', id: string, enabled = true) {
+  return useQuery({
+    queryKey: [entityType === 'assets' ? 'assets' : 'ci', id, 'lifecycle-options'],
+    queryFn: () => lifecycleApi.options(entityType, id),
+    enabled: enabled && !!id,
   });
 }
 

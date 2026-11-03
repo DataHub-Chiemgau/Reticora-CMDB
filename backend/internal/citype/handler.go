@@ -74,6 +74,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/attribute-sets/{id}", h.DeleteAttributeSet)
 	r.Get("/api/v1/ci-types/{id}/attribute-sets", h.GetTypeAttributeSets)
 	r.Put("/api/v1/ci-types/{id}/attribute-sets", h.SetTypeAttributeSets)
+	// Templates with versions (WP-251, MET-16, API-06; module metamodel,
+	// E-105); GET /api/v1/ci-types/templates above stays the type template
+	// catalog.
+	h.registerTemplateRoutes(r)
 }
 
 // attributeStore returns the attribute-definitions store or answers 503
@@ -101,7 +105,9 @@ func writeAttributeError(w http.ResponseWriter, err error) {
 }
 
 // ListAttributeDefinitions handles GET /api/v1/attribute-definitions
-// (?ci_type_id=, ?attribute_set_id=, ?scope=type|global|set): a page newest first on (created_at,
+// (?ci_type_id=, ?attribute_set_id=, ?scope=type|global|set, and
+// ?applicable_to= for the definitions of a type with the global ones that
+// apply to it, WP-255): a page newest first on (created_at,
 // id) with limit (default 50, at most 200) and the signed cursor of API-02
 // (F-215).
 func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +125,8 @@ func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Reques
 	}
 	q := r.URL.Query()
 	items, total, err := store.ListAttributeDefinitionPage(r.Context(), t.OrganizationID,
-		AttributeFilter{CITypeID: q.Get("ci_type_id"), AttributeSetID: q.Get("attribute_set_id"), Scope: q.Get("scope")}, page)
+		AttributeFilter{CITypeID: q.Get("ci_type_id"), AttributeSetID: q.Get("attribute_set_id"), Scope: q.Get("scope"),
+			ApplicableTo: q.Get("applicable_to")}, page)
 	if err != nil {
 		writeAttributeError(w, err)
 		return
@@ -518,6 +525,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	model, err := req.LifecycleModel()
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	typ := &Type{
 		OrganizationID:           t.OrganizationID,
 		Key:                      req.Key,
@@ -530,7 +542,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		IsObservable:             observableDefault(req.IsObservable, req.IsLogical),
 		ParentTypeID:             req.ParentTypeID,
 		TemplateKey:              req.TemplateKey,
-		LifecycleDefinitionID:    req.LifecycleDefinitionID,
+		LifecycleModelID:         model,
+		LifecycleDefinitionID:    model,
 		Capabilities:             req.Capabilities,
 		AllowedRelationshipTypes: req.AllowedRelationshipTypes,
 		UISchema:                 req.UISchema,
@@ -538,7 +551,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		DiscoveryMappings:        req.DiscoveryMappings,
 		Fields:                   req.Fields,
 	}
-	if err := h.repo.Create(r.Context(), typ); err != nil {
+	if err = h.repo.Create(r.Context(), typ); err != nil {
 		writeTypeError(w, err)
 		return
 	}
@@ -561,6 +574,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "display_name", Message: err.Error()})
 		return
 	}
+	// lifecycle_model_id and its deprecated name lifecycle_definition_id
+	// with different values are a 422 (API-01).
+	model, err := req.LifecycleModel()
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	req.LifecycleModelID, req.LifecycleDefinitionID = model, nil
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		writeTypeUpdateError(w, err)
@@ -676,13 +697,19 @@ func (h *Handler) UpsertField(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, f)
 }
 
-// DeleteField handles DELETE /api/v1/ci-types/{id}/fields/{name}
+// DeleteField handles DELETE /api/v1/ci-types/{id}/fields/{name}: a field
+// of the type only; a global field of the same name stays (404, WP-255).
 func (h *Handler) DeleteField(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), chi.URLParam(r, "name")); err != nil {
+	typeID := chi.URLParam(r, "id")
+	if typeID == "" {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "field definition not found")
+		return
+	}
+	if err := h.repo.DeleteField(r.Context(), t.OrganizationID, typeID, chi.URLParam(r, "name")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "field definition not found")
 		return
 	}
@@ -807,7 +834,9 @@ func validateField(f Field) error {
 // writeTypeError reports a failed create or clone of a CI type: a taken key
 // or name is 409 (in memory ErrConflict, in PostgreSQL 23505), an error of
 // the parent or of the composition of the chain an RFC 7807 problem with
-// field parent_type_id (422, a cycle 409), every other repository error
+// field parent_type_id (422, a cycle 409), an invisible lifecycle model a
+// 422 on lifecycle_model_id, CIs whose lifecycle states the new effective
+// model lacks a 409 with the counts per state, every other repository error
 // goes through api.WriteRepoError, so no SQLSTATE, constraint or driver
 // text reaches the client (F-047).
 func writeTypeError(w http.ResponseWriter, err error) {
@@ -815,10 +844,33 @@ func writeTypeError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
 		return
 	}
+	var states *LifecycleStatesConflict
+	if errors.As(err, &states) {
+		writeLifecycleStatesConflict(w, states)
+		return
+	}
 	if api.WriteFieldError(w, err) {
 		return
 	}
 	api.WriteRepoError(w, err)
+}
+
+// writeLifecycleStatesConflict answers a refused change of the lifecycle
+// model or of the parent of a type (409): the field and the number of CIs
+// per lifecycle state the new effective model does not contain (MET-06,
+// LCY-02).
+func writeLifecycleStatesConflict(w http.ResponseWriter, c *LifecycleStatesConflict) {
+	api.WriteProblemBody(w, http.StatusConflict, struct {
+		api.FieldProblem
+		StateCounts []LifecycleStateCount `json:"state_counts"`
+	}{
+		FieldProblem: api.FieldProblem{
+			ProblemDetail: api.ProblemDetail{Type: "urn:reticora:problem:conflict", Title: "Conflict",
+				Status: http.StatusConflict, Detail: lifecycleStatesConflictDetail},
+			Field: c.Field,
+		},
+		StateCounts: c.Counts,
+	})
 }
 
 // writeSetActiveError reports a refused deactivation or activation (MET-05):

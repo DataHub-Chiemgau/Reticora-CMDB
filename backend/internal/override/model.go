@@ -57,6 +57,11 @@ type FieldValue struct {
 	// (API-07); the handler returns it as ETag. Zero when the repository
 	// keeps no CI version (memory profile).
 	CIVersion int64 `json:"-"`
+	// InstanceAttribute reports that the field is an instance attribute of
+	// the CI (ci_instance_field_definition, MET-14): Get sets it, also for a
+	// field without provenance row, so the central write decision refuses
+	// it (ReasonInstanceAttribute, WP-714). It is not part of the API.
+	InstanceAttribute bool `json:"-"`
 }
 
 // SetOverrideRequest is the payload for setting a manual override.

@@ -2224,7 +2224,9 @@ var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attribute
 // recordManualOverrides gives every field a manual change touched a
 // protected override, so discovery never overwrites it (OVR-01, CH9): the
 // changed CI columns by name, the attributes per changed top-level member
-// (a removed member is recorded with a null value).
+// (a removed member is recorded with a null value). Instance attributes of
+// the CI get no override (MET-14, CI-04, WP-714): automation never writes
+// them, the central write decision refuses them (ReasonInstanceAttribute).
 func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest) error {
 	reason := strings.TrimSpace(req.ChangeReason)
 	if reason == "" {
@@ -2244,7 +2246,22 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 			return err
 		}
 	}
-	for _, key := range changedKeys(before.Attributes, after.Attributes) {
+	keys := changedKeys(before.Attributes, after.Attributes)
+	if len(keys) == 0 {
+		return nil
+	}
+	names, err := instanceFieldNames(ctx, tx, after.ID)
+	if err != nil {
+		return err
+	}
+	instance := make(map[string]bool, len(names))
+	for _, name := range names {
+		instance[name] = true
+	}
+	for _, key := range keys {
+		if instance[key] {
+			continue
+		}
 		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, key, after.Attributes[key], req.Manual.Author, reason, true); err != nil {
 			return err
 		}
