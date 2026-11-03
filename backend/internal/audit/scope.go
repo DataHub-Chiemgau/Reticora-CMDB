@@ -130,6 +130,7 @@ var resourceTables = map[string][]string{
 	"service-accounts":          {"service_account"},
 	"sites":                     {"site"},
 	"slas":                      {"sla"},
+	"business-calendars":        {"business_calendar"},
 	"stock-movements":           {"asset_movement"},
 	"stocktakes":                {"stocktake"},
 	"subnets":                   {"subnet"},

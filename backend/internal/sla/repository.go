@@ -33,7 +33,26 @@ type Repository interface {
 	MarkFirstResponse(ctx context.Context, orgID, ticketID string, at time.Time) error
 	MarkResolved(ctx context.Context, orgID, ticketID string, at time.Time) error
 	ListBreaches(ctx context.Context, orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error)
+	// Business calendars (TKT-02, WP-768). ListCalendars returns at most
+	// one row more than the page limit, sorted by name and id, and the
+	// number of matching calendars.
+	ListCalendars(ctx context.Context, orgID string, filter BusinessCalendarFilter, page api.PaginationParams) ([]BusinessCalendar, int, error)
+	GetCalendar(ctx context.Context, orgID, id string) (*BusinessCalendar, error)
+	CreateCalendar(ctx context.Context, c *BusinessCalendar) error
+	UpdateCalendar(ctx context.Context, orgID, id string, req *UpdateBusinessCalendarRequest) (*BusinessCalendar, error)
+	DeleteCalendar(ctx context.Context, orgID, id string) error
 }
+
+var (
+	// ErrCalendarNotFound: the business calendar is unknown, of another
+	// organization, outside the caller's scope or (for a change) an
+	// org-wide calendar of a client-scoped principal; all answer alike
+	// with 404 (TEN-04, E-09).
+	ErrCalendarNotFound = errors.New("business calendar not found")
+	// errCalendarDefaultTaken: a second default calendar for the same
+	// organization and client (409 on is_default).
+	errCalendarDefaultTaken = &api.ConflictError{Field: "is_default", Message: "another calendar is already the default of this organization and client"}
+)
 
 // MemoryRepository is an in-memory implementation of Repository.
 type MemoryRepository struct {
@@ -50,8 +69,150 @@ type MemoryRepository struct {
 // memoryCalendar is a stored business calendar of the memory repository.
 type memoryCalendar struct {
 	ID, OrganizationID, ClientID string
+	Name                         string
 	IsDefault                    bool
 	Calendar                     Calendar
+	CreatedAt, UpdatedAt         time.Time
+}
+
+// toAPI returns the stored calendar in the form of the REST API.
+func (c *memoryCalendar) toAPI() BusinessCalendar {
+	out := BusinessCalendar{ID: c.ID, OrganizationID: c.OrganizationID, Name: c.Name, IsDefault: c.IsDefault,
+		WeeklyHours: append([]Window{}, c.Calendar.WeeklyHours...), Holidays: append([]Holiday{}, c.Calendar.Holidays...),
+		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
+	if c.ClientID != "" {
+		v := c.ClientID
+		out.ClientID = &v
+	}
+	if c.Calendar.Timezone != "" {
+		v := c.Calendar.Timezone
+		out.Timezone = &v
+	}
+	return out
+}
+
+// defaultTakenLocked reports whether another calendar than id is the
+// default of the organization and client (the partial unique index of
+// the PostgreSQL repository).
+func (r *MemoryRepository) defaultTakenLocked(orgID, clientID, id string) bool {
+	for _, c := range r.calendars {
+		if c.ID != id && c.OrganizationID == orgID && c.ClientID == clientID && c.IsDefault {
+			return true
+		}
+	}
+	return false
+}
+
+// ListCalendars pages the organization's calendars by name and id like
+// the PostgreSQL repository (memory calendars carry no client scope).
+func (r *MemoryRepository) ListCalendars(_ context.Context, orgID string, filter BusinessCalendarFilter, page api.PaginationParams) ([]BusinessCalendar, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var all []BusinessCalendar
+	for _, c := range r.calendars {
+		if c.OrganizationID != orgID || filter.ClientID != "" && c.ClientID != filter.ClientID {
+			continue
+		}
+		all = append(all, c.toAPI())
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].Name != all[j].Name {
+			return all[i].Name < all[j].Name
+		}
+		return all[i].ID < all[j].ID
+	})
+	start := min(page.Offset, len(all))
+	if page.Cursor != nil {
+		name, id, err := calendarPosition(page.Cursor)
+		if err != nil {
+			return nil, 0, err
+		}
+		start = len(all)
+		for i := range all {
+			if api.KeysetCompare(all[i].Name, all[i].ID, api.Cursor{Value: name, ID: id}, calendarDir) {
+				start = i
+				break
+			}
+		}
+	}
+	end := min(start+max(page.Limit, 0)+1, len(all))
+	return all[start:end], len(all), nil
+}
+
+func (r *MemoryRepository) GetCalendar(_ context.Context, orgID, id string) (*BusinessCalendar, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.calendars[id]
+	if !ok || c.OrganizationID != orgID {
+		return nil, ErrCalendarNotFound
+	}
+	out := c.toAPI()
+	return &out, nil
+}
+
+func (r *MemoryRepository) CreateCalendar(_ context.Context, b *BusinessCalendar) error {
+	if err := b.validate(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	clientID := ""
+	if b.ClientID != nil {
+		clientID = *b.ClientID
+	}
+	if b.IsDefault && r.defaultTakenLocked(b.OrganizationID, clientID, "") {
+		return errCalendarDefaultTaken
+	}
+	r.nextID++
+	now := time.Now().UTC()
+	c := &memoryCalendar{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID), OrganizationID: b.OrganizationID,
+		ClientID: clientID, Name: b.Name, IsDefault: b.IsDefault, Calendar: b.Calendar(), CreatedAt: now, UpdatedAt: now}
+	r.calendars[c.ID] = c
+	*b = c.toAPI()
+	return nil
+}
+
+func (r *MemoryRepository) UpdateCalendar(_ context.Context, orgID, id string, req *UpdateBusinessCalendarRequest) (*BusinessCalendar, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.calendars[id]
+	if !ok || c.OrganizationID != orgID {
+		return nil, ErrCalendarNotFound
+	}
+	next := c.toAPI()
+	req.apply(&next)
+	if err := next.validate(); err != nil {
+		return nil, err
+	}
+	if next.IsDefault && r.defaultTakenLocked(orgID, c.ClientID, id) {
+		return nil, errCalendarDefaultTaken
+	}
+	c.Name, c.IsDefault, c.Calendar, c.UpdatedAt = next.Name, next.IsDefault, next.Calendar(), time.Now().UTC()
+	out := c.toAPI()
+	return &out, nil
+}
+
+// DeleteCalendar removes the calendar and clears the references of the
+// policies and SLA states like ON DELETE SET NULL; computed due times stay.
+func (r *MemoryRepository) DeleteCalendar(_ context.Context, orgID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.calendars[id]
+	if !ok || c.OrganizationID != orgID {
+		return ErrCalendarNotFound
+	}
+	delete(r.calendars, id)
+	for _, p := range r.policies {
+		if p.OrganizationID == orgID && p.CalendarID != nil && *p.CalendarID == id {
+			p.CalendarID = nil
+		}
+	}
+	for _, s := range r.states {
+		if s.OrganizationID == orgID && s.CalendarID != nil && *s.CalendarID == id {
+			s.CalendarID = nil
+		}
+	}
+	return nil
 }
 
 // NewMemoryRepository creates a memory SLA repository.

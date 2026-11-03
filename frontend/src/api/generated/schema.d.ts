@@ -4879,6 +4879,61 @@ export interface paths {
     patch: operations['updateSLAPolicy'];
     trace?: never;
   };
+  '/api/v1/business-calendars': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List business calendars (TKT-02)
+     * @description The business calendars of the organization visible under the caller's scope: org-wide calendars (client_id null) and those of the caller's clients (E-09), optionally filtered by `client_id`. Sorted by name and id (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`; a forged cursor is 400. Requires sla:read.
+     */
+    get: operations['listBusinessCalendars'];
+    put?: never;
+    /**
+     * Create a business calendar (TKT-02)
+     * @description A calendar of the organization (client_id null) or of a client visible under the caller's scope (otherwise 400 on client_id). Without `weekly_hours` the built-in standard applies (Monday to Friday, 08:00-18:00). 400 with the field for an invalid IANA time zone, an unknown weekday, a malformed time, a window whose start is not before its end, overlapping windows on one day, an empty window list and malformed or duplicate holiday dates. A second default calendar of the organization and client is 409 on is_default. A caller restricted to clients cannot create an org-wide calendar (403, E-09). Requires sla:write.
+     */
+    post: operations['createBusinessCalendar'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/business-calendars/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a business calendar
+     * @description A calendar visible under the caller's scope; an unknown, foreign or invisible id is 404. Requires sla:read.
+     */
+    get: operations['getBusinessCalendar'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a business calendar
+     * @description Policies and ticket SLA states that named the calendar lose the reference (calendar_id null); later computations follow the calendar chain, due times computed before stay. An org-wide calendar is 404 for a caller restricted to clients. Requires sla:write.
+     */
+    delete: operations['deleteBusinessCalendar'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a business calendar
+     * @description Sent fields change; `timezone` null derives the zone from the ticket's client, else the organization. `client_id` cannot change (400 on client_id), so a policy's calendar stays bound to its client. The merged calendar is checked like a create (400 with the field); a second default is 409 on is_default. An org-wide calendar is 404 for a caller restricted to clients and stays unchanged. Due times computed before stay unchanged. Requires sla:write.
+     */
+    patch: operations['updateBusinessCalendar'];
+    trace?: never;
+  };
   '/api/v1/tickets/{id}/sla': {
     parameters: {
       query?: never;
@@ -12413,6 +12468,70 @@ export interface components {
        * @description Business calendar of the policy (TKT-02). It must be visible under the caller's scope and belong to no client or to the policy's client; otherwise 400 on calendar_id. null clears it; then the calendar chain decide when business_calendar is true: default calendar of the ticket's client, default calendar of the organization, built-in standard (Monday to Friday, 08:00-18:00).
        */
       calendar_id?: string | null;
+    };
+    /** @description A span of working time on a weekday in local wall time. */
+    BusinessCalendarWindow: {
+      /** @description 1 is Monday, 7 is Sunday. */
+      weekday: number;
+      /** @description Start in local wall time, HH:MM. */
+      start: string;
+      /** @description End in local wall time, HH:MM, after start (24:00 ends at midnight). */
+      end: string;
+    };
+    /** @description A whole local day on which the SLA clock pauses. */
+    BusinessCalendarHoliday: {
+      /** Format: date */
+      date: string;
+      name?: string;
+    };
+    /** @description A business calendar of the organization or one of its clients (TKT-02, WP-768). A policy with business_calendar true uses its own calendar, else the default of the ticket's client, else the default of the organization, else the built-in standard. */
+    BusinessCalendar: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /**
+       * Format: uuid
+       * @description Client of the calendar; null is org-wide.
+       */
+      client_id: string | null;
+      name: string;
+      /** @description IANA time zone of the windows; null derives it from the ticket's client, else the organization. */
+      timezone: string | null;
+      weekly_hours: components['schemas']['BusinessCalendarWindow'][];
+      holidays: components['schemas']['BusinessCalendarHoliday'][];
+      /** @description Default calendar of the organization and client (at most one). */
+      is_default: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateBusinessCalendarRequest: {
+      /**
+       * Format: uuid
+       * @description Client visible under the caller's scope; null or absent is org-wide. Set only at creation.
+       */
+      client_id?: string | null;
+      name: string;
+      /** @description IANA time zone; null or absent derives it. */
+      timezone?: string | null;
+      /** @description Without it Monday to Friday, 08:00-18:00. */
+      weekly_hours?: components['schemas']['BusinessCalendarWindow'][];
+      holidays?: components['schemas']['BusinessCalendarHoliday'][];
+      is_default?: boolean;
+    };
+    /** @description Sent fields change. client_id cannot change; sending it is 400 on client_id. */
+    UpdateBusinessCalendarRequest: {
+      name?: string;
+      /** @description IANA time zone; null derives it again. */
+      timezone?: string | null;
+      weekly_hours?: components['schemas']['BusinessCalendarWindow'][];
+      holidays?: components['schemas']['BusinessCalendarHoliday'][];
+      is_default?: boolean;
+    };
+    BusinessCalendarListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['BusinessCalendar'][];
     };
     SLAPolicyListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['SLAPolicy'][];
@@ -26631,6 +26750,159 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+    };
+  };
+  listBusinessCalendars: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only calendars of this client (UUID). */
+        client_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Business calendars, sorted by name */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BusinessCalendarListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createBusinessCalendar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateBusinessCalendarRequest'];
+      };
+    };
+    responses: {
+      /** @description Business calendar created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BusinessCalendar'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getBusinessCalendar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Business calendar */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BusinessCalendar'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteBusinessCalendar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Business calendar deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateBusinessCalendar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateBusinessCalendarRequest'];
+      };
+    };
+    responses: {
+      /** @description Business calendar updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BusinessCalendar'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   getTicketSLA: {

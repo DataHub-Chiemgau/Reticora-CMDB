@@ -34,6 +34,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/slas/{id}", h.DeletePolicy)
 	r.Get("/api/v1/tickets/{id}/sla", h.GetTicketSLA)
 	r.Post("/api/v1/tickets/{id}/sla", h.AttachTicketSLA)
+	r.Get("/api/v1/business-calendars", h.ListCalendars)
+	r.Post("/api/v1/business-calendars", h.CreateCalendar)
+	r.Get("/api/v1/business-calendars/{id}", h.GetCalendar)
+	r.Patch("/api/v1/business-calendars/{id}", h.UpdateCalendar)
+	r.Delete("/api/v1/business-calendars/{id}", h.DeleteCalendar)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
@@ -58,6 +63,14 @@ func writeSLAError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrTicketSLANotFound.Error())
 	case errors.Is(err, ticket.ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ticket.ErrNotFound.Error())
+	case errors.Is(err, ErrCalendarNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrCalendarNotFound.Error())
+	case errors.Is(err, ErrNoBusinessTime):
+		// The calendar has no working time within 400 days of the
+		// ticket's creation: no due time can be computed (TKT-02).
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", ErrNoBusinessTime.Error())
+	case errors.Is(err, api.ErrInvalidCursor):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", api.ErrInvalidCursor.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "sla request failed", "error", err)
@@ -259,6 +272,137 @@ func (h *Handler) ListBreaches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[TicketSLA]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total})
+}
+
+// ListCalendars handles GET /api/v1/business-calendars (?client_id=): the
+// calendars visible under the scope, sorted by name and id, with limit
+// (at most 200) and the signed keyset cursor (API-02).
+func (h *Handler) ListCalendars(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	page := api.ParsePagination(r)
+	cursorErr := page.CursorError
+	if cursorErr == nil && page.Cursor != nil {
+		_, _, cursorErr = calendarPosition(page.Cursor)
+	}
+	if cursorErr != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", api.ErrInvalidCursor.Error())
+		return
+	}
+	filter := BusinessCalendarFilter{ClientID: r.URL.Query().Get("client_id")}
+	if filter.ClientID != "" && !api.IsUUID(filter.ClientID) {
+		api.WriteFieldError(w, &api.FieldError{Field: "client_id", Message: "must be a UUID"})
+		return
+	}
+	rows, total, err := h.repo.ListCalendars(r.Context(), t.OrganizationID, filter, page)
+	if err != nil {
+		writeSLAError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, calendarPage(rows, total, page))
+}
+
+// GetCalendar handles GET /api/v1/business-calendars/{id}.
+func (h *Handler) GetCalendar(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrCalendarNotFound.Error())
+	if !ok {
+		return
+	}
+	item, err := h.repo.GetCalendar(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		writeSLAError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// CreateCalendar handles POST /api/v1/business-calendars. The calendar is
+// checked with Calendar.Validate (400 on the field); without weekly_hours
+// the built-in standard applies.
+func (h *Handler) CreateCalendar(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	var req CreateBusinessCalendarRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.ClientID != nil && *req.ClientID == "" {
+		req.ClientID = nil
+	}
+	if req.ClientID != nil && !api.IsUUID(*req.ClientID) {
+		// client_id reaches SQL only as a UUID (F-047); a malformed id
+		// names no visible client, alike 400 on client_id.
+		api.WriteFieldError(w, errCalendarClient)
+		return
+	}
+	item := &BusinessCalendar{OrganizationID: t.OrganizationID, ClientID: req.ClientID, Name: req.Name,
+		Timezone: req.Timezone, Holidays: req.Holidays, IsDefault: req.IsDefault}
+	if req.WeeklyHours != nil {
+		item.WeeklyHours = *req.WeeklyHours
+	} else {
+		item.WeeklyHours = DefaultCalendar().WeeklyHours
+	}
+	if err := h.repo.CreateCalendar(r.Context(), item); err != nil {
+		writeSLAError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, item)
+}
+
+// UpdateCalendar handles PATCH /api/v1/business-calendars/{id}. client_id
+// cannot change (400 on client_id), so the binding of sla.calendar_id to
+// sla.client_id stays valid; the merged calendar passes Calendar.Validate.
+func (h *Handler) UpdateCalendar(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrCalendarNotFound.Error())
+	if !ok {
+		return
+	}
+	var req UpdateBusinessCalendarRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.ClientID.Set {
+		api.WriteFieldError(w, &api.FieldError{Field: "client_id", Message: "cannot be changed; create a calendar for the other client"})
+		return
+	}
+	item, err := h.repo.UpdateCalendar(r.Context(), t.OrganizationID, id, &req)
+	if err != nil {
+		writeSLAError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// DeleteCalendar handles DELETE /api/v1/business-calendars/{id}; policies
+// and SLA states that named it fall back to the calendar chain.
+func (h *Handler) DeleteCalendar(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrCalendarNotFound.Error())
+	if !ok {
+		return
+	}
+	if err := h.repo.DeleteCalendar(r.Context(), t.OrganizationID, id); err != nil {
+		writeSLAError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // TicketHooks lets the ticket handler keep SLA state consistent without taking

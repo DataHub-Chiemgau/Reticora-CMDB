@@ -308,7 +308,8 @@ var e38Register = []e38Resource{
 	{path: "/api/v1/suppliers", module: ModuleInventory, owner: "WP-736"},
 	{path: "/api/v1/contracts", module: ModuleInventory, owner: "WP-269"},
 	{path: "/api/v1/labels", module: ModuleInventory, owner: "WP-762"},
-	{path: "/api/v1/business-calendars", module: "ticketing", owner: "WP-768"},
+	// Business calendars of the SLA clock (WP-768), module ticketing.
+	{path: "/api/v1/business-calendars", module: "ticketing"},
 	{path: "/api/v1/review-items/{id}/ticket", module: "ticketing", owner: "WP-291"},
 	// Import (IMP-IO-01): the module import of this work package.
 	{path: "/api/v1/import-profiles", module: "import"},

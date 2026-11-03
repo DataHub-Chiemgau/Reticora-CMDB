@@ -51,6 +51,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"desk-bookings":        identity.PermDeskRead,
 	"tickets":              identity.PermTicketRead,
 	"slas":                 identity.PermSLARead,
+	"business-calendars":   identity.PermSLARead, // business calendars of the SLA clock (WP-768); writes sla:write
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,
 	// Invitations name addresses and grant roles: read and write need

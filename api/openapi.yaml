@@ -10791,6 +10791,165 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/business-calendars:
+    x-phase: P2
+    x-feature: ticketing_standard
+    get:
+      operationId: listBusinessCalendars
+      tags: [SLA]
+      summary: List business calendars (TKT-02)
+      description: >-
+        The business calendars of the organization visible under the
+        caller's scope: org-wide calendars (client_id null) and those of the
+        caller's clients (E-09), optionally filtered by `client_id`. Sorted
+        by name and id (API-02): `limit` (default 50, at most 200) and the
+        signed keyset `cursor` from `next_cursor`; a forged cursor is 400.
+        Requires sla:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - name: client_id
+          in: query
+          required: false
+          description: Only calendars of this client (UUID).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Business calendars, sorted by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessCalendarListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createBusinessCalendar
+      tags: [SLA]
+      summary: Create a business calendar (TKT-02)
+      description: >-
+        A calendar of the organization (client_id null) or of a client
+        visible under the caller's scope (otherwise 400 on client_id).
+        Without `weekly_hours` the built-in standard applies (Monday to
+        Friday, 08:00-18:00). 400 with the field for an invalid IANA time
+        zone, an unknown weekday, a malformed time, a window whose start is
+        not before its end, overlapping windows on one day, an empty window
+        list and malformed or duplicate holiday dates. A second default
+        calendar of the organization and client is 409 on is_default. A
+        caller restricted to clients cannot create an org-wide calendar
+        (403, E-09). Requires sla:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBusinessCalendarRequest'
+      responses:
+        '201':
+          description: Business calendar created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessCalendar'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/business-calendars/{id}:
+    x-phase: P2
+    x-feature: ticketing_standard
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getBusinessCalendar
+      tags: [SLA]
+      summary: Get a business calendar
+      description: >-
+        A calendar visible under the caller's scope; an unknown, foreign or
+        invisible id is 404. Requires sla:read.
+      responses:
+        '200':
+          description: Business calendar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessCalendar'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateBusinessCalendar
+      tags: [SLA]
+      summary: Update a business calendar
+      description: >-
+        Sent fields change; `timezone` null derives the zone from the
+        ticket's client, else the organization. `client_id` cannot change
+        (400 on client_id), so a policy's calendar stays bound to its
+        client. The merged calendar is checked like a create (400 with the
+        field); a second default is 409 on is_default. An org-wide calendar
+        is 404 for a caller restricted to clients and stays unchanged.
+        Due times computed before stay unchanged. Requires sla:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateBusinessCalendarRequest'
+      responses:
+        '200':
+          description: Business calendar updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessCalendar'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteBusinessCalendar
+      tags: [SLA]
+      summary: Delete a business calendar
+      description: >-
+        Policies and ticket SLA states that named the calendar lose the
+        reference (calendar_id null); later computations follow the
+        calendar chain, due times computed before stay. An org-wide
+        calendar is 404 for a caller restricted to clients. Requires
+        sla:write.
+      responses:
+        '204':
+          description: Business calendar deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/v1/tickets/{id}/sla:
     x-phase: P2
     x-feature: ticketing_standard
@@ -24038,6 +24197,142 @@ components:
             decide when business_calendar is true: default calendar of the
             ticket's client, default calendar of the organization, built-in
             standard (Monday to Friday, 08:00-18:00).
+
+    BusinessCalendarWindow:
+      type: object
+      description: A span of working time on a weekday in local wall time.
+      required: [weekday, start, end]
+      properties:
+        weekday:
+          type: integer
+          minimum: 1
+          maximum: 7
+          description: 1 is Monday, 7 is Sunday.
+        start:
+          type: string
+          description: Start in local wall time, HH:MM.
+        end:
+          type: string
+          description: End in local wall time, HH:MM, after start (24:00 ends at midnight).
+
+    BusinessCalendarHoliday:
+      type: object
+      description: A whole local day on which the SLA clock pauses.
+      required: [date]
+      properties:
+        date:
+          type: string
+          format: date
+        name:
+          type: string
+
+    BusinessCalendar:
+      type: object
+      description: >-
+        A business calendar of the organization or one of its clients
+        (TKT-02, WP-768). A policy with business_calendar true uses its own
+        calendar, else the default of the ticket's client, else the default
+        of the organization, else the built-in standard.
+      required: [id, organization_id, client_id, name, timezone, weekly_hours, holidays, is_default, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        client_id:
+          type: [string, 'null']
+          format: uuid
+          description: Client of the calendar; null is org-wide.
+        name:
+          type: string
+        timezone:
+          type: [string, 'null']
+          description: >-
+            IANA time zone of the windows; null derives it from the ticket's
+            client, else the organization.
+        weekly_hours:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessCalendarWindow'
+        holidays:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessCalendarHoliday'
+        is_default:
+          type: boolean
+          description: Default calendar of the organization and client (at most one).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateBusinessCalendarRequest:
+      type: object
+      required: [name]
+      properties:
+        client_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Client visible under the caller's scope; null or absent is
+            org-wide. Set only at creation.
+        name:
+          type: string
+          minLength: 1
+        timezone:
+          type: [string, 'null']
+          description: IANA time zone; null or absent derives it.
+        weekly_hours:
+          type: array
+          minItems: 1
+          description: Without it Monday to Friday, 08:00-18:00.
+          items:
+            $ref: '#/components/schemas/BusinessCalendarWindow'
+        holidays:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessCalendarHoliday'
+        is_default:
+          type: boolean
+
+    UpdateBusinessCalendarRequest:
+      type: object
+      description: >-
+        Sent fields change. client_id cannot change; sending it is 400 on
+        client_id.
+      properties:
+        name:
+          type: string
+          minLength: 1
+        timezone:
+          type: [string, 'null']
+          description: IANA time zone; null derives it again.
+        weekly_hours:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/BusinessCalendarWindow'
+        holidays:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessCalendarHoliday'
+        is_default:
+          type: boolean
+
+    BusinessCalendarListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/BusinessCalendar'
 
     SLAPolicyListResponse:
       allOf:
