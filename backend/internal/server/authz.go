@@ -55,6 +55,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"slas":                 identity.PermSLARead,
 	"business-calendars":   identity.PermSLARead,   // business calendars of the SLA clock (WP-768); writes sla:write
 	"import-profiles":      identity.PermImportRun, // import mapping profiles (WP-774, E-106); writes import:manage
+	"tags":                 identity.PermCIRead,    // tag catalog (CI-08, WP-753, E-106); writes tag:manage
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,
 	// Invitations name addresses and grant roles: read and write need
@@ -222,6 +223,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"layouts":               identity.PermCITypeManage, // form layouts write like ci-types (WP-259, E-106)
 	"metamodel":             identity.PermCITypeManage, // drafts (WP-260); test and publish map their own rules (WP-721, WP-261)
 	"import-profiles":       identity.PermImportManage, // only org_admin manages profiles, engineer runs imports (WP-774, E-106)
+	"tags":                  identity.PermTagManage,    // the tag catalog and its merge (CI-08, WP-753, E-106)
 	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
@@ -615,8 +617,15 @@ var domainRecordedRoutes = map[string]string{
 	"PUT /api/v1/cis/{id}/instance-attributes/{key}":    "ci.PGRepository.Update",
 	"DELETE /api/v1/cis/{id}/instance-attributes/{key}": "ci.PGRepository.Update",
 	"PUT /api/v1/cis/{id}/templates":                    "ci.PGRepository.Update",
+	"PUT /api/v1/cis/{id}/tags":                         "ci.PGRepository.ReplaceCITags",
 	"PUT /api/v1/cis/{id}/fields/{name}/override":       "override.PGRepository",
 	"DELETE /api/v1/cis/{id}/fields/{name}/override":    "override.PGRepository",
+	// Tag catalog (CI-08, WP-753): tag.created, tag.updated, tag.deleted,
+	// tag.merged (with ci.updated per CI of a merge).
+	"POST /api/v1/tags":            "ci.PGRepository.CreateTag",
+	"PATCH /api/v1/tags/{id}":      "ci.PGRepository.UpdateTag",
+	"DELETE /api/v1/tags/{id}":     "ci.PGRepository.DeleteTag",
+	"POST /api/v1/tags/{id}/merge": "ci.PGRepository.MergeTag",
 	// Metamodel (MET-15).
 	"POST /api/v1/ci-types":                                  "citype.PGRepository",
 	"POST /api/v1/ci-types/{id}/activate":                    "citype.PGRepository",

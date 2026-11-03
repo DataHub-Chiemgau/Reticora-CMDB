@@ -7641,14 +7641,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List tags
-     * @description Planned (E-38); WP-753 implements the operation.
+     * List tags (CI-08)
+     * @description The tag catalog of the organization, sorted by key and id (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`; a forged cursor is 400. Tags are core, without a module gate (E-105). Requires ci:read.
      */
     get: operations['listTags'];
     put?: never;
     /**
-     * Create a tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * Create a tag (CI-08)
+     * @description A catalog tag with an unchangeable key (lower case, digits, _ and -, at most 63 characters), display_name in de and/or en (defaults to the key) and an optional color #rrggbb. A taken key is 409 on key, an invalid value 422 with the fields. Audit tag.created. Requires tag:manage.
      */
     post: operations['createTag'];
     delete?: never;
@@ -7669,21 +7669,21 @@ export interface paths {
     };
     /**
      * Get a tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * @description A tag of the organization; an unknown or foreign id is 404. Requires ci:read.
      */
     get: operations['getTag'];
     put?: never;
     post?: never;
     /**
      * Delete a tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * @description Deletes a tag no CI carries (deleted CIs count). A tag assigned to a CI and a system tag (is_system, e.g. archived) are 409. Audit tag.deleted. Requires tag:manage.
      */
     delete: operations['deleteTag'];
     options?: never;
     head?: never;
     /**
      * Update a tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * @description Sent fields change: display_name replaces the names, color null removes the color. The key is unchangeable: a sent key is 422. Audit tag.updated. Requires tag:manage.
      */
     patch: operations['updateTag'];
     trace?: never;
@@ -7702,7 +7702,7 @@ export interface paths {
     put?: never;
     /**
      * Merge a tag into another tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * @description In one transaction every CI with this tag gets the tag into_id instead (a CI with both keeps one); then this tag is deleted. Each live CI changed is a manual update: version + 1, ci_change of the field tags, audit ci.updated and the event ci.changed (webhook ci.updated), like PUT /api/v1/cis/{id}/tags; deleted CIs keep the target tag for a restore. Audit tag.merged. A system tag cannot be merged away (409); assignments outside the caller's client or site scope are 409 as well. An unknown into_id or the tag itself is 422. Requires tag:manage.
      */
     post: operations['mergeTag'];
     delete?: never;
@@ -7723,8 +7723,8 @@ export interface paths {
     };
     get?: never;
     /**
-     * Replace the tags of a CI
-     * @description Planned (E-38); WP-753 implements the operation.
+     * Replace the tags of a CI (CI-08)
+     * @description Replaces the tags of the CI with the catalog tags `tags` (keys) in one transaction; an empty list removes every tag. Unknown keys are 422 with the entries (tags[i]); tags are not created implicitly (POST /api/v1/tags). A changed list raises the version by 1 and writes ci_change (field tags, old and new keys), the audit entry ci.updated and the event ci.changed with changed_fields ["tags"] (webhook ci.updated); no override. If-Match as with PATCH (API-07): 412 when it is required but missing or names no version of the CI, 409 with the fields when the tags changed since. A CI outside the caller's scope is 404. This replaces the deprecated attributes.tags of POST and PATCH /api/v1/cis. Requires ci:write.
      */
     put: operations['replaceCITags'];
     post?: never;
@@ -10854,6 +10854,8 @@ export interface components {
       attributes: {
         [key: string]: unknown;
       };
+      /** @description Keys of the catalog tags of the CI (CI-07, CI-08), sorted; [] for a CI without tags. Written with PUT /api/v1/cis/{id}/tags; the catalog is /api/v1/tags. */
+      readonly tags?: string[];
       discovery_source?: components['schemas']['CIDiscoverySource'];
       /** Format: date-time */
       first_seen_at?: string;
@@ -10949,6 +10951,12 @@ export interface components {
       sys_object_id?: string;
       /** @description The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
+        /**
+         * @deprecated
+         * @description Deprecated (E-125, API-01): replaces the tags of the CI with the keys of these texts (lower case, other characters than a-z, 0-9, _ and - become _); missing catalog tags are created, null removes every tag. The value is not kept in the attributes. A value that is no array of strings is 400 on attributes.tags. The answer carries Deprecation and Sunset; at the sunset on 2028-06-30 the member is switched off. Use PUT /api/v1/cis/{id}/tags with catalog keys instead.
+         */
+        tags?: string[] | null;
+      } & {
         [key: string]: unknown;
       };
       /** @description Defaults to manual. With manual or import the CI is manual (is_manual); an unknown source is rejected (400 with the field). */
@@ -10984,6 +10992,12 @@ export interface components {
       sys_object_id?: string | null;
       /** @description RFC 7396 merge patch. The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
+        /**
+         * @deprecated
+         * @description Deprecated (E-125, API-01): replaces the tags of the CI with the keys of these texts (lower case, other characters than a-z, 0-9, _ and - become _); missing catalog tags are created, null removes every tag. The value is not kept in the attributes. A value that is no array of strings is 400 on attributes.tags. The answer carries Deprecation and Sunset; at the sunset on 2028-06-30 the member is switched off. Use PUT /api/v1/cis/{id}/tags with catalog keys instead.
+         */
+        tags?: string[] | null;
+      } & {
         [key: string]: unknown;
       };
       discovery_source?: components['schemas']['CIDiscoverySource'];
@@ -12805,6 +12819,59 @@ export interface components {
     };
     ImportProfileListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ImportProfile'][];
+    };
+    /** @description A catalog tag of the organization (CI-08, WP-753). */
+    Tag: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** @description Unique and unchangeable in the organization; CI.tags lists it. */
+      key: string;
+      display_name: components['schemas']['TagDisplayName'];
+      color: string | null;
+      /** @description A tag the system relies on (archived); it cannot be deleted or merged away. */
+      is_system: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description The name in de and/or en; no other language, no empty name. */
+    TagDisplayName: {
+      de?: string;
+      en?: string;
+    };
+    TagListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Tag'][];
+    };
+    CreateTagRequest: {
+      key: string;
+      display_name?: components['schemas']['TagDisplayName'];
+      color?: string | null;
+    };
+    UpdateTagRequest: {
+      /** @description Not changeable; a sent key is 422. */
+      key?: string;
+      display_name?: components['schemas']['TagDisplayName'];
+      /** @description null removes the color. */
+      color?: string | null;
+    };
+    MergeTagRequest: {
+      /**
+       * Format: uuid
+       * @description The tag that takes the assignments.
+       */
+      into_id: string;
+    };
+    TagMergeResult: {
+      tag: components['schemas']['Tag'];
+      /** @description Number of live CIs whose assignment moved to the tag. */
+      moved: number;
+    };
+    ReplaceCITagsRequest: {
+      /** @description Keys of catalog tags; duplicates count once, [] removes every tag. */
+      tags: string[];
     };
     BusinessCalendarListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['BusinessCalendar'][];
@@ -15973,6 +16040,10 @@ export interface operations {
       /** @description Configuration item created */
       201: {
         headers: {
+          /** @description Set (RFC 9745, @1793664000 = 2026-11-03) when the request carried the deprecated attributes.tags (E-125, WP-281). */
+          Deprecation?: string;
+          /** @description Set (RFC 8594) with Deprecation: attributes.tags is switched off on Fri, 30 Jun 2028 00:00:00 GMT; then PUT /api/v1/cis/{id}/tags is the only way to write tags. */
+          Sunset?: string;
           [name: string]: unknown;
         };
         content: {
@@ -16106,6 +16177,10 @@ export interface operations {
         headers: {
           /** @description The new CI version. */
           ETag?: string;
+          /** @description Set (RFC 9745, @1793664000 = 2026-11-03) when the request carried the deprecated attributes.tags (E-125, WP-281). */
+          Deprecation?: string;
+          /** @description Set (RFC 8594) with Deprecation: attributes.tags is switched off on Fri, 30 Jun 2028 00:00:00 GMT; then PUT /api/v1/cis/{id}/tags is the only way to write tags. */
+          Sunset?: string;
           [name: string]: unknown;
         };
         content: {
@@ -35181,12 +35256,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List tags. The page follows the cursor contract (API-02); the item schema comes with WP-753. */
+      /** @description Tags, sorted by key */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['TagListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -35200,19 +35277,34 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateTagRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-753. */
+      /** @description Tag created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Tag'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      422: components['responses']['UnprocessableEntity'];
+      409: components['responses']['Conflict'];
+      /** @description An invalid key, display_name or color; `violations` names the fields. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   getTag: {
@@ -35227,12 +35319,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a tag. The response schema comes with WP-753. */
+      /** @description Tag */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Tag'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -35251,7 +35345,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Deleted. */
+      /** @description Tag deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -35261,6 +35355,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The tag is assigned to CIs or is a system tag. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateTag: {
@@ -35273,20 +35376,34 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateTagRequest'];
+      };
+    };
     responses: {
-      /** @description Updated. The request and response schemas come with WP-753. */
+      /** @description Tag updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Tag'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description A sent key or an invalid display_name or color; `violations` names the fields. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   mergeTag: {
@@ -35299,46 +35416,108 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MergeTagRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-753. */
+      /** @description Tags merged */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['TagMergeResult'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The tag is a system tag, or it is assigned to CIs outside the caller's scope. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description into_id names no other tag of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   replaceCITags: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReplaceCITagsRequest'];
+      };
+    };
     responses: {
-      /** @description Replaced. The request and response schemas come with WP-753. */
+      /** @description Tags replaced; the CI */
       200: {
         headers: {
+          /** @description The new CI version. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The tags changed since the If-Match version */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the CI */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description tags is missing or names unknown tags; `violations` names the entries. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   listSubnetReservations: {

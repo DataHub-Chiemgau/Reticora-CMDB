@@ -438,6 +438,7 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/maintenance-windows", `{"title":"a5-mw","starts_at":"2030-01-01T00:00:00Z","ends_at":"2030-01-01T02:00:00Z","ci_ids":["<id:/api/v1/cis>"]}`},
 	{"POST /api/v1/monitoring/alerts", `{"name":"a5-alert","metric_name":"cpu","condition":"gt","threshold":90}`},
 	{"POST /api/v1/saved-views", `{"name":"a5-view","entity_kind":"ci","filter_spec":{}}`},
+	{"POST /api/v1/tags", `{"key":"a5_tag","display_name":{"de":"A5","en":"A5"}}`},
 	{"POST /api/v1/compliance/rules", `{"name":"a5-rule","severity":"low","category":"a5","expression":{"field":"name","op":"eq","value":"a5"}}`},
 	{"POST /api/v1/consumables", `{"name":"a5-consumable"}`},
 	{"POST /api/v1/desks", `{"name":"a5-desk","room_id":"<id:/api/v1/rooms>"}`},
@@ -537,6 +538,13 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"PUT /api/v1/ci-fields/global":                      {"", `{"name":"a5_global","data_type":"string"}`},
 	"PUT /api/v1/ci-types/{id}/fields":                  {"", `{"name":"a5_field","data_type":"string"}`},
 	"PUT /api/v1/cis/{id}/field-definitions":            {"", `{"name":"a5_ci_field","data_type":"string"}`},
+
+	// Tags (WP-753): the system tag archived for the CI, so the created tag
+	// stays unassigned for its DELETE; the merge folds a tag of its own
+	// into the created one.
+	"PUT /api/v1/cis/{id}/tags":    {"", `{"tags":["archived"]}`},
+	"PATCH /api/v1/tags/{id}":      {"", `{"color":"#a5a5a5"}`},
+	"POST /api/v1/tags/{id}/merge": {"/api/v1/tags/<tag_src>/merge", `{"into_id":"<id:/api/v1/tags>"}`},
 
 	// Lifecycle transitions (WP-724): the asset has no type model, so
 	// physical_asset with the initial state ordered; <ci6> has the type
@@ -651,6 +659,13 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixed["<suppression>"] = suppression
+	// The source tag of POST /tags/{id}/merge (WP-753).
+	var tagSource string
+	if err = f.Admin.QueryRow(bg, `INSERT INTO tag (organization_id, key, display_name) VALUES ($1, 'a5_tag_src', '{"de":"A5 src"}')
+		RETURNING id::text`, f.OrgA).Scan(&tagSource); err != nil {
+		t.Fatal(err)
+	}
+	fixed["<tag_src>"] = tagSource
 	ids := map[string]string{}
 	fill := func(s string) string {
 		for k, v := range fixed {

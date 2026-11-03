@@ -350,3 +350,95 @@ func (r *indexingRepository) index(ctx context.Context, item *Item) {
 		slog.WarnContext(ctx, "search index update failed; rebuild via POST /api/v1/search/reindex", "ci_id", item.ID, "error", err)
 	}
 }
+
+// tagStore returns the tag store of the wrapped repository.
+func (r *indexingRepository) tagStore() (TagStore, error) {
+	store, ok := r.Repository.(TagStore)
+	if !ok {
+		return nil, ErrTagsUnsupported
+	}
+	return store, nil
+}
+
+// ListTags forwards the tag catalog (TagStore, CI-08, WP-753).
+func (r *indexingRepository) ListTags(ctx context.Context, orgID string, page api.PaginationParams) ([]Tag, int, error) {
+	store, err := r.tagStore()
+	if err != nil {
+		return nil, 0, err
+	}
+	return store.ListTags(ctx, orgID, page)
+}
+
+// GetTag forwards the tag catalog.
+func (r *indexingRepository) GetTag(ctx context.Context, orgID, id string) (*Tag, error) {
+	store, err := r.tagStore()
+	if err != nil {
+		return nil, err
+	}
+	return store.GetTag(ctx, orgID, id)
+}
+
+// CreateTag forwards the tag catalog.
+func (r *indexingRepository) CreateTag(ctx context.Context, tag *Tag) error {
+	store, err := r.tagStore()
+	if err != nil {
+		return err
+	}
+	return store.CreateTag(ctx, tag)
+}
+
+// UpdateTag forwards the tag catalog.
+func (r *indexingRepository) UpdateTag(ctx context.Context, orgID, id string, req *UpdateTagRequest) (*Tag, error) {
+	store, err := r.tagStore()
+	if err != nil {
+		return nil, err
+	}
+	return store.UpdateTag(ctx, orgID, id, req)
+}
+
+// DeleteTag forwards the tag catalog; a deletable tag is on no CI, so no
+// document changes.
+func (r *indexingRepository) DeleteTag(ctx context.Context, orgID, id string) error {
+	store, err := r.tagStore()
+	if err != nil {
+		return err
+	}
+	return store.DeleteTag(ctx, orgID, id)
+}
+
+// MergeTag forwards the merge of two tags and indexes the CIs whose tags
+// changed again, after the commit of a context transaction (K20).
+func (r *indexingRepository) MergeTag(ctx context.Context, orgID, sourceID, intoID string) (*TagMergeResult, error) {
+	store, err := r.tagStore()
+	if err != nil {
+		return nil, err
+	}
+	result, err := store.MergeTag(ctx, orgID, sourceID, intoID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*Item, 0, len(result.CIs))
+	for _, item := range result.CIs {
+		items = append(items, snapshot(item))
+	}
+	if len(items) > 0 {
+		database.AfterCommit(ctx, func(ctx context.Context) { r.indexMany(ctx, items) })
+	}
+	return result, nil
+}
+
+// ReplaceCITags forwards PUT /cis/{id}/tags and indexes the CI again,
+// after the commit of a context transaction (K20).
+func (r *indexingRepository) ReplaceCITags(ctx context.Context, orgID, ciID string, keys []string, ifMatch *int64) (*Item, error) {
+	store, err := r.tagStore()
+	if err != nil {
+		return nil, err
+	}
+	item, err := store.ReplaceCITags(ctx, orgID, ciID, keys, ifMatch)
+	if err != nil {
+		return nil, err
+	}
+	indexed := snapshot(item)
+	database.AfterCommit(ctx, func(ctx context.Context) { r.index(ctx, indexed) })
+	return item, nil
+}
