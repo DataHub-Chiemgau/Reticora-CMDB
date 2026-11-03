@@ -64,7 +64,7 @@ func TestStatusAndLifecycleAreSeparate(t *testing.T) {
 	}
 	transition := func(to string) {
 		t.Helper()
-		if _, err := service.Transition(ctx, f.OrgA, "ci", withModel, software.Key, lifecycle.TransitionRequest{ToState: to}); err != nil {
+		if _, err := service.Transition(ctx, f.OrgA, "ci", withModel, software.ID, lifecycle.TransitionRequest{ToState: to}); err != nil {
 			t.Fatalf("transition to %s: %v", to, err)
 		}
 	}
@@ -107,7 +107,7 @@ func TestStatusAndLifecycleAreSeparate(t *testing.T) {
 			t.Errorf("lifecycle_state accepted the status %q", status)
 		}
 	}
-	if _, err = service.Transition(ctx, f.OrgA, "ci", withModel, software.Key,
+	if _, err = service.Transition(ctx, f.OrgA, "ci", withModel, software.ID,
 		lifecycle.TransitionRequest{ToState: ci.StatusActive}); err == nil {
 		t.Error("a transition to a status was accepted")
 	}

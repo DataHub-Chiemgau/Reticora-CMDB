@@ -139,6 +139,11 @@ type LifecycleChangedData struct {
 	SiteID     string `json:"site_id,omitempty"`
 	From       string `json:"from,omitempty"`
 	To         string `json:"to"`
+	// The fields of the transition service (WP-724): the lifecycle model
+	// and the reason of the transition.
+	ModelID  string `json:"model_id,omitempty"`
+	ModelKey string `json:"model_key,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 // RelationshipChangedData is the data of relationship.changed (WP-296).

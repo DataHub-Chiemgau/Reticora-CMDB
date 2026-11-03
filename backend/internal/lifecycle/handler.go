@@ -17,9 +17,6 @@ import (
 // (asset: the effective asset model of its type chain or the default
 // physical_asset; ci: the effective ci model of its type chain).
 type EntityResolver interface {
-	// LifecycleKeyFor returns the lifecycle definition key for an entity and
-	// whether the entity exists in the tenant scope.
-	LifecycleKeyFor(r *http.Request, orgID, entityType, entityID string) (string, error)
 	// LifecycleModelFor returns the id of the effective lifecycle model of
 	// an entity; an entity outside the scope is "not found", a CI without
 	// a model ErrNoLifecycleModel.
@@ -552,7 +549,7 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 	if !ok {
 		return
 	}
-	defKey, err := h.resolver.LifecycleKeyFor(r, t.OrganizationID, entityType, entityID)
+	modelID, err := h.resolver.LifecycleModelFor(r, t.OrganizationID, entityType, entityID)
 	if errors.Is(err, ErrNoLifecycleModel) {
 		writeNoLifecycleModel(w)
 		return
@@ -561,7 +558,7 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 		api.WriteError(w, http.StatusNotFound, "Not Found", "entity not found")
 		return
 	}
-	result, err := h.service.Transition(r.Context(), t.OrganizationID, entityType, entityID, defKey, req)
+	result, err := h.service.Transition(r.Context(), t.OrganizationID, entityType, entityID, modelID, req)
 	if err != nil {
 		writeTransitionError(w, err)
 		return
@@ -574,12 +571,48 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 // is a 422 on applies_to, not a check violation of the database.
 var validAppliesTo = map[string]bool{"": true, "asset": true, "ci": true}
 
-// writeTransitionError reports a failed transition: the rejection of the
-// definition (422 with the field), a definition that cannot be resolved
-// (422), an entity that vanished (404); state store errors go through
-// api.WriteRepoError (F-047).
+// writeTransitionError reports a failed transition (WP-724): failed
+// required fields or guard rules are 422 lifecycle-guard with the
+// violations, a missing edge or an unknown target state 422
+// invalid-transition, a from_state that is not the current state 409 with
+// current_state, a refused field 422 with the field, a model that cannot
+// be resolved 422, an entity that vanished 404; state store errors go
+// through api.WriteRepoError (F-047).
 func writeTransitionError(w http.ResponseWriter, err error) {
+	var guard *GuardError
+	var invalid *InvalidTransitionError
+	var conflict *StateConflictError
 	switch {
+	case errors.As(err, &guard):
+		api.WriteProblemBody(w, http.StatusUnprocessableEntity, struct {
+			api.ProblemDetail
+			Violations []GuardViolation `json:"violations"`
+		}{
+			ProblemDetail: api.ProblemDetail{Type: ProblemLifecycleGuard, Title: "Unprocessable Entity",
+				Status: http.StatusUnprocessableEntity, Detail: guard.Error()},
+			Violations: guard.Violations,
+		})
+	case errors.As(err, &invalid):
+		api.WriteProblemBody(w, http.StatusUnprocessableEntity, struct {
+			api.ProblemDetail
+			Field     string `json:"field"`
+			FromState string `json:"from_state"`
+			ToState   string `json:"to_state"`
+		}{
+			ProblemDetail: api.ProblemDetail{Type: ProblemInvalidTransition, Title: "Unprocessable Entity",
+				Status: http.StatusUnprocessableEntity, Detail: invalid.Error()},
+			Field: "to_state", FromState: invalid.From, ToState: invalid.To,
+		})
+	case errors.As(err, &conflict):
+		api.WriteProblemBody(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			Field        string `json:"field"`
+			CurrentState string `json:"current_state"`
+		}{
+			ProblemDetail: api.ProblemDetail{Type: ProblemConflict, Title: "Conflict",
+				Status: http.StatusConflict, Detail: conflict.Error()},
+			Field: "from_state", CurrentState: conflict.CurrentState,
+		})
 	case api.WriteFieldError(w, err):
 	case errors.Is(err, ErrNoLifecycleModel):
 		writeNoLifecycleModel(w)

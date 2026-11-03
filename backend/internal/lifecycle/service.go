@@ -5,121 +5,292 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
-// Service applies lifecycle definitions to assets and CIs: it resolves the
-// guard of the requested transition, validates required fields, applies the
-// state, and records the history entry.
+// Service applies lifecycle models to assets and CIs (LCY-02, WP-724): in
+// one transaction it locks the current state, checks the edge, the
+// required fields and the guard of the transition and the system checks,
+// sets the state and records history, audit and the event
+// lifecycle.changed. Any error rolls everything back.
 type Service struct {
 	repo    Repository
 	states  StateStore
 	changes ChangeRecorder
+	checks  []SystemCheck
 }
 
-// StateStore combines StateReader and StateWriter for the two entity kinds.
+// StateStore combines StateReader and StateWriter for the two entity kinds
+// with the transaction of a transition and its audit and event.
 type StateStore interface {
 	StateReader
 	StateWriter
+	// RunInTx runs fn in one transaction of orgID; the calls of the
+	// service with the context fn gets join it (NFR-03). A transaction in
+	// ctx is joined. Inside it CurrentState locks the entity row.
+	RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error
+	// RecordTransition writes the audit entry and the event
+	// lifecycle.changed of a transition in the transaction of ctx.
+	RecordTransition(ctx context.Context, orgID string, rec *TransitionRecord) error
+}
+
+// TransitionRecord is a transition the service applied, for its audit
+// entry and its event.
+type TransitionRecord struct {
+	EntityType string
+	EntityID   string
+	ModelID    string
+	ModelKey   string
+	From       string
+	To         string
+	Reason     string
+}
+
+// SystemCheck is a check of the system that runs in the transaction of a
+// transition after the guard of the model (WP-279: location, holder,
+// disposal_record, reservation); an error refuses the transition.
+type SystemCheck func(ctx context.Context, check *TransitionCheck) error
+
+// TransitionCheck is what a SystemCheck sees: the entity, its model, the
+// locked current state, the target and the request context.
+type TransitionCheck struct {
+	OrgID      string
+	EntityType string
+	EntityID   string
+	Model      *Definition
+	From       string
+	To         string
+	Context    map[string]any
 }
 
 // ErrNoLifecycleModel: the entity's type has no lifecycle model, so it has
 // no lifecycle state (DB-05).
 var ErrNoLifecycleModel = errors.New("the type has no lifecycle model")
 
-// NewService creates a lifecycle service.
+// errEntityNotFound: the entity is unknown or outside the caller's scope.
+var errEntityNotFound = errors.New("not found")
+
+// Problem types of a refused transition.
+const (
+	ProblemLifecycleGuard    = "urn:reticora:problem:lifecycle-guard"
+	ProblemInvalidTransition = "urn:reticora:problem:invalid-transition"
+	ProblemConflict          = "urn:reticora:problem:conflict"
+)
+
+// GuardViolation is one failed required field or guard rule of a
+// transition: the context field, the rule code and its message.
+type GuardViolation struct {
+	Field   string `json:"field"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// GuardError refuses a transition whose required fields or guard rules the
+// context fails (422 lifecycle-guard with the violations).
+type GuardError struct {
+	Violations []GuardViolation
+}
+
+// validation: a fixed text.
+func (e *GuardError) Error() string {
+	return "the transition context fails the guard of the lifecycle transition"
+}
+
+// InvalidTransitionError refuses a transition the model has no edge for,
+// or into an unknown state (422 invalid-transition).
+type InvalidTransitionError struct {
+	From, To string
+	reason   string
+}
+
+// validation: the rule text of the edge check with the state keys of the
+// model and the request.
+func (e *InvalidTransitionError) Error() string { return e.reason }
+
+// StateConflictError refuses a transition whose from_state is not the
+// current state (409 conflict with current_state).
+type StateConflictError struct {
+	CurrentState string
+}
+
+// validation: a fixed text.
+func (e *StateConflictError) Error() string {
+	return "the lifecycle state changed: from_state is not the current state"
+}
+
+// NewService creates a lifecycle service; changes records the history
+// entry of a transition (NewHistoryRecorder), nil records none.
 func NewService(repo Repository, states StateStore, changes ChangeRecorder) *Service {
 	return &Service{repo: repo, states: states, changes: changes}
 }
 
-// DefinitionForKey resolves a definition by key within the tenant scope,
-// with its states and transitions (the list holds the definitions only).
-func (s *Service) DefinitionForKey(ctx context.Context, orgID, key string) (*Definition, error) {
-	defs, _, err := s.repo.List(ctx, orgID, api.PaginationParams{Limit: api.MaxPageLimit})
-	if err != nil {
-		return nil, err
-	}
-	for _, d := range defs {
-		if d.Key == key {
-			return s.repo.GetByID(ctx, orgID, d.ID)
-		}
-	}
-	return nil, fmt.Errorf("%w: lifecycle definition %q not found", ErrNoLifecycleModel, key)
+// WithGuards adds system checks that run in the transaction of every
+// transition after the guard of the model (WP-279).
+func (s *Service) WithGuards(checks ...SystemCheck) *Service {
+	s.checks = append(s.checks, checks...)
+	return s
 }
 
-// Transition executes a guarded lifecycle transition for an entity. A
-// request the definition rejects is a 422 *api.FieldError; a definition that
-// cannot be resolved is ErrNoLifecycleModel.
-//
-// Required fields are resolved from the transition's target state definition
-// and from the transition itself, then validated against the transition
-// context (e.g. storage_location, deployment_location, disposal_date).
-func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, definitionKey string, req TransitionRequest) (*TransitionResult, error) {
+// Transition executes a lifecycle transition of an entity with the model
+// modelID (EntityResolver.LifecycleModelFor) in one transaction: the
+// current state is read with a row lock, the request's from_state must
+// match it (StateConflictError), the model needs an edge from it or from
+// any state, or the target is the initial state of an entity without a
+// state (InvalidTransitionError); the required fields of target and edge
+// and the guard rules are evaluated against the context (GuardError);
+// then the system checks run, the state is set and history, audit and
+// event are recorded. A model that cannot be loaded is ErrNoLifecycleModel.
+func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, modelID string, req TransitionRequest) (*TransitionResult, error) {
 	if req.ToState == "" {
 		return nil, &api.FieldError{Field: "to_state", Message: "to_state is required", Status: http.StatusUnprocessableEntity}
 	}
-	def, err := s.DefinitionForKey(ctx, orgID, definitionKey)
+	var result *TransitionResult
+	err := s.states.RunInTx(ctx, orgID, func(ctx context.Context) error {
+		def, err := s.repo.GetByID(ctx, orgID, modelID)
+		if errors.Is(err, api.ErrNotFound) || (err != nil && err.Error() == "not found") {
+			return ErrNoLifecycleModel
+		}
+		if err != nil {
+			return err
+		}
+		current, err := s.states.CurrentState(ctx, orgID, entityType, entityID)
+		if err != nil {
+			return err
+		}
+		if req.FromState != nil && *req.FromState != current {
+			return &StateConflictError{CurrentState: current}
+		}
+		target, edge, err := allowedTransition(def, current, req.ToState)
+		if err != nil {
+			return err
+		}
+		if violations := guardViolations(target, edge, req.Context); len(violations) > 0 {
+			return &GuardError{Violations: violations}
+		}
+		check := &TransitionCheck{OrgID: orgID, EntityType: entityType, EntityID: entityID, Model: def,
+			From: current, To: req.ToState, Context: req.Context}
+		for _, systemCheck := range s.checks {
+			if checkErr := systemCheck(ctx, check); checkErr != nil {
+				return checkErr
+			}
+		}
+		if setErr := s.states.SetState(ctx, orgID, entityType, entityID, req.ToState); setErr != nil {
+			return setErr
+		}
+		if s.changes != nil {
+			var old any
+			if current != "" {
+				old = current
+			}
+			if histErr := s.changes.RecordChange(ctx, orgID, entityType, entityID,
+				"lifecycle_transition", "lifecycle_state", old, req.ToState, req.Reason); histErr != nil {
+				return fmt.Errorf("record lifecycle history: %w", histErr)
+			}
+		}
+		if recErr := s.states.RecordTransition(ctx, orgID, &TransitionRecord{EntityType: entityType, EntityID: entityID,
+			ModelID: def.ID, ModelKey: def.Key, From: current, To: req.ToState, Reason: req.Reason}); recErr != nil {
+			return recErr
+		}
+		result = &TransitionResult{EntityType: entityType, EntityID: entityID, FromState: current, ToState: req.ToState}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	stateByKey := map[string]State{}
-	for _, st := range def.States {
-		stateByKey[st.Key] = st
-	}
-	target, ok := stateByKey[req.ToState]
-	if !ok {
-		return nil, &api.FieldError{Field: "to_state", Message: fmt.Sprintf("unknown lifecycle state %q", req.ToState),
-			Status: http.StatusUnprocessableEntity}
-	}
+	return result, nil
+}
 
-	current, err := s.states.CurrentState(ctx, orgID, entityType, entityID)
-	if err != nil {
-		return nil, err
+// allowedTransition returns the target state and the edge of a transition
+// from current to to: an edge from current wins over one without a from
+// state; without an edge only an entity without a state may enter the
+// initial state (edge nil).
+func allowedTransition(def *Definition, current, to string) (*State, *Transition, error) {
+	var target *State
+	for i := range def.States {
+		if def.States[i].Key == to {
+			target = &def.States[i]
+		}
 	}
-
-	// Resolve the guard: an explicit transition from the current state wins;
-	// otherwise any transition into the target state matches (initial
-	// assignment), otherwise the state itself must exist (direct set allowed
-	// only into the initial state).
-	required := append([]string{}, target.RequiredFields...)
-	guardFound := false
-	for _, tr := range def.Transitions {
-		if tr.ToStateKey != req.ToState {
+	if target == nil {
+		return nil, nil, &InvalidTransitionError{From: current, To: to,
+			reason: fmt.Sprintf("unknown lifecycle state %q", to)}
+	}
+	var edge *Transition
+	for i := range def.Transitions {
+		tr := &def.Transitions[i]
+		if tr.ToStateKey != to {
 			continue
 		}
-		if tr.FromStateKey == "" || tr.FromStateKey == current {
-			required = append(required, tr.RequiredFields...)
-			guardFound = true
+		if tr.FromStateKey == current && current != "" {
+			edge = tr
 			break
 		}
+		if tr.FromStateKey == "" && edge == nil {
+			edge = tr
+		}
 	}
-	if !guardFound && current != "" {
-		return nil, &api.FieldError{Field: "to_state", Message: fmt.Sprintf("no lifecycle transition from %q to %q", current, req.ToState),
-			Status: http.StatusUnprocessableEntity}
+	switch {
+	case edge != nil:
+		return target, edge, nil
+	case current == "" && target.IsInitial:
+		return target, nil, nil
+	case current == "":
+		return nil, nil, &InvalidTransitionError{From: current, To: to,
+			reason: fmt.Sprintf("initial lifecycle state must be %q", initialKey(def))}
 	}
-	if current == "" && !target.IsInitial && !guardFound {
-		return nil, &api.FieldError{Field: "to_state", Message: fmt.Sprintf("initial lifecycle state must be %q", initialKey(def)),
-			Status: http.StatusUnprocessableEntity}
-	}
+	return nil, nil, &InvalidTransitionError{From: current, To: to,
+		reason: fmt.Sprintf("no lifecycle transition from %q to %q", current, to)}
+}
 
-	if err := validateRequiredFields(required, req.Context); err != nil {
-		return nil, err
+// guardViolations evaluates the required fields of target and edge (the
+// short form of {op: required}) and every rule of the edge's guard
+// (rules.Evaluate) against the transition context.
+func guardViolations(target *State, edge *Transition, values map[string]any) []GuardViolation {
+	required := slices.Clone(target.RequiredFields)
+	var guard *Guard
+	if edge != nil {
+		required = append(required, edge.RequiredFields...)
+		guard = edge.Guard
 	}
-
-	if err := s.states.SetState(ctx, orgID, entityType, entityID, req.ToState); err != nil {
-		return nil, err
+	var out []GuardViolation
+	seen := map[string]bool{}
+	requiredRule := rules.Rule{Op: rules.OpRequired}
+	for _, field := range required {
+		if seen[field] {
+			continue
+		}
+		seen[field] = true
+		value, present := values[field]
+		for _, v := range rules.Evaluate(&requiredRule, value, present) {
+			out = append(out, GuardViolation{Field: field, Code: v.Code,
+				Message: fmt.Sprintf("lifecycle transition requires field %q", field)})
+		}
 	}
-	if s.changes != nil {
-		_ = s.changes.RecordChange(ctx, orgID, entityType, entityID,
-			"lifecycle_transition", "lifecycle_state", current, req.ToState, req.Reason)
+	if guard == nil {
+		return out
 	}
-	return &TransitionResult{
-		EntityType: entityType,
-		EntityID:   entityID,
-		FromState:  current,
-		ToState:    req.ToState,
-	}, nil
+	fields := make([]string, 0, len(guard.Fields))
+	for field := range guard.Fields {
+		fields = append(fields, field)
+	}
+	slices.Sort(fields)
+	for _, field := range fields {
+		rule := guard.Fields[field]
+		value, present := values[field]
+		for _, v := range rules.Evaluate(&rule, value, present) {
+			if v.Code == rules.CodeRequired && seen[field] {
+				continue
+			}
+			out = append(out, GuardViolation{Field: field, Code: v.Code, Message: v.Message})
+		}
+	}
+	return out
 }
 
 func initialKey(def *Definition) string {
@@ -131,15 +302,25 @@ func initialKey(def *Definition) string {
 	return ""
 }
 
-// validateRequiredFields checks that every required context value is present
-// and non-empty.
-func validateRequiredFields(required []string, ctx map[string]any) error {
-	for _, field := range required {
-		v, ok := ctx[field]
-		if !ok || v == nil || v == "" {
-			return &api.FieldError{Field: "context", Message: fmt.Sprintf("lifecycle transition requires field %q", field),
-				Status: http.StatusUnprocessableEntity}
-		}
+// HistoryRecorder is the ChangeRecorder of the transition service on the
+// entity change trail (history.Repository.Record): one entity_change row
+// with the acting user, in the transaction of the transition when the
+// repository joins it (PostgreSQL).
+type HistoryRecorder struct {
+	repo history.Repository
+}
+
+// NewHistoryRecorder records lifecycle transitions into repo.
+func NewHistoryRecorder(repo history.Repository) *HistoryRecorder {
+	return &HistoryRecorder{repo: repo}
+}
+
+// RecordChange implements ChangeRecorder.
+func (h *HistoryRecorder) RecordChange(ctx context.Context, orgID, entityType, entityID, changeType, field string, oldVal, newVal any, comment string) error {
+	actor := tenant.FromContext(ctx).UserID
+	if !audit.IsUUID(actor) {
+		actor = ""
 	}
-	return nil
+	return h.repo.Record(ctx, &history.Change{OrganizationID: orgID, EntityType: entityType, EntityID: entityID,
+		ActorID: actor, ChangeType: changeType, FieldName: field, OldValue: oldVal, NewValue: newVal, Comment: comment})
 }

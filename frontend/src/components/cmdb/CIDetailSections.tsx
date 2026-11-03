@@ -14,7 +14,7 @@ import {
   useSetOverride,
   useClearOverride,
   useBlastRadius,
-  useLifecycleDefinitions,
+  useLifecycleOptions,
   useLifecycleTransition,
   useEntityHistory,
   useLocationTree,
@@ -479,6 +479,15 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
 
 // ─── Lifecycle (§8) ──────────────────────────────────────────────────────────
 
+/**
+ * LifecycleSection offers the transitions the effective lifecycle model of
+ * the entity allows from its current state (GET …/lifecycle-transitions,
+ * WP-723) and applies one with POST …/lifecycle-transitions (WP-724); the
+ * required fields of the chosen transition are asked for as its context,
+ * and a refusal (guard violations, a transition someone else applied in
+ * between) is shown with the violated fields.
+ * A CI type without lifecycle model answers 422: the section is left out.
+ */
 export function LifecycleSection({
   entityType,
   entityId,
@@ -489,16 +498,58 @@ export function LifecycleSection({
   currentState?: string;
 }) {
   const { t } = useTranslation();
-  const defs = useLifecycleDefinitions();
+  const options = useLifecycleOptions(entityType, entityId);
   const transition = useLifecycleTransition(entityType, entityId);
   const [target, setTarget] = useState('');
   const [reason, setReason] = useState('');
+  const [context, setContext] = useState<Record<string, string>>({});
 
-  // Use the default physical asset lifecycle (or the first definition).
-  const def =
-    (defs.data?.data ?? []).find((d) => d.key === 'physical_asset') ?? (defs.data?.data ?? [])[0];
-  const states = def?.states ?? [];
-  const current = currentState || states.find((s) => s.is_initial)?.key || '';
+  if (options.isLoading) return null;
+  // No lifecycle model for the type (DB-05): no lifecycle state to show.
+  if (options.error instanceof ApiError && options.error.status === 422) return null;
+  if (options.isError || !options.data) {
+    return (
+      <Section title={t('lifecycle.title', 'Lebenszyklus')}>
+        <ErrorState
+          title={String(options.error ?? '')}
+          retryLabel={t('common.retry', 'Erneut versuchen')}
+          onRetry={() => void options.refetch()}
+        />
+      </Section>
+    );
+  }
+
+  const current = options.data.current_state ?? currentState ?? '';
+  const targets = new Map<string, { label: string; required: string[] }>();
+  // A body without transitions offers none (no crash of the detail page).
+  for (const tr of options.data.transitions ?? []) {
+    const known = targets.get(tr.to_state);
+    targets.set(tr.to_state, {
+      label: known?.label ?? tr.label,
+      required: [...new Set([...(known?.required ?? []), ...(tr.required_fields ?? [])])],
+    });
+  }
+  const required = targets.get(target)?.required ?? [];
+  const error = transition.error;
+  const violated =
+    error instanceof ApiError ? error.violations.map((v) => v.field).filter(Boolean) : [];
+
+  const apply = () => {
+    const values: Record<string, unknown> = {};
+    for (const field of required) {
+      if (context[field]) values[field] = context[field];
+    }
+    transition.mutate(
+      { toState: target, context: values, reason },
+      {
+        onSuccess: () => {
+          setTarget('');
+          setReason('');
+          setContext({});
+        },
+      },
+    );
+  };
 
   return (
     <Section title={t('lifecycle.title', 'Lebenszyklus')}>
@@ -513,30 +564,37 @@ export function LifecycleSection({
           label={t('lifecycle.transitionTo', 'Übergang nach')}
           options={[
             { value: '', label: '—' },
-            ...states
-              .filter((s) => s.key !== current)
-              .map((s) => ({ value: s.key, label: s.label })),
+            ...[...targets].map(([key, tr]) => ({ value: key, label: tr.label || key })),
           ]}
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           className="max-w-xs"
         />
+        {required.map((field) => (
+          <Input
+            key={field}
+            label={field}
+            required
+            value={context[field] ?? ''}
+            onChange={(e) => setContext((c) => ({ ...c, [field]: e.target.value }))}
+            className="max-w-xs"
+          />
+        ))}
         <Input
           label={t('lifecycle.reason', 'Grund')}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           className="max-w-xs"
         />
-        <Button
-          size="sm"
-          disabled={!target || transition.isPending}
-          onClick={() => transition.mutate({ toState: target, reason })}
-        >
+        <Button size="sm" disabled={!target || transition.isPending} onClick={apply}>
           {t('lifecycle.apply', 'Anwenden')}
         </Button>
       </div>
-      {transition.error ? (
-        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{String(transition.error)}</p>
+      {error ? (
+        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          {String(error.message || error)}
+          {violated.length > 0 ? `: ${violated.join(', ')}` : null}
+        </p>
       ) : null}
     </Section>
   );

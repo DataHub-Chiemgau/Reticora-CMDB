@@ -563,6 +563,19 @@
         "to": {
           "type": "string",
           "description": "State after the transition."
+        },
+        "model_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The effective lifecycle model of the object the transition followed (WP-724)."
+        },
+        "model_key": {
+          "type": "string",
+          "description": "Key of the lifecycle model (WP-724)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason of the transition from the request; absent without one (WP-724)."
         }
       },
       "examples": [
@@ -571,7 +584,18 @@
           "entity_id": "22222222-2222-4222-8222-222222222222",
           "site_id": "44444444-4444-4444-8444-444444444444",
           "from": "in_stock",
-          "to": "in_use"
+          "to": "deployed",
+          "model_id": "00000000-0000-0000-0000-000000000101",
+          "model_key": "physical_asset",
+          "reason": "handed out to the new employee"
+        },
+        {
+          "entity_type": "ci",
+          "entity_id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "to": "evaluation",
+          "model_id": "00000000-0000-0000-0000-000000000102",
+          "model_key": "software"
         }
       ]
     },

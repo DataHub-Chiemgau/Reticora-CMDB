@@ -656,6 +656,12 @@ var domainRecordedRoutes = map[string]string{
 	// which takes the place of its route entry; every other deletion keeps
 	// the route entry, so that route stays a route-audited one.
 	"DELETE /api/v1/relationship-suppressions/{id}": "relationship.PGRepository.LiftSuppression",
+
+	// Lifecycle transitions (LCY-02, WP-724): ci.lifecycle_changed or
+	// asset.lifecycle_changed with the old and new state and the reason,
+	// in the transaction of the transition.
+	"POST /api/v1/cis/{id}/lifecycle-transitions":    "lifecycle.PGStateStore.RecordTransition",
+	"POST /api/v1/assets/{id}/lifecycle-transitions": "lifecycle.PGStateStore.RecordTransition",
 }
 
 // auditedRoutes records, per write route registered through an

@@ -5779,7 +5779,10 @@ export interface paths {
      */
     get: operations['getAssetsIdLifecycleTransitionOptions'];
     put?: never;
-    /** Execute a lifecycle transition on an asset */
+    /**
+     * Execute a lifecycle transition on an asset
+     * @description Runs the transition in one transaction (LCY-02, WP-724): the current state is read with a row lock, the effective lifecycle model of the asset type chain needs an edge from it (or from any state) to to_state, or to_state is the initial state of an entity without a state; the required fields of target state and edge and the rules of the edge's guard are evaluated against context. The state is set, a history entry (lifecycle_transition), the audit entry asset.lifecycle_changed and the event lifecycle.changed are written; any error rolls everything back.
+     */
     post: operations['createAssetsIdLifecycleTransitions'];
     delete?: never;
     options?: never;
@@ -6572,7 +6575,10 @@ export interface paths {
      */
     get: operations['getCisIdLifecycleTransitionOptions'];
     put?: never;
-    /** Execute a lifecycle transition on a CI */
+    /**
+     * Execute a lifecycle transition on a CI
+     * @description Runs the transition in one transaction (LCY-02, WP-724): the current state is read with a row lock, the effective lifecycle model of the ci type chain needs an edge from it (or from any state) to to_state, or to_state is the initial state of an entity without a state; the required fields of target state and edge and the rules of the edge's guard are evaluated against context. The state is set, a history entry (lifecycle_transition), the audit entry ci.lifecycle_changed and the event lifecycle.changed are written; any error rolls everything back.
+     */
     post: operations['createCisIdLifecycleTransitions'];
     delete?: never;
     options?: never;
@@ -9694,6 +9700,47 @@ export interface components {
         required_fields: string[];
         guard?: components['schemas']['LifecycleGuard'];
       }[];
+    };
+    /** @description A lifecycle transition of a CI or asset (LCY-02). The effective model of the entity's type decides: an edge from the current state or from any state, or the initial state for an entity without a state. */
+    LifecycleTransitionRequest: {
+      /** @description Key of the target state. */
+      to_state: string;
+      /** @description The state the client saw; empty for an entity without a state. Another current state is 409 with current_state. Without it, parallel transitions are serialized and each is checked against the state the previous one left. */
+      from_state?: string;
+      /** @description Values the required fields of target state and edge and the rules of the edge's guard are evaluated against. */
+      context?: {
+        [key: string]: unknown;
+      };
+      /** @description Stored as comment of the history entry, in the audit entry and in the event lifecycle.changed. */
+      reason?: string;
+    };
+    LifecycleTransitionResult: {
+      /** @enum {string} */
+      entity_type: 'ci' | 'asset';
+      /** Format: uuid */
+      entity_id: string;
+      /** @description State before the transition; absent for the initial state. */
+      from_state?: string;
+      to_state: string;
+    };
+    /** @description A refused lifecycle transition (422). Type urn:reticora:problem:lifecycle-guard: the transition context fails required fields or guard rules, each failed rule is a violation. Type urn:reticora:problem:invalid-transition: the model has no edge from the current state to to_state, or no such state (field to_state, from_state, to_state). Type urn:reticora:problem:invalid-field with field to_state: to_state is missing, or the entity's type has no lifecycle model. */
+    LifecycleGuardProblem: components['schemas']['ProblemDetail'] & {
+      /** @description Current state of an invalid transition. */
+      from_state?: string;
+      /** @description Requested state of an invalid transition. */
+      to_state?: string;
+      violations?: {
+        /** @description Field of the transition context. */
+        field: string;
+        /** @description Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json). */
+        code: string;
+        message: string;
+      }[];
+    };
+    /** @description from_state is not the current state (409, type urn:reticora:problem:conflict). */
+    LifecycleTransitionConflictProblem: components['schemas']['ProblemDetail'] & {
+      /** @description The current lifecycle state; empty without one. */
+      current_state: string;
     };
     /** @description The lifecycle model is in use (409 of DELETE). */
     LifecycleModelInUseProblem: components['schemas']['ProblemDetail'] & {
@@ -28937,14 +28984,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LifecycleTransitionRequest'];
+      };
+    };
     responses: {
-      /** @description Execute a lifecycle transition on an asset */
+      /** @description The transition was applied. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleTransitionResult'];
+        };
       };
       400: components['responses']['BadRequest'];
       /** @description Unauthorized */
@@ -28955,7 +29008,24 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description from_state is not the current state; current_state names it. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleTransitionConflictProblem'];
+        };
+      };
+      /** @description Guard violations (lifecycle-guard with violations), a missing edge or unknown state (invalid-transition), a missing to_state or a type without lifecycle model (invalid-field, field to_state). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleGuardProblem'];
+        };
+      };
     };
   };
   listAssetsIdMovements: {
@@ -30753,14 +30823,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LifecycleTransitionRequest'];
+      };
+    };
     responses: {
-      /** @description Execute a lifecycle transition on a CI */
+      /** @description The transition was applied. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleTransitionResult'];
+        };
       };
       400: components['responses']['BadRequest'];
       /** @description Unauthorized */
@@ -30771,7 +30847,24 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description from_state is not the current state; current_state names it. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleTransitionConflictProblem'];
+        };
+      };
+      /** @description Guard violations (lifecycle-guard with violations), a missing edge or unknown state (invalid-transition), a missing to_state or a type without lifecycle model (invalid-field, field to_state). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleGuardProblem'];
+        };
+      };
     };
   };
   getCisIdParent: {

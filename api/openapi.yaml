@@ -12001,17 +12001,47 @@ paths:
     post:
       operationId: createAssetsIdLifecycleTransitions
       summary: Execute a lifecycle transition on an asset
+      description: >-
+        Runs the transition in one transaction (LCY-02, WP-724): the
+        current state is read with a row lock, the effective lifecycle
+        model of the asset type chain needs an edge from it (or from any
+        state) to to_state, or to_state is the initial state of an entity
+        without a state; the required fields of target state and edge and
+        the rules of the edge's guard are evaluated against context. The
+        state is set, a history entry (lifecycle_transition), the audit
+        entry asset.lifecycle_changed and the event lifecycle.changed are
+        written; any error rolls everything back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LifecycleTransitionRequest' }
       responses:
         '200':
-          description: Execute a lifecycle transition on an asset
+          description: The transition was applied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionResult' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: from_state is not the current state; current_state names it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionConflictProblem' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            Guard violations (lifecycle-guard with violations), a missing
+            edge or unknown state (invalid-transition), a missing to_state
+            or a type without lifecycle model (invalid-field, field
+            to_state).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleGuardProblem' }
 
   /api/v1/assets/{id}/movements:
     x-phase: P2
@@ -13697,17 +13727,47 @@ paths:
     post:
       operationId: createCisIdLifecycleTransitions
       summary: Execute a lifecycle transition on a CI
+      description: >-
+        Runs the transition in one transaction (LCY-02, WP-724): the
+        current state is read with a row lock, the effective lifecycle
+        model of the ci type chain needs an edge from it (or from any
+        state) to to_state, or to_state is the initial state of an entity
+        without a state; the required fields of target state and edge and
+        the rules of the edge's guard are evaluated against context. The
+        state is set, a history entry (lifecycle_transition), the audit
+        entry ci.lifecycle_changed and the event lifecycle.changed are
+        written; any error rolls everything back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LifecycleTransitionRequest' }
       responses:
         '200':
-          description: Execute a lifecycle transition on a CI
+          description: The transition was applied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionResult' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: from_state is not the current state; current_state names it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionConflictProblem' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            Guard violations (lifecycle-guard with violations), a missing
+            edge or unknown state (invalid-transition), a missing to_state
+            or a type without lifecycle model (invalid-field, field
+            to_state).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleGuardProblem' }
 
   /api/v1/cis/{id}/parent:
     get:
@@ -18826,6 +18886,95 @@ components:
                 description: Required fields of the target state and of the transition.
                 items: { type: string }
               guard: { $ref: '#/components/schemas/LifecycleGuard' }
+    LifecycleTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [to_state]
+      description: >-
+        A lifecycle transition of a CI or asset (LCY-02). The effective
+        model of the entity's type decides: an edge from the current state
+        or from any state, or the initial state for an entity without a
+        state.
+      properties:
+        to_state:
+          type: string
+          description: Key of the target state.
+        from_state:
+          type: string
+          description: >-
+            The state the client saw; empty for an entity without a state.
+            Another current state is 409 with current_state. Without it,
+            parallel transitions are serialized and each is checked against
+            the state the previous one left.
+        context:
+          type: object
+          additionalProperties: true
+          description: >-
+            Values the required fields of target state and edge and the
+            rules of the edge's guard are evaluated against.
+        reason:
+          type: string
+          description: Stored as comment of the history entry, in the audit entry and in the event lifecycle.changed.
+    LifecycleTransitionResult:
+      type: object
+      required: [entity_type, entity_id, to_state]
+      properties:
+        entity_type:
+          type: string
+          enum: [ci, asset]
+        entity_id:
+          type: string
+          format: uuid
+        from_state:
+          type: string
+          description: State before the transition; absent for the initial state.
+        to_state:
+          type: string
+    LifecycleGuardProblem:
+      description: >-
+        A refused lifecycle transition (422). Type
+        urn:reticora:problem:lifecycle-guard: the transition context fails
+        required fields or guard rules, each failed rule is a violation.
+        Type urn:reticora:problem:invalid-transition: the model has no edge
+        from the current state to to_state, or no such state (field
+        to_state, from_state, to_state). Type
+        urn:reticora:problem:invalid-field with field to_state: to_state is
+        missing, or the entity's type has no lifecycle model.
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          properties:
+            from_state:
+              type: string
+              description: Current state of an invalid transition.
+            to_state:
+              type: string
+              description: Requested state of an invalid transition.
+            violations:
+              type: array
+              items:
+                type: object
+                required: [field, code, message]
+                properties:
+                  field:
+                    type: string
+                    description: Field of the transition context.
+                  code:
+                    type: string
+                    description: Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json).
+                  message: { type: string }
+    LifecycleTransitionConflictProblem:
+      description: >-
+        from_state is not the current state (409, type
+        urn:reticora:problem:conflict).
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          required: [current_state]
+          properties:
+            current_state:
+              type: string
+              description: The current lifecycle state; empty without one.
     LifecycleModelInUseProblem:
       description: The lifecycle model is in use (409 of DELETE).
       allOf:
