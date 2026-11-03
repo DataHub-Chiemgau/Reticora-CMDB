@@ -561,15 +561,29 @@ type reservationReleaser interface {
 	DeleteReservation(ctx context.Context, orgID, subnetID, id string) error
 }
 
-// resolveDuplicateIP carries out accept of a duplicate_ip item from a
-// reservation conflict (NET-09, E-53): the observation stands and the
-// reservation is released, in the resolution transaction (WP-675), which
-// DeleteReservation joins. Dismiss keeps both. A reservation that is gone
-// or an item naming none is refused with 422, a server without IPAM
-// repository with 501; the item stays open (WP-676).
+// duplicateSideRemover re-reads the rows of a duplicate address and
+// removes those of one side (NET-06, WP-773); the IPAM repositories
+// implement it.
+type duplicateSideRemover interface {
+	ipam.DuplicateFinder
+	DeleteIPAddress(ctx context.Context, orgID, id string) error
+}
+
+// resolveDuplicateIP carries out accept of a duplicate_ip item (E-53) in
+// the resolution transaction (WP-675). An item of a reservation conflict
+// (NET-09, WP-772, payload reservation_ip_id) releases the reservation,
+// which DeleteReservation joins: the observation stands. An item of
+// duplicate observations (NET-06, WP-300, payload holders) removes the
+// address at the side of the chosen CI (resolveDuplicateSide). Dismiss
+// keeps everything. A refused accept leaves the item open (WP-676): 400
+// without the required ci_id, 422 for a reservation or side that is gone
+// and 501 on a server without IPAM repository.
 func (h *Handler) resolveDuplicateIP(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	if res.Action != reviews.ActionAccept {
 		return false, nil
+	}
+	if _, reservation := item.Payload["reservation_ip_id"]; !reservation {
+		return false, h.resolveDuplicateSide(ctx, item, res)
 	}
 	releaser, ok := h.interfaces.(reservationReleaser)
 	if !ok {
@@ -587,6 +601,62 @@ func (h *Handler) resolveDuplicateIP(ctx context.Context, item *ReviewItem, res 
 	}
 	res.Note = "reservation " + reservationID + " of " + payloadString(item.Payload, "address") + " released, observation accepted"
 	return false, nil
+}
+
+// resolveDuplicateSide carries out accept of a duplicate_ip item of
+// duplicate observations (NET-06, E-53): the address at the side of CI
+// res.CIID is stale, and all its ip_address rows of the address in the VRF
+// are removed. With one CI involved that CI is the side; with several,
+// ci_id is required and must be one of candidate_ci_ids (400, like merge).
+// The rows are read again in the resolution transaction by the duplicate
+// check (ipam.DuplicateFinder); a CI that no longer holds the address next
+// to another side, for instance after REC-07 removed it, is refused with
+// 422.
+func (h *Handler) resolveDuplicateSide(ctx context.Context, item *ReviewItem, res *Resolution) error {
+	remover, ok := h.interfaces.(duplicateSideRemover)
+	if !ok {
+		return refused(http.StatusNotImplemented, "this server cannot remove addresses")
+	}
+	if res.CIID == "" && len(item.CandidateCIIDs) == 1 {
+		res.CIID = item.CandidateCIIDs[0]
+	}
+	switch {
+	case res.CIID == "":
+		return refused(http.StatusBadRequest, "ci_id is required to accept a duplicate address of several CIs")
+	case !containsString(item.CandidateCIIDs, res.CIID):
+		return refused(http.StatusBadRequest, "ci_id is not one of the candidate CIs")
+	}
+	vrfID, address := payloadString(item.Payload, "vrf_id"), payloadString(item.Payload, "address")
+	if !isUUID(vrfID) || address == "" {
+		return refused(http.StatusUnprocessableEntity, "the item names no address")
+	}
+	dups, err := remover.FindDuplicates(ctx, item.OrganizationID, ipam.DuplicateSource{
+		Keys: []ipam.DuplicateKey{{VRFID: vrfID, Host: address}}})
+	if err != nil {
+		return err
+	}
+	var rows []string
+	for i := range dups {
+		for _, holder := range dups[i].Holders {
+			if holder.CIID == res.CIID {
+				rows = append(rows, holder.IPAddressID)
+			}
+		}
+	}
+	gone := refused(http.StatusUnprocessableEntity, "the CI "+res.CIID+" no longer holds "+address+" next to another side; dismiss the item")
+	if len(rows) == 0 {
+		return gone
+	}
+	for _, id := range rows {
+		if err = remover.DeleteIPAddress(ctx, item.OrganizationID, id); err != nil {
+			if errors.Is(err, ipam.ErrNotFound) {
+				return gone
+			}
+			return err
+		}
+	}
+	res.Note = fmt.Sprintf("%s at CI %s stale: %d address rows removed", address, res.CIID, len(rows))
+	return nil
 }
 
 // ciRestorer reactivates soft-deleted CIs; the PostgreSQL CI repository

@@ -275,6 +275,8 @@ func seedObjectReferences(t *testing.T, f *scopetest.Fixture) map[string]objectR
 	}
 	inOrg := func(ref string) []any { return []any{ref, org} }
 	ticket := `INSERT INTO ticket (organization_id, title, reporter_id, %s) VALUES ($2, 'w838', '` + user + `', $1)`
+	// With the triggers off no ticket number is assigned (ticket_number_assign, 000214).
+	ticketFK := `INSERT INTO ticket (organization_id, title, reporter_id, ticket_number, %s) VALUES ($2, 'w838', '` + user + `', 1, $1)`
 	disposal := `INSERT INTO disposal_record (organization_id, method, performed_at, %s) VALUES ($2, 'reuse', now(), $1)`
 	orderItem := `INSERT INTO internal_order_item (organization_id, order_id, description, quantity, %s)
 		VALUES ($2, '` + order + `', 'w838', 1, $1)`
@@ -305,13 +307,13 @@ func seedObjectReferences(t *testing.T, f *scopetest.Fixture) map[string]objectR
 			constraint: "ticket_related_ci_id_fkey",
 			def:        "FOREIGN KEY (related_ci_id, organization_id) REFERENCES ci(id, organization_id)",
 			app:        fmt.Sprintf(ticket, "related_ci_id"), appConstraint: "ticket_related_ci_id_fkey",
-			fk: fmt.Sprintf(ticket, "related_ci_id"), args: inOrg, foreign: ciB, own: ciA,
+			fk: fmt.Sprintf(ticketFK, "related_ci_id"), args: inOrg, foreign: ciB, own: ciA,
 		},
 		"ticket.related_asset_id": {
 			constraint: "ticket_related_asset_id_fkey",
 			def:        "FOREIGN KEY (related_asset_id, organization_id) REFERENCES asset(id, organization_id)",
 			app:        fmt.Sprintf(ticket, "related_asset_id"), appConstraint: "ticket_related_asset_id_fkey",
-			fk: fmt.Sprintf(ticket, "related_asset_id"), args: inOrg, foreign: assetB, own: assetA,
+			fk: fmt.Sprintf(ticketFK, "related_asset_id"), args: inOrg, foreign: assetB, own: assetA,
 		},
 		"reservation.asset_id": {
 			constraint: "reservation_asset_id_fkey",

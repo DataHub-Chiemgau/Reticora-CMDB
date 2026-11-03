@@ -108,13 +108,15 @@ type restoreState struct {
 
 // Change types (kept as data, not code; the CHECK constraint lists the
 // current vocabulary but new classes are additive). The type change is
-// type_changed (CI-11, 000167).
+// type_changed (CI-11, 000167), the template migration of a CI
+// template_migration (WP-253, 000210); Replay treats it as the update of
+// the field attributes.
 var ChangeTypes = map[string]bool{
 	"create": true, "update": true, "delete": true, "status_change": true,
 	"attribute_change": true, "type_changed": true, "lifecycle_transition": true,
 	"location_change": true, "movement": true, "override": true,
 	"reconciliation_decision": true, "parent_child_change": true,
-	"assignment": true, "relationship_change": true,
+	"assignment": true, "relationship_change": true, "template_migration": true,
 }
 
 // ChangeKinds are the kinds of a CI change (AUD-03, ci_change.change_kind

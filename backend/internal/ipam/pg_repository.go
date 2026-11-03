@@ -848,6 +848,10 @@ type SyncResult struct {
 	// Conflicts are the reservations (WP-299) of an address this sync
 	// observed in the same VRF (NET-09); the reservations are unchanged.
 	Conflicts []ReservationConflict
+	// Observed are the VRF and host address of every address row the sync
+	// wrote (from RETURNING), for the duplicate check after the commit
+	// (NET-06, WP-300).
+	Observed []DuplicateKey
 }
 
 // ReservationConflict is a reservation of an address that discovery
@@ -878,6 +882,7 @@ const MaxMissedObservations = 3
 // interfaces at all. Observed addresses take the VRF of the record
 // (ObservedInterface.VRFID); one set-based query afterwards reports the
 // reservations of an observed address in its VRF as Conflicts (NET-09).
+// Observed reports the VRF and host of the written addresses (NET-06).
 func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID string, observed []ObservedInterface) (SyncResult, error) {
 	var res SyncResult
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -927,23 +932,26 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			seenInterfaces[id] = true
 			for _, address := range ifc.IPs {
 				var ipID string
+				var key DuplicateKey
 				// The VRF of the record, resolved in the organization; an
 				// empty or unknown one leaves NULL and trg_ip_address_vrf
 				// sets the default VRF (WP-772).
 				err = tx.QueryRow(ctx, `UPDATE ip_address SET miss_count = 0, last_seen_at = now(), updated_at = now(),
 					vrf_id = (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(3)+` AND v.organization_id = $4)
-					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text`,
-					id, address, ifc.VRFID, orgID).Scan(&ipID)
+					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text, vrf_id::text, host(address)`,
+					id, address, ifc.VRFID, orgID).Scan(&ipID, &key.VRFID, &key.Host)
 				if errors.Is(err, pgx.ErrNoRows) {
 					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at, vrf_id)
 						VALUES ($1, $2, $3::inet, 'discovered', now(),
-							(SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(4)+` AND v.organization_id = $1)) RETURNING id::text`,
-						orgID, id, address, ifc.VRFID).Scan(&ipID)
+							(SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(4)+` AND v.organization_id = $1))
+						RETURNING id::text, vrf_id::text, host(address)`,
+						orgID, id, address, ifc.VRFID).Scan(&ipID, &key.VRFID, &key.Host)
 				}
 				if err != nil {
 					return fmt.Errorf("sync address %s: %w", address, err)
 				}
 				seenIPs = append(seenIPs, ipID)
+				res.Observed = append(res.Observed, key)
 			}
 		}
 

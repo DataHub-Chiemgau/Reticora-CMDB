@@ -81,8 +81,8 @@ const BACKEND_ENUMS = {
     'policy',
     'other',
   ],
-  // backend/migrations/000013_phase2_tickets.up.sql ticket_status_check.
-  ticketStatuses: ['open', 'in_progress', 'waiting', 'resolved', 'closed'],
+  // backend/migrations/000214_ticket_states_number.up.sql ticket_status_check.
+  ticketStatuses: ['new', 'open', 'in_progress', 'waiting', 'resolved', 'closed'],
   // backend/migrations/000013_phase2_tickets.up.sql ticket_category_check.
   ticketCategories: ['incident', 'request', 'problem', 'change', 'task'],
   // backend/migrations/000027_workflows_forms.up.sql workflow_step_status_check

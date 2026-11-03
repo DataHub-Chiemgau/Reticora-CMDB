@@ -1186,11 +1186,17 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 // known devices do as well. The records of one device keep their order.
 // When a record fails in the batch of its window, the window rolls back and
 // its records follow one by one (processWindow).
+//
+// After the last record one query checks the addresses the committed
+// records wrote for duplicates within their VRF (collectDuplicates, NET-06).
 func (h *Handler) processItems(ctx context.Context, orgID string, items []IngestItem) (BulkIngestResponse, error) {
 	var resp BulkIngestResponse
 	if h.ciRepo == nil {
 		return resp, nil
 	}
+	// One duplicate address check after the last record (NET-06, WP-300).
+	ctx, checkDuplicates := h.collectDuplicates(ctx, orgID)
+	defer checkDuplicates()
 	// The CI stores the catalog key of the profile's system template.
 	mapSystemTemplates(ctx, orgID, items)
 	// Whether the transactions take the ingest locks (WP-334): records

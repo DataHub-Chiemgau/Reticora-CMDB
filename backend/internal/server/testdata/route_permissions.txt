@@ -21,6 +21,7 @@ DELETE /api/v1/credentials/{id} credential:manage
 DELETE /api/v1/desks/{id} desk:write
 DELETE /api/v1/discovery-scopes/{id} discovery:manage
 DELETE /api/v1/documents/{id} document:write
+DELETE /api/v1/documents/{id}/links/{link_id} document:write
 DELETE /api/v1/forms/{id} form:write
 DELETE /api/v1/iga/connectors/{id} iga:write
 DELETE /api/v1/inventory/items/{id} stock:write
@@ -29,10 +30,13 @@ DELETE /api/v1/ip-addresses/{id} ipam:write
 DELETE /api/v1/ips/{id} ipam:write
 DELETE /api/v1/jobs/{id} job:read
 DELETE /api/v1/keys/{id} key:write
+DELETE /api/v1/layouts/{id} citype:manage
 DELETE /api/v1/lifecycle-definitions/{id} lifecycle:manage
 DELETE /api/v1/lifecycle-models/{id} lifecycle:manage
 DELETE /api/v1/locations/{id} location:write
 DELETE /api/v1/maintenance-windows/{id} maintenance:write
+DELETE /api/v1/metamodel/drafts/{id} citype:manage
+DELETE /api/v1/metamodel/drafts/{id}/items/{item_id} citype:manage
 DELETE /api/v1/monitoring/alerts/{id} monitoring:write
 DELETE /api/v1/mounts/{id} rack:write
 DELETE /api/v1/network-interfaces/{id} ipam:write
@@ -104,6 +108,7 @@ GET /api/v1/ci-types/templates ci:read
 GET /api/v1/ci-types/{id} ci:read
 GET /api/v1/ci-types/{id}/attribute-sets ci:read
 GET /api/v1/ci-types/{id}/fields ci:read
+GET /api/v1/ci-types/{id}/form ci:read
 GET /api/v1/ci-types/{id}/versions ci:read
 GET /api/v1/cis ci:read
 GET /api/v1/cis/{id} ci:read
@@ -113,6 +118,7 @@ GET /api/v1/cis/{id}/contacts contact:read
 GET /api/v1/cis/{id}/dependencies topology:read
 GET /api/v1/cis/{id}/field-definitions ci:read
 GET /api/v1/cis/{id}/fields ci:read
+GET /api/v1/cis/{id}/form ci:read
 GET /api/v1/cis/{id}/instance-attributes ci:read
 GET /api/v1/cis/{id}/interfaces ipam:read
 GET /api/v1/cis/{id}/lifecycle-transitions ci:read
@@ -192,6 +198,8 @@ GET /api/v1/jobs/{id}/result job:read
 GET /api/v1/keys key:read
 GET /api/v1/keys/{id} key:read
 GET /api/v1/keys/{id}/assignments key:read
+GET /api/v1/layouts ci:read
+GET /api/v1/layouts/{id} ci:read
 GET /api/v1/lifecycle-definitions asset:read
 GET /api/v1/lifecycle-definitions/{id} asset:read
 GET /api/v1/lifecycle-models asset:read
@@ -204,6 +212,10 @@ GET /api/v1/maintenance-windows/{id} maintenance:read
 GET /api/v1/maintenance-windows/{id}/notifications maintenance:read
 GET /api/v1/me authenticated
 GET /api/v1/me/permissions authenticated
+GET /api/v1/metamodel/drafts citype:manage
+GET /api/v1/metamodel/drafts/{id} citype:manage
+GET /api/v1/metamodel/drafts/{id}/items citype:manage
+GET /api/v1/metamodel/drafts/{id}/test metamodel:publish
 GET /api/v1/modules entitlement:read
 GET /api/v1/monitoring/alerts monitoring:read
 GET /api/v1/monitoring/metrics monitoring:read
@@ -328,9 +340,11 @@ PATCH /api/v1/inventory/items/{id} stock:write
 PATCH /api/v1/ip-addresses/{id} ipam:write
 PATCH /api/v1/ips/{id} ipam:write
 PATCH /api/v1/keys/{id} key:write
+PATCH /api/v1/layouts/{id} citype:manage
 PATCH /api/v1/lifecycle-models/{id} lifecycle:manage
 PATCH /api/v1/locations/{id} location:write
 PATCH /api/v1/maintenance-windows/{id} maintenance:write
+PATCH /api/v1/metamodel/drafts/{id} citype:manage
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/mounts/{id} rack:write
 PATCH /api/v1/network-interfaces/{id} ipam:write
@@ -458,11 +472,15 @@ POST /api/v1/jobs/{id}/revert job:read
 POST /api/v1/keys key:write
 POST /api/v1/keys/{id}/issue key:write
 POST /api/v1/keys/{id}/return key:write
+POST /api/v1/layouts citype:manage
 POST /api/v1/lifecycle-definitions lifecycle:manage
 POST /api/v1/lifecycle-models lifecycle:manage
 POST /api/v1/locations location:write
 POST /api/v1/maintenance-windows maintenance:write
 POST /api/v1/maintenance-windows/{id}/notify maintenance:write
+POST /api/v1/metamodel/drafts citype:manage
+POST /api/v1/metamodel/drafts/{id}/items citype:manage
+POST /api/v1/metamodel/drafts/{id}/test metamodel:publish
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/mounts rack:write
@@ -506,6 +524,7 @@ POST /api/v1/teams team:manage
 POST /api/v1/teams/{id}/members team:manage
 POST /api/v1/templates citype:manage
 POST /api/v1/templates/{id}/clone citype:manage
+POST /api/v1/templates/{id}/migrations citype:manage
 POST /api/v1/templates/{id}/versions citype:manage
 POST /api/v1/templates/{id}/versions/{version}/publish metamodel:publish
 POST /api/v1/tickets ticket:write

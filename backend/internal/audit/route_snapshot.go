@@ -401,7 +401,6 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/desks/{id}/bookings":         "desk_booking",
 		"POST /api/v1/discovery/jobs":              "discovery_job",
 		"POST /api/v1/disposal-records":            "disposal_record",
-		"POST /api/v1/documents/{id}/links":        "document_link",
 		"POST /api/v1/export/jobs":                 "export_job",
 		"POST /api/v1/exports":                     "export_job",
 		"POST /api/v1/forms/{id}/submissions":      "form_submission",
@@ -425,6 +424,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// The index job of a definition (WP-796): the answer names the queued
 	// or the open job as job_id.
 	m["POST /api/v1/attribute-definitions/{id}/reindex"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
+	// The template migration job (WP-712): the answer names it as job_id;
+	// the migrated CIs are audited by the job (ci.template_migrated).
+	m["POST /api/v1/templates/{id}/migrations"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
 	// A role assignment is a custom-role grant or a standard-role
 	// assignment.
 	for _, route := range []string{"POST /api/v1/role-assignments", "POST /api/v1/roles/assign"} {
@@ -490,6 +492,11 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 			    WHERE rp.organization_id = t.organization_id AND rp.role_id = t.id
 			   UNION SELECT jsonb_array_elements_text(COALESCE(t.permissions, '[]'::jsonb))) k
 			  WHERE k.key IN (SELECT key FROM permission)))`}
+	// The test run of a metamodel draft (WP-721): the draft and the job
+	// its report names; an earlier report shows its counters only, its
+	// violations name CIs of every client (E-106).
+	m["POST /api/v1/metamodel/drafts/{id}/test"] = RouteSnapshot{Table: "metamodel_draft", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `to_jsonb(t) || jsonb_build_object('test_report', t.test_report - 'violations')`}
 	m["POST /api/v1/tickets/{id}/sla"] = RouteSnapshot{Table: "ticket_sla", Keys: []SnapshotKey{{"ticket_id", "id"}}}
 	// Relationship types are addressed by key; the organization's own type,
 	// not the built-in one of the same key.

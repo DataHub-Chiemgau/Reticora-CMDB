@@ -30,7 +30,10 @@ import (
 // the type's definitions by the database. Validation is the rule AST of
 // MET-45 (api/rules.schema.json), evaluated bindingly by internal/rules; a
 // legacy structure in a request or a stored row is translated into it
-// (WP-589), and a required rule makes the definition required.
+// (WP-589), and a required rule makes the definition required. Computed
+// is the expression of a computed attribute (WP-258, $defs/expr): such an
+// attribute is neither required nor unique and has no default; it stays
+// computed (or entered) for its lifetime, only its expression can change.
 type AttributeDefinition struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organization_id,omitempty"`
@@ -52,6 +55,7 @@ type AttributeDefinition struct {
 	UniqueScope     string                      `json:"unique_scope"`
 	Inheritable     bool                        `json:"inheritable"`
 	Validation      *rules.Rule                 `json:"validation,omitempty"`
+	Computed        *rules.Expr                 `json:"computed,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
 	ReferenceTarget string                      `json:"reference_target,omitempty"`
 	Group           string                      `json:"group,omitempty"`
@@ -76,7 +80,9 @@ type AttributeDefinition struct {
 
 // AttributeDefinitionPatch changes a definition; key, CI type, attribute
 // set and scope are immutable. Validation is a rule AST or the legacy structure (see
-// fieldmeta.ParseValidation); null or {} removes the rules.
+// fieldmeta.ParseValidation); null or {} removes the rules. Computed is an
+// expression ($defs/expr, WP-258); it can be changed but neither added to
+// an entered definition nor removed (null) after creation.
 type AttributeDefinitionPatch struct {
 	DisplayName     LocalizedText               `json:"display_name,omitempty"`
 	Description     *string                     `json:"description,omitempty"`
@@ -90,6 +96,7 @@ type AttributeDefinitionPatch struct {
 	UniqueScope     *string                     `json:"unique_scope,omitempty"`
 	Inheritable     *bool                       `json:"inheritable,omitempty"`
 	Validation      json.RawMessage             `json:"validation,omitempty"`
+	Computed        json.RawMessage             `json:"computed,omitempty"`
 	Conditional     *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
 	ReferenceTarget *string                     `json:"reference_target,omitempty"`
 	Group           *string                     `json:"group,omitempty"`
@@ -166,6 +173,7 @@ func (d *AttributeDefinition) Field() Field {
 		EnumValues: d.EnumValues, UIGroup: d.Group, SortOrder: d.Order,
 		Validation: d.legacyValidation(), Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
 		IsSystem: d.IsSystem, MultiValue: &multiValue, Inheritable: d.Inheritable,
+		Computed: d.Computed, Unique: d.Unique,
 	}
 	if d.Scope == "global" {
 		f.AppliesTo, f.AppliesToCategories, f.AppliesToTypeIDs = d.AppliesTo, d.AppliesToCategories, d.AppliesToTypeIDs
@@ -227,6 +235,9 @@ func (d *AttributeDefinition) Validate() error {
 	if err := d.validateAppliesTo(); err != nil {
 		return err
 	}
+	if err := d.validateComputed(); err != nil {
+		return err
+	}
 	if err := fieldmeta.ValidateDefinition(d.definition()); err != nil {
 		return &api.FieldError{Field: definitionField(err), Message: err.Error()}
 	}
@@ -240,6 +251,86 @@ func (d *AttributeDefinition) Validate() error {
 		if err := fieldmeta.ValidateValue(d.definition(), value); err != nil {
 			return &api.FieldError{Field: "default", Message: err.Error()}
 		}
+	}
+	return nil
+}
+
+// errComputed refuses a computed expression (422 on computed, WP-258).
+func errComputed(message string) error {
+	return &api.FieldError{Field: "computed", Message: message, Status: http.StatusUnprocessableEntity}
+}
+
+// computedResults are the result types of an expression (rules.ResultType)
+// each data type that can be computed takes; any, a reference to an
+// attribute of the record, fits every one of them.
+var computedResults = map[string][]string{
+	fieldmeta.TypeInteger:   {rules.ResultNumber},
+	fieldmeta.TypeDecimal:   {rules.ResultNumber},
+	fieldmeta.TypeText:      {rules.ResultString, rules.ResultDate},
+	fieldmeta.TypeMultiline: {rules.ResultString, rules.ResultDate},
+	fieldmeta.TypeDate:      {rules.ResultDate},
+	fieldmeta.TypeBoolean:   {rules.ResultBoolean},
+}
+
+// validateComputed checks the expression of a computed attribute (WP-258)
+// against the definition: a single-valued data type of computedResults
+// that takes the result type of the expression, no reference to the
+// attribute itself, and neither required (also by a required rule) nor a
+// default nor unique (CHECK attribute_definition_computed_check). A
+// reference to another computed attribute is refused in the transaction
+// (checkComputedReferencesTx).
+// validation: fixed texts naming the data type or the setting that fails.
+func (d *AttributeDefinition) validateComputed() error {
+	if d.Computed == nil {
+		return nil
+	}
+	results, computable := computedResults[fieldmeta.CanonicalType(d.DataType)]
+	switch result := d.Computed.ResultType(); {
+	case !computable || d.MultiValue:
+		return errComputed(fmt.Sprintf("data type %s cannot be computed (integer, decimal, text, multiline, date, boolean; single-valued)", d.DataType))
+	case result != rules.ResultAny && !slices.Contains(results, result):
+		return errComputed(fmt.Sprintf("the expression yields %s, which does not fit data type %s", result, d.DataType))
+	case slices.Contains(d.Computed.Fields(), d.Key):
+		return errComputed("the expression refers to the attribute itself")
+	case d.Required:
+		return errComputed("a computed attribute cannot be required")
+	case len(d.Default) > 0 && string(d.Default) != "null":
+		return errComputed("a computed attribute cannot have a default")
+	case d.Unique:
+		return errComputed("a computed attribute cannot be unique")
+	}
+	return nil
+}
+
+// checkComputedReferencesTx refuses an expression that refers to another
+// computed attribute, and a computed attribute another expression refers
+// to (WP-258): computed attributes are computed from entered values only.
+// It reads every definition the organization sees, like
+// checkCompositionTx.
+// validation: fixed texts naming the computed attribute.
+func checkComputedReferencesTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) error {
+	if d.Computed == nil {
+		return nil
+	}
+	var key string
+	err := tx.QueryRow(ctx, `SELECT key FROM attribute_definition
+		WHERE computed IS NOT NULL AND key <> $2 AND key = ANY($1::text[])
+		ORDER BY key LIMIT 1`, d.Computed.Fields(), d.Key).Scan(&key)
+	switch {
+	case err == nil:
+		return errComputed(fmt.Sprintf("the expression refers to the computed attribute %s", key))
+	case !errors.Is(err, pgx.ErrNoRows):
+		return fmt.Errorf("read computed attributes: %w", err)
+	}
+	err = tx.QueryRow(ctx, `SELECT key FROM attribute_definition
+		WHERE computed IS NOT NULL AND key <> $1
+		  AND jsonb_path_exists(computed, '$.** ? (@.op == "field" && @.field == $key)', jsonb_build_object('key', $1::text))
+		ORDER BY key LIMIT 1`, d.Key).Scan(&key)
+	switch {
+	case err == nil:
+		return errComputed(fmt.Sprintf("the computed attribute %s refers to this attribute", key))
+	case !errors.Is(err, pgx.ErrNoRows):
+		return fmt.Errorf("read computed attributes: %w", err)
 	}
 	return nil
 }
@@ -347,7 +438,8 @@ func definitionField(err error) string {
 	return "data_type"
 }
 
-// apply changes d; a validation that is no valid rule is a *api.FieldError.
+// apply changes d; a validation that is no valid rule is a *api.FieldError
+// (400), an invalid computed expression one with 422 (WP-258).
 func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) error {
 	if p.Validation != nil {
 		rule, err := fieldmeta.ParseValidation(p.Validation)
@@ -355,6 +447,16 @@ func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) error {
 			return &api.FieldError{Field: "validation", Message: err.Error()}
 		}
 		d.Validation = rule
+	}
+	if p.Computed != nil {
+		d.Computed = nil
+		if string(p.Computed) != "null" {
+			expr, err := rules.ParseExpr(p.Computed)
+			if err != nil {
+				return errComputed(err.Error())
+			}
+			d.Computed = &expr
+		}
 	}
 	if p.DisplayName != nil {
 		d.DisplayName = p.DisplayName
@@ -432,19 +534,20 @@ const attributeColumns = `id::text, COALESCE(organization_id::text, ''), COALESC
 	display_name, COALESCE(description, ''), data_type, required, default_value, enum_values,
 	multi_value, searchable, is_unique, unique_scope, inheritable, validation, conditional,
 	COALESCE(reference_target, ''), COALESCE(group_name, ''), sort_order, COALESCE(unit, ''),
-	applies_to, applies_to_categories, applies_to_type_ids::text[], created_at, updated_at`
+	applies_to, applies_to_categories, applies_to_type_ids::text[], computed, created_at, updated_at`
 
 func scanAttribute(row pgx.Row) (*AttributeDefinition, error) {
 	var (
-		d                                                      AttributeDefinition
-		displayName, def, enumRaw, validationRaw, conditionRaw []byte
+		d                                                                   AttributeDefinition
+		displayName, def, enumRaw, validationRaw, conditionRaw, computedRaw []byte
 	)
 	if err := row.Scan(&d.ID, &d.OrganizationID, &d.CITypeID, &d.AttributeSetID, &d.Scope, &d.Key, &displayName, &d.Description,
 		&d.DataType, &d.Required, &def, &enumRaw, &d.MultiValue, &d.Searchable, &d.Unique, &d.UniqueScope,
 		&d.Inheritable, &validationRaw, &conditionRaw, &d.ReferenceTarget, &d.Group, &d.Order, &d.Unit,
-		&d.AppliesTo, &d.AppliesToCategories, &d.AppliesToTypeIDs, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		&d.AppliesTo, &d.AppliesToCategories, &d.AppliesToTypeIDs, &computedRaw, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, err
 	}
+	d.Computed = storedComputed(computedRaw)
 	if err := json.Unmarshal(displayName, &d.DisplayName); err != nil {
 		return nil, fmt.Errorf("decode display_name: %w", err)
 	}
@@ -465,6 +568,22 @@ func scanAttribute(row pgx.Row) (*AttributeDefinition, error) {
 	d.IsSystem = d.OrganizationID == ""
 	d.normalizeAppliesTo()
 	return &d, nil
+}
+
+// storedComputed reads the computed column of attribute_definition; NULL
+// is an entered attribute. The column holds only expressions the API
+// accepted (ParseExpr); one that no longer parses is logged and read as
+// none.
+func storedComputed(raw []byte) *rules.Expr {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	expr, err := rules.ParseExpr(raw)
+	if err != nil {
+		slog.Error("stored computed expression is invalid", "error", err)
+		return nil
+	}
+	return &expr
 }
 
 // normalizeAppliesTo renders the lists of a read definition as [] rather
@@ -510,10 +629,14 @@ func attributeArgs(d *AttributeDefinition) []any {
 	if d.Conditional != nil {
 		conditional = d.Conditional
 	}
+	var computed any
+	if d.Computed != nil {
+		computed = d.Computed
+	}
 	return []any{d.DisplayName, nilIfEmpty(d.Description), d.DataType, d.Required, def, enum, d.MultiValue,
 		d.Searchable, d.Unique, d.UniqueScope, d.Inheritable, validation, conditional,
 		nilIfEmpty(d.ReferenceTarget), nilIfEmpty(d.Group), d.Order, nilIfEmpty(d.Unit),
-		appliesToMode(d.AppliesTo), nonNil(d.AppliesToCategories), nonNil(d.AppliesToTypeIDs)}
+		appliesToMode(d.AppliesTo), nonNil(d.AppliesToCategories), nonNil(d.AppliesToTypeIDs), computed}
 }
 
 // insertAttributeTx inserts a definition; a type-scoped definition takes
@@ -525,14 +648,17 @@ func insertAttributeTx(ctx context.Context, tx pgx.Tx, orgID string, d *Attribut
 			ci_type_id, attribute_set_id, organization_id, scope, key, display_name, description, data_type,
 			required, default_value, enum_values, multi_value, searchable, is_unique, unique_scope, inheritable,
 			validation, conditional, reference_target, group_name, sort_order, unit,
-			applies_to, applies_to_categories, applies_to_type_ids)
+			applies_to, applies_to_categories, applies_to_type_ids, computed)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-			$23, $24, $25::uuid[])
+			$23, $24, $25::uuid[], $26)
 		RETURNING `+attributeColumns, args...))
 	if err != nil {
 		return attributeDBError(err)
 	}
 	*d = *created
+	if err := checkComputedReferencesTx(ctx, tx, d); err != nil {
+		return err
+	}
 	return checkDefinitionCompositionTx(ctx, tx, d)
 }
 
@@ -543,12 +669,15 @@ func updateAttributeTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) e
 			enum_values = $7, multi_value = $8, searchable = $9, is_unique = $10, unique_scope = $11,
 			inheritable = $12, validation = $13, conditional = $14, reference_target = $15,
 			group_name = $16, sort_order = $17, unit = $18,
-			applies_to = $19, applies_to_categories = $20, applies_to_type_ids = $21::uuid[]
+			applies_to = $19, applies_to_categories = $20, applies_to_type_ids = $21::uuid[], computed = $22
 		WHERE id = $1 RETURNING `+attributeColumns, args...))
 	if err != nil {
 		return attributeDBError(err)
 	}
 	*d = *updated
+	if err := checkComputedReferencesTx(ctx, tx, d); err != nil {
+		return err
+	}
 	return checkDefinitionCompositionTx(ctx, tx, d)
 }
 
@@ -566,6 +695,9 @@ const compositionConstraint = "attribute_definition_composition"
 // attributeDBError maps a failed definition write onto the request.
 func attributeDBError(err error) error {
 	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "attribute_definition_computed_check" {
+		return errComputed("a computed attribute cannot be required, have a default or be unique")
+	}
 	if errors.As(err, &pgErr) && pgErr.ConstraintName == compositionConstraint {
 		// compose_attribute_definition reports the code of the conflict in
 		// DETAIL, as CompositionError.Code.
@@ -1031,6 +1163,9 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 		before := *d
 		if perr := patch.apply(d); perr != nil {
 			return perr
+		}
+		if (before.Computed == nil) != (d.Computed == nil) {
+			return errComputed("a definition cannot switch between computed and entered after creation")
 		}
 		if verr := d.Validate(); verr != nil {
 			return verr

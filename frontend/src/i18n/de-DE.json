@@ -656,6 +656,7 @@
     "createdAt": "Erstellt",
     "startWork": "Bearbeiten",
     "statuses": {
+      "new": "Neu",
       "open": "Offen",
       "in_progress": "In Bearbeitung",
       "waiting": "Wartend",
@@ -1741,6 +1742,16 @@
       "accept": "Übernehmen"
     },
     "candidate": "Kandidat",
+    "holders": {
+      "title": "Seiten der doppelten Adresse",
+      "address": "Adresse",
+      "vrf": "VRF",
+      "ci": "CI",
+      "interface": "Interface",
+      "type": "Typ",
+      "noCI": "ohne CI",
+      "side": "Seite mit veralteter Adresse"
+    },
     "diff": "Vergleich von Beobachtung und CI",
     "field": "Feld",
     "observed": "Beobachtet",

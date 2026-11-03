@@ -87,9 +87,9 @@ var dbLeak = regexp.MustCompile(`(?i)sqlstate|constraint|policy|violat|row-level
 // document of a client-2 CI answers 404, a link to an unknown or disallowed
 // object (as an org-wide principal) 404 or 422 and an invalid id 400 or 404,
 // never with an SQLSTATE, constraint or policy text; a client-1 link to a
-// client-2, unknown or disallowed object is a write outside its scope and
-// refused alike with 403. The client-2 document and its link stay
-// unchanged; the own document answers 2xx.
+// client-2 or unknown object answers 404 alike, one to a disallowed type 422
+// (WP-267: target and type are checked before the INSERT). The client-2
+// document and its link stay unchanged; the own document answers 2xx.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestDocumentHandlerErrorsAreSanitized(t *testing.T) {
@@ -149,12 +149,12 @@ func TestDocumentHandlerErrorsAreSanitized(t *testing.T) {
 		{"patch client-2 document", http.MethodPatch, "/api/v1/documents/" + foreignDoc.ID, `{"title":"hijacked"}`, http.StatusNotFound, false},
 		{"delete client-2 document", http.MethodDelete, "/api/v1/documents/" + foreignDoc.ID, "", http.StatusNotFound, false},
 		{"link client-2 document", http.MethodPost, "/api/v1/documents/" + foreignDoc.ID + "/links", link("ci", ownCI), http.StatusNotFound, false},
-		// A link of client 1 to a client-2 CI, to an unknown CI or to a
-		// disallowed type would not be a client-1 row: a write outside the
-		// client-1 scope, refused alike without telling the cases apart.
-		{"link to a client-2 CI", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", foreignCI), http.StatusForbidden, false},
-		{"link to an unknown CI (client 1)", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", unknown), http.StatusForbidden, false},
-		{"link to a disallowed entity type (client 1)", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("bogus", ownCI), http.StatusForbidden, false},
+		// A client-2 CI does not exist for client 1: it answers like an
+		// unknown CI, without telling the cases apart (WP-267). An entity
+		// type outside the registry is refused before anything is read.
+		{"link to a client-2 CI", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", foreignCI), http.StatusNotFound, false},
+		{"link to an unknown CI (client 1)", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", unknown), http.StatusNotFound, false},
+		{"link to a disallowed entity type (client 1)", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("bogus", ownCI), http.StatusUnprocessableEntity, false},
 		// Invalid reference.
 		{"link to an unknown CI", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", unknown), http.StatusNotFound, true},
 		{"link to a disallowed entity type", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("bogus", ownCI), http.StatusUnprocessableEntity, true},

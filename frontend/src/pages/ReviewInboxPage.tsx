@@ -12,7 +12,10 @@
  * resolved meanwhile) stays visible on the page although the refetched list
  * no longer holds the item and its detail closes (WP-557). The escalation
  * filter lives in the URL (?escalated=true), so the link of the dashboard
- * widget opens the inbox on the escalated items (REC-08, F-247).
+ * widget opens the inbox on the escalated items (REC-08, F-247). A
+ * duplicate_ip item of duplicate observations shows its address, VRF and
+ * every side of payload.holders; accept names the stale side as ci_id and
+ * is no bulk action (NET-06, E-53, WP-773).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -89,9 +92,36 @@ export function reviewDiff(item: ReviewItem, ci: CI | undefined): DiffRow[] {
   });
 }
 
+/** DuplicateHolder is one ip_address row of a duplicate_ip item (WP-300). */
+export interface DuplicateHolder {
+  ip_address_id: string;
+  interface_id?: string;
+  ci_id?: string;
+  type: string;
+}
+
+/**
+ * duplicateHolders returns the sides of a duplicate_ip item of duplicate
+ * observations (payload.holders), null for any other item, such as a
+ * reservation conflict (WP-772).
+ */
+export function duplicateHolders(item: ReviewItem): DuplicateHolder[] | null {
+  const holders = item.payload?.holders;
+  if (item.kind !== 'duplicate_ip' || !Array.isArray(holders)) return null;
+  return holders.filter(
+    (h): h is DuplicateHolder =>
+      typeof h === 'object' &&
+      h !== null &&
+      typeof (h as DuplicateHolder).ip_address_id === 'string',
+  );
+}
+
 /** summary is the one-line description of an item in the list. */
 function summary(item: ReviewItem): string {
   const p = item.payload ?? {};
+  if (item.kind === 'duplicate_ip' && typeof p.address === 'string' && p.address !== '') {
+    return p.address;
+  }
   return display(
     p.name ?? p.hostname ?? p.field ?? p.management_ip ?? p.address ?? item.object_key ?? item.id,
   );
@@ -111,11 +141,15 @@ export function candidateLabel(id: string, ci: CI | undefined): string {
 /** commonActions are the actions every selected item allows. */
 export function commonActions(items: ReviewItem[]): ReviewAction[] {
   if (items.length === 0) return [];
-  // merge needs a CI per item and new of a device of an unknown type a
-  // type: neither is offered in bulk.
+  // merge needs a CI per item, new of a device of an unknown type a type
+  // and accept of duplicate observations a side (ci_id): none of them is
+  // offered in bulk.
   return (['new', 'accept', 'dismiss'] as ReviewAction[]).filter((action) =>
     items.every(
-      (item) => reviewActions(item).includes(action) && !(action === 'new' && needsCIType(item)),
+      (item) =>
+        reviewActions(item).includes(action) &&
+        !(action === 'new' && needsCIType(item)) &&
+        !(action === 'accept' && duplicateHolders(item) !== null),
     ),
   );
 }
@@ -445,8 +479,13 @@ function ReviewDetail({
   const candidates = item.candidate_ci_ids ?? [];
   const [candidate, setCandidate] = useState(candidates[0] ?? '');
   // The candidates are named by their CIs (F-346).
-  const candidateCIs = useMountedCIs(candidates.length > 1 ? candidates : []);
-  const subject = candidate || (typeof item.payload?.ci_id === 'string' ? item.payload.ci_id : '');
+  // The sides of duplicate observations replace the diff, which shows
+  // scalar fields only (WP-773).
+  const holders = duplicateHolders(item);
+  const candidateCIs = useMountedCIs(candidates.length > 1 || holders ? candidates : []);
+  const subject = holders
+    ? ''
+    : candidate || (typeof item.payload?.ci_id === 'string' ? item.payload.ci_id : '');
   const { data: ci } = useCI(subject);
   const rows = reviewDiff(item, subject ? ci : undefined);
   const actions = canResolve ? reviewActions(item) : [];
@@ -482,6 +521,7 @@ function ReviewDetail({
 
   function resolution(action: ReviewAction): ReviewResolution {
     if (action === 'merge') return { action, ci_id: candidate };
+    if (action === 'accept' && holders && candidate) return { action, ci_id: candidate };
     if (action === 'new' && askType) return { action, ci_type_id: ciTypeId };
     return { action };
   }
@@ -490,7 +530,7 @@ function ReviewDetail({
     <Card title={t(`reviews.kinds.${item.kind}`, item.kind)}>
       {candidates.length > 1 ? (
         <Select
-          label={t('reviews.candidate')}
+          label={holders ? t('reviews.holders.side') : t('reviews.candidate')}
           value={candidate}
           onChange={(event) => setCandidate(event.target.value)}
           options={candidates.map((id) => ({
@@ -499,39 +539,11 @@ function ReviewDetail({
           }))}
         />
       ) : null}
-      {/* Fixed columns that wrap long names, serials and addresses keep the
-          table inside a phone-wide viewport (UI-18 reflow); the table stays a
-          direct child of the detail so its actions remain its siblings. */}
-      <table className="mt-3 w-full table-fixed text-left text-sm [overflow-wrap:anywhere]">
-        <caption className="sr-only">{t('reviews.diff')}</caption>
-        <thead className="text-xs uppercase text-muted">
-          <tr>
-            <th className="pb-2">{t('reviews.field')}</th>
-            <th className="pb-2">{t('reviews.observed')}</th>
-            <th className="pb-2">{ci ? ci.name : t('reviews.current')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={row.field}
-              className={row.differs ? 'bg-amber-50 dark:bg-amber-950' : undefined}
-              data-differs={row.differs ? 'true' : undefined}
-            >
-              <td className="py-1 font-mono text-xs">{row.field}</td>
-              <td className="py-1">{row.observed || '—'}</td>
-              <td className="py-1">
-                {row.current || '—'}
-                {row.differs ? (
-                  <span className="ml-2">
-                    <Badge variant="warning">{t('reviews.differs')}</Badge>
-                  </span>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {holders ? (
+        <DuplicateSides item={item} holders={holders} cis={candidateCIs} />
+      ) : (
+        <DiffTable rows={rows} ci={ci} />
+      )}
       {genericCI ? (
         <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">
           {t('reviews.noProfileMatch')}{' '}
@@ -577,5 +589,102 @@ function ReviewDetail({
         </div>
       ) : null}
     </Card>
+  );
+}
+
+/** DiffTable compares the observed fields of an item with its CI. */
+function DiffTable({ rows, ci }: { rows: DiffRow[]; ci: CI | undefined }) {
+  const { t } = useTranslation();
+  // Fixed columns that wrap long names, serials and addresses keep the table
+  // inside a phone-wide viewport (UI-18 reflow).
+  return (
+    <table className="mt-3 w-full table-fixed text-left text-sm [overflow-wrap:anywhere]">
+      <caption className="sr-only">{t('reviews.diff')}</caption>
+      <thead className="text-xs uppercase text-muted">
+        <tr>
+          <th className="pb-2">{t('reviews.field')}</th>
+          <th className="pb-2">{t('reviews.observed')}</th>
+          <th className="pb-2">{ci ? ci.name : t('reviews.current')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr
+            key={row.field}
+            className={row.differs ? 'bg-amber-50 dark:bg-amber-950' : undefined}
+            data-differs={row.differs ? 'true' : undefined}
+          >
+            <td className="py-1 font-mono text-xs">{row.field}</td>
+            <td className="py-1">{row.observed || '—'}</td>
+            <td className="py-1">
+              {row.current || '—'}
+              {row.differs ? (
+                <span className="ml-2">
+                  <Badge variant="warning">{t('reviews.differs')}</Badge>
+                </span>
+              ) : null}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * DuplicateSides shows a duplicate_ip item of duplicate observations: the
+ * address, the VRF and per row of payload.holders the CI (linked), the
+ * interface and the type (NET-06, WP-773).
+ */
+function DuplicateSides({
+  item,
+  holders,
+  cis,
+}: {
+  item: ReviewItem;
+  holders: DuplicateHolder[];
+  cis: Map<string, CI>;
+}) {
+  const { t } = useTranslation();
+  const p = item.payload ?? {};
+  return (
+    <section
+      className="mt-3 text-sm [overflow-wrap:anywhere]"
+      aria-label={t('reviews.holders.title')}
+    >
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        <dt className="text-muted">{t('reviews.holders.address')}</dt>
+        <dd className="font-mono">{display(p.address) || '—'}</dd>
+        <dt className="text-muted">{t('reviews.holders.vrf')}</dt>
+        <dd className="font-mono">{display(p.vrf_id) || '—'}</dd>
+      </dl>
+      <table className="mt-3 w-full table-fixed text-left">
+        <caption className="sr-only">{t('reviews.holders.title')}</caption>
+        <thead className="text-xs uppercase text-muted">
+          <tr>
+            <th className="pb-2">{t('reviews.holders.ci')}</th>
+            <th className="pb-2">{t('reviews.holders.interface')}</th>
+            <th className="pb-2">{t('reviews.holders.type')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {holders.map((holder) => (
+            <tr key={holder.ip_address_id}>
+              <td className="py-1">
+                {holder.ci_id ? (
+                  <Link to={`/cmdb/${holder.ci_id}`} className="text-blue-600 hover:underline">
+                    {cis.get(holder.ci_id)?.name ?? holder.ci_id}
+                  </Link>
+                ) : (
+                  t('reviews.holders.noCI')
+                )}
+              </td>
+              <td className="py-1 font-mono text-xs">{holder.interface_id || '—'}</td>
+              <td className="py-1">{holder.type}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }

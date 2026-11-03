@@ -4,7 +4,9 @@
  * device recorded as generic_device is not offered new (WP-528, F-176).
  * Paging with "x von total" and the selection of all open items beyond the
  * page (F-345), merge candidates named by their CI (F-346) and no
- * resolution without review:resolve (WP-557).
+ * resolution without review:resolve (WP-557). A duplicate_ip item of
+ * duplicate observations shows its address, VRF and every side, sends the
+ * chosen side as ci_id and offers no accept in bulk (WP-773).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -41,6 +43,29 @@ const duplicateIP: ReviewItem = {
   object_key: 'ip:vrf-1/10.0.0.9',
   escalated: false,
   created_at: '2026-10-11T10:00:00Z',
+};
+
+const IP_A = '55555555-5555-4555-8555-555555555555';
+const IP_B = '66666666-6666-4666-8666-666666666666';
+const IF_A = '77777777-7777-4777-8777-777777777777';
+const IF_B = '88888888-8888-4888-8888-888888888888';
+const duplicateSides: ReviewItem = {
+  id: 'rev-7',
+  kind: 'duplicate_ip',
+  status: 'open',
+  payload: {
+    address: '10.88.0.5',
+    vrf_id: 'vrf-dup',
+    holders: [
+      { ip_address_id: IP_A, interface_id: IF_A, ci_id: CI_A, type: 'discovered' },
+      { ip_address_id: IP_B, interface_id: IF_B, ci_id: CI_B, type: 'static' },
+    ],
+    side_keys: [`${CI_A}/${IF_A}`, `${CI_B}/${IF_B}`],
+  },
+  candidate_ci_ids: [CI_A, CI_B],
+  object_key: 'ip:vrf-dup/10.88.0.5',
+  escalated: false,
+  created_at: '2026-10-14T10:00:00Z',
 };
 
 const SERVER_TYPE = '33333333-3333-4333-8333-333333333333';
@@ -176,6 +201,13 @@ describe('commonActions', () => {
     expect(commonActions([])).toEqual([]);
   });
 
+  it('never offers the side action of duplicate observations in bulk (WP-773)', () => {
+    expect(commonActions([duplicateSides])).toEqual(['dismiss']);
+    expect(commonActions([duplicateIP, duplicateSides])).toEqual(['dismiss']);
+    // The accept of a reservation conflict needs no side (WP-772).
+    expect(commonActions([duplicateIP])).toEqual(['accept', 'dismiss']);
+  });
+
   it('never offers new for an unclassified device in bulk', () => {
     expect(commonActions([unknownType])).toEqual(['dismiss']);
     expect(commonActions([noProfile])).toEqual(['dismiss']);
@@ -261,6 +293,50 @@ describe('ReviewInboxPage', () => {
     expect(screen.getByRole('button', { name: 'Übernehmen' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Zusammenführen' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /ip:vrf-1/ })).not.toBeInTheDocument();
+  });
+
+  it('shows address, VRF and every side of a duplicate_ip item and sends the chosen side as ci_id (WP-773)', async () => {
+    const fetchMock = stubServer([duplicateSides]);
+    renderWithProviders(<ReviewInboxPage />);
+
+    // The list names the item by its address.
+    const entry = await screen.findByRole('button', { name: /10\.88\.0\.5/ });
+    expect(screen.queryByRole('button', { name: /ip:vrf-dup/ })).not.toBeInTheDocument();
+    fireEvent.click(entry);
+
+    const sides = await screen.findByRole('region', { name: 'Seiten der doppelten Adresse' });
+    expect(within(sides).getByText('10.88.0.5')).toBeInTheDocument();
+    expect(within(sides).getByText('vrf-dup')).toBeInTheDocument();
+    const table = within(sides).getByRole('table', { name: 'Seiten der doppelten Adresse' });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(2);
+    expect(await within(rows[0]!).findByRole('link', { name: 'sw-core-01' })).toHaveAttribute(
+      'href',
+      `/cmdb/${CI_A}`,
+    );
+    expect(within(rows[0]!).getByText(IF_A)).toBeInTheDocument();
+    expect(within(rows[0]!).getByText('discovered')).toBeInTheDocument();
+    expect(await within(rows[1]!).findByRole('link', { name: 'sw-core-02' })).toHaveAttribute(
+      'href',
+      `/cmdb/${CI_B}`,
+    );
+    expect(within(rows[1]!).getByText(IF_B)).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('static')).toBeInTheDocument();
+    // The nested payload replaces the diff of scalar fields.
+    expect(
+      screen.queryByRole('table', { name: 'Vergleich von Beobachtung und CI' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Seite mit veralteter Adresse'), {
+      target: { value: CI_B },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Übernehmen' }));
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST');
+      expect(String(post?.[0])).toBe('/api/v1/review-items/rev-7/resolve');
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({ action: 'accept', ci_id: CI_B });
+    });
   });
 
   it('resolves several items with one action and reports failures', async () => {

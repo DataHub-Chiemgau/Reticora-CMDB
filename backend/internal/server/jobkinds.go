@@ -6,6 +6,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
 )
 
 // The job kinds the application submits (JOB-01, TEC-14), registered in one
@@ -30,6 +31,16 @@ var (
 	// Every other running kind, e.g. review.merge or the discovery
 	// mirrors, refuses a cancel (409).
 	exportJobKind = jobs.Kind{Name: "export", MaxAttempts: 1, Cancellable: true}
+	// templateMigrateJobKind (WP-712): the template migration skips every
+	// CI no longer on the source version, so a retry or a redelivery
+	// writes nothing twice; it is retried. A running migration can be
+	// cancelled between two blocks. There is no revert (E-25).
+	templateMigrateJobKind = jobs.Kind{Name: ci.TemplateMigrateJobKind, MaxAttempts: 3, Timeout: time.Hour, Cancellable: true}
+	// metamodelTestJobKind (WP-721): the test run of a metamodel draft
+	// only reads and stores its report under the lock of the draft; it is
+	// not repeated, a lost worker leaves the draft untested. A running
+	// test can be cancelled; the draft stays draft.
+	metamodelTestJobKind = jobs.Kind{Name: metamodel.TestJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -39,11 +50,19 @@ type jobKind struct {
 }
 
 // applicationJobKinds lists the kinds the application submits with their
-// handlers; the bulk kind needs the CI service.
-func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler) []jobKind {
-	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob}}
+// handlers; the bulk kind needs the CI service, the template migration its
+// executor (nil while the module metamodel is off, E-105). The test run of
+// a draft runs on the draft handler (without a database its handler
+// fails, the route answers 503 before).
+func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs,
+	draftHandler *metamodel.Handler) []jobKind {
+	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
+		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
+	}
+	if templateJobs != nil {
+		kinds = append(kinds, jobKind{kind: templateMigrateJobKind, handler: templateJobs.RunJob})
 	}
 	return kinds
 }
@@ -52,9 +71,17 @@ func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler)
 // svc, the job service of the requests, and wires their submitters: with queue (NATS) the
 // handlers run on the queue and the submitters submit there, without it
 // the submitters run their jobs in this process on svc.
-func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, historyHandler *history.Handler) {
+//
+// The template migration takes progress and cancel from svc in both cases,
+// the test run of a draft the state of a running test.
+func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, historyHandler *history.Handler,
+	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler) {
 	svc.Register(exportJobKind)
-	for _, k := range applicationJobKinds(ciService, historyHandler) {
+	if templateJobs != nil {
+		templateJobs.WithJobs(svc)
+	}
+	draftHandler.WithJobs(svc)
+	for _, k := range applicationJobKinds(ciService, historyHandler, templateJobs, draftHandler) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -62,6 +89,10 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	}
 	if queue != nil {
 		historyHandler.WithQueue(queue)
+		draftHandler.WithQueue(queue)
+		if templateJobs != nil {
+			templateJobs.WithQueue(queue)
+		}
 		if ciService != nil {
 			ciService.WithBulkQueue(queue)
 		}

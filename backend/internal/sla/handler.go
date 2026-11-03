@@ -117,7 +117,16 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	item := &Policy{OrganizationID: t.OrganizationID, ClientID: req.ClientID, Name: req.Name, Priority: req.Priority, ResponseTargetMinutes: req.ResponseTargetMinutes, ResolutionTargetMinutes: req.ResolutionTargetMinutes, BusinessCalendar: req.BusinessCalendar}
+	if req.CalendarID != nil {
+		// calendar_id reaches SQL only as a UUID (F-047); its binding to a
+		// visible calendar of the policy's client is checked in the
+		// repository (400 on calendar_id).
+		if err := api.RequireUUID("calendar_id", *req.CalendarID); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	item := &Policy{OrganizationID: t.OrganizationID, ClientID: req.ClientID, Name: req.Name, Priority: req.Priority, ResponseTargetMinutes: req.ResponseTargetMinutes, ResolutionTargetMinutes: req.ResolutionTargetMinutes, BusinessCalendar: req.BusinessCalendar, CalendarID: req.CalendarID}
 	if err := h.repo.CreatePolicy(r.Context(), item); err != nil {
 		writeSLAError(w, r, err)
 		return
@@ -141,6 +150,12 @@ func (h *Handler) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ClientID != nil && *req.ClientID != "" {
 		if err := api.RequireUUID("client_id", *req.ClientID); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	if req.CalendarID.Set && req.CalendarID.Value != "" {
+		if err := api.RequireUUID("calendar_id", req.CalendarID.Value); err != nil {
 			api.WriteFieldError(w, err)
 			return
 		}

@@ -714,3 +714,71 @@ func TestServiceAppliesCatalogRules(t *testing.T) {
 		t.Fatalf("Update with the owner: %v", err)
 	}
 }
+
+// TestValidateAttributesForTestRun covers the exported wrapper of the test
+// run of metamodel drafts (WP-721, MET-53): it reports missing required
+// fields, values outside the value domain and violated catalog rules, does
+// not check hidden fields and reports no read-only violation (there are no
+// incoming values).
+func TestValidateAttributesForTestRun(t *testing.T) {
+	defs := append(serverKindDefs(), fieldmeta.FieldDefinition{
+		Name: "asset_tag", DataType: fieldmeta.TypeText,
+		Conditional: &fieldmeta.ConditionalRules{
+			ReadOnlyWhen: []fieldmeta.Predicate{{Field: "server_kind", Op: "eq", Value: "physical"}},
+		},
+	})
+	catalog := []fieldmeta.CatalogRule{
+		catalogRule(t, "need-owner", "owner", fieldmeta.CatalogRequired, "", ""),
+		catalogRule(t, "fixed-tag", "asset_tag", fieldmeta.CatalogReadonly, "", ""),
+		catalogRule(t, "tag-form", "asset_tag", fieldmeta.CatalogValidation, "", `{"op":"pattern","pattern":"^A-[0-9]+$"}`),
+	}
+	describe := func(vs []Violation) string {
+		out := make([]string, 0, len(vs))
+		for _, v := range vs {
+			out = append(out, v.Field+"/"+v.Rule+"/"+v.Code)
+		}
+		return strings.Join(out, ",")
+	}
+
+	// A missing required field (server_kind) and a violated required rule
+	// (owner); the read-only definition and rule report nothing, the
+	// stored value of the read-only field is not "changed".
+	if got := describe(ValidateAttributes(defs, catalog, map[string]any{"asset_tag": "A-1"})); got != "owner/need-owner/required,server_kind//" {
+		t.Errorf("missing values: %s", got)
+	}
+	// A value outside the range, one outside the enum, a value the
+	// validation rule refuses.
+	if got := describe(ValidateAttributes(defs, nil, map[string]any{"server_kind": "physical", "rack_unit": 99})); got != "rack_unit//" {
+		t.Errorf("range: %s", got)
+	}
+	if got := describe(ValidateAttributes(defs, nil, map[string]any{"server_kind": "cloud"})); !strings.HasPrefix(got, "server_kind/") {
+		t.Errorf("enum: %s", got)
+	}
+	values := map[string]any{"server_kind": "virtual", "hypervisor": "esx", "owner": "ops", "asset_tag": "x"}
+	if got := describe(ValidateAttributes(defs, catalog, values)); got != "asset_tag/tag-form/pattern" {
+		t.Errorf("validation rule: %s", got)
+	}
+	// rack_unit is hidden for a virtual server: its invalid value is not
+	// checked.
+	values = map[string]any{"server_kind": "virtual", "hypervisor": "esx", "owner": "ops", "rack_unit": 99}
+	if vs := ValidateAttributes(defs, catalog, values); vs != nil {
+		t.Errorf("hidden field checked: %s", describe(vs))
+	}
+}
+
+// TestStoredValuesOfATestRun: the stored attributes of a CI are checked in
+// their read view (instance attributes under their names, projected
+// namespaces left out) with the non-empty typed columns taking precedence.
+func TestStoredValuesOfATestRun(t *testing.T) {
+	values := StoredValues(map[string]any{
+		"hostname": "stored", "role": "web", NamespaceInstance: map[string]any{"rack": "R1"},
+		NamespaceObserved: map[string]any{"role": map[string]any{"value": "db"}},
+	}, map[string]string{"hostname": "typed", "fqdn": "", "unknown": "x"})
+	want := map[string]any{"hostname": "typed", "role": "web", "rack": "R1"}
+	if fmt.Sprint(values) != fmt.Sprint(want) {
+		t.Errorf("StoredValues = %v, want %v", values, want)
+	}
+	if names := TypedColumnNames(); len(names) != len(typedColumns) || names[0] != "firmware_version" {
+		t.Errorf("TypedColumnNames = %v", names)
+	}
+}

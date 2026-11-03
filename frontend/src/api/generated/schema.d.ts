@@ -1176,7 +1176,7 @@ export interface paths {
     };
     /**
      * The result of a succeeded job
-     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled).
+     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled). The result of a job template.migrate is a TemplateMigrationReport; a cancelled template migration has none (409).
      */
     get: operations['getJobResult'];
     put?: never;
@@ -2799,7 +2799,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); duplicate_ip accept|dismiss (accept releases the reservation; 422 when the reservation is already released or the item names none, 501 without IPAM); serial_mismatch dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); duplicate_ip accept|dismiss: an item of a reservation conflict (payload reservation_ip_id) is accepted by releasing the reservation, 422 when it is already released or the item names none; an item of duplicate observations carries payload address, vrf_id, holders (every ip_address row of the address in the VRF with ip_address_id, interface_id, ci_id and type) and side_keys, and accept chooses a side: the address at the CI ci_id is stale and all its rows of the address are removed, with one CI involved that CI is the side, with several ci_id from candidate_ci_ids is required (400 otherwise, like merge), 422 when that CI no longer holds the address next to another side; dismiss keeps every side; 501 without IPAM; serial_mismatch dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -4312,7 +4312,7 @@ export interface paths {
     put?: never;
     /**
      * Link a document to another entity
-     * @description A principal restricted to some clients or sites may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09).
+     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record and stocktake; any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). The audit log records document.linked with link_id, entity_type and entity_id.
      */
     post: operations['linkDocument'];
     delete?: never;
@@ -6074,6 +6074,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/templates/{id}/migrations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Migrate the CIs of a template version to another version (job template.migrate)
+     * @description Queues a job of kind template.migrate (API-09, JOB-04, OVR-03) and answers 202 with `Location: /api/v1/jobs/{id}`. The job migrates the CIs whose assignment names the template on `from_version` (ci_template, WP-710) to `to_version`: the defaults of the target version go into attribute fields without an effective value; overridden fields and instance attributes stay, findings of the validation do not block (WP-253). Without `ci_ids` and `where` every CI the caller sees with that assignment is selected, otherwise the ids (at most 500, API-08) or the filter AST (SRC-03), always intersected with the assignment; an id without it is reported as skipped. The job runs with the caller as actor and the caller's scope (a job without scope snapshot fails), in blocks of 100 CIs, one transaction per block and a savepoint per CI: a CI that fails (e.g. a unique conflict of a default) is discarded alone. Its progress counts the selected CIs; a running job can be cancelled with DELETE /api/v1/jobs/{id} between two blocks (citype:manage) and then has no result. `dry_run` computes the report and writes nothing. The report (TemplateMigrationReport) is the result of the succeeded job, GET /api/v1/jobs/{id}/result. A retry writes nothing twice; there is no revert (E-25). Requires citype:manage.
+     */
+    post: operations['migrateTemplate'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/templates/{id}/versions': {
     parameters: {
       query?: never;
@@ -6205,6 +6228,195 @@ export interface paths {
      * @description `attribute_key`, `kind`, `condition`, `ast`, `message` and `is_active`; null removes `condition`, `ast` or `message`. A kind other than `validation` drops an `ast` the request does not send. `key` and the target are immutable (422). `version` rises by one. System rules are read-only (403); the rules of a published or retired template version are immutable (409). Requires citype:manage; audited as `metamodel_rule.updated` with before and after.
      */
     patch: operations['updateRule'];
+    trace?: never;
+  };
+  '/api/v1/layouts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List form layouts (MET-50)
+     * @description The organization's form layouts per CI type, template and role (WP-259), optionally filtered by `ci_type_id`, `template_id` and `role_id`. Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires ci:read. Not /api/v1/forms (P3 workflows).
+     */
+    get: operations['listLayouts'];
+    put?: never;
+    /**
+     * Create a form layout (MET-50)
+     * @description A layout of the organization for exactly one target it sees, a CI type or a template (an own or a system row; otherwise 422 on the target field), optionally bound to a role or custom role of the organization (`role_id`, the ids of GET /api/v1/roles; otherwise 422). The fields are checked against the effective fields of the CI type without a CI (for a template: of the template's type). 422 with the path in `field` (e.g. `layout.sections[1].fields[0].name`) for an unknown field, a field in two sections, a duplicate or reserved section key (`_instance`, `_required`), a title without `de` or `en`, a width outside 1 to 12 and a `visible_when` key that names no catalog rule (/api/v1/rules). A taken key or a second layout for the same target and role is 409. Requires citype:manage; audited as `form_layout.created`.
+     */
+    post: operations['createLayout'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/layouts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read a form layout
+     * @description A layout of the organization. Requires ci:read.
+     */
+    get: operations['getLayout'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a form layout
+     * @description An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `form_layout.deleted`.
+     */
+    delete: operations['deleteLayout'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a form layout
+     * @description `role_id` (null unbinds the role), `priority`, `is_active` and `layout`, checked like a create. `key`, `ci_type_id` and `template_id` are immutable (422). `version` rises by one. An optional If-Match must name the current version, otherwise 412; without If-Match the change is written (API-07). Requires citype:manage; audited as `form_layout.updated` with before and after.
+     */
+    patch: operations['updateLayout'];
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List metamodel drafts (MET-53)
+     * @description The organization's metamodel drafts (WP-260), optionally filtered by `status`, without their items (`item_count` counts them). Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires citype:manage, also for reading: drafts are unpublished admin work.
+     */
+    get: operations['listMetamodelDrafts'];
+    put?: never;
+    /**
+     * Create a metamodel draft (MET-53)
+     * @description An empty draft with status `draft` and version 1. Metamodel changes captured in it as items stay unproductive until the draft is published (WP-261); without a draft the resource routes write directly (MET-04). A name with 1 to 200 characters is required (422). Requires citype:manage; audited as `metamodel_draft.created`.
+     */
+    post: operations['createMetamodelDraft'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read a metamodel draft
+     * @description A draft of the organization with its items; a draft of another organization is 404. `test_report` carries the counters of the last test run only; its violations name CIs and need metamodel:publish (GET …/test). Requires citype:manage.
+     */
+    get: operations['getMetamodelDraft'];
+    put?: never;
+    post?: never;
+    /**
+     * Discard a metamodel draft
+     * @description Sets the status `discarded`; the draft stays readable and is immutable from then on. A published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.discarded`.
+     */
+    delete: operations['discardMetamodelDraft'];
+    options?: never;
+    head?: never;
+    /**
+     * Rename a metamodel draft
+     * @description Changes the name. `version` rises by one under the lock of the draft. A published or discarded draft is immutable (409). An optional If-Match must name the current version, otherwise 412 (API-07). Requires citype:manage; audited as `metamodel_draft.updated` with before and after.
+     */
+    patch: operations['updateMetamodelDraft'];
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts/{id}/items': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the items of a metamodel draft
+     * @description The items of a draft, newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires citype:manage.
+     */
+    get: operations['listMetamodelDraftItems'];
+    put?: never;
+    /**
+     * Capture an item in a metamodel draft
+     * @description A typed metamodel operation (`kind` and `op`, the permitted pairs in MetamodelDraftItemCreate). The payload is decoded strictly into the request type of the resource route the pair stands for; an unknown field is 400. A payload may carry `{"$item": "<item id>"}` instead of an id: the item must belong to the same draft and create a part (create or clone), and the references must form no cycle (422, E-112). `base` is the state of the target, read in the transaction of the capture: `updated_at` of the type, field, attribute definition, set or template, the ordered set ids of a type for `ci_type`/`assign`, the status of the version for `template_version` (`current_version` of the template for `create`), `version` of a rule or layout, null for a new part. A missing target is 404; a read-only system row is 403 or 404 as on the resource route. The caller needs the write permission of that route as well (403): `ci_attribute:manage` for `global_field` and `attribute_definition`, `metamodel:publish` for `template_version`/`publish`, otherwise `citype:manage`. A tested draft returns to `draft` and loses its test report; a published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.item_added`.
+     */
+    post: operations['addMetamodelDraftItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts/{id}/items/{item_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description The id of the item. */
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove an item from a metamodel draft
+     * @description An item another item of the draft references is 409. A tested draft returns to `draft` and loses its test report; a published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.item_removed`.
+     */
+    delete: operations['removeMetamodelDraftItem'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts/{id}/test': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read the test report of a metamodel draft
+     * @description The report of the last test run (WP-721): state, blocking conflicts, counters per type and attribute, and the violations (CI, type, field, code, rule, message; never a value) as pages of `data` with `limit` (default 50, at most 200) and the signed cursor `next_cursor` (API-02). `total` is the number of violations the run counted; at most 10000 are stored (`truncated`). A draft that was never tested, or whose items changed since, is 404. Requires metamodel:publish: the report names CIs of every client.
+     */
+    get: operations['getMetamodelDraftTest'];
+    put?: never;
+    /**
+     * Test a metamodel draft against the inventory (MET-53)
+     * @description Starts the test run of the draft as a job of kind `metamodel.test` (WP-721), on the job queue when there is one: 202 with the job (GET /api/v1/jobs/{id}). While a test of the draft is queued or running, a second request answers the same job. The job runs organization-wide, whatever the scope of the caller. It lays the items over the metamodel and composes every affected type (changed types and their subtypes, the types of a changed set, the types an organization's global attribute applies to, the targets of changed rules) and every changed template version with its type (MET-16); a composition conflict blocks and the draft stays `draft`. Otherwise it validates every CI of the affected types that is not deleted, with its templates, its instance attributes and the catalog rules the draft leaves; violations do not block. Without a blocking conflict and with unchanged items the draft becomes `tested`. The violations stand only in the report of the draft (GET …/test); the job result and the draft carry the counters. A published or discarded draft is 409; without the database or the job service 503. Requires metamodel:publish; a running test is cancelled with DELETE /api/v1/jobs/{id} and the same permission.
+     */
+    post: operations['testMetamodelDraft'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/ci-types': {
@@ -7250,7 +7462,7 @@ export interface paths {
     };
     /**
      * Get the resolved form of a CI
-     * @description Planned (E-38); WP-719 implements the operation.
+     * @description The form of the CI (WP-719, MET-50, MET-52): the effective fields of its composition (system, organization, type chain, sets, templates, instance; MET-16) arranged by the layout that applies to the caller (/api/v1/layouts), without one by the standard layout (sections by `ui_group`, fields by `sort_order`). Each field carries its composed definition and its state after its conditions and the catalog rules against the stored values; `rules` lets a client recompute the states. Layout choice: template layouts before type layouts (of several templates the highest position with an active layout), type layouts from the CI's type to the root; per target a layout with a role of the caller before the one without, then the smallest `priority`, then `role_id`. The caller's roles are the roles and custom roles assigned to the user, whatever their scope; standard roles mapped from IdP groups do not count yet (E-110, until WP-725). An API key gets the layout without a role. Instance attributes stand in `_instance`, required fields the layout leaves out or shows only in a hidden section in `_required`. Requires ci:read; the client and site scope of the CI apply (404). `preview=true` resolves the form as role `role_id` with template `template_id` (MET-52) and requires citype:manage (403); so does a `role_id` that is no role of the caller. A preview writes nothing.
      */
     get: operations['getCIForm'];
     put?: never;
@@ -7273,7 +7485,7 @@ export interface paths {
     };
     /**
      * Get the resolved form of a CI type
-     * @description Planned (E-38); WP-719 implements the operation.
+     * @description The form for creating a CI of the type (WP-719, MET-50): as GET /api/v1/cis/{id}/form, the states evaluated against the defaults. `template_id` sets the current published version of the template (its overrides and catalog rules) and chooses among its layouts. Requires ci:read; an invisible type is 404. `preview=true` or a `role_id` that is no role of the caller requires citype:manage (403).
      */
     get: operations['getCITypeForm'];
     put?: never;
@@ -8112,7 +8324,7 @@ export interface paths {
     post?: never;
     /**
      * Remove a link of a document
-     * @description Planned (E-38); WP-267 implements the operation.
+     * @description Removes one link of the document (E-38, MGT-01). Only a link the caller sees and may write (client, site and team of its target in the caller's scope) is removed; any other link, also one of another document, answers 404. The audit log records document.unlinked with link_id, entity_type and entity_id.
      */
     delete: operations['deleteDocumentLink'];
     options?: never;
@@ -8369,6 +8581,7 @@ export interface components {
       unique_scope: 'org' | 'client';
       inheritable: boolean;
       validation?: components['schemas']['AttributeValidation'];
+      computed?: components['schemas']['expr'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -8418,6 +8631,8 @@ export interface components {
       components['schemas']['rule'] | components['schemas']['AttributeValidationLegacy'];
     /** @description A rule of the JSON rule language of the metamodel (MET-45, phase 1: required, pattern, range and enum, combined with all), defined by api/rules.schema.json. */
     RuleAST: components['schemas']['rule'];
+    /** @description The expression of a computed attribute (MET-10 computed, WP-258): $defs/expr of api/rules.schema.json — field (an attribute of the CI, or asset.<field> of the asset linked through ci.asset_id: warranty_end, purchase_date, purchase_cost, asset_tag, serial_number, status), literal, add, sub, mul, div, today, days_between, concat, lower, upper and coalesce. Absent for an entered attribute. A computed attribute is neither required nor unique and has no default; its data type is integer, decimal, text, multiline, date or boolean (single-valued) and takes the result type of the expression. 422 on computed for an invalid expression, a result type that does not fit, an asset field outside the list, a reference to the attribute itself or to another computed attribute, and computed together with required, default or unique. The composition (MET-16) keeps the expression of a layer; a different expression of another layer (code computed-conflict) and required, a default or unique from another layer (computed-constraint) are 422 on key. The generated attribute_schema marks the attribute readOnly with x-computed (the AST). The CI write path computes the values with WP-717. */
+    ComputedExpression: components['schemas']['expr'];
     /** @description The former validation structure, translated into the AST: options → enum, pattern and patterns → pattern, min/max → range, min_length/max_length → range of length; several rules are combined with all. {} is no rule. */
     AttributeValidationLegacy: {
       min?: number;
@@ -8459,6 +8674,7 @@ export interface components {
       unique_scope?: 'org' | 'client';
       inheritable?: boolean;
       validation?: components['schemas']['AttributeValidation'];
+      computed?: components['schemas']['expr'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -8566,6 +8782,60 @@ export interface components {
       /** @description Default the source's description. */
       description?: string;
     };
+    TemplateMigrationRequest: {
+      /** @description Published or retired version the CIs are on. */
+      from_version: number;
+      /** @description Published version the CIs move to. */
+      to_version: number;
+      /** @description Narrows the selection to these CIs; not together with where. */
+      ci_ids?: string[];
+      where?: components['schemas']['FilterExpr'];
+      /**
+       * @description Computes the report and writes nothing.
+       * @default false
+       */
+      dry_run: boolean;
+    };
+    /** @description Result of a job template.migrate (GET /api/v1/jobs/{id}/result). items lists only the CIs with a change, a finding, an override or an error, at most 10,000; beyond that truncated is true. */
+    TemplateMigrationReport: {
+      dry_run: boolean;
+      totals: {
+        /** @description CIs selected when the run started. */
+        selected: number;
+        migrated: number;
+        /** @description Also the ci_ids without the assignment on from_version. */
+        skipped: number;
+        failed: number;
+        with_findings: number;
+      };
+      items: {
+        ci_id: string;
+        /** @enum {string} */
+        outcome: 'migrated' | 'skipped' | 'failed';
+        /** @description Keys of the defaults written (or, in a dry run, to be written). */
+        defaults: string[];
+        /** @description Keys with a default of the target version an override keeps unchanged. */
+        overridden: string[];
+        /** @description Violations of the target version; they do not block. */
+        findings: {
+          field: string;
+          detail: string;
+          code?: string;
+          rule?: string;
+          message?: {
+            [key: string]: string;
+          };
+        }[];
+        error?: {
+          /** @enum {string} */
+          code: 'unique' | 'validation' | 'not_found' | 'internal';
+          /** @description The attribute */
+          field?: string;
+          detail: string;
+        };
+      }[];
+      truncated: boolean;
+    };
     TemplateListResponse: {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
       next_cursor?: string;
@@ -8643,6 +8913,8 @@ export interface components {
       inheritable?: boolean;
       /** @description The new rules; null or {} removes them. */
       validation?: components['schemas']['AttributeValidation'] | null;
+      /** @description The new expression of a computed attribute. A definition stays computed or entered for its lifetime: an expression on an entered definition or null on a computed one is 422 on computed (WP-258). */
+      computed?: components['schemas']['expr'] | null;
       conditional?: {
         [key: string]: unknown;
       };
@@ -8729,6 +9001,326 @@ export interface components {
       next_cursor?: string;
       data: components['schemas']['MetamodelRule'][];
       total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    FormLayoutField: {
+      /** @description An effective field of the target. */
+      name: string;
+      /**
+       * @description Grid columns.
+       * @default 12
+       */
+      width: number;
+    };
+    FormLayoutSection: {
+      /** @description Unique in the layout; `_instance` and `_required` are reserved. */
+      key: string;
+      title: {
+        de: string;
+        en: string;
+      };
+      /** @description Keys of catalog rules (/api/v1/rules) that show the section; empty shows it always. */
+      visible_when?: string[];
+      fields: components['schemas']['FormLayoutField'][];
+    };
+    FormLayoutDocument: {
+      sections: components['schemas']['FormLayoutSection'][];
+    };
+    /** @description The layout of a form for exactly one target, a CI type or a template (table form_layout, WP-259); a template layout applies to every version of the template (E-111). At most one layout per target and role. There are no system layouts: a layout of a system type is a row of the organization. */
+    FormLayout: {
+      id: string;
+      organization_id: string;
+      /** @description Natural key per organization (export and import). */
+      key: string;
+      ci_type_id?: string;
+      template_id?: string;
+      /** @description A role or custom role of the organization; absent for every role. */
+      role_id?: string;
+      priority: number;
+      /** @description Rises with every change; the ETag. */
+      version: number;
+      is_active: boolean;
+      layout: components['schemas']['FormLayoutDocument'];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description A resolved form (WP-719). `template_id`, `role_id` and `layout_id` name the chosen layout; absent with the standard layout. */
+    ResolvedForm: {
+      ci_type_id: string;
+      template_id?: string;
+      role_id?: string;
+      layout_id?: string;
+      /** @enum {string} */
+      source: 'layout' | 'default';
+      sections: components['schemas']['ResolvedFormSection'][];
+      /** @description The active catalog rules of the CI (WP-257), in the order of their targets. */
+      rules: components['schemas']['ResolvedFormRule'][];
+    };
+    ResolvedFormSection: {
+      /** @description The key of the layout section, a ui_group, _default, _instance or _required. */
+      key: string;
+      title: {
+        de?: string;
+        en?: string;
+      } & {
+        [key: string]: string;
+      };
+      /** @description False while a visible_when rule of the section does not hold. */
+      visible: boolean;
+      fields: components['schemas']['ResolvedFormField'][];
+    };
+    ResolvedFormField: {
+      name: string;
+      width: number;
+      definition: components['schemas']['FormFieldDefinition'];
+      state: components['schemas']['FormFieldState'];
+    };
+    /** @description The composed field definition (fieldmeta.FieldDefinition). */
+    FormFieldDefinition: {
+      name: string;
+      label?: string;
+      description?: string;
+      data_type: string;
+      required: boolean;
+      default_value?: string;
+      enum_values?: string[];
+      ui_group?: string;
+      sort_order: number;
+      validation?: {
+        [key: string]: unknown;
+      };
+      conditional?: {
+        [key: string]: unknown;
+      };
+      reference_target?: string;
+      computed?: {
+        [key: string]: unknown;
+      };
+    };
+    /** @description The state of a field after its conditions and the catalog rules; a required field stays visible. A field the caller may not change is read only. */
+    FormFieldState: {
+      visible: boolean;
+      required: boolean;
+      read_only: boolean;
+      allowed_values?: string[];
+    };
+    ResolvedFormRule: {
+      key: string;
+      attribute_key: string;
+      kind: components['schemas']['MetamodelRuleKind'];
+      condition?: components['schemas']['condition'];
+      ast?: components['schemas']['rule'];
+      message?: components['schemas']['RuleMessage'];
+    };
+    /** @description Exactly one of ci_type_id and template_id is required (422). */
+    FormLayoutCreate: {
+      key: string;
+      ci_type_id?: string;
+      template_id?: string;
+      role_id?: string;
+      /** @default 0 */
+      priority: number;
+      /** @default true */
+      is_active: boolean;
+      layout: components['schemas']['FormLayoutDocument'];
+    };
+    /** @description key and the target are immutable; naming them is 422. */
+    FormLayoutPatch: {
+      /** @description null unbinds the role. */
+      role_id?: string | null;
+      priority?: number;
+      is_active?: boolean;
+      layout?: components['schemas']['FormLayoutDocument'];
+      /** @description Immutable (422). */
+      key?: string;
+      /** @description Immutable (422). */
+      ci_type_id?: string;
+      /** @description Immutable (422). */
+      template_id?: string;
+    };
+    FormLayoutListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['FormLayout'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    /** @description A metamodel draft (table metamodel_draft, WP-260, MET-53): the unpublished working state of metamodel changes as typed items. `status` runs draft → tested → published, or to discarded; published and discarded drafts are immutable. List entries carry no `items`. */
+    MetamodelDraft: {
+      id: string;
+      organization_id: string;
+      name: string;
+      /** @enum {string} */
+      status: 'draft' | 'tested' | 'published' | 'discarded';
+      created_by?: string | null;
+      items?: components['schemas']['MetamodelDraftItem'][];
+      item_count: number;
+      /** @description The counters of the last test run (WP-721) without the violations (GET …/test); null after every item change. */
+      test_report?: components['schemas']['MetamodelTestReport'] | null;
+      /** @description Rises with every change; the ETag. */
+      version: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /** Format: date-time */
+      published_at?: string | null;
+    };
+    MetamodelDraftCreate: {
+      name: string;
+    };
+    MetamodelDraftPatch: {
+      name: string;
+    };
+    /** @description Permitted pairs of kind and op (metamodel.ItemKinds), with the resource route whose request type the payload follows: ci_type create|update|clone|activate|deactivate|assign (ci-types, …/attribute-sets for assign); ci_type_field upsert|delete (ci-types/{id}/fields); global_field upsert|delete (ci-fields/global); attribute_definition create|update|delete; attribute_set create|update|delete; template create|update|delete|clone; template_version create|update|publish (templates/{id}/versions); rule create|update|delete; layout create|update|delete. `target_id` is empty for a new part and for global fields, the template id for template_version/create, the version id for the other template_version operations, the type id for ci_type_field, otherwise the id of the target. `target_key` is the field name of ci_type_field and global_field (on upsert the `name` of the payload). */
+    MetamodelDraftItemCreate: {
+      /** @enum {string} */
+      kind:
+        | 'ci_type'
+        | 'ci_type_field'
+        | 'global_field'
+        | 'attribute_definition'
+        | 'attribute_set'
+        | 'template'
+        | 'template_version'
+        | 'rule'
+        | 'layout';
+      /** @enum {string} */
+      op:
+        | 'create'
+        | 'update'
+        | 'upsert'
+        | 'delete'
+        | 'clone'
+        | 'activate'
+        | 'deactivate'
+        | 'assign'
+        | 'publish';
+      target_id?: string;
+      target_key?: string;
+      /** @description The request body of the resource route; ids may be item references {"$item": "<item id>"} (E-112). */
+      payload?: Record<string, never>;
+    };
+    /** @description A typed operation of a draft with the state of its target at capture. */
+    MetamodelDraftItem: {
+      id: string;
+      /** @enum {string} */
+      kind:
+        | 'ci_type'
+        | 'ci_type_field'
+        | 'global_field'
+        | 'attribute_definition'
+        | 'attribute_set'
+        | 'template'
+        | 'template_version'
+        | 'rule'
+        | 'layout';
+      /** @enum {string} */
+      op:
+        | 'create'
+        | 'update'
+        | 'upsert'
+        | 'delete'
+        | 'clone'
+        | 'activate'
+        | 'deactivate'
+        | 'assign'
+        | 'publish';
+      target_id: string | null;
+      target_key: string | null;
+      /** @description The request body of the resource route as captured. */
+      payload: Record<string, never>;
+      /** @description The state of the target at capture: a timestamp (updated_at), a number (version, current_version), a status, the ordered set ids of a type, or null for a new part. WP-261 compares it. */
+      base: unknown;
+      /** @description ci_type.schema_version per directly affected type id (informative). */
+      schema_versions: {
+        [key: string]: number;
+      };
+      /** @description The resource route the item stands for (informative). */
+      route: string;
+      created_by: string | null;
+      /** Format: date-time */
+      created_at: string;
+    };
+    MetamodelDraftListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['MetamodelDraft'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    MetamodelDraftItemListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['MetamodelDraftItem'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    /** @description The report of the test run of a metamodel draft (WP-721) without its violations. `state` is running, completed or failed; `blocked` names a composition conflict or an item that cannot be applied (`conflicts`), `outdated` items changed while the test ran. */
+    MetamodelTestReport: {
+      job_id: string;
+      /** @enum {string} */
+      state: 'running' | 'completed' | 'failed';
+      draft_version: number;
+      /** Format: date-time */
+      started_at: string;
+      /** Format: date-time */
+      finished_at?: string;
+      blocked: boolean;
+      outdated: boolean;
+      conflicts: {
+        ci_type_id?: string;
+        template_version_id?: string;
+        item_id?: string;
+        key?: string;
+        /** @description A MET-16 code (datatype-conflict, enum-empty, range-empty, length-range-empty, computed-conflict, computed-constraint), item-not-applicable or invalid-template-item. */
+        code: string;
+        message: string;
+      }[];
+      totals: {
+        types: number;
+        cis: number;
+        invalid_cis: number;
+        violations: number;
+      };
+      types: {
+        ci_type_id: string;
+        cis: number;
+        invalid_cis: number;
+        violations: number;
+        attributes: {
+          key: string;
+          violations: number;
+        }[];
+      }[];
+      truncated: boolean;
+      error?: string;
+    };
+    /** @description A violation of a CI in a test run (WP-721); no attribute value. */
+    MetamodelTestViolation: {
+      ci_id: string;
+      ci_type_id: string;
+      field: string;
+      code?: string;
+      /** @description The key of the violated catalog rule. */
+      rule?: string;
+      message: string;
+    };
+    MetamodelTestReportPage: components['schemas']['MetamodelTestReport'] & {
+      data: components['schemas']['MetamodelTestViolation'][];
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      total: number;
       limit?: number;
       offset?: number;
       has_more?: boolean;
@@ -9601,7 +10193,7 @@ export interface components {
       trace_id: string;
       /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client, or `key` of an attribute definition that cannot be composed, 422). */
       field?: string;
-      /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`) or `length-range-empty` (`min_length` > `max_length`). */
+      /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`), `length-range-empty` (`min_length` > `max_length`), `computed-conflict` (different expressions of a computed attribute) or `computed-constraint` (a computed attribute made required, given a default or made unique by another layer). */
       code?: string;
     };
     /** @description A lifecycle model (LCY-02, MET-01): states and guarded transitions for CIs or assets. System models (is_system, no organization_id) are read-only. */
@@ -10167,14 +10759,26 @@ export interface components {
       organization_id: string;
       ci_id: string;
       actor_id?: string;
-      /** @enum {string} */
+      /**
+       * @description Class of the change, the vocabulary of chk_ci_change_type. template_migration is the migration of a template assignment of the CI to another published version (WP-253): field_name attributes with the attribute map before and after, comment a JSON object with template_id, from_version, to_version, defaults, findings and job_id.
+       * @enum {string}
+       */
       change_type:
         | 'create'
         | 'update'
         | 'delete'
         | 'status_change'
         | 'relationship_change'
-        | 'attribute_change';
+        | 'attribute_change'
+        | 'type_changed'
+        | 'lifecycle_transition'
+        | 'location_change'
+        | 'movement'
+        | 'override'
+        | 'reconciliation_decision'
+        | 'parent_child_change'
+        | 'assignment'
+        | 'template_migration';
       field_name?: string;
       old_value?: unknown;
       new_value?: unknown;
@@ -11172,11 +11776,12 @@ export interface components {
     Ticket: {
       id: string;
       organization_id: string;
+      /** @description Number of the ticket, consecutive per organization. */
       ticket_number: number;
       title: string;
       description?: string;
-      status: string;
-      priority: string;
+      status: components['schemas']['TicketStatus'];
+      priority: components['schemas']['TicketPriority'];
       category: string;
       reporter_id: string;
       assignee_id?: string;
@@ -11195,10 +11800,11 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description A new ticket starts with status `new`. */
     CreateTicketRequest: {
       title: string;
       description?: string;
-      priority?: string;
+      priority?: components['schemas']['TicketPriority'];
       category?: string;
       assignee_id?: string;
       team_id?: string;
@@ -11208,11 +11814,18 @@ export interface components {
       due_date?: string;
       tags?: string[];
     };
+    /**
+     * @description State of a ticket (TKT-01). Transitions: new to open, in_progress or closed; open to in_progress, waiting, resolved or closed; in_progress to open, waiting or resolved; waiting to in_progress or resolved; resolved to closed or open (reopen); closed to open (reopen).
+     * @enum {string}
+     */
+    TicketStatus: 'new' | 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
+    /** @enum {string} */
+    TicketPriority: 'low' | 'medium' | 'high' | 'critical';
     UpdateTicketRequest: {
       title?: string;
       description?: string;
-      status?: string;
-      priority?: string;
+      status?: components['schemas']['TicketStatus'];
+      priority?: components['schemas']['TicketPriority'];
       category?: string;
       assignee_id?: string;
       team_id?: string;
@@ -11284,7 +11897,13 @@ export interface components {
       resolution_time_minutes?: number;
       response_target_minutes: number;
       resolution_target_minutes: number;
+      /** @description false counts elapsed time; true counts only business time of the calendar chain (TKT-02). */
       business_calendar: boolean;
+      /**
+       * Format: uuid
+       * @description Business calendar of the policy (TKT-02). It must be visible under the caller's scope and belong to no client or to the policy's client; otherwise 400 on calendar_id. Null lets the calendar chain decide when business_calendar is true: default calendar of the ticket's client, default calendar of the organization, built-in standard (Monday to Friday, 08:00-18:00).
+       */
+      calendar_id?: string | null;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -11773,6 +12392,11 @@ export interface components {
       response_target_minutes: number;
       resolution_target_minutes: number;
       business_calendar?: boolean;
+      /**
+       * Format: uuid
+       * @description Business calendar of the policy (TKT-02). It must be visible under the caller's scope and belong to no client or to the policy's client; otherwise 400 on calendar_id. Null lets the calendar chain decide when business_calendar is true: default calendar of the ticket's client, default calendar of the organization, built-in standard (Monday to Friday, 08:00-18:00).
+       */
+      calendar_id?: string | null;
     };
     UpdateSLAPolicyRequest: {
       client_id?: string;
@@ -11782,6 +12406,11 @@ export interface components {
       response_target_minutes?: number;
       resolution_target_minutes?: number;
       business_calendar?: boolean;
+      /**
+       * Format: uuid
+       * @description Business calendar of the policy (TKT-02). It must be visible under the caller's scope and belong to no client or to the policy's client; otherwise 400 on calendar_id. null clears it; then the calendar chain decide when business_calendar is true: default calendar of the ticket's client, default calendar of the organization, built-in standard (Monday to Friday, 08:00-18:00).
+       */
+      calendar_id?: string | null;
     };
     SLAPolicyListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['SLAPolicy'][];
@@ -11801,6 +12430,17 @@ export interface components {
       resolved_at?: string;
       response_breached: boolean;
       resolution_breached: boolean;
+      /**
+       * Format: uuid
+       * @description Business calendar the due times were computed with (TKT-02); null means elapsed time or the built-in standard calendar. Later changes of a calendar do not change computed due times.
+       */
+      calendar_id?: string | null;
+      /** @description Minutes until response_due_at: business minutes of the calendar (built-in standard when calendar_id is null and the policy counts business time), otherwise elapsed minutes. Negative once overdue, null once first_response_at is set. */
+      response_remaining_minutes?: number | null;
+      /** @description Minutes until resolution_due_at, counted like response_remaining_minutes; null once resolved_at is set. */
+      resolution_remaining_minutes?: number | null;
+      /** @description true while the current moment lies outside business hours or on a holiday of the calendar; always false for elapsed time. */
+      paused?: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -11965,7 +12605,7 @@ export interface components {
       violations: {
         field: string;
         detail: string;
-        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty` or `length-range-empty`. A violated catalog rule (WP-257, MET-10) carries the code of the rule language for a `validation` rule (e.g. `pattern`, `range.max`, `enum`), `required` for a `required` rule and `read_only` for a `readonly` rule. */
+        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty`, `length-range-empty`, `computed-conflict` or `computed-constraint`. A violated catalog rule (WP-257, MET-10) carries the code of the rule language for a `validation` rule (e.g. `pattern`, `range.max`, `enum`), `required` for a `required` rule and `read_only` for a `readonly` rule. */
         code?: string;
         /** @description Key of the violated catalog rule (`/api/v1/rules`, WP-257); absent for the rules of the attribute definitions. */
         rule?: string;
@@ -12691,7 +13331,7 @@ export interface components {
        * @enum {string}
        */
       action: 'merge' | 'new' | 'dismiss' | 'accept' | 'create';
-      /** @description Target candidate CI id, required when action is merge. */
+      /** @description Target candidate CI id (from candidate_ci_ids). Required for merge and for the side action of duplicate_ip with several CIs (accept of an item with payload holders names the side whose address is stale; with one CI involved that CI is the side). */
       ci_id?: string;
       /**
        * Format: uuid
@@ -13581,6 +14221,7 @@ export interface components {
       data: components['schemas']['DocumentLink'][];
     };
     CreateDocumentLinkRequest: {
+      /** @description ci, asset, assignment, ticket, location, disposal_record or stocktake. */
       entity_type: string;
       entity_id: string;
     };
@@ -13800,6 +14441,73 @@ export interface components {
       /** @constant */
       op: 'enum';
       values: (string | number | boolean)[];
+    };
+    /** @description The value of an attribute of the record (its key), or asset.<field> of the asset linked through ci.asset_id (whitelist rules.AssetFields). */
+    expr_field: {
+      /** @constant */
+      op: 'field';
+      field:
+        | string
+        | unknown
+        | (
+            | 'asset.warranty_end'
+            | 'asset.purchase_date'
+            | 'asset.purchase_cost'
+            | 'asset.asset_tag'
+            | 'asset.serial_number'
+            | 'asset.status'
+          );
+    };
+    /** @description A constant string, number or boolean. */
+    expr_literal: {
+      /** @constant */
+      op: 'literal';
+      value: string | number | boolean;
+    };
+    /** @description An expression (WP-258): yields a value for the values of a record; empty inputs make it empty except within coalesce. */
+    expr:
+      | components['schemas']['expr_field']
+      | components['schemas']['expr_literal']
+      | components['schemas']['expr_arithmetic']
+      | components['schemas']['expr_today']
+      | components['schemas']['expr_days_between']
+      | components['schemas']['expr_concat']
+      | components['schemas']['expr_case']
+      | components['schemas']['expr_coalesce'];
+    /** @description add and mul of two or more numbers, sub and div of exactly two (first minus/by second); division by 0 is empty. */
+    expr_arithmetic: {
+      /** @enum {unknown} */
+      op: 'add' | 'sub' | 'mul' | 'div';
+      args: components['schemas']['expr'][];
+    };
+    /** @description The current date in the time zone of the evaluation (YYYY-MM-DD). */
+    expr_today: {
+      /** @constant */
+      op: 'today';
+    };
+    /** @description The number of days from the first to the second date (negative when the second is earlier). */
+    expr_days_between: {
+      /** @constant */
+      op: 'days_between';
+      args: components['schemas']['expr'][];
+    };
+    /** @description The text of the operands joined without separator. */
+    expr_concat: {
+      /** @constant */
+      op: 'concat';
+      args: components['schemas']['expr'][];
+    };
+    /** @description The text of the one operand in lower or upper case. */
+    expr_case: {
+      /** @enum {unknown} */
+      op: 'lower' | 'upper';
+      args: components['schemas']['expr'][];
+    };
+    /** @description The first operand that is not empty; empty when all are. */
+    expr_coalesce: {
+      /** @constant */
+      op: 'coalesce';
+      args: components['schemas']['expr'][];
     };
     /** @description A condition (WP-715): true or false for the values of a record. */
     condition:
@@ -19377,10 +20085,11 @@ export interface operations {
         sort_by?: components['parameters']['SortBy'];
         /** @description Sort direction. */
         sort_dir?: components['parameters']['SortDir'];
-        status?: string;
-        priority?: string;
+        status?: components['schemas']['TicketStatus'];
+        priority?: components['schemas']['TicketPriority'];
         category?: string;
         assignee_id?: string;
+        /** @description Tickets of one team (UUID), or `mine` for the tickets of every team the caller is a member of (`team_member`, E-143), with cursor, sort and `total` like a team id; without team membership the list is empty. */
         team_id?: string;
       };
       header?: never;
@@ -19428,7 +20137,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
+      /** @description priority is no ticket priority, or assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -19517,7 +20226,16 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
+      /** @description The status change is no transition of the ticket state machine (TKT-01, e.g. new to waiting); the ticket is unchanged and the detail names both states. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description status or priority is no ticket status or priority, or assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -24463,6 +25181,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -29782,6 +30501,53 @@ export interface operations {
       503: components['responses']['ServiceUnavailable'];
     };
   };
+  migrateTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateMigrationRequest'];
+      };
+    };
+    responses: {
+      /** @description The migration runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            /** @enum {string} */
+            kind: 'template.migrate';
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description to_version is not published, from_version neither published nor retired, a version is unknown or both are equal; ci_ids is empty, has more than 500 entries or an entry that is no UUID; ci_ids and where together; where is no valid filter AST. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
   listTemplateVersions: {
     parameters: {
       query?: {
@@ -30113,6 +30879,604 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listLayouts: {
+    parameters: {
+      query?: {
+        /** @description Only layouts of this CI type. */
+        ci_type_id?: string;
+        /** @description Only layouts of this template. */
+        template_id?: string;
+        /** @description Only layouts of this role or custom role. */
+        role_id?: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Layouts, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormLayoutListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createLayout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['FormLayoutCreate'];
+      };
+    };
+    responses: {
+      /** @description Layout created */
+      201: {
+        headers: {
+          /** @description The layout version (API-07). */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormLayout'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getLayout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Layout */
+      200: {
+        headers: {
+          /** @description The layout version (API-07); send it as If-Match with a PATCH or DELETE. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormLayout'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteLayout: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the deletion is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Layout deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description If-Match does not name the current version of the layout */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateLayout: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['FormLayoutPatch'];
+      };
+    };
+    responses: {
+      /** @description Layout updated */
+      200: {
+        headers: {
+          /** @description The new layout version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormLayout'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the layout */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listMetamodelDrafts: {
+    parameters: {
+      query?: {
+        /** @description Only drafts of this status (400 for another value). */
+        status?: 'draft' | 'tested' | 'published' | 'discarded';
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Drafts, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraftListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelDraftCreate'];
+      };
+    };
+    responses: {
+      /** @description Draft created */
+      201: {
+        headers: {
+          /** @description The draft version (API-07). */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Draft */
+      200: {
+        headers: {
+          /** @description The draft version (API-07); send it as If-Match with a change. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  discardMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Draft discarded */
+      200: {
+        headers: {
+          /** @description The new draft version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the draft */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelDraftPatch'];
+      };
+    };
+    responses: {
+      /** @description Draft updated */
+      200: {
+        headers: {
+          /** @description The new draft version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the draft */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listMetamodelDraftItems: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Items, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraftItemListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  addMetamodelDraftItem: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelDraftItemCreate'];
+      };
+    };
+    responses: {
+      /** @description Item captured */
+      201: {
+        headers: {
+          /** @description The new draft version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraftItem'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the draft */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  removeMetamodelDraftItem: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description The id of the item. */
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Item removed */
+      200: {
+        headers: {
+          /** @description The new draft version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the draft */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getMetamodelDraftTest: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The test report with a page of violations */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelTestReportPage'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  testMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The test runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            /** @enum {string} */
+            kind: 'metamodel.test';
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -32699,7 +34063,14 @@ export interface operations {
   };
   getCIForm: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Resolve as role `role_id` with template `template_id`; requires citype:manage. */
+        preview?: boolean;
+        /** @description A role or custom role of the organization; without preview one of the caller's roles (another role requires citype:manage). Unknown or foreign is 404. */
+        role_id?: string;
+        /** @description Only with preview=true (otherwise 400): the current published version of this template replaces the CI's templates. Unknown or foreign is 404, a template of a type outside the CI's type chain 422. */
+        template_id?: string;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -32709,21 +34080,41 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the resolved form of a CI. The response schema comes with WP-719. */
+      /** @description The resolved form */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ResolvedForm'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      /** @description Without a database there are no resolved forms. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getCITypeForm: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description A template of the type chain; unknown or foreign is 404, a template of a type outside the chain 422. */
+        template_id?: string;
+        /** @description Resolve as role `role_id`; requires citype:manage. */
+        preview?: boolean;
+        /** @description A role or custom role of the organization (see GET /api/v1/cis/{id}/form). */
+        role_id?: string;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -32733,16 +34124,29 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the resolved form of a CI type. The response schema comes with WP-719. */
+      /** @description The resolved form */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ResolvedForm'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      /** @description Without a database there are no resolved forms. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listCITemplates: {

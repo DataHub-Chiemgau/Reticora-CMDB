@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000209_ci_snapshot
+Stand: Migration 000217_document_link_targets
 
 ## Prüfung
 
@@ -233,6 +233,24 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
   löschen sie nur, wenn jeder Link in ihrem Schreib-Scope liegt (Migrationen
   000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
   und legen keine unverlinkten an (WP-341).
+
+### Linkziele von Dokumenten (WP-267)
+
+`document_link.entity_type` ist eines von `ci`, `asset`, `assignment`,
+`ticket`, `location`, `disposal_record` und `stocktake`
+(`doc_link_entity_type_check`, Migration 000217); die Registry in
+`backend/internal/document/links.go` hält dieselben Werte.
+`derive_document_link_scope` leitet `client_id`/`site_id` auch aus
+Location, Entsorgung und dem Standort von Asset und Zuweisung ab und
+`team_id` (Teilindex `idx_document_link_team`) aus dem Ticket. Neue
+AFTER-UPDATE-Trigger auf `location` und `disposal_record`
+(`propagate_document_link_scope`) sowie `asset_module_scope_propagation`
+(auch bei `site_id`) und `ticket_scope_propagation` (auch bei
+`team_id`) leiten die Links neu ab. Die Policy von `document_link` trägt
+das Team-Prädikat wie `ticket`; ein team-beschränkter Prinzipal gilt für
+`document` (Policies, `require_visible_parent`, `require_linked_row`)
+nicht mehr als org-weit. `app_scope_widen`/`app_scope_restore` leeren
+bzw. setzen auch `app.team_scope`.
 
 ### Standort von Assets und Mengenartikeln (WP-392)
 
@@ -604,6 +622,21 @@ rack, override), und speichert `type_change` als `type_changed`, auch wenn
 der Unmerge Zeilen aus einem älteren Merge-Snapshot zurückschreibt. Die
 Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
 
+Migration 000210 (WP-253) setzt `chk_ci_change_type` neu: die Liste aus
+000167 (`create`, `update`, `delete`, `status_change`,
+`relationship_change`, `attribute_change`, `type_changed`,
+`lifecycle_transition`, `location_change`, `movement`, `override`,
+`reconciliation_decision`, `parent_child_change`, `assignment`) plus
+`template_migration`. Eine Template-Migration eines CI (Zuordnung
+`ci_template` auf eine andere veröffentlichte Version) schreibt genau eine
+Zeile `template_migration` mit `field_name = 'attributes'`, der
+Attribut-Map vor und nach der Migration und in `comment` JSON mit
+`template_id`, `from_version`, `to_version`, `defaults`, `findings` und
+`job_id`; `change_kind` ist `updated` in einer eigenen Änderungsgruppe.
+`ci_change_kind` und `ci_schema_version()` (000183) bleiben unverändert.
+Die Down-Migration scheitert, solange Zeilen `template_migration`
+existieren. Keine neue Tabelle, RLS unverändert.
+
 ## CI-Snapshots `ci_snapshot` und Merge-Herkunft (AUD-08, WP-312)
 
 Migration 000209 legt `ci_snapshot` an: der Zustand eines CI zu `taken_at`
@@ -721,6 +754,20 @@ unverändert: Die Anwendbarkeit wertet die Laufzeitkomposition aus
 (`ResolveFields`, Kompositionsprüfung), Index und Eindeutigkeit bleiben
 organisationsweit.
 
+Berechnete Attribute (MET-10 computed, WP-258, Migration 000211):
+`attribute_definition.computed` (`JSONB`, `NULL` = erfasstes Attribut) hält
+den Ausdruck nach `$defs/expr` aus `api/rules.schema.json`
+(`rules.ParseExpr`). `attribute_definition_computed_check`: Ein berechnetes
+Attribut ist weder `required` noch `is_unique` und hat keinen
+`default_value`. `compose_attribute_definition` behält den Ausdruck einer
+Ebene; abweichende Ausdrücke (`computed-conflict`) sowie `required`, Default
+oder `is_unique` einer anderen Ebene (`computed-constraint`) sind
+Kompositionsfehler unter `attribute_definition_composition`.
+`attribute_json_schema` schreibt für berechnete Attribute `readOnly: true`
+und `x-computed`; Schemata ohne berechnete Attribute und ihre
+`schema_version` bleiben unverändert. Trigger, Indizes und RLS-Policies
+bleiben unverändert; die Werte berechnet der Schreibpfad (WP-717).
+
 Lifecycle-Modelle (MET-01, MET-06, LCY-02, WP-263, Migration 000201): Die
 Tabellen `lifecycle_definition`, `lifecycle_state` und `lifecycle_transition`
 behalten ihre Namen. `ci_type.lifecycle_model_id` (vorher
@@ -793,6 +840,38 @@ ist eine schreibgeschützte Systemregel. Schlüssel: `metamodel_rule_org_key` un
 `template_version`) kopiert die Regeln der Vorversion mit ihren Schlüsseln in
 eine neue Template-Version.
 
+Formular-Layouts (MET-50, API-06, AUD-07, WP-259, Migration 000212):
+`form_layout` hält das Layout eines Formulars für genau ein Ziel
+(`form_layout_one_target`: `ci_type_id` oder `template_id`, je ON DELETE
+CASCADE und eigener Index; Template-Layouts gelten für die Template-ID
+unabhängig von der Version, E-111), optional gebunden an eine Rolle
+(`role_id` aus `role` oder `custom_role`, kein Fremdschlüssel, Index
+`idx_form_layout_role`). `layout` (`jsonb`) hält die Abschnitte, `priority`,
+`is_active` und `version` (beginnt bei 1). Es gibt keine globalen Zeilen
+(`organization_id` NOT NULL). Schlüssel: `form_layout_org_key`
+(`organization_id`, `key`); je Ziel und Rolle höchstens ein Layout über die
+Teil-Unique-Indizes `form_layout_type_role` und `form_layout_template_role`
+(NULLS NOT DISTINCT). Die AFTER-DELETE-Trigger `trg_role_form_layout` und
+`trg_custom_role_form_layout` (Funktion `form_layout_delete_role`) entfernen
+die Layouts einer gelöschten Rolle unter RLS. RLS mit ENABLE/FORCE und der
+Policy `form_layout_isolation` (FOR ALL, `app.org_id`), TRUNCATE-Schutz
+`reticora_truncate_guard`.
+
+Metamodell-Entwürfe (MET-53, API-06, WP-260, Migration 000215):
+`metamodel_draft` hält den unveröffentlichten Arbeitsstand von
+Metamodelländerungen einer Organisation. `items` (`jsonb`, Standard `[]`) ist
+die Liste typisierter Operationen mit Item-ID und Ausgangsstand `base` je
+Item; eine Spalte für den Ausgangsstand des Drafts gibt es nicht. `status`
+ist `draft`, `tested`, `published` oder `discarded`
+(`metamodel_draft_status_check`); `published_at` ist genau bei `published`
+gesetzt (`metamodel_draft_published_at_check`). `created_by` ist ein Surrogat
+ohne Fremdschlüssel wie `job.created_by`, `test_report` (`jsonb`) ist
+optional, `version` beginnt bei 1 und steigt mit jeder Änderung. Index
+`idx_metamodel_draft_org_status` (`organization_id`, `status`, `created_at`
+DESC), Trigger `trg_metamodel_draft_updated_at`. RLS mit ENABLE/FORCE und der
+Policy `metamodel_draft_isolation` (FOR ALL, `app.org_id`), TRUNCATE-Schutz
+`reticora_truncate_guard`.
+
 IP-Reservierungen (NET-09, WP-299, Migration 000208): `ip_address` erhält
 `reserved_until` (`timestamptz`, informativ, keine automatische Freigabe) und
 `reserved_by` (`uuid`, Surrogat des reservierenden Nutzers ohne Fremdschlüssel,
@@ -800,6 +879,63 @@ Konvention 16 wie `ci_change.actor_id`). Eine Reservierung ist eine Zeile mit
 `type = 'reserved'`, `subnet_id` und ohne `interface_id`; VRF, Client und
 Standort setzen `trg_ip_address_vrf` und `ip_address_scope`. RLS, Policies und
 Indizes von `ip_address` bleiben unverändert.
+
+Host-Adresse (NET-06, WP-300, Migration 000213): `ip_address` erhält die
+gespeicherte Spalte `address_host` (`text GENERATED ALWAYS AS (host(address))
+STORED`) und den Index `idx_ip_address_org_vrf_host` auf `(organization_id,
+vrf_id, address_host)`. Die Duplikatsuche vergleicht damit die Host-Adresse
+ohne Präfixlänge mit der leakproof Textgleichheit, auch unter RLS; ein
+Ausdrucksindex über `host(address)` wäre als `reticora_app` nicht nutzbar.
+RLS und Policies von `ip_address` bleiben unverändert.
+
+Ticket-Zustände und Nummer je Organisation (TKT-01, WP-290, Migration 000214):
+`ticket_status_check` erlaubt zusätzlich `new`, der Default von `status` ist
+`new`; die Übergänge prüft die Anwendung (`backend/internal/ticket/states.go`).
+`ticket_number` hat keinen Default mehr (die Sequenz
+`ticket_ticket_number_seq` bleibt für die Down-Migration) und ist über
+`ticket_organization_number_key` (`organization_id`, `ticket_number`)
+eindeutig; der nicht eindeutige Index `idx_ticket_number` entfällt. Der
+BEFORE-INSERT-Trigger `ticket_number_assign` (Funktion
+`assign_ticket_number`) vergibt die Nummer aus `ticket_number_counter`
+(`organization_id` PRIMARY KEY, ON DELETE CASCADE, `last_number`) per
+`INSERT … ON CONFLICT (organization_id) DO UPDATE … RETURNING`; eine
+mitgegebene Nummer bleibt und hebt den Zähler höchstens an. Der Zähler
+startete je Organisation bei `max(ticket_number)`. RLS mit ENABLE/FORCE und
+der Policy `ticket_number_counter_isolation` (FOR ALL, nur `app.org_id`, damit
+gescopte Prinzipale denselben Zähler nutzen), TRUNCATE-Schutz
+`reticora_truncate_guard`.
+
+Business-Kalender (TKT-02, LOC-01/02, WP-292, Migration 000216):
+`business_calendar` hält die Arbeitszeiten einer Organisation oder eines
+Clients (`client_id` NULL ist org-weit): `weekly_hours` (`jsonb`, Standard
+Mo–Fr 08:00–18:00, `business_calendar_weekly_hours_check`: Array) als Fenster
+`{weekday 1=Mo…7=So, start, end}` in lokaler Wandzeit, `holidays` (`jsonb`,
+Standard `[]`, `business_calendar_holidays_check`: Array) als
+`{date, name}`, optional `timezone` (`business_calendar_timezone_check` mit
+`reticora_is_iana_timezone`), `is_default` (Standard false). Die Inhalte prüft
+die Anwendung (`sla.Calendar.Validate`). Schlüssel
+`business_calendar_id_organization_key` (`id`, `organization_id`); der
+Client-Verweis `business_calendar_client_id_fkey` trägt die Organisation
+(`client_id`, `organization_id`, ON DELETE CASCADE, K19). Indizes
+`idx_business_calendar_client` (`organization_id`, `client_id`) und der
+Teil-Unique-Index `business_calendar_default` (`organization_id`,
+`client_id`) NULLS NOT DISTINCT WHERE `is_default`: ein Default je
+Organisation und Client. Trigger `trg_business_calendar_updated_at`. RLS mit
+ENABLE/FORCE: `business_calendar_isolation` (FOR ALL; USING lässt org-weite
+Kalender für Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im
+Client-Scope, E-09) und die RESTRICTIVE-Policies
+`business_calendar_scoped_update` und `business_calendar_scoped_delete`,
+TRUNCATE-Schutz `reticora_truncate_guard`. `sla` erhält `calendar_id`
+(`sla_calendar_id_fkey` auf (`calendar_id`, `organization_id`), ON DELETE SET
+NULL (`calendar_id`), Index `idx_sla_calendar`). `ticket_sla` erhält
+`calendar_id` (`ticket_sla_calendar_id_fkey` wie bei `sla`, Index
+`idx_ticket_sla_calendar`), `sla_explicit` (Standard false),
+`response_breach_notified_at` und `resolution_breach_notified_at` mit den
+Teilindizes `idx_ticket_sla_response_open` (`organization_id`,
+`response_due_at`) WHERE `first_response_at` und
+`response_breach_notified_at` NULL sowie `idx_ticket_sla_resolution_open`
+(`organization_id`, `resolution_due_at`) WHERE `resolved_at` und
+`resolution_breach_notified_at` NULL (Lauf aus WP-769).
 
 ## Tabellen, RLS und Policies
 
@@ -826,6 +962,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
 | `building` | ja | ja | building_isolation (ALL) |
+| `business_calendar` | ja | ja | business_calendar_isolation (ALL), business_calendar_scoped_delete (DELETE), business_calendar_scoped_update (UPDATE) |
 | `cable` | ja | ja | org_isolation (ALL) |
 | `ci` | ja | ja | ci_isolation (ALL), ci_scoped_delete (DELETE), ci_scoped_update (UPDATE) |
 | `ci_change` | ja | ja | ci_change_scoped_delete (DELETE), ci_change_scoped_update (UPDATE), org_isolation (ALL) |
@@ -866,6 +1003,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `event_outbox_counter` | ja | ja | event_outbox_counter_isolation (ALL), event_outbox_counter_system_select (SELECT) |
 | `export_job` | ja | ja | export_job_isolation (ALL), export_job_system_select (SELECT) |
 | `form_def` | ja | ja | form_def_scoped_delete (DELETE), form_def_scoped_update (UPDATE), form_def_tenant_isolation (ALL) |
+| `form_layout` | ja | ja | form_layout_isolation (ALL) |
 | `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |
 | `iga_access_request` | ja | ja | iga_access_request_tenant_isolation (ALL) |
 | `iga_access_review` | ja | ja | iga_review_tenant_isolation (ALL) |
@@ -891,6 +1029,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL), maintenance_notification_scoped_delete (DELETE), maintenance_notification_scoped_update (UPDATE) |
 | `maintenance_window` | ja | ja | maintenance_window_isolation (ALL), maintenance_window_scoped_delete (DELETE), maintenance_window_scoped_insert (INSERT), maintenance_window_scoped_update (UPDATE) |
 | `maintenance_window_ci` | ja | ja | maintenance_window_ci_isolation (ALL), maintenance_window_ci_scoped_delete (DELETE), maintenance_window_ci_scoped_update (UPDATE) |
+| `metamodel_draft` | ja | ja | metamodel_draft_isolation (ALL) |
 | `metamodel_rule` | ja | ja | metamodel_rule_isolation_delete (DELETE), metamodel_rule_isolation_insert (INSERT), metamodel_rule_isolation_select (SELECT), metamodel_rule_isolation_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
@@ -940,6 +1079,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `template_version_item` | ja | ja | template_version_item_isolation_delete (DELETE), template_version_item_isolation_insert (INSERT), template_version_item_isolation_select (SELECT), template_version_item_isolation_update (UPDATE) |
 | `ticket` | ja | ja | ticket_scoped_delete (DELETE), ticket_scoped_update (UPDATE), ticket_tenant_isolation (ALL) |
 | `ticket_comment` | ja | ja | ticket_comment_scoped_delete (DELETE), ticket_comment_scoped_update (UPDATE), ticket_comment_tenant_isolation (ALL) |
+| `ticket_number_counter` | ja | ja | ticket_number_counter_isolation (ALL) |
 | `ticket_sla` | ja | ja | ticket_sla_tenant_isolation (ALL) |
 | `training` | ja | ja | training_isolation (ALL) |
 | `training_assignment` | ja | ja | training_assignment_isolation (ALL) |

@@ -173,6 +173,47 @@ func validateAttributes(defs []fieldmeta.FieldDefinition, values map[string]any,
 	return validateWithRules(defs, nil, values, incoming, existing)
 }
 
+// ValidateAttributes checks the stored values of a CI against its field
+// metadata defs and its active catalog rules catalog (WP-721, MET-53): the
+// test run of a metamodel draft checks the CIs a change would make invalid
+// with the server validation of a write (validateWithRules), but without
+// incoming and existing values, so a read-only field or rule reports
+// nothing. Fields hidden in the current state carry no requirement, as on
+// a write. values is the effective attribute map (StoredValues). The
+// violations are sorted by field; none is nil.
+func ValidateAttributes(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.CatalogRule, values map[string]any) []Violation {
+	ve, ok := AsValidationError(validateWithRules(defs, catalog, values, nil, nil))
+	if !ok {
+		return nil
+	}
+	return ve.Violations
+}
+
+// StoredValues is the value map ValidateAttributes checks for a stored CI:
+// its attributes as the read view shows them (the projected namespaces
+// left out, the instance attributes under their names) with the non-empty
+// typed columns typed taking precedence for their names, as on a write.
+func StoredValues(attributes map[string]any, typed map[string]string) map[string]any {
+	columns := make(map[string]any, len(typed))
+	for name, value := range typed {
+		if _, known := typedColumns[name]; known && value != "" {
+			columns[name] = value
+		}
+	}
+	return withTyped(presentAttributes(attributes), columns)
+}
+
+// TypedColumnNames are the typed CI columns (CI-01) a field definition of
+// the same name applies to, sorted.
+func TypedColumnNames() []string {
+	names := make([]string, 0, len(typedColumns))
+	for name := range typedColumns {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // validateWithRules is validateAttributes with the active catalog rules of
 // the CI (WP-257, MET-10): their violations are AND-ed with those of the
 // attribute rules (catalogViolations) and reported together.

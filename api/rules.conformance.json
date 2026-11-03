@@ -1,5 +1,5 @@
 {
-  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon.",
+  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. Only backend/internal/rules/rules_test.go evaluates expressions for now; frontend/src/rules reads only cases, invalid_rules, condition_cases and invalid_conditions until WP-315 adds the TypeScript evaluation.",
   "version": 1,
   "cases": [
     {
@@ -1491,6 +1491,936 @@
         ]
       },
       "path": "rules[1].rules[0].field"
+    }
+  ],
+  "expressions": [
+    {
+      "name": "field: the value of an attribute",
+      "expr": {
+        "op": "field",
+        "field": "env"
+      },
+      "inputs": {
+        "env": "prod"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "prod"
+    },
+    {
+      "name": "field: an asset field",
+      "expr": {
+        "op": "field",
+        "field": "asset.serial_number"
+      },
+      "inputs": {
+        "asset.serial_number": "SN-1"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "SN-1"
+    },
+    {
+      "name": "literal: false is a value",
+      "expr": {
+        "op": "literal",
+        "value": false
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": false
+    },
+    {
+      "name": "literal: 0 is a value",
+      "expr": {
+        "op": "literal",
+        "value": 0
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": 0
+    },
+    {
+      "name": "add: two numbers",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "field",
+            "field": "cpu_count"
+          },
+          {
+            "op": "literal",
+            "value": 2
+          }
+        ]
+      },
+      "inputs": {
+        "cpu_count": 4
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": 6
+    },
+    {
+      "name": "add: three operands, decimal text counts as number",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "field",
+            "field": "a"
+          },
+          {
+            "op": "field",
+            "field": "b"
+          },
+          {
+            "op": "literal",
+            "value": 3
+          }
+        ]
+      },
+      "inputs": {
+        "a": "1.5",
+        "b": 2
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": 6.5
+    },
+    {
+      "name": "sub: first minus second",
+      "expr": {
+        "op": "sub",
+        "args": [
+          {
+            "op": "field",
+            "field": "total"
+          },
+          {
+            "op": "field",
+            "field": "used"
+          }
+        ]
+      },
+      "inputs": {
+        "total": 20,
+        "used": 8
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": 12
+    },
+    {
+      "name": "mul: asset cost times a factor",
+      "expr": {
+        "op": "mul",
+        "args": [
+          {
+            "op": "field",
+            "field": "asset.purchase_cost"
+          },
+          {
+            "op": "literal",
+            "value": 1.5
+          }
+        ]
+      },
+      "inputs": {
+        "asset.purchase_cost": 100
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": 150
+    },
+    {
+      "name": "div: fraction",
+      "expr": {
+        "op": "div",
+        "args": [
+          {
+            "op": "literal",
+            "value": 7
+          },
+          {
+            "op": "literal",
+            "value": 2
+          }
+        ]
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": 3.5
+    },
+    {
+      "name": "div: division by 0 is empty",
+      "expr": {
+        "op": "div",
+        "args": [
+          {
+            "op": "field",
+            "field": "a"
+          },
+          {
+            "op": "field",
+            "field": "b"
+          }
+        ]
+      },
+      "inputs": {
+        "a": 5,
+        "b": 0
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "missing input: an absent field makes the expression empty",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "field",
+            "field": "missing"
+          },
+          {
+            "op": "literal",
+            "value": 1
+          }
+        ]
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "missing input: null",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "field",
+            "field": "a"
+          },
+          {
+            "op": "literal",
+            "value": 1
+          }
+        ]
+      },
+      "inputs": {
+        "a": null
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "missing input: blank text",
+      "expr": {
+        "op": "concat",
+        "args": [
+          {
+            "op": "field",
+            "field": "a"
+          },
+          {
+            "op": "literal",
+            "value": "x"
+          }
+        ]
+      },
+      "inputs": {
+        "a": "   "
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "missing input: nested in arithmetic",
+      "expr": {
+        "op": "mul",
+        "args": [
+          {
+            "op": "add",
+            "args": [
+              {
+                "op": "field",
+                "field": "a"
+              },
+              {
+                "op": "literal",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "op": "literal",
+            "value": 2
+          }
+        ]
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "wrong kind: text in add is empty",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "field",
+            "field": "a"
+          },
+          {
+            "op": "literal",
+            "value": 1
+          }
+        ]
+      },
+      "inputs": {
+        "a": "abc"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "today: the date of now in UTC",
+      "expr": {
+        "op": "today"
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "2026-03-01"
+    },
+    {
+      "name": "today: after midnight in Europe/Berlin",
+      "expr": {
+        "op": "today"
+      },
+      "inputs": {},
+      "now": "2026-03-01T23:30:00Z",
+      "timezone": "Europe/Berlin",
+      "result": "2026-03-02"
+    },
+    {
+      "name": "today: before midnight in America/New_York",
+      "expr": {
+        "op": "today"
+      },
+      "inputs": {},
+      "now": "2026-03-02T03:00:00Z",
+      "timezone": "America/New_York",
+      "result": "2026-03-01"
+    },
+    {
+      "name": "days_between: days left until the warranty end, across midnight",
+      "expr": {
+        "op": "days_between",
+        "args": [
+          {
+            "op": "today"
+          },
+          {
+            "op": "field",
+            "field": "asset.warranty_end"
+          }
+        ]
+      },
+      "inputs": {
+        "asset.warranty_end": "2026-03-12"
+      },
+      "now": "2026-03-01T23:30:00Z",
+      "timezone": "Europe/Berlin",
+      "result": 10
+    },
+    {
+      "name": "days_between: the same instant in UTC counts one day more",
+      "expr": {
+        "op": "days_between",
+        "args": [
+          {
+            "op": "today"
+          },
+          {
+            "op": "field",
+            "field": "asset.warranty_end"
+          }
+        ]
+      },
+      "inputs": {
+        "asset.warranty_end": "2026-03-12"
+      },
+      "now": "2026-03-01T23:30:00Z",
+      "timezone": "UTC",
+      "result": 11
+    },
+    {
+      "name": "days_between: an earlier date is negative",
+      "expr": {
+        "op": "days_between",
+        "args": [
+          {
+            "op": "today"
+          },
+          {
+            "op": "field",
+            "field": "asset.warranty_end"
+          }
+        ]
+      },
+      "inputs": {
+        "asset.warranty_end": "2026-01-31"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": -29
+    },
+    {
+      "name": "days_between: across the change to summer time",
+      "expr": {
+        "op": "days_between",
+        "args": [
+          {
+            "op": "literal",
+            "value": "2026-03-28"
+          },
+          {
+            "op": "literal",
+            "value": "2026-03-30"
+          }
+        ]
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "Europe/Berlin",
+      "result": 2
+    },
+    {
+      "name": "days_between: a timestamp counts with its date in the time zone",
+      "expr": {
+        "op": "days_between",
+        "args": [
+          {
+            "op": "today"
+          },
+          {
+            "op": "field",
+            "field": "seen_at"
+          }
+        ]
+      },
+      "inputs": {
+        "seen_at": "2026-03-02T23:30:00Z"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "Europe/Berlin",
+      "result": 2
+    },
+    {
+      "name": "days_between: text that is no date is empty",
+      "expr": {
+        "op": "days_between",
+        "args": [
+          {
+            "op": "today"
+          },
+          {
+            "op": "field",
+            "field": "d"
+          }
+        ]
+      },
+      "inputs": {
+        "d": "soon"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "concat: text of strings, numbers and booleans",
+      "expr": {
+        "op": "concat",
+        "args": [
+          {
+            "op": "field",
+            "field": "hostname"
+          },
+          {
+            "op": "literal",
+            "value": "."
+          },
+          {
+            "op": "literal",
+            "value": 42
+          },
+          {
+            "op": "literal",
+            "value": true
+          }
+        ]
+      },
+      "inputs": {
+        "hostname": "srv"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "srv.42true"
+    },
+    {
+      "name": "concat: an empty operand makes it empty",
+      "expr": {
+        "op": "concat",
+        "args": [
+          {
+            "op": "field",
+            "field": "hostname"
+          },
+          {
+            "op": "field",
+            "field": "domain"
+          }
+        ]
+      },
+      "inputs": {
+        "hostname": "srv"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "lower",
+      "expr": {
+        "op": "lower",
+        "args": [
+          {
+            "op": "field",
+            "field": "name"
+          }
+        ]
+      },
+      "inputs": {
+        "name": "SRV-01"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "srv-01"
+    },
+    {
+      "name": "upper",
+      "expr": {
+        "op": "upper",
+        "args": [
+          {
+            "op": "field",
+            "field": "name"
+          }
+        ]
+      },
+      "inputs": {
+        "name": "srv-01"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "SRV-01"
+    },
+    {
+      "name": "lower: a number of an attribute by its text",
+      "expr": {
+        "op": "lower",
+        "args": [
+          {
+            "op": "field",
+            "field": "n"
+          }
+        ]
+      },
+      "inputs": {
+        "n": 5
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "5"
+    },
+    {
+      "name": "coalesce: the first non-empty operand",
+      "expr": {
+        "op": "coalesce",
+        "args": [
+          {
+            "op": "field",
+            "field": "missing"
+          },
+          {
+            "op": "field",
+            "field": "blank"
+          },
+          {
+            "op": "literal",
+            "value": "n/a"
+          }
+        ]
+      },
+      "inputs": {
+        "blank": "  "
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "n/a"
+    },
+    {
+      "name": "coalesce: an attribute before the fallback",
+      "expr": {
+        "op": "coalesce",
+        "args": [
+          {
+            "op": "field",
+            "field": "owner"
+          },
+          {
+            "op": "literal",
+            "value": "n/a"
+          }
+        ]
+      },
+      "inputs": {
+        "owner": "ops"
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": "ops"
+    },
+    {
+      "name": "coalesce: an empty division falls through",
+      "expr": {
+        "op": "coalesce",
+        "args": [
+          {
+            "op": "div",
+            "args": [
+              {
+                "op": "field",
+                "field": "a"
+              },
+              {
+                "op": "literal",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "op": "literal",
+            "value": -1
+          }
+        ]
+      },
+      "inputs": {
+        "a": 4
+      },
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": -1
+    },
+    {
+      "name": "coalesce: all empty is empty",
+      "expr": {
+        "op": "coalesce",
+        "args": [
+          {
+            "op": "field",
+            "field": "a"
+          },
+          {
+            "op": "field",
+            "field": "b"
+          }
+        ]
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": null
+    },
+    {
+      "name": "coalesce: inside an operator, its result counts",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "coalesce",
+            "args": [
+              {
+                "op": "field",
+                "field": "a"
+              },
+              {
+                "op": "literal",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "op": "literal",
+            "value": 1
+          }
+        ]
+      },
+      "inputs": {},
+      "now": "2026-03-01T12:00:00Z",
+      "timezone": "UTC",
+      "result": 1
+    }
+  ],
+  "invalid_expressions": [
+    {
+      "name": "invalid: unknown operator",
+      "expr": {
+        "op": "pow",
+        "args": [
+          {
+            "op": "literal",
+            "value": 2
+          },
+          {
+            "op": "literal",
+            "value": 3
+          }
+        ]
+      },
+      "path": "op"
+    },
+    {
+      "name": "invalid: a value rule is no expression",
+      "expr": {
+        "op": "required"
+      },
+      "path": "op"
+    },
+    {
+      "name": "invalid: a comparison is no expression",
+      "expr": {
+        "op": "eq",
+        "field": "env",
+        "value": "prod"
+      },
+      "path": "op"
+    },
+    {
+      "name": "invalid: unknown property",
+      "expr": {
+        "op": "today",
+        "timezone": "UTC"
+      },
+      "path": "timezone"
+    },
+    {
+      "name": "invalid: field without field",
+      "expr": {
+        "op": "field"
+      },
+      "path": "field"
+    },
+    {
+      "name": "invalid: field with surrounding blanks",
+      "expr": {
+        "op": "field",
+        "field": " env"
+      },
+      "path": "field"
+    },
+    {
+      "name": "invalid: asset field outside the whitelist",
+      "expr": {
+        "op": "field",
+        "field": "asset.location_id"
+      },
+      "path": "field"
+    },
+    {
+      "name": "invalid: literal null",
+      "expr": {
+        "op": "literal",
+        "value": null
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: literal array",
+      "expr": {
+        "op": "literal",
+        "value": [1]
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: add of one operand",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "literal",
+            "value": 1
+          }
+        ]
+      },
+      "path": "args"
+    },
+    {
+      "name": "invalid: sub of three operands",
+      "expr": {
+        "op": "sub",
+        "args": [
+          {
+            "op": "literal",
+            "value": 1
+          },
+          {
+            "op": "literal",
+            "value": 2
+          },
+          {
+            "op": "literal",
+            "value": 3
+          }
+        ]
+      },
+      "path": "args"
+    },
+    {
+      "name": "invalid: lower of two operands",
+      "expr": {
+        "op": "lower",
+        "args": [
+          {
+            "op": "literal",
+            "value": "a"
+          },
+          {
+            "op": "literal",
+            "value": "b"
+          }
+        ]
+      },
+      "path": "args"
+    },
+    {
+      "name": "invalid: args is no array",
+      "expr": {
+        "op": "concat",
+        "args": "a"
+      },
+      "path": "args"
+    },
+    {
+      "name": "invalid: nested unknown operator",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "literal",
+            "value": 1
+          },
+          {
+            "op": "sqrt",
+            "args": [
+              {
+                "op": "literal",
+                "value": 4
+              }
+            ]
+          }
+        ]
+      },
+      "path": "args[1].op"
+    },
+    {
+      "name": "invalid: text in arithmetic",
+      "expr": {
+        "op": "add",
+        "args": [
+          {
+            "op": "literal",
+            "value": "a"
+          },
+          {
+            "op": "literal",
+            "value": 1
+          }
+        ]
+      },
+      "path": "args[0]"
+    },
+    {
+      "name": "invalid: a number as date",
+      "expr": {
+        "op": "days_between",
+        "args": [
+          {
+            "op": "literal",
+            "value": 5
+          },
+          {
+            "op": "today"
+          }
+        ]
+      },
+      "path": "args[0]"
+    },
+    {
+      "name": "invalid: coalesce mixes number and text",
+      "expr": {
+        "op": "coalesce",
+        "args": [
+          {
+            "op": "field",
+            "field": "a"
+          },
+          {
+            "op": "literal",
+            "value": 1
+          },
+          {
+            "op": "literal",
+            "value": "x"
+          }
+        ]
+      },
+      "path": "args[2]"
+    },
+    {
+      "name": "invalid: nested type error",
+      "expr": {
+        "op": "concat",
+        "args": [
+          {
+            "op": "literal",
+            "value": "x"
+          },
+          {
+            "op": "upper",
+            "args": [
+              {
+                "op": "literal",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "path": "args[1].args[0]"
     }
   ]
 }

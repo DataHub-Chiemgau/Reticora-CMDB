@@ -1282,8 +1282,8 @@ func (r *PGRepository) recordTemplatesChange(ctx context.Context, tx pgx.Tx, ite
 }
 
 // recordTemplatesHistory writes the ci_change row update of the field
-// templates in a change set of its own (WP-487); WP-253 brings the type
-// template_migrated.
+// templates in a change set of its own (WP-487); a template migration is
+// the type template_migration (WP-253, MigrateTemplate).
 func (r *PGRepository) recordTemplatesHistory(ctx context.Context, tx pgx.Tx, item *Item, change *templatesChange) error {
 	if change == nil {
 		return nil
@@ -2125,10 +2125,12 @@ const (
 
 // changeSet is one write of a CI (AUD-03, E-82 option 2): its field rows in
 // ci_change share the id and the kind. record names the ingest record the
-// write comes from (UpdateRecord).
+// write comes from (UpdateRecord). comment is written into the comment of
+// its rows, "" none (the template migration, WP-253).
 type changeSet struct {
 	id, kind string
 	record   *RecordOrigin
+	comment  string
 }
 
 // newChangeSet returns a change set of kind with a new id.
@@ -2185,7 +2187,8 @@ func (o *origin) withRecord(rec *RecordOrigin) {
 	}
 }
 
-// recordCIChange writes one field row of the change set set.
+// recordCIChange writes one field row of the change set set, with the
+// comment of the set when it has one.
 func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, set changeSet, orgID, ciID string, version int64, changeType, fieldName string, oldValue, newValue any) error {
 	// Personal values are stored as vault surrogates (SEC-05).
 	oldValue, err := sealChangeValue(ctx, tx, orgID, fieldName, oldValue)
@@ -2222,10 +2225,12 @@ func (r *PGRepository) recordCIChange(ctx context.Context, tx pgx.Tx, set change
 			request_id,
 			correlation_id,
 			collector_id,
-			observed_at
-		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			observed_at,
+			comment
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 	`, orgID, ciID, who.actorID, changeType, nilIfEmpty(fieldName), oldJSON, newJSON, version,
-		set.kind, set.id, who.actorUserID, who.source, who.requestID, who.correlationID, who.collectorID, who.observedAt)
+		set.kind, set.id, who.actorUserID, who.source, who.requestID, who.correlationID, who.collectorID, who.observedAt,
+		nilIfEmpty(set.comment))
 	if err != nil {
 		return fmt.Errorf("record ci change: %w", err)
 	}

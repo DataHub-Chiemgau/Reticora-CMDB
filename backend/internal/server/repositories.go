@@ -33,6 +33,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
@@ -172,7 +173,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Location:          location.NewPGRepository(pool),
 		Agent:             agent.NewPGRepository(pool),
 		Security:          security.NewPGRepository(pool),
-		Ticket:            ticket.NewPGRepository(pool),
+		Ticket:            ticket.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),
 		Entitlement:       entitlement.NewPGRepository(pool),
@@ -196,6 +197,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Jobs:              jobs.NewPGRepository(pool),
 		Privacy:           privacy.NewPGRepository(pool),
 		CIType:            citype.NewPGRepository(pool),
+		MetamodelDraft:    metamodel.NewPGRepository(pool),
 		RelationshipType:  relationshiptype.NewPGRepository(pool),
 		Lifecycle:         lifecycle.NewPGRepository(pool),
 		LocationTree:      locations.NewPGRepository(pool),

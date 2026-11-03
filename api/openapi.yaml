@@ -2570,7 +2570,9 @@ paths:
       summary: The result of a succeeded job
       description: >-
         Also the partial result a job cancelled while running kept, e.g.
-        the report of a bulk change (status cancelled).
+        the report of a bulk change (status cancelled). The result of a
+        job template.migrate is a TemplateMigrationReport; a cancelled
+        template migration has none (409).
       responses:
         '200':
           description: The result of the job (its shape depends on the kind)
@@ -4835,11 +4837,11 @@ paths:
         - name: status
           in: query
           schema:
-            type: string
+            $ref: '#/components/schemas/TicketStatus'
         - name: priority
           in: query
           schema:
-            type: string
+            $ref: '#/components/schemas/TicketPriority'
         - name: category
           in: query
           schema:
@@ -4850,6 +4852,11 @@ paths:
             type: string
         - name: team_id
           in: query
+          description: >-
+            Tickets of one team (UUID), or `mine` for the tickets of every
+            team the caller is a member of (`team_member`, E-143), with
+            cursor, sort and `total` like a team id; without team membership
+            the list is empty.
           schema:
             type: string
       responses:
@@ -4890,9 +4897,10 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           description: >-
-            assignee_id, team_id, related_ci_id or related_asset_id is no UUID
-            or names an object that is unknown, of another organization or
-            outside the caller's scope (all alike, TEN-04); `field` names it.
+            priority is no ticket priority, or assignee_id, team_id,
+            related_ci_id or related_asset_id is no UUID or names an object
+            that is unknown, of another organization or outside the caller's
+            scope (all alike, TEN-04); `field` names it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -4944,11 +4952,21 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The status change is no transition of the ticket state machine
+            (TKT-01, e.g. new to waiting); the ticket is unchanged and the
+            detail names both states.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: >-
-            assignee_id, team_id, related_ci_id or related_asset_id is no UUID
-            or names an object that is unknown, of another organization or
-            outside the caller's scope (all alike, TEN-04); `field` names it.
+            status or priority is no ticket status or priority, or
+            assignee_id, team_id, related_ci_id or related_asset_id is no
+            UUID or names an object that is unknown, of another organization
+            or outside the caller's scope (all alike, TEN-04); `field` names
+            it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -5661,8 +5679,17 @@ paths:
         no_profile_match is 409 (its generic_device CI exists: set the type
         on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis,
         403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
-        duplicate_ip accept|dismiss (accept releases the reservation; 422 when the
-        reservation is already released or the item names none, 501 without IPAM);
+        duplicate_ip accept|dismiss: an item of a reservation conflict
+        (payload reservation_ip_id) is accepted by releasing the reservation,
+        422 when it is already released or the item names none; an item of
+        duplicate observations carries payload address, vrf_id, holders (every
+        ip_address row of the address in the VRF with ip_address_id,
+        interface_id, ci_id and type) and side_keys, and accept chooses a side:
+        the address at the CI ci_id is stale and all its rows of the address
+        are removed, with one CI involved that CI is the side, with several
+        ci_id from candidate_ci_ids is required (400 otherwise, like merge),
+        422 when that CI no longer holds the address next to another side;
+        dismiss keeps every side; 501 without IPAM;
         serial_mismatch dismiss. Another action is 422.
         resolved_by and the audit actor are the caller; a body with
         resolved_by is 400. An item is resolved exactly once (F-404): the
@@ -9380,7 +9407,18 @@ paths:
       operationId: linkDocument
       tags: [Documents]
       summary: Link a document to another entity
-      description: A principal restricted to some clients or sites may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09).
+      description: >-
+        entity_type is one of ci, asset, assignment, ticket, location,
+        disposal_record and stocktake; any other value answers 422. A target
+        that does not exist or lies outside the caller's scope answers 404.
+        The link takes client, site and team of its target (MGT-01). A
+        principal restricted to some clients, sites or teams may link only
+        documents that already have links; linking an unlinked (org-wide)
+        document answers 403 (E-09), and so does a link whose target lies
+        outside its write scope, e.g. an org-wide object or, for a
+        team-restricted principal, a target without a team of its scope
+        (E-11). The audit log records document.linked with link_id,
+        entity_type and entity_id.
       requestBody:
         required: true
         content:
@@ -9402,6 +9440,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -12738,6 +12778,77 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/templates/{id}/migrations:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: migrateTemplate
+      tags: [Metamodel]
+      summary: Migrate the CIs of a template version to another version (job template.migrate)
+      description: >-
+        Queues a job of kind template.migrate (API-09, JOB-04, OVR-03) and
+        answers 202 with `Location: /api/v1/jobs/{id}`. The job migrates
+        the CIs whose assignment names the template on `from_version`
+        (ci_template, WP-710) to `to_version`: the defaults of the target
+        version go into attribute fields without an effective value;
+        overridden fields and instance attributes stay, findings of the
+        validation do not block (WP-253). Without `ci_ids` and `where`
+        every CI the caller sees with that assignment is selected,
+        otherwise the ids (at most 500, API-08) or the filter AST (SRC-03),
+        always intersected with the assignment; an id without it is
+        reported as skipped. The job runs with the caller as actor and the
+        caller's scope (a job without scope snapshot fails), in blocks of
+        100 CIs, one transaction per block and a savepoint per CI: a CI
+        that fails (e.g. a unique conflict of a default) is discarded alone.
+        Its progress counts the selected CIs; a running job can be
+        cancelled with DELETE /api/v1/jobs/{id} between two blocks
+        (citype:manage) and then has no result. `dry_run` computes the
+        report and writes nothing. The report (TemplateMigrationReport) is
+        the result of the succeeded job, GET /api/v1/jobs/{id}/result. A
+        retry writes nothing twice; there is no revert (E-25). Requires
+        citype:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateMigrationRequest'
+      responses:
+        '202':
+          description: The migration runs as a job
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status, kind]
+                properties:
+                  job_id: { type: string }
+                  status: { type: string }
+                  kind: { type: string, enum: [template.migrate] }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            to_version is not published, from_version neither published nor
+            retired, a version is unknown or both are equal; ci_ids is empty,
+            has more than 500 entries or an entry that is no UUID; ci_ids and
+            where together; where is no valid filter AST.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/templates/{id}/versions:
     x-phase: P2
     parameters:
@@ -13099,6 +13210,657 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/layouts:
+    x-phase: P2
+    get:
+      operationId: listLayouts
+      tags: [Metamodel]
+      summary: List form layouts (MET-50)
+      description: >-
+        The organization's form layouts per CI type, template and role
+        (WP-259), optionally filtered by `ci_type_id`, `template_id` and
+        `role_id`. Pages newest first on (created_at, id) (API-02): `limit`
+        (default 50, at most 200) and the signed keyset `cursor` from
+        `next_cursor`. Requires ci:read. Not /api/v1/forms (P3 workflows).
+      parameters:
+        - name: ci_type_id
+          in: query
+          required: false
+          description: Only layouts of this CI type.
+          schema: { type: string }
+        - name: template_id
+          in: query
+          required: false
+          description: Only layouts of this template.
+          schema: { type: string }
+        - name: role_id
+          in: query
+          required: false
+          description: Only layouts of this role or custom role.
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Layouts, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormLayoutListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createLayout
+      tags: [Metamodel]
+      summary: Create a form layout (MET-50)
+      description: >-
+        A layout of the organization for exactly one target it sees, a CI
+        type or a template (an own or a system row; otherwise 422 on the
+        target field), optionally bound to a role or custom role of the
+        organization (`role_id`, the ids of GET /api/v1/roles; otherwise
+        422). The fields are checked against the effective fields of the CI
+        type without a CI (for a template: of the template's type). 422 with
+        the path in `field` (e.g. `layout.sections[1].fields[0].name`) for an
+        unknown field, a field in two sections, a duplicate or reserved
+        section key (`_instance`, `_required`), a title without `de` or
+        `en`, a width outside 1 to 12 and a `visible_when` key that names
+        no catalog rule (/api/v1/rules). A taken key or a second layout for
+        the same target and role is 409. Requires citype:manage; audited as
+        `form_layout.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormLayoutCreate'
+      responses:
+        '201':
+          description: Layout created
+          headers:
+            ETag:
+              description: The layout version (API-07).
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormLayout'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/layouts/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getLayout
+      tags: [Metamodel]
+      summary: Read a form layout
+      description: A layout of the organization. Requires ci:read.
+      responses:
+        '200':
+          description: Layout
+          headers:
+            ETag:
+              description: The layout version (API-07); send it as If-Match with a PATCH or DELETE.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormLayout'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateLayout
+      tags: [Metamodel]
+      summary: Update a form layout
+      description: >-
+        `role_id` (null unbinds the role), `priority`, `is_active` and
+        `layout`, checked like a create. `key`, `ci_type_id` and
+        `template_id` are immutable (422). `version` rises by one. An
+        optional If-Match must name the current version, otherwise 412;
+        without If-Match the change is written (API-07). Requires
+        citype:manage; audited as `form_layout.updated` with before and
+        after.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FormLayoutPatch'
+      responses:
+        '200':
+          description: Layout updated
+          headers:
+            ETag:
+              description: The new layout version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FormLayout'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the layout
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteLayout
+      tags: [Metamodel]
+      summary: Delete a form layout
+      description: >-
+        An optional If-Match must name the current version, otherwise 412.
+        Requires citype:manage; audited as `form_layout.deleted`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the deletion is based on, or "*".
+          schema: { type: string }
+      responses:
+        '204':
+          description: Layout deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          description: If-Match does not name the current version of the layout
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts:
+    x-phase: P2
+    get:
+      operationId: listMetamodelDrafts
+      tags: [Metamodel]
+      summary: List metamodel drafts (MET-53)
+      description: >-
+        The organization's metamodel drafts (WP-260), optionally filtered by
+        `status`, without their items (`item_count` counts them). Pages
+        newest first on (created_at, id) (API-02): `limit` (default 50, at
+        most 200) and the signed keyset `cursor` from `next_cursor`.
+        Requires citype:manage, also for reading: drafts are unpublished
+        admin work.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Only drafts of this status (400 for another value).
+          schema:
+            type: string
+            enum: [draft, tested, published, discarded]
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Drafts, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraftListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMetamodelDraft
+      tags: [Metamodel]
+      summary: Create a metamodel draft (MET-53)
+      description: >-
+        An empty draft with status `draft` and version 1. Metamodel changes
+        captured in it as items stay unproductive until the draft is
+        published (WP-261); without a draft the resource routes write
+        directly (MET-04). A name with 1 to 200 characters is required
+        (422). Requires citype:manage; audited as `metamodel_draft.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelDraftCreate'
+      responses:
+        '201':
+          description: Draft created
+          headers:
+            ETag:
+              description: The draft version (API-07).
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getMetamodelDraft
+      tags: [Metamodel]
+      summary: Read a metamodel draft
+      description: >-
+        A draft of the organization with its items; a draft of another
+        organization is 404. `test_report` carries the counters of the last
+        test run only; its violations name CIs and need metamodel:publish
+        (GET …/test). Requires citype:manage.
+      responses:
+        '200':
+          description: Draft
+          headers:
+            ETag:
+              description: The draft version (API-07); send it as If-Match with a change.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateMetamodelDraft
+      tags: [Metamodel]
+      summary: Rename a metamodel draft
+      description: >-
+        Changes the name. `version` rises by one under the lock of the
+        draft. A published or discarded draft is immutable (409). An
+        optional If-Match must name the current version, otherwise 412
+        (API-07). Requires citype:manage; audited as
+        `metamodel_draft.updated` with before and after.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelDraftPatch'
+      responses:
+        '200':
+          description: Draft updated
+          headers:
+            ETag:
+              description: The new draft version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the draft
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: discardMetamodelDraft
+      tags: [Metamodel]
+      summary: Discard a metamodel draft
+      description: >-
+        Sets the status `discarded`; the draft stays readable and is
+        immutable from then on. A published or discarded draft is 409. An
+        optional If-Match must name the current version, otherwise 412.
+        Requires citype:manage; audited as `metamodel_draft.discarded`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      responses:
+        '200':
+          description: Draft discarded
+          headers:
+            ETag:
+              description: The new draft version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the draft
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts/{id}/items:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listMetamodelDraftItems
+      tags: [Metamodel]
+      summary: List the items of a metamodel draft
+      description: >-
+        The items of a draft, newest first on (created_at, id) (API-02):
+        `limit` (default 50, at most 200) and the signed keyset `cursor`
+        from `next_cursor`. Requires citype:manage.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Items, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraftItemListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: addMetamodelDraftItem
+      tags: [Metamodel]
+      summary: Capture an item in a metamodel draft
+      description: >-
+        A typed metamodel operation (`kind` and `op`, the permitted pairs in
+        MetamodelDraftItemCreate). The payload is decoded strictly into the
+        request type of the resource route the pair stands for; an unknown
+        field is 400. A payload may carry `{"$item": "<item id>"}` instead
+        of an id: the item must belong to the same draft and create a part
+        (create or clone), and the references must form no cycle (422,
+        E-112). `base` is the state of the target, read in the transaction
+        of the capture: `updated_at` of the type, field, attribute
+        definition, set or template, the ordered set ids of a type for
+        `ci_type`/`assign`, the status of the version for
+        `template_version` (`current_version` of the template for
+        `create`), `version` of a rule or layout, null for a new part.
+        A missing target is 404; a read-only system row is 403 or 404 as
+        on the resource route. The caller needs the write permission of
+        that route as well (403): `ci_attribute:manage` for `global_field`
+        and `attribute_definition`, `metamodel:publish` for
+        `template_version`/`publish`, otherwise `citype:manage`. A tested
+        draft returns to `draft` and loses its test report; a published or
+        discarded draft is 409. An optional If-Match must name the current
+        version, otherwise 412. Requires citype:manage; audited as
+        `metamodel_draft.item_added`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelDraftItemCreate'
+      responses:
+        '201':
+          description: Item captured
+          headers:
+            ETag:
+              description: The new draft version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraftItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the draft
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts/{id}/items/{item_id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: item_id
+        in: path
+        required: true
+        description: The id of the item.
+        schema: { type: string }
+    delete:
+      operationId: removeMetamodelDraftItem
+      tags: [Metamodel]
+      summary: Remove an item from a metamodel draft
+      description: >-
+        An item another item of the draft references is 409. A tested
+        draft returns to `draft` and loses its test report; a published or
+        discarded draft is 409. An optional If-Match must name the current
+        version, otherwise 412. Requires citype:manage; audited as
+        `metamodel_draft.item_removed`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      responses:
+        '200':
+          description: Item removed
+          headers:
+            ETag:
+              description: The new draft version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the draft
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts/{id}/test:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: testMetamodelDraft
+      tags: [Metamodel]
+      summary: Test a metamodel draft against the inventory (MET-53)
+      description: >-
+        Starts the test run of the draft as a job of kind `metamodel.test`
+        (WP-721), on the job queue when there is one: 202 with the job
+        (GET /api/v1/jobs/{id}). While a test of the draft is queued or
+        running, a second request answers the same job. The job runs
+        organization-wide, whatever the scope of the caller. It lays the
+        items over the metamodel and composes every affected type (changed
+        types and their subtypes, the types of a changed set, the types an
+        organization's global attribute applies to, the targets of changed
+        rules) and every changed template version with its type (MET-16);
+        a composition conflict blocks and the draft stays `draft`.
+        Otherwise it validates every CI of the affected types that is not
+        deleted, with its templates, its instance attributes and the
+        catalog rules the draft leaves; violations do not block. Without a
+        blocking conflict and with unchanged items the draft becomes
+        `tested`. The violations stand only in the report of the draft
+        (GET …/test); the job result and the draft carry the counters. A
+        published or discarded draft is 409; without the database or the
+        job service 503. Requires metamodel:publish; a running test is
+        cancelled with DELETE /api/v1/jobs/{id} and the same permission.
+      responses:
+        '202':
+          description: The test runs as a job
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status, kind]
+                properties:
+                  job_id: { type: string }
+                  status: { type: string }
+                  kind: { type: string, enum: [metamodel.test] }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    get:
+      operationId: getMetamodelDraftTest
+      tags: [Metamodel]
+      summary: Read the test report of a metamodel draft
+      description: >-
+        The report of the last test run (WP-721): state, blocking
+        conflicts, counters per type and attribute, and the violations
+        (CI, type, field, code, rule, message; never a value) as pages of
+        `data` with `limit` (default 50, at most 200) and the signed cursor
+        `next_cursor` (API-02). `total` is the number of violations the run
+        counted; at most 10000 are stored (`truncated`). A draft that was
+        never tested, or whose items changed since, is 404. Requires
+        metamodel:publish: the report names CIs of every client.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: The test report with a page of violations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelTestReportPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -15035,42 +15797,133 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/form:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getCIForm
       tags: [Metamodel]
       summary: Get the resolved form of a CI
-      description: Planned (E-38); WP-719 implements the operation.
+      description: >-
+        The form of the CI (WP-719, MET-50, MET-52): the effective fields of
+        its composition (system, organization, type chain, sets, templates,
+        instance; MET-16) arranged by the layout that applies to the caller
+        (/api/v1/layouts), without one by the standard layout (sections by
+        `ui_group`, fields by `sort_order`). Each field carries its composed
+        definition and its state after its conditions and the catalog rules
+        against the stored values; `rules` lets a client recompute the
+        states. Layout choice: template layouts before type layouts (of
+        several templates the highest position with an active layout),
+        type layouts from the CI's type to the root; per target a layout
+        with a role of the caller before the one without, then the smallest
+        `priority`, then `role_id`. The caller's roles are the roles and
+        custom roles assigned to the user, whatever their scope; standard
+        roles mapped from IdP groups do not count yet (E-110, until
+        WP-725). An API key gets the layout without a role. Instance
+        attributes stand in `_instance`, required fields the layout leaves
+        out or shows only in a hidden section in `_required`. Requires
+        ci:read; the client and site scope of the CI apply (404).
+        `preview=true` resolves the form as role `role_id` with template
+        `template_id` (MET-52) and requires citype:manage (403); so does a
+        `role_id` that is no role of the caller. A preview writes nothing.
+      parameters:
+        - name: preview
+          in: query
+          required: false
+          description: Resolve as role `role_id` with template `template_id`; requires citype:manage.
+          schema: { type: boolean, default: false }
+        - name: role_id
+          in: query
+          required: false
+          description: >-
+            A role or custom role of the organization; without preview one of
+            the caller's roles (another role requires citype:manage). Unknown
+            or foreign is 404.
+          schema: { type: string, format: uuid }
+        - name: template_id
+          in: query
+          required: false
+          description: >-
+            Only with preview=true (otherwise 400): the current published
+            version of this template replaces the CI's templates. Unknown or
+            foreign is 404, a template of a type outside the CI's type chain
+            422.
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Get the resolved form of a CI. The response schema comes with WP-719.
+          description: The resolved form
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolvedForm' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          description: Without a database there are no resolved forms.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/ci-types/{id}/form:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getCITypeForm
       tags: [Metamodel]
       summary: Get the resolved form of a CI type
-      description: Planned (E-38); WP-719 implements the operation.
+      description: >-
+        The form for creating a CI of the type (WP-719, MET-50): as GET
+        /api/v1/cis/{id}/form, the states evaluated against the defaults.
+        `template_id` sets the current published version of the template
+        (its overrides and catalog rules) and chooses among its layouts.
+        Requires ci:read; an invisible type is 404. `preview=true` or a
+        `role_id` that is no role of the caller requires citype:manage
+        (403).
+      parameters:
+        - name: template_id
+          in: query
+          required: false
+          description: >-
+            A template of the type chain; unknown or foreign is 404, a
+            template of a type outside the chain 422.
+          schema: { type: string, format: uuid }
+        - name: preview
+          in: query
+          required: false
+          description: Resolve as role `role_id`; requires citype:manage.
+          schema: { type: boolean, default: false }
+        - name: role_id
+          in: query
+          required: false
+          description: A role or custom role of the organization (see GET /api/v1/cis/{id}/form).
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: Get the resolved form of a CI type. The response schema comes with WP-719.
+          description: The resolved form
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolvedForm' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          description: Without a database there are no resolved forms.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cis/{id}/templates:
     parameters:
@@ -16199,7 +17052,6 @@ paths:
   /api/v1/documents/{id}/links/{link_id}:
     x-phase: P2
     x-feature: documents
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: link_id
@@ -16212,7 +17064,12 @@ paths:
       operationId: deleteDocumentLink
       tags: [Documents]
       summary: Remove a link of a document
-      description: Planned (E-38); WP-267 implements the operation.
+      description: >-
+        Removes one link of the document (E-38, MGT-01). Only a link the
+        caller sees and may write (client, site and team of its target in
+        the caller's scope) is removed; any other link, also one of another
+        document, answers 404. The audit log records document.unlinked with
+        link_id, entity_type and entity_id.
       responses:
         '204':
           description: Deleted.
@@ -16950,6 +17807,8 @@ components:
         inheritable: { type: boolean }
         validation:
           $ref: '#/components/schemas/AttributeValidation'
+        computed:
+          $ref: '#/components/schemas/ComputedExpression'
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -17045,6 +17904,27 @@ components:
         required, pattern, range and enum, combined with all), defined by
         api/rules.schema.json.
       $ref: './rules.schema.json'
+    ComputedExpression:
+      description: >-
+        The expression of a computed attribute (MET-10 computed, WP-258):
+        $defs/expr of api/rules.schema.json — field (an attribute of the CI,
+        or asset.<field> of the asset linked through ci.asset_id: warranty_end,
+        purchase_date, purchase_cost, asset_tag, serial_number, status),
+        literal, add, sub, mul, div, today, days_between, concat, lower,
+        upper and coalesce. Absent for an entered attribute. A computed
+        attribute is neither required nor unique and has no default; its
+        data type is integer, decimal, text, multiline, date or boolean
+        (single-valued) and takes the result type of the expression. 422 on
+        computed for an invalid expression, a result type that does not
+        fit, an asset field outside the list, a reference to the attribute
+        itself or to another computed attribute, and computed together with
+        required, default or unique. The composition (MET-16) keeps the
+        expression of a layer; a different expression of another layer
+        (code computed-conflict) and required, a default or unique from
+        another layer (computed-constraint) are 422 on key. The generated
+        attribute_schema marks the attribute readOnly with x-computed (the
+        AST). The CI write path computes the values with WP-717.
+      $ref: './rules.schema.json#/$defs/expr'
     AttributeValidationLegacy:
       type: object
       additionalProperties: false
@@ -17106,6 +17986,8 @@ components:
         inheritable: { type: boolean }
         validation:
           $ref: '#/components/schemas/AttributeValidation'
+        computed:
+          $ref: '#/components/schemas/ComputedExpression'
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -17241,6 +18123,82 @@ components:
         display_name:
           $ref: '#/components/schemas/LocalizedText'
         description: { type: string, description: Default the source's description. }
+    TemplateMigrationRequest:
+      type: object
+      required: [from_version, to_version]
+      additionalProperties: false
+      properties:
+        from_version: { type: integer, minimum: 1, description: Published or retired version the CIs are on. }
+        to_version: { type: integer, minimum: 1, description: Published version the CIs move to. }
+        ci_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: string, format: uuid }
+          description: Narrows the selection to these CIs; not together with where.
+        where:
+          $ref: '#/components/schemas/FilterExpr'
+        dry_run: { type: boolean, default: false, description: Computes the report and writes nothing. }
+    TemplateMigrationReport:
+      type: object
+      description: >-
+        Result of a job template.migrate (GET /api/v1/jobs/{id}/result).
+        items lists only the CIs with a change, a finding, an override or
+        an error, at most 10,000; beyond that truncated is true.
+      required: [dry_run, totals, items, truncated]
+      properties:
+        dry_run: { type: boolean }
+        totals:
+          type: object
+          required: [selected, migrated, skipped, failed, with_findings]
+          properties:
+            selected: { type: integer, description: CIs selected when the run started. }
+            migrated: { type: integer }
+            skipped: { type: integer, description: Also the ci_ids without the assignment on from_version. }
+            failed: { type: integer }
+            with_findings: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            required: [ci_id, outcome, defaults, overridden, findings]
+            properties:
+              ci_id: { type: string }
+              outcome:
+                type: string
+                enum: [migrated, skipped, failed]
+              defaults:
+                type: array
+                items: { type: string }
+                description: Keys of the defaults written (or, in a dry run, to be written).
+              overridden:
+                type: array
+                items: { type: string }
+                description: Keys with a default of the target version an override keeps unchanged.
+              findings:
+                type: array
+                description: Violations of the target version; they do not block.
+                items:
+                  type: object
+                  required: [field, detail]
+                  properties:
+                    field: { type: string }
+                    detail: { type: string }
+                    code: { type: string }
+                    rule: { type: string }
+                    message:
+                      type: object
+                      additionalProperties: { type: string }
+              error:
+                type: object
+                required: [code, detail]
+                properties:
+                  code:
+                    type: string
+                    enum: [unique, validation, not_found, internal]
+                  field: { type: string, description: The attribute, e.g. the key of a unique attribute. }
+                  detail: { type: string }
+        truncated: { type: boolean }
     TemplateListResponse:
       type: object
       required: [data]
@@ -17345,6 +18303,15 @@ components:
             - $ref: '#/components/schemas/AttributeValidation'
             - type: 'null'
           description: The new rules; null or {} removes them.
+        computed:
+          oneOf:
+            - $ref: '#/components/schemas/ComputedExpression'
+            - type: 'null'
+          description: >-
+            The new expression of a computed attribute. A definition stays
+            computed or entered for its lifetime: an expression on an
+            entered definition or null on a computed one is 422 on
+            computed (WP-258).
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -17483,6 +18450,434 @@ components:
         limit: { type: integer }
         offset: { type: integer }
         has_more: { type: boolean }
+    FormLayoutField:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, description: An effective field of the target. }
+        width: { type: integer, minimum: 1, maximum: 12, default: 12, description: Grid columns. }
+    FormLayoutSection:
+      type: object
+      required: [key, title, fields]
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Unique in the layout; `_instance` and `_required` are reserved.
+        title:
+          type: object
+          required: [de, en]
+          additionalProperties: false
+          properties:
+            de: { type: string, minLength: 1, maxLength: 200 }
+            en: { type: string, minLength: 1, maxLength: 200 }
+        visible_when:
+          type: array
+          description: Keys of catalog rules (/api/v1/rules) that show the section; empty shows it always.
+          items: { type: string }
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormLayoutField'
+    FormLayoutDocument:
+      type: object
+      required: [sections]
+      additionalProperties: false
+      properties:
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormLayoutSection'
+    FormLayout:
+      type: object
+      description: >-
+        The layout of a form for exactly one target, a CI type or a template
+        (table form_layout, WP-259); a template layout applies to every
+        version of the template (E-111). At most one layout per target and
+        role. There are no system layouts: a layout of a system type is a
+        row of the organization.
+      required: [id, organization_id, key, priority, version, is_active, layout, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        key: { type: string, description: Natural key per organization (export and import). }
+        ci_type_id: { type: string }
+        template_id: { type: string }
+        role_id: { type: string, description: A role or custom role of the organization; absent for every role. }
+        priority: { type: integer }
+        version: { type: integer, description: Rises with every change; the ETag. }
+        is_active: { type: boolean }
+        layout:
+          $ref: '#/components/schemas/FormLayoutDocument'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ResolvedForm:
+      type: object
+      description: >-
+        A resolved form (WP-719). `template_id`, `role_id` and `layout_id`
+        name the chosen layout; absent with the standard layout.
+      required: [ci_type_id, source, sections, rules]
+      properties:
+        ci_type_id: { type: string }
+        template_id: { type: string }
+        role_id: { type: string }
+        layout_id: { type: string }
+        source: { type: string, enum: [layout, default] }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/ResolvedFormSection' }
+        rules:
+          type: array
+          description: The active catalog rules of the CI (WP-257), in the order of their targets.
+          items: { $ref: '#/components/schemas/ResolvedFormRule' }
+    ResolvedFormSection:
+      type: object
+      required: [key, title, visible, fields]
+      properties:
+        key: { type: string, description: 'The key of the layout section, a ui_group, _default, _instance or _required.' }
+        title:
+          type: object
+          additionalProperties: { type: string }
+          properties:
+            de: { type: string }
+            en: { type: string }
+        visible: { type: boolean, description: False while a visible_when rule of the section does not hold. }
+        fields:
+          type: array
+          items: { $ref: '#/components/schemas/ResolvedFormField' }
+    ResolvedFormField:
+      type: object
+      required: [name, width, definition, state]
+      properties:
+        name: { type: string }
+        width: { type: integer, minimum: 1, maximum: 12 }
+        definition: { $ref: '#/components/schemas/FormFieldDefinition' }
+        state: { $ref: '#/components/schemas/FormFieldState' }
+    FormFieldDefinition:
+      type: object
+      description: The composed field definition (fieldmeta.FieldDefinition).
+      required: [name, data_type, required, sort_order]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        description: { type: string }
+        data_type: { type: string }
+        required: { type: boolean }
+        default_value: { type: string }
+        enum_values:
+          type: array
+          items: { type: string }
+        ui_group: { type: string }
+        sort_order: { type: integer }
+        validation:
+          type: object
+          additionalProperties: true
+        conditional:
+          type: object
+          additionalProperties: true
+        reference_target: { type: string }
+        computed:
+          type: object
+          additionalProperties: true
+    FormFieldState:
+      type: object
+      description: >-
+        The state of a field after its conditions and the catalog rules; a
+        required field stays visible. A field the caller may not change is
+        read only.
+      required: [visible, required, read_only]
+      properties:
+        visible: { type: boolean }
+        required: { type: boolean }
+        read_only: { type: boolean }
+        allowed_values:
+          type: array
+          items: { type: string }
+    ResolvedFormRule:
+      type: object
+      required: [key, attribute_key, kind]
+      properties:
+        key: { type: string }
+        attribute_key: { type: string }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        condition:
+          $ref: '#/components/schemas/RuleCondition'
+        ast:
+          $ref: '#/components/schemas/RuleAST'
+        message:
+          $ref: '#/components/schemas/RuleMessage'
+    FormLayoutCreate:
+      type: object
+      required: [key, layout]
+      additionalProperties: false
+      description: Exactly one of ci_type_id and template_id is required (422).
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100 }
+        ci_type_id: { type: string }
+        template_id: { type: string }
+        role_id: { type: string }
+        priority: { type: integer, default: 0 }
+        is_active: { type: boolean, default: true }
+        layout:
+          $ref: '#/components/schemas/FormLayoutDocument'
+    FormLayoutPatch:
+      type: object
+      additionalProperties: false
+      description: key and the target are immutable; naming them is 422.
+      properties:
+        role_id: { type: [string, 'null'], description: null unbinds the role. }
+        priority: { type: integer }
+        is_active: { type: boolean }
+        layout:
+          $ref: '#/components/schemas/FormLayoutDocument'
+        key: { type: string, description: Immutable (422). }
+        ci_type_id: { type: string, description: Immutable (422). }
+        template_id: { type: string, description: Immutable (422). }
+    FormLayoutListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/FormLayout'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    MetamodelDraft:
+      type: object
+      description: >-
+        A metamodel draft (table metamodel_draft, WP-260, MET-53): the
+        unpublished working state of metamodel changes as typed items.
+        `status` runs draft → tested → published, or to discarded;
+        published and discarded drafts are immutable. List entries carry no
+        `items`.
+      required: [id, organization_id, name, status, item_count, version, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [draft, tested, published, discarded]
+        created_by: { type: [string, 'null'] }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetamodelDraftItem'
+        item_count: { type: integer }
+        test_report:
+          description: >-
+            The counters of the last test run (WP-721) without the
+            violations (GET …/test); null after every item change.
+          oneOf:
+            - $ref: '#/components/schemas/MetamodelTestReport'
+            - type: 'null'
+        version: { type: integer, description: Rises with every change; the ETag. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        published_at: { type: [string, 'null'], format: date-time }
+    MetamodelDraftCreate:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+    MetamodelDraftPatch:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+    MetamodelDraftItemCreate:
+      type: object
+      required: [kind, op]
+      additionalProperties: false
+      description: >-
+        Permitted pairs of kind and op (metamodel.ItemKinds), with the
+        resource route whose request type the payload follows:
+        ci_type create|update|clone|activate|deactivate|assign (ci-types,
+        …/attribute-sets for assign); ci_type_field upsert|delete
+        (ci-types/{id}/fields); global_field upsert|delete
+        (ci-fields/global); attribute_definition create|update|delete;
+        attribute_set create|update|delete; template
+        create|update|delete|clone; template_version create|update|publish
+        (templates/{id}/versions); rule create|update|delete; layout
+        create|update|delete. `target_id` is empty for a new part and for
+        global fields, the template id for template_version/create, the
+        version id for the other template_version operations, the type id
+        for ci_type_field, otherwise the id of the target. `target_key` is
+        the field name of ci_type_field and global_field (on upsert the
+        `name` of the payload).
+      properties:
+        kind:
+          type: string
+          enum: [ci_type, ci_type_field, global_field, attribute_definition, attribute_set, template, template_version, rule, layout]
+        op:
+          type: string
+          enum: [create, update, upsert, delete, clone, activate, deactivate, assign, publish]
+        target_id: { type: string }
+        target_key: { type: string }
+        payload:
+          type: object
+          description: 'The request body of the resource route; ids may be item references {"$item": "<item id>"} (E-112).'
+    MetamodelDraftItem:
+      type: object
+      description: A typed operation of a draft with the state of its target at capture.
+      required: [id, kind, op, target_id, target_key, payload, base, schema_versions, route, created_by, created_at]
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [ci_type, ci_type_field, global_field, attribute_definition, attribute_set, template, template_version, rule, layout]
+        op:
+          type: string
+          enum: [create, update, upsert, delete, clone, activate, deactivate, assign, publish]
+        target_id: { type: [string, 'null'] }
+        target_key: { type: [string, 'null'] }
+        payload:
+          type: object
+          description: The request body of the resource route as captured.
+        base:
+          description: >-
+            The state of the target at capture: a timestamp (updated_at),
+            a number (version, current_version), a status, the ordered set
+            ids of a type, or null for a new part. WP-261 compares it.
+        schema_versions:
+          type: object
+          description: ci_type.schema_version per directly affected type id (informative).
+          additionalProperties: { type: integer }
+        route: { type: string, description: The resource route the item stands for (informative). }
+        created_by: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+    MetamodelDraftListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetamodelDraft'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    MetamodelDraftItemListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetamodelDraftItem'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    MetamodelTestReport:
+      type: object
+      description: >-
+        The report of the test run of a metamodel draft (WP-721) without
+        its violations. `state` is running, completed or failed; `blocked`
+        names a composition conflict or an item that cannot be applied
+        (`conflicts`), `outdated` items changed while the test ran.
+      required: [job_id, state, draft_version, started_at, blocked, outdated, conflicts, totals, types, truncated]
+      properties:
+        job_id: { type: string }
+        state: { type: string, enum: [running, completed, failed] }
+        draft_version: { type: integer }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        blocked: { type: boolean }
+        outdated: { type: boolean }
+        conflicts:
+          type: array
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              ci_type_id: { type: string }
+              template_version_id: { type: string }
+              item_id: { type: string }
+              key: { type: string }
+              code:
+                type: string
+                description: >-
+                  A MET-16 code (datatype-conflict, enum-empty, range-empty,
+                  length-range-empty, computed-conflict,
+                  computed-constraint), item-not-applicable or
+                  invalid-template-item.
+              message: { type: string }
+        totals:
+          type: object
+          required: [types, cis, invalid_cis, violations]
+          properties:
+            types: { type: integer }
+            cis: { type: integer }
+            invalid_cis: { type: integer }
+            violations: { type: integer }
+        types:
+          type: array
+          items:
+            type: object
+            required: [ci_type_id, cis, invalid_cis, violations, attributes]
+            properties:
+              ci_type_id: { type: string }
+              cis: { type: integer }
+              invalid_cis: { type: integer }
+              violations: { type: integer }
+              attributes:
+                type: array
+                items:
+                  type: object
+                  required: [key, violations]
+                  properties:
+                    key: { type: string }
+                    violations: { type: integer }
+        truncated: { type: boolean }
+        error: { type: string }
+    MetamodelTestViolation:
+      type: object
+      description: A violation of a CI in a test run (WP-721); no attribute value.
+      required: [ci_id, ci_type_id, field, message]
+      properties:
+        ci_id: { type: string }
+        ci_type_id: { type: string }
+        field: { type: string }
+        code: { type: string }
+        rule: { type: string, description: The key of the violated catalog rule. }
+        message: { type: string }
+    MetamodelTestReportPage:
+      allOf:
+        - $ref: '#/components/schemas/MetamodelTestReport'
+        - type: object
+          required: [data, total]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/MetamodelTestViolation'
+            next_cursor:
+              type: string
+              description: Opaque signed cursor for the next page (API-02); absent on the last page.
+            total: { type: integer }
+            limit: { type: integer }
+            offset: { type: integer }
+            has_more: { type: boolean }
     LocalizedText:
       type: object
       description: A label per language (MET-01).
@@ -18819,8 +20214,11 @@ components:
             defined. A composition conflict of attribute definitions (MET-16,
             422 with `field` = `key`) carries `datatype-conflict` (data type,
             reference target or `multi_value` differ), `enum-empty` (no
-            allowed value is left), `range-empty` (`min` > `max`) or
-            `length-range-empty` (`min_length` > `max_length`).
+            allowed value is left), `range-empty` (`min` > `max`),
+            `length-range-empty` (`min_length` > `max_length`),
+            `computed-conflict` (different expressions of a computed
+            attribute) or `computed-constraint` (a computed attribute made
+            required, given a default or made unique by another layer).
 
     LifecycleModel:
       type: object
@@ -19870,7 +21268,16 @@ components:
           type: string
         change_type:
           type: string
-          enum: [create, update, delete, status_change, relationship_change, attribute_change]
+          description: >-
+            Class of the change, the vocabulary of chk_ci_change_type.
+            template_migration is the migration of a template assignment of
+            the CI to another published version (WP-253): field_name
+            attributes with the attribute map before and after, comment a
+            JSON object with template_id, from_version, to_version,
+            defaults, findings and job_id.
+          enum: [create, update, delete, status_change, relationship_change, attribute_change, type_changed,
+            lifecycle_transition, location_change, movement, override, reconciliation_decision,
+            parent_child_change, assignment, template_migration]
         field_name:
           type: string
         old_value: {}
@@ -21705,14 +23112,15 @@ components:
           type: string
         ticket_number:
           type: integer
+          description: Number of the ticket, consecutive per organization.
         title:
           type: string
         description:
           type: string
         status:
-          type: string
+          $ref: '#/components/schemas/TicketStatus'
         priority:
-          type: string
+          $ref: '#/components/schemas/TicketPriority'
         category:
           type: string
         reporter_id:
@@ -21748,13 +23156,14 @@ components:
     CreateTicketRequest:
       type: object
       required: [title]
+      description: A new ticket starts with status `new`.
       properties:
         title:
           type: string
         description:
           type: string
         priority:
-          type: string
+          $ref: '#/components/schemas/TicketPriority'
         category:
           type: string
         assignee_id:
@@ -21773,6 +23182,19 @@ components:
           items:
             type: string
 
+    TicketStatus:
+      type: string
+      description: >-
+        State of a ticket (TKT-01). Transitions: new to open, in_progress or
+        closed; open to in_progress, waiting, resolved or closed; in_progress
+        to open, waiting or resolved; waiting to in_progress or resolved;
+        resolved to closed or open (reopen); closed to open (reopen).
+      enum: [new, open, in_progress, waiting, resolved, closed]
+
+    TicketPriority:
+      type: string
+      enum: [low, medium, high, critical]
+
     UpdateTicketRequest:
       type: object
       properties:
@@ -21781,9 +23203,9 @@ components:
         description:
           type: string
         status:
-          type: string
+          $ref: '#/components/schemas/TicketStatus'
         priority:
-          type: string
+          $ref: '#/components/schemas/TicketPriority'
         category:
           type: string
         assignee_id:
@@ -21955,6 +23377,19 @@ components:
           type: integer
         business_calendar:
           type: boolean
+          description: >-
+            false counts elapsed time; true counts only business time of the
+            calendar chain (TKT-02).
+        calendar_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Business calendar of the policy (TKT-02). It must be visible under
+            the caller's scope and belong to no client or to the policy's
+            client; otherwise 400 on calendar_id. Null lets the calendar chain
+            decide when business_calendar is true: default calendar of the
+            ticket's client, default calendar of the organization, built-in
+            standard (Monday to Friday, 08:00-18:00).
         created_at:
           type: string
           format: date-time
@@ -22524,6 +23959,16 @@ components:
           minimum: 1
         business_calendar:
           type: boolean
+        calendar_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Business calendar of the policy (TKT-02). It must be visible under
+            the caller's scope and belong to no client or to the policy's
+            client; otherwise 400 on calendar_id. Null lets the calendar chain
+            decide when business_calendar is true: default calendar of the
+            ticket's client, default calendar of the organization, built-in
+            standard (Monday to Friday, 08:00-18:00).
 
     UpdateSLAPolicyRequest:
       type: object
@@ -22543,6 +23988,16 @@ components:
           minimum: 1
         business_calendar:
           type: boolean
+        calendar_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Business calendar of the policy (TKT-02). It must be visible under
+            the caller's scope and belong to no client or to the policy's
+            client; otherwise 400 on calendar_id. null clears it; then the calendar chain
+            decide when business_calendar is true: default calendar of the
+            ticket's client, default calendar of the organization, built-in
+            standard (Monday to Friday, 08:00-18:00).
 
     SLAPolicyListResponse:
       allOf:
@@ -22583,6 +24038,30 @@ components:
           type: boolean
         resolution_breached:
           type: boolean
+        calendar_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Business calendar the due times were computed with (TKT-02); null
+            means elapsed time or the built-in standard calendar. Later
+            changes of a calendar do not change computed due times.
+        response_remaining_minutes:
+          type: [integer, 'null']
+          description: >-
+            Minutes until response_due_at: business minutes of the calendar
+            (built-in standard when calendar_id is null and the policy counts
+            business time), otherwise elapsed minutes. Negative once overdue,
+            null once first_response_at is set.
+        resolution_remaining_minutes:
+          type: [integer, 'null']
+          description: >-
+            Minutes until resolution_due_at, counted like
+            response_remaining_minutes; null once resolved_at is set.
+        paused:
+          type: boolean
+          description: >-
+            true while the current moment lies outside business hours or on a
+            holiday of the calendar; always false for elapsed time.
         created_at:
           type: string
           format: date-time
@@ -22786,7 +24265,8 @@ components:
                       Machine-readable code of the violation, set where one
                       is defined: a composition conflict of the attribute
                       definitions (MET-16) carries `datatype-conflict`,
-                      `enum-empty`, `range-empty` or `length-range-empty`.
+                      `enum-empty`, `range-empty`, `length-range-empty`,
+                      `computed-conflict` or `computed-constraint`.
                       A violated catalog rule (WP-257, MET-10) carries the
                       code of the rule language for a `validation` rule
                       (e.g. `pattern`, `range.max`, `enum`), `required` for
@@ -23956,7 +25436,11 @@ components:
             deprecated name of new.
         ci_id:
           type: string
-          description: Target candidate CI id, required when action is merge.
+          description: >-
+            Target candidate CI id (from candidate_ci_ids). Required for merge
+            and for the side action of duplicate_ip with several CIs (accept
+            of an item with payload holders names the side whose address is
+            stale; with one CI involved that CI is the side).
         ci_type_id:
           type: string
           format: uuid
@@ -25664,6 +27148,7 @@ components:
       properties:
         entity_type:
           type: string
+          description: ci, asset, assignment, ticket, location, disposal_record or stocktake.
         entity_id:
           type: string
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 func f64(v float64) *float64 { return &v }
@@ -750,5 +751,86 @@ func TestMemoryDeleteFieldNoGlobalFallback(t *testing.T) {
 	}
 	if globals, _ := repo.ListGlobalFields(ctx, "org"); len(globals) != 0 {
 		t.Errorf("globals after the global path = %+v", globals)
+	}
+}
+
+// TestComposeComputed covers WP-258 (MET-10 computed, MET-16): the
+// expression of a computed attribute stays when a narrower layer has none
+// (also over several layers and from AttributeDefinition through
+// Field.Definition); the same expression in two layers composes; two
+// different expressions are a computed-conflict; a computed attribute that
+// another layer makes required, gives a default or makes unique is a
+// computed-constraint.
+func TestComposeComputed(t *testing.T) {
+	expr := func(raw string) *rules.Expr {
+		t.Helper()
+		e, err := rules.ParseExpr([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &e
+	}
+	days := expr(`{"op":"days_between","args":[{"op":"today"},{"op":"field","field":"asset.warranty_end"}]}`)
+	other := expr(`{"op":"days_between","args":[{"op":"field","field":"asset.purchase_date"},{"op":"today"}]}`)
+	computed := fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, Computed: days}
+	plain := fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, Label: "Days left"}
+
+	got, err := Compose([]fieldmeta.FieldDefinition{computed}, []fieldmeta.FieldDefinition{plain}, []fieldmeta.FieldDefinition{plain})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Computed == nil || !got[0].Computed.Equal(days) || got[0].Label != "Days left" {
+		t.Errorf("composed = %+v, want the expression of the base kept", got[0])
+	}
+	got, err = Compose([]fieldmeta.FieldDefinition{plain}, []fieldmeta.FieldDefinition{computed})
+	if err != nil || got[0].Computed == nil {
+		t.Errorf("computed in the narrower layer: %+v %v", got, err)
+	}
+	same := computed
+	same.Computed = expr(`{"op":"days_between","args":[{"op":"today"},{"op":"field","field":"asset.warranty_end"}]}`)
+	if _, err = Compose([]fieldmeta.FieldDefinition{computed}, []fieldmeta.FieldDefinition{same}); err != nil {
+		t.Errorf("the same expression in two layers: %v", err)
+	}
+	// From the stored definition through the legacy field shape.
+	stored := AttributeDefinition{Key: "k", DataType: fieldmeta.TypeInteger, Computed: days}
+	if def := stored.definition(); def.Computed == nil || !def.Computed.Equal(days) {
+		t.Errorf("definition() = %+v, want the expression", def)
+	}
+
+	for name, tc := range map[string]struct {
+		base, top fieldmeta.FieldDefinition
+		code      string
+	}{
+		"different expressions": {computed, fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, Computed: other},
+			CodeComputedConflict},
+		"required of the narrower layer": {computed, fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, Required: true},
+			CodeComputedConstraint},
+		"required of the wider layer": {fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, Required: true}, computed,
+			CodeComputedConstraint},
+		"default of the narrower layer": {computed, fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, DefaultValue: "3"},
+			CodeComputedConstraint},
+		"default of the wider layer": {fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, DefaultValue: "3"}, computed,
+			CodeComputedConstraint},
+		"unique of the narrower layer": {computed, fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, Unique: true},
+			CodeComputedConstraint},
+		"unique of the wider layer": {fieldmeta.FieldDefinition{Name: "k", DataType: fieldmeta.TypeInteger, Unique: true}, computed,
+			CodeComputedConstraint},
+	} {
+		_, cerr := Compose([]fieldmeta.FieldDefinition{tc.base}, []fieldmeta.FieldDefinition{tc.top})
+		var conflict *CompositionError
+		if !errors.As(cerr, &conflict) || conflict.Key != "k" || conflict.Code != tc.code {
+			t.Errorf("%s: err = %v, want a composition error of k with code %s", name, cerr, tc.code)
+			continue
+		}
+		if !strings.HasSuffix(cerr.Error(), "(MET-16)") {
+			t.Errorf("%s: message = %q", name, cerr.Error())
+		}
+	}
+	// A layer over the conflict reports nothing more (ComposeAll).
+	_, conflicts := ComposeAll([]fieldmeta.FieldDefinition{computed},
+		[]fieldmeta.FieldDefinition{{Name: "k", DataType: fieldmeta.TypeInteger, Required: true}},
+		[]fieldmeta.FieldDefinition{{Name: "k", DataType: fieldmeta.TypeInteger, Computed: other}})
+	if len(conflicts) != 1 || conflicts[0].Code != CodeComputedConstraint {
+		t.Errorf("conflicts = %v, want one computed-constraint", conflicts)
 	}
 }

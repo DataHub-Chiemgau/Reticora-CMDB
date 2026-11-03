@@ -7,10 +7,12 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
@@ -102,7 +104,68 @@ func (h *Handler) syncInterfaces(ctx context.Context, orgID, ciID string, item *
 			return err
 		}
 	}
+	// The written addresses join the duplicate check of the ingest call
+	// once the record's or batch's transaction has committed (NET-06,
+	// WP-300); a rolled back record contributes nothing.
+	if keys := res.Observed; len(keys) > 0 {
+		if c, ok := ctx.Value(duplicateKeysKey{}).(*duplicateKeys); ok {
+			database.AfterCommit(ctx, func(context.Context) { c.add(keys) })
+		}
+	}
 	return nil
+}
+
+// duplicateKeysKey carries the *duplicateKeys of an ingest call.
+type duplicateKeysKey struct{}
+
+// duplicateKeys collects the committed addresses of one ingest call
+// (processItems) for its duplicate check (NET-06, WP-300).
+type duplicateKeys struct {
+	mu   sync.Mutex
+	seen map[ipam.DuplicateKey]bool
+	keys []ipam.DuplicateKey
+}
+
+func (c *duplicateKeys) add(keys []ipam.DuplicateKey) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, k := range keys {
+		if !c.seen[k] {
+			c.seen[k] = true
+			c.keys = append(c.keys, k)
+		}
+	}
+}
+
+// collectDuplicates prepares the duplicate check of an ingest call: the
+// returned context collects the addresses its records commit, and check,
+// called once after the last record (also when a record failed), looks
+// for duplicates among them with one query in a transaction of its own
+// (ipam.CheckDuplicates) and opens the duplicate_ip items. A call within
+// another one (processEach) adds to the outer call's check. Without an
+// IPAM repository that finds duplicates nothing is checked. A failed check
+// is logged; the next observation of the address checks again.
+func (h *Handler) collectDuplicates(ctx context.Context, orgID string) (collecting context.Context, check func()) {
+	finder, ok := h.interfaces.(ipam.DuplicateFinder)
+	if !ok {
+		return ctx, func() {}
+	}
+	if _, nested := ctx.Value(duplicateKeysKey{}).(*duplicateKeys); nested {
+		return ctx, func() {}
+	}
+	c := &duplicateKeys{seen: map[ipam.DuplicateKey]bool{}}
+	return context.WithValue(ctx, duplicateKeysKey{}, c), func() {
+		c.mu.Lock()
+		keys := c.keys
+		c.mu.Unlock()
+		if len(keys) == 0 {
+			return
+		}
+		if err := ipam.CheckDuplicates(ctx, finder, h.ReviewService(), orgID, ipam.DuplicateSource{Keys: keys}); err != nil {
+			slog.WarnContext(ctx, "duplicate address check failed; the next observation checks again", "event", "ingest.duplicate_ip",
+				"organization_id", orgID, "addresses", len(keys), "error", err)
+		}
+	}
 }
 
 // reservationConflictReview is the duplicate_ip item of a reservation of an

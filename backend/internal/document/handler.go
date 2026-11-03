@@ -74,6 +74,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/documents/{id}/content", h.DownloadContent)
 	r.Post("/api/v1/documents/{id}/links", h.Link)
 	r.Get("/api/v1/documents/{id}/links", h.GetLinks)
+	r.Delete("/api/v1/documents/{id}/links/{link_id}", h.Unlink)
 }
 
 // List handles GET /api/v1/documents
@@ -147,9 +148,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A new document has no link and is therefore org-wide; the request
-	// cannot carry links, so a principal restricted in the client or site
-	// scope may not create one (E-09, transition rule of E-61).
-	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && (!scope.Clients.IsAll() || !scope.Sites.IsAll()) {
+	// cannot carry links, so a principal restricted in the client, site or
+	// team scope may not create one (E-09, E-11, transition rule of E-61).
+	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && !orgWideDocumentScope(&scope) {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "the operation is not permitted")
 		return
 	}
@@ -375,8 +376,10 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 		EntityID:       req.EntityID,
 	}
 
+	// An unknown entity type answers 422, a target outside the scope or
+	// missing 404 (WP-267).
 	if err := h.repo.LinkDocument(r.Context(), link); err != nil {
-		if err.Error() == "not found" {
+		if errors.Is(err, api.ErrNotFound) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "document or linked object not found")
 			return
 		}
@@ -385,6 +388,29 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusCreated, link)
+}
+
+// Unlink handles DELETE /api/v1/documents/{id}/links/{link_id} (E-38,
+// WP-267): it removes a link the caller sees and may delete (204), any
+// other link answers 404.
+func (h *Handler) Unlink(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	docID, linkID := chi.URLParam(r, "id"), chi.URLParam(r, "link_id")
+	if err := h.repo.UnlinkDocument(r.Context(), t.OrganizationID, docID, linkID); err != nil {
+		if errors.Is(err, api.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "document link not found")
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // GetLinks handles GET /api/v1/documents/{id}/links

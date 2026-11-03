@@ -45,6 +45,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
@@ -135,6 +136,7 @@ type Repositories struct {
 	Privacy privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
+	MetamodelDraft    metamodel.Repository // drafts (WP-260); nil without a database: the routes answer 503
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
 	LocationTree      locations.Repository
@@ -406,9 +408,20 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	var jobTracker jobs.Tracker
 	var bffJobs graphqlbff.JobSource
 	historyHandler := history.NewHandler(repos.History)
+	// The draft handler (WP-260) runs the test run of a draft as a job
+	// (WP-721, metamodel.test) with the job service, like historyHandler.
+	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
+	// The template migration (WP-712) is a job of the module metamodel
+	// (E-105): its executor works on the decorated CI repository (WP-418),
+	// so the migrated CIs are indexed. Without the module neither route nor
+	// job kind exists.
+	var templateJobs *ci.TemplateMigrationJobs
+	if opts.Modules.Enabled(ModuleMetamodel) {
+		templateJobs = ci.NewTemplateMigrationJobs(repos.CI, repos.CIType)
+	}
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -417,6 +430,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		jobAPI = jobs.NewAPIHandler(jobService).
 			WithKind(ci.BulkJobKind, identity.PermCIWrite, nil).
 			WithKind("export", identity.PermExportRun, nil).
+			// A running template migration is cancelled with citype:manage
+			// like its start; it has no revert (E-25).
+			WithKind(ci.TemplateMigrateJobKind, identity.PermCITypeManage, nil).
+			// A running test of a metamodel draft is cancelled with
+			// metamodel:publish like its start (WP-721, E-106).
+			WithKind(metamodel.TestJobKind, identity.PermMetamodelPublish, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
@@ -449,7 +468,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
 		}
-		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler)
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -578,12 +597,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
-		ipam.NewHandler(repos.IPAM),
+		// Duplicate addresses open duplicate_ip items in the review queue of
+		// discovery (NET-06, WP-300).
+		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),
 		monitoringHandler,
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
+		draftHandler,
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
 			repos.LifecycleResolver),
@@ -602,6 +624,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
 		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
 		modulesHandler{set: opts.Modules},
+	}
+	if templateJobs != nil {
+		registrars = append(registrars, templateJobs)
 	}
 	for _, h := range registrars {
 		h.RegisterRoutes(protected)
@@ -759,6 +784,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	discovery.RegisterMetrics(registry)
 	rack.RegisterMetrics(registry)
 	iga.RegisterMetrics(registry)
+	ipam.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

@@ -1259,3 +1259,24 @@ NET-09;[P2];B;backend/internal/discovery/ip_reservation_conflict_integration_tes
 UI-14;[P2–P4, A];C;frontend/src/components/graph/ImpactPanel.test.tsx;WP-818
 AUD-08;[P2];C;backend/internal/history/snapshot_integration_test.go;WP-312
 MET-10;B/G1, Teil P2/G2;B;backend/internal/ci/rules_eval_integration_test.go;WP-257
+OVR-03;[P2];B;backend/internal/ci/template_migration_integration_test.go;WP-253
+MET-50;[P2];B;backend/internal/citype/layout_integration_test.go;WP-259
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/layout_integration_test.go;WP-259
+NET-06;[P2];B;backend/internal/discovery/duplicate_ip_integration_test.go;WP-300
+NET-06;[P2];B;backend/internal/discovery/duplicate_ip_resolve_integration_test.go;WP-773
+MET-10;B/G1, Teil P2/G2;B;backend/internal/citype/attrdef_integration_test.go;WP-258
+MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/rules/rules_test.go;WP-258
+API-09;[B];B;backend/internal/ci/template_migration_job_integration_test.go;WP-712
+JOB-04;[B];B;backend/internal/ci/template_migration_job_integration_test.go;WP-712
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/ticket/ticket_integration_test.go;WP-290
+EVT-03;[P2–P3];B;backend/internal/ticket/ticket_integration_test.go;WP-290
+MET-53;[P2];B;backend/internal/metamodel/draft_integration_test.go;WP-260
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/metamodel/draft_integration_test.go;WP-260
+MET-50;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
+MET-52;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
+GQL-03;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/form_integration_test.go;WP-719
+TKT-02;[P2];B;backend/internal/sla/sla_integration_test.go;WP-292
+MGT-01;[P2];B;backend/internal/document/links_integration_test.go;WP-267
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/document/links_integration_test.go;WP-267
+MET-53;[P2];B;backend/internal/metamodel/publish_job_integration_test.go;WP-721

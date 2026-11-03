@@ -119,10 +119,12 @@ var readPermissionFor = map[string]identity.Permission{
 	"relationship-types":    identity.PermRelationshipRead,
 	"lifecycle-definitions": identity.PermAssetRead,
 	"lifecycle-transitions": identity.PermAssetRead,
-	"lifecycle-models":      identity.PermAssetRead, // E-38 successor of lifecycle-definitions (E-106)
-	"templates":             identity.PermCIRead,    // metamodel templates read like ci-types (E-38, E-106)
-	"attribute-sets":        identity.PermCIRead,    // attribute sets read like ci-types (WP-250, E-106)
-	"rules":                 identity.PermCIRead,    // rule catalog reads like ci-types (WP-716, E-106)
+	"lifecycle-models":      identity.PermAssetRead,    // E-38 successor of lifecycle-definitions (E-106)
+	"templates":             identity.PermCIRead,       // metamodel templates read like ci-types (E-38, E-106)
+	"attribute-sets":        identity.PermCIRead,       // attribute sets read like ci-types (WP-250, E-106)
+	"rules":                 identity.PermCIRead,       // rule catalog reads like ci-types (WP-716, E-106)
+	"layouts":               identity.PermCIRead,       // form layouts read like ci-types (WP-259, E-106)
+	"metamodel":             identity.PermCITypeManage, // drafts are unpublished admin work: reading needs citype:manage (WP-260, E-106)
 	"locations":             identity.PermLocationRead,
 	"stock-movements":       identity.PermAssetRead,
 	"inventory":             identity.PermStockRead, // inventory items and availability are stock (E-106)
@@ -213,6 +215,8 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"templates":             identity.PermCITypeManage, // metamodel resources write like ci-types (E-106)
 	"attribute-sets":        identity.PermCITypeManage, // like ci-types (WP-250, E-106)
 	"rules":                 identity.PermCITypeManage, // rule catalog writes like ci-types (WP-716, E-106)
+	"layouts":               identity.PermCITypeManage, // form layouts write like ci-types (WP-259, E-106)
+	"metamodel":             identity.PermCITypeManage, // drafts (WP-260); test and publish map their own rules (WP-721, WP-261)
 	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
@@ -311,6 +315,10 @@ var routeRules = []routeRule{
 	// Publishing a template version directly (MET-53, MET-04, E-106);
 	// the other template writes stay citype:manage through the segment.
 	{http.MethodPost, "templates/*/versions/*/publish", identity.PermMetamodelPublish},
+	// The test run of a metamodel draft and its report (WP-721, MET-53):
+	// the report names CIs of every client, so reading it needs the
+	// publish right as well (E-106: org_admin only).
+	{"*", "metamodel/drafts/*/test", identity.PermMetamodelPublish},
 	// The structured search reads (F-055, SRC-03); the handler also
 	// requires the read right of the queried entity kind. Rebuilding the
 	// index (search/reindex) stays search:write.
@@ -628,6 +636,14 @@ var domainRecordedRoutes = map[string]string{
 	"POST /api/v1/rules":                                     "citype.PGRepository",
 	"PATCH /api/v1/rules/{id}":                               "citype.PGRepository",
 	"DELETE /api/v1/rules/{id}":                              "citype.PGRepository",
+	"POST /api/v1/layouts":                                   "citype.PGRepository",
+	"PATCH /api/v1/layouts/{id}":                             "citype.PGRepository",
+	"DELETE /api/v1/layouts/{id}":                            "citype.PGRepository",
+	"POST /api/v1/metamodel/drafts":                          "metamodel.PGRepository",
+	"PATCH /api/v1/metamodel/drafts/{id}":                    "metamodel.PGRepository",
+	"DELETE /api/v1/metamodel/drafts/{id}":                   "metamodel.PGRepository",
+	"POST /api/v1/metamodel/drafts/{id}/items":               "metamodel.PGRepository",
+	"DELETE /api/v1/metamodel/drafts/{id}/items/{item_id}":   "metamodel.PGRepository",
 	// Locations and rack placement (DOD-01).
 	"POST /api/v1/locations":                   "locations.PGRepository",
 	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",
@@ -663,6 +679,12 @@ var domainRecordedRoutes = map[string]string{
 	// in the transaction of the transition.
 	"POST /api/v1/cis/{id}/lifecycle-transitions":    "lifecycle.PGStateStore.RecordTransition",
 	"POST /api/v1/assets/{id}/lifecycle-transitions": "lifecycle.PGStateStore.RecordTransition",
+
+	// Document links (MGT-01, WP-267): document.linked and
+	// document.unlinked with link id and target, in the transaction of the
+	// change.
+	"POST /api/v1/documents/{id}/links":             "document.PGRepository.LinkDocument",
+	"DELETE /api/v1/documents/{id}/links/{link_id}": "document.PGRepository.UnlinkDocument",
 }
 
 // auditedRoutes records, per write route registered through an

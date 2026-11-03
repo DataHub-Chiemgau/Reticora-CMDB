@@ -68,6 +68,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SortBy:     r.URL.Query().Get("sort_by"),
 		SortDir:    r.URL.Query().Get("sort_dir"),
 	}
+	if filter.TeamID == TeamMine {
+		// The teams of the principal (E-143); without a user no team.
+		filter.TeamID, filter.TeamMemberOf = "", t.UserID
+		if !api.IsUUID(t.UserID) {
+			filter.TeamMemberOf = noUser
+		}
+	}
 
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
@@ -114,16 +121,46 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
+// TeamMine is the value of the filter team_id for the tickets of every
+// team the principal is a member of (E-143).
+const TeamMine = "mine"
+
+// noUser is a user id no team member has: team_id=mine of a principal
+// without user lists nothing.
+const noUser = "00000000-0000-0000-0000-000000000000"
+
+// validateEnums answers 422 when status or priority (nil: not given) is no
+// value of the state machine or the priority list, before the repository,
+// so PostgreSQL and the memory profile answer alike.
+func validateEnums(w http.ResponseWriter, status, priority *string) bool {
+	if status != nil && !ValidStatus(*status) {
+		api.WriteFieldError(w, &api.FieldError{Field: "status", Message: "must be one of new, open, in_progress, waiting, resolved, closed", Status: http.StatusUnprocessableEntity})
+		return false
+	}
+	if priority != nil && !ValidPriority(*priority) {
+		api.WriteFieldError(w, &api.FieldError{Field: "priority", Message: "must be one of low, medium, high, critical", Status: http.StatusUnprocessableEntity})
+		return false
+	}
+	return true
+}
+
 // writeTicketError answers a failed ticket request: a ticket that is
 // unknown, of another organization or outside the caller's scope is 404
-// (TEN-04), an assignee, team, CI or asset that is no UUID or not visible
-// 422 on its field. Database errors go through api.WriteRepoError; no table,
+// (TEN-04), a status change the state machine refuses 409, an assignee,
+// team, CI or asset that is no UUID or not visible 422 on its field. Database errors go through api.WriteRepoError; no table,
 // constraint, policy or SQLSTATE text reaches the client (API-03, F-047),
 // the log keeps it.
 func writeTicketError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
+	case errors.Is(err, ErrInvalidTransition):
+		detail := ErrInvalidTransition.Error()
+		var te *TransitionError
+		if errors.As(err, &te) && ValidStatus(te.To) && (te.From == "" || ValidStatus(te.From)) {
+			detail = te.Error()
+		}
+		api.WriteError(w, http.StatusConflict, "Conflict", detail)
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "ticket request failed", "error", err)
@@ -154,6 +191,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if priority == "" {
 		priority = "medium"
 	}
+	if !validateEnums(w, nil, &priority) {
+		return
+	}
 	category := req.Category
 	if category == "" {
 		category = "incident"
@@ -163,7 +203,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: t.OrganizationID,
 		Title:          req.Title,
 		Description:    req.Description,
-		Status:         "open",
+		Status:         StatusNew,
 		Priority:       priority,
 		Category:       category,
 		ReporterID:     t.UserID,
@@ -206,12 +246,17 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if !validateEnums(w, req.Status, req.Priority) {
+		return
+	}
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		writeTicketError(w, r, err)
 		return
 	}
+	// SLA hooks: new→open is no first response, a reopen (to open) calls
+	// none; resetting the resolution clock after a reopen is WP-292.
 	if h.sla != nil && req.Status != nil {
 		now := time.Now().UTC()
 		switch *req.Status {

@@ -412,6 +412,8 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/attribute-sets", `{"key":"a5_set"}`},
 	{"POST /api/v1/templates", `{"key":"a5_tpl","ci_type_id":"<citype>"}`},
 	{"POST /api/v1/rules", `{"key":"a5_rule","ci_type_id":"<id:/api/v1/ci-types>","attribute_key":"a5_attr","kind":"required"}`},
+	{"POST /api/v1/layouts", `{"key":"a5_layout","ci_type_id":"<id:/api/v1/ci-types>","layout":{"sections":[{"key":"main","title":{"de":"Haupt","en":"Main"},"visible_when":["a5_rule"],"fields":[{"name":"a5_attr","width":6}]}]}}`},
+	{"POST /api/v1/metamodel/drafts", `{"name":"a5 draft"}`},
 	{"POST /api/v1/cis", `{"ci_type_id":"<citype>","name":"a5-ci","client_id":"<client>"}`},
 	{"POST /api/v1/assets", `{"asset_tag":"a5-asset","name":"a5-asset","client_id":"<client>"}`},
 	{"POST /api/v1/contacts", `{"name":"a5 contact","email":"a5-contact@example.com"}`},
@@ -497,6 +499,7 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/templates/{id}/versions/{version}/publish": {"/api/v1/templates/<id:/api/v1/templates>/versions/1/publish", `{}`},
 	"PUT /api/v1/templates/{id}/versions/{version}":          {"/api/v1/templates/<id:/api/v1/templates>/versions/2", `{"items":[]}`},
 	"PATCH /api/v1/rules/{id}":                               {"", `{"kind":"readonly"}`},
+	"PATCH /api/v1/layouts/{id}":                             {"", `{"priority":1}`},
 	"POST /api/v1/cis/{id}/unmerge":                          {"/api/v1/cis/<ci4>/unmerge", `{}`},
 	"PATCH /api/v1/relationship-types/{key}":                 {"/api/v1/relationship-types/a5_rel", `{"display_name":"a5 rel renamed"}`},
 	"DELETE /api/v1/relationship-types/{key}":                {"/api/v1/relationship-types/a5_rel", ""},
@@ -540,6 +543,14 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	// application with the system model software.
 	"POST /api/v1/assets/{id}/lifecycle-transitions": {"", `{"to_state":"ordered","reason":"a5 order"}`},
 	"POST /api/v1/cis/{id}/lifecycle-transitions":    {"/api/v1/cis/<ci6>/lifecycle-transitions", `{"to_state":"evaluation","reason":"a5 evaluation"}`},
+
+	// Metamodel drafts (WP-260): an item for a new type; its removal names
+	// the item the sub-create returned, before the draft is discarded.
+	"PATCH /api/v1/metamodel/drafts/{id}":                  {"", `{"name":"a5 draft renamed"}`},
+	"POST /api/v1/metamodel/drafts/{id}/items":             {"", `{"kind":"ci_type","op":"create","payload":{"key":"a5_draft_type","name":"a5 draft type"}}`},
+	"DELETE /api/v1/metamodel/drafts/{id}/items/{item_id}": {"/api/v1/metamodel/drafts/<id:/api/v1/metamodel/drafts>/items/<id:/api/v1/metamodel-draft-items>", ""},
+	// Document links (WP-267): the link the sub-create returned.
+	"DELETE /api/v1/documents/{id}/links/{link_id}": {"/api/v1/documents/<id:/api/v1/documents>/links/<id:/api/v1/document-links>", ""},
 }
 
 // auditRouteSubCreates create rows under another resource; they run first
@@ -555,6 +566,8 @@ var auditRouteSubCreates = []struct{ route, collection string }{
 	{"POST /api/v1/workflows/{id}/runs", "/api/v1/workflow-runs"},
 	{"POST /api/v1/cis/{id}/merge", ""},
 	{"POST /api/v1/subnets/{id}/reservations", "/api/v1/ip-reservations"},
+	{"POST /api/v1/metamodel/drafts/{id}/items", "/api/v1/metamodel-draft-items"},
+	{"POST /api/v1/documents/{id}/links", "/api/v1/document-links"},
 }
 
 // TestEveryWriteRouteAuditedOnPostgreSQL runs every write route of the
