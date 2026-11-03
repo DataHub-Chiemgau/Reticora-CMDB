@@ -4,6 +4,8 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Nachtrag vom 2026-10-28:** Der Auftraggeber hat alle bis dahin offenen Entscheidungen (31: E-59, E-60, E-61, E-65, E-66, E-67, E-68, E-70, E-73, E-74, E-75, E-77, E-78, E-79, E-80, E-81, E-82, E-83, E-84, E-85, E-86, E-87, E-88, E-89, E-90, E-91, E-92, E-93, E-94, E-95, E-100) nach der jeweiligen Empfehlung entschieden („Setze alle Entscheidungen wie empfohlen um“). Die Übergangsregeln, nach denen die betroffenen WPs bereits umgesetzt sind, gelten damit als Festlegung; Folge-WPs für andere Optionen entfallen.
 
+**Nachtrag vom 2026-11-03:** E-Nummern sind über alle drei Entscheidungsdateien eindeutig, und E-103 bis E-143 führt [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md). Die neue Entscheidung dieser Datei zum SMTP-Szenario der Ausfallsuite erhält deshalb E-144; die nächste freie Nummer ist E-145.
+
 ## Übersicht
 
 | Nr. | Thema | Status | Betroffene WPs |
@@ -52,6 +54,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 | [E-100](#e-100) | Upgrade von Datenbanken mit 000056 vor E-26 (fehlende `migration_quarantine`, Migration 000089) | entschieden: Option 1 (Auftraggeber, 2026-10-28) | WP-649 |
 | [E-101](#e-101) | WP-332 AK 3: Rahmen und Ledger eines Ingest-Batches in einer oder in zwei Transaktionen (NFR-03) | entschieden: Option 1 (Auftraggeber, 2026-11-02) | WP-657 |
 | [E-102](#e-102) | Discovery-Ingest: Wert eines eindeutigen Attributs, den ein anderes CI hält (MET-15, F-432) | entschieden: Option 1 (Auftraggeber, 2026-11-02) | WP-703 |
+| [E-144](#e-144) | Einladungen bei SMTP-Ausfall: synchroner Versand über den zentralen SMTP-Server statt Zurückstellen (NTF-04, OPS-06) | entschieden: Option A (Auftraggeber, 2026-11-03) | WP-421, WP-449 |
 
 ## E-59
 
@@ -1115,3 +1118,28 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 **Betroffene IDs:** MET-15, DIS-01
 
 **Betroffene WPs:** WP-703
+
+
+## E-144
+
+**Thema:** Einladungen bei SMTP-Ausfall: synchroner Versand über den zentralen SMTP-Server statt Zurückstellen (NTF-04, OPS-06)
+
+**Status:** entschieden: Option A (Auftraggeber, 2026-11-03)
+
+**Frage:** Seit f3343d8f (PR #109, „Einladungsmail direkt über zentrales SMTP, nie über Kanäle der Organisation“) und a4447f92 („Einladungsmail vor den Organisations-Sperren von Audit und Outbox senden“) geht die Einladungsmail bei eingerichtetem Accounts-Client (Keycloak-Admin-Client) synchron über den zentralen SMTP-Server an die eingeladene Adresse (`user.InvitationDelivery`, `InvitationMailer`). Nimmt der Server die Mail nicht an, rollen Ausstellen und Erneuern vollständig zurück, und die API antwortet 503 „the invitation e-mail could not be sent“ (`ErrInvitationMail`, `backend/internal/user/invitation.go`). Das ist eine Sicherheitskorrektur: Vorher ging `invitation.created` mit dem Annahmelink über jeden E-Mail-Kanal der Organisation, auch über einen eigenen SMTP-Kanal der org_admin, die den Link so mitlesen und die Einladung für eine fremde Adresse selbst annehmen konnte. WP-421 (NTF-05) und NTF-04 sehen dagegen eine `notification_delivery` mit Status und Retries vor, und das SMTP-Szenario der Ausfallsuite (WP-449, OPS-06, `tests/outage/smtp.sh`) erwartete für eine Einladung während des Ausfalls 201, eine wartende Zustellung (`pending`, `attempts` ≥ 1, `last_error`) auf dem Kanal `central_smtp` und nach dem Neustart von Mailpit `sent`. Die Suite ist seit f3343d8f rot. Darf die Einladung bei SMTP-Ausfall sichtbar abgelehnt werden, statt zurückgestellt und wiederholt zu werden?
+
+**Optionen:**
+
+- A) Einladungen mit eingerichtetem Accounts-Client werden synchron über den zentralen SMTP-Server versendet; bei SMTP-Ausfall antwortet die API 503 (`ErrInvitationMail`) bei vollständigem Rollback (keine Einladungszeile, kein Audit-Eintrag, kein Event), ohne Retry. Die Abweichung von WP-421/NTF-04 gilt ausschließlich für Einladungen. Die Ausfallsuite prüft die sichtbare Ablehnung und weist Zurückstellen und Retry mit einer anderen E-Mail-Benachrichtigung über `central_smtp` nach. Keine Codeänderung.
+- B) Einladungen bei SMTP-Ausfall speichern und die Mail über eine eigene, nur an den zentralen SMTP-Server gebundene Warteschlange nachsenden. Die Warteschlange müsste den Annahmelink mit Klartext-Token bis zum Versand halten (gespeichert ist sonst nur der Hash); neuer Zustellpfad mit eigener Redaktion, Aufbewahrung und Tests.
+- C) Den Versand über die Kanäle der Organisation wiederherstellen (f3343d8f zurücknehmen). Öffnet die Lücke wieder, über die eine org_admin den Annahmelink mitlesen kann.
+
+**Empfehlung:** Option A. Die Sicherheitskorrektur f3343d8f/a4447f92 bleibt unverändert. Es gibt keinen stillen Datenverlust: Der Aufrufer erhält 503 und kann die Einladung nach dem Ausfall erneut ausstellen, und OPS-06 zählt eine 503-Antwort als sichtbar abgelehnt (wie die Last von `tests/outage/load.sh`). Option B verlagert das Token in eine weitere Ablage und kostet einen eigenen Zustellpfad, Option C ist eine Sicherheitslücke.
+
+**Entscheidung:** Option A nach der Empfehlung (Auftraggeber, 2026-11-03: Suite anpassen und die Entscheidung dokumentieren).
+
+**Umsetzung:** `tests/outage/smtp.sh` erwartet während des Ausfalls für die Einladung 503 „the invitation e-mail could not be sent“, keine Zeile in `user_invitation` und nach dem Neustart keine Mail an die eingeladene Adresse in Mailpit. Zurückstellen und Retry (WP-449 AK 1, NTF-04) weist `export.completed` nach: Ein Export (`POST /api/v1/exports` mit dem API-Schlüssel der Last) benachrichtigt nach Abschluss seinen Initiator, beim API-Schlüssel dessen Eigentümer (der geseedete Administrator). Die Zustellung auf `central_smtp` (erkannt am Dedup-Schlüssel `export.completed:<Event-ID>`) steht während des Ausfalls auf `pending` mit `attempts` ≥ 1 und `last_error`, nach dem Neustart binnen 120 s auf `sent`, und Mailpit hält genau eine Mail an den Initiator mit dem Betreff dieser Zustellung (andere Mails an denselben Administrator, etwa Review-Digests, haben andere Betreffe). `tests/outage/config.test.sh` prüft das gegen Stubs, `docs/backup-dr.md` beschreibt das Szenario. Ohne Accounts-Client bleibt es beim bisherigen Weg: `invitation.created` trägt den Link und wird über die E-Mail-Kanäle der Organisation mit Status und Retries zugestellt (NTF-04 unverändert).
+
+**Betroffene IDs:** NTF-04, NTF-05, OPS-06
+
+**Betroffene WPs:** WP-421, WP-449

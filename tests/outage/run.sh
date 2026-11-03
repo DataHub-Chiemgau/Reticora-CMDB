@@ -15,9 +15,10 @@
 #       answered with 2xx or a visible 429/503, and after the recovery
 #       accepted == persisted, the ingest queue is empty and the event
 #       outbox published (no silent data loss, counted in the database);
-#   smtp: Mailpit stopped, an e-mail notification stays pending with its
-#       error and is sent once Mailpit is back, plus the same load
-#       (smtp.sh);
+#   smtp: Mailpit stopped, an invitation is refused with 503 and rolled
+#       back (E-144), an e-mail notification (export.completed) stays
+#       pending with its error and is sent once Mailpit is back, plus the
+#       same load (smtp.sh);
 #   collector: an enrolled collector container with the simulated fleet;
 #       server and nats-edge stopped for COLLECTOR_OUTAGE_SECONDS (60 s):
 #       its spool counter rises, the heartbeat after the restart reports
