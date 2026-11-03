@@ -1236,3 +1236,4 @@ REL-06;[P2];B;backend/internal/relationshiptype/seed_integration_test.go;WP-294
 IMP-10;[P2];B;backend/internal/topology/custom_types_test.go;WP-294
 MET-14;P2/G2;B;backend/internal/ci/instance_lifecycle_integration_test.go;WP-714
 OVR-02;[B];B;backend/internal/override/decide_test.go;WP-714
+IMP-11;[P2];B;backend/internal/topology/projection_integration_test.go;WP-298

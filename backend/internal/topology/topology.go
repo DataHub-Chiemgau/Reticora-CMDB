@@ -41,15 +41,24 @@ const DefaultDepth = defaultDepth
 // 404 as well.
 var ErrCINotFound = fmt.Errorf("ci %w", api.ErrNotFound)
 
-// Node is a CI vertex in the topology graph.
+// Node is a vertex of the topology graph: a CI, or with include=network a
+// subnet or a VLAN projected from the IPAM tables (IMP-11, WP-298). A CI
+// has no NodeKind (node_kind ci) and always a CIType and a Status, so its
+// answer stays as before; a projected node has neither, its id is
+// subnet:{id} or vlan:{id}, and it carries CIDR and VRFID (subnet) or
+// VLANNumber (VLAN).
 type Node struct {
 	ID           string `json:"id"`
+	NodeKind     string `json:"node_kind,omitempty"`
 	Name         string `json:"name"`
-	CIType       string `json:"ci_type"`
-	Status       string `json:"status"`
+	CIType       string `json:"ci_type,omitempty"`
+	Status       string `json:"status,omitempty"`
 	ClientID     string `json:"client_id,omitempty"`
 	SiteID       string `json:"site_id,omitempty"`
 	ManagementIP string `json:"management_ip,omitempty"`
+	CIDR         string `json:"cidr,omitempty"`
+	VRFID        string `json:"vrf_id,omitempty"`
+	VLANNumber   int    `json:"vlan_number,omitempty"`
 }
 
 // Edge is a relationship between two CIs in the topology graph.
@@ -90,6 +99,9 @@ type Handler struct {
 	// subtypes supplies the subtree of a CI type for the type filter of a
 	// walk from a root (MET-06, WP-708); without it the type must match.
 	subtypes TypeSubtrees
+	// network projects the subnets and VLANs of the CIs for
+	// include=network (IMP-11, WP-298); without it network is unknown.
+	network NetworkProjector
 }
 
 // WithCITypes lets the impact name the affected services and their single
@@ -184,6 +196,17 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
+	// include=network adds the subnets and VLANs (IMP-11); they show IPAM
+	// data, so it needs ipam:read as well.
+	network, err := h.parseTopologyInclude(q.Get("include"))
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if network && !mayReadNetwork(r.Context()) {
+		writeNetworkForbidden(w)
+		return
+	}
 
 	graph, err := h.Graph(r.Context(), t.OrganizationID, rootCIID, depth, &ci.FilterParams{
 		ClientID: q.Get("client_id"),
@@ -199,6 +222,14 @@ func (h *Handler) GetTopology(w http.ResponseWriter, r *http.Request) {
 			api.WriteRepoError(w, err)
 		}
 		return
+	}
+	if network {
+		if err := h.projectTopology(r.Context(), t.OrganizationID, &graph, rootCIID == ""); err != nil {
+			if !api.WriteFieldError(w, err) {
+				api.WriteRepoError(w, err)
+			}
+			return
+		}
 	}
 	api.WriteJSON(w, http.StatusOK, graph)
 }

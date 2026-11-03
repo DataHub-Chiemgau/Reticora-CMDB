@@ -44,6 +44,12 @@ var Cardinalities = []string{CardinalityOneToOne, CardinalityOneToMany, Cardinal
 // (CH27): they are listed but never stored.
 var StructuralKeys = []string{"contains", "contained_by", "parent_of", "child_of", "mounted_in", "located_in"}
 
+// ProjectedKeys are the edges the topology and the impact project from the
+// IPAM tables to subnets and VLANs (IMP-11, WP-298): in_subnet from a CI to
+// a subnet, in_vlan from a CI or a subnet to a VLAN. They are neither
+// stored nor listed and no type may define them.
+var ProjectedKeys = []string{"in_subnet", "in_vlan"}
+
 // Type is a relationship type definition (REL-01). AllowedSourceTypes and
 // AllowedTargetTypes are CI type keys: POST /relationships takes a source
 // and a target CI of these types only, an empty list allows every type
@@ -127,6 +133,9 @@ func (t *Type) Validate() error {
 	}
 	if contains(StructuralKeys, t.Key) && !t.IsSystem {
 		return fmt.Errorf("%s is projected from the structure tables and cannot be defined", t.Key)
+	}
+	if contains(ProjectedKeys, t.Key) {
+		return fmt.Errorf("%s is projected from the IPAM tables and cannot be defined", t.Key)
 	}
 	return nil
 }

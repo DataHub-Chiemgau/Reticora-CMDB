@@ -527,13 +527,16 @@ func parseCategories(raw string) (map[string]bool, error) {
 // MaxImpactCIs bounds the failed CIs of one analysis.
 const MaxImpactCIs = 100
 
-// ImpactSummary sums up an impact analysis (IMP-05).
+// ImpactSummary sums up an impact analysis (IMP-05). Impacted, Certain,
+// Heuristic and ByCategory count CIs only; Projected counts the subnets
+// and VLANs of include=network (IMP-11) and is absent without it.
 type ImpactSummary struct {
 	Failed     int            `json:"failed"`
 	Impacted   int            `json:"impacted"`
 	Certain    int            `json:"certain"`
 	Heuristic  int            `json:"heuristic"`
 	ByCategory map[string]int `json:"by_category"`
+	Projected  *int           `json:"projected,omitempty"`
 }
 
 // GetMultiImpact handles GET /api/v1/impact?ci_ids=a,b&categories=…: the
@@ -566,8 +569,8 @@ func (h *Handler) GetMultiImpact(w http.ResponseWriter, r *http.Request) {
 
 // impactFields are the fields of an impacted CI that fields= selects (the
 // sparse fieldset of API-02); id is always returned.
-var impactFields = []string{"id", "name", "ci_type", "status", "client_id", "site_id", "management_ip",
-	"heuristic", "hops", "via", "relay", "path"}
+var impactFields = []string{"id", "node_kind", "name", "ci_type", "status", "client_id", "site_id", "management_ip",
+	"cidr", "vrf_id", "vlan_number", "heuristic", "hops", "via", "relay", "path"}
 
 // parseImpactFields reads fields=hops,via (API-02): the fields each impacted
 // CI carries besides its id; nil without a field (every field). An unknown
@@ -594,12 +597,16 @@ func parseImpactFields(raw string) (map[string]bool, error) {
 // that is not selected stays out of the answer.
 type impactEntry struct {
 	ID           string     `json:"id"`
+	NodeKind     string     `json:"node_kind,omitempty"`
 	Name         *string    `json:"name,omitempty"`
 	CIType       *string    `json:"ci_type,omitempty"`
 	Status       *string    `json:"status,omitempty"`
 	ClientID     string     `json:"client_id,omitempty"`
 	SiteID       string     `json:"site_id,omitempty"`
 	ManagementIP string     `json:"management_ip,omitempty"`
+	CIDR         string     `json:"cidr,omitempty"`
+	VRFID        string     `json:"vrf_id,omitempty"`
+	VLANNumber   int        `json:"vlan_number,omitempty"`
 	Heuristic    *bool      `json:"heuristic,omitempty"`
 	Hops         *int       `json:"hops,omitempty"`
 	Via          *Via       `json:"via,omitempty"`
@@ -608,16 +615,21 @@ type impactEntry struct {
 }
 
 // selectImpactFields narrows n to the selected fields, each with the value
-// and the omission rule of ImpactNode.
+// and the omission rule of ImpactNode: node_kind is absent for a CI, a
+// projected subnet or VLAN carries no ci_type and no status (IMP-11).
 func selectImpactFields(n *ImpactNode, fields map[string]bool) impactEntry {
 	e := impactEntry{ID: n.ID}
+	if fields["node_kind"] {
+		e.NodeKind = n.NodeKind
+	}
 	if fields["name"] {
 		e.Name = &n.Name
 	}
-	if fields["ci_type"] {
+	projected := n.NodeKind != "" && n.NodeKind != NodeKindCI
+	if fields["ci_type"] && !projected {
 		e.CIType = &n.CIType
 	}
-	if fields["status"] {
+	if fields["status"] && !projected {
 		e.Status = &n.Status
 	}
 	if fields["client_id"] {
@@ -628,6 +640,15 @@ func selectImpactFields(n *ImpactNode, fields map[string]bool) impactEntry {
 	}
 	if fields["management_ip"] {
 		e.ManagementIP = n.ManagementIP
+	}
+	if fields["cidr"] {
+		e.CIDR = n.CIDR
+	}
+	if fields["vrf_id"] {
+		e.VRFID = n.VRFID
+	}
+	if fields["vlan_number"] {
+		e.VLANNumber = n.VLANNumber
 	}
 	if fields["heuristic"] {
 		e.Heuristic = &n.Heuristic
@@ -773,12 +794,18 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 			return
 		}
 	}
-	// include= adds the service chain on the catalog paths (IMP-08); the
-	// deprecated path ignores it like fields=.
+	// include= adds the service chain (IMP-08) and the projected network
+	// (IMP-11) on the catalog paths; the deprecated path ignores it like
+	// fields=. network shows IPAM data and needs ipam:read as well.
 	var include impactInclude
+	var network bool
 	if sparse {
-		if include, err = parseImpactInclude(q.Get("include")); err != nil {
+		if include, network, err = h.parseImpactIncludes(q.Get("include")); err != nil {
 			api.WriteFieldError(w, err)
+			return
+		}
+		if network && !mayReadNetwork(ctx) {
+			writeNetworkForbidden(w)
 			return
 		}
 	}
@@ -812,8 +839,8 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 	// The providers of a redundant type beyond the depth keep their
 	// dependents up (IMP-04, F-160).
 	rules := h.impactRules(ctx, orgID)
-	if err := h.readFeeds(ctx, orgID, g, roots, depth, rules); err != nil {
-		api.WriteRepoError(w, err)
+	if feedErr := h.readFeeds(ctx, orgID, g, roots, depth, rules); feedErr != nil {
+		api.WriteRepoError(w, feedErr)
 		return
 	}
 	relType := q.Get("rel_type")
@@ -841,13 +868,29 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 		summary.ByCategory[hit.via.category]++
 	}
 	summary.Impacted = len(impactedNodes)
+	count := len(impactedNodes)
+	// include=network (IMP-11): the subnets and VLANs of the failed and
+	// impacted CIs as leaves after the CIs, read in one call; only when
+	// the categories take network. They count in summary.projected only.
+	if network {
+		var projected []ImpactNode
+		if len(categories) == 0 || categories["network"] {
+			if projected, err = h.projectImpact(ctx, orgID, g, roots, impacted, order, depth, withPaths); err != nil {
+				api.WriteRepoError(w, err)
+				return
+			}
+		}
+		n := len(projected)
+		summary.Projected = &n
+		impactedNodes = append(impactedNodes, projected...)
+	}
 	body := map[string]any{
 		"failed_cis": failed,
 		"rel_type":   relType,
 		"categories": sortedKeys(categories),
 		"depth":      depth,
 		"impacted":   impactedNodes,
-		"count":      len(impactedNodes),
+		"count":      count,
 		"summary":    summary,
 	}
 	if g.truncated {

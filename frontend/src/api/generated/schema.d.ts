@@ -2950,9 +2950,9 @@ export interface paths {
         rel_type?: string;
         /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
         categories?: string;
-        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (node_kind, name, ci_type, status, client_id, site_id, management_ip, cidr, vrf_id, vlan_number, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
-        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. network (IMP-11) appends the subnets and VLANs of the failed and impacted CIs to impacted as leaves, after the CIs, ordered by node_kind, name and id: a subnet or VLAN of a CI has the hops of the CI + 1 and via the CI, the VLAN of such a subnet the hops of the subnet + 1 and via subnet:{id}; the shortest path wins, at equal length the one from the smaller id, never beyond depth. They are heuristic, the failure does not travel on over them to other CIs, and they are only added when categories is empty or takes network (rel_type narrows the CI edges only). summary.projected counts them; count and the other counts stay CIs only. network needs ipam:read besides topology:read (403 otherwise). The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
         include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
@@ -8932,6 +8932,8 @@ export interface components {
       by_category: {
         [key: string]: number;
       };
+      /** @description The projected subnets and VLANs in impacted (include=network, IMP-11); absent without it. impacted, certain, heuristic, by_category and count count CIs only. */
+      projected?: number;
     };
     ImpactNode: components['schemas']['TopologyNode'] & {
       /** @description Reached only over an undirected network edge (connected_to), a second-class path (IMP-03). */
@@ -8946,25 +8948,34 @@ export interface components {
     /** @description An impacted CI in the answer with fields (API-02): its id and the selected properties of ImpactNode; a property that is not selected is absent. A selected property has the meaning and the omission rule it has in ImpactNode (client_id, site_id, management_ip and relay are absent when empty). */
     ImpactNodeFields: {
       id: string;
+      /**
+       * @description Absent for a CI (see TopologyNode).
+       * @enum {string}
+       */
+      node_kind?: 'ci' | 'subnet' | 'vlan';
       name?: string;
       ci_type?: string;
       status?: string;
       client_id?: string;
       site_id?: string;
       management_ip?: string;
+      cidr?: string;
+      vrf_id?: string;
+      vlan_number?: number;
       heuristic?: boolean;
       hops?: number;
       via?: components['schemas']['ImpactVia'];
       relay?: components['schemas']['ImpactRelay'];
       path?: components['schemas']['ImpactPathStep'][];
     };
-    /** @description The last step of the shortest path (IMP-02): the CI the failure comes from and the relationship type it passes. */
+    /** @description The last step of the shortest path (IMP-02): the CI the failure comes from and the relationship type it passes. On a projected subnet or VLAN (include=network, IMP-11) ci_id is the CI it hangs off or, for the VLAN of a subnet, subnet:{id}; rel_type is in_subnet or in_vlan. */
     ImpactVia: {
       ci_id: string;
       rel_type: string;
     };
     /** @description Only on a certain CI that the shortest path over all relationships (connected_to included) reaches over another step than via: the step the paths of heuristic CIs behind it take. */
     ImpactRelay: components['schemas']['ImpactVia'];
+    /** @description One hop of an impact path. The last step to a projected subnet or VLAN (include=network, IMP-11) has from_ci_id and to_ci_id of the form subnet:{id} or vlan:{id} where they name one, rel_type in_subnet or in_vlan, category network and heuristic true. */
     ImpactPathStep: {
       from_ci_id: string;
       to_ci_id: string;
@@ -12016,31 +12027,36 @@ export interface components {
       /** @description Optional human-readable resolution note. */
       resolution?: string;
     };
+    /** @description A node of the topology: a CI, or with include=network a subnet or a VLAN projected from IPAM (IMP-11). A CI (node_kind absent or ci) always carries ci_type and status. A projected node is no CI: its id is subnet:{id} or vlan:{id}, it carries no ci_type and no status (also not when fields selects them), its name is the subnet name (else the cidr) or "VLAN <vlan_number> <name>", and it carries client_id and site_id where set, cidr and vrf_id (subnet) or vlan_number (VLAN). */
     TopologyNode: {
       id: string;
+      /**
+       * @description The kind of the node; absent for a CI, so answers without include stay unchanged (API-01). Absent means ci.
+       * @enum {string}
+       */
+      node_kind?: 'ci' | 'subnet' | 'vlan';
       name: string;
-      ci_type: string;
-      status: string;
+      /** @description The id of the CI type; always set when node_kind is ci. */
+      ci_type?: string;
+      /** @description The status of the CI; always set when node_kind is ci. */
+      status?: string;
       client_id?: string;
       site_id?: string;
       management_ip?: string;
+      /** @description The network of a projected subnet. */
+      cidr?: string;
+      /** @description The VRF of a projected subnet. */
+      vrf_id?: string;
+      /** @description The VLAN number (1-4094) of a projected VLAN (vlan.vlan_id). */
+      vlan_number?: number;
     };
     TopologyEdge: {
       id: string;
       source_ci_id: string;
       target_ci_id: string;
-      /** @enum {string} */
-      rel_type:
-        | 'connected_to'
-        | 'hosted_on'
-        | 'depends_on'
-        | 'member_of'
-        | 'powers'
-        | 'powered_by'
-        | 'stores'
-        | 'monitors'
-        | 'backs_up';
-      /** @description Provenance of the edge (e.g. manual, discovery). */
+      /** @description The relationship type: a key of GET /api/v1/relationship-types (built-in or custom), contains for the containment projected from the structure, or in_subnet and in_vlan for the network edges of include=network (IMP-11). A projected network edge runs from a CI to subnet:{id} (in_subnet) or vlan:{id} (in_vlan), or from subnet:{id} to vlan:{id} (in_vlan); its id is the md5 of type and ends, stable across reads. */
+      rel_type: string;
+      /** @description Provenance of the edge (e.g. manual, discovery); projection for the projected containment and network edges. */
       source?: string;
     };
     TopologyGraph: {
@@ -13305,9 +13321,9 @@ export interface components {
     ListSort: string;
     /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
     ListFields: string;
-    /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+    /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (node_kind, name, ci_type, status, client_id, site_id, management_ip, cidr, vrf_id, vlan_number, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
     ImpactFields: string;
-    /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+    /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. network (IMP-11) appends the subnets and VLANs of the failed and impacted CIs to impacted as leaves, after the CIs, ordered by node_kind, name and id: a subnet or VLAN of a CI has the hops of the CI + 1 and via the CI, the VLAN of such a subnet the hops of the subnet + 1 and via subnet:{id}; the shortest path wins, at equal length the one from the smaller id, never beyond depth. They are heuristic, the failure does not travel on over them to other CIs, and they are only added when categories is empty or takes network (rel_type narrows the CI edges only). summary.projected counts them; count and the other counts stay CIs only. network needs ipam:read besides topology:read (403 otherwise). The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
     ImpactInclude: string;
     /** @description Free-text search. */
     ListQ: string;
@@ -19605,6 +19621,8 @@ export interface operations {
         root_ci_id?: string;
         /** @description Traversal depth from root_ci_id (default 2); a larger value than 20 is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
+        /** @description network adds the subnets and VLANs projected from IPAM (IMP-11): a node of node_kind subnet or vlan for each subnet and VLAN a CI of the graph hangs off (an address of the subnet on an interface of the CI, an interface in the VLAN) and the VLANs of those subnets, with the edges in_subnet and in_vlan (source projection). Only subnets and VLANs the caller sees appear; the projection does not widen the walk, and the ci_type filter narrows the CIs only. Without root_ci_id the projected nodes count towards the 2,000 nodes. The only value is network; any other is 422 (field include). It needs ipam:read besides topology:read. Without include the answer is unchanged. */
+        include?: 'network';
       };
       header?: never;
       path?: never;
@@ -19631,6 +19649,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      /** @description include=network without the permission ipam:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description root_ci_id names no CI the caller sees: an unknown or deleted CI, a CI of another organization or of a client or site outside the scope. The answer is the same in each case ("ci not found") and does not name the CI (F-161). */
       404: {
         headers: {
@@ -19640,7 +19667,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Without root_ci_id the filtered topology holds more than 2,000 CIs (IMP-06); narrow it with site_id, client_id or ci_type (a CI type id) or set root_ci_id. */
+      /** @description Without root_ci_id the filtered topology holds more than 2,000 CIs (IMP-06), or with include=network more than 2,000 CIs, subnets and VLANs together (the message names include); narrow it with site_id, client_id or ci_type (a CI type id) or set root_ci_id. An unknown include value is 422 with field include. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -19740,9 +19767,9 @@ export interface operations {
         rel_type?: string;
         /** @description Maximum hops of the impact paths; defaults to 20, a larger value is capped at 20. A value that is no integer or below 1 is 400 with field depth. */
         depth?: number;
-        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (node_kind, name, ci_type, status, client_id, site_id, management_ip, cidr, vrf_id, vlan_number, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
-        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. network (IMP-11) appends the subnets and VLANs of the failed and impacted CIs to impacted as leaves, after the CIs, ordered by node_kind, name and id: a subnet or VLAN of a CI has the hops of the CI + 1 and via the CI, the VLAN of such a subnet the hops of the subnet + 1 and via subnet:{id}; the shortest path wins, at equal length the one from the smaller id, never beyond depth. They are heuristic, the failure does not travel on over them to other CIs, and they are only added when categories is empty or takes network (rel_type narrows the CI edges only). summary.projected counts them; count and the other counts stay CIs only. network needs ipam:read besides topology:read (403 otherwise). The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
         include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
@@ -19763,6 +19790,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description include=network without the permission ipam:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Unknown category, unknown field in fields, unknown value in include or more than 100 CIs. */
       422: {
@@ -19784,9 +19820,9 @@ export interface operations {
         rel_type?: string;
         /** @description Comma-separated relationship categories to follow (network, power, hosting, logical, physical); physical includes the containment projected from parent_ci_id. An unknown category is 422. */
         categories?: string;
-        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (name, ci_type, status, client_id, site_id, management_ip, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
+        /** @description Sparse fieldset of the impacted CIs (API-02): comma-separated fields of ImpactNode (node_kind, name, ci_type, status, client_id, site_id, management_ip, cidr, vrf_id, vlan_number, heuristic, hops, via, relay, path); `id` is always returned, an unknown field yields 422. Without it every field is returned (ImpactAnalysis); with it the answer is an ImpactAnalysisFields, whose impacted CIs are ImpactNodeFields. Paths are only built when `path` is selected; via and relay rebuild them (see ImpactNode). The topology view asks for `name,ci_type,status,heuristic,hops,via,relay` (NFR-02). */
         fields?: components['parameters']['ImpactFields'];
-        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
+        /** @description Service impact chain (IMP-08): comma-separated blocks added at the top level of the answer, combinable with fields. services adds affected_services (the impacted CIs of type business_service or application or a type inheriting from one of them), clients client_ids and sites site_ids (of the certainly impacted CIs), spof service_spofs and spof_truncated (only computed with spof); each adds blast_radius with the counts of the blocks asked for. An unknown value yields 422 (field include). Without include the answer is unchanged (API-01); with services or spof the CI types are read once per analysis. network (IMP-11) appends the subnets and VLANs of the failed and impacted CIs to impacted as leaves, after the CIs, ordered by node_kind, name and id: a subnet or VLAN of a CI has the hops of the CI + 1 and via the CI, the VLAN of such a subnet the hops of the subnet + 1 and via subnet:{id}; the shortest path wins, at equal length the one from the smaller id, never beyond depth. They are heuristic, the failure does not travel on over them to other CIs, and they are only added when categories is empty or takes network (rel_type narrows the CI edges only). summary.projected counts them; count and the other counts stay CIs only. network needs ipam:read besides topology:read (403 otherwise). The deprecated path /api/v1/topology/cis/{id}/impact ignores include. */
         include?: components['parameters']['ImpactInclude'];
       };
       header?: never;
@@ -19818,6 +19854,15 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      /** @description include=network without the permission ipam:read. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Unknown category, unknown field in fields or unknown value in include. */
       422: {

@@ -427,6 +427,111 @@ func (r *PGRepository) DeleteIPAddress(ctx context.Context, orgID, id string) er
 	return r.deleteByID(ctx, orgID, "ip_address", ipVisible, id)
 }
 
+// --- Network projection (IMP-11) ---
+
+// projectionLinks reads the links of the CIs $2 to their subnets and VLANs:
+// the interfaces of the CIs by idx_network_interface_ci under nicVisible,
+// their addresses by idx_ip_address_interface, the subnet of an address and
+// the VLAN of an interface by a JOIN, so the row level security of subnet
+// and vlan hides one outside the scope. An address is visible by ipVisible:
+// its interface hangs off a visible CI (nicVisible), its subnet is joined.
+// An address without interface or subnet links nothing; UNION keeps each
+// link once.
+const projectionLinks = `WITH nic AS (
+	SELECT network_interface.id, network_interface.ci_id, network_interface.vlan_id FROM network_interface
+	WHERE network_interface.organization_id = $1 AND network_interface.ci_id = ANY($2::uuid[]) AND ` + nicVisible + `)
+SELECT 's', nic.ci_id::text, subnet.id::text FROM nic
+	JOIN ip_address ON ip_address.interface_id = nic.id AND ip_address.organization_id = $1
+	JOIN subnet ON subnet.id = ip_address.subnet_id AND subnet.organization_id = $1
+UNION
+SELECT 'v', nic.ci_id::text, vlan.id::text FROM nic
+	JOIN vlan ON vlan.id = nic.vlan_id AND vlan.organization_id = $1`
+
+// projectionNodes reads the subnets $2 with their visible VLAN and the
+// VLANs $3 together with the VLANs of the subnets $2, each under the row
+// level security of its table.
+const projectionNodes = `SELECT 's', subnet.id::text, COALESCE(subnet.name, ''), subnet.cidr::text, subnet.vrf_id::text,
+	COALESCE(subnet.client_id::text, ''), COALESCE(subnet.site_id::text, ''), COALESCE(vlan.id::text, ''), 0
+FROM subnet LEFT JOIN vlan ON vlan.id = subnet.vlan_id AND vlan.organization_id = subnet.organization_id
+WHERE subnet.organization_id = $1 AND subnet.id = ANY($2::uuid[])
+UNION ALL
+SELECT 'v', vlan.id::text, vlan.name, '', '', COALESCE(vlan.client_id::text, ''), COALESCE(vlan.site_id::text, ''), '', vlan.vlan_id
+FROM vlan WHERE vlan.organization_id = $1 AND (vlan.id = ANY($3::uuid[])
+	OR vlan.id IN (SELECT subnet.vlan_id FROM subnet WHERE subnet.organization_id = $1 AND subnet.id = ANY($2::uuid[])))`
+
+// NetworkProjection reads the network of the CIs ciIDs (IMP-11, WP-298)
+// in one transaction under the request's tenant scope with at most two
+// statements: the links of the CIs to their subnets and VLANs, then those
+// subnets and VLANs with the VLANs of the subnets. The CI ids go in as one
+// array, so the statements do not grow with the CIs, interfaces or
+// addresses.
+func (r *PGRepository) NetworkProjection(ctx context.Context, orgID string, ciIDs []string) (NetworkProjection, error) {
+	var p NetworkProjection
+	if len(ciIDs) == 0 {
+		return p, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, projectionLinks, orgID, ciIDs)
+		if err != nil {
+			return fmt.Errorf("read network links: %w", err)
+		}
+		var subnetIDs, vlanIDs []string
+		seenSubnet, seenVLAN := map[string]bool{}, map[string]bool{}
+		for rows.Next() {
+			var kind string
+			var link NetworkLink
+			if err = rows.Scan(&kind, &link.CIID, &link.Target); err != nil {
+				rows.Close()
+				return err
+			}
+			if kind == "s" {
+				p.CISubnets = append(p.CISubnets, link)
+				if !seenSubnet[link.Target] {
+					seenSubnet[link.Target] = true
+					subnetIDs = append(subnetIDs, link.Target)
+				}
+				continue
+			}
+			p.CIVLANs = append(p.CIVLANs, link)
+			if !seenVLAN[link.Target] {
+				seenVLAN[link.Target] = true
+				vlanIDs = append(vlanIDs, link.Target)
+			}
+		}
+		rows.Close()
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return rowsErr
+		}
+		if len(subnetIDs) == 0 && len(vlanIDs) == 0 {
+			return nil
+		}
+		nodes, err := tx.Query(ctx, projectionNodes, orgID, subnetIDs, vlanIDs)
+		if err != nil {
+			return fmt.Errorf("read network nodes: %w", err)
+		}
+		defer nodes.Close()
+		for nodes.Next() {
+			var kind, id, name, cidr, vrfID, clientID, siteID, vlanID string
+			var number int
+			if scanErr := nodes.Scan(&kind, &id, &name, &cidr, &vrfID, &clientID, &siteID, &vlanID, &number); scanErr != nil {
+				return scanErr
+			}
+			if kind == "s" {
+				p.Subnets = append(p.Subnets, ProjectedSubnet{ID: id, Name: name, CIDR: cidr, VRFID: vrfID,
+					ClientID: clientID, SiteID: siteID, VLANID: vlanID})
+				continue
+			}
+			p.VLANs = append(p.VLANs, ProjectedVLAN{ID: id, Name: name, Number: number, ClientID: clientID, SiteID: siteID})
+		}
+		return nodes.Err()
+	})
+	if err != nil {
+		return NetworkProjection{}, err
+	}
+	sortProjection(&p)
+	return p, nil
+}
+
 // --- Network Interfaces ---
 
 const nicCols = `id::text, organization_id::text, ci_id::text, name, if_index, COALESCE(mac::text,''), if_type,

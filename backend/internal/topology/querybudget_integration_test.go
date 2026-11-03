@@ -25,6 +25,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -283,6 +285,8 @@ func topologyQueryBudget(t *testing.T, objects int) {
 	}
 	t.Logf("impact of 2, 10 and 100 CIs: %d, %d and %d statements", multi[2], multi[10], multi[topology.MaxImpactCIs])
 
+	checkNetworkProjectionBudget(t, f, pool, counter, hubs[20], hubs[400])
+
 	for name, q := range map[string]string{
 		"by source": `SELECT id FROM ci_relationship WHERE organization_id = $1 AND source_ci_id = $2`,
 		"by target": `SELECT id FROM ci_relationship WHERE organization_id = $1 AND target_ci_id = $2`,
@@ -297,6 +301,89 @@ func topologyQueryBudget(t *testing.T, objects int) {
 		if seqScan(t, plan, "ci_relationship") {
 			t.Errorf("edges %s read ci_relationship with a sequential scan: %s", name, plan)
 		}
+	}
+}
+
+// checkNetworkProjectionBudget covers NFR-02 and ABN-02 for include=network
+// (IMP-11, WP-298): every leaf of the hubs with 20 and 400 neighbours gets
+// an interface in a VLAN with two addresses in a subnet of its own; the
+// subnets of a hub share another VLAN. The topology from
+// the hub and /impact/{id} with include=network cost the same statements
+// for 20 and 400 neighbours, within the budget of 40: the projection is one
+// call of the repository for all CIs, without include the statements stay
+// as they were.
+func checkNetworkProjectionBudget(t *testing.T, f *scopetest.Fixture, pool *pgxpool.Pool, counter *queryCounter, small, large string) {
+	bg := context.Background()
+	for base, hub := range map[int]string{100: small, 200: large} {
+		if _, err := f.Admin.Exec(bg, `WITH v AS (
+				INSERT INTO vlan (organization_id, vlan_id, name)
+				SELECT $1, $3::int + g, 'budget-' || $3::int || '-' || g FROM generate_series(1, 2) g RETURNING id, vlan_id),
+			l AS (SELECT row_number() OVER (ORDER BY ci.name) AS n, ci.id FROM ci
+				JOIN ci_relationship r ON r.source_ci_id = ci.id AND r.target_ci_id = $2::uuid),
+			s AS (INSERT INTO subnet (organization_id, cidr, name, vlan_id)
+				SELECT $1, set_masklen('10.0.0.0'::inet + ($3::int * 65536 + l.n * 4), 30)::cidr, 'budget-' || l.id,
+					(SELECT id FROM v WHERE vlan_id = $3::int + 1)
+				FROM l RETURNING id, name, cidr),
+			n AS (INSERT INTO network_interface (organization_id, ci_id, name, vlan_id)
+				SELECT $1, l.id, 'eth0', (SELECT id FROM v WHERE vlan_id = $3::int + 2) FROM l RETURNING id, ci_id)
+			INSERT INTO ip_address (organization_id, subnet_id, interface_id, address)
+			SELECT $1, s.id, n.id, s.cidr::inet + k
+			FROM n JOIN s ON s.name = 'budget-' || n.ci_id, generate_series(1, 2) k`, f.OrgA, hub, base); err != nil {
+			t.Fatalf("seed the network of %s: %v", hub, err)
+		}
+	}
+	if _, err := f.Admin.Exec(bg, `ANALYZE network_interface; ANALYZE ip_address; ANALYZE subnet; ANALYZE vlan`); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	topology.NewHandler(ci.NewPGRepository(pool), relationship.NewPGRepository(pool)).
+		WithRelationshipTypes(relationshiptype.NewPGRepository(pool)).WithCITypes(citype.NewPGRepository(pool)).
+		WithNetworkProjection(ipam.NewPGRepository(pool)).RegisterRoutes(mux)
+	ctx := identity.WithPrincipal(tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User}),
+		identity.Principal{Subject: f.User, OrganizationID: f.OrgA, Permissions: []identity.Permission{identity.PermTopologyRead, identity.PermIPAMRead}})
+	get := func(path string, leaves int) int64 {
+		t.Helper()
+		before := counter.n.Load()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %.300s", path, w.Code, w.Body.String())
+		}
+		var body struct {
+			Nodes    []topology.Node       `json:"nodes"`
+			Impacted []topology.ImpactNode `json:"impacted"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		// Each leaf with its subnet, the two VLANs.
+		projected := 0
+		for i := range body.Nodes {
+			if body.Nodes[i].NodeKind != "" {
+				projected++
+			}
+		}
+		for i := range body.Impacted {
+			if body.Impacted[i].NodeKind != "" {
+				projected++
+			}
+		}
+		if projected != leaves+2 {
+			t.Errorf("GET %s: %d projected nodes, want %d", path, projected, leaves+2)
+		}
+		return counter.n.Load() - before
+	}
+	get("/api/v1/topology?include=network&root_ci_id="+small, 20)
+	for name, path := range map[string]func(id string) string{
+		"topology": func(id string) string { return "/api/v1/topology?include=network&depth=2&root_ci_id=" + id },
+		"impact":   func(id string) string { return "/api/v1/impact/" + id + "?include=network" },
+	} {
+		few, many := get(path(small), 20), get(path(large), 400)
+		const budget = 40
+		if few != many || many > budget {
+			t.Errorf("%s with include=network: %d statements for 20 neighbours, %d for 400, budget %d", name, few, many, budget)
+		}
+		t.Logf("%s with include=network: %d statements", name, many)
 	}
 }
 
