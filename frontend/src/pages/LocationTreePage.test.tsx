@@ -43,7 +43,21 @@ const tree = [
       [node('r-1', 'room', 'Server room', [node('k-1', 'rack', 'Rack A1', [], 'r-1')], 'b-1')],
       'site-1',
     ),
-    node('w-1', 'warehouse', 'Depot', [], 'site-1'),
+    node(
+      'w-1',
+      'warehouse',
+      'Depot',
+      [
+        node(
+          'z-1',
+          'zone',
+          'Zone 1',
+          [node('s-1', 'shelf', 'Shelf 1', [node('n-1', 'bin', 'Bin 1', [], 's-1')], 'z-1')],
+          'w-1',
+        ),
+      ],
+      'site-1',
+    ),
   ]),
   node('site-2', 'site', 'Branch', [
     node('b-2', 'building', 'Annex', [node('r-2', 'room', 'Lab', [], 'b-2')], 'site-2'),
@@ -161,6 +175,61 @@ describe('LocationTreePage', () => {
       name: 'Zone A',
       parent_id: 'w-1',
     });
+  });
+
+  // LOC-08 (WP-282): the storage chain site > warehouse > zone > shelf > bin;
+  // every level offers exactly the child kinds of the parent matrix.
+  it('offers the storage chain level by level and refetches the tree after a create', async () => {
+    const created: [string, Record<string, unknown>][] = [];
+    const fetchMock = stubApi((body, url) => {
+      created.push([url, body]);
+      return json(node('n-2', 'bin', String(body.name), [], 's-1'), 201);
+    });
+    renderWithProviders(<LocationTreePage />, { route: '/locations' });
+
+    const childKinds = async (name: string) => {
+      fireEvent.click(within(await row(name)).getByRole('button', { name: /Unterpunkt|child/ }));
+      const dialog = await screen.findByRole('dialog');
+      const kind = within(dialog).getByRole('combobox') as HTMLSelectElement;
+      return { dialog, kinds: Array.from(kind.options).map((o) => o.value) };
+    };
+    const cancel = async (dialog: HTMLElement) => {
+      fireEvent.click(within(dialog).getByRole('button', { name: /Abbrechen|Cancel/ }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    };
+    const expand = async (name: string) =>
+      fireEvent.click(within(await row(name)).getByRole('button', { name: 'expand' }));
+
+    let step = await childKinds('HQ');
+    expect(step.kinds).toEqual(['building', 'warehouse']);
+    await cancel(step.dialog);
+    step = await childKinds('Depot');
+    expect(step.kinds).toEqual(['zone']);
+    await cancel(step.dialog);
+    // Zone (depth 2) and shelf (depth 3) start collapsed.
+    step = await childKinds('Zone 1');
+    expect(step.kinds).toEqual(['shelf']);
+    await cancel(step.dialog);
+    await expand('Zone 1');
+    await expand('Shelf 1');
+    // A bin is a leaf: it has no child button.
+    expect(
+      within(await row('Bin 1')).queryByRole('button', { name: /Unterpunkt|child/ }),
+    ).not.toBeInTheDocument();
+
+    step = await childKinds('Shelf 1');
+    expect(step.kinds).toEqual(['bin']);
+    const loadsBefore = treeLoads(fetchMock);
+    fireEvent.change(within(step.dialog).getByRole('textbox'), { target: { value: 'Bin 2' } });
+    fireEvent.click(within(step.dialog).getByRole('button', { name: /Anlegen|Create/ }));
+
+    await waitFor(() =>
+      expect(created).toEqual([
+        ['/api/v1/locations', { kind: 'bin', name: 'Bin 2', parent_id: 's-1' }],
+      ]),
+    );
+    // useCreateLocation invalidates ['locations'], so the tree is read again.
+    await waitFor(() => expect(treeLoads(fetchMock)).toBeGreaterThan(loadsBefore));
   });
 
   it('creates a site for a client', async () => {
