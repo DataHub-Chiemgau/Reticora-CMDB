@@ -265,7 +265,8 @@ func (p *Plugin) verifyVendor(ctx context.Context, client *http.Client, baseURL,
 		return false, untrustedError(req, err)
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	// Draining lets the connection be reused; the body itself is not needed.
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	// Any response from vendor-specific endpoint confirms the vendor
 	return resp.StatusCode < 500, nil

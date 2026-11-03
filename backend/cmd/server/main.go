@@ -110,7 +110,11 @@ func main() {
 		slog.Error("failed to init observability", "error", err)
 		os.Exit(1)
 	}
-	defer shutdown(context.Background())
+	defer func() {
+		if shutdownErr := shutdown(context.Background()); shutdownErr != nil {
+			slog.Warn("failed to shut down observability", "error", shutdownErr)
+		}
+	}()
 
 	// Initialize envelope encryptor. Credentials are stored encrypted, so a
 	// missing master key must fail startup instead of silently disabling the

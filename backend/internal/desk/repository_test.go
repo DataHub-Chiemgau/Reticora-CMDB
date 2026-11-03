@@ -36,3 +36,24 @@ func TestDeskBookingOverlapRejected(t *testing.T) {
 		t.Fatalf("expected booking after cancel, got %v", err)
 	}
 }
+
+// jsonColumnRow is a pgx.Row whose JSON columns hold a JSON array, which no
+// object-shaped field accepts.
+type jsonColumnRow struct{}
+
+func (jsonColumnRow) Scan(dest ...any) error {
+	for _, d := range dest {
+		if p, ok := d.(*[]byte); ok {
+			*p = []byte(`[1]`)
+		}
+	}
+	return nil
+}
+
+// TestScanDeskReportsUndecodableAttributes covers F-123 (errcheck):
+// attributes that do not decode are an error instead of an empty map.
+func TestScanDeskReportsUndecodableAttributes(t *testing.T) {
+	if d, err := scanDesk(jsonColumnRow{}); err == nil {
+		t.Fatalf("scanDesk = %+v, want decode error", d)
+	}
+}

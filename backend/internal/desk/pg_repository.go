@@ -39,7 +39,9 @@ func scanDesk(s pgx.Row) (*Desk, error) {
 		return nil, err
 	}
 	if len(attrs) > 0 {
-		json.Unmarshal(attrs, &d.Attributes)
+		if err := json.Unmarshal(attrs, &d.Attributes); err != nil {
+			return nil, fmt.Errorf("decode attributes of desk %s: %w", d.ID, err)
+		}
 	}
 	if d.Attributes == nil {
 		d.Attributes = map[string]any{}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -221,9 +222,18 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	if list, ok := v.(pagedList); ok {
 		v = list.withNextCursor()
 	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		// Nothing is written yet, so the client gets a 500 instead of a
+		// truncated body under a success status (F-123).
+		slog.Error("encode JSON response", "error", err)
+		WriteProblemBody(w, http.StatusInternalServerError, ProblemDetail{Type: "https://reticora.io/problems/500", Title: "Internal Server Error", Status: http.StatusInternalServerError})
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	// A failed write means the client is gone; there is nobody to tell.
+	_, _ = w.Write(append(raw, '\n'))
 }
 
 // WriteProblemBody is the one writer of error responses (API-03): body is a

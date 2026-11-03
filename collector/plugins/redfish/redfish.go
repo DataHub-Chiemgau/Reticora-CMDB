@@ -148,7 +148,8 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 				return
 			}
 			defer resp.Body.Close()
-			io.Copy(io.Discard, resp.Body)
+			// Draining lets the connection be reused; the body itself is not needed.
+			_, _ = io.Copy(io.Discard, resp.Body)
 
 			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized {
 				result := plugins.Result{
