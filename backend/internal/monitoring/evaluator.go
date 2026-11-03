@@ -193,7 +193,7 @@ func (e *Evaluator) evaluateRule(ctx context.Context, rule AlertRule) error {
 	// pending marker wins (durations survive restarts); otherwise the
 	// condition history is derived from the samples — the breach started at
 	// the first consecutive in-window sample that still holds.
-	pendingSince := now
+	var pendingSince time.Time
 	if rule.PendingSince != nil {
 		pendingSince = *rule.PendingSince
 	} else {

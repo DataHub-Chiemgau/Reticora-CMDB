@@ -180,7 +180,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if req.IndependentlyLifecycleManaged != nil {
 			sets = append(sets, fmt.Sprintf("independently_lifecycle_managed = $%d", pos))
 			args = append(args, *req.IndependentlyLifecycleManaged)
-			pos++
 		}
 		if len(sets) == 0 {
 			c, err := scan(tx.QueryRow(ctx, fmt.Sprintf(

@@ -256,7 +256,6 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req U
 		if req.IsManagement != nil {
 			sets = append(sets, fmt.Sprintf("is_management = $%d", pos))
 			args = append(args, *req.IsManagement)
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {
@@ -406,7 +405,6 @@ func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, re
 		if req.Description != nil {
 			sets = append(sets, fmt.Sprintf("description = $%d", pos))
 			args = append(args, nilIfEmpty(*req.Description))
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {
@@ -707,7 +705,6 @@ func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, re
 		if req.Description != nil {
 			sets = append(sets, fmt.Sprintf("description = $%d", pos))
 			args = append(args, nilIfEmpty(*req.Description))
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {

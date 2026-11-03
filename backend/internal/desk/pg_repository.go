@@ -183,7 +183,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateD
 			attrs, _ := json.Marshal(req.Attributes)
 			sets = append(sets, fmt.Sprintf("attributes = $%d::jsonb", pos))
 			args = append(args, string(attrs))
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {

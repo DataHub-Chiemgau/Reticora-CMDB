@@ -184,7 +184,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateW
 		if req.Status != nil {
 			sets = append(sets, fmt.Sprintf("status = $%d", pos))
 			args = append(args, *req.Status)
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {
