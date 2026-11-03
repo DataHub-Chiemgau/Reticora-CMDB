@@ -14246,19 +14246,41 @@ paths:
       operationId: exportMetamodel
       summary: Export the metamodel
       description: >-
-        The organization's metamodel as one JSON document (MET-54, phase 1):
-        every CI type it sees — system and own, active or not — with its
-        attribute definitions, and the global attribute definitions. Served
-        as a download (Content-Disposition attachment).
+        The organization's metamodel as one JSON document, served as a
+        download (Content-Disposition attachment). Format 1 (default,
+        MET-54 phase 1): every CI type it sees — system and own, active or
+        not — with its attribute definitions, and the global attribute
+        definitions. Format 2 (`format_version=2`, opt-in, WP-262): the
+        complete metamodel — types, attribute definitions, attribute sets,
+        templates with versions, catalog rules, form layouts and lifecycle
+        models — with every reference as a key instead of an id, read in
+        one snapshot; system parts appear as references only (key and
+        is_system). Another format_version is 400; format 2 without the
+        database is 503.
+      parameters:
+        - name: format_version
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1, 2]
+            default: 1
+          description: The export format; 1 stays the default (API-01).
       responses:
         '200':
           description: Metamodel export
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MetamodelExport'
+                oneOf:
+                  - $ref: '#/components/schemas/MetamodelExport'
+                  - $ref: '#/components/schemas/MetamodelExportV2'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/ci-types/{id}:
     get:
@@ -19465,6 +19487,277 @@ components:
           items:
             $ref: '#/components/schemas/AttributeDefinition'
 
+    MetamodelExportV2:
+      type: object
+      description: >-
+        The complete metamodel (format 2, WP-262). References are keys:
+        parent type, lifecycle model and sets of a type, type or set of an
+        attribute definition, applies_to types, type of a template,
+        attribute of a template item, target of a rule, target and role of
+        a layout, states of a transition. Ids, organization ids, generated
+        fields, version counters, user ids and time stamps of the rows are
+        not exported. System parts carry only key and is_system (attribute
+        definitions also scope and their owner key). Two exports of the
+        same state differ only in exported_at.
+      required: [format_version, exported_at, organization_id, omitted_sections, ci_types, attribute_definitions, attribute_sets, templates, rules, layouts, lifecycle_models]
+      properties:
+        format_version:
+          type: integer
+          enum: [2]
+        exported_at:
+          type: string
+          format: date-time
+        organization_id:
+          type: string
+        omitted_sections:
+          type: array
+          description: Sections left out for the reader's permissions (WP-264); empty for now.
+          items: { type: string }
+        ci_types:
+          type: array
+          description: Sorted by key.
+          items: { $ref: '#/components/schemas/MetamodelExportType' }
+        attribute_definitions:
+          type: array
+          description: Sorted by scope, ci_type_key or attribute_set_key, and key.
+          items: { $ref: '#/components/schemas/MetamodelExportAttribute' }
+        attribute_sets:
+          type: array
+          description: Sorted by key; the set attributes are the definitions with its attribute_set_key.
+          items: { $ref: '#/components/schemas/MetamodelExportAttributeSet' }
+        templates:
+          type: array
+          description: Sorted by key.
+          items: { $ref: '#/components/schemas/MetamodelExportTemplate' }
+        rules:
+          type: array
+          description: Sorted by target (types, sets, template versions) and key.
+          items: { $ref: '#/components/schemas/MetamodelExportRule' }
+        layouts:
+          type: array
+          description: Sorted by key.
+          items: { $ref: '#/components/schemas/MetamodelExportLayout' }
+        lifecycle_models:
+          type: array
+          description: Sorted by key.
+          items: { $ref: '#/components/schemas/MetamodelExportLifecycleModel' }
+    MetamodelExportType:
+      type: object
+      description: A CI type; a system type carries only key and is_system.
+      required: [key, is_system]
+      properties:
+        key: { type: string }
+        is_system: { type: boolean }
+        name: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        icon: { type: string }
+        description: { type: string }
+        category: { type: string }
+        is_builtin: { type: boolean }
+        is_active: { type: boolean }
+        is_logical: { type: boolean }
+        is_observable: { type: boolean }
+        parent_type_key: { type: string }
+        lifecycle_model_key: { type: string }
+        template_key: { type: string, description: The type template of the catalog (GET /api/v1/ci-types/templates). }
+        attribute_set_keys:
+          type: array
+          description: The assigned sets in position order.
+          items: { type: string }
+        capabilities: { type: object, additionalProperties: true }
+        allowed_relationship_types:
+          type: array
+          items: { type: string }
+        ui_schema: { type: object, additionalProperties: true }
+        compliance_rules:
+          type: array
+          items: {}
+        discovery_mappings:
+          type: array
+          items: {}
+    MetamodelExportAttribute:
+      type: object
+      description: >-
+        An attribute definition: global (no owner key), of a type
+        (ci_type_key) or of a set (attribute_set_key). A system definition
+        carries only key, scope, its owner key and is_system.
+      required: [key, scope, is_system]
+      properties:
+        key: { type: string }
+        scope: { type: string, enum: [type, global, set] }
+        ci_type_key: { type: string }
+        attribute_set_key: { type: string }
+        is_system: { type: boolean }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        data_type: { type: string }
+        required: { type: boolean }
+        default: {}
+        enum_values:
+          type: array
+          items: { type: string }
+        multi_value: { type: boolean }
+        searchable: { type: boolean }
+        unique: { type: boolean }
+        unique_scope: { type: string, enum: [org, client] }
+        inheritable: { type: boolean }
+        validation:
+          $ref: '#/components/schemas/AttributeValidation'
+        computed:
+          $ref: '#/components/schemas/ComputedExpression'
+        conditional: { type: object, additionalProperties: true }
+        reference_target: { type: string }
+        group: { type: string }
+        order: { type: integer }
+        unit: { type: string }
+        applies_to:
+          $ref: '#/components/schemas/AttributeAppliesTo'
+        applies_to_categories:
+          type: array
+          items: { type: string }
+        applies_to_type_keys:
+          type: array
+          items: { type: string }
+    MetamodelExportAttributeSet:
+      type: object
+      description: An attribute set; a system set carries only key and is_system.
+      required: [key, is_system]
+      properties:
+        key: { type: string }
+        is_system: { type: boolean }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_active: { type: boolean }
+    MetamodelExportTemplate:
+      type: object
+      description: A template with all versions; a system template carries only key and is_system.
+      required: [key, is_system]
+      properties:
+        key: { type: string }
+        is_system: { type: boolean }
+        ci_type_key: { type: string }
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        description: { type: string }
+        is_active: { type: boolean }
+        current_version: { type: [integer, 'null'] }
+        versions:
+          type: array
+          description: Sorted by version.
+          items: { $ref: '#/components/schemas/MetamodelExportTemplateVersion' }
+    MetamodelExportTemplateVersion:
+      type: object
+      required: [version, status, items]
+      properties:
+        version: { type: integer }
+        status: { type: string, enum: [draft, published, retired] }
+        published_at: { type: string, format: date-time }
+        items:
+          type: array
+          description: Sorted by position.
+          items: { $ref: '#/components/schemas/MetamodelExportTemplateItem' }
+    MetamodelExportTemplateItem:
+      type: object
+      description: An item references an attribute definition by key and owner (none for a global definition).
+      required: [attribute_key, position]
+      properties:
+        attribute_key: { type: string }
+        ci_type_key: { type: string }
+        attribute_set_key: { type: string }
+        position: { type: integer }
+        required_override: { type: boolean }
+        default_override: {}
+        validation_override: {}
+    MetamodelExportRule:
+      type: object
+      description: >-
+        A catalog rule with its target as ci_type_key, attribute_set_key or
+        template_key with template_version; a system rule carries only key
+        and is_system.
+      required: [key, is_system]
+      properties:
+        key: { type: string }
+        is_system: { type: boolean }
+        attribute_key: { type: string }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        ci_type_key: { type: string }
+        attribute_set_key: { type: string }
+        template_key: { type: string }
+        template_version: { type: integer }
+        condition:
+          oneOf:
+            - $ref: '#/components/schemas/RuleCondition'
+            - type: 'null'
+        ast:
+          oneOf:
+            - $ref: '#/components/schemas/RuleAST'
+            - type: 'null'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RuleMessage'
+            - type: 'null'
+        is_active: { type: boolean }
+    MetamodelExportLayout:
+      type: object
+      description: >-
+        A form layout for ci_type_key or template_key; the role is its name
+        with the table it lives in (role_kind), since role names are unique
+        per table only.
+      required: [key, priority, is_active, layout]
+      properties:
+        key: { type: string }
+        ci_type_key: { type: string }
+        template_key: { type: string }
+        role_name: { type: string }
+        role_kind: { type: string, enum: [role, custom_role] }
+        priority: { type: integer }
+        is_active: { type: boolean }
+        layout:
+          $ref: '#/components/schemas/FormLayoutDocument'
+    MetamodelExportLifecycleModel:
+      type: object
+      description: A lifecycle model; a system model carries only key and is_system.
+      required: [key, is_system]
+      properties:
+        key: { type: string }
+        is_system: { type: boolean }
+        name: { type: string }
+        applies_to: { type: string, enum: [asset, ci] }
+        description: { type: string }
+        states:
+          type: array
+          description: Sorted by sort_order and key.
+          items:
+            type: object
+            required: [key, label, is_initial, is_terminal, sort_order, required_fields]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              is_initial: { type: boolean }
+              is_terminal: { type: boolean }
+              sort_order: { type: integer }
+              required_fields:
+                type: array
+                items: { type: string }
+        transitions:
+          type: array
+          description: Sorted by from_state_key and to_state_key; without from_state_key from every state.
+          items:
+            type: object
+            required: [key, label, to_state_key, required_fields]
+            properties:
+              key: { type: string }
+              label: { type: string }
+              from_state_key: { type: string }
+              to_state_key: { type: string }
+              required_fields:
+                type: array
+                items: { type: string }
+              validation: { type: object, additionalProperties: true }
     CIType:
       type: object
       required: [id, key, name, display_name, is_builtin, is_system, is_active, is_logical, is_observable, schema_version, version, capabilities, allowed_relationship_types, ui_schema, compliance_rules, discovery_mappings, created_at, updated_at]

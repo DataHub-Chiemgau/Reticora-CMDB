@@ -609,7 +609,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
-		citype.NewHandler(repos.CIType, opts.Dispatcher),
+		citype.NewHandler(repos.CIType, opts.Dispatcher).
+			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}),
 		draftHandler,
 		importer.NewHandler(repos.Import),
 		lifecycle.NewHandler(repos.Lifecycle,
@@ -867,4 +868,72 @@ func notifyHandler(opts *Options) *notify.Handler {
 		opts.Notifications = notify.NewMemoryCenter()
 	}
 	return notify.NewHandler(opts.Notifications).WithEgress(opts.Egress)
+}
+
+// lifecycleModelExport reads the lifecycle models for the metamodel export
+// v2 (WP-262): every model the organization sees with its states and
+// transitions. In the export's snapshot the reads join its transaction.
+type lifecycleModelExport struct{ repo lifecycle.Repository }
+
+func (a lifecycleModelExport) ExportLifecycleModels(ctx context.Context, orgID string) ([]citype.ExportLifecycleModelV2, error) {
+	out := []citype.ExportLifecycleModelV2{}
+	for offset := 0; ; offset += api.MaxPageLimit {
+		defs, total, err := a.repo.List(ctx, orgID, api.PaginationParams{Limit: api.MaxPageLimit, Offset: offset})
+		if err != nil {
+			return nil, err
+		}
+		for i := range defs {
+			d, getErr := a.repo.GetByID(ctx, orgID, defs[i].ID)
+			if getErr != nil {
+				return nil, getErr
+			}
+			out = append(out, exportLifecycleModel(d))
+		}
+		if len(defs) == 0 || offset+len(defs) >= total {
+			return out, nil
+		}
+	}
+}
+
+// exportLifecycleModel maps a lifecycle model onto the export v2: states and
+// transitions by key, without ids and the version.
+func exportLifecycleModel(d *lifecycle.Definition) citype.ExportLifecycleModelV2 {
+	body := &citype.ExportLifecycleModelBody{Name: d.Name, AppliesTo: d.AppliesTo, Description: d.Description,
+		States:      make([]citype.ExportLifecycleStateV2, 0, len(d.States)),
+		Transitions: make([]citype.ExportLifecycleTransitionV2, 0, len(d.Transitions))}
+	for i := range d.States {
+		s := &d.States[i]
+		body.States = append(body.States, citype.ExportLifecycleStateV2{Key: s.Key, Label: s.Label, IsInitial: s.IsInitial,
+			IsTerminal: s.IsTerminal, SortOrder: s.SortOrder, RequiredFields: s.RequiredFields})
+	}
+	for i := range d.Transitions {
+		t := &d.Transitions[i]
+		body.Transitions = append(body.Transitions, citype.ExportLifecycleTransitionV2{Key: t.Key, Label: t.Label,
+			FromStateKey: t.FromStateKey, ToStateKey: t.ToStateKey, RequiredFields: t.RequiredFields, Validation: t.Validation})
+	}
+	return citype.ExportLifecycleModelV2{ID: d.ID, Key: d.Key, IsSystem: d.IsSystem, ExportLifecycleModelBody: body}
+}
+
+// roleExport reads the role names for the layouts of the metamodel export
+// v2: the union of role (builtin, kind "role") and custom_role.
+type roleExport struct{ repo user.Repository }
+
+func (a roleExport) ExportRoles(ctx context.Context, orgID string) ([]citype.ExportRole, error) {
+	out := []citype.ExportRole{}
+	for offset := 0; ; offset += api.MaxPageLimit {
+		roles, total, err := a.repo.ListRoles(ctx, orgID, api.PaginationParams{Limit: api.MaxPageLimit, Offset: offset})
+		if err != nil {
+			return nil, err
+		}
+		for i := range roles {
+			kind := citype.RoleKindCustomRole
+			if roles[i].IsBuiltin {
+				kind = citype.RoleKindRole
+			}
+			out = append(out, citype.ExportRole{ID: roles[i].ID, Name: roles[i].Name, Kind: kind})
+		}
+		if len(roles) == 0 || offset+len(roles) >= total {
+			return out, nil
+		}
+	}
 }

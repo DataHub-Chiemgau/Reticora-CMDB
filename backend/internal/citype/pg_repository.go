@@ -71,6 +71,38 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
+// RunInSnapshot runs fn in one reading tenant transaction with a snapshot
+// (database.WithRequestTenantSnapshot: REPEATABLE READ, READ ONLY): the
+// repository calls fn makes with its context, also those of other packages,
+// join it and read one consistent state (WP-262, the metamodel export v2).
+func (r *PGRepository) RunInSnapshot(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantSnapshot(ctx, r.pool, orgID, fn)
+}
+
+// typeAttributeSetIDs returns the assigned sets of every type the
+// organization sees, by type id, in the order position, attribute_set_id
+// (GetTypeAttributeSets for all types in one statement; export v2).
+func (r *PGRepository) typeAttributeSetIDs(ctx context.Context, orgID string) (map[string][]string, error) {
+	out := map[string][]string{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT ci_type_id::text, attribute_set_id::text FROM ci_type_attribute_set
+			ORDER BY ci_type_id, position, attribute_set_id`)
+		if err != nil {
+			return fmt.Errorf("read attribute sets of ci types: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var typeID, setID string
+			if err := rows.Scan(&typeID, &setID); err != nil {
+				return fmt.Errorf("read attribute sets of ci types: %w", err)
+			}
+			out[typeID] = append(out[typeID], setID)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // List returns CI types visible to the tenant: its own types plus the global
 // system types (organization_id NULL, exposed by the RLS policy).
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Type, int, error) {

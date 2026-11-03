@@ -1287,3 +1287,4 @@ MET-53;[P2];B;backend/internal/server/draft_isolation_integration_test.go;WP-720
 MGT-01;[P2];B;backend/internal/document/create_links_integration_test.go;WP-851
 IMP-IO-01;[P2];C;backend/internal/importer/handler_test.go;WP-774
 API-06;[P2]/[P3]/[P4]/[A];C;backend/internal/importer/handler_test.go;WP-774
+MET-54;B/G1, Teil P2/G2;B;backend/internal/citype/export_v2_integration_test.go;WP-262

@@ -169,6 +169,21 @@ func unquoteLiteral(t *testing.T, s string) (value, rest string) {
 // inside its literal, whatever quotes, backslashes or statement separators
 // it carries; a backslash quote is never produced (backslash_quote).
 func TestBeginTenantSQLQuotesValues(t *testing.T) {
+	checkBeginTenantSQL(t, beginTenantSQL, "BEGIN; SELECT ")
+}
+
+// TestBeginTenantSnapshotSQL covers the snapshot variant of WP-262: the
+// statement opens a REPEATABLE READ, READ ONLY transaction and sets the five
+// GUCs in the same round trip, quoted like beginTenantSQL.
+func TestBeginTenantSnapshotSQL(t *testing.T) {
+	checkBeginTenantSQL(t, beginTenantSnapshotSQL, "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY; SELECT ")
+}
+
+// checkBeginTenantSQL checks that begin opens the transaction with prefix
+// and then sets exactly the five GUCs transaction-locally, whatever the
+// user id carries.
+func checkBeginTenantSQL(t *testing.T, begin func(*TenantScope) string, prefix string) {
+	t.Helper()
 	for _, user := range []string{"", "user-1", `'`, `\`, `;`, `--`, `\'`, "line\nbreak", `x'); SELECT set_config('app.org_id', '', true); --`} {
 		scope := OrgWideScope(testOrg, user)
 		scope.Clients = ScopeIDs(testClientA, testClientB)
@@ -176,8 +191,8 @@ func TestBeginTenantSQLQuotesValues(t *testing.T) {
 		if err := scope.Validate(); err != nil {
 			t.Fatalf("%q: Validate() = %v", user, err)
 		}
-		sql := beginTenantSQL(&scope)
-		rest, ok := strings.CutPrefix(sql, "BEGIN; SELECT ")
+		sql := begin(&scope)
+		rest, ok := strings.CutPrefix(sql, prefix)
 		if !ok {
 			t.Fatalf("%q: %s does not open the transaction first", user, sql)
 		}
