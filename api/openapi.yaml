@@ -1761,8 +1761,15 @@ paths:
             allowed_source_types or allowed_target_types of the relationship
             type names source_ci_id, target_ci_id or both ("the type of the
             source CI is not in allowed_source_types of the relationship
-            type"); an empty list allows every type, nothing is stored
-            (REL-01, E-95, F-313).
+            type"); an empty list allows every type, a subtype of a listed
+            CI type (parent_type_id) is allowed, nothing is stored (REL-01,
+            REL-06, E-95, F-313).
+            An edge that would exceed the cardinality of the relationship
+            type names rel_type ("the edge would exceed the cardinality of
+            the relationship type"): one_to_one allows the source one
+            outgoing and the target one incoming edge of the type,
+            one_to_many the target one incoming, many_to_one the source one
+            outgoing; nothing is stored (REL-06, E-125).
             Without violations: a structural relationship type, which is
             projected and cannot be stored, or an interface of another CI.
           content:
@@ -13544,6 +13551,10 @@ paths:
     get:
       operationId: listRelationshipTypes
       summary: List the relationship types (system catalogue and the organization's)
+      description: >-
+        One entry per key. An organization row with the key of a system type
+        (created before REL-06) is listed instead of the system row; total
+        counts the keys (REL-06).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -13571,7 +13582,11 @@ paths:
         allowed_source_types and allowed_target_types name CI type keys the
         organization sees (system types and its own); an unknown key is
         refused with 400 and `field` allowed_source_types or
-        allowed_target_types, nothing is stored (REL-01, E-95, F-313).
+        allowed_target_types, nothing is stored (REL-01, E-95, F-313). An
+        unknown cardinality and an undirected type outside the category
+        network are 400 (REL-06). The key of a system type is taken: 409,
+        an organization type no longer shadows a system type (REL-06,
+        E-125).
       requestBody:
         required: true
         content:
@@ -13588,7 +13603,12 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >-
+            The key is taken by a type of the organization or by a system
+            type (REL-06, E-125).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/relationship-types/{key}:
     parameters:
@@ -13637,6 +13657,10 @@ paths:
     delete:
       operationId: deleteRelationshipTypesKey
       summary: Delete a relationship type of the organization (system types stay)
+      description: >-
+        A system type, a type of another organization and an unknown key are
+        404. A type a relationship of the organization or a relationship
+        suppression uses stays: 409 (REL-06, E-125).
       responses:
         '204':
           description: Relationship type deleted
@@ -13644,6 +13668,11 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The type is used by relationships or suppressions of the organization (REL-06).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/reservations:
     x-phase: P2
@@ -16355,6 +16384,10 @@ components:
         allowed_relationship_types:
           type: array
           items: { type: string }
+          description: >-
+            Informative and not enforced; which CI types an edge may connect
+            is set on the relationship type (allowed_source_types,
+            allowed_target_types of GET /api/v1/relationship-types).
         ui_schema: { type: object, additionalProperties: true }
         compliance_rules:
           type: array
@@ -16418,6 +16451,10 @@ components:
         allowed_relationship_types:
           type: array
           items: { type: string }
+          description: >-
+            Informative and not enforced; which CI types an edge may connect
+            is set on the relationship type (allowed_source_types,
+            allowed_target_types of GET /api/v1/relationship-types).
         ui_schema: { type: object, additionalProperties: true }
         compliance_rules:
           type: array
@@ -16468,6 +16505,10 @@ components:
         allowed_relationship_types:
           type: array
           items: { type: string }
+          description: >-
+            Informative and not enforced; which CI types an edge may connect
+            is set on the relationship type (allowed_source_types,
+            allowed_target_types of GET /api/v1/relationship-types).
         ui_schema: { type: object, additionalProperties: true }
         compliance_rules:
           type: array
@@ -18219,19 +18260,19 @@ components:
           type: array
           items: { type: string }
           description: >-
-            CI type keys an edge of the type may start at; POST
-            /relationships refuses a source CI of another type (422,
-            source_ci_id). Empty allows every type (REL-01, E-95).
+            CI type keys an edge of the type may start at, their subtypes
+            (parent_type_id) included; POST /relationships refuses a source
+            CI of another type (422, source_ci_id). Empty allows every type
+            (REL-01, REL-06, E-95).
         allowed_target_types:
           type: array
           items: { type: string }
           description: >-
-            CI type keys an edge of the type may end at; POST
-            /relationships refuses a target CI of another type (422,
-            target_ci_id). Empty allows every type (REL-01, E-95).
-        cardinality:
-          type: string
-          description: Informative until REL-06 [P2]; not enforced (E-95).
+            CI type keys an edge of the type may end at, their subtypes
+            (parent_type_id) included; POST /relationships refuses a target
+            CI of another type (422, target_ci_id). Empty allows every type
+            (REL-01, REL-06, E-95).
+        cardinality: { $ref: '#/components/schemas/RelationshipTypeCardinality' }
         is_system: { type: boolean, readOnly: true }
         description: { type: string }
         created_at: { type: string, format: date-time }
@@ -18241,8 +18282,9 @@ components:
       type: object
       description: >-
         Create (key, display_name, reverse_name required; defaults directed,
-        logical, source_depends_on_target) or change a relationship type.
-        impact_direction undirected belongs to undirected types only.
+        logical, source_depends_on_target, many_to_many) or change a
+        relationship type. impact_direction undirected belongs to undirected
+        types of the category network only (400, REL-06).
       properties:
         key: { type: string }
         display_name: { type: string }
@@ -18254,19 +18296,27 @@ components:
         allowed_source_types:
           type: array
           items: { type: string }
-          description: CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type.
+          description: CI type keys the organization sees (system types and its own), their subtypes included on POST /relationships; an unknown key is 400. Empty allows every type.
         allowed_target_types:
           type: array
           items: { type: string }
-          description: CI type keys the organization sees (system types and its own); an unknown key is 400. Empty allows every type.
-        cardinality:
-          type: string
-          description: Informative until REL-06 [P2]; not enforced (E-95).
+          description: CI type keys the organization sees (system types and its own), their subtypes included on POST /relationships; an unknown key is 400. Empty allows every type.
+        cardinality: { $ref: '#/components/schemas/RelationshipTypeCardinality' }
         description: { type: string }
+
+    RelationshipTypeCardinality:
+      type: string
+      enum: [one_to_one, one_to_many, many_to_one, many_to_many]
+      description: >-
+        Enforced on POST /relationships (REL-06): one_to_one allows the source
+        one outgoing and the target one incoming edge of the type,
+        one_to_many the target one incoming, many_to_one the source one
+        outgoing edge; many_to_many has no bound. Another value is 400.
+        Discovery edges are not checked.
 
     RelationshipType:
       type: string
-      enum: [connected_to, hosted_on, depends_on, member_of, powers, powered_by, stores, monitors, backs_up]
+      description: Key of a relationship_type of the organization or the system (GET /api/v1/relationship-types).
 
     Relationship:
       type: object

@@ -26,6 +26,20 @@ const (
 // ImpactDirections lists the impact directions.
 var ImpactDirections = []string{ImpactSourceDependsOnTarget, ImpactTargetDependsOnSource, ImpactNone, ImpactUndirected}
 
+// Cardinalities of REL-01, enforced since REL-06 (WP-294): one_to_one
+// allows a source one outgoing and a target one incoming edge of the type,
+// one_to_many a target one incoming, many_to_one a source one outgoing
+// edge; many_to_many has no bound.
+const (
+	CardinalityOneToOne   = "one_to_one"
+	CardinalityOneToMany  = "one_to_many"
+	CardinalityManyToOne  = "many_to_one"
+	CardinalityManyToMany = "many_to_many"
+)
+
+// Cardinalities lists the cardinalities.
+var Cardinalities = []string{CardinalityOneToOne, CardinalityOneToMany, CardinalityManyToOne, CardinalityManyToMany}
+
 // StructuralKeys are the relationships projected from the structure tables
 // (CH27): they are listed but never stored.
 var StructuralKeys = []string{"contains", "contained_by", "parent_of", "child_of", "mounted_in", "located_in"}
@@ -33,7 +47,8 @@ var StructuralKeys = []string{"contains", "contained_by", "parent_of", "child_of
 // Type is a relationship type definition (REL-01). AllowedSourceTypes and
 // AllowedTargetTypes are CI type keys: POST /relationships takes a source
 // and a target CI of these types only, an empty list allows every type
-// (E-95, F-313). Cardinality is informative until REL-06 [P2].
+// (E-95, F-313), subtypes of a listed type included (MET-06, WP-294).
+// Cardinality bounds the edges of the type per end (REL-06, WP-294).
 type Type struct {
 	ID                 string    `json:"id"`
 	OrganizationID     string    `json:"organization_id,omitempty"`
@@ -89,9 +104,11 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-// Validate checks the REL-01 contract of a type: a known category and
-// impact direction; an undirected type has the impact direction
-// undirected, a directed type any other.
+// Validate checks the REL-01 contract of a type: a known category,
+// impact direction and cardinality; an undirected type has the impact
+// direction undirected, a directed type any other; undirected belongs to
+// the category network (REL-06, IMP-03). The database holds the same rules
+// (CHECKs of migrations 000113 and 000202).
 func (t *Type) Validate() error {
 	if !contains(Categories, t.Category) {
 		return fmt.Errorf("category must be one of %v", Categories)
@@ -99,8 +116,14 @@ func (t *Type) Validate() error {
 	if !contains(ImpactDirections, t.ImpactDirection) {
 		return fmt.Errorf("impact_direction must be one of %v", ImpactDirections)
 	}
+	if !contains(Cardinalities, t.Cardinality) {
+		return fmt.Errorf("cardinality must be one of %v", Cardinalities)
+	}
 	if t.Directed == (t.ImpactDirection == ImpactUndirected) {
 		return fmt.Errorf("impact_direction undirected belongs to undirected types (directed false) only")
+	}
+	if t.ImpactDirection == ImpactUndirected && t.Category != "network" {
+		return fmt.Errorf("an undirected type belongs to the category network")
 	}
 	if contains(StructuralKeys, t.Key) && !t.IsSystem {
 		return fmt.Errorf("%s is projected from the structure tables and cannot be defined", t.Key)
@@ -143,14 +166,14 @@ func (req *UpsertRequest) apply(t *Type) {
 }
 
 // Catalogue returns the built-in relationship type catalogue with the
-// impact semantics of CH27 (E-18). Migration 000113 gives the seeded rows
-// the same values.
+// impact semantics of CH27 (E-18). Migrations 000113 and 000202 (REL-06:
+// monitored_by, belongs_to) give the seeded rows the same values.
 func Catalogue() []Type {
 	def := func(key, name, reverse, category, impact string, redundant bool) Type {
 		return Type{
 			Key: key, DisplayName: name, ReverseName: reverse,
 			Directed: impact != ImpactUndirected, Category: category, ImpactDirection: impact, Redundant: redundant,
-			Cardinality: "many_to_many", IsSystem: true,
+			Cardinality: CardinalityManyToMany, IsSystem: true,
 			AllowedSourceTypes: []string{}, AllowedTargetTypes: []string{},
 		}
 	}
@@ -168,6 +191,10 @@ func Catalogue() []Type {
 		def("used_by", "used by", "uses", "logical", ImpactTargetDependsOnSource, false),
 		def("member_of", "member of", "has member", "logical", ImpactNone, false),
 		def("monitors", "monitors", "monitored by", "logical", ImpactNone, false),
+		// The source is the monitored CI; the failure of the monitoring CI
+		// reaches none (REL-06).
+		def("monitored_by", "monitored by", "monitors", "logical", ImpactNone, false),
+		def("belongs_to", "belongs to", "has member", "logical", ImpactSourceDependsOnTarget, false),
 		def("backs_up", "backs up", "backed up by", "logical", ImpactNone, false),
 		def("backed_up_by", "backed up by", "backs up", "logical", ImpactNone, false),
 		def("managed_by", "managed by", "manages", "logical", ImpactNone, false),

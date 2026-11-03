@@ -662,8 +662,9 @@ func TestEdgesOfStaysInsideScope(t *testing.T) {
 // organization) is refused on create and change of the type with 400 and the
 // field; nothing is stored. POST /relationships refuses a source or target
 // CI of a type outside the list with 422 and a violation on source_ci_id or
-// target_ci_id; nothing is stored. An empty list allows every type, and
-// cardinality is informative until REL-06 [P2].
+// target_ci_id; nothing is stored. An empty list allows every type. The
+// cardinality is enforced since REL-06 (WP-294,
+// TestRelationshipCardinalityEnforced); the type here has many_to_many.
 //
 // Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestRelationshipTypeConstraintsEnforced' ./internal/relationship/
 //
@@ -739,7 +740,7 @@ func TestRelationshipTypeConstraintsEnforced(t *testing.T) {
 		t.Errorf("a refused type was stored: %d %s", w.Code, w.Body.String())
 	}
 	if w := call(http.MethodPost, "/api/v1/relationship-types", `{"key":"rel01-feeds","display_name":"feeds","reverse_name":"fed by",
-		"allowed_source_types":["server","rel01-own-type"],"allowed_target_types":["switch"],"cardinality":"one_to_one"}`); w.Code != http.StatusCreated {
+		"allowed_source_types":["server","rel01-own-type"],"allowed_target_types":["switch"],"cardinality":"many_to_many"}`); w.Code != http.StatusCreated {
 		t.Fatalf("create with known types: %d %s", w.Code, w.Body.String())
 	}
 	w := call(http.MethodPatch, "/api/v1/relationship-types/rel01-feeds", `{"allowed_target_types":["switch","b16v-nonexistent-type"]}`)
@@ -774,7 +775,7 @@ func TestRelationshipTypeConstraintsEnforced(t *testing.T) {
 		{"switch as source", edge("rel01-feeds", switch2, switch1), http.StatusUnprocessableEntity, []string{"source_ci_id"}},
 		{"server as target", edge("rel01-feeds", server1, server2), http.StatusUnprocessableEntity, []string{"target_ci_id"}},
 		{"both ends", edge("rel01-feeds", switch1, server1), http.StatusUnprocessableEntity, []string{"source_ci_id", "target_ci_id"}},
-		// cardinality one_to_one is informative: a second edge of the source.
+		// many_to_many: a second edge of the source.
 		{"second edge of the source", edge("rel01-feeds", server1, switch2), http.StatusCreated, nil},
 		// Empty lists: no restriction.
 		{"type without lists", edge("rel01-free", switch1, server1), http.StatusCreated, nil},

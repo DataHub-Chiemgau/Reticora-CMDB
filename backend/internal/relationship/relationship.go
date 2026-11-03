@@ -58,7 +58,9 @@ type Relationship struct {
 	TargetLocationID string `json:"target_location_id,omitempty"`
 	// checkTypeLists makes the PostgreSQL repository check the CI types of
 	// the ends against allowed_source_types and allowed_target_types of the
-	// relationship type (ErrSourceCITypeNotAllowed, ErrTargetCITypeNotAllowed).
+	// relationship type, subtypes included (ErrSourceCITypeNotAllowed,
+	// ErrTargetCITypeNotAllowed), and the cardinality of the type
+	// (ErrCardinalityExceeded, REL-06).
 	// POST /relationships sets it (E-95), as does the accept of an
 	// unknown_relationship item (CheckTypeLists); the discovery ingest does
 	// not.
@@ -133,6 +135,7 @@ var ValidRelTypes = map[string]bool{
 	"uplink_to":         true,
 	"stores":            true,
 	"monitors":          true,
+	"monitored_by":      true,
 	"backs_up":          true,
 	// Extended standard catalogue (spec §11).
 	"backed_up_by": true,
@@ -146,6 +149,8 @@ var ValidRelTypes = map[string]bool{
 	"located_in":   true,
 	"uses":         true,
 	"used_by":      true,
+	// REL-06 seeds (WP-294, migration 000202).
+	"belongs_to": true,
 }
 
 // ValidSources lists the origin vocabulary for relationships (spec §12).
@@ -204,6 +209,13 @@ var (
 	ErrSourceCITypeNotAllowed = errors.New("the type of the source CI is not in allowed_source_types of the relationship type")
 	ErrTargetCITypeNotAllowed = errors.New("the type of the target CI is not in allowed_target_types of the relationship type")
 )
+
+// ErrCardinalityExceeded refuses an edge that would exceed the cardinality
+// of its relationship type (REL-06, WP-294): one_to_one allows the source
+// one outgoing and the target one incoming edge of the type, one_to_many
+// the target one incoming, many_to_one the source one outgoing. Create
+// answers 422 on rel_type.
+var ErrCardinalityExceeded = errors.New("the edge would exceed the cardinality of the relationship type")
 
 // PolicyDeleter deletes an edge by the source policy (REL-03, REL-04): a
 // discovery edge only with force, then suppressed for its CIs and type.
@@ -1091,7 +1103,9 @@ type violation struct {
 // (ErrSourceCINotFound, ErrTargetCINotFound, F-145) or of a type the
 // relationship type does not allow (ErrSourceCITypeNotAllowed,
 // ErrTargetCITypeNotAllowed, F-313) with 422 and a violation per such
-// endpoint. It reports whether err was one.
+// endpoint, an edge beyond the cardinality of the type
+// (ErrCardinalityExceeded, REL-06) with 422 on rel_type. It reports whether
+// err was one.
 func writeEndpointError(w http.ResponseWriter, err error) bool {
 	var violations []violation
 	for _, end := range []struct {
@@ -1100,6 +1114,7 @@ func writeEndpointError(w http.ResponseWriter, err error) bool {
 	}{
 		{"source_ci_id", ErrSourceCINotFound}, {"source_ci_id", ErrSourceCITypeNotAllowed},
 		{"target_ci_id", ErrTargetCINotFound}, {"target_ci_id", ErrTargetCITypeNotAllowed},
+		{"rel_type", ErrCardinalityExceeded},
 	} {
 		if errors.Is(err, end.err) {
 			violations = append(violations, violation{Field: end.field, Detail: end.err.Error()})

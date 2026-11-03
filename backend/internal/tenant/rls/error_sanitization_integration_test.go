@@ -66,7 +66,7 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 	// Fixtures created through the API: the first request of each duplicate
 	// pair must succeed.
 	relType := map[string]any{"key": "t1_dup", "display_name": "T1", "reverse_name": "T1 rev",
-		"directed": true, "category": "logical", "impact_direction": "none", "cardinality": "n:m"}
+		"directed": true, "category": "logical", "impact_direction": "none", "cardinality": "many_to_many"}
 	w.create(w.orgA, "/api/v1/relationship-types", relType)
 	ciType := map[string]any{"key": "t1_dup", "name": "T1 Dup"}
 	w.create(w.orgA, "/api/v1/ci-types", ciType)

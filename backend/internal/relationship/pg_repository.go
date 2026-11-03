@@ -256,21 +256,34 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		// by its sentinel (F-145). With
 		// checkTypeLists the type of a visible end must be in the allowed
 		// list of the relationship type the caller sees (the organization's
-		// shadows the system one); an empty list allows every type (E-95,
-		// F-313).
+		// row before the system one) or a subtype of a listed type
+		// (ci_type_subtree, MET-06, REL-06); an empty list allows every type
+		// (E-95, F-313). The edge must not exceed the cardinality of the type
+		// either (REL-06); lockCardinalityEnds has locked the bounded ends, so
+		// the statement sees an edge a parallel request committed.
+		if rel.checkTypeLists {
+			if err := lockCardinalityEnds(ctx, tx, rel); err != nil {
+				return err
+			}
+		}
 		query := `
 			WITH rel_type AS (
-				SELECT allowed_source_types, allowed_target_types FROM relationship_type
+				SELECT allowed_source_types, allowed_target_types, cardinality FROM relationship_type
 				WHERE key = $4 AND $16::boolean ORDER BY organization_id NULLS LAST LIMIT 1
 			), ends AS (
 				SELECT EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid AND ci.deleted_at IS NULL) AS source_visible,
 				       EXISTS (SELECT 1 FROM ci WHERE ci.id = $3::uuid AND ci.deleted_at IS NULL) AS target_visible,
-				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $2::uuid LEFT JOIN ci_type t ON t.id = ci.ci_type_id
+				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $2::uuid
 				                   WHERE jsonb_array_length(rel_type.allowed_source_types) > 0
-				                     AND NOT COALESCE(rel_type.allowed_source_types ? t.key, false)) AS source_allowed,
-				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $3::uuid LEFT JOIN ci_type t ON t.id = ci.ci_type_id
+				                     AND NOT EXISTS (SELECT 1 FROM ci_type a CROSS JOIN LATERAL ci_type_subtree(a.id) sub
+				                                     WHERE rel_type.allowed_source_types ? a.key AND sub.id = ci.ci_type_id)) AS source_allowed,
+				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci ON ci.id = $3::uuid
 				                   WHERE jsonb_array_length(rel_type.allowed_target_types) > 0
-				                     AND NOT COALESCE(rel_type.allowed_target_types ? t.key, false)) AS target_allowed
+				                     AND NOT EXISTS (SELECT 1 FROM ci_type a CROSS JOIN LATERAL ci_type_subtree(a.id) sub
+				                                     WHERE rel_type.allowed_target_types ? a.key AND sub.id = ci.ci_type_id)) AS target_allowed,
+				       NOT EXISTS (SELECT 1 FROM rel_type JOIN ci_relationship r ON r.organization_id = $1::uuid AND r.rel_type = $4::text
+				                   WHERE (rel_type.cardinality IN ('one_to_one', 'many_to_one') AND r.source_ci_id = $2::uuid)
+				                      OR (rel_type.cardinality IN ('one_to_one', 'one_to_many') AND r.target_ci_id = $3::uuid)) AS within_cardinality
 			), created AS (
 				INSERT INTO ci_relationship (
 					organization_id,
@@ -297,13 +310,15 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 					(SELECT id FROM app_user WHERE id::text = $15::text),
 					CASE WHEN $10::text = 'verified' THEN now() END
 				FROM ends WHERE ends.source_visible AND ends.target_visible AND ends.source_allowed AND ends.target_allowed
+					AND ends.within_cardinality
 				RETURNING id::text AS id, created_at, updated_at, last_confirmed_at,
 					COALESCE(verified_by::text, '') AS verified_by, verified_at
 			)
-			SELECT ends.source_visible, ends.target_visible, ends.source_allowed, ends.target_allowed, created.*
+			SELECT ends.source_visible, ends.target_visible, ends.source_allowed, ends.target_allowed,
+				ends.within_cardinality, created.*
 			FROM ends LEFT JOIN created ON true
 		`
-		var sourceVisible, targetVisible, sourceAllowed, targetAllowed bool
+		var sourceVisible, targetVisible, sourceAllowed, targetAllowed, withinCardinality bool
 		var id, verifiedBy *string
 		var createdAt, updatedAt, confirmedAt, verifiedAt *time.Time
 		firstSeen := any(nil)
@@ -331,7 +346,7 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 			nilIfEmptyStr(rel.TargetInterfaceID),
 			rel.VerifiedBy,
 			rel.checkTypeLists,
-		).Scan(&sourceVisible, &targetVisible, &sourceAllowed, &targetAllowed,
+		).Scan(&sourceVisible, &targetVisible, &sourceAllowed, &targetAllowed, &withinCardinality,
 			&id, &createdAt, &updatedAt, &confirmedAt, &verifiedBy, &verifiedAt); err != nil {
 			return fmt.Errorf("create relationship: %w", err)
 		}
@@ -351,6 +366,9 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		if len(refused) > 0 {
 			return errors.Join(refused...)
 		}
+		if !withinCardinality {
+			return ErrCardinalityExceeded
+		}
 		if id == nil {
 			return fmt.Errorf("create relationship: no row inserted")
 		}
@@ -361,6 +379,41 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		rel.VerifiedAt = formatTime(verifiedAt)
 		return r.recordEvent(ctx, tx, events.RelationshipCreated, rel)
 	})
+}
+
+// lockCardinalityEnds locks the CI rows whose edges of the type the
+// cardinality bounds (REL-06): the source for many_to_one, the target for
+// one_to_many, both in the order of their ids for one_to_one, so parallel
+// requests for the same end run one after the other and take no deadlock.
+// FOR NO KEY UPDATE does not wait for the key share locks other edge inserts
+// take on the CIs. many_to_many locks nothing.
+func lockCardinalityEnds(ctx context.Context, tx pgx.Tx, rel *Relationship) error {
+	var cardinality string
+	err := tx.QueryRow(ctx, `SELECT cardinality FROM relationship_type WHERE key = $1
+		ORDER BY organization_id NULLS LAST LIMIT 1`, rel.RelType).Scan(&cardinality)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read cardinality: %w", err)
+	}
+	var ends []string
+	switch cardinality {
+	case "one_to_one":
+		ends = []string{rel.SourceCIID, rel.TargetCIID}
+	case "many_to_one":
+		ends = []string{rel.SourceCIID}
+	case "one_to_many":
+		ends = []string{rel.TargetCIID}
+	default:
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id FROM ci WHERE id::text = ANY($1::text[]) ORDER BY id FOR NO KEY UPDATE`, ends)
+	if err != nil {
+		return fmt.Errorf("lock relationship ends: %w", err)
+	}
+	rows.Close()
+	return rows.Err()
 }
 
 // Update edits the provenance and verification metadata of a relationship.

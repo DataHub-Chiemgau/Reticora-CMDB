@@ -118,7 +118,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, chi.URLParam(r, "key")); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship type not found or protected")
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -127,8 +127,9 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 // writeError maps repository errors: an invalid type is 400 (the REL-01
 // rule as text), an unknown CI type key 400 on allowed_source_types or
 // allowed_target_types (E-95, F-313), a missing or system type 404, a taken
-// key 409; database errors go through api.WriteRepoError (23505 is 409
-// without the constraint name, F-047).
+// key (also the key of a system type) and a type in use 409 (REL-06);
+// database errors go through api.WriteRepoError (23505 is 409 without the
+// constraint name, F-047).
 func writeError(w http.ResponseWriter, err error) {
 	if api.WriteFieldError(w, err) {
 		return
@@ -140,6 +141,8 @@ func writeError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "relationship type not found or protected")
 	case errors.Is(err, ErrConflict):
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+	case errors.Is(err, ErrInUse):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrInUse.Error())
 	default:
 		api.WriteRepoError(w, err)
 	}

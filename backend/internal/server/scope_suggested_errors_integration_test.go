@@ -356,12 +356,13 @@ func TestUnknownRelationshipAcceptRespectsTypeListsAndDeletedCIs(t *testing.T) {
 	}
 
 	// The organization restricts connected_to to switch -> switch (its own
-	// type shadows the system one, E-95): server -> server is 422, as POST
-	// /relationships answers, switch -> switch stays 200.
-	if w := r.call(all, http.MethodPost, "/api/v1/relationship-types",
-		`{"key":"connected_to","display_name":"Connected","reverse_name":"Connected","directed":false,"allowed_source_types":["switch"],"allowed_target_types":["switch"]}`); w.Code != http.StatusCreated {
-		t.Fatalf("POST /relationship-types connected_to: %d %s", w.Code, w.Body.String())
-	}
+	// row resolves before the system one, E-95): server -> server is 422, as
+	// POST /relationships answers, switch -> switch stays 200. Since REL-06
+	// (WP-294) POST /relationship-types refuses a system key with 409, so
+	// the row is one from before, inserted directly.
+	r.str(`INSERT INTO relationship_type (organization_id, key, display_name, reverse_name, directed, category, impact_direction,
+		allowed_source_types, allowed_target_types) VALUES ($1, 'connected_to', 'Connected', 'Connected', false, 'network', 'undirected',
+		'["switch"]', '["switch"]') RETURNING id::text`, f.OrgA)
 	servers := [2]string{f.CI(t, f.OrgA, "", "wp695-srv-a"), f.CI(t, f.OrgA, "", "wp695-srv-b")}
 	if w := r.call(all, http.MethodPost, "/api/v1/relationships",
 		`{"source_ci_id":"`+servers[0]+`","target_ci_id":"`+servers[1]+`","rel_type":"connected_to"}`); w.Code != http.StatusUnprocessableEntity {

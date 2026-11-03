@@ -21,8 +21,7 @@ import (
 // well.
 var serviceTypeKeys = []string{"business_service", "application"}
 
-// maxCITypes bounds the CI types read for one analysis, as
-// maxRelationshipTypes bounds the relationship types.
+// maxCITypes bounds the CI types read for one analysis.
 const maxCITypes = 1000
 
 // maxSPOFCandidates bounds the CIs whose single failure one analysis

@@ -257,9 +257,6 @@ func (h *Handler) WithRelationshipTypes(types relationshiptype.Repository) *Hand
 	return h
 }
 
-// maxRelationshipTypes bounds the types read for one impact analysis.
-const maxRelationshipTypes = 500
-
 // impactRule is the impact semantics of a relationship type.
 type impactRule struct {
 	direction string
@@ -270,8 +267,10 @@ type impactRule struct {
 }
 
 // impactRules maps each relationship type key onto its impact direction
-// and category: the built-in catalogue (CH27, E-18), overlaid by the
-// organization's types.
+// and category: the built-in catalogue (CH27, E-18), overlaid by every type
+// the organization sees, read in one statement without a bound and
+// resolved per key as List does, the organization's row before the system
+// row (REL-06, IMP-10).
 func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]impactRule {
 	rules := map[string]impactRule{}
 	catalogue := relationshiptype.Catalogue()
@@ -281,7 +280,7 @@ func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]impa
 	if h.types == nil {
 		return rules
 	}
-	types, _, err := h.types.List(ctx, orgID, api.PaginationParams{Limit: maxRelationshipTypes})
+	types, err := h.types.ListAll(ctx, orgID)
 	if err != nil {
 		slog.WarnContext(ctx, "relationship types unavailable; impact uses the built-in catalogue", "error", err)
 		return rules
