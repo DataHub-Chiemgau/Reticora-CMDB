@@ -115,8 +115,6 @@ var unroutedKeys = map[string]string{
 var unroutedUntil = map[string]string{
 	"contract:read":           "suppliers and contracts (WP-269)",
 	"contract:write":          "suppliers and contracts (WP-269)",
-	"import:run":              "imports (WP-301)",
-	"import:manage":           "import mapping profiles (WP-301, WP-774)",
 	"field_permission:manage": "field-permissions (WP-264, WP-726)",
 	"tag:manage":              "tags (WP-281, WP-753)",
 }

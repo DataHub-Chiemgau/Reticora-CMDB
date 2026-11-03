@@ -8470,14 +8470,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List import profiles
-     * @description Planned (E-38); WP-774 implements the operation.
+     * List import profiles (IMP-IO-01)
+     * @description The mapping profiles of the organization, sorted by name and id (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`; a forged cursor is 400. Requires import:run.
      */
     get: operations['listImportProfiles'];
     put?: never;
     /**
-     * Create an import profile
-     * @description Planned (E-38); WP-774 implements the operation.
+     * Create an import profile (IMP-IO-01)
+     * @description A stored mapping of an import: per source column a target (core field, `attributes.<key>` or `relations.<type>`) with an ordered list of transformations, defaults per target, identity keys and the mode. The structure is checked here (422 with the field: required fields, unknown entity, format, mode or transformation, identity keys that are no target of the mapping, sheet without format xlsx); whether a target exists for the entity and type and may be written is checked when an import runs (WP-302). The name is unique per organization (409 on name). Requires import:manage.
      */
     post: operations['createImportProfile'];
     delete?: never;
@@ -8498,21 +8498,21 @@ export interface paths {
     };
     /**
      * Get an import profile
-     * @description Planned (E-38); WP-774 implements the operation.
+     * @description A profile of the organization; an unknown or foreign id is 404. Requires import:run.
      */
     get: operations['getImportProfile'];
     put?: never;
     post?: never;
     /**
      * Delete an import profile
-     * @description Planned (E-38); WP-774 implements the operation.
+     * @description Removes the profile; an unknown or foreign id is 404. Requires import:manage.
      */
     delete: operations['deleteImportProfile'];
     options?: never;
     head?: never;
     /**
      * Update an import profile
-     * @description Planned (E-38); WP-774 implements the operation.
+     * @description Sent fields change; `description` and `sheet` null clear them. A sent `mapping` or `identity_keys` replaces the stored one. The merged profile is checked like a create (422 with the field, 409 on name). Requires import:manage.
      */
     patch: operations['updateImportProfile'];
     trace?: never;
@@ -12529,6 +12529,98 @@ export interface components {
       weekly_hours?: components['schemas']['BusinessCalendarWindow'][];
       holidays?: components['schemas']['BusinessCalendarHoliday'][];
       is_default?: boolean;
+    };
+    /** @description One step of the transformation list of a column (IMP-IO-01). `trim` has no parameter, `date_format` needs `layout`, `enum_map` needs `values` (source value to target value), `split` needs `separator` and `constant` needs `value`. */
+    ImportTransform: {
+      /** @enum {string} */
+      op: 'trim' | 'date_format' | 'enum_map' | 'split' | 'constant';
+      /** @description Date layout of the source value (date_format). */
+      layout?: string;
+      /** @description Value mapping (enum_map). */
+      values?: {
+        [key: string]: string;
+      };
+      /** @description Separator of a list value (split). */
+      separator?: string;
+      /** @description Value that replaces the cell value (constant). */
+      value?: string;
+    };
+    /** @description The target of a source column with its transformations. */
+    ImportColumnMapping: {
+      /** @description A core field of the entity (`name`), an attribute (`attributes.<key>`) or a relation (`relations.<type>`). */
+      target: string;
+      /** @description Applied in order to the cell value. */
+      transforms?: components['schemas']['ImportTransform'][];
+    };
+    /** @description Per source column (file header or JSON key) a target; defaults per target apply to rows whose value is empty or missing. */
+    ImportMapping: {
+      columns: {
+        [key: string]: components['schemas']['ImportColumnMapping'];
+      };
+      defaults?: {
+        [key: string]: string;
+      };
+    };
+    /** @description A stored import mapping profile of the organization (IMP-IO-01, WP-774). */
+    ImportProfile: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      name: string;
+      description: string | null;
+      /** @enum {string} */
+      entity: 'ci' | 'asset' | 'contract' | 'consumable' | 'location' | 'relationship';
+      /** @enum {string} */
+      format: 'csv' | 'xlsx' | 'json';
+      /**
+       * @description create_missing only creates objects with an unknown identity, update_existing only changes known objects, both does either.
+       * @enum {string}
+       */
+      mode: 'create_missing' | 'update_existing' | 'both';
+      /** @description Sheet of an xlsx file; null for other formats. */
+      sheet: string | null;
+      mapping: components['schemas']['ImportMapping'];
+      /** @description Targets of the mapping that identify an existing object. */
+      identity_keys: string[];
+      /** Format: uuid */
+      created_by: string | null;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateImportProfileRequest: {
+      name: string;
+      description?: string | null;
+      /** @enum {string} */
+      entity: 'ci' | 'asset' | 'contract' | 'consumable' | 'location' | 'relationship';
+      /** @enum {string} */
+      format: 'csv' | 'xlsx' | 'json';
+      /** @enum {string} */
+      mode: 'create_missing' | 'update_existing' | 'both';
+      /** @description Only with format xlsx. */
+      sheet?: string | null;
+      mapping: components['schemas']['ImportMapping'];
+      /** @description Each a target of the mapping, without duplicates. */
+      identity_keys?: string[];
+    };
+    /** @description Sent fields change; the merged profile is checked like a create. */
+    UpdateImportProfileRequest: {
+      name?: string;
+      description?: string | null;
+      /** @enum {string} */
+      entity?: 'ci' | 'asset' | 'contract' | 'consumable' | 'location' | 'relationship';
+      /** @enum {string} */
+      format?: 'csv' | 'xlsx' | 'json';
+      /** @enum {string} */
+      mode?: 'create_missing' | 'update_existing' | 'both';
+      sheet?: string | null;
+      mapping?: components['schemas']['ImportMapping'];
+      identity_keys?: string[];
+    };
+    ImportProfileListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ImportProfile'][];
     };
     BusinessCalendarListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['BusinessCalendar'][];
@@ -36012,12 +36104,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List import profiles. The page follows the cursor contract (API-02); the item schema comes with WP-774. */
+      /** @description Import profiles, sorted by name */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportProfileListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -36031,18 +36125,25 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateImportProfileRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-774. */
+      /** @description Import profile created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportProfile'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -36058,12 +36159,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get an import profile. The response schema comes with WP-774. */
+      /** @description Import profile */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportProfile'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -36082,7 +36185,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Deleted. */
+      /** @description Import profile deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -36104,19 +36207,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateImportProfileRequest'];
+      };
+    };
     responses: {
-      /** @description Updated. The request and response schemas come with WP-774. */
+      /** @description Import profile updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportProfile'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };

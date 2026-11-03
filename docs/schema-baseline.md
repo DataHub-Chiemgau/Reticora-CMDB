@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000217_document_link_targets
+Stand: Migration 000219_import_profiles
 
 ## Prüfung
 
@@ -872,6 +872,22 @@ DESC), Trigger `trg_metamodel_draft_updated_at`. RLS mit ENABLE/FORCE und der
 Policy `metamodel_draft_isolation` (FOR ALL, `app.org_id`), TRUNCATE-Schutz
 `reticora_truncate_guard`.
 
+Import-Mapping-Profile (IMP-IO-01, API-06, WP-774, Migration 000219):
+`import_profile` speichert die Mapping-Profile des Dateiimports je
+Organisation. `entity` ist `ci`, `asset`, `contract`, `consumable`,
+`location` oder `relationship` (`import_profile_entity_check`), `format`
+`csv`, `xlsx` oder `json` (`import_profile_format_check`), `mode`
+`create_missing`, `update_existing` oder `both` (`import_profile_mode_check`).
+`mapping` (`jsonb`) muss ein Objekt sein (`import_profile_mapping_check`; je
+Quellspalte Ziel und Transformationen, Defaults je Ziel, Struktur prüft die
+Anwendung), `identity_keys` (`text[]`, Standard `{}`), `description` und
+`sheet` sind optional. Der Name ist je Organisation eindeutig
+(`import_profile_organization_id_name_key`). `created_by` ist ein Surrogat
+ohne Fremdschlüssel wie `job.created_by`; die Tabelle verweist weder auf
+Client- noch auf Objekttabellen. Trigger `trg_import_profile_updated_at`. RLS
+mit ENABLE/FORCE und der Policy `import_profile_isolation` (FOR ALL,
+`app.org_id`), TRUNCATE-Schutz `reticora_truncate_guard`.
+
 IP-Reservierungen (NET-09, WP-299, Migration 000208): `ip_address` erhält
 `reserved_until` (`timestamptz`, informativ, keine automatische Freigabe) und
 `reserved_by` (`uuid`, Surrogat des reservierenden Nutzers ohne Fremdschlüssel,
@@ -1012,6 +1028,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `iga_drift_finding` | ja | ja | iga_drift_tenant_isolation (ALL) |
 | `iga_lifecycle_policy` | ja | ja | iga_lifecycle_tenant_isolation (ALL) |
 | `iga_provisioning_task` | ja | ja | iga_task_tenant_isolation (ALL) |
+| `import_profile` | ja | ja | import_profile_isolation (ALL) |
 | `ingest_record` | ja | ja | ingest_record_isolation (ALL) |
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL) |

@@ -38,6 +38,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/iga"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
@@ -137,6 +138,7 @@ type Repositories struct {
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
 	MetamodelDraft    metamodel.Repository // drafts (WP-260); nil without a database: the routes answer 503
+	Import            importer.Repository  // import mapping profiles (WP-774, IMP-IO-01)
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
 	LocationTree      locations.Repository
@@ -609,6 +611,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher),
 		draftHandler,
+		importer.NewHandler(repos.Import),
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
 			repos.LifecycleResolver),
@@ -732,6 +735,8 @@ func validate(repos Repositories, opts Options) error {
 		return fmt.Errorf("server: history repository is required")
 	case repos.SavedView == nil:
 		return fmt.Errorf("server: saved view repository is required")
+	case repos.Import == nil:
+		return fmt.Errorf("server: import profile repository is required")
 	}
 	return nil
 }

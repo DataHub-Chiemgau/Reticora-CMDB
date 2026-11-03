@@ -17490,18 +17490,25 @@ paths:
   /api/v1/import-profiles:
     x-phase: P2
     x-feature: import
-    x-status: planned
     get:
       operationId: listImportProfiles
       tags: [Import]
-      summary: List import profiles
-      description: Planned (E-38); WP-774 implements the operation.
+      summary: List import profiles (IMP-IO-01)
+      description: >-
+        The mapping profiles of the organization, sorted by name and id
+        (API-02): `limit` (default 50, at most 200) and the signed keyset
+        `cursor` from `next_cursor`; a forged cursor is 400. Requires
+        import:run.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List import profiles. The page follows the cursor contract (API-02); the item schema comes with WP-774.
+          description: Import profiles, sorted by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportProfileListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -17511,34 +17518,60 @@ paths:
     post:
       operationId: createImportProfile
       tags: [Import]
-      summary: Create an import profile
-      description: Planned (E-38); WP-774 implements the operation.
+      summary: Create an import profile (IMP-IO-01)
+      description: >-
+        A stored mapping of an import: per source column a target (core
+        field, `attributes.<key>` or `relations.<type>`) with an ordered list
+        of transformations, defaults per target, identity keys and the mode.
+        The structure is checked here (422 with the field: required fields,
+        unknown entity, format, mode or transformation, identity keys that
+        are no target of the mapping, sheet without format xlsx); whether a
+        target exists for the entity and type and may be written is checked
+        when an import runs (WP-302). The name is unique per organization
+        (409 on name). Requires import:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateImportProfileRequest'
       responses:
         '201':
-          description: Created. The request and response schemas come with WP-774.
+          description: Import profile created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportProfile'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/import-profiles/{id}:
     x-phase: P2
     x-feature: import
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getImportProfile
       tags: [Import]
       summary: Get an import profile
-      description: Planned (E-38); WP-774 implements the operation.
+      description: >-
+        A profile of the organization; an unknown or foreign id is 404.
+        Requires import:run.
       responses:
         '200':
-          description: Get an import profile. The response schema comes with WP-774.
+          description: Import profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportProfile'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -17549,10 +17582,24 @@ paths:
       operationId: updateImportProfile
       tags: [Import]
       summary: Update an import profile
-      description: Planned (E-38); WP-774 implements the operation.
+      description: >-
+        Sent fields change; `description` and `sheet` null clear them. A
+        sent `mapping` or `identity_keys` replaces the stored one. The merged
+        profile is checked like a create (422 with the field, 409 on name).
+        Requires import:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateImportProfileRequest'
       responses:
         '200':
-          description: Updated. The request and response schemas come with WP-774.
+          description: Import profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportProfile'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -17561,16 +17608,20 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteImportProfile
       tags: [Import]
       summary: Delete an import profile
-      description: Planned (E-38); WP-774 implements the operation.
+      description: >-
+        Removes the profile; an unknown or foreign id is 404. Requires
+        import:manage.
       responses:
         '204':
-          description: Deleted.
+          description: Import profile deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24475,6 +24526,194 @@ components:
             $ref: '#/components/schemas/BusinessCalendarHoliday'
         is_default:
           type: boolean
+
+    ImportTransform:
+      type: object
+      description: >-
+        One step of the transformation list of a column (IMP-IO-01). `trim`
+        has no parameter, `date_format` needs `layout`, `enum_map` needs
+        `values` (source value to target value), `split` needs `separator`
+        and `constant` needs `value`.
+      required: [op]
+      properties:
+        op:
+          type: string
+          enum: [trim, date_format, enum_map, split, constant]
+        layout:
+          type: string
+          maxLength: 200
+          description: Date layout of the source value (date_format).
+        values:
+          type: object
+          additionalProperties:
+            type: string
+          description: Value mapping (enum_map).
+        separator:
+          type: string
+          maxLength: 10
+          description: Separator of a list value (split).
+        value:
+          type: string
+          maxLength: 1000
+          description: Value that replaces the cell value (constant).
+
+    ImportColumnMapping:
+      type: object
+      description: The target of a source column with its transformations.
+      required: [target]
+      properties:
+        target:
+          type: string
+          pattern: '^((attributes|relations)\.)?[A-Za-z][A-Za-z0-9_-]{0,99}$'
+          description: >-
+            A core field of the entity (`name`), an attribute
+            (`attributes.<key>`) or a relation (`relations.<type>`).
+        transforms:
+          type: array
+          maxItems: 20
+          description: Applied in order to the cell value.
+          items:
+            $ref: '#/components/schemas/ImportTransform'
+
+    ImportMapping:
+      type: object
+      description: >-
+        Per source column (file header or JSON key) a target; defaults per
+        target apply to rows whose value is empty or missing.
+      required: [columns]
+      properties:
+        columns:
+          type: object
+          minProperties: 1
+          maxProperties: 1000
+          additionalProperties:
+            $ref: '#/components/schemas/ImportColumnMapping'
+        defaults:
+          type: object
+          additionalProperties:
+            type: string
+
+    ImportProfile:
+      type: object
+      description: >-
+        A stored import mapping profile of the organization (IMP-IO-01,
+        WP-774).
+      required: [id, organization_id, name, description, entity, format, mode, sheet, mapping, identity_keys, created_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        entity:
+          type: string
+          enum: [ci, asset, contract, consumable, location, relationship]
+        format:
+          type: string
+          enum: [csv, xlsx, json]
+        mode:
+          type: string
+          enum: [create_missing, update_existing, both]
+          description: >-
+            create_missing only creates objects with an unknown identity,
+            update_existing only changes known objects, both does either.
+        sheet:
+          type: [string, 'null']
+          description: Sheet of an xlsx file; null for other formats.
+        mapping:
+          $ref: '#/components/schemas/ImportMapping'
+        identity_keys:
+          type: array
+          description: Targets of the mapping that identify an existing object.
+          items:
+            type: string
+        created_by:
+          type: [string, 'null']
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateImportProfileRequest:
+      type: object
+      required: [name, entity, format, mode, mapping]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: [string, 'null']
+          maxLength: 1000
+        entity:
+          type: string
+          enum: [ci, asset, contract, consumable, location, relationship]
+        format:
+          type: string
+          enum: [csv, xlsx, json]
+        mode:
+          type: string
+          enum: [create_missing, update_existing, both]
+        sheet:
+          type: [string, 'null']
+          description: Only with format xlsx.
+        mapping:
+          $ref: '#/components/schemas/ImportMapping'
+        identity_keys:
+          type: array
+          maxItems: 10
+          description: Each a target of the mapping, without duplicates.
+          items:
+            type: string
+
+    UpdateImportProfileRequest:
+      type: object
+      description: Sent fields change; the merged profile is checked like a create.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: [string, 'null']
+          maxLength: 1000
+        entity:
+          type: string
+          enum: [ci, asset, contract, consumable, location, relationship]
+        format:
+          type: string
+          enum: [csv, xlsx, json]
+        mode:
+          type: string
+          enum: [create_missing, update_existing, both]
+        sheet:
+          type: [string, 'null']
+        mapping:
+          $ref: '#/components/schemas/ImportMapping'
+        identity_keys:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+
+    ImportProfileListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ImportProfile'
 
     BusinessCalendarListResponse:
       allOf:

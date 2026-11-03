@@ -97,6 +97,8 @@ var resourceTables = map[string][]string{
 	"exports":                   {"export_job"},
 	"forms":                     {"form_def"},
 	"history":                   {"job"},
+	"import-profiles":           {"import_profile"},
+	"imports":                   {"job"},
 	"iga":                       {"iga_connector", "iga_access_request", "iga_access_review", "iga_lifecycle_policy", "iga_drift_finding", "iga_provisioning_task"},
 	"inventory":                 {"quantity_item"},
 	"invitations":               {"user_invitation"},

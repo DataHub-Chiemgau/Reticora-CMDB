@@ -53,7 +53,8 @@ var readPermissionFor = map[string]identity.Permission{
 	"desk-bookings":        identity.PermDeskRead,
 	"tickets":              identity.PermTicketRead,
 	"slas":                 identity.PermSLARead,
-	"business-calendars":   identity.PermSLARead, // business calendars of the SLA clock (WP-768); writes sla:write
+	"business-calendars":   identity.PermSLARead,   // business calendars of the SLA clock (WP-768); writes sla:write
+	"import-profiles":      identity.PermImportRun, // import mapping profiles (WP-774, E-106); writes import:manage
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,
 	// Invitations name addresses and grant roles: read and write need
@@ -220,6 +221,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"rules":                 identity.PermCITypeManage, // rule catalog writes like ci-types (WP-716, E-106)
 	"layouts":               identity.PermCITypeManage, // form layouts write like ci-types (WP-259, E-106)
 	"metamodel":             identity.PermCITypeManage, // drafts (WP-260); test and publish map their own rules (WP-721, WP-261)
+	"import-profiles":       identity.PermImportManage, // only org_admin manages profiles, engineer runs imports (WP-774, E-106)
 	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
