@@ -1,10 +1,14 @@
 package ipam
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -12,11 +16,40 @@ import (
 // Handler exposes HTTP endpoints for subnets, IP addresses, and interfaces.
 type Handler struct {
 	repo Repository
+	// reviews opens the duplicate_ip items of the duplicate check (NET-06,
+	// WP-300); without it, or with a repository that cannot find
+	// duplicates, nothing is checked.
+	reviews *reviews.Service
 }
 
 // NewHandler creates a new ipam handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithReviews attaches the review queue (the one of discovery) that the
+// duplicate check of POST and PATCH /ips and PATCH /subnets/{id} opens its
+// items in (NET-06).
+func (h *Handler) WithReviews(svc *reviews.Service) *Handler {
+	h.reviews = svc
+	return h
+}
+
+// checkDuplicates looks for duplicates of the addresses src names once the
+// request's transaction has committed (at once without one), in a
+// transaction of its own (CheckDuplicates). The response does not depend
+// on it: a failed check is logged.
+func (h *Handler) checkDuplicates(ctx context.Context, orgID string, src DuplicateSource) {
+	finder, ok := h.repo.(DuplicateFinder)
+	if !ok || h.reviews == nil {
+		return
+	}
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		if err := CheckDuplicates(ctx, finder, h.reviews, orgID, src); err != nil {
+			slog.WarnContext(ctx, "duplicate address check failed", "event", "ipam.duplicate_ip", "organization_id", orgID,
+				"error", err)
+		}
+	})
 }
 
 // RegisterRoutes registers IPAM routes.
@@ -208,6 +241,11 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// trg_subnet_propagate_vrf moved the subnet's addresses: one query
+	// checks them all.
+	if req.VRFID != nil {
+		h.checkDuplicates(r.Context(), orgID, DuplicateSource{SubnetID: s.ID})
+	}
 	api.WriteJSON(w, http.StatusOK, s)
 }
 
@@ -324,6 +362,7 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, err, "ip address not found")
 		return
 	}
+	h.checkDuplicates(r.Context(), orgID, DuplicateSource{IPIDs: []string{a.ID}})
 	api.WriteJSON(w, http.StatusCreated, a)
 }
 
@@ -382,6 +421,9 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
+	}
+	if req.InterfaceID != nil || req.SubnetID != nil || req.Type != nil {
+		h.checkDuplicates(r.Context(), orgID, DuplicateSource{IPIDs: []string{a.ID}})
 	}
 	api.WriteJSON(w, http.StatusOK, a)
 }

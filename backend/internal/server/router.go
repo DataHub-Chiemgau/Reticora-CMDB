@@ -578,7 +578,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
-		ipam.NewHandler(repos.IPAM),
+		// Duplicate addresses open duplicate_ip items in the review queue of
+		// discovery (NET-06, WP-300).
+		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),
 		monitoringHandler,
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
@@ -759,6 +761,7 @@ func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func
 	discovery.RegisterMetrics(registry)
 	rack.RegisterMetrics(registry)
 	iga.RegisterMetrics(registry)
+	ipam.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

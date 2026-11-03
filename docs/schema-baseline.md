@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000212_form_layout
+Stand: Migration 000213_ip_address_host
 
 ## Prüfung
 
@@ -832,6 +832,14 @@ Konvention 16 wie `ci_change.actor_id`). Eine Reservierung ist eine Zeile mit
 `type = 'reserved'`, `subnet_id` und ohne `interface_id`; VRF, Client und
 Standort setzen `trg_ip_address_vrf` und `ip_address_scope`. RLS, Policies und
 Indizes von `ip_address` bleiben unverändert.
+
+Host-Adresse (NET-06, WP-300, Migration 000213): `ip_address` erhält die
+gespeicherte Spalte `address_host` (`text GENERATED ALWAYS AS (host(address))
+STORED`) und den Index `idx_ip_address_org_vrf_host` auf `(organization_id,
+vrf_id, address_host)`. Die Duplikatsuche vergleicht damit die Host-Adresse
+ohne Präfixlänge mit der leakproof Textgleichheit, auch unter RLS; ein
+Ausdrucksindex über `host(address)` wäre als `reticora_app` nicht nutzbar.
+RLS und Policies von `ip_address` bleiben unverändert.
 
 ## Tabellen, RLS und Policies
 

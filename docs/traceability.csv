@@ -1262,3 +1262,4 @@ MET-10;B/G1, Teil P2/G2;B;backend/internal/ci/rules_eval_integration_test.go;WP-
 OVR-03;[P2];B;backend/internal/ci/template_migration_integration_test.go;WP-253
 MET-50;[P2];B;backend/internal/citype/layout_integration_test.go;WP-259
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/layout_integration_test.go;WP-259
+NET-06;[P2];B;backend/internal/discovery/duplicate_ip_integration_test.go;WP-300
