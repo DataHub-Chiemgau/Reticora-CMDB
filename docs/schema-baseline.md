@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000208_ip_reservation
+Stand: Migration 000209_ci_snapshot
 
 ## Prüfung
 
@@ -604,6 +604,27 @@ rack, override), und speichert `type_change` als `type_changed`, auch wenn
 der Unmerge Zeilen aus einem älteren Merge-Snapshot zurückschreibt. Die
 Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
 
+## CI-Snapshots `ci_snapshot` und Merge-Herkunft (AUD-08, WP-312)
+
+Migration 000209 legt `ci_snapshot` an: der Zustand eines CI zu `taken_at`
+(`state` mit `fields`, `deleted`, `merged_into_id`, `restore`; Formatversion
+`schema_version`; Personendaten nur als Surrogat), `ci_version`, die Kanten
+des CI beim Schreiben (`relationships`) und der Anlass `reason` (CHECK
+`ci_snapshot_reason_check`: `weekly`, `merge`, `unmerge`, `initial`).
+`ci_id` hat keinen Fremdschlüssel (wie `entity_change.entity_id`), damit ein
+Snapshot Hard-Delete und Merge überdauert. `client_id` und `site_id` setzt
+der Trigger `ci_snapshot_scope` (`derive_ci_scope('ci_id')`);
+`propagate_ci_scope()` (Fassung 000141) zieht sie bei einem Client- oder
+Standortwechsel nach. `ENABLE` + `FORCE ROW LEVEL SECURITY`, die Policy
+`ci_snapshot_isolation` mit Org-, Client- und Site-Prädikat, die restriktiven
+Policies `ci_snapshot_scoped_update` und `ci_snapshot_scoped_delete`, der
+TRUNCATE-Schutz `reticora_truncate_guard` und der Index
+`idx_ci_snapshot_ci_taken (organization_id, ci_id, taken_at DESC)`.
+`ci_change.origin_ci_id` nennt nach einem Merge das CI, zu dem eine
+umgehängte Zeile gehörte (Teilindex `idx_ci_change_origin
+(organization_id, origin_ci_id) WHERE origin_ci_id IS NOT NULL`); der
+Unmerge schreibt die Spalte aus dem Merge-Snapshot zurück.
+
 ## Schemaversion und Laufzeitschicht der Attribute (MET-16, WP-590)
 
 `ci_type.attribute_schema` ist das materialisierte Schema eines Typs:
@@ -814,6 +835,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_instance_field_definition` | ja | ja | ci_instance_field_definition_isolation (ALL), ci_instance_field_definition_scoped_delete (DELETE), ci_instance_field_definition_scoped_update (UPDATE) |
 | `ci_merge` | ja | ja | ci_merge_isolation (ALL), ci_merge_scoped_delete (DELETE), ci_merge_scoped_update (UPDATE) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL), ci_relationship_scoped_delete (DELETE), ci_relationship_scoped_update (UPDATE) |
+| `ci_snapshot` | ja | ja | ci_snapshot_isolation (ALL), ci_snapshot_scoped_delete (DELETE), ci_snapshot_scoped_update (UPDATE) |
 | `ci_template` | ja | ja | ci_template_isolation (ALL), ci_template_scoped_delete (DELETE), ci_template_scoped_update (UPDATE) |
 | `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
 | `ci_type_attribute_set` | ja | ja | ci_type_attribute_set_isolation_delete (DELETE), ci_type_attribute_set_isolation_insert (INSERT), ci_type_attribute_set_isolation_select (SELECT), ci_type_attribute_set_isolation_update (UPDATE) |

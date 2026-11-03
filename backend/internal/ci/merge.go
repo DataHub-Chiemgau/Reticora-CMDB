@@ -16,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -317,6 +318,8 @@ type mergeReference struct {
 	dedupe string
 	// prepare adjusts victim rows before the move ($1 survivor, $2 victim).
 	prepare string
+	// set adds assignments to the move ($1 victim, $2 survivor).
+	set string
 }
 
 var mergeReferences = []mergeReference{
@@ -346,7 +349,10 @@ var mergeReferences = []mergeReference{
 			WHERE s.ci_id = $1 AND s.contact_id = v.contact_id AND s.relationship_type = v.relationship_type)
 			RETURNING to_jsonb(v)`,
 	},
-	{key: "history", table: "ci_change", column: "ci_id"},
+	// The history keeps the CI it belonged to (WP-312): the replay of the
+	// survivor leaves the rows of the victim out, that of the victim reads
+	// them; the unmerge writes origin_ci_id back from the snapshot.
+	{key: "history", table: "ci_change", column: "ci_id", set: "origin_ci_id = COALESCE(origin_ci_id, $1)"},
 	{key: "documents", table: "document_link", column: "entity_id", where: "entity_type = 'ci'"},
 	// The endpoint agent follows its CI, so its next telemetry updates the
 	// survivor instead of creating a new CI (F-083).
@@ -486,6 +492,18 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 			map[string]any{"status": victim.Status}, map[string]any{"merged_into_id": survivorID, "merge_id": result.MergeID}); cerr != nil {
 			return cerr
 		}
+		// The merge changes both rows without field rows: a snapshot of
+		// each is the base of their replay after it (AUD-08, WP-312).
+		retired, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1", ciSelectColumns), victimID))
+		if err != nil {
+			return fmt.Errorf("read victim: %w", err)
+		}
+		if serr := history.WriteLiveSnapshotTx(ctx, tx, orgID, survivorID, history.SnapshotReasonMerge, merged, merged.Version, false, ""); serr != nil {
+			return serr
+		}
+		if serr := history.WriteLiveSnapshotTx(ctx, tx, orgID, victimID, history.SnapshotReasonMerge, retired, retired.Version, true, survivorID); serr != nil {
+			return serr
+		}
 		if aerr := r.recordAudit(ctx, tx, "ci.merged", merged, map[string]interface{}{
 			"victim_id": victimID, "merge_id": result.MergeID, "moved": result.Moved, "override_conflicts": result.OverrideConflicts,
 		}); aerr != nil {
@@ -564,7 +582,11 @@ func moveReference(ctx context.Context, tx pgx.Tx, ref *mergeReference, survivor
 			return 0, fmt.Errorf("prepare %s: %w", ref.table, err)
 		}
 	}
-	tag, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET %s = $2 WHERE %s", ref.table, ref.column, where), victimID, survivorID)
+	set := ref.column + " = $2"
+	if ref.set != "" {
+		set += ", " + ref.set
+	}
+	tag, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET %s WHERE %s", ref.table, set, where), victimID, survivorID)
 	if err != nil {
 		return 0, fmt.Errorf("move %s: %w", ref.table, err)
 	}
@@ -1014,6 +1036,14 @@ func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string, forc
 			if cerr := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindRestored), orgID, item.ID, item.Version, "reconciliation_decision", "unmerged_ci",
 				nil, map[string]any{"merge_id": result.MergeID, "survivor_id": survivorID, "victim_id": victimID}); cerr != nil {
 				return cerr
+			}
+		}
+		// The rows written back are no field rows, also with force (E-80):
+		// a snapshot of each CI is the base of their replay (WP-312).
+		for _, item := range []*Item{result.Survivor, result.Victim} {
+			if serr := history.WriteLiveSnapshotTx(ctx, tx, orgID, item.ID, history.SnapshotReasonUnmerge, item, item.Version,
+				item.DeletedAt != nil, item.MergedIntoID); serr != nil {
+				return serr
 			}
 		}
 		if aerr := r.recordAudit(ctx, tx, "ci.unmerged", result.Survivor, map[string]interface{}{
