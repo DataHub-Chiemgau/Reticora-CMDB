@@ -34,6 +34,8 @@ DELETE /api/v1/lifecycle-definitions/{id} lifecycle:manage
 DELETE /api/v1/lifecycle-models/{id} lifecycle:manage
 DELETE /api/v1/locations/{id} location:write
 DELETE /api/v1/maintenance-windows/{id} maintenance:write
+DELETE /api/v1/metamodel/drafts/{id} citype:manage
+DELETE /api/v1/metamodel/drafts/{id}/items/{item_id} citype:manage
 DELETE /api/v1/monitoring/alerts/{id} monitoring:write
 DELETE /api/v1/mounts/{id} rack:write
 DELETE /api/v1/network-interfaces/{id} ipam:write
@@ -207,6 +209,9 @@ GET /api/v1/maintenance-windows/{id} maintenance:read
 GET /api/v1/maintenance-windows/{id}/notifications maintenance:read
 GET /api/v1/me authenticated
 GET /api/v1/me/permissions authenticated
+GET /api/v1/metamodel/drafts citype:manage
+GET /api/v1/metamodel/drafts/{id} citype:manage
+GET /api/v1/metamodel/drafts/{id}/items citype:manage
 GET /api/v1/modules entitlement:read
 GET /api/v1/monitoring/alerts monitoring:read
 GET /api/v1/monitoring/metrics monitoring:read
@@ -335,6 +340,7 @@ PATCH /api/v1/layouts/{id} citype:manage
 PATCH /api/v1/lifecycle-models/{id} lifecycle:manage
 PATCH /api/v1/locations/{id} location:write
 PATCH /api/v1/maintenance-windows/{id} maintenance:write
+PATCH /api/v1/metamodel/drafts/{id} citype:manage
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/mounts/{id} rack:write
 PATCH /api/v1/network-interfaces/{id} ipam:write
@@ -468,6 +474,8 @@ POST /api/v1/lifecycle-models lifecycle:manage
 POST /api/v1/locations location:write
 POST /api/v1/maintenance-windows maintenance:write
 POST /api/v1/maintenance-windows/{id}/notify maintenance:write
+POST /api/v1/metamodel/drafts citype:manage
+POST /api/v1/metamodel/drafts/{id}/items citype:manage
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/mounts rack:write

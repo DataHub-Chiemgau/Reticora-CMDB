@@ -6285,6 +6285,113 @@ export interface paths {
     patch: operations['updateLayout'];
     trace?: never;
   };
+  '/api/v1/metamodel/drafts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List metamodel drafts (MET-53)
+     * @description The organization's metamodel drafts (WP-260), optionally filtered by `status`, without their items (`item_count` counts them). Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires citype:manage, also for reading: drafts are unpublished admin work.
+     */
+    get: operations['listMetamodelDrafts'];
+    put?: never;
+    /**
+     * Create a metamodel draft (MET-53)
+     * @description An empty draft with status `draft` and version 1. Metamodel changes captured in it as items stay unproductive until the draft is published (WP-261); without a draft the resource routes write directly (MET-04). A name with 1 to 200 characters is required (422). Requires citype:manage; audited as `metamodel_draft.created`.
+     */
+    post: operations['createMetamodelDraft'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read a metamodel draft
+     * @description A draft of the organization with its items; a draft of another organization is 404. Requires citype:manage.
+     */
+    get: operations['getMetamodelDraft'];
+    put?: never;
+    post?: never;
+    /**
+     * Discard a metamodel draft
+     * @description Sets the status `discarded`; the draft stays readable and is immutable from then on. A published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.discarded`.
+     */
+    delete: operations['discardMetamodelDraft'];
+    options?: never;
+    head?: never;
+    /**
+     * Rename a metamodel draft
+     * @description Changes the name. `version` rises by one under the lock of the draft. A published or discarded draft is immutable (409). An optional If-Match must name the current version, otherwise 412 (API-07). Requires citype:manage; audited as `metamodel_draft.updated` with before and after.
+     */
+    patch: operations['updateMetamodelDraft'];
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts/{id}/items': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the items of a metamodel draft
+     * @description The items of a draft, newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires citype:manage.
+     */
+    get: operations['listMetamodelDraftItems'];
+    put?: never;
+    /**
+     * Capture an item in a metamodel draft
+     * @description A typed metamodel operation (`kind` and `op`, the permitted pairs in MetamodelDraftItemCreate). The payload is decoded strictly into the request type of the resource route the pair stands for; an unknown field is 400. A payload may carry `{"$item": "<item id>"}` instead of an id: the item must belong to the same draft and create a part (create or clone), and the references must form no cycle (422, E-112). `base` is the state of the target, read in the transaction of the capture: `updated_at` of the type, field, attribute definition, set or template, the ordered set ids of a type for `ci_type`/`assign`, the status of the version for `template_version` (`current_version` of the template for `create`), `version` of a rule or layout, null for a new part. A missing target is 404; a read-only system row is 403 or 404 as on the resource route. The caller needs the write permission of that route as well (403): `ci_attribute:manage` for `global_field` and `attribute_definition`, `metamodel:publish` for `template_version`/`publish`, otherwise `citype:manage`. A tested draft returns to `draft` and loses its test report; a published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.item_added`.
+     */
+    post: operations['addMetamodelDraftItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/metamodel/drafts/{id}/items/{item_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description The id of the item. */
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove an item from a metamodel draft
+     * @description An item another item of the draft references is 409. A tested draft returns to `draft` and loses its test report; a published or discarded draft is 409. An optional If-Match must name the current version, otherwise 412. Requires citype:manage; audited as `metamodel_draft.item_removed`.
+     */
+    delete: operations['removeMetamodelDraftItem'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -8944,6 +9051,121 @@ export interface components {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
       next_cursor?: string;
       data: components['schemas']['FormLayout'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    /** @description A metamodel draft (table metamodel_draft, WP-260, MET-53): the unpublished working state of metamodel changes as typed items. `status` runs draft → tested → published, or to discarded; published and discarded drafts are immutable. List entries carry no `items`. */
+    MetamodelDraft: {
+      id: string;
+      organization_id: string;
+      name: string;
+      /** @enum {string} */
+      status: 'draft' | 'tested' | 'published' | 'discarded';
+      created_by?: string | null;
+      items?: components['schemas']['MetamodelDraftItem'][];
+      item_count: number;
+      /** @description The report of the last test run (WP-721); null after every item change. */
+      test_report?: unknown;
+      /** @description Rises with every change; the ETag. */
+      version: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /** Format: date-time */
+      published_at?: string | null;
+    };
+    MetamodelDraftCreate: {
+      name: string;
+    };
+    MetamodelDraftPatch: {
+      name: string;
+    };
+    /** @description Permitted pairs of kind and op (metamodel.ItemKinds), with the resource route whose request type the payload follows: ci_type create|update|clone|activate|deactivate|assign (ci-types, …/attribute-sets for assign); ci_type_field upsert|delete (ci-types/{id}/fields); global_field upsert|delete (ci-fields/global); attribute_definition create|update|delete; attribute_set create|update|delete; template create|update|delete|clone; template_version create|update|publish (templates/{id}/versions); rule create|update|delete; layout create|update|delete. `target_id` is empty for a new part and for global fields, the template id for template_version/create, the version id for the other template_version operations, the type id for ci_type_field, otherwise the id of the target. `target_key` is the field name of ci_type_field and global_field (on upsert the `name` of the payload). */
+    MetamodelDraftItemCreate: {
+      /** @enum {string} */
+      kind:
+        | 'ci_type'
+        | 'ci_type_field'
+        | 'global_field'
+        | 'attribute_definition'
+        | 'attribute_set'
+        | 'template'
+        | 'template_version'
+        | 'rule'
+        | 'layout';
+      /** @enum {string} */
+      op:
+        | 'create'
+        | 'update'
+        | 'upsert'
+        | 'delete'
+        | 'clone'
+        | 'activate'
+        | 'deactivate'
+        | 'assign'
+        | 'publish';
+      target_id?: string;
+      target_key?: string;
+      /** @description The request body of the resource route; ids may be item references {"$item": "<item id>"} (E-112). */
+      payload?: Record<string, never>;
+    };
+    /** @description A typed operation of a draft with the state of its target at capture. */
+    MetamodelDraftItem: {
+      id: string;
+      /** @enum {string} */
+      kind:
+        | 'ci_type'
+        | 'ci_type_field'
+        | 'global_field'
+        | 'attribute_definition'
+        | 'attribute_set'
+        | 'template'
+        | 'template_version'
+        | 'rule'
+        | 'layout';
+      /** @enum {string} */
+      op:
+        | 'create'
+        | 'update'
+        | 'upsert'
+        | 'delete'
+        | 'clone'
+        | 'activate'
+        | 'deactivate'
+        | 'assign'
+        | 'publish';
+      target_id: string | null;
+      target_key: string | null;
+      /** @description The request body of the resource route as captured. */
+      payload: Record<string, never>;
+      /** @description The state of the target at capture: a timestamp (updated_at), a number (version, current_version), a status, the ordered set ids of a type, or null for a new part. WP-261 compares it. */
+      base: unknown;
+      /** @description ci_type.schema_version per directly affected type id (informative). */
+      schema_versions: {
+        [key: string]: number;
+      };
+      /** @description The resource route the item stands for (informative). */
+      route: string;
+      created_by: string | null;
+      /** Format: date-time */
+      created_at: string;
+    };
+    MetamodelDraftListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['MetamodelDraft'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
+    };
+    MetamodelDraftItemListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['MetamodelDraftItem'][];
       total?: number;
       limit?: number;
       offset?: number;
@@ -30666,6 +30888,334 @@ export interface operations {
         };
       };
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listMetamodelDrafts: {
+    parameters: {
+      query?: {
+        /** @description Only drafts of this status (400 for another value). */
+        status?: 'draft' | 'tested' | 'published' | 'discarded';
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Drafts, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraftListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelDraftCreate'];
+      };
+    };
+    responses: {
+      /** @description Draft created */
+      201: {
+        headers: {
+          /** @description The draft version (API-07). */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Draft */
+      200: {
+        headers: {
+          /** @description The draft version (API-07); send it as If-Match with a change. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  discardMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Draft discarded */
+      200: {
+        headers: {
+          /** @description The new draft version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the draft */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelDraftPatch'];
+      };
+    };
+    responses: {
+      /** @description Draft updated */
+      200: {
+        headers: {
+          /** @description The new draft version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the draft */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listMetamodelDraftItems: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Items, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraftItemListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  addMetamodelDraftItem: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelDraftItemCreate'];
+      };
+    };
+    responses: {
+      /** @description Item captured */
+      201: {
+        headers: {
+          /** @description The new draft version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraftItem'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the draft */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  removeMetamodelDraftItem: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description The id of the item. */
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Item removed */
+      200: {
+        headers: {
+          /** @description The new draft version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelDraft'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match does not name the current version of the draft */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       503: components['responses']['ServiceUnavailable'];
     };
   };

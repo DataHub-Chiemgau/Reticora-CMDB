@@ -13406,6 +13406,357 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/metamodel/drafts:
+    get:
+      operationId: listMetamodelDrafts
+      tags: [Metamodel]
+      summary: List metamodel drafts (MET-53)
+      description: >-
+        The organization's metamodel drafts (WP-260), optionally filtered by
+        `status`, without their items (`item_count` counts them). Pages
+        newest first on (created_at, id) (API-02): `limit` (default 50, at
+        most 200) and the signed keyset `cursor` from `next_cursor`.
+        Requires citype:manage, also for reading: drafts are unpublished
+        admin work.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Only drafts of this status (400 for another value).
+          schema:
+            type: string
+            enum: [draft, tested, published, discarded]
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Drafts, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraftListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMetamodelDraft
+      tags: [Metamodel]
+      summary: Create a metamodel draft (MET-53)
+      description: >-
+        An empty draft with status `draft` and version 1. Metamodel changes
+        captured in it as items stay unproductive until the draft is
+        published (WP-261); without a draft the resource routes write
+        directly (MET-04). A name with 1 to 200 characters is required
+        (422). Requires citype:manage; audited as `metamodel_draft.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelDraftCreate'
+      responses:
+        '201':
+          description: Draft created
+          headers:
+            ETag:
+              description: The draft version (API-07).
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getMetamodelDraft
+      tags: [Metamodel]
+      summary: Read a metamodel draft
+      description: >-
+        A draft of the organization with its items; a draft of another
+        organization is 404. Requires citype:manage.
+      responses:
+        '200':
+          description: Draft
+          headers:
+            ETag:
+              description: The draft version (API-07); send it as If-Match with a change.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateMetamodelDraft
+      tags: [Metamodel]
+      summary: Rename a metamodel draft
+      description: >-
+        Changes the name. `version` rises by one under the lock of the
+        draft. A published or discarded draft is immutable (409). An
+        optional If-Match must name the current version, otherwise 412
+        (API-07). Requires citype:manage; audited as
+        `metamodel_draft.updated` with before and after.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelDraftPatch'
+      responses:
+        '200':
+          description: Draft updated
+          headers:
+            ETag:
+              description: The new draft version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the draft
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: discardMetamodelDraft
+      tags: [Metamodel]
+      summary: Discard a metamodel draft
+      description: >-
+        Sets the status `discarded`; the draft stays readable and is
+        immutable from then on. A published or discarded draft is 409. An
+        optional If-Match must name the current version, otherwise 412.
+        Requires citype:manage; audited as `metamodel_draft.discarded`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      responses:
+        '200':
+          description: Draft discarded
+          headers:
+            ETag:
+              description: The new draft version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the draft
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts/{id}/items:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listMetamodelDraftItems
+      tags: [Metamodel]
+      summary: List the items of a metamodel draft
+      description: >-
+        The items of a draft, newest first on (created_at, id) (API-02):
+        `limit` (default 50, at most 200) and the signed keyset `cursor`
+        from `next_cursor`. Requires citype:manage.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Items, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraftItemListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: addMetamodelDraftItem
+      tags: [Metamodel]
+      summary: Capture an item in a metamodel draft
+      description: >-
+        A typed metamodel operation (`kind` and `op`, the permitted pairs in
+        MetamodelDraftItemCreate). The payload is decoded strictly into the
+        request type of the resource route the pair stands for; an unknown
+        field is 400. A payload may carry `{"$item": "<item id>"}` instead
+        of an id: the item must belong to the same draft and create a part
+        (create or clone), and the references must form no cycle (422,
+        E-112). `base` is the state of the target, read in the transaction
+        of the capture: `updated_at` of the type, field, attribute
+        definition, set or template, the ordered set ids of a type for
+        `ci_type`/`assign`, the status of the version for
+        `template_version` (`current_version` of the template for
+        `create`), `version` of a rule or layout, null for a new part.
+        A missing target is 404; a read-only system row is 403 or 404 as
+        on the resource route. The caller needs the write permission of
+        that route as well (403): `ci_attribute:manage` for `global_field`
+        and `attribute_definition`, `metamodel:publish` for
+        `template_version`/`publish`, otherwise `citype:manage`. A tested
+        draft returns to `draft` and loses its test report; a published or
+        discarded draft is 409. An optional If-Match must name the current
+        version, otherwise 412. Requires citype:manage; audited as
+        `metamodel_draft.item_added`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelDraftItemCreate'
+      responses:
+        '201':
+          description: Item captured
+          headers:
+            ETag:
+              description: The new draft version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraftItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the draft
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/metamodel/drafts/{id}/items/{item_id}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: item_id
+        in: path
+        required: true
+        description: The id of the item.
+        schema: { type: string }
+    delete:
+      operationId: removeMetamodelDraftItem
+      tags: [Metamodel]
+      summary: Remove an item from a metamodel draft
+      description: >-
+        An item another item of the draft references is 409. A tested
+        draft returns to `draft` and loses its test report; a published or
+        discarded draft is 409. An optional If-Match must name the current
+        version, otherwise 412. Requires citype:manage; audited as
+        `metamodel_draft.item_removed`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      responses:
+        '200':
+          description: Item removed
+          headers:
+            ETag:
+              description: The new draft version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match does not name the current version of the draft
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -17999,6 +18350,137 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FormLayout'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    MetamodelDraft:
+      type: object
+      description: >-
+        A metamodel draft (table metamodel_draft, WP-260, MET-53): the
+        unpublished working state of metamodel changes as typed items.
+        `status` runs draft → tested → published, or to discarded;
+        published and discarded drafts are immutable. List entries carry no
+        `items`.
+      required: [id, organization_id, name, status, item_count, version, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string }
+        status:
+          type: string
+          enum: [draft, tested, published, discarded]
+        created_by: { type: [string, 'null'] }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetamodelDraftItem'
+        item_count: { type: integer }
+        test_report:
+          description: The report of the last test run (WP-721); null after every item change.
+        version: { type: integer, description: Rises with every change; the ETag. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        published_at: { type: [string, 'null'], format: date-time }
+    MetamodelDraftCreate:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+    MetamodelDraftPatch:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+    MetamodelDraftItemCreate:
+      type: object
+      required: [kind, op]
+      additionalProperties: false
+      description: >-
+        Permitted pairs of kind and op (metamodel.ItemKinds), with the
+        resource route whose request type the payload follows:
+        ci_type create|update|clone|activate|deactivate|assign (ci-types,
+        …/attribute-sets for assign); ci_type_field upsert|delete
+        (ci-types/{id}/fields); global_field upsert|delete
+        (ci-fields/global); attribute_definition create|update|delete;
+        attribute_set create|update|delete; template
+        create|update|delete|clone; template_version create|update|publish
+        (templates/{id}/versions); rule create|update|delete; layout
+        create|update|delete. `target_id` is empty for a new part and for
+        global fields, the template id for template_version/create, the
+        version id for the other template_version operations, the type id
+        for ci_type_field, otherwise the id of the target. `target_key` is
+        the field name of ci_type_field and global_field (on upsert the
+        `name` of the payload).
+      properties:
+        kind:
+          type: string
+          enum: [ci_type, ci_type_field, global_field, attribute_definition, attribute_set, template, template_version, rule, layout]
+        op:
+          type: string
+          enum: [create, update, upsert, delete, clone, activate, deactivate, assign, publish]
+        target_id: { type: string }
+        target_key: { type: string }
+        payload:
+          type: object
+          description: 'The request body of the resource route; ids may be item references {"$item": "<item id>"} (E-112).'
+    MetamodelDraftItem:
+      type: object
+      description: A typed operation of a draft with the state of its target at capture.
+      required: [id, kind, op, target_id, target_key, payload, base, schema_versions, route, created_by, created_at]
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [ci_type, ci_type_field, global_field, attribute_definition, attribute_set, template, template_version, rule, layout]
+        op:
+          type: string
+          enum: [create, update, upsert, delete, clone, activate, deactivate, assign, publish]
+        target_id: { type: [string, 'null'] }
+        target_key: { type: [string, 'null'] }
+        payload:
+          type: object
+          description: The request body of the resource route as captured.
+        base:
+          description: >-
+            The state of the target at capture: a timestamp (updated_at),
+            a number (version, current_version), a status, the ordered set
+            ids of a type, or null for a new part. WP-261 compares it.
+        schema_versions:
+          type: object
+          description: ci_type.schema_version per directly affected type id (informative).
+          additionalProperties: { type: integer }
+        route: { type: string, description: The resource route the item stands for (informative). }
+        created_by: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+    MetamodelDraftListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetamodelDraft'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
+    MetamodelDraftItemListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetamodelDraftItem'
         total: { type: integer }
         limit: { type: integer }
         offset: { type: integer }

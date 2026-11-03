@@ -1270,3 +1270,5 @@ API-09;[B];B;backend/internal/ci/template_migration_job_integration_test.go;WP-7
 JOB-04;[B];B;backend/internal/ci/template_migration_job_integration_test.go;WP-712
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/ticket/ticket_integration_test.go;WP-290
 EVT-03;[P2–P3];B;backend/internal/ticket/ticket_integration_test.go;WP-290
+MET-53;[P2];B;backend/internal/metamodel/draft_integration_test.go;WP-260
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/metamodel/draft_integration_test.go;WP-260

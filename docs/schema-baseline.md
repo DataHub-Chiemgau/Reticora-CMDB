@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000216_ticket_states_number
+Stand: Migration 000215_metamodel_draft
 
 ## Prüfung
 
@@ -839,6 +839,21 @@ die Layouts einer gelöschten Rolle unter RLS. RLS mit ENABLE/FORCE und der
 Policy `form_layout_isolation` (FOR ALL, `app.org_id`), TRUNCATE-Schutz
 `reticora_truncate_guard`.
 
+Metamodell-Entwürfe (MET-53, API-06, WP-260, Migration 000215):
+`metamodel_draft` hält den unveröffentlichten Arbeitsstand von
+Metamodelländerungen einer Organisation. `items` (`jsonb`, Standard `[]`) ist
+die Liste typisierter Operationen mit Item-ID und Ausgangsstand `base` je
+Item; eine Spalte für den Ausgangsstand des Drafts gibt es nicht. `status`
+ist `draft`, `tested`, `published` oder `discarded`
+(`metamodel_draft_status_check`); `published_at` ist genau bei `published`
+gesetzt (`metamodel_draft_published_at_check`). `created_by` ist ein Surrogat
+ohne Fremdschlüssel wie `job.created_by`, `test_report` (`jsonb`) ist
+optional, `version` beginnt bei 1 und steigt mit jeder Änderung. Index
+`idx_metamodel_draft_org_status` (`organization_id`, `status`, `created_at`
+DESC), Trigger `trg_metamodel_draft_updated_at`. RLS mit ENABLE/FORCE und der
+Policy `metamodel_draft_isolation` (FOR ALL, `app.org_id`), TRUNCATE-Schutz
+`reticora_truncate_guard`.
+
 IP-Reservierungen (NET-09, WP-299, Migration 000208): `ip_address` erhält
 `reserved_until` (`timestamptz`, informativ, keine automatische Freigabe) und
 `reserved_by` (`uuid`, Surrogat des reservierenden Nutzers ohne Fremdschlüssel,
@@ -963,6 +978,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL), maintenance_notification_scoped_delete (DELETE), maintenance_notification_scoped_update (UPDATE) |
 | `maintenance_window` | ja | ja | maintenance_window_isolation (ALL), maintenance_window_scoped_delete (DELETE), maintenance_window_scoped_insert (INSERT), maintenance_window_scoped_update (UPDATE) |
 | `maintenance_window_ci` | ja | ja | maintenance_window_ci_isolation (ALL), maintenance_window_ci_scoped_delete (DELETE), maintenance_window_ci_scoped_update (UPDATE) |
+| `metamodel_draft` | ja | ja | metamodel_draft_isolation (ALL) |
 | `metamodel_rule` | ja | ja | metamodel_rule_isolation_delete (DELETE), metamodel_rule_isolation_insert (INSERT), metamodel_rule_isolation_select (SELECT), metamodel_rule_isolation_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |

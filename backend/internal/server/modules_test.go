@@ -300,7 +300,10 @@ var e38Register = []e38Resource{
 	{path: "/api/v1/templates", module: ModuleMetamodel},
 	{path: "/api/v1/rules", module: ModuleMetamodel},
 	{path: "/api/v1/layouts", module: ModuleMetamodel},
-	{path: "/api/v1/metamodel/drafts", module: ModuleMetamodel, owner: "WP-721"},
+	// The drafts (WP-260) are documented without x-phase and ship without
+	// module gate until WP-721 adds the prefix /api/v1/metamodel to module
+	// metamodel; WP-721 sets module ModuleMetamodel here again.
+	{path: "/api/v1/metamodel/drafts", module: ""},
 	{path: "/api/v1/field-permissions", module: ModuleMetamodel, owner: "WP-726"},
 	// New prefixes of existing modules, set with their first route.
 	{path: "/api/v1/suppliers", module: ModuleInventory, owner: "WP-736"},
