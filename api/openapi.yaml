@@ -5661,8 +5661,17 @@ paths:
         no_profile_match is 409 (its generic_device CI exists: set the type
         on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis,
         403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
-        duplicate_ip accept|dismiss (accept releases the reservation; 422 when the
-        reservation is already released or the item names none, 501 without IPAM);
+        duplicate_ip accept|dismiss: an item of a reservation conflict
+        (payload reservation_ip_id) is accepted by releasing the reservation,
+        422 when it is already released or the item names none; an item of
+        duplicate observations carries payload address, vrf_id, holders (every
+        ip_address row of the address in the VRF with ip_address_id,
+        interface_id, ci_id and type) and side_keys, and accept chooses a side:
+        the address at the CI ci_id is stale and all its rows of the address
+        are removed, with one CI involved that CI is the side, with several
+        ci_id from candidate_ci_ids is required (400 otherwise, like merge),
+        422 when that CI no longer holds the address next to another side;
+        dismiss keeps every side; 501 without IPAM;
         serial_mismatch dismiss. Another action is 422.
         resolved_by and the audit actor are the caller; a body with
         resolved_by is 400. An item is resolved exactly once (F-404): the
@@ -24315,7 +24324,11 @@ components:
             deprecated name of new.
         ci_id:
           type: string
-          description: Target candidate CI id, required when action is merge.
+          description: >-
+            Target candidate CI id (from candidate_ci_ids). Required for merge
+            and for the side action of duplicate_ip with several CIs (accept
+            of an item with payload holders names the side whose address is
+            stale; with one CI involved that CI is the side).
         ci_type_id:
           type: string
           format: uuid

@@ -1741,6 +1741,16 @@
       "accept": "Accept"
     },
     "candidate": "Candidate",
+    "holders": {
+      "title": "Sides of the duplicate address",
+      "address": "Address",
+      "vrf": "VRF",
+      "ci": "CI",
+      "interface": "Interface",
+      "type": "Type",
+      "noCI": "no CI",
+      "side": "Side with the stale address"
+    },
     "diff": "Observation compared with the CI",
     "field": "Field",
     "observed": "Observed",
