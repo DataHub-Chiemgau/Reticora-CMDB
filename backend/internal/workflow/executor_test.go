@@ -368,3 +368,71 @@ func TestSetCIFieldRespectsOverrides(t *testing.T) {
 		t.Errorf("rack after a refused write: %v", got.Attributes["rack"])
 	}
 }
+
+// instanceOverrides marks the named fields as instance attributes of every
+// CI, as override.PGRepository.Get does from ci_instance_field_definition.
+type instanceOverrides struct {
+	*override.MemoryRepository
+	instance map[string]bool
+}
+
+func (o instanceOverrides) Get(ctx context.Context, orgID, ciID, field string) (*override.FieldValue, error) {
+	fv, err := o.MemoryRepository.Get(ctx, orgID, ciID, field)
+	if !o.instance[field] {
+		return fv, err
+	}
+	if errors.Is(err, override.ErrNotFound) {
+		return &override.FieldValue{OrganizationID: orgID, CIID: ciID, FieldName: field, InstanceAttribute: true}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	fv.InstanceAttribute = true
+	return fv, nil
+}
+
+// TestSetCIFieldRefusesInstanceAttributes covers WP-714 (MET-14, OVR-02):
+// set_ci_field on an instance attribute of the CI, with a value or with
+// null, writes nothing and reports written false with the reason
+// instance_attribute; the value stays and no provenance is recorded.
+func TestSetCIFieldRefusesInstanceAttributes(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	cis := ci.NewMemoryRepository()
+	item := &ci.Item{OrganizationID: "org-1", CITypeID: "server", Name: "srv", DiscoverySource: ci.SourceSNMP,
+		Attributes: map[string]any{"contract": "C-1", "rack": "R1"}}
+	if err := cis.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	overrides := override.NewMemoryRepository()
+	guard := override.NewGuard(instanceOverrides{overrides, map[string]bool{"contract": true}})
+	exec := NewExecutor(repo, ticket.NewMemoryRepository(), cis, form.NewMemoryRepository(), nil).WithFieldGuard(guard)
+	for _, value := range []any{"C-2", nil} {
+		def := &Definition{OrganizationID: "org-1", Name: "set", Trigger: JSONMap{"type": "manual"}, Active: true,
+			Actions: []JSONMap{{"type": "set_ci_field", "ci_id": item.ID, "field": "contract", "value": value}}}
+		if err := repo.CreateDefinition(ctx, def); err != nil {
+			t.Fatal(err)
+		}
+		r, err := exec.Trigger(ctx, "org-1", def, "manual", JSONMap{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		steps, err := repo.ListSteps(ctx, "org-1", r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Status != StatusSucceeded || steps[0].Output["written"] != false || steps[0].Output["reason"] != override.ReasonInstanceAttribute {
+			t.Errorf("set_ci_field contract=%v: run %s output %v, want written false reason instance_attribute", value, r.Status, steps[0].Output)
+		}
+		got, err := cis.GetByID(ctx, "org-1", item.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, ok := got.Attributes["contract"]; !ok || v != "C-1" {
+			t.Errorf("contract after set_ci_field %v: %v (present %v), want C-1", value, v, ok)
+		}
+		if _, err := overrides.Get(ctx, "org-1", item.ID, "contract"); !errors.Is(err, override.ErrNotFound) {
+			t.Errorf("provenance of the refused instance attribute: %v, want none", err)
+		}
+	}
+}

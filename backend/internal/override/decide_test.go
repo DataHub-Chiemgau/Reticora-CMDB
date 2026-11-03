@@ -122,6 +122,43 @@ func TestDecideAutomatedWrite(t *testing.T) {
 	}
 }
 
+// TestDecideRefusesInstanceAttributes covers WP-714 (MET-14, OVR-02, CI-10):
+// an instance attribute of the CI is never written by automation, with or
+// without a provenance row or override, also not removed with a null value,
+// and the refusal is no conflict. An unreadable state still fails closed.
+func TestDecideRefusesInstanceAttributes(t *testing.T) {
+	now := time.Now().UTC()
+	at := func(t time.Time) *time.Time { return &t }
+	write := func(source string, value, current any) *Write {
+		return &Write{OrganizationID: "org", CIID: "ci", Field: "contract", Value: value, Source: source, ObservedAt: now, Current: current}
+	}
+	bare := &FieldValue{OrganizationID: "org", CIID: "ci", FieldName: "contract", InstanceAttribute: true}
+	observed := &FieldValue{DiscoveredValue: "x", DiscoveredSource: "snmp", DiscoveredAt: at(now.Add(-time.Hour)), InstanceAttribute: true}
+	legacyOverride := &FieldValue{OverrideValue: "manual", OverrideAt: at(now.Add(-time.Hour)), Protected: true, InstanceAttribute: true}
+	for _, c := range []struct {
+		name   string
+		reader FieldReader
+		w      *Write
+		reason string
+	}{
+		{"empty instance attribute is not filled", stubReader{fv: bare}, write("sweep", "x", nil), ReasonInstanceAttribute},
+		{"workflow does not replace", stubReader{fv: bare}, write("workflow", "y", "manual"), ReasonInstanceAttribute},
+		{"workflow does not remove (null)", stubReader{fv: bare}, write("workflow", nil, "manual"), ReasonInstanceAttribute},
+		{"import does not replace", stubReader{fv: bare}, write("import", "y", "manual"), ReasonInstanceAttribute},
+		{"discovery with provenance does not replace", stubReader{fv: observed}, write("redfish", "y", "manual"), ReasonInstanceAttribute},
+		{"legacy override: no conflict", stubReader{fv: legacyOverride}, write("agent", "other", "manual"), ReasonInstanceAttribute},
+		{"unreadable state fails closed", stubReader{err: errors.New("db down")}, write("workflow", "y", "manual"), ReasonError},
+	} {
+		got := DecideAutomatedWrite(context.Background(), c.reader, c.w)
+		if got.Write || got.Conflict || got.Reason != c.reason {
+			t.Errorf("%s: %+v, want write=false conflict=false reason=%s", c.name, got, c.reason)
+		}
+	}
+	if ReasonInstanceAttribute != "instance_attribute" {
+		t.Errorf("ReasonInstanceAttribute = %q", ReasonInstanceAttribute)
+	}
+}
+
 func TestDecisionFailuresAreCounted(t *testing.T) {
 	before := DecisionFailures()
 	DecideAutomatedWrite(context.Background(), stubReader{err: errors.New("db down")}, &Write{Field: "name", Source: "snmp"})

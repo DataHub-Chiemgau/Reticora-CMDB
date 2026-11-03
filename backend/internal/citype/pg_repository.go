@@ -1260,6 +1260,11 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 		if err = rows.Err(); err != nil || out == nil {
 			return err
 		}
+		if before == nil {
+			if moveErr := moveIntoInstance(ctx, tx, ciID, out.Name); moveErr != nil {
+				return moveErr
+			}
+		}
 		action, changes := "ci_instance_field.created", map[string]any{"after": out}
 		if before != nil {
 			action, changes = "ci_instance_field.updated", map[string]any{"before": before, "after": out}
@@ -1286,8 +1291,53 @@ func (r *PGRepository) DeleteInstanceField(ctx context.Context, orgID, ciID, nam
 			"DELETE FROM ci_instance_field_definition WHERE ci_id = $1 AND name = $2 AND "+visibleCI, ciID, name); err != nil {
 			return fmt.Errorf("delete instance field: %w", err)
 		}
+		if moveErr := moveOutOfInstance(ctx, tx, ciID, name); moveErr != nil {
+			return moveErr
+		}
 		return recordInstanceFieldAudit(ctx, tx, "ci_instance_field.deleted", before, map[string]any{"before": before})
 	})
+}
+
+// moveIntoInstance moves a value the CI holds on the top level of its
+// attributes under the name of a new instance attribute into
+// attributes._instance, in the transaction of the definition (MET-14,
+// CI-10, WP-714): the read view keeps the value, the storage follows the
+// definition. A manual override of the field is removed as by migration
+// 000205; instance attributes carry none (CI-04).
+func moveIntoInstance(ctx context.Context, tx pgx.Tx, ciID, name string) error {
+	if _, err := tx.Exec(ctx, `UPDATE ci SET attributes = (attributes - $2::text) || jsonb_build_object('_instance',
+			COALESCE(attributes -> '_instance', '{}'::jsonb) || jsonb_build_object($2::text, attributes -> $2::text))
+		WHERE id = $1 AND attributes ? $2::text`, ciID, name); err != nil {
+		return fmt.Errorf("move %s into _instance: %w", name, err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM ci_field_value WHERE ci_id = $1 AND field_name = $2 AND discovered_at IS NULL`,
+		ciID, name); err != nil {
+		return fmt.Errorf("remove override of %s: %w", name, err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE ci_field_value SET override_value = NULL, override_author = NULL,
+			override_reason = NULL, override_at = NULL, protected = false
+		WHERE ci_id = $1 AND field_name = $2 AND (override_at IS NOT NULL OR override_value IS NOT NULL OR protected)`,
+		ciID, name); err != nil {
+		return fmt.Errorf("remove override of %s: %w", name, err)
+	}
+	return nil
+}
+
+// moveOutOfInstance returns the value of a deleted instance attribute from
+// attributes._instance to the top level of the CI's attributes, in the
+// transaction of the deletion (MET-14, WP-714): it stays visible as an
+// ordinary attribute and no stale _instance value hides a later one. An
+// emptied _instance is removed.
+func moveOutOfInstance(ctx context.Context, tx pgx.Tx, ciID, name string) error {
+	if _, err := tx.Exec(ctx, `UPDATE ci SET attributes = CASE
+			WHEN (attributes -> '_instance') - $2::text = '{}'::jsonb THEN attributes - '_instance'
+			ELSE attributes #- ARRAY['_instance', $2::text] END
+			|| jsonb_build_object($2::text, attributes -> '_instance' -> $2::text)
+		WHERE id = $1 AND jsonb_typeof(attributes -> '_instance') = 'object' AND attributes -> '_instance' ? $2::text`,
+		ciID, name); err != nil {
+		return fmt.Errorf("move %s out of _instance: %w", name, err)
+	}
+	return nil
 }
 
 // getInstanceField returns the visible instance field ciID/name or nil.
