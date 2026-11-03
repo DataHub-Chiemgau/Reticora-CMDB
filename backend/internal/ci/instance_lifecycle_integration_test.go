@@ -119,7 +119,7 @@ func (e *lifecycleEnv) overrideRows(id, field string) int {
 // TestInstanceValuesCreateNoOverrides covers WP-714 (MET-14, CI-04): a
 // manual change of an instance attribute, by PATCH or by PUT
 // /cis/{id}/instance-attributes, records no override; a business attribute
-// changed in the same PATCH still does. Migration 000205 removes the
+// changed in the same PATCH still does. Migration 000204 removes the
 // overrides of instance attributes written before: the override columns are
 // empty, a row without observed value is gone, the provenance of an
 // observed value stays, _overrides no longer names them and _instance is
@@ -169,7 +169,7 @@ func TestInstanceValuesCreateNoOverrides(t *testing.T) {
 	}
 	instanceBefore := e.namespace(device, "_instance")
 
-	up, err := os.ReadFile("../../migrations/000205_instance_attribute_overrides.up.sql")
+	up, err := os.ReadFile("../../migrations/000204_instance_attribute_overrides.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func TestInstanceValuesIngestAndOverrideClear(t *testing.T) {
 		t.Errorf("provenance of the reported instance value: %d rows, want 1 without override", n)
 	}
 
-	// A legacy override of the instance attribute (before migration 000205):
+	// A legacy override of the instance attribute (before migration 000204):
 	// clearing it keeps the manual value in _instance.
 	e.exec(`UPDATE ci_field_value SET override_value = '"C-1"', override_reason = 'legacy', override_at = now(), protected = true
 		WHERE ci_id = $1 AND field_name = 'contract'`, device)

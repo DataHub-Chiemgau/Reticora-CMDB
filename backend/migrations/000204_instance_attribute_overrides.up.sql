@@ -1,4 +1,4 @@
--- Migration 000205: instance attributes carry no manual override (WP-714,
+-- Migration 000204: instance attributes carry no manual override (WP-714,
 -- MET-14, CI-04, OVR-02).
 --
 -- Before WP-714 a manual change of an instance attribute (PATCH, PUT

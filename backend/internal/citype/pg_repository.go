@@ -1350,7 +1350,7 @@ func (r *PGRepository) DeleteInstanceField(ctx context.Context, orgID, ciID, nam
 // attributes._instance, in the transaction of the definition (MET-14,
 // CI-10, WP-714): the read view keeps the value, the storage follows the
 // definition. A manual override of the field is removed as by migration
-// 000205; instance attributes carry none (CI-04).
+// 000204; instance attributes carry none (CI-04).
 func moveIntoInstance(ctx context.Context, tx pgx.Tx, ciID, name string) error {
 	if _, err := tx.Exec(ctx, `UPDATE ci SET attributes = (attributes - $2::text) || jsonb_build_object('_instance',
 			COALESCE(attributes -> '_instance', '{}'::jsonb) || jsonb_build_object($2::text, attributes -> $2::text))
