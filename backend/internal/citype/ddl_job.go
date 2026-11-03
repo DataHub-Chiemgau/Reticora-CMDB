@@ -104,10 +104,22 @@ func IndexName(defID string, unique bool) string {
 	return name
 }
 
-// IndexScheduler starts the index job of a definition whose flags changed.
+// IndexScheduler starts the index job of a definition whose flags changed
+// and the rebuild a user asks for (POST /attribute-definitions/{id}/reindex,
+// WP-796).
 type IndexScheduler interface {
 	ScheduleIndex(ctx context.Context, orgID, defID string) error
+	// Reindex queues an attribute.index job of the definition for
+	// createdBy unless a job of the definition (IndexJobKinds) is queued
+	// or running; created reports whether it queued one. Concurrent calls
+	// for the same definition leave at most one open job.
+	Reindex(ctx context.Context, orgID, defID, createdBy string) (created bool, err error)
 }
+
+// IndexJobKinds are the job kinds that serve the index of a definition,
+// each with params.definition_id; the index status (DB-04, WP-796) is the
+// one of the newest of them.
+var IndexJobKinds = []string{IndexJobKind, RebuildJobKind, KeyJobKind}
 
 // indexRelevant reports whether a change from before to after (nil for a
 // missing definition) touches the attribute index.
@@ -278,6 +290,194 @@ type indexJobParams struct {
 func (j *DDLJob) ScheduleIndex(ctx context.Context, orgID, defID string) error {
 	_, _, err := j.jobs.Enqueue(ctx, orgID, IndexJobKind, indexJobParams{DefinitionID: defID}, jobs.EnqueueOptions{})
 	return err
+}
+
+// reindexLock serializes the rebuild requests of a definition (Reindex);
+// it is not the lock of Ensure, which a running job holds for the build.
+const reindexLock = IndexJobKind + ".reindex/"
+
+// Reindex implements IndexScheduler. The check for an open job and the
+// insert of the new one run under a transaction advisory lock on the
+// definition, which is held until the new job is committed: a concurrent
+// call waits and finds that job open. The job carries the scope snapshot of
+// the request (jobs.Service.Enqueue); the check reads the jobs
+// organization-wide, so a job a principal of another scope queued counts as
+// well.
+func (j *DDLJob) Reindex(ctx context.Context, orgID, defID, createdBy string) (bool, error) {
+	if !isUUIDText(defID) {
+		return false, fmt.Errorf("%w: %q", ErrAttributeNotFound, defID)
+	}
+	created := false
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, j.pool, &scope, func(txCtx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(txCtx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, reindexLock+strings.ToLower(defID)); err != nil {
+			return fmt.Errorf("lock the rebuild of attribute definition %s: %w", defID, err)
+		}
+		var open bool
+		if err := tx.QueryRow(txCtx, `SELECT EXISTS (SELECT 1 FROM job WHERE organization_id = $1::uuid
+			AND kind = ANY($2::text[]) AND lower(params->>'definition_id') = $3 AND status IN ('queued', 'running'))`,
+			orgID, IndexJobKinds, strings.ToLower(defID)).Scan(&open); err != nil {
+			return fmt.Errorf("read the open index jobs of attribute definition %s: %w", defID, err)
+		}
+		if open {
+			return nil
+		}
+		// The job is committed by its own transaction (the context of the
+		// request: its scope snapshot), before this one releases the lock.
+		if _, _, err := j.jobs.Enqueue(ctx, orgID, IndexJobKind, indexJobParams{DefinitionID: strings.ToLower(defID)},
+			jobs.EnqueueOptions{CreatedBy: createdBy}); err != nil {
+			return fmt.Errorf("queue the index job of attribute definition %s: %w", defID, err)
+		}
+		created = true
+		return nil
+	})
+	return created, err
+}
+
+// Index states of a definition (AttributeIndexStatus, DB-04): the status of
+// its newest index job, IndexStateNone for a definition that needs no
+// index and has no job.
+const (
+	IndexStateNone      = "none"
+	IndexStateQueued    = string(jobs.StatusQueued)
+	IndexStateRunning   = string(jobs.StatusRunning)
+	IndexStateSucceeded = string(jobs.StatusSucceeded)
+	IndexStateFailed    = string(jobs.StatusFailed)
+	IndexStateCancelled = string(jobs.StatusCancelled)
+)
+
+// IndexMissing is the error of an indexed definition of the
+// organization without index job and without valid index (its job could
+// not be queued).
+const IndexMissing = "index missing"
+
+// AttributeIndexStatus is the index status of a definition (DB-04, UI-11,
+// WP-796): the state, attempts and error of its newest index job
+// (IndexJobKinds), the index that serves it and whether that index is
+// valid (pg_index.indisvalid).
+type AttributeIndexStatus struct {
+	State       string     `json:"state"`
+	IndexName   string     `json:"index_name"`
+	Valid       bool       `json:"valid"`
+	Error       string     `json:"error,omitempty"`
+	Attempts    int        `json:"attempts"`
+	MaxAttempts int        `json:"max_attempts"`
+	JobID       string     `json:"job_id,omitempty"`
+	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
+}
+
+// ServingIndexName is the index that serves d: the index of its key for a
+// definition UsesKeyIndex is true for (KeyIndexName, WP-607), else its own
+// (IndexName).
+func ServingIndexName(d *AttributeDefinition) string {
+	if UsesKeyIndex(d) {
+		return KeyIndexName(d.Key)
+	}
+	return IndexName(d.ID, d.Unique)
+}
+
+// indexJobState is the newest index job of a definition, as
+// indexStatusesTx reads it.
+type indexJobState struct {
+	id, status, err      string
+	attempts, maxAttempt int
+	updatedAt            *time.Time
+}
+
+// indexStatus derives the status of d from the validity of the index that
+// serves it and its newest index job (nil: none). A system definition is
+// indexed by its migration (Ensure skips it) and has no job of the
+// organization; a definition of the organization with flags but without
+// job (queueing failed) reports the index as it finds it.
+func indexStatus(d *AttributeDefinition, valid bool, job *indexJobState) AttributeIndexStatus {
+	s := AttributeIndexStatus{IndexName: ServingIndexName(d), Valid: valid}
+	indexed := d.Searchable || d.Unique
+	switch {
+	case d.IsSystem && indexed:
+		s.State = IndexStateSucceeded
+	case d.IsSystem:
+		s.State = IndexStateNone
+	case job != nil:
+		s.State, s.Error, s.Attempts, s.MaxAttempts = job.status, job.err, job.attempts, job.maxAttempt
+		if strings.HasPrefix(s.Error, ErrDuplicateValues.Error()) {
+			// The detail names the shared value of CIs the reader may not
+			// see; the status holds no object data.
+			s.Error = ErrDuplicateValues.Error()
+		}
+		s.JobID, s.UpdatedAt = job.id, job.updatedAt
+	case !indexed:
+		s.State = IndexStateNone
+	case valid:
+		s.State = IndexStateSucceeded
+	default:
+		s.State, s.Error = IndexStateFailed, IndexMissing
+	}
+	return s
+}
+
+// indexStatuses returns the index status of every definition of defs by
+// its id, read with one query: the newest job of IndexJobKinds of the
+// organization with params.definition_id of the definition, and the
+// validity of the index that serves it. The jobs are read
+// organization-wide: job_scope_select (migration 000154) hides the jobs of
+// org-wide creators from a scoped reader, and the status holds no object
+// data. The jobs are matched by params, not by ref_table/ref_id
+// (uq_job_ref admits one job per reference) or an idempotency key.
+func indexStatuses(ctx context.Context, pool *pgxpool.Pool, orgID string, defs []AttributeDefinition) (map[string]AttributeIndexStatus, error) {
+	out := make(map[string]AttributeIndexStatus, len(defs))
+	if len(defs) == 0 {
+		return out, nil
+	}
+	ids, names := make([]string, len(defs)), make([]string, len(defs))
+	for i := range defs {
+		ids[i], names[i] = strings.ToLower(defs[i].ID), ServingIndexName(&defs[i])
+	}
+	valid := make(map[string]bool, len(defs))
+	latest := make(map[string]*indexJobState, len(defs))
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			WITH d AS (SELECT * FROM unnest($2::text[], $3::text[]) AS d(id, index_name)),
+			latest AS (
+				SELECT DISTINCT ON (lower(j.params->>'definition_id')) lower(j.params->>'definition_id') AS def,
+					j.id::text AS id, j.status, COALESCE(j.error, '') AS error, j.attempts, j.max_attempts, j.updated_at
+				FROM job j
+				WHERE j.organization_id = $1::uuid AND j.kind = ANY($4::text[])
+				  AND lower(j.params->>'definition_id') = ANY($2::text[])
+				ORDER BY lower(j.params->>'definition_id'), j.created_at DESC, j.id DESC)
+			SELECT d.id, COALESCE(i.indisvalid, false), l.id IS NOT NULL, COALESCE(l.id, ''), COALESCE(l.status, ''),
+				COALESCE(l.error, ''), COALESCE(l.attempts, 0), COALESCE(l.max_attempts, 0), l.updated_at
+			FROM d
+			LEFT JOIN latest l ON l.def = d.id
+			LEFT JOIN pg_class c ON c.relname = d.index_name AND c.relnamespace = 'public'::regnamespace
+			LEFT JOIN pg_index i ON i.indexrelid = c.oid`, orgID, ids, names, IndexJobKinds)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var isValid, hasJob bool
+			job := &indexJobState{}
+			if serr := rows.Scan(&id, &isValid, &hasJob, &job.id, &job.status, &job.err, &job.attempts, &job.maxAttempt,
+				&job.updatedAt); serr != nil {
+				return serr
+			}
+			valid[id] = isValid
+			if hasJob {
+				latest[id] = job
+			}
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read attribute index status: %w", err)
+	}
+	for i := range defs {
+		id := strings.ToLower(defs[i].ID)
+		out[defs[i].ID] = indexStatus(&defs[i], valid[id], latest[id])
+	}
+	return out, nil
 }
 
 // Schedule runs the due index jobs every minute on the scheduler.

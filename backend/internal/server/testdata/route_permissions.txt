@@ -378,6 +378,7 @@ POST /api/v1/assignments assignment:write
 POST /api/v1/assignments/{id}/return assignment:write
 POST /api/v1/assignments/{id}/transfer assignment:write
 POST /api/v1/attribute-definitions ci_attribute:manage
+POST /api/v1/attribute-definitions/{id}/reindex ci_attribute:manage
 POST /api/v1/attribute-sets citype:manage
 POST /api/v1/audit-log/verify audit:read
 POST /api/v1/audit/verify audit:read

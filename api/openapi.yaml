@@ -12170,6 +12170,7 @@ paths:
         Pages
         newest first on (created_at, id) (API-02, F-215): `limit` (default
         50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+        Every definition carries its `index_status` (DB-04, WP-796).
       parameters:
         - { name: ci_type_id, in: query, schema: { type: string } }
         - { name: attribute_set_id, in: query, schema: { type: string } }
@@ -12244,6 +12245,7 @@ paths:
     get:
       operationId: getAttributeDefinition
       summary: Read an attribute definition
+      description: The definition with its `index_status` (DB-04, WP-796).
       responses:
         '200':
           description: Attribute definition
@@ -12310,6 +12312,51 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/attribute-definitions/{id}/reindex:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: reindexAttributeDefinition
+      summary: Rebuild the index of an attribute definition (DB-04)
+      description: >-
+        Queues an `attribute.index` job for the caller that brings the index
+        of the definition in line with its flags (DB-04, WP-796) and answers
+        202 with the index status of the new job; Location names the job.
+        While an index job of the definition (`attribute.index`,
+        `attribute.index.rebuild`, `attribute.index.key`) is queued or
+        running, the answer is 200 with its status and no job is queued;
+        concurrent requests leave at most one open job. A system definition
+        is 403 (its index comes from the migration), a definition that is
+        neither searchable nor unique 409, a server without job service 503.
+        Requires ci_attribute:manage.
+      responses:
+        '200':
+          description: An index job of the definition is open; its status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeIndexStatus'
+        '202':
+          description: Index job queued
+          headers:
+            Location:
+              description: The job (/api/v1/jobs/{id}).
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeIndexStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -14539,31 +14586,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  # Scaffold of the P2 path contract (E-38, WP-247): x-status: planned,
-  # no route yet; the work package named in description implements it.
-  /api/v1/attribute-definitions/{id}/reindex:
-    x-status: planned
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    post:
-      operationId: reindexAttributeDefinition
-      tags: [Metamodel]
-      summary: Rebuild the index of an attribute definition
-      description: Planned (E-38); WP-796 implements the operation.
-      responses:
-        '202':
-          description: Accepted; the job runs in the background, the Location header names it. The schemas come with WP-796.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
   /api/v1/lifecycle-models:
     get:
       operationId: listLifecycleModels
@@ -16619,6 +16641,46 @@ components:
             otherwise. IDs of types deleted since are kept and match nothing.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        index_status:
+          $ref: '#/components/schemas/AttributeIndexStatus'
+    AttributeIndexStatus:
+      type: object
+      required: [state, index_name, valid, attempts, max_attempts]
+      description: >-
+        The index status of an attribute definition (DB-04, UI-11, WP-796),
+        part of the reads GET /attribute-definitions and
+        GET /attribute-definitions/{id} (not of the writes, the export, the
+        audit or the event ci_attribute.changed). The source is the newest
+        job of the kinds `attribute.index`, `attribute.index.rebuild` and
+        `attribute.index.key` of the organization for the definition, read
+        organization-wide, so a reader with ci:read and a restricted scope
+        sees the same status (no job:read needed). A failed attempt with
+        attempts left is `queued` with `error` and `attempts`. Without a
+        job: `none` for a definition that is neither searchable nor unique;
+        a system definition `succeeded` (its index comes from the
+        migration); a definition of the organization with flags
+        `succeeded` when its index is valid, else `failed` with the error
+        "index missing".
+      properties:
+        state:
+          type: string
+          enum: [none, queued, running, succeeded, failed, cancelled]
+        index_name:
+          type: string
+          description: >-
+            The index that serves the definition: `idx_attr_<id>` (32 hex
+            characters, unique `_u`), or the index of its key
+            (`idx_attr_key_<key>` / `idx_attr_keyh_<hash>`) for a searchable,
+            not unique definition of the organization without CI type
+            (WP-607).
+        valid:
+          type: boolean
+          description: pg_index.indisvalid of the index; false without index.
+        error: { type: string, description: The error of the job's last attempt. }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        job_id: { type: string, description: The job; absent without job. }
+        updated_at: { type: string, format: date-time, description: The last change of the job; absent without job. }
     AttributeAppliesTo:
       type: string
       enum: [all, categories, types]

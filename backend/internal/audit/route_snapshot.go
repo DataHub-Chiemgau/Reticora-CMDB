@@ -422,6 +422,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	}
 	// The snapshot job: the answer names it as job_id.
 	m["POST /api/v1/history/snapshots"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
+	// The index job of a definition (WP-796): the answer names the queued
+	// or the open job as job_id.
+	m["POST /api/v1/attribute-definitions/{id}/reindex"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
 	// A role assignment is a custom-role grant or a standard-role
 	// assignment.
 	for _, route := range []string{"POST /api/v1/role-assignments", "POST /api/v1/roles/assign"} {

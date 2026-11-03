@@ -68,6 +68,10 @@ type AttributeDefinition struct {
 	AppliesToTypeIDs    []string  `json:"applies_to_type_ids"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// IndexStatus is the index status (DB-04, WP-796); only the read
+	// handlers set it (AttributeIndexStatuses), so the export, the audit
+	// and the event ci_attribute.changed go without it.
+	IndexStatus *AttributeIndexStatus `json:"index_status,omitempty"`
 }
 
 // AttributeDefinitionPatch changes a definition; key, CI type, attribute
@@ -121,6 +125,12 @@ var (
 	ErrAttributeNotFound = errors.New("attribute definition not found")
 	// ErrAttributeReadOnly: system definitions cannot be changed.
 	ErrAttributeReadOnly = errors.New("system attribute definitions are read-only")
+	// ErrAttributeNotIndexed: a rebuild of a definition that is neither
+	// searchable nor unique (WP-796).
+	ErrAttributeNotIndexed = errors.New("the attribute definition is neither searchable nor unique and has no index")
+	// ErrIndexJobsUnavailable: no job service runs the index jobs
+	// (WithIndexScheduler not set).
+	ErrIndexJobsUnavailable = errors.New("attribute index jobs are not available")
 )
 
 // AttributeDefinitionStore is the attribute-definitions resource
@@ -137,6 +147,13 @@ type AttributeDefinitionStore interface {
 	CreateAttributeDefinition(ctx context.Context, orgID string, def *AttributeDefinition) error
 	UpdateAttributeDefinition(ctx context.Context, orgID, id string, patch *AttributeDefinitionPatch) (*AttributeDefinition, error)
 	DeleteAttributeDefinition(ctx context.Context, orgID, id string) error
+	// AttributeIndexStatuses returns the index status of the definitions
+	// by id with one query (DB-04, WP-796).
+	AttributeIndexStatuses(ctx context.Context, orgID string, defs []AttributeDefinition) (map[string]AttributeIndexStatus, error)
+	// ReindexAttributeDefinition queues a rebuild of the definition's
+	// index for createdBy unless an index job of it is open (created
+	// false) and returns the index status (WP-796).
+	ReindexAttributeDefinition(ctx context.Context, orgID, id, createdBy string) (status *AttributeIndexStatus, created bool, err error)
 }
 
 // Field is the legacy field view of the definition (/ci-types/{id}/fields).
@@ -1216,6 +1233,39 @@ func (r *PGRepository) DeleteAttributeDefinition(ctx context.Context, orgID, id 
 		r.scheduleIndex(ctx, orgID, deleted, nil)
 	}
 	return err
+}
+
+// AttributeIndexStatuses implements AttributeDefinitionStore.
+func (r *PGRepository) AttributeIndexStatuses(ctx context.Context, orgID string, defs []AttributeDefinition) (map[string]AttributeIndexStatus, error) {
+	return indexStatuses(ctx, r.pool, orgID, defs)
+}
+
+// ReindexAttributeDefinition implements AttributeDefinitionStore: the
+// definition is read in the principal's scope (unknown 404); a system
+// definition is indexed by its migration (ErrAttributeReadOnly), one
+// without searchable and unique has no index (ErrAttributeNotIndexed).
+func (r *PGRepository) ReindexAttributeDefinition(ctx context.Context, orgID, id, createdBy string) (*AttributeIndexStatus, bool, error) {
+	d, err := r.GetAttributeDefinition(ctx, orgID, id)
+	switch {
+	case err != nil:
+		return nil, false, err
+	case d.IsSystem:
+		return nil, false, ErrAttributeReadOnly
+	case !d.Searchable && !d.Unique:
+		return nil, false, ErrAttributeNotIndexed
+	case r.indexes == nil:
+		return nil, false, ErrIndexJobsUnavailable
+	}
+	created, err := r.indexes.Reindex(ctx, orgID, d.ID, createdBy)
+	if err != nil {
+		return nil, false, err
+	}
+	statuses, err := indexStatuses(ctx, r.pool, orgID, []AttributeDefinition{*d})
+	if err != nil {
+		return nil, false, err
+	}
+	s := statuses[d.ID]
+	return &s, created, nil
 }
 
 // scheduleIndex starts the index job when the change touches the index

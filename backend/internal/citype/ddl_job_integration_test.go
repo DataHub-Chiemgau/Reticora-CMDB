@@ -426,6 +426,27 @@ func TestAttributeIndexRebuild(t *testing.T) {
 	short, cancel := context.WithTimeout(bg, 3*time.Second)
 	err = ddl.Ensure(short, f.OrgA, serial.ID)
 	cancel()
+	// The driver cancels the build with a cancel request on a connection
+	// of its own and closes the run's connection without waiting for it, so
+	// the build may still wait on the server. Released by the rollback it
+	// would complete a valid index after the run gave up. The blocker stays
+	// until no backend runs the build any more; the build is cancelled as
+	// the driver's request does (which may still be on its way).
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		var running int
+		if qerr := f.Admin.QueryRow(bg, `SELECT count(*) FILTER (WHERE pg_cancel_backend(pid)) FROM pg_stat_activity
+			WHERE pid <> pg_backend_pid() AND state = 'active' AND strpos(query, $1) > 0 AND query LIKE 'CREATE %'`,
+			serialIndex+RebuildSuffix).Scan(&running); qerr != nil {
+			t.Fatal(qerr)
+		}
+		if running == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the interrupted build of %s still runs on the server", serialIndex+RebuildSuffix)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	_ = blocker.Rollback(bg)
 	if err == nil {
 		t.Fatal("the run finished although a transaction kept the build waiting")
