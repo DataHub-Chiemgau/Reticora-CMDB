@@ -323,6 +323,27 @@ func TestAttributeSetCompositionConflictsAgainstPostgres(t *testing.T) {
 		t.Errorf("type after the refused changes: version %d (before %d), mode %v",
 			after.SchemaVersion, before.SchemaVersion, prop(&after, "wp709_mode"))
 	}
+	// A deactivated set leaves the composition; a type attribute may then
+	// take its key with another data type. Activating the set again would
+	// bring the conflict back: 422 on is_active with the code, the set stays
+	// inactive.
+	react := a.createSet(org, "wp709-conflict-react")
+	a.mustSetAttribute(org, react.ID, `{"key":"wp709_react","data_type":"integer"}`)
+	a.putSets(org, child.ID, react.ID)
+	a.must(http.StatusOK, org, http.MethodPatch, "/api/v1/attribute-sets/"+react.ID, `{"is_active":false}`, nil)
+	a.must(http.StatusCreated, org, http.MethodPost, "/api/v1/attribute-definitions",
+		`{"ci_type_id":"`+child.ID+`","key":"wp709_react","data_type":"text"}`, nil)
+	w = a.call(org, http.MethodPatch, "/api/v1/attribute-sets/"+react.ID, `{"is_active":true}`)
+	if p := problemOf(w); w.Code != http.StatusUnprocessableEntity || p.Field != "is_active" ||
+		!strings.Contains(w.Body.String(), citype.CodeDatatypeConflict) {
+		t.Errorf("reactivating a conflicting set: %d %s, want 422 on is_active with %s",
+			w.Code, w.Body.String(), citype.CodeDatatypeConflict)
+	}
+	var still citype.AttributeSet
+	a.must(http.StatusOK, org, http.MethodGet, "/api/v1/attribute-sets/"+react.ID, "", &still)
+	if still.IsActive {
+		t.Error("the refused reactivation left the set active")
+	}
 }
 
 // TestAttributeSetCloneAndUniqueAgainstPostgres covers MET-16 and DB-04
