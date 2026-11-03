@@ -141,6 +141,13 @@ type FieldDefinition struct {
 	// instance definition has no such column). The composition treats two
 	// set values that differ as a data type conflict (MET-16).
 	MultiValue *bool `json:"-"`
+	// Computed is the expression of a computed attribute (WP-258, MET-10;
+	// $defs/expr of api/rules.schema.json), nil for an entered one. The
+	// write path evaluates it (WP-717); the composition keeps it (MET-16).
+	Computed *rules.Expr `json:"computed,omitempty"`
+	// Unique is attribute_definition.is_unique; the composition refuses it
+	// next to a computed expression of another layer (WP-258).
+	Unique bool `json:"-"`
 }
 
 // ValidationRules carries the configurable validation metadata of a field.

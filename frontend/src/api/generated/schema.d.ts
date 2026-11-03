@@ -8424,6 +8424,7 @@ export interface components {
       unique_scope: 'org' | 'client';
       inheritable: boolean;
       validation?: components['schemas']['AttributeValidation'];
+      computed?: components['schemas']['expr'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -8473,6 +8474,8 @@ export interface components {
       components['schemas']['rule'] | components['schemas']['AttributeValidationLegacy'];
     /** @description A rule of the JSON rule language of the metamodel (MET-45, phase 1: required, pattern, range and enum, combined with all), defined by api/rules.schema.json. */
     RuleAST: components['schemas']['rule'];
+    /** @description The expression of a computed attribute (MET-10 computed, WP-258): $defs/expr of api/rules.schema.json — field (an attribute of the CI, or asset.<field> of the asset linked through ci.asset_id: warranty_end, purchase_date, purchase_cost, asset_tag, serial_number, status), literal, add, sub, mul, div, today, days_between, concat, lower, upper and coalesce. Absent for an entered attribute. A computed attribute is neither required nor unique and has no default; its data type is integer, decimal, text, multiline, date or boolean (single-valued) and takes the result type of the expression. 422 on computed for an invalid expression, a result type that does not fit, an asset field outside the list, a reference to the attribute itself or to another computed attribute, and computed together with required, default or unique. The composition (MET-16) keeps the expression of a layer; a different expression of another layer (code computed-conflict) and required, a default or unique from another layer (computed-constraint) are 422 on key. The generated attribute_schema marks the attribute readOnly with x-computed (the AST). The CI write path computes the values with WP-717. */
+    ComputedExpression: components['schemas']['expr'];
     /** @description The former validation structure, translated into the AST: options → enum, pattern and patterns → pattern, min/max → range, min_length/max_length → range of length; several rules are combined with all. {} is no rule. */
     AttributeValidationLegacy: {
       min?: number;
@@ -8514,6 +8517,7 @@ export interface components {
       unique_scope?: 'org' | 'client';
       inheritable?: boolean;
       validation?: components['schemas']['AttributeValidation'];
+      computed?: components['schemas']['expr'];
       conditional?: {
         [key: string]: unknown;
       };
@@ -8698,6 +8702,8 @@ export interface components {
       inheritable?: boolean;
       /** @description The new rules; null or {} removes them. */
       validation?: components['schemas']['AttributeValidation'] | null;
+      /** @description The new expression of a computed attribute. A definition stays computed or entered for its lifetime: an expression on an entered definition or null on a computed one is 422 on computed (WP-258). */
+      computed?: components['schemas']['expr'] | null;
       conditional?: {
         [key: string]: unknown;
       };
@@ -9734,7 +9740,7 @@ export interface components {
       trace_id: string;
       /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client, or `key` of an attribute definition that cannot be composed, 422). */
       field?: string;
-      /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`) or `length-range-empty` (`min_length` > `max_length`). */
+      /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`), `length-range-empty` (`min_length` > `max_length`), `computed-conflict` (different expressions of a computed attribute) or `computed-constraint` (a computed attribute made required, given a default or made unique by another layer). */
       code?: string;
     };
     /** @description A lifecycle model (LCY-02, MET-01): states and guarded transitions for CIs or assets. System models (is_system, no organization_id) are read-only. */
@@ -12110,7 +12116,7 @@ export interface components {
       violations: {
         field: string;
         detail: string;
-        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty` or `length-range-empty`. A violated catalog rule (WP-257, MET-10) carries the code of the rule language for a `validation` rule (e.g. `pattern`, `range.max`, `enum`), `required` for a `required` rule and `read_only` for a `readonly` rule. */
+        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty`, `length-range-empty`, `computed-conflict` or `computed-constraint`. A violated catalog rule (WP-257, MET-10) carries the code of the rule language for a `validation` rule (e.g. `pattern`, `range.max`, `enum`), `required` for a `required` rule and `read_only` for a `readonly` rule. */
         code?: string;
         /** @description Key of the violated catalog rule (`/api/v1/rules`, WP-257); absent for the rules of the attribute definitions. */
         rule?: string;
@@ -13945,6 +13951,73 @@ export interface components {
       /** @constant */
       op: 'enum';
       values: (string | number | boolean)[];
+    };
+    /** @description The value of an attribute of the record (its key), or asset.<field> of the asset linked through ci.asset_id (whitelist rules.AssetFields). */
+    expr_field: {
+      /** @constant */
+      op: 'field';
+      field:
+        | string
+        | unknown
+        | (
+            | 'asset.warranty_end'
+            | 'asset.purchase_date'
+            | 'asset.purchase_cost'
+            | 'asset.asset_tag'
+            | 'asset.serial_number'
+            | 'asset.status'
+          );
+    };
+    /** @description A constant string, number or boolean. */
+    expr_literal: {
+      /** @constant */
+      op: 'literal';
+      value: string | number | boolean;
+    };
+    /** @description An expression (WP-258): yields a value for the values of a record; empty inputs make it empty except within coalesce. */
+    expr:
+      | components['schemas']['expr_field']
+      | components['schemas']['expr_literal']
+      | components['schemas']['expr_arithmetic']
+      | components['schemas']['expr_today']
+      | components['schemas']['expr_days_between']
+      | components['schemas']['expr_concat']
+      | components['schemas']['expr_case']
+      | components['schemas']['expr_coalesce'];
+    /** @description add and mul of two or more numbers, sub and div of exactly two (first minus/by second); division by 0 is empty. */
+    expr_arithmetic: {
+      /** @enum {unknown} */
+      op: 'add' | 'sub' | 'mul' | 'div';
+      args: components['schemas']['expr'][];
+    };
+    /** @description The current date in the time zone of the evaluation (YYYY-MM-DD). */
+    expr_today: {
+      /** @constant */
+      op: 'today';
+    };
+    /** @description The number of days from the first to the second date (negative when the second is earlier). */
+    expr_days_between: {
+      /** @constant */
+      op: 'days_between';
+      args: components['schemas']['expr'][];
+    };
+    /** @description The text of the operands joined without separator. */
+    expr_concat: {
+      /** @constant */
+      op: 'concat';
+      args: components['schemas']['expr'][];
+    };
+    /** @description The text of the one operand in lower or upper case. */
+    expr_case: {
+      /** @enum {unknown} */
+      op: 'lower' | 'upper';
+      args: components['schemas']['expr'][];
+    };
+    /** @description The first operand that is not empty; empty when all are. */
+    expr_coalesce: {
+      /** @constant */
+      op: 'coalesce';
+      args: components['schemas']['expr'][];
     };
     /** @description A condition (WP-715): true or false for the values of a record. */
     condition:

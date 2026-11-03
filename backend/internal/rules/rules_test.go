@@ -3,10 +3,12 @@ package rules
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 type conformance struct {
@@ -32,6 +34,19 @@ type conformance struct {
 		Condition json.RawMessage `json:"condition"`
 		Path      string          `json:"path"`
 	} `json:"invalid_conditions"`
+	Expressions []struct {
+		Name     string          `json:"name"`
+		Expr     json.RawMessage `json:"expr"`
+		Inputs   map[string]any  `json:"inputs"`
+		Now      string          `json:"now"`
+		Timezone string          `json:"timezone"`
+		Result   json.RawMessage `json:"result"`
+	} `json:"expressions"`
+	InvalidExpressions []struct {
+		Name string          `json:"name"`
+		Expr json.RawMessage `json:"expr"`
+		Path string          `json:"path"`
+	} `json:"invalid_expressions"`
 }
 
 func loadConformance(t *testing.T) conformance {
@@ -44,7 +59,8 @@ func loadConformance(t *testing.T) conformance {
 	if err = json.Unmarshal(raw, &c); err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Cases) == 0 || len(c.InvalidRules) == 0 || len(c.ConditionCases) == 0 || len(c.InvalidConditions) == 0 {
+	if len(c.Cases) == 0 || len(c.InvalidRules) == 0 || len(c.ConditionCases) == 0 || len(c.InvalidConditions) == 0 ||
+		len(c.Expressions) == 0 || len(c.InvalidExpressions) == 0 {
 		t.Fatal("conformance file has no cases")
 	}
 	return c
@@ -231,6 +247,8 @@ func TestSchemaMatchesOperators(t *testing.T) {
 	for union, want := range map[string][]string{
 		"rule":      slices.Concat([]string{OpAll}, ValueOps),
 		"condition": slices.Concat(LogicOps, CompareOps),
+		// The expressions (WP-258) have operators of their own.
+		"expr": ExprOps,
 	} {
 		want = slices.Clone(want)
 		sort.Strings(want)
@@ -242,6 +260,11 @@ func TestSchemaMatchesOperators(t *testing.T) {
 	sort.Strings(all)
 	if !slices.Equal(all, slices.Compact(slices.Sorted(slices.Values(slices.Concat(operators("rule"), operators("condition")))))) {
 		t.Errorf("Ops %v are not the operators of the schema", Ops)
+	}
+	for _, op := range ExprOps {
+		if slices.Contains(Ops, op) {
+			t.Errorf("expression operator %s is an operator of rules or conditions", op)
+		}
 	}
 }
 
@@ -293,5 +316,145 @@ func TestMarshalCondition(t *testing.T) {
 		if again, _ := json.Marshal(parsed); string(again) != tc.want {
 			t.Errorf("round trip %s, want %s", again, tc.want)
 		}
+	}
+}
+
+// TestExpressionConformance runs expressions and invalid_expressions of
+// api/rules.conformance.json (WP-258, MET-45): arithmetic, today and
+// days_between with a fixed now and time zone (across midnight), strings,
+// coalesce, missing inputs and division by 0; invalid expressions are
+// refused naming the path. A valid expression survives a JSON round trip.
+func TestExpressionConformance(t *testing.T) {
+	c := loadConformance(t)
+	for _, tc := range c.Expressions {
+		t.Run(tc.Name, func(t *testing.T) {
+			e, err := ParseExpr(tc.Expr)
+			if err != nil {
+				t.Fatalf("valid expression rejected: %v", err)
+			}
+			now, err := time.Parse(time.RFC3339, tc.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loc, err := time.LoadLocation(tc.Timezone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := json.Marshal(EvalExpr(&e, tc.Inputs, now, loc))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var gotValue, wantValue any
+			if err = json.Unmarshal(got, &gotValue); err != nil {
+				t.Fatal(err)
+			}
+			if err = json.Unmarshal(tc.Result, &wantValue); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(gotValue, wantValue) {
+				t.Errorf("result = %s, want %s", got, tc.Result)
+			}
+			again, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sent, written any
+			_ = json.Unmarshal(tc.Expr, &sent)
+			_ = json.Unmarshal(again, &written)
+			if !reflect.DeepEqual(sent, written) {
+				t.Errorf("round trip %s, sent %s", again, tc.Expr)
+			}
+		})
+	}
+	for _, tc := range c.InvalidExpressions {
+		t.Run(tc.Name, func(t *testing.T) {
+			_, err := ParseExpr(tc.Expr)
+			if err == nil {
+				t.Fatal("invalid expression accepted")
+			}
+			if !strings.HasPrefix(err.Error(), tc.Path+": ") {
+				t.Errorf("error %q does not name the path %s", err, tc.Path)
+			}
+		})
+	}
+}
+
+// TestExpressionCoversEveryOperator: expressions have at least one case per
+// operator (WP-258).
+func TestExpressionCoversEveryOperator(t *testing.T) {
+	seen := map[string]bool{}
+	for _, tc := range loadConformance(t).Expressions {
+		e, err := ParseExpr(tc.Expr)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.Name, err)
+		}
+		e.walk(func(n *Expr) { seen[n.Op] = true })
+	}
+	for _, op := range ExprOps {
+		if !seen[op] {
+			t.Errorf("no expression case uses %s", op)
+		}
+	}
+}
+
+// TestExpressionTypesAndFields: the result type of an expression, its
+// references and whether it reads the date; a Go time.Time counts with its
+// date in the time zone, a nil location is UTC; a nesting deeper than the
+// limit is refused.
+func TestExpressionTypesAndFields(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"op":"days_between","args":[{"op":"today"},{"op":"field","field":"asset.warranty_end"}]}`: ResultNumber,
+		`{"op":"concat","args":[{"op":"literal","value":1}]}`:                                       ResultString,
+		`{"op":"today"}`: ResultDate,
+		`{"op":"field","field":"asset.purchase_date"}`:                                       ResultDate,
+		`{"op":"literal","value":true}`:                                                      ResultBoolean,
+		`{"op":"field","field":"owner"}`:                                                     ResultAny,
+		`{"op":"coalesce","args":[{"op":"field","field":"a"},{"op":"literal","value":"x"}]}`: ResultString,
+	} {
+		e, err := ParseExpr([]byte(raw))
+		if err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		if got := e.ResultType(); got != want {
+			t.Errorf("%s: type %s, want %s", raw, got, want)
+		}
+	}
+	e, err := ParseExpr([]byte(`{"op":"add","args":[{"op":"field","field":"b"},{"op":"days_between","args":[
+		{"op":"today"},{"op":"field","field":"asset.warranty_end"}]},{"op":"field","field":"b"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Fields(); !slices.Equal(got, []string{"asset.warranty_end", "b"}) {
+		t.Errorf("fields = %v", got)
+	}
+	if !e.UsesToday() {
+		t.Error("today not found")
+	}
+	now := time.Date(2026, 3, 1, 23, 30, 0, 0, time.UTC)
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	days := Expr{Op: ExprDaysBetween, Args: []Expr{{Op: ExprToday}, {Op: ExprField, Field: "end"}}}
+	end := time.Date(2026, 3, 3, 23, 30, 0, 0, time.UTC)
+	if got := EvalExpr(&days, map[string]any{"end": end}, now, berlin); got != float64(2) {
+		t.Errorf("days in Berlin = %v, want 2", got)
+	}
+	if got := EvalExpr(&days, map[string]any{"end": end}, now, nil); got != float64(2) {
+		t.Errorf("days in UTC = %v, want 2", got)
+	}
+	deep := `{"op":"field","field":"a"}`
+	for range maxExprDepth + 1 {
+		deep = `{"op":"lower","args":[` + deep + `]}`
+	}
+	if _, err := ParseExpr([]byte(deep)); err == nil {
+		t.Error("expression nested too deep accepted")
+	}
+	var decoded Expr
+	if err := json.Unmarshal([]byte(`{"op":"today","x":1}`), &decoded); err == nil {
+		t.Error("UnmarshalJSON accepted an unknown property")
+	}
+	if !e.Equal(&e) || e.Equal(&days) {
+		t.Error("Equal")
 	}
 }

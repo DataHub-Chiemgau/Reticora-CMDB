@@ -15,8 +15,9 @@ type CompositionError struct {
 	Reason string
 	// Code names the failing rule in machine-readable form, as
 	// compose_attribute_definition reports it in DETAIL: one of
-	// CodeDatatypeConflict, CodeEnumEmpty, CodeRangeEmpty and
-	// CodeLengthRangeEmpty.
+	// CodeDatatypeConflict, CodeEnumEmpty, CodeRangeEmpty,
+	// CodeLengthRangeEmpty, CodeComputedConflict and
+	// CodeComputedConstraint.
 	Code string
 }
 
@@ -31,6 +32,12 @@ const (
 	CodeRangeEmpty = "range-empty"
 	// CodeLengthRangeEmpty: min_length is greater than max_length.
 	CodeLengthRangeEmpty = "length-range-empty"
+	// CodeComputedConflict: two layers compute the attribute with different
+	// expressions (WP-258).
+	CodeComputedConflict = "computed-conflict"
+	// CodeComputedConstraint: a computed attribute would become required,
+	// get a default or become unique through another layer (WP-258).
+	CodeComputedConstraint = "computed-constraint"
 )
 
 func (e *CompositionError) Error() string {
@@ -55,7 +62,10 @@ func (e *CompositionError) CompositionCode() string { return e.Code }
 // the last layer that sets them win; a different data type is an error.
 // Keys keep the order of their first appearance. multi_value is part of
 // the data type: two set values that differ are a conflict, an unset one
-// (nil, an instance definition) takes the other.
+// (nil, an instance definition) takes the other. A computed expression
+// (WP-258) stays: a layer without one keeps that of the layer below, two
+// different expressions are a conflict, and so is a computed attribute
+// that would be required, have a default or be unique through any layer.
 // It returns the first conflict of ComposeAll, as before WP-252.
 // validation: CompositionError names the key and the rule that fails.
 func Compose(layers ...[]fieldmeta.FieldDefinition) ([]fieldmeta.FieldDefinition, error) {
@@ -162,6 +172,9 @@ func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefiniti
 	if out.Conditional == nil {
 		out.Conditional = base.Conditional
 	}
+	if conflict := composeComputed(base, top, &out); conflict != nil {
+		return fieldmeta.FieldDefinition{}, conflict
+	}
 
 	allowed := allowedValues(base)
 	if more := allowedValues(top); more != nil {
@@ -223,6 +236,24 @@ func composeField(base, top *fieldmeta.FieldDefinition) (fieldmeta.FieldDefiniti
 		out.Validation = &v
 	}
 	return out, nil
+}
+
+// composeComputed keeps the expression of a computed attribute in out
+// (WP-258): a narrower layer cannot remove it, two different expressions
+// are a conflict, and a computed attribute is neither required nor has a
+// default nor is unique, whichever layer sets them.
+func composeComputed(base, top, out *fieldmeta.FieldDefinition) *CompositionError {
+	switch {
+	case base.Computed != nil && top.Computed != nil && !base.Computed.Equal(top.Computed):
+		return &CompositionError{Key: top.Name, Reason: "the computed expressions differ", Code: CodeComputedConflict}
+	case out.Computed == nil:
+		out.Computed = base.Computed
+	}
+	if out.Computed != nil && (out.Required || out.DefaultValue != "" || base.Unique || top.Unique) {
+		return &CompositionError{Key: top.Name, Reason: "a computed attribute cannot be required, have a default or be unique",
+			Code: CodeComputedConstraint}
+	}
+	return nil
 }
 
 type number interface{ ~int | ~float64 }

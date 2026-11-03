@@ -3,6 +3,7 @@ package citype
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
@@ -720,5 +722,258 @@ func TestAttributeDefinitionASTValidation(t *testing.T) {
 		if !reflect.DeepEqual(normalized(string(goJSON)), normalized(string(sqlJSON))) {
 			t.Errorf("%s: Go %s, database %s", ast, goJSON, sqlJSON)
 		}
+	}
+}
+
+// TestComputedAttributeDefinitions covers WP-258 (MET-10 computed, MET-16)
+// against PostgreSQL: POST and PATCH /attribute-definitions take an
+// expression ($defs/expr) in computed, store and answer it, and the
+// materialized schema marks the attribute readOnly with x-computed; types
+// without a computed attribute keep their schema_version. 422 on computed
+// for an invalid expression, a result type that does not fit the data
+// type, an asset field outside the whitelist, a data type that cannot be
+// computed, a reference to the attribute itself or to another computed
+// attribute (both directions), computed with required, default or unique
+// (also by PATCH, and the CHECK of the database), and for switching
+// between computed and entered after creation; the expression itself can
+// change. The composition keeps the expression and refuses a different
+// one and required, default or unique of another layer: the system base
+// against a type (compose_attribute_definition) and an organization global
+// against a type (checkCompositionTx), 422 on key with the code.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestComputedAttributeDefinitions(t *testing.T) {
+	f := scopetest.Seed(t, "89")
+	bg := context.Background()
+	repo := NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	normalized := func(s string) any {
+		t.Helper()
+		var v any
+		if err := json.Unmarshal([]byte(s), &v); err != nil {
+			t.Fatalf("%s: %v", s, err)
+		}
+		return v
+	}
+	created := func(body string) (id string, computed any) {
+		t.Helper()
+		w := call(http.MethodPost, "/api/v1/attribute-definitions", body)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("POST %s: %d %s", body, w.Code, w.Body.String())
+		}
+		var d struct {
+			ID       string `json:"id"`
+			Computed any    `json:"computed"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &d); err != nil {
+			t.Fatal(err)
+		}
+		return d.ID, d.Computed
+	}
+	stored := func(id string) any {
+		t.Helper()
+		var raw []byte
+		if err := f.Admin.QueryRow(bg, `SELECT computed FROM attribute_definition WHERE id = $1`, id).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw == nil {
+			return nil
+		}
+		return normalized(string(raw))
+	}
+	refused := func(name string, w *httptest.ResponseRecorder, field, code string) {
+		t.Helper()
+		var problem struct {
+			Field string `json:"field"`
+			Code  string `json:"code"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &problem)
+		if w.Code != http.StatusUnprocessableEntity || problem.Field != field || problem.Code != code {
+			t.Errorf("%s: %d %s, want 422 on %s with code %q", name, w.Code, w.Body.String(), field, code)
+		}
+	}
+	newType := func(key string) *Type {
+		t.Helper()
+		typ := &Type{OrganizationID: f.OrgA, Key: key, Name: key, IsObservable: true}
+		if err := repo.Create(ctx, typ); err != nil {
+			t.Fatalf("create type: %v", err)
+		}
+		return typ
+	}
+	schemaOf := func(id string) (props map[string]any, version int) {
+		t.Helper()
+		typ, err := repo.GetByID(ctx, f.OrgA, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		props, _ = typ.AttributeSchema["properties"].(map[string]any)
+		return props, typ.SchemaVersion
+	}
+
+	server, plain := newType("wp258-server"), newType("wp258-plain")
+	if _, err := repo.UpsertField(ctx, f.OrgA, plain.ID, UpsertFieldRequest{Scope: "type", Name: "wp258_note", DataType: "text"}); err != nil {
+		t.Fatal(err)
+	}
+	_, plainVersion := schemaOf(plain.ID)
+	typed := func(key, rest string) string {
+		return `{"ci_type_id":"` + server.ID + `","key":"` + key + `",` + rest + `}`
+	}
+
+	// A computed attribute: answered and stored as sent, readOnly with
+	// x-computed in the schema, the expression in the resolved definition.
+	const daysExpr = `{"op":"days_between","args":[{"op":"today"},{"op":"field","field":"asset.warranty_end"}]}`
+	daysID, answered := created(typed("wp258_days", `"data_type":"integer","searchable":true,"computed":`+daysExpr))
+	if !reflect.DeepEqual(answered, normalized(daysExpr)) || !reflect.DeepEqual(stored(daysID), normalized(daysExpr)) {
+		t.Errorf("computed answered %v, stored %v, want %s", answered, stored(daysID), daysExpr)
+	}
+	props, _ := schemaOf(server.ID)
+	days, _ := props["wp258_days"].(map[string]any)
+	if days["readOnly"] != true || !reflect.DeepEqual(days["x-computed"], normalized(daysExpr)) || days["type"] != "integer" {
+		t.Errorf("materialized schema of the computed attribute = %v", days)
+	}
+	resolved, err := ResolveFields(ctx, repo, f.OrgA, server.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, d := range resolved {
+		if d.Name == "wp258_days" {
+			found = d.Computed != nil && d.Computed.UsesToday()
+		}
+	}
+	if !found {
+		t.Error("ResolveFields does not carry the expression of wp258_days")
+	}
+	if _, v := schemaOf(plain.ID); v != plainVersion {
+		t.Errorf("schema_version of a type without computed attributes v%d, want v%d", v, plainVersion)
+	}
+	// An entered attribute next to it, referenced by a computed text.
+	if _, err = repo.UpsertField(ctx, f.OrgA, server.ID, UpsertFieldRequest{Scope: "type", Name: "wp258_host", DataType: "text"}); err != nil {
+		t.Fatal(err)
+	}
+	labelID, _ := created(typed("wp258_label", `"data_type":"text","computed":{"op":"upper","args":[{"op":"field","field":"wp258_host"}]}`))
+
+	// Refused definitions: 422 on computed, nothing stored.
+	for name, body := range map[string]string{
+		"invalid expression":          typed("wp258_bad", `"data_type":"integer","computed":{"op":"pow","args":[]}`),
+		"unknown property":            typed("wp258_bad", `"data_type":"integer","computed":{"op":"today","tz":"UTC"}`),
+		"result does not fit":         typed("wp258_bad", `"data_type":"date","computed":`+daysExpr),
+		"text into a number":          typed("wp258_bad", `"data_type":"integer","computed":{"op":"concat","args":[{"op":"literal","value":"x"}]}`),
+		"asset field not whitelisted": typed("wp258_bad", `"data_type":"text","computed":{"op":"field","field":"asset.location_id"}`),
+		"data type not computable":    typed("wp258_bad", `"data_type":"ip","computed":{"op":"field","field":"wp258_host"}`),
+		"multi_value":                 typed("wp258_bad", `"data_type":"text","multi_value":true,"computed":{"op":"field","field":"wp258_host"}`),
+		"refers to itself":            typed("wp258_bad", `"data_type":"text","computed":{"op":"field","field":"wp258_bad"}`),
+		"refers to a computed one":    typed("wp258_bad", `"data_type":"integer","computed":{"op":"add","args":[{"op":"field","field":"wp258_days"},{"op":"literal","value":1}]}`),
+		"with required":               typed("wp258_bad", `"data_type":"integer","required":true,"computed":`+daysExpr),
+		"with a required rule":        typed("wp258_bad", `"data_type":"integer","validation":{"op":"required"},"computed":`+daysExpr),
+		"with a default":              typed("wp258_bad", `"data_type":"integer","default":3,"computed":`+daysExpr),
+		"with unique":                 typed("wp258_bad", `"data_type":"integer","unique":true,"computed":`+daysExpr),
+	} {
+		refused(name, call(http.MethodPost, "/api/v1/attribute-definitions", body), "computed", "")
+	}
+	var bad int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM attribute_definition WHERE key = 'wp258_bad'`).Scan(&bad); err != nil || bad != 0 {
+		t.Errorf("%d refused definitions stored (%v)", bad, err)
+	}
+	// A computed attribute another expression already refers to.
+	created(typed("wp258_future", `"data_type":"text","computed":{"op":"lower","args":[{"op":"field","field":"wp258_later"}]}`))
+	refused("referred to by a computed one", call(http.MethodPost, "/api/v1/attribute-definitions",
+		typed("wp258_later", `"data_type":"text","computed":{"op":"field","field":"wp258_host"}`)), "computed", "")
+
+	// PATCH: the expression can change; switching, an invalid expression
+	// and required, default or unique cannot.
+	const nextExpr = `{"op":"coalesce","args":[{"op":"days_between","args":[{"op":"today"},{"op":"field","field":"asset.warranty_end"}]},{"op":"literal","value":0}]}`
+	if w := call(http.MethodPatch, "/api/v1/attribute-definitions/"+daysID, `{"computed":`+nextExpr+`}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH the expression: %d %s", w.Code, w.Body.String())
+	}
+	if !reflect.DeepEqual(stored(daysID), normalized(nextExpr)) {
+		t.Errorf("patched expression stored %v", stored(daysID))
+	}
+	props, _ = schemaOf(server.ID)
+	if days, _ = props["wp258_days"].(map[string]any); !reflect.DeepEqual(days["x-computed"], normalized(nextExpr)) {
+		t.Errorf("schema after PATCH = %v", days)
+	}
+	hostID := ""
+	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM attribute_definition WHERE ci_type_id = $1 AND key = 'wp258_host'`,
+		server.ID).Scan(&hostID); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct{ id, body string }{
+		"computed to entered":  {daysID, `{"computed":null}`},
+		"entered to computed":  {hostID, `{"computed":{"op":"literal","value":"x"}}`},
+		"invalid expression":   {daysID, `{"computed":{"op":"add","args":[{"op":"literal","value":1}]}}`},
+		"result does not fit":  {labelID, `{"computed":` + daysExpr + `}`},
+		"required":             {daysID, `{"required":true}`},
+		"default":              {daysID, `{"default":5}`},
+		"unique":               {daysID, `{"unique":true}`},
+		"refers to a computed": {labelID, `{"computed":{"op":"field","field":"wp258_future"}}`},
+	} {
+		refused("PATCH "+name, call(http.MethodPatch, "/api/v1/attribute-definitions/"+tc.id, tc.body), "computed", "")
+	}
+	if !reflect.DeepEqual(stored(daysID), normalized(nextExpr)) || stored(hostID) != nil {
+		t.Errorf("refused PATCHes changed computed: %v, %v", stored(daysID), stored(hostID))
+	}
+	// The CHECK of the database.
+	_, err = f.Admin.Exec(bg, `UPDATE attribute_definition SET required = true WHERE id = $1`, daysID)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "attribute_definition_computed_check" {
+		t.Errorf("required on a computed attribute in the database: %v, want attribute_definition_computed_check", err)
+	}
+
+	// Composition: the system base against a type (database) and an
+	// organization global against a type (backend).
+	var sysID string
+	if err = f.Admin.QueryRow(bg, `INSERT INTO attribute_definition (organization_id, ci_type_id, scope, key, data_type, computed)
+		VALUES (NULL, NULL, 'global', 'wp258_sys_days', 'integer', $1::jsonb) RETURNING id::text`, daysExpr).Scan(&sysID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DELETE FROM attribute_definition WHERE id = $1`, sysID)
+	})
+	created(`{"key":"wp258_org_days","data_type":"integer","computed":` + daysExpr + `}`)
+	props, _ = schemaOf(server.ID)
+	if sys, _ := props["wp258_sys_days"].(map[string]any); sys["readOnly"] != true {
+		t.Errorf("system computed attribute in the type schema = %v", sys)
+	}
+	// The same expression and a narrower layer without one compose; the
+	// expression of the base stays.
+	created(typed("wp258_sys_days", `"data_type":"integer","group":"warranty"`))
+	props, _ = schemaOf(server.ID)
+	if sys, _ := props["wp258_sys_days"].(map[string]any); sys["readOnly"] != true || sys["x-group"] != "warranty" ||
+		!reflect.DeepEqual(sys["x-computed"], normalized(daysExpr)) {
+		t.Errorf("type layer over the computed system attribute = %v", sys)
+	}
+	other := newType("wp258-other")
+	_, before := schemaOf(server.ID)
+	for name, tc := range map[string]struct{ body, code string }{
+		"database: different expression": {`{"ci_type_id":"` + other.ID + `","key":"wp258_sys_days","data_type":"integer",
+			"computed":{"op":"literal","value":1}}`, CodeComputedConflict},
+		"backend: different expression": {typed("wp258_org_days", `"data_type":"integer","computed":{"op":"literal","value":1}`), CodeComputedConflict},
+		"backend: required":             {typed("wp258_org_days", `"data_type":"integer","required":true`), CodeComputedConstraint},
+		"backend: default":              {typed("wp258_org_days", `"data_type":"integer","default":7`), CodeComputedConstraint},
+		"backend: unique":               {typed("wp258_org_days", `"data_type":"integer","unique":true`), CodeComputedConstraint},
+	} {
+		refused(name, call(http.MethodPost, "/api/v1/attribute-definitions", tc.body), "key", tc.code)
+	}
+	// The type attribute of the system key: required, a default and unique
+	// are composition conflicts in the database.
+	typeSysID := ""
+	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM attribute_definition WHERE ci_type_id = $1 AND key = 'wp258_sys_days'`,
+		server.ID).Scan(&typeSysID); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{`{"required":true}`, `{"default":7}`, `{"unique":true}`} {
+		refused("database: PATCH "+body, call(http.MethodPatch, "/api/v1/attribute-definitions/"+typeSysID, body), "key", CodeComputedConstraint)
+	}
+	if _, after := schemaOf(server.ID); after != before {
+		t.Errorf("refused definitions changed the schema: v%d, want v%d", after, before)
 	}
 }

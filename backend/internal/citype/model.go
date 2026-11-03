@@ -17,6 +17,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // Type is a CI type definition including its extension metadata (spec §1).
@@ -96,6 +97,11 @@ type Field struct {
 	AppliesTo           string   `json:"applies_to,omitempty"`
 	AppliesToCategories []string `json:"applies_to_categories,omitempty"`
 	AppliesToTypeIDs    []string `json:"applies_to_type_ids,omitempty"`
+	// Computed is the expression of a computed attribute (WP-258) and
+	// Unique attribute_definition.is_unique; both reach the composition
+	// (Definition), the legacy field views do not show them.
+	Computed *rules.Expr `json:"-"`
+	Unique   bool        `json:"-"`
 }
 
 // InstanceField is a field definition scoped to a single CI instance (spec §2).
@@ -135,6 +141,8 @@ func (f Field) Definition() fieldmeta.FieldDefinition {
 		Conditional:     f.Conditional,
 		ReferenceTarget: f.ReferenceTarget,
 		MultiValue:      f.MultiValue,
+		Computed:        f.Computed,
+		Unique:          f.Unique,
 	}
 }
 

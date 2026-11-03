@@ -1012,6 +1012,8 @@ type attributeRowJSON struct {
 	AppliesTo           string   `json:"applies_to"`
 	AppliesToCategories []string `json:"applies_to_categories"`
 	AppliesToTypeIDs    []string `json:"applies_to_type_ids"`
+	// Computed is the expression of a computed attribute (WP-258).
+	Computed json.RawMessage `json:"computed"`
 }
 
 // attributesFromJSON decodes a JSON array of attribute_definition rows the
@@ -1049,6 +1051,7 @@ func attributesFromJSON(raw []byte) ([]AttributeDefinition, error) {
 			_ = json.Unmarshal(row.EnumValues, &d.EnumValues)
 		}
 		d.Validation = fieldmeta.StoredValidation(row.Validation)
+		d.Computed = storedComputed(row.Computed)
 		if len(row.Conditional) > 0 && string(row.Conditional) != "null" {
 			var c fieldmeta.ConditionalRules
 			if json.Unmarshal(row.Conditional, &c) == nil {

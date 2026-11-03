@@ -736,6 +736,20 @@ unverändert: Die Anwendbarkeit wertet die Laufzeitkomposition aus
 (`ResolveFields`, Kompositionsprüfung), Index und Eindeutigkeit bleiben
 organisationsweit.
 
+Berechnete Attribute (MET-10 computed, WP-258, Migration 000211):
+`attribute_definition.computed` (`JSONB`, `NULL` = erfasstes Attribut) hält
+den Ausdruck nach `$defs/expr` aus `api/rules.schema.json`
+(`rules.ParseExpr`). `attribute_definition_computed_check`: Ein berechnetes
+Attribut ist weder `required` noch `is_unique` und hat keinen
+`default_value`. `compose_attribute_definition` behält den Ausdruck einer
+Ebene; abweichende Ausdrücke (`computed-conflict`) sowie `required`, Default
+oder `is_unique` einer anderen Ebene (`computed-constraint`) sind
+Kompositionsfehler unter `attribute_definition_composition`.
+`attribute_json_schema` schreibt für berechnete Attribute `readOnly: true`
+und `x-computed`; Schemata ohne berechnete Attribute und ihre
+`schema_version` bleiben unverändert. Trigger, Indizes und RLS-Policies
+bleiben unverändert; die Werte berechnet der Schreibpfad (WP-717).
+
 Lifecycle-Modelle (MET-01, MET-06, LCY-02, WP-263, Migration 000201): Die
 Tabellen `lifecycle_definition`, `lifecycle_state` und `lifecycle_transition`
 behalten ihre Namen. `ci_type.lifecycle_model_id` (vorher

@@ -17156,6 +17156,8 @@ components:
         inheritable: { type: boolean }
         validation:
           $ref: '#/components/schemas/AttributeValidation'
+        computed:
+          $ref: '#/components/schemas/ComputedExpression'
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -17251,6 +17253,27 @@ components:
         required, pattern, range and enum, combined with all), defined by
         api/rules.schema.json.
       $ref: './rules.schema.json'
+    ComputedExpression:
+      description: >-
+        The expression of a computed attribute (MET-10 computed, WP-258):
+        $defs/expr of api/rules.schema.json — field (an attribute of the CI,
+        or asset.<field> of the asset linked through ci.asset_id: warranty_end,
+        purchase_date, purchase_cost, asset_tag, serial_number, status),
+        literal, add, sub, mul, div, today, days_between, concat, lower,
+        upper and coalesce. Absent for an entered attribute. A computed
+        attribute is neither required nor unique and has no default; its
+        data type is integer, decimal, text, multiline, date or boolean
+        (single-valued) and takes the result type of the expression. 422 on
+        computed for an invalid expression, a result type that does not
+        fit, an asset field outside the list, a reference to the attribute
+        itself or to another computed attribute, and computed together with
+        required, default or unique. The composition (MET-16) keeps the
+        expression of a layer; a different expression of another layer
+        (code computed-conflict) and required, a default or unique from
+        another layer (computed-constraint) are 422 on key. The generated
+        attribute_schema marks the attribute readOnly with x-computed (the
+        AST). The CI write path computes the values with WP-717.
+      $ref: './rules.schema.json#/$defs/expr'
     AttributeValidationLegacy:
       type: object
       additionalProperties: false
@@ -17312,6 +17335,8 @@ components:
         inheritable: { type: boolean }
         validation:
           $ref: '#/components/schemas/AttributeValidation'
+        computed:
+          $ref: '#/components/schemas/ComputedExpression'
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -17551,6 +17576,15 @@ components:
             - $ref: '#/components/schemas/AttributeValidation'
             - type: 'null'
           description: The new rules; null or {} removes them.
+        computed:
+          oneOf:
+            - $ref: '#/components/schemas/ComputedExpression'
+            - type: 'null'
+          description: >-
+            The new expression of a computed attribute. A definition stays
+            computed or entered for its lifetime: an expression on an
+            entered definition or null on a computed one is 422 on
+            computed (WP-258).
         conditional: { type: object, additionalProperties: true }
         reference_target: { type: string }
         group: { type: string }
@@ -19131,8 +19165,11 @@ components:
             defined. A composition conflict of attribute definitions (MET-16,
             422 with `field` = `key`) carries `datatype-conflict` (data type,
             reference target or `multi_value` differ), `enum-empty` (no
-            allowed value is left), `range-empty` (`min` > `max`) or
-            `length-range-empty` (`min_length` > `max_length`).
+            allowed value is left), `range-empty` (`min` > `max`),
+            `length-range-empty` (`min_length` > `max_length`),
+            `computed-conflict` (different expressions of a computed
+            attribute) or `computed-constraint` (a computed attribute made
+            required, given a default or made unique by another layer).
 
     LifecycleModel:
       type: object
@@ -23107,7 +23144,8 @@ components:
                       Machine-readable code of the violation, set where one
                       is defined: a composition conflict of the attribute
                       definitions (MET-16) carries `datatype-conflict`,
-                      `enum-empty`, `range-empty` or `length-range-empty`.
+                      `enum-empty`, `range-empty`, `length-range-empty`,
+                      `computed-conflict` or `computed-constraint`.
                       A violated catalog rule (WP-257, MET-10) carries the
                       code of the rule language for a `validation` rule
                       (e.g. `pattern`, `range.max`, `enum`), `required` for
