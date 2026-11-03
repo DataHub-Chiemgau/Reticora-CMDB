@@ -68,7 +68,8 @@ const (
 //     device: reactivates it; for a probable duplicate: removes the new CI);
 //   - new creates a CI from the observation;
 //   - accept applies what the item proposes (the observed values, the
-//     suggested scope);
+//     suggested scope; for a duplicate_ip from a reservation conflict:
+//     releases the reservation, E-53);
 //   - dismiss closes the item without a change.
 var AllowedActions = map[string][]string{
 	KindUnclassifiedDevice:  {ActionNew, ActionDismiss},
@@ -80,7 +81,7 @@ var AllowedActions = map[string][]string{
 	KindUnlicensedCI:        {ActionNew, ActionDismiss},
 	KindScopeSuggested:      {ActionAccept, ActionDismiss},
 	KindSerialMismatch:      {ActionDismiss},
-	KindDuplicateIP:         {ActionDismiss},
+	KindDuplicateIP:         {ActionAccept, ActionDismiss},
 	KindUnknownRelationship: {ActionAccept, ActionDismiss},
 }
 

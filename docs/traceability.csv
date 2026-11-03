@@ -1255,3 +1255,4 @@ API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/ci/template_assignment_integration_
 AUD-07;[B];B;backend/internal/ci/template_assignment_integration_test.go;WP-710
 MET-16;B/G1, Teil P2/G2;B;backend/internal/citype/compose_integration_test.go;WP-252
 TST-01;[B], Teilumfang [P2];B;backend/internal/citype/compose_test.go;WP-252
+NET-09;[P2];B;backend/internal/discovery/ip_reservation_conflict_integration_test.go;WP-772

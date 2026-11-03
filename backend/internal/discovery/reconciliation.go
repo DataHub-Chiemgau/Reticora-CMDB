@@ -12,6 +12,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 )
 
 // MaxFutureSkew is how far observed_at may lie after the arrival time before
@@ -73,7 +74,9 @@ func (h *Handler) WithInterfaces(syncer InterfaceSyncer) *Handler {
 
 // syncInterfaces applies the interfaces of an item to its CI. Items that
 // report no interfaces leave them untouched: only an observation that lists
-// interfaces can miss one.
+// interfaces can miss one. Observed addresses take the VRF of the item; a
+// reservation of an observed address in that VRF opens a duplicate_ip item
+// (NET-09, WP-772), in the transaction of the record or batch.
 func (h *Handler) syncInterfaces(ctx context.Context, orgID, ciID string, item *IngestItem) error {
 	if h.interfaces == nil || ciID == "" || len(item.Interfaces) == 0 {
 		return nil
@@ -87,10 +90,46 @@ func (h *Handler) syncInterfaces(ctx context.Context, orgID, ciID string, item *
 		observed = append(observed, ipam.ObservedInterface{
 			Name: ifc.Name, IfIndex: ifc.IfIndex, MAC: canonicalMAC(ifc.MAC), SpeedMbps: ifc.SpeedMbps, MTU: ifc.MTU,
 			AdminStatus: ifc.AdminStatus, OperStatus: ifc.OperStatus, IsManagement: ifc.Management, IPs: ifc.IPs,
+			VRFID: item.VRFID,
 		})
 	}
-	_, err := h.interfaces.SyncDiscoveredInterfaces(ctx, orgID, ciID, observed)
-	return err
+	res, err := h.interfaces.SyncDiscoveredInterfaces(ctx, orgID, ciID, observed)
+	if err != nil {
+		return err
+	}
+	for i := range res.Conflicts {
+		if _, err = h.ReviewService().OpenUnlessDismissed(ctx, reservationConflictReview(orgID, ciID, &res.Conflicts[i]), "conflict"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reservationConflictReview is the duplicate_ip item of a reservation of an
+// address that discovery observed at an interface of CI ciID in the same
+// VRF (NET-09, E-53). Its object is the address in the VRF; conflict names
+// the reservation and the interface, so that a dismissal holds until another
+// interface reports the address or a new reservation exists.
+func reservationConflictReview(orgID, ciID string, c *ipam.ReservationConflict) *ReviewItem {
+	return &ReviewItem{
+		OrganizationID: orgID,
+		Kind:           reviews.KindDuplicateIP,
+		Status:         ReviewStatusOpen,
+		ObjectKey:      "ip:" + c.VRFID + "/" + c.Address,
+		Payload: map[string]any{
+			"reason":            ReasonReservation,
+			"address":           c.Address,
+			"vrf_id":            c.VRFID,
+			"subnet_id":         c.SubnetID,
+			"reservation_ip_id": c.ReservationIPID,
+			"discovered_ip_id":  c.DiscoveredIPID,
+			"interface_id":      c.InterfaceID,
+			"ci_id":             ciID,
+			"reserved_by":       c.ReservedBy,
+			"conflict":          c.ReservationIPID + "/" + c.InterfaceID,
+		},
+		CandidateCIIDs: []string{ciID},
+	}
 }
 
 // ReconcileAction represents the reconciliation outcome.

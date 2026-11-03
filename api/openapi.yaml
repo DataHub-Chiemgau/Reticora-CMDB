@@ -5661,7 +5661,9 @@ paths:
         no_profile_match is 409 (its generic_device CI exists: set the type
         on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis,
         403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
-        serial_mismatch and duplicate_ip dismiss. Another action is 422.
+        duplicate_ip accept|dismiss (accept releases the reservation; 422 when the
+        reservation is already released or the item names none, 501 without IPAM);
+        serial_mismatch dismiss. Another action is 422.
         resolved_by and the audit actor are the caller; a body with
         resolved_by is 400. An item is resolved exactly once (F-404): the
         effect of the action and the resolution commit together, so a

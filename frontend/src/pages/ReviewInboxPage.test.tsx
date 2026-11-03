@@ -37,7 +37,8 @@ const duplicateIP: ReviewItem = {
   id: 'rev-3',
   kind: 'duplicate_ip',
   status: 'open',
-  payload: { management_ip: '10.0.0.9' },
+  payload: { reason: 'reservation', address: '10.0.0.9', vrf_id: 'vrf-1' },
+  object_key: 'ip:vrf-1/10.0.0.9',
   escalated: false,
   created_at: '2026-10-11T10:00:00Z',
 };
@@ -253,10 +254,13 @@ describe('ReviewInboxPage', () => {
     stubServer([duplicateIP]);
     renderWithProviders(<ReviewInboxPage />);
 
+    // duplicate_ip (E-53): accept releases the reservation, dismiss keeps
+    // both; the summary is the address of the payload, not the object key.
     fireEvent.click(await screen.findByRole('button', { name: /10\.0\.0\.9/ }));
     expect(await screen.findByRole('button', { name: 'Verwerfen' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Übernehmen' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Zusammenführen' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Übernehmen' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /ip:vrf-1/ })).not.toBeInTheDocument();
   });
 
   it('resolves several items with one action and reports failures', async () => {

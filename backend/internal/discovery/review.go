@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -63,6 +64,7 @@ func (h *Handler) ReviewService() *reviews.Service {
 		svc.WithEffect(ReviewKindOverrideConflict, h.resolveOverrideConflict)
 		svc.WithEffect(ReviewKindScopeSuggested, h.resolveScopeSuggested)
 		svc.WithEffect(ReviewKindUnknownRelationship, h.resolveUnknownRelationship)
+		svc.WithEffect(reviews.KindDuplicateIP, h.resolveDuplicateIP)
 		if h.reviewNotifier != nil {
 			svc.WithNotifier(afterCommitNotifier{next: h.reviewNotifier})
 		}
@@ -159,6 +161,10 @@ const ReasonNoProfileMatch = "no_profile_match"
 // whose reported type is deactivated (MET-05); its generic_device CI
 // exists.
 const ReasonTypeInactive = "type_inactive"
+
+// ReasonReservation marks a duplicate_ip item of a reservation of an
+// address that discovery observed in the same VRF (NET-09, WP-772).
+const ReasonReservation = "reservation"
 
 // ReasonReclassified is the resolution of an unclassified_device item whose
 // CI discovery classified later (DIS-02).
@@ -547,6 +553,40 @@ func (h *Handler) candidateClient(ctx context.Context, orgID string, ids []strin
 
 func isNotFound(err error) bool {
 	return err != nil && (err.Error() == "not found" || errors.Is(err, reviews.ErrNotFound))
+}
+
+// reservationReleaser releases a reservation of a subnet (WP-299); the IPAM
+// repositories implement it.
+type reservationReleaser interface {
+	DeleteReservation(ctx context.Context, orgID, subnetID, id string) error
+}
+
+// resolveDuplicateIP carries out accept of a duplicate_ip item from a
+// reservation conflict (NET-09, E-53): the observation stands and the
+// reservation is released, in the resolution transaction (WP-675), which
+// DeleteReservation joins. Dismiss keeps both. A reservation that is gone
+// or an item naming none is refused with 422, a server without IPAM
+// repository with 501; the item stays open (WP-676).
+func (h *Handler) resolveDuplicateIP(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
+	if res.Action != reviews.ActionAccept {
+		return false, nil
+	}
+	releaser, ok := h.interfaces.(reservationReleaser)
+	if !ok {
+		return false, refused(http.StatusNotImplemented, "this server cannot release reservations")
+	}
+	reservationID, subnetID := payloadString(item.Payload, "reservation_ip_id"), payloadString(item.Payload, "subnet_id")
+	if !isUUID(reservationID) || !isUUID(subnetID) {
+		return false, refused(http.StatusUnprocessableEntity, "the item names no reservation")
+	}
+	if err := releaser.DeleteReservation(ctx, item.OrganizationID, subnetID, reservationID); err != nil {
+		if errors.Is(err, ipam.ErrNotFound) {
+			return false, refused(http.StatusUnprocessableEntity, "the reservation "+reservationID+" was already released; dismiss the item")
+		}
+		return false, err
+	}
+	res.Note = "reservation " + reservationID + " of " + payloadString(item.Payload, "address") + " released, observation accepted"
+	return false, nil
 }
 
 // ciRestorer reactivates soft-deleted CIs; the PostgreSQL CI repository

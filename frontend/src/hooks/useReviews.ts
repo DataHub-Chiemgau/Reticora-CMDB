@@ -29,7 +29,7 @@ export const REVIEW_ACTIONS: Record<string, ReviewAction[]> = {
   unlicensed_ci: ['new', 'dismiss'],
   scope_suggested: ['accept', 'dismiss'],
   serial_mismatch: ['dismiss'],
-  duplicate_ip: ['dismiss'],
+  duplicate_ip: ['accept', 'dismiss'],
   unknown_relationship: ['accept', 'dismiss'],
 };
 
