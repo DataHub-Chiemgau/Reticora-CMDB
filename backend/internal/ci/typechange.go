@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 )
 
 // Reclassification of CIs (CI-11): discovery may raise generic_device to a
@@ -79,6 +80,10 @@ type TypeChangeResult struct {
 	Findings []TypeFinding `json:"findings"`
 	// Changed is false when the CI already had the type.
 	Changed bool `json:"changed"`
+	// DroppedTemplates are the template assignments the change removed
+	// because their template does not fit the target type or its chain
+	// (WP-710).
+	DroppedTemplates []citype.CITemplate `json:"dropped_templates"`
 }
 
 // TypeChanger changes the type of a CI (CI-11).
@@ -119,7 +124,11 @@ func (s *Service) ChangeType(ctx context.Context, orgID, ciID, typeID string) (*
 	if err := checkCITypeID(typeID); err != nil {
 		return nil, err
 	}
-	return changer.ChangeType(ctx, orgID, ciID, typeID, TypeChangeManual)
+	result, err := changer.ChangeType(ctx, orgID, ciID, typeID, TypeChangeManual)
+	if err == nil && result.DroppedTemplates == nil {
+		result.DroppedTemplates = []citype.CITemplate{}
+	}
+	return result, err
 }
 
 // RecordOrigin is the ingest record a change comes from (AUD-03): the

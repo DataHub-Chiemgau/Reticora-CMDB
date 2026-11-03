@@ -8,7 +8,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // FieldResolver returns the effective field definitions that apply to a CI:
@@ -19,19 +22,94 @@ type FieldResolver interface {
 	ResolveFields(ctx context.Context, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error)
 }
 
+// TemplateFieldResolver is the optional part of a FieldResolver that
+// composes the field definitions of a CI with a given template list in
+// place of the stored one (MET-16, WP-710): the list a creation (POST /cis
+// with templates) or a replacement (PUT /cis/{id}/templates) writes, so the
+// write is validated against the schema it leads to. It checks the list
+// like the write (422 on templates[i]). citype.PGRepository implements it;
+// the signature of FieldResolver and its test stubs stay unchanged. The
+// parameter type is citype's (no import cycle).
+type TemplateFieldResolver interface {
+	ResolveFieldsWithTemplates(ctx context.Context, orgID, ciTypeID, ciID string, templates []citype.CITemplate) ([]fieldmeta.FieldDefinition, error)
+}
+
+// RuleResolver is the optional part of a FieldResolver that also returns
+// the active catalog rules of a CI (metamodel_rule, WP-716, WP-257):
+// ResolveRules the rules alone, ResolveFieldsAndRules the field
+// definitions and the rules in one pass (templates as in
+// TemplateFieldResolver when set), so a write reads its rules without a
+// second resolution of the layers (NFR-03). citype.PGRepository and
+// citype.MemoryRepository implement it, the latter without rules;
+// WithFieldResolver finds it by type assertion.
+type RuleResolver interface {
+	ResolveRules(ctx context.Context, orgID, ciTypeID, ciID string) ([]fieldmeta.CatalogRule, error)
+	ResolveFieldsAndRules(ctx context.Context, orgID, ciTypeID, ciID string,
+		templates *[]citype.CITemplate) ([]fieldmeta.FieldDefinition, []fieldmeta.CatalogRule, error)
+}
+
+// CodeReadOnly is the code of a violation of a readonly catalog rule
+// (WP-257): the write changes a value the rule keeps.
+const CodeReadOnly = "read_only"
+
+// ErrTemplatesUnavailable: the field resolver keeps no template
+// assignments (memory mode without a database); the handlers answer 503.
+var ErrTemplatesUnavailable = errors.New("template assignments need the database")
+
 // resolveFields resolves the field definitions; definitions that cannot be
 // composed (MET-16) reject the write as a violation of the attribute.
 func resolveFields(ctx context.Context, fields FieldResolver, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error) {
-	defs, err := fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	defs, _, err := resolveWithRules(ctx, fields, nil, orgID, ciTypeID, ciID, nil)
+	return defs, err
+}
+
+// resolveWithRules resolves the field definitions and, with a
+// RuleResolver, the catalog rules of a CI in one pass, with the template
+// list templates in place of the stored one when it is set
+// (TemplateFieldResolver); a refused entry of the list is a violation of
+// templates[i], definitions that cannot be composed (MET-16) are a
+// violation of the attribute.
+func resolveWithRules(ctx context.Context, fields FieldResolver, catalog RuleResolver, orgID, ciTypeID, ciID string,
+	templates *[]citype.CITemplate) ([]fieldmeta.FieldDefinition, []fieldmeta.CatalogRule, error) {
+	var (
+		defs  []fieldmeta.FieldDefinition
+		found []fieldmeta.CatalogRule
+		err   error
+	)
+	resolver, withTemplates := fields.(TemplateFieldResolver)
+	switch {
+	case templates != nil && !withTemplates:
+		return nil, nil, ErrTemplatesUnavailable
+	case catalog != nil:
+		defs, found, err = catalog.ResolveFieldsAndRules(ctx, orgID, ciTypeID, ciID, templates)
+	case templates != nil:
+		defs, err = resolver.ResolveFieldsWithTemplates(ctx, orgID, ciTypeID, ciID, *templates)
+	default:
+		defs, err = fields.ResolveFields(ctx, orgID, ciTypeID, ciID)
+	}
 	var conflict interface {
 		CompositionKey() string
 		CompositionCode() string
 	}
 	if errors.As(err, &conflict) {
-		return nil, &ValidationError{Violations: []Violation{{Field: conflict.CompositionKey(), Detail: err.Error(),
+		return nil, nil, &ValidationError{Violations: []Violation{{Field: conflict.CompositionKey(), Detail: err.Error(),
 			Code: conflict.CompositionCode()}}}
 	}
-	return defs, err
+	if err != nil {
+		return nil, nil, templateViolation(err)
+	}
+	return defs, found, nil
+}
+
+// templateViolation turns the refusal of a template list entry (a
+// *api.FieldError on templates[i], citype.ResolveTemplateRefsTx) into the
+// violation of that field; any other error stays.
+func templateViolation(err error) error {
+	var fe *api.FieldError
+	if errors.As(err, &fe) && strings.HasPrefix(fe.Field, "templates[") {
+		return &ValidationError{Violations: []Violation{{Field: fe.Field, Detail: fe.Message}}}
+	}
+	return err
 }
 
 // ValidationError reports one or more attribute values that violate the field
@@ -45,8 +123,16 @@ type Violation struct {
 	Field  string `json:"field"`
 	Detail string `json:"detail"`
 	// Code names the failing rule in machine-readable form, e.g. the code
-	// of a composition conflict (MET-16); omitted when empty.
+	// of a composition conflict (MET-16) or of a catalog rule (WP-257: the
+	// code of internal/rules, rules.CodeRequired or CodeReadOnly); omitted
+	// when empty.
 	Code string `json:"code,omitempty"`
+	// Rule is the key of the violated catalog rule (WP-257); omitted for
+	// the attribute rules.
+	Rule string `json:"rule,omitempty"`
+	// Message is the i18n message of the violated catalog rule (language
+	// → text), when it has one. A pointer keeps Violation comparable.
+	Message *map[string]string `json:"message,omitempty"`
 }
 
 // validation: the violations of the field metadata (fieldmeta) and the
@@ -84,12 +170,109 @@ func AsValidationError(err error) (*ValidationError, bool) {
 // Attributes without a definition are left untouched: discovery and
 // integrations legitimately store attributes the metadata does not describe.
 func validateAttributes(defs []fieldmeta.FieldDefinition, values map[string]any, incoming map[string]any, existing map[string]any) error {
-	if len(defs) == 0 {
-		return nil
-	}
+	return validateWithRules(defs, nil, values, incoming, existing)
+}
+
+// validateWithRules is validateAttributes with the active catalog rules of
+// the CI (WP-257, MET-10): their violations are AND-ed with those of the
+// attribute rules (catalogViolations) and reported together.
+func validateWithRules(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.CatalogRule,
+	values, incoming, existing map[string]any) error {
 	if values == nil {
 		values = map[string]any{}
 	}
+	violations := append(attributeViolations(defs, values, incoming, existing),
+		catalogViolations(defs, catalog, values, incoming, existing)...)
+	if len(violations) == 0 {
+		return nil
+	}
+	sort.SliceStable(violations, func(i, j int) bool { return violations[i].Field < violations[j].Field })
+	return &ValidationError{Violations: violations}
+}
+
+// catalogViolations evaluates the active catalog rules of a CI (WP-257)
+// against the values after the write. A rule applies while its condition
+// holds (rules.EvaluateCondition; no condition: always). Per kind:
+// required asks for a value (rules.CodeRequired); readonly refuses a
+// changed incoming value, as state.ReadOnly does (CodeReadOnly);
+// validation checks the value with rules.Evaluate (its code); visible
+// hides the field while its condition does not hold. The rules are AND-ed
+// with the attribute rules and lift none of them: a hidden field is
+// exempt from the catalog's readonly and validation rules only, the
+// attribute rules still apply, and a field that is required in the
+// current state (by its attribute rules or an applying required rule) is
+// never hidden by a visible rule. A field the attribute rules hide counts
+// as hidden for the catalog's readonly and validation rules too.
+func catalogViolations(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.CatalogRule,
+	values, incoming, existing map[string]any) []Violation {
+	if len(catalog) == 0 {
+		return nil
+	}
+	required, hidden := map[string]bool{}, map[string]bool{}
+	for i := range defs {
+		state := fieldmeta.Evaluate(defs[i], values)
+		switch {
+		case !state.Visible:
+			hidden[defs[i].Name] = true
+		case state.Required:
+			required[defs[i].Name] = true
+		}
+	}
+	applies := make([]bool, len(catalog))
+	for i := range catalog {
+		applies[i] = catalog[i].Applies(values)
+		if applies[i] && catalog[i].Kind == fieldmeta.CatalogRequired {
+			required[catalog[i].AttributeKey] = true
+		}
+	}
+	for i := range catalog {
+		if catalog[i].Kind == fieldmeta.CatalogVisible && !applies[i] {
+			hidden[catalog[i].AttributeKey] = true
+		}
+	}
+	var out []Violation
+	for i := range catalog {
+		rule := &catalog[i]
+		key := rule.AttributeKey
+		if !applies[i] {
+			continue
+		}
+		value, present := values[key]
+		exempt := hidden[key] && !required[key]
+		switch rule.Kind {
+		case fieldmeta.CatalogRequired:
+			if !present || isBlank(value) {
+				out = append(out, catalogViolation(rule, rules.CodeRequired, "field is required"))
+			}
+		case fieldmeta.CatalogReadonly:
+			if in, changed := incoming[key]; changed && !exempt && !sameValue(existing[key], in) {
+				out = append(out, catalogViolation(rule, CodeReadOnly, "field is read-only in the current state"))
+			}
+		case fieldmeta.CatalogValidation:
+			if exempt || rule.AST == nil {
+				continue
+			}
+			for _, v := range rules.Evaluate(rule.AST, value, present) {
+				out = append(out, catalogViolation(rule, v.Code, v.Message))
+			}
+		}
+	}
+	return out
+}
+
+// catalogViolation is the violation of the catalog rule rule.
+func catalogViolation(rule *fieldmeta.CatalogRule, code, detail string) Violation {
+	v := Violation{Field: rule.AttributeKey, Detail: detail, Code: code, Rule: rule.Key}
+	if len(rule.Message) > 0 {
+		message := rule.Message
+		v.Message = &message
+	}
+	return v
+}
+
+// attributeViolations returns the violations of the attribute rules (see
+// validateAttributes), unsorted.
+func attributeViolations(defs []fieldmeta.FieldDefinition, values, incoming, existing map[string]any) []Violation {
 	var violations []Violation
 	for _, def := range defs {
 		state := fieldmeta.Evaluate(def, values)
@@ -126,11 +309,7 @@ func validateAttributes(defs []fieldmeta.FieldDefinition, values map[string]any,
 			})
 		}
 	}
-	if len(violations) == 0 {
-		return nil
-	}
-	sort.Slice(violations, func(i, j int) bool { return violations[i].Field < violations[j].Field })
-	return &ValidationError{Violations: violations}
+	return violations
 }
 
 // Details of a reference value refused by checkReferences (MET-12). A
@@ -495,33 +674,37 @@ func InvalidTypedColumns(values map[string]any) []string {
 // InvalidObserved returns the fields whose observed values (typed columns
 // and attributes, by field name) violate the field metadata of the CI
 // type or, for a typed column, its own data type: the same value rules as
-// a manual write (CI-03, MET-11). Required fields do not apply, an
-// observation may lack them. Discovery drops the returned values instead
-// of storing them.
+// a manual write (CI-03, MET-11). The catalog rules of kind validation
+// apply as well (WP-257), their condition evaluated against the observed
+// values; required, readonly and visible do not apply to an observation,
+// nor do required fields, an observation may lack them. The rules are
+// resolved with the field definitions in one pass (RuleResolver).
+// Discovery drops the returned values instead of storing them.
 func (s *Service) InvalidObserved(ctx context.Context, orgID, ciTypeID, ciID string, values map[string]any) ([]string, error) {
 	if s.fields == nil || len(values) == 0 {
 		return invalidObserved(nil, values), nil
 	}
-	defs, err := resolveFields(ctx, s.fields, orgID, ciTypeID, ciID)
+	defs, catalog, err := resolveWithRules(ctx, s.fields, s.catalog, orgID, ciTypeID, ciID, nil)
 	if err != nil {
 		return nil, err
 	}
-	return invalidObserved(defs, values), nil
+	return invalidObservedWith(defs, catalog, values), nil
 }
 
-// ObservedRules resolves the field definitions of a CI type for new CIs once
-// and returns the check InvalidObserved applies to the observed values of a
-// new CI of that type: a batch of discovered devices resolves the
-// definitions once per type instead of once per device (NFR-03, WP-333).
+// ObservedRules resolves the field definitions and the catalog rules of a
+// CI type for new CIs once and returns the check InvalidObserved applies to
+// the observed values of a new CI of that type: a batch of discovered
+// devices resolves them once per type instead of once per device (NFR-03,
+// WP-333).
 func (s *Service) ObservedRules(ctx context.Context, orgID, ciTypeID string) (func(values map[string]any) []string, error) {
 	if s.fields == nil {
 		return func(values map[string]any) []string { return invalidObserved(nil, values) }, nil
 	}
-	defs, err := resolveFields(ctx, s.fields, orgID, ciTypeID, "")
+	defs, catalog, err := resolveWithRules(ctx, s.fields, s.catalog, orgID, ciTypeID, "", nil)
 	if err != nil {
 		return nil, err
 	}
-	return func(values map[string]any) []string { return invalidObserved(defs, values) }, nil
+	return func(values map[string]any) []string { return invalidObservedWith(defs, catalog, values) }, nil
 }
 
 // invalidObserved returns the fields whose observed value violates their
@@ -529,6 +712,13 @@ func (s *Service) ObservedRules(ctx context.Context, orgID, ciTypeID string) (fu
 // implicit definition, as validateTypedColumns checks a manual write),
 // sorted and each once.
 func invalidObserved(defs []fieldmeta.FieldDefinition, values map[string]any) []string {
+	return invalidObservedWith(defs, nil, values)
+}
+
+// invalidObservedWith is invalidObserved with the catalog rules of the CI
+// (WP-257): an observed value a validation rule refuses while its
+// condition holds on the observed values is invalid as well.
+func invalidObservedWith(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.CatalogRule, values map[string]any) []string {
 	invalid := map[string]bool{}
 	for name, dataType := range typedColumns {
 		value, ok := values[name]
@@ -547,6 +737,19 @@ func invalidObserved(defs []fieldmeta.FieldDefinition, values map[string]any) []
 		}
 		if err := fieldmeta.ValidateValue(*def, value); err != nil {
 			invalid[def.Name] = true
+		}
+	}
+	for i := range catalog {
+		rule := &catalog[i]
+		if rule.Kind != fieldmeta.CatalogValidation || rule.AST == nil || invalid[rule.AttributeKey] {
+			continue
+		}
+		value, ok := values[rule.AttributeKey]
+		if !ok || isBlank(value) || !rule.Applies(values) {
+			continue
+		}
+		if len(rules.Evaluate(rule.AST, value, true)) > 0 {
+			invalid[rule.AttributeKey] = true
 		}
 	}
 	if len(invalid) == 0 {

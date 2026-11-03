@@ -400,11 +400,39 @@ export const A11Y_HANDLERS: Handler[] = [
   },
   {
     path: /^\/cis\/[^/]+\/blast-radius$/,
+    // The impact panel with every block (WP-297, WP-818): the peer is
+    // affected and a service, the CI itself its single point of failure.
     reply: fixed({
       ci_id: CI_ID,
-      affected_cis: [],
-      affected_count: 0,
+      affected_cis: [
+        {
+          id: CI_PEER,
+          name: M.ciPeer,
+          ci_type: CI_TYPES[1]!.id,
+          status: 'maintenance',
+          heuristic: false,
+        },
+      ],
+      affected_count: 1,
       heuristic_count: 0,
+      affected_services: [
+        {
+          id: CI_PEER,
+          name: M.ciPeer,
+          ci_type: CI_TYPES[1]!.id,
+          status: 'maintenance',
+          heuristic: false,
+        },
+      ],
+      client_ids: [CLIENT],
+      site_ids: [SITE],
+      single_points_of_failure: [
+        { id: CI_PEER, name: M.ciPeer, ci_type: CI_TYPES[1]!.id, status: 'maintenance' },
+      ],
+      protected_by_redundancy: [],
+      service_spofs: [{ id: CI_ID, name: M.ci, ci_type: SERVER_TYPE, service_ids: [CI_PEER] }],
+      spof_truncated: false,
+      blast_radius: { cis: 1, services: 1, services_heuristic: 0, clients: 1, sites: 1, spof: 1 },
     }),
   },
   {

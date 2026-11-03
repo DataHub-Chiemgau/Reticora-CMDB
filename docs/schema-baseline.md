@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000205_templates
+Stand: Migration 000209_ci_snapshot
 
 ## Prüfung
 
@@ -604,6 +604,27 @@ rack, override), und speichert `type_change` als `type_changed`, auch wenn
 der Unmerge Zeilen aus einem älteren Merge-Snapshot zurückschreibt. Die
 Policies und `ENABLE` + `FORCE ROW LEVEL SECURITY` sind unverändert.
 
+## CI-Snapshots `ci_snapshot` und Merge-Herkunft (AUD-08, WP-312)
+
+Migration 000209 legt `ci_snapshot` an: der Zustand eines CI zu `taken_at`
+(`state` mit `fields`, `deleted`, `merged_into_id`, `restore`; Formatversion
+`schema_version`; Personendaten nur als Surrogat), `ci_version`, die Kanten
+des CI beim Schreiben (`relationships`) und der Anlass `reason` (CHECK
+`ci_snapshot_reason_check`: `weekly`, `merge`, `unmerge`, `initial`).
+`ci_id` hat keinen Fremdschlüssel (wie `entity_change.entity_id`), damit ein
+Snapshot Hard-Delete und Merge überdauert. `client_id` und `site_id` setzt
+der Trigger `ci_snapshot_scope` (`derive_ci_scope('ci_id')`);
+`propagate_ci_scope()` (Fassung 000141) zieht sie bei einem Client- oder
+Standortwechsel nach. `ENABLE` + `FORCE ROW LEVEL SECURITY`, die Policy
+`ci_snapshot_isolation` mit Org-, Client- und Site-Prädikat, die restriktiven
+Policies `ci_snapshot_scoped_update` und `ci_snapshot_scoped_delete`, der
+TRUNCATE-Schutz `reticora_truncate_guard` und der Index
+`idx_ci_snapshot_ci_taken (organization_id, ci_id, taken_at DESC)`.
+`ci_change.origin_ci_id` nennt nach einem Merge das CI, zu dem eine
+umgehängte Zeile gehörte (Teilindex `idx_ci_change_origin
+(organization_id, origin_ci_id) WHERE origin_ci_id IS NOT NULL`); der
+Unmerge schreibt die Spalte aus dem Merge-Snapshot zurück.
+
 ## Schemaversion und Laufzeitschicht der Attribute (MET-16, WP-590)
 
 `ci_type.attribute_schema` ist das materialisierte Schema eines Typs:
@@ -735,6 +756,51 @@ fremden CI-Typ, eine fremde Klonquelle und eine fremde Attributdefinition mit
 `pdu`) mit veröffentlichter Version 1 ohne Items (E-37). Das CI hat keine
 Template-Spalten; die Zuordnung folgt mit `ci_template` (WP-710).
 
+Template-Zuordnung (MET-16, API-06, WP-710, Migration 000206): `ci_template`
+hält die Templates eines CI in definierter Reihenfolge (Primärschlüssel
+`ci_id`, `template_id`; `ci_template_ci_id_position_key` eindeutig je CI und
+`position`) mit der verwendeten veröffentlichten `version`. Das CI wird über
+`ci_template_ci_fkey` (`ci_id`, `organization_id`) → `ci` (`id`,
+`organization_id`) mit ON DELETE CASCADE referenziert (K19); Template und
+Version über `ci_template_template_id_fkey` und `ci_template_version_fkey`
+(`template_id`, `version`) → `template_version` ohne ON DELETE-Aktion, ein
+zugeordnetes Template lässt sich also nicht löschen (23503). Die
+Zuordnungsregeln (veröffentlichte Version eines aktiven Templates der
+Organisation oder eines Systemtemplates, Typ des CI oder seiner Typkette)
+prüft die Anwendung unter RLS. `client_id` und `site_id` setzt
+`derive_ci_scope('ci_id')` (`ci_template_scope`); `ci_template_scope_propagation`
+(AFTER UPDATE auf `ci` bei Wechsel von `client_id` oder `site_id`) leitet sie
+über `propagate_ci_template_scope()` mit erweitertem Scope
+(`app_scope_widen`/`app_scope_restore`) neu ab. Policies wie
+`ci_field_value` (Organisation, Client und Site; restriktive Update- und
+Delete-Policies), TRUNCATE-Schutz `reticora_truncate_guard`. Das wirksame
+Schema eines CI ergibt sich aus `ci.schema_version` und den referenzierten
+`ci_template.version` (E-108).
+
+Regelkatalog (MET-45, API-06, AUD-07, WP-716, Migration 000207):
+`metamodel_rule` hält benannte Regeln für das Attribut `attribute_key` genau
+eines Ziels (`metamodel_rule_one_target`: `ci_type_id`, `attribute_set_id` oder
+`template_version_id`, je ON DELETE CASCADE und eigener Index; Template-Regeln
+binden an die Version, E-111). `kind` ist `validation`, `required`,
+`readonly` oder `visible`; `ast` ist genau bei `validation` gesetzt
+(`metamodel_rule_ast_check`), `condition` NULL gilt immer, `message` prüft
+`reticora_i18n_text_valid`, `version` beginnt bei 1. `organization_id` `NULL`
+ist eine schreibgeschützte Systemregel. Schlüssel: `metamodel_rule_org_key` und
+`metamodel_rule_system_key` für Typ- und Set-Regeln,
+`metamodel_rule_template_version_key` je Template-Version.
+`metamodel_rule_binding` weist ein unter RLS unsichtbares oder fremdes Ziel mit
+23503 ab. Der Trigger `metamodel_rule_copy_template_version` (AFTER INSERT auf
+`template_version`) kopiert die Regeln der Vorversion mit ihren Schlüsseln in
+eine neue Template-Version.
+
+IP-Reservierungen (NET-09, WP-299, Migration 000208): `ip_address` erhält
+`reserved_until` (`timestamptz`, informativ, keine automatische Freigabe) und
+`reserved_by` (`uuid`, Surrogat des reservierenden Nutzers ohne Fremdschlüssel,
+Konvention 16 wie `ci_change.actor_id`). Eine Reservierung ist eine Zeile mit
+`type = 'reserved'`, `subnet_id` und ohne `interface_id`; VRF, Client und
+Standort setzen `trg_ip_address_vrf` und `ip_address_scope`. RLS, Policies und
+Indizes von `ip_address` bleiben unverändert.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -769,6 +835,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_instance_field_definition` | ja | ja | ci_instance_field_definition_isolation (ALL), ci_instance_field_definition_scoped_delete (DELETE), ci_instance_field_definition_scoped_update (UPDATE) |
 | `ci_merge` | ja | ja | ci_merge_isolation (ALL), ci_merge_scoped_delete (DELETE), ci_merge_scoped_update (UPDATE) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL), ci_relationship_scoped_delete (DELETE), ci_relationship_scoped_update (UPDATE) |
+| `ci_snapshot` | ja | ja | ci_snapshot_isolation (ALL), ci_snapshot_scoped_delete (DELETE), ci_snapshot_scoped_update (UPDATE) |
+| `ci_template` | ja | ja | ci_template_isolation (ALL), ci_template_scoped_delete (DELETE), ci_template_scoped_update (UPDATE) |
 | `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
 | `ci_type_attribute_set` | ja | ja | ci_type_attribute_set_isolation_delete (DELETE), ci_type_attribute_set_isolation_insert (INSERT), ci_type_attribute_set_isolation_select (SELECT), ci_type_attribute_set_isolation_update (UPDATE) |
 | `client` | ja | ja | client_isolation (ALL) |
@@ -823,6 +891,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `maintenance_notification` | ja | ja | maintenance_notification_isolation (ALL), maintenance_notification_scoped_delete (DELETE), maintenance_notification_scoped_update (UPDATE) |
 | `maintenance_window` | ja | ja | maintenance_window_isolation (ALL), maintenance_window_scoped_delete (DELETE), maintenance_window_scoped_insert (INSERT), maintenance_window_scoped_update (UPDATE) |
 | `maintenance_window_ci` | ja | ja | maintenance_window_ci_isolation (ALL), maintenance_window_ci_scoped_delete (DELETE), maintenance_window_ci_scoped_update (UPDATE) |
+| `metamodel_rule` | ja | ja | metamodel_rule_isolation_delete (DELETE), metamodel_rule_isolation_insert (INSERT), metamodel_rule_isolation_select (SELECT), metamodel_rule_isolation_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |

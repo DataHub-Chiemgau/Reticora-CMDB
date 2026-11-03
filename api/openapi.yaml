@@ -905,12 +905,21 @@ paths:
             names no system type and no type of the organization ("CI type
             not found", the same for an unknown ID and a type of another
             organization) or a deactivated type ("the CI type is
-            deactivated").
+            deactivated"). With templates (WP-710) also an entry the
+            assignment rules refuse (templates[i]) or an attribute the
+            schema composed with the templates does not allow.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ViolationProblem' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          description: >-
+            templates is not empty and the server runs without a database
+            (template assignments need it, WP-710).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cis/{id}:
     parameters:
@@ -5652,7 +5661,9 @@ paths:
         no_profile_match is 409 (its generic_device CI exists: set the type
         on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis,
         403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to);
-        serial_mismatch and duplicate_ip dismiss. Another action is 422.
+        duplicate_ip accept|dismiss (accept releases the reservation; 422 when the
+        reservation is already released or the item names none, 501 without IPAM);
+        serial_mismatch dismiss. Another action is 422.
         resolved_by and the audit actor are the caller; a body with
         resolved_by is 400. An item is resolved exactly once (F-404): the
         effect of the action and the resolution commit together, so a
@@ -12001,17 +12012,47 @@ paths:
     post:
       operationId: createAssetsIdLifecycleTransitions
       summary: Execute a lifecycle transition on an asset
+      description: >-
+        Runs the transition in one transaction (LCY-02, WP-724): the
+        current state is read with a row lock, the effective lifecycle
+        model of the asset type chain needs an edge from it (or from any
+        state) to to_state, or to_state is the initial state of an entity
+        without a state; the required fields of target state and edge and
+        the rules of the edge's guard are evaluated against context. The
+        state is set, a history entry (lifecycle_transition), the audit
+        entry asset.lifecycle_changed and the event lifecycle.changed are
+        written; any error rolls everything back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LifecycleTransitionRequest' }
       responses:
         '200':
-          description: Execute a lifecycle transition on an asset
+          description: The transition was applied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionResult' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: from_state is not the current state; current_state names it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionConflictProblem' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            Guard violations (lifecycle-guard with violations), a missing
+            edge or unknown state (invalid-transition), a missing to_state
+            or a type without lifecycle model (invalid-field, field
+            to_state).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleGuardProblem' }
 
   /api/v1/assets/{id}/movements:
     x-phase: P2
@@ -12170,6 +12211,7 @@ paths:
         Pages
         newest first on (created_at, id) (API-02, F-215): `limit` (default
         50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+        Every definition carries its `index_status` (DB-04, WP-796).
       parameters:
         - { name: ci_type_id, in: query, schema: { type: string } }
         - { name: attribute_set_id, in: query, schema: { type: string } }
@@ -12244,6 +12286,7 @@ paths:
     get:
       operationId: getAttributeDefinition
       summary: Read an attribute definition
+      description: The definition with its `index_status` (DB-04, WP-796).
       responses:
         '200':
           description: Attribute definition
@@ -12310,6 +12353,51 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/attribute-definitions/{id}/reindex:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: reindexAttributeDefinition
+      summary: Rebuild the index of an attribute definition (DB-04)
+      description: >-
+        Queues an `attribute.index` job for the caller that brings the index
+        of the definition in line with its flags (DB-04, WP-796) and answers
+        202 with the index status of the new job; Location names the job.
+        While an index job of the definition (`attribute.index`,
+        `attribute.index.rebuild`, `attribute.index.key`) is queued or
+        running, the answer is 200 with its status and no job is queued;
+        concurrent requests leave at most one open job. A system definition
+        is 403 (its index comes from the migration), a definition that is
+        neither searchable nor unique 409, a server without job service 503.
+        Requires ci_attribute:manage.
+      responses:
+        '200':
+          description: An index job of the definition is open; its status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeIndexStatus'
+        '202':
+          description: Index job queued
+          headers:
+            Location:
+              description: The job (/api/v1/jobs/{id}).
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttributeIndexStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -12823,6 +12911,194 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/rules:
+    x-phase: P2
+    get:
+      operationId: listRules
+      tags: [Metamodel]
+      summary: List catalog rules (MET-45)
+      description: >-
+        The organization's rules of the rule catalog and the read-only
+        system rules (`is_system`, WP-716), optionally filtered by target
+        (`ci_type_id`, `attribute_set_id`, `template_version_id`), by
+        `attribute_key` and by `kind`. Pages newest first on (created_at,
+        id) (API-02): `limit` (default 50, at most 200) and the signed
+        keyset `cursor` from `next_cursor`. Requires ci:read. The catalog
+        is not /api/v1/compliance/rules.
+      parameters:
+        - name: ci_type_id
+          in: query
+          required: false
+          description: Only rules of this CI type.
+          schema: { type: string }
+        - name: attribute_set_id
+          in: query
+          required: false
+          description: Only rules of this attribute set.
+          schema: { type: string }
+        - name: template_version_id
+          in: query
+          required: false
+          description: Only rules of this template version.
+          schema: { type: string }
+        - name: attribute_key
+          in: query
+          required: false
+          description: Only rules of this target attribute.
+          schema: { type: string }
+        - name: kind
+          in: query
+          required: false
+          description: Only rules of this kind.
+          schema:
+            $ref: '#/components/schemas/MetamodelRuleKind'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Rules, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelRuleListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createRule
+      tags: [Metamodel]
+      summary: Create a catalog rule (MET-45)
+      description: >-
+        A rule of the organization on exactly one target it sees (a CI type,
+        an attribute set or a template version, its own or a system row;
+        otherwise 422 on the target field). `condition` is checked strictly
+        as a condition of api/rules.schema.json, `ast` as a value rule; an
+        invalid expression is 422 with the parser's path in `field` (e.g.
+        `condition.rules[1].field`). `ast` is required exactly for kind
+        `validation`. A `visible` rule on a CI type for an attribute the
+        type requires statically is 422 on `attribute_key`. A rule on a
+        published or retired template version is 409, a taken key 409
+        (unique per organization for type and set rules, per version for
+        template rules). Requires citype:manage; audited as
+        `metamodel_rule.created`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelRuleCreate'
+      responses:
+        '201':
+          description: Rule created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/rules/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getRule
+      tags: [Metamodel]
+      summary: Read a catalog rule
+      description: An own or a system rule. Requires ci:read.
+      responses:
+        '200':
+          description: Rule
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelRule'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      operationId: updateRule
+      tags: [Metamodel]
+      summary: Update a catalog rule
+      description: >-
+        `attribute_key`, `kind`, `condition`, `ast`, `message` and
+        `is_active`; null removes `condition`, `ast` or `message`. A kind
+        other than `validation` drops an `ast` the request does not send.
+        `key` and the target are immutable (422). `version` rises by one.
+        System rules are read-only (403); the rules of a published or
+        retired template version are immutable (409). Requires
+        citype:manage; audited as `metamodel_rule.updated` with before and
+        after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelRulePatch'
+      responses:
+        '200':
+          description: Rule updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelRule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteRule
+      tags: [Metamodel]
+      summary: Delete a catalog rule
+      description: >-
+        System rules are read-only (403); the rules of a published or
+        retired template version are immutable (409). Requires
+        citype:manage; audited as `metamodel_rule.deleted`.
+      responses:
+        '204':
+          description: Rule deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -13462,17 +13738,47 @@ paths:
     post:
       operationId: createCisIdLifecycleTransitions
       summary: Execute a lifecycle transition on a CI
+      description: >-
+        Runs the transition in one transaction (LCY-02, WP-724): the
+        current state is read with a row lock, the effective lifecycle
+        model of the ci type chain needs an edge from it (or from any
+        state) to to_state, or to_state is the initial state of an entity
+        without a state; the required fields of target state and edge and
+        the rules of the edge's guard are evaluated against context. The
+        state is set, a history entry (lifecycle_transition), the audit
+        entry ci.lifecycle_changed and the event lifecycle.changed are
+        written; any error rolls everything back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LifecycleTransitionRequest' }
       responses:
         '200':
-          description: Execute a lifecycle transition on a CI
+          description: The transition was applied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionResult' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: from_state is not the current state; current_state names it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleTransitionConflictProblem' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            Guard violations (lifecycle-guard with violations), a missing
+            edge or unknown state (invalid-transition), a missing to_state
+            or a type without lifecycle model (invalid-field, field
+            to_state).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/LifecycleGuardProblem' }
 
   /api/v1/cis/{id}/parent:
     get:
@@ -14539,31 +14845,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  # Scaffold of the P2 path contract (E-38, WP-247): x-status: planned,
-  # no route yet; the work package named in description implements it.
-  /api/v1/attribute-definitions/{id}/reindex:
-    x-status: planned
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    post:
-      operationId: reindexAttributeDefinition
-      tags: [Metamodel]
-      summary: Rebuild the index of an attribute definition
-      description: Planned (E-38); WP-796 implements the operation.
-      responses:
-        '202':
-          description: Accepted; the job runs in the background, the Location header names it. The schemas come with WP-796.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-
   /api/v1/lifecycle-models:
     get:
       operationId: listLifecycleModels
@@ -14792,31 +15073,82 @@ paths:
           $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/templates:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listCITemplates
       tags: [Metamodel]
       summary: List the templates assigned to a CI
-      description: Planned (E-38); WP-710 implements the operation.
+      description: >-
+        The templates of the CI in position order (MET-16, WP-710) with the
+        version each uses; they lie between the attribute sets and the
+        instance attributes in the composition of the CI's schema. Requires
+        ci:read; the client and site scope of the CI apply. The list is
+        bounded per CI and complete: no limit or cursor, next_cursor stays
+        absent.
       responses:
         '200':
-          description: List the templates assigned to a CI. The response schema comes with WP-710.
+          description: The templates of the CI
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); absent, the list is complete.
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/CITemplate' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          description: The server runs without a database; template assignments need it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     put:
       operationId: replaceCITemplates
       tags: [Metamodel]
       summary: Replace the templates assigned to a CI
-      description: Planned (E-38); WP-710 implements the operation.
+      description: >-
+        Replaces the ordered template list of the CI (MET-16, WP-710); the
+        position is the index, an entry without version takes the
+        template's current version. Assignable are published versions of
+        active templates of the organization and system templates whose CI
+        type is the type of the CI or a type of its chain. The attributes of
+        the CI are validated against the schema composed with the new list.
+        Requires ci:write; a manual write like PATCH /cis/{id}: If-Match
+        (API-07; only the current version, else 412), the version rises when
+        the list changes, the history records the field templates in a
+        change set of its own, audit ci.templates_changed (list before and
+        after), event ci.changed with the changed field templates.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the current version of the CI, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetCITemplatesRequest' }
       responses:
         '200':
-          description: Replaced. The request and response schemas come with WP-710.
+          description: The CI with its new template list
+          headers:
+            ETag:
+              description: The new CI version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CI' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -14825,8 +15157,27 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '412':
+          description: If-Match missing although required, or not the current version of the CI
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            An entry the rules refuse (templates[i]: unknown or foreign
+            template, deactivated template, a template of a type outside the
+            chain of the CI, no or no published version, a template listed
+            twice), an attribute of the CI the composed schema does not
+            allow, or definitions that cannot be composed (MET-16, the key
+            as field).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
+        '503':
+          description: The server runs without a database; template assignments need it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cis/{id}/instance-attributes:
     parameters:
@@ -15115,20 +15466,26 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/subnets/{id}/reservations:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listSubnetReservations
       tags: [IPAM]
       summary: List the IP reservations of a subnet
-      description: Planned (E-38); WP-299 implements the operation.
+      description: >-
+        Lists the addresses of type reserved of the subnet (NET-09), the newest
+        first. The page follows the cursor contract (API-02); total counts the
+        reservations of the subnet.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the IP reservations of a subnet. The page follows the cursor contract (API-02); the item schema comes with WP-299.
+          description: Paginated list of the reservations of the subnet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddressListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -15141,10 +15498,26 @@ paths:
       operationId: createSubnetReservation
       tags: [IPAM]
       summary: Reserve an IP address in a subnet
-      description: Planned (E-38); WP-299 implements the operation.
+      description: >-
+        Stores the address as an IP address of type reserved in the subnet,
+        without interface (NET-09). The VRF, client and site come from the
+        subnet; reserved_by is the calling user. reserved_until is informative,
+        nothing releases the reservation when it passes. An address the VRF of
+        the subnet already holds (on an interface, as another reservation or
+        another address without interface) is a conflict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IPReservationCreateRequest'
       responses:
         '201':
-          description: Created. The request and response schemas come with WP-299.
+          description: Created reservation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -15153,11 +15526,10 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/subnets/{id}/reservations/{ip_id}:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: ip_id
@@ -15165,15 +15537,19 @@ paths:
         required: true
         schema:
           type: string
-        description: IP address identifier.
+        description: IP address identifier of the reservation.
     delete:
       operationId: deleteSubnetReservation
       tags: [IPAM]
       summary: Release an IP reservation of a subnet
-      description: Planned (E-38); WP-299 implements the operation.
+      description: >-
+        Deletes the reservation. An address of another subnet or of another
+        type than reserved is not found.
       responses:
         '204':
-          description: Deleted.
+          description: Released.
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -16594,6 +16970,46 @@ components:
             otherwise. IDs of types deleted since are kept and match nothing.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        index_status:
+          $ref: '#/components/schemas/AttributeIndexStatus'
+    AttributeIndexStatus:
+      type: object
+      required: [state, index_name, valid, attempts, max_attempts]
+      description: >-
+        The index status of an attribute definition (DB-04, UI-11, WP-796),
+        part of the reads GET /attribute-definitions and
+        GET /attribute-definitions/{id} (not of the writes, the export, the
+        audit or the event ci_attribute.changed). The source is the newest
+        job of the kinds `attribute.index`, `attribute.index.rebuild` and
+        `attribute.index.key` of the organization for the definition, read
+        organization-wide, so a reader with ci:read and a restricted scope
+        sees the same status (no job:read needed). A failed attempt with
+        attempts left is `queued` with `error` and `attempts`. Without a
+        job: `none` for a definition that is neither searchable nor unique;
+        a system definition `succeeded` (its index comes from the
+        migration); a definition of the organization with flags
+        `succeeded` when its index is valid, else `failed` with the error
+        "index missing".
+      properties:
+        state:
+          type: string
+          enum: [none, queued, running, succeeded, failed, cancelled]
+        index_name:
+          type: string
+          description: >-
+            The index that serves the definition: `idx_attr_<id>` (32 hex
+            characters, unique `_u`), or the index of its key
+            (`idx_attr_key_<key>` / `idx_attr_keyh_<hash>`) for a searchable,
+            not unique definition of the organization without CI type
+            (WP-607).
+        valid:
+          type: boolean
+          description: pg_index.indisvalid of the index; false without index.
+        error: { type: string, description: The error of the job's last attempt. }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        job_id: { type: string, description: The job; absent without job. }
+        updated_at: { type: string, format: date-time, description: The last change of the job; absent without job. }
     AttributeAppliesTo:
       type: string
       enum: [all, categories, types]
@@ -16942,6 +17358,131 @@ components:
         applies_to_type_ids:
           type: array
           items: { type: string }
+    MetamodelRuleKind:
+      type: string
+      enum: [validation, required, readonly, visible]
+      description: >-
+        validation checks the value with `ast` (allowed values under a
+        condition are a validation with enum); required, readonly and
+        visible set the state of the attribute while the condition holds.
+    RuleCondition:
+      description: >-
+        A condition of the rule language (MET-45, WP-715):
+        $defs/condition of api/rules.schema.json.
+      $ref: './rules.schema.json#/$defs/condition'
+    RuleMessage:
+      type: object
+      description: The message of a rule per language (MET-01).
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        de: { type: string, minLength: 1, maxLength: 500 }
+        en: { type: string, minLength: 1, maxLength: 500 }
+    MetamodelRule:
+      type: object
+      description: >-
+        A named rule of the rule catalog (table metamodel_rule, WP-716) for
+        the attribute `attribute_key` of exactly one target: a CI type, an
+        attribute set or a template version (E-111). A new template version
+        takes over the rules of the previous version with their keys. The
+        rules of the attribute definitions (validation, conditional) stay
+        beside the catalog (E-114).
+      required: [id, key, attribute_key, kind, condition, ast, message, is_system, is_active, version, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string, description: Empty for system rules. }
+        key: { type: string }
+        attribute_key: { type: string, description: The target attribute. }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        ci_type_id: { type: string }
+        attribute_set_id: { type: string }
+        template_version_id: { type: string }
+        condition:
+          description: The condition; null applies always.
+          oneOf:
+            - $ref: '#/components/schemas/RuleCondition'
+            - type: 'null'
+        ast:
+          description: The value rule of a validation; null for the other kinds.
+          oneOf:
+            - $ref: '#/components/schemas/RuleAST'
+            - type: 'null'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RuleMessage'
+            - type: 'null'
+        is_system: { type: boolean, description: A read-only system rule. }
+        is_active: { type: boolean }
+        version: { type: integer, description: Rises with every change. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    MetamodelRuleCreate:
+      type: object
+      required: [key, attribute_key, kind]
+      additionalProperties: false
+      description: Exactly one of ci_type_id, attribute_set_id and template_version_id is required (422).
+      properties:
+        key: { type: string, minLength: 1, maxLength: 100 }
+        attribute_key: { type: string, minLength: 1, maxLength: 100 }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        ci_type_id: { type: string }
+        attribute_set_id: { type: string }
+        template_version_id: { type: string }
+        condition:
+          oneOf:
+            - $ref: '#/components/schemas/RuleCondition'
+            - type: 'null'
+        ast:
+          oneOf:
+            - $ref: '#/components/schemas/RuleAST'
+            - type: 'null'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RuleMessage'
+            - type: 'null'
+        is_active: { type: boolean, default: true }
+    MetamodelRulePatch:
+      type: object
+      additionalProperties: false
+      description: key and the target are immutable; naming them is 422.
+      properties:
+        attribute_key: { type: string, minLength: 1, maxLength: 100 }
+        kind:
+          $ref: '#/components/schemas/MetamodelRuleKind'
+        condition:
+          oneOf:
+            - $ref: '#/components/schemas/RuleCondition'
+            - type: 'null'
+        ast:
+          oneOf:
+            - $ref: '#/components/schemas/RuleAST'
+            - type: 'null'
+        message:
+          oneOf:
+            - $ref: '#/components/schemas/RuleMessage'
+            - type: 'null'
+        is_active: { type: boolean }
+        key: { type: string, description: Immutable (422). }
+        ci_type_id: { type: string, description: Immutable (422). }
+        attribute_set_id: { type: string, description: Immutable (422). }
+        template_version_id: { type: string, description: Immutable (422). }
+    MetamodelRuleListResponse:
+      type: object
+      required: [data]
+      properties:
+        next_cursor:
+          type: string
+          description: Opaque signed cursor for the next page (API-02); absent on the last page.
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetamodelRule'
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        has_more: { type: boolean }
     LocalizedText:
       type: object
       description: A label per language (MET-01).
@@ -18080,11 +18621,56 @@ components:
                 type: integer
                 description: The HTTP status the single operation would have answered; 0 for a skipped id.
               error: { type: string }
+    CITemplate:
+      type: object
+      required: [template_id, key, version, position]
+      description: A template assigned to a CI (ci_template, MET-16, WP-710).
+      properties:
+        template_id: { type: string, format: uuid }
+        key:
+          type: string
+          description: Key of the template.
+        version:
+          type: integer
+          minimum: 1
+          description: The published version of the template the CI uses.
+        position:
+          type: integer
+          minimum: 0
+          description: Position in the order of the CI's templates (0 first).
+    CITemplateRef:
+      type: object
+      required: [template_id]
+      description: >-
+        An entry of a template list to assign: an active template of the
+        organization or a system template whose CI type is the type of the
+        CI or a type of its chain (WP-248), with a published version.
+      properties:
+        template_id: { type: string, format: uuid }
+        version:
+          type: integer
+          minimum: 1
+          description: Published version to use; absent, the template's current version.
+    SetCITemplatesRequest:
+      type: object
+      required: [templates]
+      properties:
+        templates:
+          type: array
+          description: The new ordered list; the position is the index. An empty list removes every template.
+          items: { $ref: '#/components/schemas/CITemplateRef' }
     CITypeChangeResult:
       type: object
-      required: [ci, findings, changed]
+      required: [ci, findings, changed, dropped_templates]
       properties:
         ci: { $ref: '#/components/schemas/CI' }
+        dropped_templates:
+          type: array
+          description: >-
+            Template assignments the change removed because their template
+            belongs to a CI type outside the target type and its chain
+            (WP-710).
+          items: { $ref: '#/components/schemas/CITemplate' }
         changed:
           type: boolean
           description: False when the CI already had the type.
@@ -18426,6 +19012,95 @@ components:
                 description: Required fields of the target state and of the transition.
                 items: { type: string }
               guard: { $ref: '#/components/schemas/LifecycleGuard' }
+    LifecycleTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [to_state]
+      description: >-
+        A lifecycle transition of a CI or asset (LCY-02). The effective
+        model of the entity's type decides: an edge from the current state
+        or from any state, or the initial state for an entity without a
+        state.
+      properties:
+        to_state:
+          type: string
+          description: Key of the target state.
+        from_state:
+          type: string
+          description: >-
+            The state the client saw; empty for an entity without a state.
+            Another current state is 409 with current_state. Without it,
+            parallel transitions are serialized and each is checked against
+            the state the previous one left.
+        context:
+          type: object
+          additionalProperties: true
+          description: >-
+            Values the required fields of target state and edge and the
+            rules of the edge's guard are evaluated against.
+        reason:
+          type: string
+          description: Stored as comment of the history entry, in the audit entry and in the event lifecycle.changed.
+    LifecycleTransitionResult:
+      type: object
+      required: [entity_type, entity_id, to_state]
+      properties:
+        entity_type:
+          type: string
+          enum: [ci, asset]
+        entity_id:
+          type: string
+          format: uuid
+        from_state:
+          type: string
+          description: State before the transition; absent for the initial state.
+        to_state:
+          type: string
+    LifecycleGuardProblem:
+      description: >-
+        A refused lifecycle transition (422). Type
+        urn:reticora:problem:lifecycle-guard: the transition context fails
+        required fields or guard rules, each failed rule is a violation.
+        Type urn:reticora:problem:invalid-transition: the model has no edge
+        from the current state to to_state, or no such state (field
+        to_state, from_state, to_state). Type
+        urn:reticora:problem:invalid-field with field to_state: to_state is
+        missing, or the entity's type has no lifecycle model.
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          properties:
+            from_state:
+              type: string
+              description: Current state of an invalid transition.
+            to_state:
+              type: string
+              description: Requested state of an invalid transition.
+            violations:
+              type: array
+              items:
+                type: object
+                required: [field, code, message]
+                properties:
+                  field:
+                    type: string
+                    description: Field of the transition context.
+                  code:
+                    type: string
+                    description: Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json).
+                  message: { type: string }
+    LifecycleTransitionConflictProblem:
+      description: >-
+        from_state is not the current state (409, type
+        urn:reticora:problem:conflict).
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          required: [current_state]
+          properties:
+            current_state:
+              type: string
+              description: The current lifecycle state; empty without one.
     LifecycleModelInUseProblem:
       description: The lifecycle model is in use (409 of DELETE).
       allOf:
@@ -18822,7 +19497,17 @@ components:
             system base composed with the type chain and its attribute sets
             (MET-16). Set by
             the server when the CI is created or its type or attributes
-            change.
+            change. The template layer is not materialized: the templates of
+            the CI with their versions (templates) complete the effective
+            schema (E-108).
+        templates:
+          type: array
+          readOnly: true
+          description: >-
+            Templates assigned to the CI in position order (MET-16, WP-710):
+            present in GET /cis/{id} and the answers of the write paths when
+            the CI has templates; GET /cis does not load them.
+          items: { $ref: '#/components/schemas/CITemplate' }
         site_id:
           type: string
           readOnly: true
@@ -19073,6 +19758,16 @@ components:
           description: >-
             Defaults to manual. With manual or import the CI is manual
             (is_manual); an unknown source is rejected (400 with the field).
+        templates:
+          type: array
+          description: >-
+            Templates assigned with the CI in this order (MET-16, WP-710);
+            the creation is validated against the schema composed with
+            them, atomically with the assignment. Without version an entry
+            takes the template's current version. The rules are those of
+            PUT /cis/{id}/templates (422 on templates[i]). Not empty without
+            a database: 503.
+          items: { $ref: '#/components/schemas/CITemplateRef' }
 
     UpdateCIRequest:
       description: >-
@@ -22092,6 +22787,22 @@ components:
                       is defined: a composition conflict of the attribute
                       definitions (MET-16) carries `datatype-conflict`,
                       `enum-empty`, `range-empty` or `length-range-empty`.
+                      A violated catalog rule (WP-257, MET-10) carries the
+                      code of the rule language for a `validation` rule
+                      (e.g. `pattern`, `range.max`, `enum`), `required` for
+                      a `required` rule and `read_only` for a `readonly`
+                      rule.
+                  rule:
+                    type: string
+                    description: >-
+                      Key of the violated catalog rule (`/api/v1/rules`,
+                      WP-257); absent for the rules of the attribute
+                      definitions.
+                  message:
+                    $ref: '#/components/schemas/RuleMessage'
+                    description: >-
+                      Message of the violated catalog rule (de and/or en),
+                      when the rule has one.
     InterfaceInUseProblem:
       allOf:
         - $ref: '#/components/schemas/ProblemDetail'
@@ -24358,12 +25069,35 @@ components:
         last_seen_at:
           type: string
           format: date-time
+        reserved_until:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Informative end of a reservation (NET-09); set only by POST /api/v1/subnets/{id}/reservations, no automatic release.
+        reserved_by:
+          type: string
+          readOnly: true
+          description: Surrogate id of the user who made the reservation; set only by POST /api/v1/subnets/{id}/reservations.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    IPReservationCreateRequest:
+      type: object
+      required: [address]
+      properties:
+        address:
+          type: string
+          description: Bare IP address (no prefix length) within the CIDR of the subnet.
+        description:
+          type: string
+        reserved_until:
+          type: string
+          format: date-time
+          description: Informative end of the reservation (RFC 3339).
 
     CreateIPAddressRequest:
       type: object

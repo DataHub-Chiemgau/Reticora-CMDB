@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,14 +15,17 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // TestStateSnapshotContentAgainstPostgres covers JOB-04 (WP-516, retest of
@@ -308,5 +312,259 @@ func TestStateSnapshotContentAgainstPostgres(t *testing.T) {
 	}
 	if rows = trail(); len(rows) != 3 || rows[2].changeType != "delete" || !strings.Contains(string(rows[2].oldValue), `"snap-asset-renamed"`) || rows[2].newValue != nil {
 		t.Errorf("asset trail after the deletion: %+v, want a delete row with the asset as it was", rows)
+	}
+}
+
+// TestCISnapshotReplayAgainstPostgres covers AUD-08 (WP-312) as
+// reticora_app: the weekly job history.weekly_snapshot (clock set ahead
+// with WithClock) writes a ci_snapshot with the client and site of the CI
+// and without plain text; a second run without a change writes no row and
+// no vault entry. Snapshot plus replay give the live state before and after
+// a change. A merge of two CIs with different values marks the moved
+// history rows with origin_ci_id and writes a snapshot of both: the replay
+// of the survivor before the merge is its own state, now the live state,
+// the replay of the victim before the merge its state and after it deleted
+// with the survivor. The unmerge, also with force, takes origin_ci_id back
+// and writes both snapshots. The snapshot outlives the hard delete, and a
+// client-2 principal reads no snapshot of a client-1 CI.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCISnapshotReplayAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "b6")
+	bg := context.Background()
+	key, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.NewEnvelopeEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pii.SetDefault(pii.NewVault(f.App, enc))
+	t.Cleanup(func() { pii.SetDefault(nil) })
+
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	repo := ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())
+	svc := ci.NewService(repo)
+	hist := history.NewPGRepository(f.App)
+	manual := &ci.ManualChange{Author: f.User}
+	var typeID string
+	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1`).Scan(&typeID); err != nil {
+		t.Fatal(err)
+	}
+	site, err := locations.NewPGRepository(f.App).Create(ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindSite, ClientID: f.Client1, Name: "snap-site"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(name, model string, attrs map[string]any) *ci.Item {
+		t.Helper()
+		item := &ci.Item{OrganizationID: f.OrgA, ClientID: f.Client1, LocationID: site.ID, CITypeID: typeID, Name: name, Status: "active",
+			Model: model, Attributes: attrs}
+		if cerr := svc.Create(ctx, item); cerr != nil {
+			t.Fatalf("create %s: %v", name, cerr)
+		}
+		return item
+	}
+	replay := func(id string, at time.Time) (history.StateSnapshot, []history.Change) {
+		t.Helper()
+		trail, terr := hist.TrailUpTo(ctx, f.OrgA, "ci", id, at)
+		if terr != nil {
+			t.Fatal(terr)
+		}
+		return history.Replay(trail), trail
+	}
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if qerr := f.Admin.QueryRow(bg, query, args...).Scan(&n); qerr != nil {
+			t.Fatal(qerr)
+		}
+		return n
+	}
+	live := func(id string) *ci.Item {
+		t.Helper()
+		item, gerr := repo.GetByID(ctx, f.OrgA, id)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		return item
+	}
+
+	// Weekly snapshot: the trail of the CI lies three hours back, the run
+	// starts half an hour ahead, so it is taken half an hour ago.
+	weekly := create("snap-weekly", "", map[string]any{"contact_email": "snap-weekly@example.invalid"})
+	if _, err = f.Admin.Exec(bg, `UPDATE ci_change SET created_at = created_at - interval '3 hours' WHERE ci_id = $1`, weekly.ID); err != nil {
+		t.Fatal(err)
+	}
+	job := history.NewWeeklySnapshot(f.App).WithClock(func() time.Time { return time.Now().Add(30 * time.Minute) })
+	if _, err = job.RunOrg(bg, f.OrgA); err != nil {
+		t.Fatalf("weekly snapshot: %v", err)
+	}
+	var clientID, siteID, reason, state string
+	var takenAt time.Time
+	if err = f.Admin.QueryRow(bg, `SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), reason, state::text, taken_at
+		FROM ci_snapshot WHERE ci_id = $1`, weekly.ID).Scan(&clientID, &siteID, &reason, &state, &takenAt); err != nil {
+		t.Fatalf("weekly snapshot of the CI: %v", err)
+	}
+	if clientID != f.Client1 || siteID != weekly.SiteID || siteID == "" || reason != history.SnapshotReasonWeekly {
+		t.Errorf("weekly snapshot: client %s site %s reason %s, want %s %s weekly", clientID, siteID, reason, f.Client1, weekly.SiteID)
+	}
+	if strings.Contains(state, "snap-weekly@example.invalid") || !strings.Contains(state, pii.RefKey) {
+		t.Errorf("weekly snapshot state %s holds plain text, want the surrogate (SEC-05)", state)
+	}
+	if d := time.Until(takenAt); d > -20*time.Minute || d < -40*time.Minute {
+		t.Errorf("weekly snapshot taken at %s, want half an hour ago", takenAt)
+	}
+	snapshots := count(`SELECT count(*) FROM ci_snapshot WHERE organization_id = $1`, f.OrgA)
+	subjects := count(`SELECT count(*) FROM pii_subject WHERE organization_id = $1`, f.OrgA)
+	if n, rerr := job.RunOrg(bg, f.OrgA); rerr != nil || n != 0 {
+		t.Errorf("second weekly run without a change: %d snapshots, %v; want none", n, rerr)
+	}
+	if n := count(`SELECT count(*) FROM ci_snapshot WHERE organization_id = $1`, f.OrgA); n != snapshots {
+		t.Errorf("second weekly run: %d snapshots, before %d", n, snapshots)
+	}
+	if n := count(`SELECT count(*) FROM pii_subject WHERE organization_id = $1`, f.OrgA); n != subjects {
+		t.Errorf("second weekly run: %d vault entries, before %d", n, subjects)
+	}
+
+	// Snapshot plus replay: the live state before and after a change.
+	s, trail := replay(weekly.ID, time.Now())
+	attrs, _ := s.Fields["attributes"].(map[string]any)
+	if len(trail) == 0 || trail[0].Source != history.SourceCISnapshot || s.Fields["name"] != live(weekly.ID).Name || s.Deleted ||
+		attrs["contact_email"] != "snap-weekly@example.invalid" {
+		t.Errorf("replay from the weekly snapshot: %+v (trail %+v), want the live state with the unsealed value", s, trail)
+	}
+	renamed := "snap-weekly-renamed"
+	if _, err = svc.Update(ctx, f.OrgA, weekly.ID, ci.UpdateRequest{Name: &renamed, Manual: manual}); err != nil {
+		t.Fatal(err)
+	}
+	if s, trail = replay(weekly.ID, time.Now()); trail[0].Source != history.SourceCISnapshot || s.Fields["name"] != renamed ||
+		s.Fields["name"] != live(weekly.ID).Name {
+		t.Errorf("replay from the weekly snapshot after a rename: %+v, want the live name %s", s, renamed)
+	}
+	if s, _ = replay(weekly.ID, takenAt); s.Fields["name"] != "snap-weekly" {
+		t.Errorf("replay at the snapshot: %+v, want the name before the rename", s)
+	}
+
+	// A client-2 principal reads no snapshot of the client-1 CI.
+	snapshotsFor := func(ctx context.Context) int {
+		t.Helper()
+		var n int
+		if terr := database.WithRequestTenant(ctx, f.App, f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM ci_snapshot WHERE ci_id = $1`, weekly.ID).Scan(&n)
+		}); terr != nil {
+			t.Fatal(terr)
+		}
+		return n
+	}
+	if n := snapshotsFor(f.ClientCtx(f.Client2)); n != 0 {
+		t.Errorf("client-2 principal reads %d snapshots of a client-1 CI", n)
+	}
+	if n := snapshotsFor(f.ClientCtx(f.Client1)); n != 1 {
+		t.Errorf("client-1 principal reads %d snapshots of its CI, want 1", n)
+	}
+
+	// Merge: the survivor and the victim differ in model and attributes.
+	survivor := create("snap-survivor", "", map[string]any{"s_only": "s"})
+	victim := create("snap-victim", "m-victim", map[string]any{"v_only": "v"})
+	time.Sleep(20 * time.Millisecond)
+	if _, err = svc.Merge(ctx, f.OrgA, survivor.ID, victim.ID); err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	var mergedAt time.Time
+	if err = f.Admin.QueryRow(bg, `SELECT created_at FROM ci_change WHERE ci_id = $1 AND field_name = 'merged_into_id'`, victim.ID).Scan(&mergedAt); err != nil {
+		t.Fatal(err)
+	}
+	beforeMerge := mergedAt.Add(-5 * time.Millisecond)
+	if n := count(`SELECT count(*) FROM ci_change WHERE ci_id = $1 AND origin_ci_id = $2`, survivor.ID, victim.ID); n == 0 {
+		t.Error("merge: no moved history row names the victim as its origin")
+	}
+	if n := count(`SELECT count(*) FROM ci_snapshot WHERE reason = 'merge' AND taken_at = $3 AND (ci_id = $1 OR (ci_id = $2 AND state->>'deleted' = 'true'
+			AND state->>'merged_into_id' = $1::text))`, survivor.ID, victim.ID, mergedAt); n != 2 {
+		t.Errorf("merge: %d snapshots, want the survivor and the deleted victim with its survivor", n)
+	}
+	checkState := func(label string, s history.StateSnapshot, name, model string, key string, deleted bool, mergedInto string) {
+		t.Helper()
+		a, _ := s.Fields["attributes"].(map[string]any)
+		gotModel, _ := s.Fields["model"].(string)
+		if s.Fields["name"] != name || gotModel != model || a[key] == nil || s.Deleted != deleted || s.MergedIntoID != mergedInto {
+			t.Errorf("%s: name %v model %q attributes %v deleted %v merged into %q; want %s %q with %s, %v %q",
+				label, s.Fields["name"], gotModel, a, s.Deleted, s.MergedIntoID, name, model, key, deleted, mergedInto)
+		}
+	}
+	s, _ = replay(survivor.ID, beforeMerge)
+	checkState("survivor before the merge", s, "snap-survivor", "", "s_only", false, "")
+	if a, _ := s.Fields["attributes"].(map[string]any); a["v_only"] != nil {
+		t.Errorf("survivor before the merge carries the victim's attribute: %v", a)
+	}
+	s, _ = replay(survivor.ID, time.Now())
+	checkState("survivor now", s, "snap-survivor", "m-victim", "v_only", false, "")
+	if l := live(survivor.ID); s.Fields["model"] != l.Model || s.Fields["name"] != l.Name {
+		t.Errorf("survivor now: %+v, live %+v", s.Fields, l)
+	}
+	s, _ = replay(victim.ID, beforeMerge)
+	checkState("victim before the merge", s, "snap-victim", "m-victim", "v_only", false, "")
+	s, _ = replay(victim.ID, time.Now())
+	checkState("victim after the merge", s, "snap-victim", "m-victim", "v_only", true, survivor.ID)
+
+	// Unmerge: origin_ci_id back, a snapshot of both.
+	if _, err = svc.Unmerge(ctx, f.OrgA, victim.ID, false); err != nil {
+		t.Fatalf("unmerge: %v", err)
+	}
+	unmergeChecks := func(label string, want int) {
+		t.Helper()
+		if n := count(`SELECT count(*) FROM ci_change WHERE origin_ci_id = $1`, victim.ID); n != 0 {
+			t.Errorf("%s: %d history rows still name the victim as origin", label, n)
+		}
+		if n := count(`SELECT count(*) FROM ci_change WHERE ci_id = $1 AND change_type = 'create'`, victim.ID); n != 1 {
+			t.Errorf("%s: the creation of the victim is not back with it (%d)", label, n)
+		}
+		if n := count(`SELECT count(*) FROM ci_snapshot WHERE reason = 'unmerge' AND ci_id IN ($1, $2)`, survivor.ID, victim.ID); n != want {
+			t.Errorf("%s: %d unmerge snapshots, want %d", label, n, want)
+		}
+		vs, _ := replay(victim.ID, time.Now())
+		checkState(label+", victim", vs, "snap-victim", "m-victim", "v_only", false, "")
+		// The row as the unmerge wrote it back (GET overlays the field
+		// overrides of the survivor on it).
+		var name string
+		if qerr := f.Admin.QueryRow(bg, `SELECT name FROM ci WHERE id = $1`, survivor.ID).Scan(&name); qerr != nil {
+			t.Fatal(qerr)
+		}
+		if ss, _ := replay(survivor.ID, time.Now()); ss.Fields["name"] != name || name != "snap-survivor" || ss.Deleted || ss.Fields["model"] != nil {
+			t.Errorf("%s, survivor: %+v, want the row name %s without model", label, ss, name)
+		}
+	}
+	unmergeChecks("unmerge", 2)
+
+	// Merge again, change the survivor, unmerge with force (E-80).
+	if _, err = svc.Merge(ctx, f.OrgA, survivor.ID, victim.ID); err != nil {
+		t.Fatalf("second merge: %v", err)
+	}
+	later := "snap-survivor-later"
+	if _, err = svc.Update(ctx, f.OrgA, survivor.ID, ci.UpdateRequest{Name: &later, Manual: manual}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Unmerge(ctx, f.OrgA, victim.ID, false); !errors.Is(err, ci.ErrUnmergeConflict) {
+		t.Fatalf("unmerge after a later change: %v, want the conflict", err)
+	}
+	if _, err = svc.Unmerge(ctx, f.OrgA, victim.ID, true); err != nil {
+		t.Fatalf("forced unmerge: %v", err)
+	}
+	unmergeChecks("forced unmerge", 4)
+
+	// The snapshot outlives the hard delete.
+	if _, err = svc.Delete(ctx, f.OrgA, weekly.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = database.WithRequestTenant(ctx, f.App, f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
+		return jobs.HardDeleteCI(ctx, tx, f.OrgA, weekly.ID)
+	}); err != nil {
+		t.Fatalf("hard delete: %v", err)
+	}
+	if n := count(`SELECT count(*) FROM ci WHERE id = $1`, weekly.ID); n != 0 {
+		t.Fatalf("hard delete left the CI")
+	}
+	if n := count(`SELECT count(*) FROM ci_snapshot WHERE ci_id = $1`, weekly.ID); n != 1 {
+		t.Errorf("after the hard delete %d snapshots of the CI, want 1", n)
 	}
 }

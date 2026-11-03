@@ -14,7 +14,7 @@ import {
   useSetOverride,
   useClearOverride,
   useBlastRadius,
-  useLifecycleDefinitions,
+  useLifecycleOptions,
   useLifecycleTransition,
   useEntityHistory,
   useLocationTree,
@@ -33,6 +33,8 @@ import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Modal } from '../ui/Modal';
 import { SkeletonList } from '../ui/Skeleton';
+import { ImpactPanel } from '../graph/ImpactPanel';
+import { useEntitlements } from '../../hooks/useEntitlements';
 import { ErrorState } from '../ui/ErrorState';
 
 // ─── Location names and times (CI-06, DB-05) ────────────────────────────────
@@ -479,6 +481,15 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
 
 // ─── Lifecycle (§8) ──────────────────────────────────────────────────────────
 
+/**
+ * LifecycleSection offers the transitions the effective lifecycle model of
+ * the entity allows from its current state (GET …/lifecycle-transitions,
+ * WP-723) and applies one with POST …/lifecycle-transitions (WP-724); the
+ * required fields of the chosen transition are asked for as its context,
+ * and a refusal (guard violations, a transition someone else applied in
+ * between) is shown with the violated fields.
+ * A CI type without lifecycle model answers 422: the section is left out.
+ */
 export function LifecycleSection({
   entityType,
   entityId,
@@ -489,16 +500,58 @@ export function LifecycleSection({
   currentState?: string;
 }) {
   const { t } = useTranslation();
-  const defs = useLifecycleDefinitions();
+  const options = useLifecycleOptions(entityType, entityId);
   const transition = useLifecycleTransition(entityType, entityId);
   const [target, setTarget] = useState('');
   const [reason, setReason] = useState('');
+  const [context, setContext] = useState<Record<string, string>>({});
 
-  // Use the default physical asset lifecycle (or the first definition).
-  const def =
-    (defs.data?.data ?? []).find((d) => d.key === 'physical_asset') ?? (defs.data?.data ?? [])[0];
-  const states = def?.states ?? [];
-  const current = currentState || states.find((s) => s.is_initial)?.key || '';
+  if (options.isLoading) return null;
+  // No lifecycle model for the type (DB-05): no lifecycle state to show.
+  if (options.error instanceof ApiError && options.error.status === 422) return null;
+  if (options.isError || !options.data) {
+    return (
+      <Section title={t('lifecycle.title', 'Lebenszyklus')}>
+        <ErrorState
+          title={String(options.error ?? '')}
+          retryLabel={t('common.retry', 'Erneut versuchen')}
+          onRetry={() => void options.refetch()}
+        />
+      </Section>
+    );
+  }
+
+  const current = options.data.current_state ?? currentState ?? '';
+  const targets = new Map<string, { label: string; required: string[] }>();
+  // A body without transitions offers none (no crash of the detail page).
+  for (const tr of options.data.transitions ?? []) {
+    const known = targets.get(tr.to_state);
+    targets.set(tr.to_state, {
+      label: known?.label ?? tr.label,
+      required: [...new Set([...(known?.required ?? []), ...(tr.required_fields ?? [])])],
+    });
+  }
+  const required = targets.get(target)?.required ?? [];
+  const error = transition.error;
+  const violated =
+    error instanceof ApiError ? error.violations.map((v) => v.field).filter(Boolean) : [];
+
+  const apply = () => {
+    const values: Record<string, unknown> = {};
+    for (const field of required) {
+      if (context[field]) values[field] = context[field];
+    }
+    transition.mutate(
+      { toState: target, context: values, reason },
+      {
+        onSuccess: () => {
+          setTarget('');
+          setReason('');
+          setContext({});
+        },
+      },
+    );
+  };
 
   return (
     <Section title={t('lifecycle.title', 'Lebenszyklus')}>
@@ -513,46 +566,53 @@ export function LifecycleSection({
           label={t('lifecycle.transitionTo', 'Übergang nach')}
           options={[
             { value: '', label: '—' },
-            ...states
-              .filter((s) => s.key !== current)
-              .map((s) => ({ value: s.key, label: s.label })),
+            ...[...targets].map(([key, tr]) => ({ value: key, label: tr.label || key })),
           ]}
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           className="max-w-xs"
         />
+        {required.map((field) => (
+          <Input
+            key={field}
+            label={field}
+            required
+            value={context[field] ?? ''}
+            onChange={(e) => setContext((c) => ({ ...c, [field]: e.target.value }))}
+            className="max-w-xs"
+          />
+        ))}
         <Input
           label={t('lifecycle.reason', 'Grund')}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           className="max-w-xs"
         />
-        <Button
-          size="sm"
-          disabled={!target || transition.isPending}
-          onClick={() => transition.mutate({ toState: target, reason })}
-        >
+        <Button size="sm" disabled={!target || transition.isPending} onClick={apply}>
           {t('lifecycle.apply', 'Anwenden')}
         </Button>
       </div>
-      {transition.error ? (
-        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{String(transition.error)}</p>
+      {error ? (
+        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          {String(error.message || error)}
+          {violated.length > 0 ? `: ${violated.join(', ')}` : null}
+        </p>
       ) : null}
     </Section>
   );
 }
 
-// ─── Impact analysis (§15) ───────────────────────────────────────────────────
+// ─── Impact analysis (§15, UI-14: ImpactPanel, WP-818) ───────────────────────────────────────────────────
 
 export function ImpactSection({ ciId }: { ciId: string }) {
   const { t } = useTranslation();
+  const { isEnabled } = useEntitlements();
   const [enabled, setEnabled] = useState(false);
-  const blast = useBlastRadius(ciId, enabled);
-  // Certain hits and CIs reached only over connected_to (the network
-  // heuristic, IMP-03) are listed apart; affected_count counts the former.
-  const affected = blast.data?.affected_cis ?? [];
-  const certain = affected.filter((n) => !n.heuristic);
-  const heuristic = affected.filter((n) => n.heuristic);
+  const topology = isEnabled('topology');
+  const blast = useBlastRadius(ciId, enabled && topology);
+  // blast-radius hangs on the entitlement topology (gatedSuffixes): without
+  // it the section is not shown (UI-14, WP-818).
+  if (!topology) return null;
 
   return (
     <Section title={t('impact.title', 'Auswirkungsanalyse')}>
@@ -563,74 +623,8 @@ export function ImpactSection({ ciId }: { ciId: string }) {
       ) : blast.isLoading ? (
         <SkeletonList rows={3} label="…" />
       ) : blast.data ? (
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-4 text-sm">
-            <span>
-              {t('impact.affected', 'Betroffene CIs')}: <strong>{blast.data.affected_count}</strong>
-            </span>
-            <span>
-              {t('impact.heuristic')}: <strong>{blast.data.heuristic_count}</strong>
-            </span>
-            <span>
-              {t('impact.clients', 'Kunden')}: <strong>{blast.data.client_ids?.length ?? 0}</strong>
-            </span>
-            <span>
-              {t('impact.sites', 'Standorte')}: <strong>{blast.data.site_ids?.length ?? 0}</strong>
-            </span>
-            <span className="text-red-600 dark:text-red-400">
-              {t('impact.spof', 'SPOF')}:{' '}
-              <strong>{blast.data.single_points_of_failure?.length ?? 0}</strong>
-            </span>
-          </div>
-          {(blast.data.single_points_of_failure?.length ?? 0) > 0 ? (
-            <div>
-              <p className="text-xs font-semibold text-red-600 dark:text-red-400">
-                {t('impact.spofList', 'Single Points of Failure:')}
-              </p>
-              <ul className="text-sm">
-                {blast.data.single_points_of_failure!.map((n) => (
-                  <li key={n.id}>• {n.name}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <div>
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-              {t('impact.affectedList', 'Betroffen:')}
-            </p>
-            {certain.length > 0 ? (
-              <ul className="max-h-40 overflow-y-auto text-sm">
-                {certain.map((n) => (
-                  <li key={n.id}>
-                    • {n.name}{' '}
-                    <span className="text-xs text-gray-500 dark:text-gray-400">({n.ci_type})</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">{t('impact.noneAffected')}</p>
-            )}
-          </div>
-          {heuristic.length > 0 ? (
-            <div>
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                {t('impact.heuristicList')}
-              </p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t('impact.heuristicHint')}
-              </p>
-              <ul className="max-h-40 overflow-y-auto text-sm">
-                {heuristic.map((n) => (
-                  <li key={n.id}>
-                    • {n.name}{' '}
-                    <span className="text-xs text-gray-500 dark:text-gray-400">({n.ci_type})</span>{' '}
-                    <Badge variant="warning">{t('impact.heuristicMarker')}</Badge>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
+        // Of the nodes the CI detail uses id, name and ci_type only.
+        <ImpactPanel impact={{ ...blast.data, affected: blast.data.affected_cis }} />
       ) : null}
     </Section>
   );

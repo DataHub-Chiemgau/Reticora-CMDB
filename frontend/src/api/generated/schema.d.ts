@@ -2799,7 +2799,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); serial_mismatch and duplicate_ip dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); duplicate_ip accept|dismiss (accept releases the reservation; 422 when the reservation is already released or the item names none, 501 without IPAM); serial_mismatch dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -5779,7 +5779,10 @@ export interface paths {
      */
     get: operations['getAssetsIdLifecycleTransitionOptions'];
     put?: never;
-    /** Execute a lifecycle transition on an asset */
+    /**
+     * Execute a lifecycle transition on an asset
+     * @description Runs the transition in one transaction (LCY-02, WP-724): the current state is read with a row lock, the effective lifecycle model of the asset type chain needs an edge from it (or from any state) to to_state, or to_state is the initial state of an entity without a state; the required fields of target state and edge and the rules of the edge's guard are evaluated against context. The state is set, a history entry (lifecycle_transition), the audit entry asset.lifecycle_changed and the event lifecycle.changed are written; any error rolls everything back.
+     */
     post: operations['createAssetsIdLifecycleTransitions'];
     delete?: never;
     options?: never;
@@ -5878,7 +5881,7 @@ export interface paths {
     };
     /**
      * List attribute definitions (MET-10)
-     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `attribute_set_id`, `scope` (type, global, set) and `applicable_to` (WP-255): the definitions of that CI type together with the global definitions that apply to it (system globals, globals with `applies_to` = all, categories listing the type's category, types listing the type or one of its ancestors); a type the organization does not see selects nothing. Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `attribute_set_id`, `scope` (type, global, set) and `applicable_to` (WP-255): the definitions of that CI type together with the global definitions that apply to it (system globals, globals with `applies_to` = all, categories listing the type's category, types listing the type or one of its ancestors); a type the organization does not see selects nothing. Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Every definition carries its `index_status` (DB-04, WP-796).
      */
     get: operations['listAttributeDefinitions'];
     put?: never;
@@ -5903,7 +5906,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Read an attribute definition */
+    /**
+     * Read an attribute definition
+     * @description The definition with its `index_status` (DB-04, WP-796).
+     */
     get: operations['getAttributeDefinition'];
     put?: never;
     post?: never;
@@ -5916,6 +5922,29 @@ export interface paths {
      * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409. A definition that cannot be composed with the other layers of its key (MET-16) is 422 with `field` = `key` and a `code`; this includes a change of `applies_to`, `applies_to_categories` or `applies_to_type_ids` that extends a global definition to a type with a conflicting definition (MET-13, WP-255). A change of the applicability rebuilds no index and raises no `schema_version`.
      */
     patch: operations['updateAttributeDefinition'];
+    trace?: never;
+  };
+  '/api/v1/attribute-definitions/{id}/reindex': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rebuild the index of an attribute definition (DB-04)
+     * @description Queues an `attribute.index` job for the caller that brings the index of the definition in line with its flags (DB-04, WP-796) and answers 202 with the index status of the new job; Location names the job. While an index job of the definition (`attribute.index`, `attribute.index.rebuild`, `attribute.index.key`) is queued or running, the answer is 200 with its status and no job is queued; concurrent requests leave at most one open job. A system definition is 403 (its index comes from the migration), a definition that is neither searchable nor unique 409, a server without job service 503. Requires ci_attribute:manage.
+     */
+    post: operations['reindexAttributeDefinition'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/attribute-sets': {
@@ -6121,6 +6150,61 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  '/api/v1/rules': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List catalog rules (MET-45)
+     * @description The organization's rules of the rule catalog and the read-only system rules (`is_system`, WP-716), optionally filtered by target (`ci_type_id`, `attribute_set_id`, `template_version_id`), by `attribute_key` and by `kind`. Pages newest first on (created_at, id) (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`. Requires ci:read. The catalog is not /api/v1/compliance/rules.
+     */
+    get: operations['listRules'];
+    put?: never;
+    /**
+     * Create a catalog rule (MET-45)
+     * @description A rule of the organization on exactly one target it sees (a CI type, an attribute set or a template version, its own or a system row; otherwise 422 on the target field). `condition` is checked strictly as a condition of api/rules.schema.json, `ast` as a value rule; an invalid expression is 422 with the parser's path in `field` (e.g. `condition.rules[1].field`). `ast` is required exactly for kind `validation`. A `visible` rule on a CI type for an attribute the type requires statically is 422 on `attribute_key`. A rule on a published or retired template version is 409, a taken key 409 (unique per organization for type and set rules, per version for template rules). Requires citype:manage; audited as `metamodel_rule.created`.
+     */
+    post: operations['createRule'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/rules/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read a catalog rule
+     * @description An own or a system rule. Requires ci:read.
+     */
+    get: operations['getRule'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a catalog rule
+     * @description System rules are read-only (403); the rules of a published or retired template version are immutable (409). Requires citype:manage; audited as `metamodel_rule.deleted`.
+     */
+    delete: operations['deleteRule'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a catalog rule
+     * @description `attribute_key`, `kind`, `condition`, `ast`, `message` and `is_active`; null removes `condition`, `ast` or `message`. A kind other than `validation` drops an `ast` the request does not send. `key` and the target are immutable (422). `version` rises by one. System rules are read-only (403); the rules of a published or retired template version are immutable (409). Requires citype:manage; audited as `metamodel_rule.updated` with before and after.
+     */
+    patch: operations['updateRule'];
     trace?: never;
   };
   '/api/v1/ci-types': {
@@ -6491,7 +6575,10 @@ export interface paths {
      */
     get: operations['getCisIdLifecycleTransitionOptions'];
     put?: never;
-    /** Execute a lifecycle transition on a CI */
+    /**
+     * Execute a lifecycle transition on a CI
+     * @description Runs the transition in one transaction (LCY-02, WP-724): the current state is read with a row lock, the effective lifecycle model of the ci type chain needs an edge from it (or from any state) to to_state, or to_state is the initial state of an entity without a state; the required fields of target state and edge and the rules of the edge's guard are evaluated against context. The state is set, a history entry (lifecycle_transition), the audit entry ci.lifecycle_changed and the event lifecycle.changed are written; any error rolls everything back.
+     */
     post: operations['createCisIdLifecycleTransitions'];
     delete?: never;
     options?: never;
@@ -7073,29 +7160,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/attribute-definitions/{id}/reindex': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Rebuild the index of an attribute definition
-     * @description Planned (E-38); WP-796 implements the operation.
-     */
-    post: operations['reindexAttributeDefinition'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/lifecycle-models': {
     parameters: {
       query?: never;
@@ -7232,12 +7296,12 @@ export interface paths {
     };
     /**
      * List the templates assigned to a CI
-     * @description Planned (E-38); WP-710 implements the operation.
+     * @description The templates of the CI in position order (MET-16, WP-710) with the version each uses; they lie between the attribute sets and the instance attributes in the composition of the CI's schema. Requires ci:read; the client and site scope of the CI apply. The list is bounded per CI and complete: no limit or cursor, next_cursor stays absent.
      */
     get: operations['listCITemplates'];
     /**
      * Replace the templates assigned to a CI
-     * @description Planned (E-38); WP-710 implements the operation.
+     * @description Replaces the ordered template list of the CI (MET-16, WP-710); the position is the index, an entry without version takes the template's current version. Assignable are published versions of active templates of the organization and system templates whose CI type is the type of the CI or a type of its chain. The attributes of the CI are validated against the schema composed with the new list. Requires ci:write; a manual write like PATCH /cis/{id}: If-Match (API-07; only the current version, else 412), the version rises when the list changes, the history records the field templates in a change set of its own, audit ci.templates_changed (list before and after), event ci.changed with the changed field templates.
      */
     put: operations['replaceCITemplates'];
     post?: never;
@@ -7412,13 +7476,13 @@ export interface paths {
     };
     /**
      * List the IP reservations of a subnet
-     * @description Planned (E-38); WP-299 implements the operation.
+     * @description Lists the addresses of type reserved of the subnet (NET-09), the newest first. The page follows the cursor contract (API-02); total counts the reservations of the subnet.
      */
     get: operations['listSubnetReservations'];
     put?: never;
     /**
      * Reserve an IP address in a subnet
-     * @description Planned (E-38); WP-299 implements the operation.
+     * @description Stores the address as an IP address of type reserved in the subnet, without interface (NET-09). The VRF, client and site come from the subnet; reserved_by is the calling user. reserved_until is informative, nothing releases the reservation when it passes. An address the VRF of the subnet already holds (on an interface, as another reservation or another address without interface) is a conflict.
      */
     post: operations['createSubnetReservation'];
     delete?: never;
@@ -7434,7 +7498,7 @@ export interface paths {
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
-        /** @description IP address identifier. */
+        /** @description IP address identifier of the reservation. */
         ip_id: string;
       };
       cookie?: never;
@@ -7444,7 +7508,7 @@ export interface paths {
     post?: never;
     /**
      * Release an IP reservation of a subnet
-     * @description Planned (E-38); WP-299 implements the operation.
+     * @description Deletes the reservation. An address of another subnet or of another type than reserved is not found.
      */
     delete: operations['deleteSubnetReservation'];
     options?: never;
@@ -8322,6 +8386,27 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      index_status?: components['schemas']['AttributeIndexStatus'];
+    };
+    /** @description The index status of an attribute definition (DB-04, UI-11, WP-796), part of the reads GET /attribute-definitions and GET /attribute-definitions/{id} (not of the writes, the export, the audit or the event ci_attribute.changed). The source is the newest job of the kinds `attribute.index`, `attribute.index.rebuild` and `attribute.index.key` of the organization for the definition, read organization-wide, so a reader with ci:read and a restricted scope sees the same status (no job:read needed). A failed attempt with attempts left is `queued` with `error` and `attempts`. Without a job: `none` for a definition that is neither searchable nor unique; a system definition `succeeded` (its index comes from the migration); a definition of the organization with flags `succeeded` when its index is valid, else `failed` with the error "index missing". */
+    AttributeIndexStatus: {
+      /** @enum {string} */
+      state: 'none' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+      /** @description The index that serves the definition: `idx_attr_<id>` (32 hex characters, unique `_u`), or the index of its key (`idx_attr_key_<key>` / `idx_attr_keyh_<hash>`) for a searchable, not unique definition of the organization without CI type (WP-607). */
+      index_name: string;
+      /** @description pg_index.indisvalid of the index; false without index. */
+      valid: boolean;
+      /** @description The error of the job's last attempt. */
+      error?: string;
+      attempts: number;
+      max_attempts: number;
+      /** @description The job; absent without job. */
+      job_id?: string;
+      /**
+       * Format: date-time
+       * @description The last change of the job; absent without job.
+       */
+      updated_at?: string;
     };
     /**
      * @description The applicability of a global attribute of the organization (MET-13, WP-255): `all` (default) every CI type, `categories` the types whose `category` is in `applies_to_categories`, `types` the types in `applies_to_type_ids` and their subtypes (type chain, MET-06). Only an organization's global definition (scope global) can be restricted, otherwise 400; the list of the mode must not be empty and the other list must be (400); a type ID that is neither a type of the organization nor a system type is 422 on `applies_to_type_ids`. A changed mode drops the lists of the former mode unless the request sends them. `required`, validation and default of a restricted global apply only to the CIs of the types it applies to; indexes and uniqueness stay organization-wide. System globals and type or set definitions are always `all`.
@@ -8568,6 +8653,85 @@ export interface components {
       applies_to?: components['schemas']['AttributeAppliesTo'];
       applies_to_categories?: string[];
       applies_to_type_ids?: string[];
+    };
+    /**
+     * @description validation checks the value with `ast` (allowed values under a condition are a validation with enum); required, readonly and visible set the state of the attribute while the condition holds.
+     * @enum {string}
+     */
+    MetamodelRuleKind: 'validation' | 'required' | 'readonly' | 'visible';
+    /** @description A condition of the rule language (MET-45, WP-715): $defs/condition of api/rules.schema.json. */
+    RuleCondition: components['schemas']['condition'];
+    /** @description The message of a rule per language (MET-01). */
+    RuleMessage: {
+      de?: string;
+      en?: string;
+    };
+    /** @description A named rule of the rule catalog (table metamodel_rule, WP-716) for the attribute `attribute_key` of exactly one target: a CI type, an attribute set or a template version (E-111). A new template version takes over the rules of the previous version with their keys. The rules of the attribute definitions (validation, conditional) stay beside the catalog (E-114). */
+    MetamodelRule: {
+      id: string;
+      /** @description Empty for system rules. */
+      organization_id?: string;
+      key: string;
+      /** @description The target attribute. */
+      attribute_key: string;
+      kind: components['schemas']['MetamodelRuleKind'];
+      ci_type_id?: string;
+      attribute_set_id?: string;
+      template_version_id?: string;
+      /** @description The condition; null applies always. */
+      condition: components['schemas']['condition'] | null;
+      /** @description The value rule of a validation; null for the other kinds. */
+      ast: components['schemas']['rule'] | null;
+      message: components['schemas']['RuleMessage'] | null;
+      /** @description A read-only system rule. */
+      is_system: boolean;
+      is_active: boolean;
+      /** @description Rises with every change. */
+      version: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description Exactly one of ci_type_id, attribute_set_id and template_version_id is required (422). */
+    MetamodelRuleCreate: {
+      key: string;
+      attribute_key: string;
+      kind: components['schemas']['MetamodelRuleKind'];
+      ci_type_id?: string;
+      attribute_set_id?: string;
+      template_version_id?: string;
+      condition?: components['schemas']['condition'] | null;
+      ast?: components['schemas']['rule'] | null;
+      message?: components['schemas']['RuleMessage'] | null;
+      /** @default true */
+      is_active: boolean;
+    };
+    /** @description key and the target are immutable; naming them is 422. */
+    MetamodelRulePatch: {
+      attribute_key?: string;
+      kind?: components['schemas']['MetamodelRuleKind'];
+      condition?: components['schemas']['condition'] | null;
+      ast?: components['schemas']['rule'] | null;
+      message?: components['schemas']['RuleMessage'] | null;
+      is_active?: boolean;
+      /** @description Immutable (422). */
+      key?: string;
+      /** @description Immutable (422). */
+      ci_type_id?: string;
+      /** @description Immutable (422). */
+      attribute_set_id?: string;
+      /** @description Immutable (422). */
+      template_version_id?: string;
+    };
+    MetamodelRuleListResponse: {
+      /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
+      next_cursor?: string;
+      data: components['schemas']['MetamodelRule'][];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      has_more?: boolean;
     };
     /** @description A label per language (MET-01). */
     LocalizedText: {
@@ -9300,8 +9464,32 @@ export interface components {
         error?: string;
       }[];
     };
+    /** @description A template assigned to a CI (ci_template, MET-16, WP-710). */
+    CITemplate: {
+      /** Format: uuid */
+      template_id: string;
+      /** @description Key of the template. */
+      key: string;
+      /** @description The published version of the template the CI uses. */
+      version: number;
+      /** @description Position in the order of the CI's templates (0 first). */
+      position: number;
+    };
+    /** @description An entry of a template list to assign: an active template of the organization or a system template whose CI type is the type of the CI or a type of its chain (WP-248), with a published version. */
+    CITemplateRef: {
+      /** Format: uuid */
+      template_id: string;
+      /** @description Published version to use; absent, the template's current version. */
+      version?: number;
+    };
+    SetCITemplatesRequest: {
+      /** @description The new ordered list; the position is the index. An empty list removes every template. */
+      templates: components['schemas']['CITemplateRef'][];
+    };
     CITypeChangeResult: {
       ci: components['schemas']['CI'];
+      /** @description Template assignments the change removed because their template belongs to a CI type outside the target type and its chain (WP-710). */
+      dropped_templates: components['schemas']['CITemplate'][];
       /** @description False when the CI already had the type. */
       changed: boolean;
       /** @description Required attributes of the target type the CI does not carry. */
@@ -9537,6 +9725,47 @@ export interface components {
         guard?: components['schemas']['LifecycleGuard'];
       }[];
     };
+    /** @description A lifecycle transition of a CI or asset (LCY-02). The effective model of the entity's type decides: an edge from the current state or from any state, or the initial state for an entity without a state. */
+    LifecycleTransitionRequest: {
+      /** @description Key of the target state. */
+      to_state: string;
+      /** @description The state the client saw; empty for an entity without a state. Another current state is 409 with current_state. Without it, parallel transitions are serialized and each is checked against the state the previous one left. */
+      from_state?: string;
+      /** @description Values the required fields of target state and edge and the rules of the edge's guard are evaluated against. */
+      context?: {
+        [key: string]: unknown;
+      };
+      /** @description Stored as comment of the history entry, in the audit entry and in the event lifecycle.changed. */
+      reason?: string;
+    };
+    LifecycleTransitionResult: {
+      /** @enum {string} */
+      entity_type: 'ci' | 'asset';
+      /** Format: uuid */
+      entity_id: string;
+      /** @description State before the transition; absent for the initial state. */
+      from_state?: string;
+      to_state: string;
+    };
+    /** @description A refused lifecycle transition (422). Type urn:reticora:problem:lifecycle-guard: the transition context fails required fields or guard rules, each failed rule is a violation. Type urn:reticora:problem:invalid-transition: the model has no edge from the current state to to_state, or no such state (field to_state, from_state, to_state). Type urn:reticora:problem:invalid-field with field to_state: to_state is missing, or the entity's type has no lifecycle model. */
+    LifecycleGuardProblem: components['schemas']['ProblemDetail'] & {
+      /** @description Current state of an invalid transition. */
+      from_state?: string;
+      /** @description Requested state of an invalid transition. */
+      to_state?: string;
+      violations?: {
+        /** @description Field of the transition context. */
+        field: string;
+        /** @description Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json). */
+        code: string;
+        message: string;
+      }[];
+    };
+    /** @description from_state is not the current state (409, type urn:reticora:problem:conflict). */
+    LifecycleTransitionConflictProblem: components['schemas']['ProblemDetail'] & {
+      /** @description The current lifecycle state; empty without one. */
+      current_state: string;
+    };
     /** @description The lifecycle model is in use (409 of DELETE). */
     LifecycleModelInUseProblem: components['schemas']['ProblemDetail'] & {
       /** @description CI types that bind the model (lifecycle_model_id). */
@@ -9761,8 +9990,10 @@ export interface components {
       readonly health?: 'ok' | 'warning' | 'critical' | 'unknown';
       /** Format: date-time */
       readonly health_updated_at?: string;
-      /** @description Version of the materialized attribute schema of the CI type (ci_type.schema_version) the CI was last written against: the system base composed with the type chain and its attribute sets (MET-16). Set by the server when the CI is created or its type or attributes change. */
+      /** @description Version of the materialized attribute schema of the CI type (ci_type.schema_version) the CI was last written against: the system base composed with the type chain and its attribute sets (MET-16). Set by the server when the CI is created or its type or attributes change. The template layer is not materialized: the templates of the CI with their versions (templates) complete the effective schema (E-108). */
       readonly schema_version?: number;
+      /** @description Templates assigned to the CI in position order (MET-16, WP-710): present in GET /cis/{id} and the answers of the write paths when the CI has templates; GET /cis does not load them. */
+      readonly templates?: components['schemas']['CITemplate'][];
       /** @description Site of location_id, derived by the server. */
       readonly site_id?: string;
       /** @description Room of location_id (the location or its nearest room ancestor), derived by the server. */
@@ -9891,6 +10122,8 @@ export interface components {
       };
       /** @description Defaults to manual. With manual or import the CI is manual (is_manual); an unknown source is rejected (400 with the field). */
       discovery_source?: components['schemas']['CIDiscoverySource'];
+      /** @description Templates assigned with the CI in this order (MET-16, WP-710); the creation is validated against the schema composed with them, atomically with the assignment. Without version an entry takes the template's current version. The rules are those of PUT /cis/{id}/templates (422 on templates[i]). Not empty without a database: 503. */
+      templates?: components['schemas']['CITemplateRef'][];
     };
     /** @description A manual change as an RFC 7396 merge patch (CI-04): an absent member stays unchanged; null clears a nullable field (the stored value becomes empty and its protected override holds null); null on name, status, attributes, discovery_source, last_seen_at or change_reason is refused with 422 naming the field. attributes merges nested objects, null removes a member. Every changed field gets a protected override that discovery does not overwrite. */
     UpdateCIRequest: {
@@ -11732,8 +11965,12 @@ export interface components {
       violations: {
         field: string;
         detail: string;
-        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty` or `length-range-empty`. */
+        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty` or `length-range-empty`. A violated catalog rule (WP-257, MET-10) carries the code of the rule language for a `validation` rule (e.g. `pattern`, `range.max`, `enum`), `required` for a `required` rule and `read_only` for a `readonly` rule. */
         code?: string;
+        /** @description Key of the violated catalog rule (`/api/v1/rules`, WP-257); absent for the rules of the attribute definitions. */
+        rule?: string;
+        /** @description Message of the violated catalog rule (de and/or en), when the rule has one. */
+        message?: components['schemas']['RuleMessage'];
       }[];
     };
     InterfaceInUseProblem: components['schemas']['ProblemDetail'] & {
@@ -13016,10 +13253,27 @@ export interface components {
       description?: string;
       /** Format: date-time */
       last_seen_at?: string;
+      /**
+       * Format: date-time
+       * @description Informative end of a reservation (NET-09); set only by POST /api/v1/subnets/{id}/reservations, no automatic release.
+       */
+      readonly reserved_until?: string;
+      /** @description Surrogate id of the user who made the reservation; set only by POST /api/v1/subnets/{id}/reservations. */
+      readonly reserved_by?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    IPReservationCreateRequest: {
+      /** @description Bare IP address (no prefix length) within the CIDR of the subnet. */
+      address: string;
+      description?: string;
+      /**
+       * Format: date-time
+       * @description Informative end of the reservation (RFC 3339).
+       */
+      reserved_until?: string;
     };
     CreateIPAddressRequest: {
       subnet_id?: string;
@@ -13547,6 +13801,48 @@ export interface components {
       op: 'enum';
       values: (string | number | boolean)[];
     };
+    /** @description A condition (WP-715): true or false for the values of a record. */
+    condition:
+      | components['schemas']['condition_all']
+      | components['schemas']['any']
+      | components['schemas']['not']
+      | components['schemas']['compare'];
+    /** @description AND: every condition holds (no conditions: true). */
+    condition_all: {
+      /** @constant */
+      op: 'all';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description OR: at least one condition holds (no conditions: false). */
+    any: {
+      /** @constant */
+      op: 'any';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description NOT: the one condition does not hold. */
+    not: {
+      /** @constant */
+      op: 'not';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description A comparison of the value of field (fieldmeta.Predicate). empty and not_empty take no value; in and not_in a non-empty array of strings, numbers and booleans; gt, gte, lt and lte a number; eq, ne and contains a string, number or boolean. */
+    compare: {
+      /** @enum {unknown} */
+      op:
+        | 'eq'
+        | 'ne'
+        | 'in'
+        | 'not_in'
+        | 'gt'
+        | 'gte'
+        | 'lt'
+        | 'lte'
+        | 'contains'
+        | 'empty'
+        | 'not_empty';
+      field: string;
+      value?: unknown;
+    } & (unknown & unknown & unknown & unknown);
   };
   responses: {
     /** @description Bad request */
@@ -14524,7 +14820,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). */
+      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). With templates (WP-710) also an entry the assignment rules refuse (templates[i]) or an attribute the schema composed with the templates does not allow. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -14534,6 +14830,15 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+      /** @description templates is not empty and the server runs without a database (template assignments need it, WP-710). */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getCI: {
@@ -28720,14 +29025,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LifecycleTransitionRequest'];
+      };
+    };
     responses: {
-      /** @description Execute a lifecycle transition on an asset */
+      /** @description The transition was applied. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleTransitionResult'];
+        };
       };
       400: components['responses']['BadRequest'];
       /** @description Unauthorized */
@@ -28738,7 +29049,24 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description from_state is not the current state; current_state names it. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleTransitionConflictProblem'];
+        };
+      };
+      /** @description Guard violations (lifecycle-guard with violations), a missing edge or unknown state (invalid-transition), a missing to_state or a type without lifecycle model (invalid-field, field to_state). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleGuardProblem'];
+        };
+      };
     };
   };
   listAssetsIdMovements: {
@@ -29068,6 +29396,45 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  reindexAttributeDefinition: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description An index job of the definition is open; its status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeIndexStatus'];
+        };
+      };
+      /** @description Index job queued */
+      202: {
+        headers: {
+          /** @description The job (/api/v1/jobs/{id}). */
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AttributeIndexStatus'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -29574,6 +29941,173 @@ export interface operations {
           'application/json': components['schemas']['TemplateVersion'];
         };
       };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listRules: {
+    parameters: {
+      query?: {
+        /** @description Only rules of this CI type. */
+        ci_type_id?: string;
+        /** @description Only rules of this attribute set. */
+        attribute_set_id?: string;
+        /** @description Only rules of this template version. */
+        template_version_id?: string;
+        /** @description Only rules of this target attribute. */
+        attribute_key?: string;
+        /** @description Only rules of this kind. */
+        kind?: components['schemas']['MetamodelRuleKind'];
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rules, newest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelRuleListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelRuleCreate'];
+      };
+    };
+    responses: {
+      /** @description Rule created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rule */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelRule'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Rule deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateRule: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelRulePatch'];
+      };
+    };
+    responses: {
+      /** @description Rule updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelRule'];
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
@@ -30330,14 +30864,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LifecycleTransitionRequest'];
+      };
+    };
     responses: {
-      /** @description Execute a lifecycle transition on a CI */
+      /** @description The transition was applied. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['LifecycleTransitionResult'];
+        };
       };
       400: components['responses']['BadRequest'];
       /** @description Unauthorized */
@@ -30348,7 +30888,24 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description from_state is not the current state; current_state names it. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleTransitionConflictProblem'];
+        };
+      };
+      /** @description Guard violations (lifecycle-guard with violations), a missing edge or unknown state (invalid-transition), a missing to_state or a type without lifecycle model (invalid-field, field to_state). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['LifecycleGuardProblem'];
+        };
+      };
     };
   };
   getCisIdParent: {
@@ -31935,32 +32492,6 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  reindexAttributeDefinition: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Accepted; the job runs in the background, the Location header names it. The schemas come with WP-796. */
-      202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
-    };
-  };
   listLifecycleModels: {
     parameters: {
       query?: {
@@ -32226,42 +32757,94 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the templates assigned to a CI. The response schema comes with WP-710. */
+      /** @description The templates of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); absent, the list is complete. */
+            next_cursor?: string;
+            data: components['schemas']['CITemplate'][];
+          };
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The server runs without a database; template assignments need it. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   replaceCITemplates: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the current version of the CI, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetCITemplatesRequest'];
+      };
+    };
     responses: {
-      /** @description Replaced. The request and response schemas come with WP-710. */
+      /** @description The CI with its new template list */
       200: {
         headers: {
+          /** @description The new CI version. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description If-Match missing although required, or not the current version of the CI */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description An entry the rules refuse (templates[i]: unknown or foreign template, deactivated template, a template of a type outside the chain of the CI, no or no published version, a template listed twice), an attribute of the CI the composed schema does not allow, or definitions that cannot be composed (MET-16, the key as field). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+      /** @description The server runs without a database; template assignments need it. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listCIInstanceAttributes: {
@@ -32624,12 +33207,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the IP reservations of a subnet. The page follows the cursor contract (API-02); the item schema comes with WP-299. */
+      /** @description Paginated list of the reservations of the subnet. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAddressListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -32647,20 +33232,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['IPReservationCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-299. */
+      /** @description Created reservation. */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      409: components['responses']['Conflict'];
     };
   };
   deleteSubnetReservation: {
@@ -32670,20 +33261,21 @@ export interface operations {
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
-        /** @description IP address identifier. */
+        /** @description IP address identifier of the reservation. */
         ip_id: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Deleted. */
+      /** @description Released. */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];

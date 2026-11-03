@@ -577,9 +577,10 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Item, er
 	var item *Item
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", ciSelectColumns)
+		query := fmt.Sprintf("SELECT %s, %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL",
+			ciSelectColumns, ciTemplatesColumn)
 		var err error
-		item, err = scanCI(tx.QueryRow(ctx, query, id, orgID))
+		item, err = scanCIWithTemplates(tx.QueryRow(ctx, query, id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return ErrNotFound
@@ -857,13 +858,36 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
 			return err
 		}
+		// The templates of the creation (WP-710), checked under RLS in the
+		// writing transaction.
+		var assigned *templatesChange
+		if len(item.Templates) > 0 {
+			resolved, rerr := citype.ResolveTemplateRefsTx(ctx, tx, item.CITypeID, item.Templates)
+			if rerr != nil {
+				return templateViolation(rerr)
+			}
+			if werr := writeTemplatesTx(ctx, tx, item.OrganizationID, item.ID, resolved, false); werr != nil {
+				return werr
+			}
+			item.Templates = resolved
+			assigned = &templatesChange{before: []citype.CITemplate{}, after: resolved}
+		}
 		if err := r.recordCIChange(ctx, tx, newChangeSet(ChangeKindCreated), item.OrganizationID, item.ID, item.Version, "create", "", nil, item); err != nil {
+			return err
+		}
+		if err := r.recordTemplatesHistory(ctx, tx, item, assigned); err != nil {
 			return err
 		}
 		if err := r.recordAudit(ctx, tx, "ci.created", item, map[string]interface{}{"after": item}); err != nil {
 			return err
 		}
-		return r.recordEvent(ctx, tx, events.CICreated, item, nil)
+		if err := r.recordTemplatesAudit(ctx, tx, item, assigned); err != nil {
+			return err
+		}
+		if err := r.recordEvent(ctx, tx, events.CICreated, item, nil); err != nil {
+			return err
+		}
+		return r.recordTemplatesEvent(ctx, tx, item, assigned)
 	})
 	return r.uniqueField(ctx, item.OrganizationID, err)
 }
@@ -1131,13 +1155,20 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 		item = w.after
 		if len(w.changes) == 0 {
-			return nil
+			// A replaced template list alone (PUT /cis/{id}/templates).
+			return r.recordTemplatesChange(ctx, tx, item, w.templates)
 		}
 		set := newChangeSet(w.kind())
 		if err := r.recordFieldChanges(ctx, tx, set, orgID, id, item.Version, w.changes); err != nil {
 			return err
 		}
+		if err := r.recordTemplatesHistory(ctx, tx, item, w.templates); err != nil {
+			return err
+		}
 		if err := r.recordUpdateAudit(ctx, tx, w); err != nil {
+			return err
+		}
+		if err := r.recordTemplatesAudit(ctx, tx, item, w.templates); err != nil {
 			return err
 		}
 		changed := changedFieldNames(w.changes)
@@ -1145,17 +1176,139 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			return err
 		}
 		// A status change is also its own event (EVT-03, WP-707).
-		return r.recordStatusEvent(ctx, tx, w, changed)
+		if err := r.recordStatusEvent(ctx, tx, w, changed); err != nil {
+			return err
+		}
+		return r.recordTemplatesEvent(ctx, tx, item, w.templates)
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
 }
 
-// rowUpdate is the UPDATE of a CI row: the row before and after it and the
-// historized fields it changed (diffCI).
+// rowUpdate is the UPDATE of a CI row: the row before and after it, the
+// historized fields it changed (diffCI) and the replaced template list
+// (nil when it stayed, WP-710).
 type rowUpdate struct {
 	before, after *Item
 	changes       []ciFieldChange
+	templates     *templatesChange
+}
+
+// templatesChange is a change of the template list of a CI (WP-710).
+type templatesChange struct {
+	before, after []citype.CITemplate
+}
+
+// ciTemplatesColumn is the template list of the CI row ci in position order
+// (ci_template with the template's key, WP-710) as a JSON array: a column
+// after ciSelectColumns that scanCIWithTemplates reads, so the CI and its
+// templates come with one statement.
+const ciTemplatesColumn = `(SELECT COALESCE(jsonb_agg(jsonb_build_object('template_id', ct.template_id, 'key', t.key,
+		'version', ct.version, 'position', ct.position) ORDER BY ct.position), '[]'::jsonb)
+	FROM ci_template ct JOIN template t ON t.id = ct.template_id WHERE ct.ci_id = ci.id)`
+
+// templatesScanner appends the destination of ciTemplatesColumn to a scan
+// of ciSelectColumns.
+type templatesScanner struct {
+	ciScanner
+	templates *[]byte
+}
+
+func (s templatesScanner) Scan(dest ...any) error {
+	return s.ciScanner.Scan(append(dest, s.templates)...)
+}
+
+// scanCIWithTemplates scans ciSelectColumns followed by ciTemplatesColumn.
+func scanCIWithTemplates(row ciScanner) (*Item, error) {
+	var raw []byte
+	item, err := scanCI(templatesScanner{ciScanner: row, templates: &raw})
+	if err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal(raw, &item.Templates); err != nil {
+		return nil, fmt.Errorf("decode ci templates: %w", err)
+	}
+	return item, nil
+}
+
+// sameTemplates reports whether two template lists name the same templates
+// and versions in the same order.
+func sameTemplates(a, b []citype.CITemplate) bool {
+	return slices.EqualFunc(a, b, func(x, y citype.CITemplate) bool {
+		return strings.EqualFold(x.TemplateID, y.TemplateID) && x.Version == y.Version
+	})
+}
+
+// writeTemplatesTx writes the checked template list of CI ciID
+// (citype.ResolveTemplateRefsTx); replace removes the rows it had first.
+// A template or version deleted since the check is a foreign key violation
+// (422 through api.WriteDBError).
+func writeTemplatesTx(ctx context.Context, tx pgx.Tx, orgID, ciID string, list []citype.CITemplate, replace bool) error {
+	if replace {
+		if _, err := tx.Exec(ctx, `DELETE FROM ci_template WHERE ci_id = $1`, ciID); err != nil {
+			return fmt.Errorf("replace ci templates: %w", err)
+		}
+	}
+	if len(list) == 0 {
+		return nil
+	}
+	ids := make([]string, len(list))
+	versions := make([]int32, len(list))
+	positions := make([]int32, len(list))
+	for i := range list {
+		ids[i] = list[i].TemplateID
+		versions[i], positions[i] = int32(list[i].Version), int32(list[i].Position) //nolint:gosec // checked versions, list indexes
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO ci_template (organization_id, ci_id, template_id, version, position)
+		SELECT $1, $2, u.template_id, u.version, u.position
+		FROM unnest($3::uuid[], $4::int[], $5::int[]) AS u(template_id, version, position)`,
+		orgID, ciID, ids, versions, positions); err != nil {
+		return fmt.Errorf("assign ci templates: %w", err)
+	}
+	return nil
+}
+
+// recordTemplatesChange records a replaced template list (AUD-07, K20):
+// history, audit entry ci.templates_changed and event ci.changed, nothing
+// for nil.
+func (r *PGRepository) recordTemplatesChange(ctx context.Context, tx pgx.Tx, item *Item, change *templatesChange) error {
+	if err := r.recordTemplatesHistory(ctx, tx, item, change); err != nil {
+		return err
+	}
+	if err := r.recordTemplatesAudit(ctx, tx, item, change); err != nil {
+		return err
+	}
+	return r.recordTemplatesEvent(ctx, tx, item, change)
+}
+
+// recordTemplatesHistory writes the ci_change row update of the field
+// templates in a change set of its own (WP-487); WP-253 brings the type
+// template_migrated.
+func (r *PGRepository) recordTemplatesHistory(ctx context.Context, tx pgx.Tx, item *Item, change *templatesChange) error {
+	if change == nil {
+		return nil
+	}
+	return r.recordCIChange(ctx, tx, newChangeSet(ChangeKindUpdated), item.OrganizationID, item.ID, item.Version,
+		"update", "templates", change.before, change.after)
+}
+
+// recordTemplatesAudit writes the audit entry ci.templates_changed with the
+// list before and after (like ci.type_changed).
+func (r *PGRepository) recordTemplatesAudit(ctx context.Context, tx pgx.Tx, item *Item, change *templatesChange) error {
+	if change == nil {
+		return nil
+	}
+	return r.recordAudit(ctx, tx, "ci.templates_changed", item, map[string]interface{}{
+		"before": change.before, "after": change.after,
+	})
+}
+
+// recordTemplatesEvent writes ci.changed with the changed field templates.
+func (r *PGRepository) recordTemplatesEvent(ctx context.Context, tx pgx.Tx, item *Item, change *templatesChange) error {
+	if change == nil {
+		return nil
+	}
+	return r.recordEvent(ctx, tx, events.CIChanged, item, []string{"templates"})
 }
 
 // kind is the change kind of the field changes (AUD-03): a status change
@@ -1209,8 +1362,9 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	req := *reqp
 	var item *Item
 	// FOR UPDATE: the merge patch is computed from this state.
-	beforeQuery := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
-	before, err := scanCI(tx.QueryRow(ctx, beforeQuery, id, orgID))
+	beforeQuery := fmt.Sprintf("SELECT %s, %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE",
+		ciSelectColumns, ciTemplatesColumn)
+	before, err := scanCIWithTemplates(tx.QueryRow(ctx, beforeQuery, id, orgID))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
@@ -1232,6 +1386,25 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	}
 	if adoptErr := r.adoptCILocation(ctx, tx, orgID, before, &req); adoptErr != nil {
 		return nil, adoptErr
+	}
+	// A replaced template list (PUT /cis/{id}/templates, WP-710), checked
+	// under RLS; an unchanged list writes nothing.
+	var templates *templatesChange
+	if req.Templates != nil {
+		resolved, terr := citype.ResolveTemplateRefsTx(ctx, tx, before.CITypeID, *req.Templates)
+		if terr != nil {
+			return nil, templateViolation(terr)
+		}
+		if !sameTemplates(before.Templates, resolved) {
+			if werr := writeTemplatesTx(ctx, tx, orgID, id, resolved, true); werr != nil {
+				return nil, werr
+			}
+			prior := before.Templates
+			if prior == nil {
+				prior = []citype.CITemplate{}
+			}
+			templates = &templatesChange{before: prior, after: resolved}
+		}
 	}
 
 	setClauses := make([]string, 0, 18)
@@ -1297,7 +1470,7 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		argPos++
 	}
 
-	if len(setClauses) == 0 {
+	if len(setClauses) == 0 && templates == nil {
 		return &rowUpdate{before: before, after: before}, nil
 	}
 
@@ -1310,14 +1483,15 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	// as defense in depth: a missing or wrong app.org_id must never allow a
 	// cross-tenant write.
 	query := fmt.Sprintf(
-		"UPDATE ci SET %s WHERE id = $1 AND organization_id = $%d AND deleted_at IS NULL RETURNING %s",
+		"UPDATE ci SET %s WHERE id = $1 AND organization_id = $%d AND deleted_at IS NULL RETURNING %s, %s",
 		strings.Join(setClauses, ", "),
 		argPos,
 		ciSelectColumns,
+		ciTemplatesColumn,
 	)
 	args = append(args, orgID)
 
-	item, err = scanCI(tx.QueryRow(ctx, query, args...))
+	item, err = scanCIWithTemplates(tx.QueryRow(ctx, query, args...))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
@@ -1328,7 +1502,7 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
 		return nil, err
 	}
-	w := &rowUpdate{before: before, after: item, changes: diffCI(before, item)}
+	w := &rowUpdate{before: before, after: item, changes: diffCI(before, item), templates: templates}
 	if len(w.changes) > 0 && req.Manual != nil {
 		if err := recordManualOverrides(ctx, tx, orgID, before, item, &req); err != nil {
 			return nil, err
@@ -2372,6 +2546,10 @@ func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, before *Ite
 		return nil
 	case *req.IfMatch > before.Version || *req.IfMatch < 1:
 		return ErrPreconditionFailed
+	case req.Templates != nil:
+		// The template list is replaced as a whole (WP-710): only the
+		// current version is a valid base.
+		return ErrPreconditionFailed
 	}
 	rows, err := tx.Query(ctx, `SELECT DISTINCT field_name FROM ci_change
 		WHERE ci_id = $1 AND ci_version > $2 AND field_name = ANY($3) ORDER BY field_name`,
@@ -2612,9 +2790,10 @@ type typeChange struct {
 // changeTypeRow changes the type of CI ciID to typeID in tx (CI-11); it
 // writes no history, audit entry or event.
 func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID, typeID, mode string) (*typeChange, error) {
-	tc := &typeChange{result: TypeChangeResult{Findings: []TypeFinding{}}, mode: mode}
-	query := fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE", ciSelectColumns)
-	before, err := scanCI(tx.QueryRow(ctx, query, ciID, orgID))
+	tc := &typeChange{result: TypeChangeResult{Findings: []TypeFinding{}, DroppedTemplates: []citype.CITemplate{}}, mode: mode}
+	query := fmt.Sprintf("SELECT %s, %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE",
+		ciSelectColumns, ciTemplatesColumn)
+	before, err := scanCIWithTemplates(tx.QueryRow(ctx, query, ciID, orgID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -2667,12 +2846,46 @@ func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID
 		WHERE id = $1 AND organization_id = $2`, ciID, orgID, typeID); err != nil {
 		return nil, locationError(fmt.Errorf("change ci type: %w", err))
 	}
-	after, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1 AND organization_id = $2", ciSelectColumns), ciID, orgID))
+	// The templates that do not fit the target type or its chain go in the
+	// same transaction (WP-710); the result names them.
+	if len(before.Templates) > 0 {
+		if tc.result.DroppedTemplates, err = dropForeignTemplates(ctx, tx, ciID, typeID); err != nil {
+			return nil, err
+		}
+	}
+	after, err := scanCIWithTemplates(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s, %s FROM ci WHERE id = $1 AND organization_id = $2",
+		ciSelectColumns, ciTemplatesColumn), ciID, orgID))
 	if err != nil {
 		return nil, fmt.Errorf("get changed ci: %w", err)
 	}
 	tc.result.CI, tc.result.Changed = after, true
 	return tc, nil
+}
+
+// dropForeignTemplates removes the template assignments of CI ciID whose
+// template's CI type is not typeID or a type of its chain (WP-248, WP-710)
+// and returns them in position order.
+func dropForeignTemplates(ctx context.Context, tx pgx.Tx, ciID, typeID string) ([]citype.CITemplate, error) {
+	rows, err := tx.Query(ctx, `DELETE FROM ci_template ct USING template t
+		WHERE ct.ci_id = $1 AND t.id = ct.template_id
+			AND t.ci_type_id NOT IN (SELECT c.id FROM ci_type_ancestors($2::uuid) c)
+		RETURNING ct.template_id::text, t.key, ct.version, ct.position`, ciID, typeID)
+	if err != nil {
+		return nil, fmt.Errorf("drop ci templates: %w", err)
+	}
+	dropped, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (citype.CITemplate, error) {
+		var t citype.CITemplate
+		serr := row.Scan(&t.TemplateID, &t.Key, &t.Version, &t.Position)
+		return t, serr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("drop ci templates: %w", err)
+	}
+	slices.SortFunc(dropped, func(a, b citype.CITemplate) int { return a.Position - b.Position })
+	if dropped == nil {
+		dropped = []citype.CITemplate{}
+	}
+	return dropped, nil
 }
 
 // recordTypeChange writes the ci_type_id row of a type change into set.
@@ -2685,9 +2898,13 @@ func (r *PGRepository) recordTypeChange(ctx context.Context, tx pgx.Tx, set chan
 
 // recordTypeChangeAudit writes the audit entry ci.type_changed.
 func (r *PGRepository) recordTypeChangeAudit(ctx context.Context, tx pgx.Tx, tc *typeChange) error {
-	return r.recordAudit(ctx, tx, "ci.type_changed", tc.result.CI, map[string]interface{}{
+	changes := map[string]interface{}{
 		"from": tc.fromKey, "to": tc.toKey, "mode": tc.mode, "findings": tc.result.Findings,
-	})
+	}
+	if len(tc.result.DroppedTemplates) > 0 {
+		changes["dropped_templates"] = tc.result.DroppedTemplates
+	}
+	return r.recordAudit(ctx, tx, "ci.type_changed", tc.result.CI, changes)
 }
 
 // UpdateRecord implements RecordUpdater (AUD-03, CI-11): the field update

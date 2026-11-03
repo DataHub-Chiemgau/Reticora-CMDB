@@ -412,6 +412,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/reservations":                "reservation",
 		"POST /api/v1/stock-movements":             "asset_movement",
 		"POST /api/v1/stocktakes/{id}/scans":       "stock_scan",
+		"POST /api/v1/subnets/{id}/reservations":   "ip_address",
 		"POST /api/v1/teams/{id}/members":          "team_member",
 		"POST /api/v1/tickets/{id}/comments":       "ticket_comment",
 		"POST /api/v1/trainings/{id}/assignments":  "training_assignment",
@@ -421,6 +422,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	}
 	// The snapshot job: the answer names it as job_id.
 	m["POST /api/v1/history/snapshots"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
+	// The index job of a definition (WP-796): the answer names the queued
+	// or the open job as job_id.
+	m["POST /api/v1/attribute-definitions/{id}/reindex"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
 	// A role assignment is a custom-role grant or a standard-role
 	// assignment.
 	for _, route := range []string{"POST /api/v1/role-assignments", "POST /api/v1/roles/assign"} {
@@ -435,11 +439,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/agents/{id}/enable":                  "endpoint_agent",
 		"PATCH /api/v1/agents/{id}/policy":                 "endpoint_agent",
 		"POST /api/v1/agents/{id}/site":                    "endpoint_agent",
-		"POST /api/v1/assets/{id}/lifecycle-transitions":   "asset",
 		"POST /api/v1/assignments/{id}/return":             "assignment",
 		"POST /api/v1/assignments/{id}/transfer":           "assignment",
 		"DELETE /api/v1/assignments/{id}":                  "assignment",
-		"POST /api/v1/cis/{id}/lifecycle-transitions":      "ci",
 		"POST /api/v1/cis/{id}/unmerge":                    "ci",
 		"POST /api/v1/consumables/{id}/movements":          "consumable",
 		"POST /api/v1/desk-bookings/{id}/cancel":           "desk_booking",
@@ -473,6 +475,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		Keys: []SnapshotKey{{"id", "itemId"}, {"review_id", "id"}}}
 	m["POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry"] = RouteSnapshot{Table: "webhook_delivery",
 		Keys: []SnapshotKey{{"id", "delivery_id"}, {"subscription_id", "id"}}}
+	// The released IP reservation of the subnet (NET-09, WP-299).
+	m["DELETE /api/v1/subnets/{id}/reservations/{ip_id}"] = RouteSnapshot{Table: "ip_address",
+		Keys: []SnapshotKey{{"id", "ip_id"}, {"subnet_id", "id"}}}
 	m["DELETE /api/v1/teams/{teamId}/members/{userId}"] = RouteSnapshot{Table: "team_member",
 		Keys: []SnapshotKey{{"team_id", "teamId"}, {"user_id", "userId"}}}
 	// The permissions of a standard role are the rows of role_permission and

@@ -52,6 +52,10 @@ type Change struct {
 	ObservedAt    *time.Time `json:"observed_at,omitempty"`
 	// ActorUserID is the user who made the change (not an API key).
 	ActorUserID string `json:"actor_user_id,omitempty"`
+
+	// ciVersion is the version of the CI after a ci_change row or at a
+	// ci_snapshot of its trail (WP-312).
+	ciVersion *int64
 }
 
 // FieldChange is one changed field of a change set (AUD-03).
@@ -86,6 +90,20 @@ type StateSnapshot struct {
 	Fields map[string]any `json:"fields"`
 	// Deleted is true when a delete change precedes the snapshot time.
 	Deleted bool `json:"deleted"`
+	// MergedIntoID is the survivor a merged CI was merged into (CI-12);
+	// the answer shows it from WP-793 on.
+	MergedIntoID string `json:"-"`
+	// restore is what a restore of the deleted CI brings back (CI-05):
+	// the status before the deletion and the released asset link.
+	restore restoreState
+}
+
+// restoreState is the status and the asset link of a CI before its last
+// deletion (old_value.status and new_value.unlinked_asset_id of the delete
+// row), as ci.PGRepository.restore reads them.
+type restoreState struct {
+	Status  string `json:"status,omitempty"`
+	AssetID string `json:"asset_id,omitempty"`
 }
 
 // Change types (kept as data, not code; the CHECK constraint lists the
@@ -119,26 +137,49 @@ func (e *NoRecordedStateError) Error() string {
 	return "no recorded state before " + e.At.UTC().Format(time.RFC3339Nano)
 }
 
+// SourceCISnapshot is the trail element of a ci_snapshot (WP-312): the
+// replay of a CI starts with the last snapshot before the point in time.
+const SourceCISnapshot = "ci_snapshot"
+
 // Replay reconstructs the field state from an ordered change trail (oldest
-// first). A "create" change seeds the state with its new_value object;
-// subsequent changes overwrite individual fields; "delete" marks the entity
-// as deleted and a change of kind restored (CI-05) clears the mark again.
-// Overrides and reconciliation decisions (merge, unmerge) are no field
-// changes of the entity and are not replayed (AUD-08).
+// first), as the writers of the CI changed the row (AUD-08, WP-312):
+//
+//   - an element of the source ci_snapshot sets the whole state (its new
+//     value is the stored document, snapshotDocument);
+//   - "create" seeds the state with its new_value object;
+//   - "delete" marks the entity as deleted; the deletion of a CI
+//     (ci.PGRepository.Delete) takes the status of its new_value and
+//     releases the asset link, the deletion by a merge (field
+//     merged_into_id) names the survivor;
+//   - the restore (field deleted_at, change kind restored; update of
+//     RestoreDeleted and reconciliation_decision of Restore) clears the mark
+//     and brings back the status before the deletion (active for none or
+//     decommissioned) and the released asset link, like the restore of the
+//     row; another change of kind restored (the unmerge) clears the mark;
+//   - overrides and the other reconciliation decisions (merge, unmerge)
+//     are no field changes of the entity and are not replayed;
+//   - every other change with a field name overwrites that field.
 func Replay(changes []Change) StateSnapshot {
 	snapshot := StateSnapshot{Fields: map[string]any{}}
-	for _, change := range changes {
-		switch change.ChangeType {
-		case "create":
+	for i := range changes {
+		change := &changes[i]
+		if change.Source == SourceCISnapshot {
+			snapshot.setDocument(change.NewValue)
+			continue
+		}
+		switch {
+		case change.ChangeType == "create":
 			if obj, ok := change.NewValue.(map[string]any); ok {
 				for k, v := range obj {
 					snapshot.Fields[k] = v
 				}
 			}
 			snapshot.Deleted = false
-		case "delete":
-			snapshot.Deleted = true
-		case "override", "reconciliation_decision":
+		case change.ChangeType == "delete":
+			snapshot.replayDelete(change)
+		case change.ChangeKind == "restored" && change.FieldName == "deleted_at":
+			snapshot.replayRestore()
+		case change.ChangeType == "override", change.ChangeType == "reconciliation_decision":
 		default:
 			if change.FieldName != "" {
 				if change.NewValue == nil {
@@ -150,7 +191,90 @@ func Replay(changes []Change) StateSnapshot {
 		}
 		if change.ChangeKind == "restored" {
 			snapshot.Deleted = false
+			snapshot.MergedIntoID = ""
 		}
 	}
 	return snapshot
+}
+
+// replayDelete marks the entity as deleted. The merge names the survivor;
+// the deletion of a CI decommissions it and releases its asset link and
+// keeps what a restore brings back.
+func (s *StateSnapshot) replayDelete(change *Change) {
+	s.Deleted = true
+	newValue, _ := change.NewValue.(map[string]any)
+	if change.FieldName == "merged_into_id" {
+		s.MergedIntoID, _ = newValue["merged_into_id"].(string)
+		return
+	}
+	if change.EntityType != "ci" || newValue == nil {
+		return
+	}
+	oldValue, _ := change.OldValue.(map[string]any)
+	s.restore.Status, _ = oldValue["status"].(string)
+	s.restore.AssetID, _ = newValue["unlinked_asset_id"].(string)
+	if status, ok := newValue["status"]; ok {
+		s.Fields["status"] = status
+	}
+	delete(s.Fields, "asset_id")
+}
+
+// replayRestore brings a deleted CI back as ci.PGRepository.restore does:
+// a decommissioned status becomes the one before the deletion (active for
+// none or decommissioned), a released asset link comes back.
+func (s *StateSnapshot) replayRestore() {
+	s.Deleted = false
+	delete(s.Fields, "deleted_at")
+	if s.Fields["status"] == "decommissioned" {
+		status := s.restore.Status
+		if status == "" || status == "decommissioned" {
+			status = "active"
+		}
+		s.Fields["status"] = status
+	}
+	if s.restore.AssetID != "" && s.Fields["asset_id"] == nil {
+		s.Fields["asset_id"] = s.restore.AssetID
+	}
+	s.restore = restoreState{}
+}
+
+// snapshotDocument is the stored state of a ci_snapshot (WP-312, format
+// SnapshotSchemaVersion): the fields, the deletion mark, the survivor of a
+// merge and what a restore of a deleted CI brings back.
+type snapshotDocument struct {
+	Fields       map[string]any `json:"fields"`
+	Deleted      bool           `json:"deleted"`
+	MergedIntoID string         `json:"merged_into_id,omitempty"`
+	Restore      *restoreState  `json:"restore,omitempty"`
+}
+
+// document returns the stored form of the state.
+func (s *StateSnapshot) document() snapshotDocument {
+	doc := snapshotDocument{Fields: s.Fields, Deleted: s.Deleted, MergedIntoID: s.MergedIntoID}
+	if doc.Fields == nil {
+		doc.Fields = map[string]any{}
+	}
+	if s.restore != (restoreState{}) {
+		r := s.restore
+		doc.Restore = &r
+	}
+	return doc
+}
+
+// setDocument replaces the state with a stored document (its JSON form).
+func (s *StateSnapshot) setDocument(value any) {
+	doc, _ := value.(map[string]any)
+	s.Fields = map[string]any{}
+	if fields, ok := doc["fields"].(map[string]any); ok {
+		for k, v := range fields {
+			s.Fields[k] = v
+		}
+	}
+	s.Deleted, _ = doc["deleted"].(bool)
+	s.MergedIntoID, _ = doc["merged_into_id"].(string)
+	s.restore = restoreState{}
+	if r, ok := doc["restore"].(map[string]any); ok {
+		s.restore.Status, _ = r["status"].(string)
+		s.restore.AssetID, _ = r["asset_id"].(string)
+	}
 }

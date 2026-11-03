@@ -65,6 +65,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/attribute-definitions/{id}", h.GetAttributeDefinition)
 	r.Patch("/api/v1/attribute-definitions/{id}", h.UpdateAttributeDefinition)
 	r.Delete("/api/v1/attribute-definitions/{id}", h.DeleteAttributeDefinition)
+	r.Post("/api/v1/attribute-definitions/{id}/reindex", h.ReindexAttributeDefinition)
 	// Attribute sets and their assignment to types (WP-250, API-06; module
 	// metamodel, E-105).
 	r.Get("/api/v1/attribute-sets", h.ListAttributeSets)
@@ -78,6 +79,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// E-105); GET /api/v1/ci-types/templates above stays the type template
 	// catalog.
 	h.registerTemplateRoutes(r)
+	// Rule catalog metamodel_rule (WP-716, MET-45, API-06; module
+	// metamodel, E-105).
+	h.registerRuleRoutes(r)
 }
 
 // attributeStore returns the attribute-definitions store or answers 503
@@ -98,10 +102,29 @@ func writeAttributeError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
 	case errors.Is(err, ErrAttributeSetReadOnly):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrAttributeSetReadOnly.Error())
+	case errors.Is(err, ErrAttributeNotIndexed):
+		api.WriteProblem(w, http.StatusConflict, "urn:reticora:problem:conflict", "Conflict", ErrAttributeNotIndexed.Error())
+	case errors.Is(err, ErrIndexJobsUnavailable):
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrIndexJobsUnavailable.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		api.WriteRepoError(w, err)
 	}
+}
+
+// withIndexStatus sets the index status of the definitions (DB-04, WP-796)
+// with one query for all of them.
+func withIndexStatus(r *http.Request, store AttributeDefinitionStore, orgID string, defs []AttributeDefinition) error {
+	statuses, err := store.AttributeIndexStatuses(r.Context(), orgID, defs)
+	if err != nil {
+		return err
+	}
+	for i := range defs {
+		if s, ok := statuses[defs[i].ID]; ok {
+			defs[i].IndexStatus = &s
+		}
+	}
+	return nil
 }
 
 // ListAttributeDefinitions handles GET /api/v1/attribute-definitions
@@ -127,6 +150,9 @@ func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Reques
 	items, total, err := store.ListAttributeDefinitionPage(r.Context(), t.OrganizationID,
 		AttributeFilter{CITypeID: q.Get("ci_type_id"), AttributeSetID: q.Get("attribute_set_id"), Scope: q.Get("scope"),
 			ApplicableTo: q.Get("applicable_to")}, page)
+	if err == nil {
+		err = withIndexStatus(r, store, t.OrganizationID, items)
+	}
 	if err != nil {
 		writeAttributeError(w, err)
 		return
@@ -147,11 +173,48 @@ func (h *Handler) GetAttributeDefinition(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	d, err := store.GetAttributeDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err == nil {
+		one := []AttributeDefinition{*d}
+		if err = withIndexStatus(r, store, t.OrganizationID, one); err == nil {
+			d = &one[0]
+		}
+	}
 	if err != nil {
 		writeAttributeError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, d)
+}
+
+// ReindexAttributeDefinition handles POST
+// /api/v1/attribute-definitions/{id}/reindex (DB-04, WP-796): it queues an
+// attribute.index job for the caller and answers 202 with the index status
+// (Location names the job), or 200 with the status of the job of the
+// definition that is queued or running, without a new one. A system
+// definition is 403, one without searchable and unique 409, an unknown 404,
+// a server without job service 503.
+func (h *Handler) ReindexAttributeDefinition(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantOr401(w, r)
+	if !ok {
+		return
+	}
+	store, ok := h.attributeStore(w)
+	if !ok {
+		return
+	}
+	s, created, err := store.ReindexAttributeDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), t.UserID)
+	if err != nil {
+		writeAttributeError(w, err)
+		return
+	}
+	if !created {
+		api.WriteJSON(w, http.StatusOK, s)
+		return
+	}
+	if s.JobID != "" {
+		w.Header().Set("Location", "/api/v1/jobs/"+s.JobID)
+	}
+	api.WriteJSON(w, http.StatusAccepted, s)
 }
 
 // CreateAttributeDefinition handles POST /api/v1/attribute-definitions; a

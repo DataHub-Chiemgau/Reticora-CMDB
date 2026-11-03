@@ -10,13 +10,19 @@
  *   left out when the CI has no instance fields.
  * - With the permission the administration stays as it was.
  *
+ * LifecycleSection (LCY-02, WP-724) offers the targets of GET
+ * /cis/{id}/lifecycle-transitions, sends the transition with its required
+ * fields to POST /cis/{id}/lifecycle-transitions and renders nothing for a
+ * CI type without lifecycle model (422).
+ *
  * Retest:
  *   cd frontend && npx vitest run src/components/cmdb/CIDetailSections.test.tsx
  */
 import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders, stubFetchRoutes } from '../../test/utils';
-import { InstanceFieldsSection } from './CIDetailSections';
+import { InstanceFieldsSection, LifecycleSection } from './CIDetailSections';
 
 const CI_ID = 'ci-1';
 
@@ -99,5 +105,103 @@ describe('InstanceFieldsSection with ci_instance_attribute:manage (UI-12, WP-804
     expect(screen.getByText('ip')).toBeInTheDocument();
     expect(screen.getByLabelText('iLO-IP')).toHaveValue('10.0.0.1');
     expect(screen.queryByText('Weitere Angaben')).not.toBeInTheDocument();
+  });
+});
+
+describe('LifecycleSection (LCY-02, WP-724)', () => {
+  const OPTIONS = {
+    model: { id: 'model-1', key: 'software', name: 'Software' },
+    current_state: 'approved',
+    transitions: [
+      {
+        to_state: 'production',
+        key: 'go_live',
+        label: 'Go live',
+        required_fields: ['change_ticket'],
+      },
+      { to_state: 'eol', key: 'retire', label: 'End of life', required_fields: [] },
+    ],
+  };
+
+  /** stubLifecycle answers GET …/lifecycle-transitions with options and records the POSTs. */
+  function stubLifecycle(options: Response | object) {
+    const posts: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes(`/cis/${CI_ID}/lifecycle-transitions`) && init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return new Response(
+          JSON.stringify({ entity_type: 'ci', entity_id: CI_ID, to_state: 'production' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.includes(`/cis/${CI_ID}/lifecycle-transitions`)) {
+        return options instanceof Response
+          ? options.clone()
+          : new Response(JSON.stringify(options), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request: ${url}` }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return { fetchMock, posts };
+  }
+
+  it('offers the allowed targets and sends the transition with its required fields', async () => {
+    const { posts } = stubLifecycle(OPTIONS);
+    const user = userEvent.setup();
+    renderWithProviders(<LifecycleSection entityType="cis" entityId={CI_ID} />);
+
+    const select = (await screen.findByLabelText('Übergang nach')) as HTMLSelectElement;
+    expect(screen.getByText('approved')).toBeInTheDocument();
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+      '—',
+      'Go live',
+      'End of life',
+    ]);
+
+    await user.selectOptions(select, 'production');
+    await user.type(screen.getByLabelText(/change_ticket/), 'CHG-1');
+    await user.type(screen.getByLabelText('Grund'), 'release 2');
+    await user.click(screen.getByRole('button', { name: 'Anwenden' }));
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      to_state: 'production',
+      context: { change_ticket: 'CHG-1' },
+      reason: 'release 2',
+    });
+  });
+
+  it('renders nothing for a CI type without lifecycle model (422)', async () => {
+    const { fetchMock } = stubLifecycle(
+      new Response(
+        JSON.stringify({
+          type: 'urn:reticora:problem:invalid-field',
+          status: 422,
+          field: 'to_state',
+        }),
+        { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+      ),
+    );
+    const { container } = renderWithProviders(
+      <LifecycleSection entityType="cis" entityId={CI_ID} />,
+    );
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).includes('/lifecycle-transitions')),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    expect(screen.queryByText('Lebenszyklus')).not.toBeInTheDocument();
+    // The section no longer guesses a model from the model list.
+    expect(
+      fetchMock.mock.calls.some(([input]) => String(input).includes('/lifecycle-models')),
+    ).toBe(false);
   });
 });

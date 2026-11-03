@@ -11,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -473,5 +475,242 @@ func TestObservedTypedValuesFollowManualWrites(t *testing.T) {
 		if w := create(field, value); w.Code != http.StatusCreated {
 			t.Errorf("POST /cis with %s=%q: %d %s, want 201", field, value, w.Code, w.Body.String())
 		}
+	}
+}
+
+// catalogRule builds a catalog rule from its JSON condition and value rule
+// ("" for none), as citype.ResolveRules returns it.
+func catalogRule(t *testing.T, key, attribute, kind, condition, ast string) fieldmeta.CatalogRule {
+	t.Helper()
+	out := fieldmeta.CatalogRule{Key: key, AttributeKey: attribute, Kind: kind}
+	if condition != "" {
+		cond, err := rules.ParseCondition([]byte(condition))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out.Condition = &cond
+	}
+	if ast != "" {
+		rule, err := rules.Parse([]byte(ast))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out.AST = &rule
+	}
+	return out
+}
+
+// violationsOf returns the violations of err as field/rule/code triples.
+func violationsOf(err error) []string {
+	ve, ok := AsValidationError(err)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(ve.Violations))
+	for _, v := range ve.Violations {
+		out = append(out, v.Field+"/"+v.Rule+"/"+v.Code)
+	}
+	return out
+}
+
+// TestCatalogRuleKinds covers WP-257 (MET-10): the four kinds of a catalog
+// rule with and without condition, the condition evaluated against the
+// values after the write, and the AND with the attribute rules.
+func TestCatalogRuleKinds(t *testing.T) {
+	physical := `{"op":"eq","field":"server_kind","value":"physical"}`
+	defs := serverKindDefs()
+	cases := []struct {
+		name             string
+		rule             fieldmeta.CatalogRule
+		values, incoming map[string]any
+		existing         map[string]any
+		want             string
+	}{
+		{name: "required always, missing",
+			rule:   catalogRule(t, "need-owner", "owner", fieldmeta.CatalogRequired, "", ""),
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx"}, want: "owner/need-owner/required"},
+		{name: "required always, present",
+			rule:   catalogRule(t, "need-owner", "owner", fieldmeta.CatalogRequired, "", ""),
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx", "owner": "ops"}},
+		{name: "required with condition that holds",
+			rule:   catalogRule(t, "need-room", "room", fieldmeta.CatalogRequired, physical, ""),
+			values: map[string]any{"server_kind": "physical", "rack_unit": 4}, want: "room/need-room/required"},
+		{name: "required with condition that does not hold",
+			rule:   catalogRule(t, "need-room", "room", fieldmeta.CatalogRequired, physical, ""),
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx"}},
+		{name: "readonly refuses a changed value",
+			rule:     catalogRule(t, "fixed-tag", "asset_tag", fieldmeta.CatalogReadonly, "", ""),
+			existing: map[string]any{"asset_tag": "A-1"}, incoming: map[string]any{"asset_tag": "A-2"},
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx", "asset_tag": "A-2"}, want: "asset_tag/fixed-tag/read_only"},
+		{name: "readonly keeps an unchanged value",
+			rule:     catalogRule(t, "fixed-tag", "asset_tag", fieldmeta.CatalogReadonly, "", ""),
+			existing: map[string]any{"asset_tag": "A-1"}, incoming: map[string]any{"asset_tag": "A-1"},
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx", "asset_tag": "A-1"}},
+		{name: "readonly with condition that does not hold",
+			rule:     catalogRule(t, "fixed-tag", "asset_tag", fieldmeta.CatalogReadonly, physical, ""),
+			existing: map[string]any{"asset_tag": "A-1"}, incoming: map[string]any{"asset_tag": "A-2"},
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx", "asset_tag": "A-2"}},
+		{name: "validation refuses a value",
+			rule:   catalogRule(t, "tag-form", "asset_tag", fieldmeta.CatalogValidation, "", `{"op":"pattern","pattern":"^A-[0-9]+$"}`),
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx", "asset_tag": "x"}, want: "asset_tag/tag-form/pattern"},
+		{name: "validation with condition that holds",
+			rule:   catalogRule(t, "small-rack", "rack_unit", fieldmeta.CatalogValidation, physical, `{"op":"range","max":10}`),
+			values: map[string]any{"server_kind": "physical", "rack_unit": 12}, want: "rack_unit/small-rack/range.max"},
+		{name: "validation with condition that does not hold",
+			rule:   catalogRule(t, "tag-form", "asset_tag", fieldmeta.CatalogValidation, physical, `{"op":"pattern","pattern":"^A-[0-9]+$"}`),
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx", "asset_tag": "x"}},
+		{name: "validation ignores an absent value",
+			rule:   catalogRule(t, "tag-form", "asset_tag", fieldmeta.CatalogValidation, "", `{"op":"pattern","pattern":"^A-[0-9]+$"}`),
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx"}},
+		{name: "visible hides a field from the catalog's validation",
+			rule:   catalogRule(t, "tag-visible", "asset_tag", fieldmeta.CatalogVisible, physical, ""),
+			values: map[string]any{"server_kind": "virtual", "hypervisor": "esx", "asset_tag": "x"}},
+		{name: "visible does not hide a field the attribute rules require",
+			rule:   catalogRule(t, "kind-visible", "server_kind", fieldmeta.CatalogVisible, `{"op":"eq","field":"owner","value":"ops"}`, ""),
+			values: map[string]any{"hypervisor": "esx"}, want: "server_kind//"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := []fieldmeta.CatalogRule{tc.rule}
+			if tc.rule.Kind == fieldmeta.CatalogVisible {
+				// A validation of the same field, so hiding shows.
+				catalog = append(catalog, catalogRule(t, "tag-form", tc.rule.AttributeKey, fieldmeta.CatalogValidation, "",
+					`{"op":"pattern","pattern":"^A-[0-9]+$"}`))
+			}
+			incoming := tc.incoming
+			if incoming == nil {
+				incoming = tc.values
+			}
+			got := strings.Join(violationsOf(validateWithRules(defs, catalog, tc.values, incoming, tc.existing)), ",")
+			if got != tc.want {
+				t.Errorf("violations %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// Required by an applying catalog rule: a visible rule does not hide
+	// the field, the catalog validation still applies.
+	catalog := []fieldmeta.CatalogRule{
+		catalogRule(t, "tag-visible", "asset_tag", fieldmeta.CatalogVisible, physical, ""),
+		catalogRule(t, "need-tag", "asset_tag", fieldmeta.CatalogRequired, "", ""),
+		catalogRule(t, "tag-form", "asset_tag", fieldmeta.CatalogValidation, "", `{"op":"pattern","pattern":"^A-[0-9]+$"}`),
+	}
+	values := map[string]any{"server_kind": "virtual", "hypervisor": "esx", "asset_tag": "x"}
+	if got := strings.Join(violationsOf(validateWithRules(defs, catalog, values, values, nil)), ","); got != "asset_tag/tag-form/pattern" {
+		t.Errorf("visible on a required field: %q, want the validation to apply", got)
+	}
+
+	// AND with the attribute rules: both report, neither lifts the other.
+	catalog = []fieldmeta.CatalogRule{catalogRule(t, "small-rack", "rack_unit", fieldmeta.CatalogValidation, "", `{"op":"range","max":10}`)}
+	values = map[string]any{"server_kind": "physical", "rack_unit": 99}
+	if got := strings.Join(violationsOf(validateWithRules(defs, catalog, values, values, nil)), ","); got != "rack_unit//,rack_unit/small-rack/range.max" {
+		t.Errorf("attribute and catalog rule: %q, want both violations", got)
+	}
+	// A catalog visible rule does not lift the attribute rules.
+	catalog = []fieldmeta.CatalogRule{catalogRule(t, "rack-visible", "rack_unit", fieldmeta.CatalogVisible, `{"op":"empty","field":"owner"}`, "")}
+	values = map[string]any{"server_kind": "physical", "rack_unit": 99, "owner": "ops"}
+	if got := strings.Join(violationsOf(validateWithRules(defs, catalog, values, values, nil)), ","); got != "rack_unit//" {
+		t.Errorf("visible rule and attribute range: %q, want the attribute violation", got)
+	}
+
+	// The violation carries the rule's message.
+	rule := catalogRule(t, "need-owner", "owner", fieldmeta.CatalogRequired, "", "")
+	rule.Message = map[string]string{"de": "Verantwortlicher fehlt", "en": "owner missing"}
+	ve, ok := AsValidationError(validateWithRules(nil, []fieldmeta.CatalogRule{rule}, map[string]any{}, nil, nil))
+	if !ok || len(ve.Violations) != 1 || ve.Violations[0].Message == nil || (*ve.Violations[0].Message)["de"] != "Verantwortlicher fehlt" {
+		t.Fatalf("violation without the rule message: %+v", ve)
+	}
+	raw, err := json.Marshal(ve.Violations[0])
+	if err != nil || !strings.Contains(string(raw), `"rule":"need-owner"`) || !strings.Contains(string(raw), `"message":{"de":"Verantwortlicher fehlt","en":"owner missing"}`) {
+		t.Errorf("violation JSON %s (%v)", raw, err)
+	}
+	if raw, _ := json.Marshal(Violation{Field: "a", Detail: "b"}); string(raw) != `{"field":"a","detail":"b"}` {
+		t.Errorf("attribute violation JSON %s, want unchanged", raw)
+	}
+}
+
+// TestInvalidObservedWithCatalogRule covers WP-257 (CI-03, MET-11):
+// discovery drops an observed value a validation rule of the catalog
+// refuses while its condition holds on the observed values; required,
+// readonly and visible do not apply to observations.
+func TestInvalidObservedWithCatalogRule(t *testing.T) {
+	catalog := []fieldmeta.CatalogRule{
+		catalogRule(t, "host-form", "hostname", fieldmeta.CatalogValidation, `{"op":"eq","field":"os_name","value":"linux"}`,
+			`{"op":"pattern","pattern":"^[a-z]+$"}`),
+		catalogRule(t, "need-owner", "owner", fieldmeta.CatalogRequired, "", ""),
+		catalogRule(t, "fixed-model", "model", fieldmeta.CatalogReadonly, "", ""),
+		catalogRule(t, "model-visible", "model", fieldmeta.CatalogVisible, `{"op":"eq","field":"os_name","value":"none"}`, ""),
+	}
+	if got := invalidObservedWith(nil, catalog, map[string]any{"hostname": "host01", "os_name": "linux", "model": "x"}); strings.Join(got, ",") != "hostname" {
+		t.Errorf("invalidObserved = %v, want hostname", got)
+	}
+	if got := invalidObservedWith(nil, catalog, map[string]any{"hostname": "host01", "os_name": "windows"}); len(got) != 0 {
+		t.Errorf("invalidObserved with a condition that does not hold = %v, want none", got)
+	}
+
+	// The service resolves the rules with the definitions, also for new
+	// CIs once per type (ObservedRules).
+	svc := NewService(NewMemoryRepository()).WithFieldResolver(stubRuleResolver{catalog: catalog})
+	values := map[string]any{"hostname": "host01", "os_name": "linux"}
+	got, err := svc.InvalidObserved(context.Background(), "org-1", testServerType, "", values)
+	if err != nil || strings.Join(got, ",") != "hostname" {
+		t.Errorf("InvalidObserved = %v, %v; want hostname", got, err)
+	}
+	check, err := svc.ObservedRules(context.Background(), "org-1", testServerType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := check(values); strings.Join(got, ",") != "hostname" {
+		t.Errorf("ObservedRules = %v, want hostname", got)
+	}
+}
+
+// stubRuleResolver is a FieldResolver and RuleResolver with fixed
+// definitions and catalog rules.
+type stubRuleResolver struct {
+	defs    []fieldmeta.FieldDefinition
+	catalog []fieldmeta.CatalogRule
+}
+
+func (s stubRuleResolver) ResolveFields(context.Context, string, string, string) ([]fieldmeta.FieldDefinition, error) {
+	return s.defs, nil
+}
+
+func (s stubRuleResolver) ResolveRules(context.Context, string, string, string) ([]fieldmeta.CatalogRule, error) {
+	return s.catalog, nil
+}
+
+func (s stubRuleResolver) ResolveFieldsAndRules(context.Context, string, string, string,
+	*[]citype.CITemplate) ([]fieldmeta.FieldDefinition, []fieldmeta.CatalogRule, error) {
+	return s.defs, s.catalog, nil
+}
+
+// TestServiceAppliesCatalogRules covers WP-257: WithFieldResolver finds the
+// RuleResolver, Create and Update refuse a violation of a catalog rule
+// with the rule, code and message, and the conditions see the typed
+// columns after the write.
+func TestServiceAppliesCatalogRules(t *testing.T) {
+	ctx := context.Background()
+	rule := catalogRule(t, "need-owner", "owner", fieldmeta.CatalogRequired, `{"op":"eq","field":"hostname","value":"core"}`, "")
+	rule.Message = map[string]string{"en": "core hosts need an owner"}
+	repo := NewMemoryRepository()
+	svc := NewService(repo).WithFieldResolver(stubRuleResolver{catalog: []fieldmeta.CatalogRule{rule}})
+
+	item := &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "srv-257", Hostname: "core", Attributes: map[string]any{}}
+	err := svc.Create(ctx, item)
+	if got := strings.Join(violationsOf(err), ","); got != "owner/need-owner/required" {
+		t.Fatalf("Create: %v (%q), want the catalog violation", err, got)
+	}
+	item.Hostname = "edge"
+	if err = svc.Create(ctx, item); err != nil {
+		t.Fatalf("Create with a condition that does not hold: %v", err)
+	}
+	core := "core"
+	_, err = svc.Update(ctx, "org-1", item.ID, UpdateRequest{Hostname: &core})
+	if got := strings.Join(violationsOf(err), ","); got != "owner/need-owner/required" {
+		t.Fatalf("Update: %v (%q), want the catalog violation", err, got)
+	}
+	if _, err = svc.Update(ctx, "org-1", item.ID, UpdateRequest{Hostname: &core, Attributes: map[string]any{"owner": "ops"}}); err != nil {
+		t.Fatalf("Update with the owner: %v", err)
 	}
 }

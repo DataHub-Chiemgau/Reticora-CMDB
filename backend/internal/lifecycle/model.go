@@ -1,7 +1,8 @@
 // Package lifecycle implements the configurable lifecycle engine (spec §8):
 // per-type lifecycle definitions with states and guarded transitions, kept
 // strictly separate from technical health. Transition guards declare required
-// fields that the API validates before applying a state change.
+// fields and rules of the rule AST that the transition service evaluates in
+// the transaction of the state change.
 package lifecycle
 
 import (
@@ -55,7 +56,7 @@ type Transition struct {
 	RequiredFields []string `json:"required_fields"`
 	// Guard holds the rules of the transition context (LCY-02); it is
 	// stored in lifecycle_transition.validation, which stays readable
-	// as validation (API-01). WP-724 evaluates it.
+	// as validation (API-01); the transition evaluates it (WP-724).
 	Guard      *Guard         `json:"guard,omitempty"`
 	Validation map[string]any `json:"validation,omitempty"`
 }
@@ -144,11 +145,16 @@ type TransitionOption struct {
 // TransitionRequest is the payload for executing a lifecycle transition on an
 // asset or CI.
 type TransitionRequest struct {
-	// ToState is the target state key. The service resolves the guard from the
-	// definition assigned to the entity's type.
+	// ToState is the target state key. The service resolves the edge and
+	// its guard from the effective model of the entity's type.
 	ToState string `json:"to_state"`
-	// Context carries values consulted by required-field validation
-	// (e.g. storage_location, deployment_location, disposal_date).
+	// FromState is the state the client saw; another current state is 409
+	// with current_state (WP-724). Empty means the entity has no state
+	// yet; absent, the transition is checked against the current state.
+	FromState *string `json:"from_state,omitempty"`
+	// Context carries the values the required fields and the guard rules
+	// of the transition are evaluated against (e.g. storage_location,
+	// deployment_location, disposal_date).
 	Context map[string]any `json:"context,omitempty"`
 	// Reason is stored in the history/audit trail.
 	Reason string `json:"reason,omitempty"`

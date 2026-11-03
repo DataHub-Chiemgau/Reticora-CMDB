@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
@@ -368,6 +369,9 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		}
 		// Unconfirmed and suppressed discovery edges are removed (TOP-02).
 		systemJobs = append(systemJobs, relationship.NewCleanup(pool).Schedule())
+		// Weekly CI snapshots, the base of the replay at a point in time
+		// (AUD-08, WP-312).
+		systemJobs = append(systemJobs, history.NewWeeklySnapshot(pool).Schedule())
 		// Personal data of existing history entries into the vault (SEC-05).
 		systemJobs = append(systemJobs, jobs.NewPIIBackfill(pool).Schedule())
 		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).

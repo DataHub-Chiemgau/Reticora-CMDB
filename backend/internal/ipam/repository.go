@@ -61,6 +61,12 @@ type Repository interface {
 	UpdateIPAddress(ctx context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error)
 	DeleteIPAddress(ctx context.Context, orgID, id string) error
 
+	// IP reservations of a subnet (NET-09, reservation.go): rows of
+	// ip_address with type reserved, the subnet and no interface.
+	ListReservations(ctx context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error)
+	CreateReservation(ctx context.Context, a *IPAddress) error
+	DeleteReservation(ctx context.Context, orgID, subnetID, id string) error
+
 	ListInterfacesForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error)
 	GetInterface(ctx context.Context, orgID, id string) (*NetworkInterface, error)
 	CreateInterface(ctx context.Context, ni *NetworkInterface) error

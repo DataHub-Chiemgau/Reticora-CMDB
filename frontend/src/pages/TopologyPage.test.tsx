@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import type { TopologyGraphData } from '../api/client';
+import { NODE_KINDS, type TopologyGraphData } from '../api/client';
 import type { RelationshipType } from '../api/cmdb';
 import {
   TopologyPage,
   buildGraphModel,
+  relTypeFilterOptions,
   computeOutageImpact,
   impactDirections,
   parseSimulated,
@@ -12,8 +13,19 @@ import {
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
 vi.mock('../components/graph/TopologyGraph', () => ({
-  TopologyGraph: ({ nodes, edges }: { nodes: unknown[]; edges: unknown[] }) => (
-    <div data-testid="topology-graph">{`${nodes.length}/${edges.length}`}</div>
+  SPOF_COLOR: '#d97706',
+  TopologyGraph: ({
+    nodes,
+    edges,
+    spofNodes,
+  }: {
+    nodes: unknown[];
+    edges: unknown[];
+    spofNodes?: ReadonlySet<string>;
+  }) => (
+    <div data-testid="topology-graph" data-spof={[...(spofNodes ?? [])].join(',')}>
+      {`${nodes.length}/${edges.length}`}
+    </div>
   ),
 }));
 
@@ -638,5 +650,216 @@ describe('multiple failures', () => {
     ];
     expect([...computeOutageImpact(['a', 'd'], edges, directions)].sort()).toEqual(['b', 'c', 'e']);
     expect([...computeOutageImpact(['a', 'b'], edges, directions)]).toEqual(['c']);
+  });
+});
+
+// WP-818: the impact panel with the blocks of WP-297, the SPOF marks, the
+// relationship filter from /relationship-types and the projected subnets and
+// VLANs of WP-298.
+describe('TopologyPage impact panel and projected nodes (WP-818)', () => {
+  const networkGraph: TopologyGraphData = {
+    nodes: [
+      { id: 'ci-1', name: 'core-sw-01', ci_type: 'switch', status: 'active' },
+      {
+        id: 'subnet:sn-1',
+        node_kind: 'subnet',
+        name: '10.0.0.0/24',
+        cidr: '10.0.0.0/24',
+      },
+      { id: 'vlan:vl-1', node_kind: 'vlan', name: 'VLAN 10 office', vlan_number: 10 },
+    ],
+    edges: [
+      {
+        id: 'e-n1',
+        source_ci_id: 'ci-1',
+        target_ci_id: 'subnet:sn-1',
+        rel_type: 'in_subnet',
+        source: 'projection',
+      },
+      {
+        id: 'e-n2',
+        source_ci_id: 'subnet:sn-1',
+        target_ci_id: 'vlan:vl-1',
+        rel_type: 'in_vlan',
+        source: 'projection',
+      },
+    ],
+  };
+
+  it('asks for the compact impact with the blocks of WP-297 and shows them in the panel', async () => {
+    const fetchMock = stubFetchRoutes({
+      '/impact?ci_ids=': {
+        failed_cis: [powerGraph.nodes[0]],
+        impacted: [
+          {
+            id: 'ci-server',
+            name: 'srv-01',
+            ci_type: 'type-server',
+            status: 'active',
+            heuristic: false,
+          },
+          { id: 'ci-vm', name: 'vm-01', ci_type: 'vm', status: 'active', heuristic: false },
+        ],
+        count: 2,
+        summary: {
+          failed: 1,
+          impacted: 2,
+          certain: 2,
+          heuristic: 0,
+          by_category: { power: 1, hosting: 1 },
+        },
+        affected_services: [{ id: 'ci-vm', name: 'vm-01', ci_type: 'vm', heuristic: false }],
+        client_ids: ['client-1'],
+        site_ids: ['site-1'],
+        service_spofs: [
+          { id: 'ci-server', name: 'srv-01', ci_type: 'server', service_ids: ['ci-vm'] },
+        ],
+        spof_truncated: true,
+        blast_radius: { cis: 2, services: 1, services_heuristic: 0, clients: 1, sites: 1, spof: 1 },
+      },
+      '/topology': powerGraph,
+      '/ci-types': ciTypes,
+      '/relationship-types': relationshipTypes,
+      '/sites': {
+        data: [{ id: 'site-1', name: 'RZ Nord' }],
+        total: 1,
+        limit: 200,
+        offset: 0,
+        has_more: false,
+      },
+    });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology?simulate=ci-pdu' });
+
+    expect(await screen.findByText('Betroffene Services:')).toBeInTheDocument();
+    const impactUrl = new URL(
+      fetchMock.mock.calls.map((call) => String(call[0])).find((url) => url.includes('/impact?'))!,
+      'http://localhost',
+    );
+    expect(impactUrl.searchParams.get('fields')).toBe(
+      'name,ci_type,status,heuristic,hops,via,relay',
+    );
+    expect(impactUrl.searchParams.get('fields')).not.toContain('path');
+    expect(impactUrl.searchParams.get('include')).toBe('services,clients,sites,spof');
+
+    const panel = screen.getByTestId('impact-panel');
+    expect(within(panel).getByText('Betroffen je Beziehungskategorie:')).toBeInTheDocument();
+    expect(within(panel).getByText(/Die Liste ist gekürzt/)).toBeInTheDocument();
+    await waitFor(() => expect(within(panel).getByText('• RZ Nord')).toBeInTheDocument());
+    // The type label of the catalogue, the id for a type it does not list.
+    expect(within(panel).getAllByText('(Server)').length).toBeGreaterThan(0);
+    expect(within(panel).getAllByText('(vm)').length).toBeGreaterThan(0);
+
+    // The SPOF of the service: marked in the graph and with a badge in the list.
+    expect(screen.getByTestId('topology-graph')).toHaveAttribute('data-spof', 'ci-server');
+    const list = screen.getByRole('heading', { name: 'Knotenliste' }).closest('section')!;
+    const row = within(list as HTMLElement)
+      .getByRole('button', { name: 'srv-01' })
+      .closest('li') as HTMLElement;
+    expect(within(row).getByText('SPOF')).toBeInTheDocument();
+    const pduRow = within(list as HTMLElement)
+      .getByRole('button', { name: 'pdu-01' })
+      .closest('li') as HTMLElement;
+    expect(within(pduRow).queryByText('SPOF')).not.toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Legende' })).toHaveTextContent(
+      'Single Point of Failure eines Services',
+    );
+  });
+
+  it('offers the relationship types of /relationship-types by display name, without none', async () => {
+    stubFetchRoutes({
+      '/topology': graph,
+      '/ci-types': ciTypes,
+      '/relationship-types': {
+        ...relationshipTypes,
+        data: [
+          {
+            ...relType('powered_by', 'source_depends_on_target'),
+            display_name: 'wird versorgt von',
+          },
+          { ...relType('member_of', 'none'), display_name: 'Mitglied von' },
+          { ...relType('runs_on', 'source_depends_on_target'), display_name: 'läuft auf' },
+        ],
+      },
+    });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology' });
+
+    const filter = await screen.findByRole('combobox', { name: 'Beziehungstyp' });
+    await waitFor(() =>
+      expect(
+        within(filter)
+          .getAllByRole('option')
+          .map((o) => o.textContent),
+      ).toEqual(['Alle Beziehungen', 'wird versorgt von', 'läuft auf']),
+    );
+    expect(within(filter).getByRole('option', { name: 'läuft auf' })).toHaveValue('runs_on');
+  });
+
+  it('builds the filter options without types of impact direction none', () => {
+    expect(
+      relTypeFilterOptions([
+        relType('depends_on', 'source_depends_on_target'),
+        relType('monitors', 'none'),
+        { ...relType('custom', 'undirected'), display_name: '' },
+      ]),
+    ).toEqual([
+      { value: 'depends_on', label: 'depends_on' },
+      { value: 'custom', label: 'custom' },
+    ]);
+  });
+
+  it('asks for the projected subnets and VLANs only with the filter and explains them', async () => {
+    const fetchMock = stubFetchRoutes({ '/topology': graph, '/ci-types': ciTypes });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology' });
+
+    const toggle = await screen.findByRole('checkbox', { name: 'Subnetze und VLANs' });
+    expect(toggle).not.toBeChecked();
+    await screen.findByTestId('topology-graph');
+    const topologyUrls = () =>
+      fetchMock.mock.calls
+        .map((call) => String(call[0]))
+        .filter((url) => url.includes('/topology'));
+    expect(topologyUrls().every((url) => !url.includes('include='))).toBe(true);
+    expect(screen.queryByRole('list', { name: 'Legende' })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(topologyUrls().some((url) => url.includes('include=network'))).toBe(true),
+    );
+    const legend = await screen.findByRole('list', { name: 'Legende' });
+    expect(legend).toHaveTextContent('Subnetz (aus IPAM projiziert)');
+    expect(legend).toHaveTextContent('VLAN (aus IPAM projiziert)');
+  });
+
+  it('draws projected nodes in their own look and offers them no simulation, focus or link', async () => {
+    stubFetchRoutes({ '/topology': networkGraph, '/ci-types': ciTypes });
+
+    renderWithProviders(<TopologyPage />, { route: '/topology?network=1' });
+
+    const list = (await screen.findByRole('heading', { name: 'Knotenliste' })).closest(
+      'section',
+    ) as HTMLElement;
+    const subnetRow = within(list).getByText('10.0.0.0/24').closest('li') as HTMLElement;
+    expect(within(subnetRow).getByText('Subnetz')).toBeInTheDocument();
+    expect(within(subnetRow).queryByRole('button')).not.toBeInTheDocument();
+    const vlanRow = within(list).getByText('VLAN 10 office').closest('li') as HTMLElement;
+    expect(within(vlanRow).getByText('VLAN')).toBeInTheDocument();
+    expect(within(vlanRow).queryByRole('button')).not.toBeInTheDocument();
+    // The CI keeps its link, simulation and focus.
+    expect(within(list).getByRole('button', { name: 'core-sw-01' })).toBeInTheDocument();
+    expect(within(list).getAllByRole('button', { name: 'Ausfall simulieren' })).toHaveLength(1);
+    expect(within(list).getAllByRole('button', { name: 'Fokussieren' })).toHaveLength(1);
+
+    const model = buildGraphModel(networkGraph);
+    expect(model.nodes.map((n) => n.color)).toEqual(['#16a34a', '#0891b2', '#7c3aed']);
+    expect(model.nodes[1]?.size).toBeLessThan(10);
+    expect(model.edges).toHaveLength(2);
+  });
+
+  it('ignores projected ids in the simulation of the URL', () => {
+    expect(parseSimulated('ci-1,subnet:sn-1,vlan:vl-1')).toEqual(['ci-1']);
+    expect(NODE_KINDS).toEqual(['ci', 'subnet', 'vlan']);
   });
 });

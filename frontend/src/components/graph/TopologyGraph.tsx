@@ -25,12 +25,20 @@ export interface TopologyGraphProps {
   dimmedNodes?: ReadonlySet<string>;
   /** Nodes in the set are emphasized with a red halo (e.g. failed CI). */
   highlightedNodes?: ReadonlySet<string>;
+  /**
+   * Single points of failure of the affected services (service_spofs,
+   * IMP-08): enlarged, outlined in amber and labelled even when dimmed.
+   * The node list marks them with a badge as well, so the mark does not
+   * rest on the color alone (WP-818).
+   */
+  spofNodes?: ReadonlySet<string>;
   className?: string;
 }
 
 const DIMMED_COLOR = '#d1d5db';
 const DIMMED_EDGE_COLOR = '#e5e7eb';
 const HIGHLIGHT_COLOR = '#dc2626';
+export const SPOF_COLOR = '#d97706';
 
 /**
  * TopologyGraph renders an interactive graph of CI relationships
@@ -41,6 +49,7 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
   edges,
   dimmedNodes,
   highlightedNodes,
+  spofNodes,
   className,
 }) => {
   const { t } = useTranslation();
@@ -83,12 +92,18 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
     }
     setUnavailable(false);
 
-    if (dimmedNodes || highlightedNodes) {
+    if (dimmedNodes || highlightedNodes || spofNodes) {
       renderer.setSetting('nodeReducer', (node, data) => {
         const result = { ...data };
         if (highlightedNodes?.has(node)) {
           result.size = (result.size ?? 10) * 1.4;
           result.color = HIGHLIGHT_COLOR;
+        } else if (spofNodes?.has(node)) {
+          // A SPOF is a failed or affected CI: its mark wins over the dimming.
+          result.size = (result.size ?? 10) * 1.3;
+          result.color = SPOF_COLOR;
+          result.forceLabel = true;
+          result.highlighted = true;
         } else if (dimmedNodes?.has(node)) {
           result.color = DIMMED_COLOR;
         }
@@ -111,7 +126,7 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
       renderer.kill();
       sigmaRef.current = null;
     };
-  }, [nodes, edges, dimmedNodes, highlightedNodes]);
+  }, [nodes, edges, dimmedNodes, highlightedNodes, spofNodes]);
 
   return (
     <div

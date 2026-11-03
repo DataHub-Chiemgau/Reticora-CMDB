@@ -40,7 +40,7 @@ stop a single worker during an incident, without touching the API.
 | `ingest` | `RETICORA_WORKER_INGEST_ENABLED` | Consumes `ingest.>` from NATS (REC-01): one consumer per ingest lane (`RETICORA_INGEST_LANES`, default 4), the consumer of the releases before the lanes and lanes left by a higher lane count; at most 6 batches at a time per instance. The API still publishes to the queue. It also answers the collectors' records, heartbeats and metric samples over the NATS endpoint (`collector.<org>.<id>.ingest`, `….heartbeat`, `….metrics`, COL-08, MON-02; the samples are assigned in the collector's client and site scope and need the monitoring entitlement); a request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Only an instance running this worker reports the backlog per lane in `/readyz` (`details.ingest`, its last 30-s sample); every instance running it holds up to 1,542 identity locks, which sizes the PostgreSQL lock table. See [`docs/betrieb/ingest-spuren.md`](../betrieb/ingest-spuren.md). |
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates the alert rules every minute (MON-04). Part of the module `alerting`: it starts only with `RETICORA_MODULES` naming `alerting` (or `all`), otherwise the server logs `worker disabled` for it. It does not compute `ci.health`; that is the worker `health`. |
 | `health` | `RETICORA_WORKER_HEALTH_ENABLED` | Recomputes `ci.health` of every CI every minute (DB-05, MON-02): per organization, in its tenant transaction, the database function `ci_refresh_health` sets `critical` or `warning` when the latest sample of a metric breaches an enabled alert rule of that severity, `ok` for samples of the last 15 minutes without a breach and `unknown` without such a sample. It belongs to no late module and runs in the G1 default configuration (`RETICORA_MODULES` empty); with the module `alerting` the refresh still runs once per cycle, here and not in `monitoring` (F-087). Run it on one or more instances; a refresh is idempotent. Needs the database. |
-| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below); `audit.route_intents` (every minute, see below); `discovery.jobs.reap` (every minute) fails ad-hoc discovery jobs that their collector neither took nor finished within one hour of creation or start with cause `timeout`; `jobs.reap` (every minute, see "Job queue and timeout reaper"); `notify.digest` (every minute, see "Notification digests"). |
+| `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below); `audit.route_intents` (every minute, see below); `discovery.jobs.reap` (every minute) fails ad-hoc discovery jobs that their collector neither took nor finished within one hour of creation or start with cause `timeout`; `jobs.reap` (every minute, see "Job queue and timeout reaper"); `notify.digest` (every minute, see "Notification digests"); `history.weekly_snapshot` (Sundays 02:07, see "Weekly CI snapshots"). |
 | `events` | `RETICORA_WORKER_EVENTS_ENABLED` | Publishes the domain events of the transactional outbox (`event_outbox`) in sequence order per organization to the NATS stream `RETICORA_EVENTS` (`events.<org_id>.<type>`, by default 30 days / 10 GB, see [Event stream retention](#event-stream-retention-evt-01-nfr-06)) and to the webhook subscriptions; one instance per organization at a time (EVT-01, EVT-02). Without NATS the webhooks still receive the events. |
 | `notifier` | `RETICORA_WORKER_NOTIFIER_ENABLED` | Delivers queued notifications (`notification_delivery`) over their channels — e-mail, in-app, webhook — with retry and exponential backoff (5 attempts), deduplication by key, the recipients' quiet hours and muted categories (critical notifications ignore both), e-mails of the categories a recipient bundles as one digest per window (`notify.digest`, see below); replicas share the queue, a delivery whose instance died is taken over after 10 minutes (NTF-04). |
 | `nats_edge` | `RETICORA_WORKER_NATS_EDGE_ENABLED` | Collector NATS endpoint (COL-08): writes the collector CA bundle, the server certificate of `nats-edge` (host names from `RETICORA_NATS_EDGE_HOSTS`, renewed from 60 % of its lifetime) and the generated `edge.conf` into `RETICORA_PKI_DIR` (daily), and answers the endpoint's authorization callout at `RETICORA_NATS_EDGE_URL`: only certificates of the collector CA that are not revoked, of collectors that are not disabled, each confined to its own subjects, for at most 15 minutes per authorization (docs/betrieb/firewall-matrix.md). A disable, announced on the internal NATS (`discovery.collector.disabled`, also by other replicas), makes one instance cut the collector's open connections through the endpoint's system account within seconds; a failure is logged as `discovery.collector.kick_failed` and retried. The first connection with a renewed certificate revokes its predecessors; hourly it revokes predecessors whose successor was issued 7 days ago (docs/betrieb/collector-ca.md). Run it on one or more server instances; its keys derive from the master key. |
@@ -212,6 +212,32 @@ SEC-05) cannot be restored by design. Entries sealed before migration 000188
 were re-chained by the former backfill and verify like any other entry. The
 down migration re-chains each organization from its first sealed entry, as
 the former backfill did.
+
+## Weekly CI snapshots (AUD-08, WP-312)
+
+The state of a CI at a point in time T (`GET /api/v1/cis/{id}/state`, the
+job `history.snapshot`) is replayed from its last `ci_snapshot` with
+`taken_at` up to T and the `ci_change` rows after it; without a snapshot from
+its whole trail. A merge moves the history rows of the victim to the
+survivor and marks them with `ci_change.origin_ci_id`: each CI replays its
+own rows.
+
+| Run | When | Writes |
+|---|---|---|
+| `history.weekly_snapshot` | Sundays 02:07 | one `ci_snapshot` (reason `weekly`) per CI with `ci_change` rows since its last snapshot, edges other than those of that snapshot, or no snapshot yet |
+
+The run reads the organizations as the system and works per organization in
+batches of at most 500 CIs, each in its own transaction with the
+organization-wide scope. Its snapshots are taken one hour before the run
+started, so a write committed during the run is not lost behind them; their
+state is the replay of the trail up to then and keeps its vault surrogates,
+a repeated run without changes writes nothing. A CI created within that hour
+waits for the next run; a CI without a recorded creation is snapshotted from
+its row (reason `initial`). The merge and the unmerge also write a snapshot
+of both CIs from their rows (reasons `merge` and `unmerge`). `relationships`
+keeps the edges of the CI when the snapshot was written. No run deletes
+snapshots yet: they outlive the hard delete and the merge; their retention
+follows with the point-in-time API (WP-793).
 
 ## Container logs (NFR-06)
 

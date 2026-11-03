@@ -295,18 +295,23 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 // --- IP Addresses ---
 
 const ipCols = `id::text, organization_id::text, COALESCE(subnet_id::text,''), COALESCE(interface_id::text,''),
-	address::text, vrf_id::text, type, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at, created_at, updated_at`
+	address::text, vrf_id::text, type, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at,
+	reserved_until, COALESCE(reserved_by::text,''), created_at, updated_at`
 
 func scanIP(s scanner) (*IPAddress, error) {
 	a := &IPAddress{}
 	var lastSeen *time.Time
 	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Type,
-		&a.DNSName, &a.Description, &lastSeen, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.DNSName, &a.Description, &lastSeen, &a.ReservedUntil, &a.ReservedBy, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if lastSeen != nil {
 		s := lastSeen.UTC().Format(time.RFC3339)
 		a.LastSeenAt = &s
+	}
+	if a.ReservedUntil != nil {
+		until := a.ReservedUntil.UTC()
+		a.ReservedUntil = &until
 	}
 	a.CreatedAt = a.CreatedAt.UTC()
 	a.UpdatedAt = a.UpdatedAt.UTC()
@@ -832,11 +837,29 @@ type ObservedInterface struct {
 	OperStatus   string
 	IsManagement bool
 	IPs          []string
+	// VRFID is the VRF of the record (IngestItem.VRFID); empty or unknown
+	// in the organization means the default VRF (trg_ip_address_vrf).
+	VRFID string
 }
 
 // SyncResult counts what a sync changed.
 type SyncResult struct {
 	Added, Updated, Removed int
+	// Conflicts are the reservations (WP-299) of an address this sync
+	// observed in the same VRF (NET-09); the reservations are unchanged.
+	Conflicts []ReservationConflict
+}
+
+// ReservationConflict is a reservation of an address that discovery
+// observed at an interface in the same VRF (NET-09, WP-772).
+type ReservationConflict struct {
+	ReservationIPID string
+	Address         string
+	VRFID           string
+	SubnetID        string
+	DiscoveredIPID  string
+	InterfaceID     string
+	ReservedBy      string
 }
 
 // MaxMissedObservations is how many consecutive observations of a CI may
@@ -852,7 +875,9 @@ const MaxMissedObservations = 3
 // interfaces and reserved, static and dhcp addresses are kept (E-90). An
 // interface that a manual or verified edge names is not removed and keeps
 // counting misses (REL-05, removeInterfaces). The caller syncs only observations that report
-// interfaces at all.
+// interfaces at all. Observed addresses take the VRF of the record
+// (ObservedInterface.VRFID); one set-based query afterwards reports the
+// reservations of an observed address in its VRF as Conflicts (NET-09).
 func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID string, observed []ObservedInterface) (SyncResult, error) {
 	var res SyncResult
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -902,11 +927,18 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			seenInterfaces[id] = true
 			for _, address := range ifc.IPs {
 				var ipID string
-				err = tx.QueryRow(ctx, `UPDATE ip_address SET miss_count = 0, last_seen_at = now(), updated_at = now()
-					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text`, id, address).Scan(&ipID)
+				// The VRF of the record, resolved in the organization; an
+				// empty or unknown one leaves NULL and trg_ip_address_vrf
+				// sets the default VRF (WP-772).
+				err = tx.QueryRow(ctx, `UPDATE ip_address SET miss_count = 0, last_seen_at = now(), updated_at = now(),
+					vrf_id = (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(3)+` AND v.organization_id = $4)
+					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text`,
+					id, address, ifc.VRFID, orgID).Scan(&ipID)
 				if errors.Is(err, pgx.ErrNoRows) {
-					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at)
-						VALUES ($1, $2, $3::inet, 'discovered', now()) RETURNING id::text`, orgID, id, address).Scan(&ipID)
+					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at, vrf_id)
+						VALUES ($1, $2, $3::inet, 'discovered', now(),
+							(SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(4)+` AND v.organization_id = $1)) RETURNING id::text`,
+						orgID, id, address, ifc.VRFID).Scan(&ipID)
 				}
 				if err != nil {
 					return fmt.Errorf("sync address %s: %w", address, err)
@@ -939,6 +971,9 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			return err
 		}
 		res.Removed = len(removedIPs) + len(removedInterfaces)
+		if res.Conflicts, err = reservationConflicts(ctx, tx, orgID, seenIPs); err != nil {
+			return err
+		}
 		for _, removed := range []struct {
 			field string
 			names []string
@@ -955,6 +990,43 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 		return nil
 	})
 	return res, err
+}
+
+// vrfParam is the VRF id parameter $n as uuid: empty or not a UUID is NULL,
+// so that a record with a malformed VRF falls back to the default VRF
+// instead of failing.
+func vrfParam(n int) string {
+	p := fmt.Sprintf("$%d", n)
+	return `(CASE WHEN ` + p + `::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN ` + p + `::text::uuid END)`
+}
+
+// reservationConflicts finds, in one set-based query, the reservations
+// (type reserved, no interface) of the organization whose address equals
+// (host()) an address seenIPs names, in the VRF of that address (NET-09,
+// WP-772). It changes nothing.
+func reservationConflicts(ctx context.Context, tx pgx.Tx, orgID string, seenIPs []string) ([]ReservationConflict, error) {
+	if len(seenIPs) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT r.id::text, host(r.address), r.vrf_id::text, COALESCE(r.subnet_id::text, ''),
+			d.id::text, d.interface_id::text, COALESCE(r.reserved_by::text, '')
+		FROM ip_address d
+		JOIN ip_address r ON r.organization_id = d.organization_id AND r.vrf_id = d.vrf_id
+			AND r.type = 'reserved' AND r.interface_id IS NULL AND host(r.address) = host(d.address)
+		WHERE d.organization_id = $1 AND d.id = ANY ($2::uuid[]) AND d.interface_id IS NOT NULL
+		ORDER BY host(r.address), d.id`, orgID, seenIPs)
+	if err != nil {
+		return nil, fmt.Errorf("find reservation conflicts: %w", err)
+	}
+	conflicts, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ReservationConflict, error) {
+		var c ReservationConflict
+		scanErr := row.Scan(&c.ReservationIPID, &c.Address, &c.VRFID, &c.SubnetID, &c.DiscoveredIPID, &c.InterfaceID, &c.ReservedBy)
+		return c, scanErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("find reservation conflicts: %w", err)
+	}
+	return conflicts, nil
 }
 
 // missAndRemove counts one miss with countQuery and deletes the rows of

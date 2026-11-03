@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -270,73 +270,24 @@ func checkTemplateItemsTx(ctx context.Context, tx pgx.Tx, typeID string, items [
 	return defs, nil
 }
 
-// typeLayersTx returns the composition layers of a type below the
-// templates (MET-16): the system base, the organization's global
-// attributes, the type chain root → type (of the ancestors the inheritable
-// definitions, of the type all, WP-248) and one layer per active set of
-// the chain (setLayersTx, WP-709), read under the caller's row level
-// security. It is the order of ResolveFields and chainCompositionTx.
-func typeLayersTx(ctx context.Context, tx pgx.Tx, typeID string) ([][]fieldmeta.FieldDefinition, error) {
-	globals, err := queryAttributes(ctx, tx, `SELECT `+attributeColumns+` FROM attribute_definition
-		WHERE scope = 'global' ORDER BY sort_order, key`, nil)
-	if err != nil {
-		return nil, err
-	}
-	var system, org []fieldmeta.FieldDefinition
-	for i := range globals {
-		if globals[i].IsSystem {
-			system = append(system, globals[i].definition())
-		} else {
-			org = append(org, globals[i].definition())
-		}
-	}
-	typed, err := queryAttributes(ctx, tx, `SELECT `+attributeColumns+` FROM (
-			SELECT c.level AS lvl, a.* FROM ci_type_ancestors($1::uuid) c
-			JOIN attribute_definition a ON a.ci_type_id = c.id
-			WHERE a.inheritable OR c.id = $1::uuid
-		) defs ORDER BY lvl, sort_order, key`, []any{typeID})
-	if err != nil {
-		return nil, err
-	}
-	layers := [][]fieldmeta.FieldDefinition{system, org, definitionsOf(typed)}
-	sets, err := setLayersTx(ctx, tx, []string{typeID}, "", nil)
-	if err != nil {
-		return nil, err
-	}
-	for _, layer := range sets[typeID] {
-		layers = append(layers, definitionsOf(layer))
-	}
-	return layers, nil
-}
-
-// checkTemplateCompositionTx composes a template version on its type
-// (MET-16): system base → organization's global attributes → type chain →
-// sets of the type → the template version (each item's definition, then
+// checkTemplateCompositionTx composes the template version versionID on
+// its type (MET-16) with CheckComposition (WP-252, a type with
+// TemplateVersionIDs): system base → organization's global attributes that
+// apply to the type → type chain → sets of the chain → the template
+// version (each item's definition where no lower layer has the key, then
 // its overrides). The template layer is not materialized; templates are
-// composed per CI (WP-710). A conflict is a 422 on the key of the
-// attribute with the code of the conflict.
-func checkTemplateCompositionTx(ctx context.Context, tx pgx.Tx, typeID string, items []TemplateVersionItem,
-	defs map[string]*AttributeDefinition) error {
-	layers, err := typeLayersTx(ctx, tx, typeID)
+// composed per CI (WP-710). A conflict of an item's key is a 422 on that
+// key with the code of the conflict.
+func checkTemplateCompositionTx(ctx context.Context, tx pgx.Tx, typeID, versionID string, items []TemplateVersionItem) error {
+	conflicts, err := CheckComposition(ctx, tx, CompositionScope{TypeID: typeID, TemplateVersionIDs: []string{versionID}})
 	if err != nil {
 		return err
 	}
-	base := make([]fieldmeta.FieldDefinition, 0, len(items))
-	top := make([]fieldmeta.FieldDefinition, 0, len(items))
-	for i := range items {
-		b, t, lerr := templateItemLayers(defs[items[i].AttributeDefinitionID], &items[i])
-		if lerr != nil {
-			return itemError(i, "validation_override", lerr.Error())
-		}
-		base, top = append(base, b), append(top, t)
+	inItems := func(key string) bool {
+		return slices.ContainsFunc(items, func(it TemplateVersionItem) bool { return it.Key == key })
 	}
-	if _, cerr := Compose(append(layers, base, top)...); cerr != nil {
-		var conflict *CompositionError
-		if errors.As(cerr, &conflict) {
-			return &api.FieldError{Field: conflict.Key, Message: cerr.Error(), Status: http.StatusUnprocessableEntity,
-				Code: conflict.Code}
-		}
-		return cerr
+	if c := firstConflict(conflicts, inItems); c != nil {
+		return &api.FieldError{Field: c.Key, Message: c.Error(), Status: http.StatusUnprocessableEntity, Code: c.Code}
 	}
 	return nil
 }
@@ -648,11 +599,10 @@ func (r *PGRepository) PublishTemplateVersion(ctx context.Context, orgID, id str
 			return ErrTemplateVersionNotDraft
 		}
 		items := append([]TemplateVersionItem(nil), before.Items...)
-		defs, err := checkTemplateItemsTx(ctx, tx, t.CITypeID, items)
-		if err != nil {
+		if _, err = checkTemplateItemsTx(ctx, tx, t.CITypeID, items); err != nil {
 			return err
 		}
-		if cerr := checkTemplateCompositionTx(ctx, tx, t.CITypeID, items, defs); cerr != nil {
+		if cerr := checkTemplateCompositionTx(ctx, tx, t.CITypeID, before.ID, items); cerr != nil {
 			return cerr
 		}
 		var publisher any

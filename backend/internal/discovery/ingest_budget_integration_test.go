@@ -1102,7 +1102,7 @@ func TestRediscoverStatementBudget(t *testing.T) {
 	// miss for the addresses of the device's interfaces it did not report.
 	d := seeded[f.OrgA][3]
 	args := map[string][]any{
-		"update ip_address set miss_count = 0":                  {d.ifID, d.ip},
+		"update ip_address set miss_count = 0":                  {d.ifID, d.ip, "", f.OrgA}, // VRF of the record (WP-772)
 		"update ip_address a set miss_count = a.miss_count + 1": {d.id, []string{}},
 	}
 	for prefix, a := range args {

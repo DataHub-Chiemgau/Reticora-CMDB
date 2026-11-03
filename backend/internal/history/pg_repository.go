@@ -310,47 +310,69 @@ func (r *PGRepository) Visible(ctx context.Context, orgID, entityType, entityID 
 	return visible, err
 }
 
-// ciTrail is the change trail of a CI for its replay (JOB-04, WP-516): the
-// field rows of its ci_change change sets (AUD-03, the row of its creation
-// included) and its entity_change rows up to $3, with the change kind, both
-// under the caller's tenant scope as in its history (unifiedCIChanges).
+// ciTrail is the change trail of a CI for its replay at $3 (JOB-04, WP-516,
+// WP-312): the last ci_snapshot with taken_at <= $3 as its base, then the
+// field rows of the ci_change change sets of the CI (AUD-03, the row of its
+// creation included; after a merge found by origin_ci_id, so the survivor
+// replays its own rows and the victim its rows before the merge) and its
+// entity_change rows, each with taken_at < created_at <= $3; without a
+// snapshot the whole trail up to $3. All under the caller's tenant scope as
+// in its history (unifiedCIChanges). rank orders the rows of one time: the
+// snapshot, then the creation, then the others.
 const ciTrail = `
-	SELECT id::text AS id, organization_id::text AS organization_id, 'ci' AS entity_type, ci_id::text AS entity_id,
-	       COALESCE(actor_id::text, '') AS actor_id, change_type, COALESCE(field_name, '') AS field_name, old_value, new_value,
-	       COALESCE(comment, '') AS comment, created_at, change_kind, ci_version
-	FROM ci_change WHERE organization_id = $1 AND ci_id = $2::uuid AND created_at <= $3
+	WITH base AS (
+		SELECT id, organization_id, taken_at, state, ci_version FROM ci_snapshot
+		WHERE organization_id = $1 AND ci_id = $2::uuid AND taken_at <= $3
+		ORDER BY taken_at DESC LIMIT 1)
+	SELECT id::text AS id, organization_id::text AS organization_id, 'ci' AS entity_type, $2::uuid::text AS entity_id,
+	       '' AS actor_id, 'snapshot' AS change_type, '' AS field_name, NULL::jsonb AS old_value, state AS new_value,
+	       '' AS comment, taken_at AS created_at, '' AS change_kind, ci_version, '` + SourceCISnapshot + `' AS source, 0 AS rank
+	FROM base
+	UNION ALL
+	SELECT id::text, organization_id::text, 'ci', $2::uuid::text,
+	       COALESCE(actor_id::text, ''), change_type, COALESCE(field_name, ''), old_value, new_value,
+	       COALESCE(comment, ''), created_at, change_kind, ci_version, '` + SourceCIChange + `', CASE WHEN change_type = 'create' THEN 1 ELSE 2 END
+	FROM ci_change WHERE organization_id = $1 AND ((ci_id = $2::uuid AND origin_ci_id IS NULL) OR origin_ci_id = $2::uuid)
+	  AND created_at <= $3 AND created_at > COALESCE((SELECT taken_at FROM base), '-infinity')
 	UNION ALL
 	SELECT id::text, organization_id::text, entity_type, entity_id::text, COALESCE(actor_id::text, ''), change_type,
-	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, '', NULL::bigint
-	FROM entity_change WHERE organization_id = $1 AND entity_type = 'ci' AND entity_id = $2::uuid AND created_at <= $3`
+	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, '', NULL::bigint,
+	       '` + SourceEntityChange + `', CASE WHEN change_type = 'create' THEN 1 ELSE 2 END
+	FROM entity_change WHERE organization_id = $1 AND entity_type = 'ci' AND entity_id = $2::uuid
+	  AND created_at <= $3 AND created_at > COALESCE((SELECT taken_at FROM base), '-infinity')`
 
 // TrailUpTo returns the changes of an entity up to at, oldest first, for
 // point-in-time replay, with the personal values the surrogates stand for,
-// as its history shows them (SEC-05). For a CI it is its ci_change field
-// rows and its entity_change rows, for another type its entity_change rows
-// (an asset writes them since WP-516). The rows of one write share their
-// time: the creation goes first, then the CI version orders them. An entity
-// the caller cannot see has none.
+// as its history shows them (SEC-05). For a CI it is its last ci_snapshot
+// up to at and the ci_change and entity_change rows after it (ciTrail),
+// for another type its entity_change rows (an asset writes them since
+// WP-516). The rows of one write share their time: the creation goes
+// first, then the CI version orders them. An entity the caller cannot see
+// has none.
 func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error) {
 	out := []Change{}
 	if !api.IsUUID(entityID) {
 		return out, nil
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var rows pgx.Rows
-		var err error
 		if entityType == "ci" {
-			rows, err = tx.Query(ctx, `
-				SELECT id, organization_id, entity_type, entity_id, actor_id, change_type, field_name, old_value, new_value,
-				       comment, created_at, change_kind
-				FROM (`+ciTrail+`) t
-				WHERE EXISTS (SELECT 1 FROM ci WHERE ci.id = $2::uuid)
-				ORDER BY created_at, change_type <> 'create', ci_version NULLS LAST, id`, orgID, entityID, at)
-		} else {
-			rows, err = tx.Query(ctx, fmt.Sprintf(
-				"SELECT %s, '' FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 AND %s ORDER BY created_at, change_type <> 'create', id",
-				selectColumns, visibleEntity), orgID, entityType, entityID, at)
+			var visible bool
+			if err := tx.QueryRow(ctx, visibleSQL["ci"], entityID).Scan(&visible); err != nil {
+				return fmt.Errorf("check ci visibility: %w", err)
+			}
+			if !visible {
+				return nil
+			}
+			trail, err := ciTrailTx(ctx, tx, orgID, entityID, at)
+			if err != nil {
+				return err
+			}
+			out = trail
+			return reveal(ctx, tx, orgID, out)
 		}
+		rows, err := tx.Query(ctx, fmt.Sprintf(
+			"SELECT %s, '' FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 AND %s ORDER BY created_at, change_type <> 'create', id",
+			selectColumns, visibleEntity), orgID, entityType, entityID, at)
 		if err != nil {
 			return fmt.Errorf("list entity trail: %w", err)
 		}
@@ -373,6 +395,34 @@ func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityI
 		return reveal(ctx, tx, orgID, out)
 	})
 	return out, err
+}
+
+// ciTrailTx reads the trail of a CI up to at in tx (ciTrail), oldest first,
+// with the stored values: the personal values stay surrogates.
+func ciTrailTx(ctx context.Context, tx pgx.Tx, orgID, ciID string, at time.Time) ([]Change, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT id, organization_id, entity_type, entity_id, actor_id, change_type, field_name, old_value, new_value,
+		       comment, created_at, change_kind, ci_version, source
+		FROM (`+ciTrail+`) t
+		ORDER BY created_at, rank, ci_version NULLS LAST, id`, orgID, ciID, at)
+	if err != nil {
+		return nil, fmt.Errorf("list ci trail: %w", err)
+	}
+	defer rows.Close()
+	out := []Change{}
+	for rows.Next() {
+		c := Change{}
+		var oldRaw, newRaw []byte
+		if err := rows.Scan(&c.ID, &c.OrganizationID, &c.EntityType, &c.EntityID, &c.ActorID, &c.ChangeType, &c.FieldName,
+			&oldRaw, &newRaw, &c.Comment, &c.CreatedAt, &c.ChangeKind, &c.ciVersion, &c.Source); err != nil {
+			return nil, err
+		}
+		if err := decodeValues(&c, oldRaw, newRaw); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // decodeValues decodes the stored old and new value of a trail row.

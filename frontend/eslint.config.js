@@ -51,6 +51,9 @@ export default tseslint.config(
       'src/pages/DiscoveryPage.tsx',
       'src/pages/StocktakeListPage.tsx',
       'src/pages/CITypeAdminPage.tsx',
+      // WP-818: the impact panel and the topology page.
+      'src/pages/TopologyPage.tsx',
+      'src/components/graph/ImpactPanel.tsx',
     ],
     rules: {
       'no-restricted-syntax': [

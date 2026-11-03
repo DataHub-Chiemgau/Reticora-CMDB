@@ -397,7 +397,8 @@ func (c *countingRouteAuditor) count(route string) int {
 // TestEveryWriteRouteAuditedOnPostgreSQL in the order they run, with their
 // bodies; the other write routes follow, the deletes last. Placeholders:
 // <client> a client, <user> the caller, <uuid> a new id, <citype> the
-// server type, <ci2> and <ci3> further CIs, <asset2> a further asset,
+// server type, <ci2> and <ci3> further CIs, <ci6> a CI of the type
+// application (lifecycle model software), <asset2> a further asset,
 // <id:path> the id the create of path returned.
 var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/clients", `{"name":"a5 client","slug":"a5-client"}`},
@@ -410,6 +411,7 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/attribute-definitions", `{"ci_type_id":"<id:/api/v1/ci-types>","key":"a5_attr","data_type":"string"}`},
 	{"POST /api/v1/attribute-sets", `{"key":"a5_set"}`},
 	{"POST /api/v1/templates", `{"key":"a5_tpl","ci_type_id":"<citype>"}`},
+	{"POST /api/v1/rules", `{"key":"a5_rule","ci_type_id":"<id:/api/v1/ci-types>","attribute_key":"a5_attr","kind":"required"}`},
 	{"POST /api/v1/cis", `{"ci_type_id":"<citype>","name":"a5-ci","client_id":"<client>"}`},
 	{"POST /api/v1/assets", `{"asset_tag":"a5-asset","name":"a5-asset","client_id":"<client>"}`},
 	{"POST /api/v1/contacts", `{"name":"a5 contact","email":"a5-contact@example.com"}`},
@@ -484,12 +486,17 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/cis/{id}/contacts":          {"", `{"contact_id":"<id:/api/v1/contacts>"}`},
 	"POST /api/v1/cis/{id}/interfaces":        {"", `{"name":"eth0"}`},
 	"POST /api/v1/cis/{id}/type":              {"", `{"ci_type_id":"<citype2>"}`},
+	// IP reservations (WP-299): an address of the created subnet; the
+	// release names the reservation the sub-create returned.
+	"POST /api/v1/subnets/{id}/reservations":           {"", `{"address":"10.205.0.20"}`},
+	"DELETE /api/v1/subnets/{id}/reservations/{ip_id}": {"/api/v1/subnets/<id:/api/v1/subnets>/reservations/<id:/api/v1/ip-reservations>", ""},
 	// Templates (WP-251): the clone needs a key; version 1 of the created
 	// template is published after POST …/versions added the draft 2, which
 	// the PUT then fills.
 	"POST /api/v1/templates/{id}/clone":                      {"", `{"key":"a5_tpl_clone"}`},
 	"POST /api/v1/templates/{id}/versions/{version}/publish": {"/api/v1/templates/<id:/api/v1/templates>/versions/1/publish", `{}`},
 	"PUT /api/v1/templates/{id}/versions/{version}":          {"/api/v1/templates/<id:/api/v1/templates>/versions/2", `{"items":[]}`},
+	"PATCH /api/v1/rules/{id}":                               {"", `{"kind":"readonly"}`},
 	"POST /api/v1/cis/{id}/unmerge":                          {"/api/v1/cis/<ci4>/unmerge", `{}`},
 	"PATCH /api/v1/relationship-types/{key}":                 {"/api/v1/relationship-types/a5_rel", `{"display_name":"a5 rel renamed"}`},
 	"DELETE /api/v1/relationship-types/{key}":                {"/api/v1/relationship-types/a5_rel", ""},
@@ -503,7 +510,6 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/desks/{id}/bookings":                       {"", `{"starts_at":"2030-01-02T08:00:00Z","ends_at":"2030-01-02T12:00:00Z"}`},
 	"POST /api/v1/keys/{id}/issue":                           {"", `{"assigned_to":"<user>"}`},
 	"POST /api/v1/trainings/{id}/assignments":                {"", `{"user_id":"<user>"}`},
-	"POST /api/v1/assets/{id}/lifecycle-transitions":         {"", `{"to_state":"used"}`},
 	"PUT /api/v1/reconciliation/source-policy":               {"", `{"name":"a5-policy","priorities":["manual","discovery"]}`},
 	"PUT /api/v1/cis/{id}/fields/{name}/override":            {"/api/v1/cis/<id:/api/v1/cis>/fields/description/override", `{"value":"a5","reason":"a5 override"}`},
 	"DELETE /api/v1/cis/{id}/fields/{name}/override":         {"/api/v1/cis/<id:/api/v1/cis>/fields/description/override", ""},
@@ -524,9 +530,16 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	// The value of the instance attribute a5_ci_field (MET-14, WP-256).
 	"PUT /api/v1/cis/{id}/instance-attributes/{key}":    {"/api/v1/cis/<id:/api/v1/cis>/instance-attributes/a5_ci_field", `{"value":"a5 value"}`},
 	"DELETE /api/v1/cis/{id}/instance-attributes/{key}": {"/api/v1/cis/<id:/api/v1/cis>/instance-attributes/a5_ci_field", ""},
+	"PUT /api/v1/cis/{id}/templates":                    {"/api/v1/cis/<ci2>/templates", `{"templates":[{"template_id":"<template>"}]}`}, // WP-710
 	"PUT /api/v1/ci-fields/global":                      {"", `{"name":"a5_global","data_type":"string"}`},
 	"PUT /api/v1/ci-types/{id}/fields":                  {"", `{"name":"a5_field","data_type":"string"}`},
 	"PUT /api/v1/cis/{id}/field-definitions":            {"", `{"name":"a5_ci_field","data_type":"string"}`},
+
+	// Lifecycle transitions (WP-724): the asset has no type model, so
+	// physical_asset with the initial state ordered; <ci6> has the type
+	// application with the system model software.
+	"POST /api/v1/assets/{id}/lifecycle-transitions": {"", `{"to_state":"ordered","reason":"a5 order"}`},
+	"POST /api/v1/cis/{id}/lifecycle-transitions":    {"/api/v1/cis/<ci6>/lifecycle-transitions", `{"to_state":"evaluation","reason":"a5 evaluation"}`},
 }
 
 // auditRouteSubCreates create rows under another resource; they run first
@@ -541,6 +554,7 @@ var auditRouteSubCreates = []struct{ route, collection string }{
 	{"POST /api/v1/keys/{id}/issue", ""},
 	{"POST /api/v1/workflows/{id}/runs", "/api/v1/workflow-runs"},
 	{"POST /api/v1/cis/{id}/merge", ""},
+	{"POST /api/v1/subnets/{id}/reservations", "/api/v1/ip-reservations"},
 }
 
 // TestEveryWriteRouteAuditedOnPostgreSQL runs every write route of the
@@ -591,6 +605,11 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&citype); err != nil {
 		t.Fatal(err)
 	}
+	// The system template of the server profiles for PUT /cis/{id}/templates (WP-710).
+	var systemTemplate string
+	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM template WHERE key = 'physical_server' AND organization_id IS NULL`).Scan(&systemTemplate); err != nil {
+		t.Fatal(err)
+	}
 	var citype2 string
 	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'application' AND organization_id IS NULL`).Scan(&citype2); err != nil {
 		t.Fatal(err)
@@ -599,7 +618,14 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		"<ci2>": f.CI(t, f.OrgA, f.Client1, "a5-ci2"), "<ci3>": f.CI(t, f.OrgA, f.Client1, "a5-ci3"),
 		"<ci4>": f.CI(t, f.OrgA, f.Client1, "a5-ci4"), "<ci5>": f.CI(t, f.OrgA, f.Client1, "a5-ci5"),
 		"<asset2>": f.Asset(t, f.OrgA, f.Client1, "a5-asset2"), "<citype2>": citype2,
-		"<user2>": f.AppUser(t, f.OrgA, "audit-a5-user2"), "<user3>": f.AppUser(t, f.OrgA, "audit-a5-user3")}
+		"<user2>": f.AppUser(t, f.OrgA, "audit-a5-user2"), "<user3>": f.AppUser(t, f.OrgA, "audit-a5-user3"),
+		"<template>": systemTemplate}
+	// A CI whose type has a ci lifecycle model (software) for POST
+	// /cis/{id}/lifecycle-transitions (WP-724).
+	fixed["<ci6>"] = f.CI(t, f.OrgA, f.Client1, "a5-ci6")
+	if _, err = f.Admin.Exec(bg, `UPDATE ci SET ci_type_id = $2 WHERE id = $1`, fixed["<ci6>"], citype2); err != nil {
+		t.Fatal(err)
+	}
 	// A soft-deleted CI for POST /cis/{id}/restore.
 	if _, err = f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, fixed["<ci5>"]); err != nil {
 		t.Fatal(err)

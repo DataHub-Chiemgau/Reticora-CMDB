@@ -47,12 +47,14 @@ DELETE /api/v1/relationships/{id} relationship:write
 DELETE /api/v1/role-assignments/{id} role:manage
 DELETE /api/v1/roles/{id} role:manage
 DELETE /api/v1/rooms/{id} location:write
+DELETE /api/v1/rules/{id} citype:manage
 DELETE /api/v1/saved-views/{id} saved_view:write
 DELETE /api/v1/service-accounts/{id} user:manage
 DELETE /api/v1/sites/{id} location:write
 DELETE /api/v1/slas/{id} sla:write
 DELETE /api/v1/stocktakes/{id} stocktake:write
 DELETE /api/v1/subnets/{id} ipam:write
+DELETE /api/v1/subnets/{id}/reservations/{ip_id} ipam:write
 DELETE /api/v1/teams/{id} team:manage
 DELETE /api/v1/teams/{teamId}/members/{userId} team:manage
 DELETE /api/v1/templates/{id} citype:manage
@@ -119,6 +121,7 @@ GET /api/v1/cis/{id}/parent ci:read
 GET /api/v1/cis/{id}/provenance ci:read
 GET /api/v1/cis/{id}/relationships relationship:read
 GET /api/v1/cis/{id}/state ci:read
+GET /api/v1/cis/{id}/templates ci:read
 GET /api/v1/clients location:read
 GET /api/v1/clients/{id} location:read
 GET /api/v1/collectors discovery:read
@@ -238,6 +241,8 @@ GET /api/v1/roles/{id} role:read
 GET /api/v1/roles/{id}/permissions role:read
 GET /api/v1/rooms location:read
 GET /api/v1/rooms/{id} location:read
+GET /api/v1/rules ci:read
+GET /api/v1/rules/{id} ci:read
 GET /api/v1/saved-views saved_view:read
 GET /api/v1/saved-views/presets saved_view:read
 GET /api/v1/saved-views/{id} saved_view:read
@@ -261,6 +266,7 @@ GET /api/v1/stocktakes/{id}/scans stocktake:read
 GET /api/v1/subnets ipam:read
 GET /api/v1/subnets/{id} ipam:read
 GET /api/v1/subnets/{id}/addresses ipam:read
+GET /api/v1/subnets/{id}/reservations ipam:read
 GET /api/v1/teams user:read
 GET /api/v1/teams/{id} user:read
 GET /api/v1/teams/{id}/members user:read
@@ -337,6 +343,7 @@ PATCH /api/v1/relationship-types/{key} relationship_type:manage
 PATCH /api/v1/relationships/{id} relationship:write
 PATCH /api/v1/roles/{id} role:manage
 PATCH /api/v1/rooms/{id} location:write
+PATCH /api/v1/rules/{id} citype:manage
 PATCH /api/v1/saved-views/{id} saved_view:write
 PATCH /api/v1/security/findings/{id} security:write
 PATCH /api/v1/service-accounts/{id} user:manage
@@ -376,6 +383,7 @@ POST /api/v1/assignments assignment:write
 POST /api/v1/assignments/{id}/return assignment:write
 POST /api/v1/assignments/{id}/transfer assignment:write
 POST /api/v1/attribute-definitions ci_attribute:manage
+POST /api/v1/attribute-definitions/{id}/reindex ci_attribute:manage
 POST /api/v1/attribute-sets citype:manage
 POST /api/v1/audit-log/verify audit:read
 POST /api/v1/audit/verify audit:read
@@ -478,6 +486,7 @@ POST /api/v1/role-assignments role:manage
 POST /api/v1/roles role:manage
 POST /api/v1/roles/assign role:manage
 POST /api/v1/rooms location:write
+POST /api/v1/rules citype:manage
 POST /api/v1/saved-views saved_view:write
 POST /api/v1/search/query search:read
 POST /api/v1/search/reindex search:write
@@ -492,6 +501,7 @@ POST /api/v1/stocktakes stocktake:write
 POST /api/v1/stocktakes/{id}/complete stocktake:complete
 POST /api/v1/stocktakes/{id}/scans stocktake:write
 POST /api/v1/subnets ipam:write
+POST /api/v1/subnets/{id}/reservations ipam:write
 POST /api/v1/teams team:manage
 POST /api/v1/teams/{id}/members team:manage
 POST /api/v1/templates citype:manage
@@ -524,6 +534,7 @@ PUT /api/v1/ci-types/{id}/fields citype:manage
 PUT /api/v1/cis/{id}/field-definitions ci_instance_attribute:manage
 PUT /api/v1/cis/{id}/fields/{name}/override override:write
 PUT /api/v1/cis/{id}/instance-attributes/{key} ci_instance_attribute:manage
+PUT /api/v1/cis/{id}/templates ci:write
 PUT /api/v1/documents/{id}/content document:write
 PUT /api/v1/notifications/preferences authenticated
 PUT /api/v1/privacy/retention user:manage

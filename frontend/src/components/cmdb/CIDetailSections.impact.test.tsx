@@ -3,11 +3,14 @@
  * WP-491): the blast radius lists the certainly affected CIs and the CIs
  * reached only over connected_to (the network heuristic) apart, the latter
  * with the marker "Netzheuristik"; affected_count counts the certain hits
- * only (WP-490).
+ * only (WP-490). Since WP-818 the section renders the ImpactPanel: the
+ * services of WP-297 and the SPOF of the services, and it is not shown
+ * without the entitlement topology.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import i18n from '../../i18n';
+import { useAuthStore } from '../../auth/authStore';
 import { renderWithProviders, stubFetchRoutes } from '../../test/utils';
 import { ImpactSection } from './CIDetailSections';
 
@@ -35,6 +38,7 @@ const blastRadius = {
 
 afterEach(async () => {
   vi.unstubAllGlobals();
+  useAuthStore.setState({ token: null, expiresAt: null, user: null });
   vi.restoreAllMocks();
   await i18n.changeLanguage('de-DE');
 });
@@ -128,5 +132,63 @@ describe('ImpactSection', () => {
     expect(items).toHaveLength(1);
     expect(within(items[0]!).getByText('Network heuristic')).toBeInTheDocument();
     expect(screen.getByText(/^Network heuristic:/)).toHaveTextContent('Network heuristic: 1');
+  });
+
+  it('shows the affected services and the SPOF of the services through the panel (WP-818)', async () => {
+    await computeBlastRadius({
+      ...blastRadius,
+      affected_services: [node('ci-vm', 'vm-01', 'vm', false)],
+      single_points_of_failure: [node('ci-srv', 'srv-01', 'server', false)],
+      service_spofs: [{ id: 'ci-srv', name: 'srv-01', ci_type: 'server', service_ids: ['ci-vm'] }],
+      spof_truncated: false,
+      blast_radius: { cis: 2, services: 1, services_heuristic: 0, clients: 1, sites: 1, spof: 1 },
+    });
+
+    expect(await screen.findByText('Betroffene Services:')).toBeInTheDocument();
+    expect(
+      within(listAfter('Betroffene Services:'))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['• vm-01 (vm)']);
+    expect(
+      within(listAfter('Single Points of Failure der Services:')).getByText(/srv-01/),
+    ).toBeInTheDocument();
+    expect(
+      within(listAfter('Direkt betroffen ohne Alternative:')).getByText(/srv-01/),
+    ).toBeInTheDocument();
+  });
+
+  it('is not shown without the entitlement topology', async () => {
+    useAuthStore.setState({
+      token: 'header.payload.signature',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      user: { sub: 'user-1' },
+    });
+    stubFetchRoutes({
+      '/entitlements': {
+        data: [
+          {
+            organization_id: 'org-1',
+            feature_key: 'cmdb_core',
+            plan: 'enterprise',
+            enabled: true,
+            limits: {},
+            source: 'manual',
+          },
+        ],
+        total: 1,
+        limit: 200,
+        offset: 0,
+        has_more: false,
+      },
+    });
+    renderWithProviders(<ImpactSection ciId={CI_ID} />);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Blast Radius berechnen' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Auswirkungsanalyse')).not.toBeInTheDocument();
   });
 });

@@ -725,6 +725,10 @@ export interface ImpactResult {
 /**
  * The blast radius of a CI failure: affected_count counts the certain hits,
  * heuristic_count the CIs reached only over connected_to (IMP-03, WP-490).
+ * WP-297 adds affected_services, service_spofs with spof_truncated (the SPOF
+ * of the services, IMP-08) and the counts of blast_radius; the ImpactPanel
+ * shows them (WP-818). single_points_of_failure are the direct dependents
+ * without an alternative, not the SPOF of IMP-08.
  */
 export type BlastRadius = components['schemas']['BlastRadius'];
 

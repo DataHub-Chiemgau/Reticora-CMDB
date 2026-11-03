@@ -122,6 +122,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"lifecycle-models":      identity.PermAssetRead, // E-38 successor of lifecycle-definitions (E-106)
 	"templates":             identity.PermCIRead,    // metamodel templates read like ci-types (E-38, E-106)
 	"attribute-sets":        identity.PermCIRead,    // attribute sets read like ci-types (WP-250, E-106)
+	"rules":                 identity.PermCIRead,    // rule catalog reads like ci-types (WP-716, E-106)
 	"locations":             identity.PermLocationRead,
 	"stock-movements":       identity.PermAssetRead,
 	"inventory":             identity.PermStockRead, // inventory items and availability are stock (E-106)
@@ -211,6 +212,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"lifecycle-models":      identity.PermLifecycleManage,
 	"templates":             identity.PermCITypeManage, // metamodel resources write like ci-types (E-106)
 	"attribute-sets":        identity.PermCITypeManage, // like ci-types (WP-250, E-106)
+	"rules":                 identity.PermCITypeManage, // rule catalog writes like ci-types (WP-716, E-106)
 	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
@@ -595,6 +597,7 @@ var domainRecordedRoutes = map[string]string{
 	"POST /api/v1/cis/{id}/type":                        "ci.PGRepository.ChangeType",
 	"PUT /api/v1/cis/{id}/instance-attributes/{key}":    "ci.PGRepository.Update",
 	"DELETE /api/v1/cis/{id}/instance-attributes/{key}": "ci.PGRepository.Update",
+	"PUT /api/v1/cis/{id}/templates":                    "ci.PGRepository.Update",
 	"PUT /api/v1/cis/{id}/fields/{name}/override":       "override.PGRepository",
 	"DELETE /api/v1/cis/{id}/fields/{name}/override":    "override.PGRepository",
 	// Metamodel (MET-15).
@@ -622,6 +625,9 @@ var domainRecordedRoutes = map[string]string{
 	"POST /api/v1/templates/{id}/versions":                   "citype.PGRepository",
 	"PUT /api/v1/templates/{id}/versions/{version}":          "citype.PGRepository",
 	"POST /api/v1/templates/{id}/versions/{version}/publish": "citype.PGRepository",
+	"POST /api/v1/rules":                                     "citype.PGRepository",
+	"PATCH /api/v1/rules/{id}":                               "citype.PGRepository",
+	"DELETE /api/v1/rules/{id}":                              "citype.PGRepository",
 	// Locations and rack placement (DOD-01).
 	"POST /api/v1/locations":                   "locations.PGRepository",
 	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",
@@ -651,6 +657,12 @@ var domainRecordedRoutes = map[string]string{
 	// which takes the place of its route entry; every other deletion keeps
 	// the route entry, so that route stays a route-audited one.
 	"DELETE /api/v1/relationship-suppressions/{id}": "relationship.PGRepository.LiftSuppression",
+
+	// Lifecycle transitions (LCY-02, WP-724): ci.lifecycle_changed or
+	// asset.lifecycle_changed with the old and new state and the reason,
+	// in the transaction of the transition.
+	"POST /api/v1/cis/{id}/lifecycle-transitions":    "lifecycle.PGStateStore.RecordTransition",
+	"POST /api/v1/assets/{id}/lifecycle-transitions": "lifecycle.PGStateStore.RecordTransition",
 }
 
 // auditedRoutes records, per write route registered through an

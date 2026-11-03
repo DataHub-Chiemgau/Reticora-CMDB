@@ -76,7 +76,7 @@ interface TopologyGraph {
 }
 
 interface Impact {
-  impacted: { id: string; name?: string }[];
+  impacted: { id: string; name?: string; heuristic?: boolean }[];
 }
 
 interface Session {
@@ -225,15 +225,39 @@ async function expectSimulation(page: Page, failed: CI[], expected: Impact) {
   // The server answer replaced the preview of the client walk.
   await expect(panel.getByText('Vorschau', { exact: true })).toHaveCount(0);
   await expect(panel.getByRole('alert')).toHaveCount(0);
-  const names = expected.impacted.map((n) => n.name ?? n.id).sort();
-  await expect
-    .poll(
-      async () => (await panel.getByRole('listitem').allInnerTexts()).map((t) => t.trim()).sort(),
-      {
-        message: `impacted CIs shown for the failure of ${failed.map((c) => c.name).join(', ')}`,
-      },
-    )
-    .toEqual(names);
+  // The impact panel (WP-818) lists the certain and the heuristic hits (IMP-03) apart from
+  // services, clients, sites and the counts per category; each list is named by its heading.
+  const lists = [
+    { heading: 'Betroffen:', heuristic: false },
+    { heading: 'Möglicherweise betroffen:', heuristic: true },
+  ];
+  for (const { heading, heuristic } of lists) {
+    const names = expected.impacted
+      .filter((n) => (n.heuristic ?? false) === heuristic)
+      .map((n) => n.name ?? n.id)
+      .sort();
+    const list = panel.getByRole('list', { name: heading, exact: true });
+    await expect
+      .poll(async () => shownNames(await list.getByRole('listitem').allInnerTexts()), {
+        message: `"${heading}" for the failure of ${failed.map((c) => c.name).join(', ')}`,
+      })
+      .toEqual(names);
+  }
+}
+
+/**
+ * shownNames reads the CI names of the entries "• <name> (<type>)" of the impact panel; a
+ * heuristic entry ends with the marker "Netzheuristik". An entry in another format is kept
+ * as it is and fails the comparison.
+ */
+function shownNames(entries: string[]): string[] {
+  return entries
+    .map((entry) => {
+      const text = entry.replace(/\s+/g, ' ').trim();
+      const m = /^• (.+?)(?: \([^()]*\))?(?: Netzheuristik)?$/.exec(text);
+      return m ? m[1]! : text;
+    })
+    .sort();
 }
 
 test.describe.configure({ mode: 'serial' });

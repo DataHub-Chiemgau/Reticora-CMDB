@@ -842,13 +842,6 @@
     },
     "filterRelType": "Relationship type",
     "allRelTypes": "All relationships",
-    "relTypes": {
-      "connected_to": "connected",
-      "powered_by": "powered by",
-      "hosted_on": "hosted on",
-      "depends_on": "depends on",
-      "member_of": "member of"
-    },
     "filterSite": "Filter by site",
     "allSites": "All sites",
     "start": {
@@ -857,7 +850,20 @@
       "type": "CI type",
       "show": "Show topology"
     },
-    "graphUnavailable": "The graph view needs WebGL, which is not available in this browser. The node list below shows the same data."
+    "graphUnavailable": "The graph view needs WebGL, which is not available in this browser. The node list below shows the same data.",
+    "filterNetwork": "Subnets and VLANs",
+    "nodeKinds": {
+      "ci": "CI",
+      "subnet": "Subnet",
+      "vlan": "VLAN"
+    },
+    "legend": {
+      "title": "Legend",
+      "ci": "CI (color by status)",
+      "subnet": "Subnet (projected from IPAM)",
+      "vlan": "VLAN (projected from IPAM)",
+      "spof": "Single point of failure of a service"
+    }
   },
   "rack": {
     "title": "Racks",
@@ -1472,7 +1478,7 @@
     "sites": "Sites",
     "affected": "Affected CIs",
     "spof": "SPOF",
-    "spofList": "Single points of failure:",
+    "spofList": "Single points of failure of the services:",
     "clients": "Clients",
     "title": "Impact analysis",
     "compute": "Compute blast radius",
@@ -1480,7 +1486,26 @@
     "heuristicList": "Possibly affected:",
     "heuristicHint": "Reached only over an undirected network connection (connected_to); whether the failure hits these CIs is not certain. They do not count towards the affected CIs, clients and sites.",
     "heuristicMarker": "Network heuristic",
-    "noneAffected": "No CIs are certainly affected."
+    "noneAffected": "No CIs are certainly affected.",
+    "services": "Services",
+    "servicesHeuristic": "+{{count}} over the network heuristic",
+    "servicesList": "Affected services:",
+    "clientsList": "Affected clients:",
+    "sitesList": "Affected sites:",
+    "spofBadge": "SPOF",
+    "spofFor": "for {{services}}",
+    "spofTruncated": "The list is shortened: only the 500 candidates closest to the failure were checked.",
+    "directList": "Directly affected without an alternative:",
+    "redundantList": "Protected by redundancy:",
+    "byCategory": "Affected per relationship category:",
+    "categories": {
+      "network": "Network",
+      "power": "Power",
+      "hosting": "Hosting",
+      "logical": "Logical",
+      "physical": "Physical"
+    },
+    "truncated": "The analysis reached the node limit: the counts are lower bounds and the list may be incomplete."
   },
   "composition": {
     "inheritedHint": "Shared inventory data (serial, purchase, warranty, location) comes from the parent asset.",

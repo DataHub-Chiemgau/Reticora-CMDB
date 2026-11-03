@@ -758,14 +758,21 @@ export const discoveryScopeApi = {
 
 // --- Topology ---
 
-export interface TopologyNode {
-  id: string;
-  name: string;
-  ci_type: string;
-  status: string;
-  client_id?: string;
-  site_id?: string;
-  management_ip?: string;
+/**
+ * A node of the topology (K27): a CI, or with include=network a subnet or a
+ * VLAN projected from IPAM (IMP-11, WP-298). node_kind is absent for a CI; a
+ * projected node carries no ci_type and no status and is no CI: it cannot
+ * fail in the simulation, be the start CI or open a CI page (WP-818).
+ */
+export type TopologyNode = components['schemas']['TopologyNode'];
+
+/** The kinds of a topology node (TopologyNode.node_kind, IMP-11, WP-298). */
+export const NODE_KINDS = ['ci', 'subnet', 'vlan'] as const;
+export type NodeKind = (typeof NODE_KINDS)[number];
+
+/** isProjectedNode tells a projected subnet or VLAN apart from a CI (IMP-11). */
+export function isProjectedNode(node: Pick<TopologyNode, 'node_kind'>): boolean {
+  return node.node_kind !== undefined && node.node_kind !== 'ci';
 }
 
 export interface TopologyEdge {
@@ -787,6 +794,8 @@ export interface TopologyParams {
   ci_type?: string;
   root_ci_id?: string;
   depth?: number;
+  /** network adds the subnets and VLANs projected from IPAM (IMP-11, WP-298). */
+  include?: 'network';
 }
 
 /** A step of an impact path by its origin (IMP-02): the CI the failure comes from and the relationship type. */
@@ -833,7 +842,23 @@ export interface ImpactResult {
   count: number;
 }
 
-export interface MultiImpactResult {
+/**
+ * The blocks of /impact for include=services,clients,sites,spof (IMP-08,
+ * WP-297); summary and truncated come with every answer (K27).
+ */
+export const IMPACT_PANEL_INCLUDE = 'services,clients,sites,spof';
+
+export interface MultiImpactResult extends Pick<
+  components['schemas']['ImpactAnalysisFields'],
+  | 'summary'
+  | 'truncated'
+  | 'affected_services'
+  | 'client_ids'
+  | 'site_ids'
+  | 'service_spofs'
+  | 'spof_truncated'
+  | 'blast_radius'
+> {
   failed_cis: TopologyNode[];
   impacted: ImpactedCI[];
   count: number;
@@ -855,7 +880,7 @@ export const topologyApi = {
   /** Joint impact of several CIs failing at once (IMP-05). */
   impactMany(
     ciIds: string[],
-    params: { rel_type?: string; fields?: string } = {},
+    params: { rel_type?: string; fields?: string; include?: string } = {},
   ): Promise<MultiImpactResult> {
     return fetchAPI(`/impact${buildQuery({ ci_ids: ciIds.join(','), ...params })}`);
   },

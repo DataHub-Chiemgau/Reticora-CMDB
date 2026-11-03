@@ -92,7 +92,9 @@ export function reviewDiff(item: ReviewItem, ci: CI | undefined): DiffRow[] {
 /** summary is the one-line description of an item in the list. */
 function summary(item: ReviewItem): string {
   const p = item.payload ?? {};
-  return display(p.name ?? p.hostname ?? p.field ?? p.management_ip ?? item.object_key ?? item.id);
+  return display(
+    p.name ?? p.hostname ?? p.field ?? p.management_ip ?? p.address ?? item.object_key ?? item.id,
+  );
 }
 
 /**

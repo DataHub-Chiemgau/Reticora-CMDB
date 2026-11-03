@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -257,6 +258,8 @@ type Service struct {
 	repo   Repository
 	limit  LimitGuard
 	fields FieldResolver
+	// catalog is fields as a RuleResolver (WP-257); nil: no catalog rules.
+	catalog RuleResolver
 	// references checks reference values against their targets (MET-12);
 	// nil: form only.
 	references fieldmeta.ReferenceLookup
@@ -284,8 +287,12 @@ func NewServiceWithLimits(repo Repository, limit LimitGuard) *Service {
 // global, CI-type and instance field metadata. Without a resolver the service
 // keeps its previous pass-through behaviour, which keeps the constructor
 // signatures stable for callers that do not manage field metadata.
+// When the resolver is also a RuleResolver (citype's repositories), the
+// active catalog rules of a CI are evaluated with its attribute rules
+// (WP-257, MET-10).
 func (s *Service) WithFieldResolver(fields FieldResolver) *Service {
 	s.fields = fields
+	s.catalog, _ = fields.(RuleResolver)
 	return s
 }
 
@@ -307,17 +314,25 @@ type writeScope struct {
 
 // validate checks the effective attributes of a CI against its field
 // metadata and the reference values the write sets against their targets
-// (checkReferences).
-func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, scope writeScope, existing, patch map[string]any) error {
+// (checkReferences). templates, when set, is the template list the write
+// leaves the CI with (WP-710): the attributes are checked against the
+// schema composed with it. The active catalog rules of the CI (type chain,
+// sets, template versions; WP-257) apply with the attribute rules; their
+// conditions see the values after the write, typed columns included.
+func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, scope writeScope, existing, patch map[string]any,
+	templates *[]citype.CITemplate) error {
 	if s.fields == nil {
+		if templates != nil {
+			return ErrTemplatesUnavailable
+		}
 		return nil
 	}
-	defs, err := resolveFields(ctx, s.fields, orgID, ciTypeID, ciID)
+	defs, catalog, err := resolveWithRules(ctx, s.fields, s.catalog, orgID, ciTypeID, ciID, templates)
 	if err != nil {
 		return err
 	}
 	values := MergePatch(existing, patch)
-	if verr := validateAttributes(defs, values, patch, existing); verr != nil {
+	if verr := validateWithRules(defs, catalog, values, patch, existing); verr != nil {
 		return verr
 	}
 	return checkReferences(ctx, s.references, orgID, defs, scope, values, patch, existing)
@@ -358,8 +373,17 @@ func (s *Service) create(ctx context.Context, item *Item) error {
 		return err
 	}
 	item.ChosenType = true
+	// A creation with templates is validated against the schema composed
+	// with them, atomically with the assignment (WP-710).
+	var templates *[]citype.CITemplate
+	if len(item.Templates) > 0 {
+		if !s.TemplatesAvailable() {
+			return ErrTemplatesUnavailable
+		}
+		templates = &item.Templates
+	}
 	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", writeScope{clientID: item.ClientID},
-		nil, withTyped(item.Attributes, typed)); err != nil {
+		nil, withTyped(item.Attributes, typed), templates); err != nil {
 		return err
 	}
 	if item.AssetID != "" && item.LocationID != "" {
@@ -423,6 +447,9 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 	if err := validateTypedColumns(typed); err != nil {
 		return nil, err
 	}
+	if req.Templates != nil && !s.TemplatesAvailable() {
+		return nil, ErrTemplatesUnavailable
+	}
 	_, unique := s.repo.(UniqueChecker)
 	unique = unique && (req.Attributes != nil || req.ClientID != nil)
 	needsBefore := unique || s.fields != nil || (req.Manual != nil && (req.LocationID != nil || req.SerialNumber != nil))
@@ -444,7 +471,7 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 		}
 		scope := writeScope{clientID: clientID, clientChanged: !strings.EqualFold(clientID, before.ClientID)}
 		if err := s.validate(ctx, orgID, before.CITypeID, id, scope,
-			withTyped(before.Attributes, typedValues(before)), withTyped(req.Attributes, typed)); err != nil {
+			withTyped(before.Attributes, typedValues(before)), withTyped(req.Attributes, typed), req.Templates); err != nil {
 			return nil, err
 		}
 		if err := checkAssetOwnedFields(before, &req); err != nil {
@@ -457,6 +484,44 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 		}
 	}
 	return s.repo.Update(ctx, orgID, id, req)
+}
+
+// TemplatesAvailable reports whether CIs keep template assignments
+// (WP-710): only with the field resolver of the database
+// (TemplateFieldResolver). Without it GET and PUT /cis/{id}/templates and a
+// POST /cis with templates answer 503.
+func (s *Service) TemplatesAvailable() bool {
+	_, ok := s.fields.(TemplateFieldResolver)
+	return ok
+}
+
+// ListTemplates returns the templates assigned to a visible CI in position
+// order (ci_template, WP-710).
+func (s *Service) ListTemplates(ctx context.Context, orgID, id string) ([]citype.CITemplate, error) {
+	if !s.TemplatesAvailable() {
+		return nil, ErrTemplatesUnavailable
+	}
+	item, err := s.repo.GetByID(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	if item.Templates == nil {
+		return []citype.CITemplate{}, nil
+	}
+	return item.Templates, nil
+}
+
+// SetTemplates replaces the ordered template list of a CI (PUT
+// /cis/{id}/templates, MET-16, WP-710): a manual write through Update
+// (If-Match, version + 1 when the list changes); the attributes of the CI
+// are validated against the schema composed with the new list. Without a
+// version an entry takes the template's current version, the position is
+// the index. It returns the CI with the new list.
+func (s *Service) SetTemplates(ctx context.Context, orgID, id string, templates []citype.CITemplate, ifMatch *int64, author string) (*Item, error) {
+	if templates == nil {
+		templates = []citype.CITemplate{}
+	}
+	return s.Update(ctx, orgID, id, UpdateRequest{Templates: &templates, IfMatch: ifMatch, Manual: &ManualChange{Author: author}})
 }
 
 // checkAssetOwnedFields rejects a manual write of the fields the asset owns

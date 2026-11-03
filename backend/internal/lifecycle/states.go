@@ -2,11 +2,16 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -31,16 +36,27 @@ func (s *PGStateStore) table(entityType string) (string, error) {
 	return "", fmt.Errorf("unsupported entity type %q", entityType)
 }
 
-// CurrentState returns the lifecycle_state column of the entity.
+// CurrentState returns the lifecycle_state column of the entity. In a
+// transaction (RunInTx) it locks the row (SELECT … FOR UPDATE), so parallel
+// transitions of the entity are serialized (WP-724). An entity outside the
+// scope is "not found".
 func (s *PGStateStore) CurrentState(ctx context.Context, orgID, entityType, entityID string) (string, error) {
 	table, err := s.table(entityType)
 	if err != nil {
 		return "", err
 	}
+	lock := ""
+	if database.InTx(ctx) {
+		lock = " FOR UPDATE"
+	}
 	var state string
 	err = database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if scanErr := tx.QueryRow(ctx, fmt.Sprintf(
-			"SELECT COALESCE(lifecycle_state, '') FROM %s WHERE id = $1", table), entityID).Scan(&state); scanErr != nil {
+		scanErr := tx.QueryRow(ctx, fmt.Sprintf(
+			"SELECT COALESCE(lifecycle_state, '') FROM %s WHERE id = $1%s", table, lock), entityID).Scan(&state)
+		if errors.Is(scanErr, pgx.ErrNoRows) {
+			return errEntityNotFound
+		}
+		if scanErr != nil {
 			return fmt.Errorf("read lifecycle state: %w", scanErr)
 		}
 		return nil
@@ -48,22 +64,82 @@ func (s *PGStateStore) CurrentState(ctx context.Context, orgID, entityType, enti
 	return state, err
 }
 
-// SetState updates the lifecycle_state column of the entity.
+// SetState updates the lifecycle_state column of the entity. A CI also
+// gets version + 1 and updated_at now(), so its ETag changes (API-07); an
+// asset has no version column until WP-271.
 func (s *PGStateStore) SetState(ctx context.Context, orgID, entityType, entityID, state string) error {
 	table, err := s.table(entityType)
 	if err != nil {
 		return err
 	}
+	set := "lifecycle_state = $2"
+	if table == "ci" {
+		set += ", version = version + 1, updated_at = now()"
+	}
 	return database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmd, err := tx.Exec(ctx, fmt.Sprintf(
-			"UPDATE %s SET lifecycle_state = $2 WHERE id = $1", table), entityID, state)
-		if err != nil {
-			return fmt.Errorf("set lifecycle state: %w", err)
+		cmd, execErr := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET %s WHERE id = $1", table, set), entityID, state)
+		if execErr != nil {
+			return fmt.Errorf("set lifecycle state: %w", execErr)
 		}
 		if cmd.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
+			return errEntityNotFound
 		}
 		return nil
+	})
+}
+
+// RunInTx runs fn in one transaction of the request's tenant scope
+// (database.WithRequestTenantTx); a transaction in ctx is joined (NFR-03,
+// WP-332), so a caller such as the disposal path (WP-278) commits or rolls
+// back the transition with its own writes.
+func (s *PGStateStore) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, s.pool, orgID, fn)
+}
+
+// RecordTransition writes the audit entry (ci.lifecycle_changed or
+// asset.lifecycle_changed) and the event lifecycle.changed of a transition
+// in the transaction of ctx. Both take an organization-wide lock until the
+// commit (audit chain, outbox), so they run last, right before the commit
+// (database.BeforeCommit); their failure rolls the transition back.
+func (s *PGStateStore) RecordTransition(ctx context.Context, orgID string, rec *TransitionRecord) error {
+	table, err := s.table(rec.EntityType)
+	if err != nil {
+		return err
+	}
+	return database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var clientID, siteID string
+		if scanErr := tx.QueryRow(ctx, fmt.Sprintf(
+			"SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM %s WHERE id = $1", table),
+			rec.EntityID).Scan(&clientID, &siteID); scanErr != nil {
+			if errors.Is(scanErr, pgx.ErrNoRows) {
+				return errEntityNotFound
+			}
+			return fmt.Errorf("read lifecycle entity: %w", scanErr)
+		}
+		var from any
+		if rec.From != "" {
+			from = rec.From
+		}
+		actor := strings.TrimSpace(tenant.FromContext(ctx).UserID)
+		actorType := "system"
+		if actor != "" {
+			actorType = "user"
+		}
+		entry := audit.Entry{OrganizationID: orgID, ActorID: actor, ActorType: actorType,
+			Action: rec.EntityType + ".lifecycle_changed", ResourceType: rec.EntityType, ResourceID: rec.EntityID,
+			Changes: map[string]any{"lifecycle_state": []any{from, rec.To}, "reason": rec.Reason}}
+		event := &events.Event{OrgID: orgID, Type: events.LifecycleChanged, EntityID: rec.EntityID,
+			Data: events.LifecycleChangedData{EntityType: rec.EntityType, EntityID: rec.EntityID, ClientID: clientID,
+				SiteID: siteID, From: rec.From, To: rec.To, ModelID: rec.ModelID, ModelKey: rec.ModelKey, Reason: rec.Reason}}
+		return database.BeforeCommit(ctx, func() error {
+			if _, recErr := audit.NewPGRecorder().Record(ctx, tx, entry); recErr != nil {
+				return fmt.Errorf("audit lifecycle transition: %w", recErr)
+			}
+			if _, appendErr := events.NewOutbox().Append(ctx, tx, event); appendErr != nil {
+				return fmt.Errorf("event of the lifecycle transition: %w", appendErr)
+			}
+			return nil
+		})
 	})
 }
 
@@ -98,7 +174,9 @@ func (r *Resolver) LifecycleModelFor(req *http.Request, orgID, entityType, entit
 	return definitionID, err
 }
 
-// LifecycleKeyFor resolves the lifecycle definition key for an entity.
+// LifecycleKeyFor resolves the key of the effective lifecycle model of an
+// entity. The transition loads the model by its id (LifecycleModelFor,
+// WP-724); the key is only a reading aid.
 func (r *Resolver) LifecycleKeyFor(req *http.Request, orgID, entityType, entityID string) (string, error) {
 	var key string
 	err := database.WithRequestTenant(req.Context(), r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -147,6 +225,8 @@ func effectiveModelTx(ctx context.Context, tx pgx.Tx, entityType, entityID strin
 // MemoryStateStore implements StateStore and EntityResolver in memory for
 // tests and the --no-db development mode.
 type MemoryStateStore struct {
+	// tx serializes the transitions (RunInTx); there is no rollback.
+	tx     sync.Mutex
 	mu     sync.RWMutex
 	states map[string]string // entityType/entityID -> state
 	keys   map[string]string // entityType/entityID -> definition key
@@ -180,9 +260,23 @@ func (s *MemoryStateStore) SetState(_ context.Context, orgID, entityType, entity
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.keys[entityType+"/"+entityID]; !ok {
-		return fmt.Errorf("not found")
+		return errEntityNotFound
 	}
 	s.states[entityType+"/"+entityID] = state
+	return nil
+}
+
+// RunInTx runs fn under the store's lock: transitions in memory are
+// serialized, but not rolled back (--no-db).
+func (s *MemoryStateStore) RunInTx(ctx context.Context, _ string, fn func(ctx context.Context) error) error {
+	s.tx.Lock()
+	defer s.tx.Unlock()
+	return fn(ctx)
+}
+
+// RecordTransition implements StateStore: in memory the route audit
+// writes the entry and there is no outbox (--no-db).
+func (s *MemoryStateStore) RecordTransition(context.Context, string, *TransitionRecord) error {
 	return nil
 }
 
@@ -192,7 +286,7 @@ func (s *MemoryStateStore) LifecycleKeyFor(_ *http.Request, orgID, entityType, e
 	defer s.mu.RUnlock()
 	key, ok := s.keys[entityType+"/"+entityID]
 	if !ok {
-		return "", fmt.Errorf("not found")
+		return "", errEntityNotFound
 	}
 	return key, nil
 }

@@ -1,11 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ApiError, type TopologyGraphData } from '../api/client';
+import {
+  ApiError,
+  IMPACT_PANEL_INCLUDE,
+  isProjectedNode,
+  type NodeKind,
+  type TopologyGraphData,
+  type TopologyNode,
+} from '../api/client';
 import { localizedText, type RelationshipType } from '../api/cmdb';
 import { useCITypes, useRelationshipTypes } from '../api/cmdbHooks';
 import { MAX_IMPACT_CIS, useTopology, useImpactMany, useSites } from '../api/hooks';
-import { TopologyGraph } from '../components/graph/TopologyGraph';
+import { ImpactPanel } from '../components/graph/ImpactPanel';
+import { SPOF_COLOR, TopologyGraph } from '../components/graph/TopologyGraph';
 import type { GraphEdge, GraphNode } from '../components/graph/TopologyGraph';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -14,6 +22,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { useEntitlements } from '../hooks/useEntitlements';
 import { getStatusBadgeVariant, getStatusTranslationKey } from './ciStatus';
 
 const statusColors: Record<string, string> = {
@@ -22,6 +31,24 @@ const statusColors: Record<string, string> = {
   maintenance: '#d97706',
   decommissioned: '#dc2626',
 };
+
+/**
+ * The look of the projected subnets and VLANs (IMP-11): their own color and a
+ * smaller size than a CI, whose color follows its status. The legend of the
+ * page explains both.
+ */
+export const projectedNodeStyles: Record<
+  Exclude<NodeKind, 'ci'>,
+  { color: string; size: number }
+> = {
+  subnet: { color: '#0891b2', size: 6 },
+  vlan: { color: '#7c3aed', size: 6 },
+};
+
+/** nodeKindOf reads the kind of a node; absent means ci (API-01). */
+export function nodeKindOf(node: Pick<TopologyNode, 'node_kind'>): NodeKind {
+  return node.node_kind ?? 'ci';
+}
 
 export interface GraphModel {
   nodes: GraphNode[];
@@ -62,11 +89,17 @@ export function buildGraphModel(graph: TopologyGraphData): GraphModel {
     });
 
   return {
-    nodes: graph.nodes.map((node) => ({
-      id: node.id,
-      label: node.name,
-      color: statusColors[node.status] ?? '#4f46e5',
-    })),
+    nodes: graph.nodes.map((node) => {
+      const kind = nodeKindOf(node);
+      if (kind !== 'ci') {
+        return { id: node.id, label: node.name, ...projectedNodeStyles[kind] };
+      }
+      return {
+        id: node.id,
+        label: node.name,
+        color: statusColors[node.status ?? ''] ?? '#4f46e5',
+      };
+    }),
     edges: [...edgesByPair.values()],
   };
 }
@@ -134,17 +167,35 @@ export function computeOutageImpact(
   return impacted;
 }
 
-/** parseSimulated reads the failed CIs of the simulation from the URL. */
+/**
+ * parseSimulated reads the failed CIs of the simulation from the URL. A
+ * projected subnet or VLAN (subnet:{id}, vlan:{id}) is no CI and cannot
+ * fail (IMP-11): a stale link naming one is ignored.
+ */
 export function parseSimulated(value: string | null): string[] {
   return (value ?? '')
     .split(',')
     .map((id) => id.trim())
-    .filter((id, index, all) => id !== '' && all.indexOf(id) === index);
+    .filter(
+      (id, index, all) => id !== '' && !/^(subnet|vlan):/.test(id) && all.indexOf(id) === index,
+    );
+}
+
+/**
+ * relTypeFilterOptions lists the relationship types of the facet filter
+ * (WP-818): from GET /relationship-types, labelled with display_name, without
+ * the types whose impact direction is none, since a failure never passes
+ * them and the simulation would stay empty.
+ */
+export function relTypeFilterOptions(
+  types: RelationshipType[],
+): { value: string; label: string }[] {
+  return types
+    .filter((type) => type.impact_direction !== 'none')
+    .map((type) => ({ value: type.key, label: type.display_name || type.key }));
 }
 
 const depthValues = ['1', '2', '3', '4', '5'];
-// Dependency classes for the failure-simulation facet filter (spec §5.5).
-const relTypeValues = ['connected_to', 'powered_by', 'hosted_on', 'depends_on', 'member_of'];
 
 export function TopologyPage() {
   const { t, i18n } = useTranslation();
@@ -159,13 +210,17 @@ export function TopologyPage() {
   const depth = searchParams.get('depth') ?? '2';
   const simulated = useMemo(() => parseSimulated(searchParams.get('simulate')), [searchParams]);
   const relTypeFacet = searchParams.get('rel_type') ?? '';
+  // The projected subnets and VLANs of IPAM (IMP-11): off by default.
+  const includeNetwork = searchParams.get('network') === '1';
   const { data: sites } = useSites();
+  const { isEnabled } = useEntitlements();
 
   const { data, isLoading, error, refetch } = useTopology({
     root_ci_id: rootCiId || undefined,
     ci_type: ciType || undefined,
     site_id: siteId || undefined,
     depth: rootCiId ? Number(depth) : undefined,
+    include: includeNetwork ? 'network' : undefined,
   });
   // More than 2,000 CIs without a filter: the server answers 422 and the
   // page asks for a site or type first (UI-06).
@@ -199,11 +254,16 @@ export function TopologyPage() {
     error: impactError,
     isError: impactFailed,
     refetch: refetchImpact,
-  } = useImpactMany(simulated, relTypeFacet);
+  } = useImpactMany(simulated, relTypeFacet, IMPACT_PANEL_INCLUDE);
   // More CIs than one analysis takes: 422 on ci_ids (IMP-05).
   const tooManyFailed =
     impactError instanceof ApiError && impactError.status === 422 && impactError.field === 'ci_ids';
-  const { data: relationshipTypes } = useRelationshipTypes(simulated.length > 0);
+  // The types label the facet filter and give the preview its directions.
+  const { data: relationshipTypes } = useRelationshipTypes();
+  const relTypeOptions = useMemo(
+    () => relTypeFilterOptions(relationshipTypes?.data ?? []),
+    [relationshipTypes],
+  );
   const directions = useMemo(
     () => (relationshipTypes ? impactDirections(relationshipTypes.data) : undefined),
     [relationshipTypes],
@@ -221,6 +281,15 @@ export function TopologyPage() {
     };
   }, [simulated, impact, impactFailed, directions, model.edges, relTypeFacet]);
   const outageImpact = outage?.impacted;
+  // The SPOF of the affected services (service_spofs, IMP-08), not the
+  // direct dependents without an alternative (single_points_of_failure).
+  const spofIds = useMemo(
+    () =>
+      simulated.length > 0 && !impactFailed && impact?.service_spofs
+        ? new Set(impact.service_spofs.map((spof) => spof.id))
+        : undefined,
+    [simulated, impact, impactFailed],
+  );
 
   // The facet filter also narrows the rendered edges to the selected
   // relationship class so the simulated dependency path is visible.
@@ -314,12 +383,18 @@ export function TopologyPage() {
             className="max-w-xs"
             options={[
               { value: '', label: t('topology.allRelTypes', 'Alle Beziehungen') },
-              ...relTypeValues.map((value) => ({
-                value,
-                label: t(`topology.relTypes.${value}`, value.replace(/_/g, ' ')),
-              })),
+              ...relTypeOptions,
             ]}
           />
+          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+            <input
+              type="checkbox"
+              checked={includeNetwork}
+              onChange={(event) => updateParam('network', event.target.checked ? '1' : '')}
+              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+            />
+            {t('topology.filterNetwork')}
+          </label>
         </div>
       </Card>
 
@@ -402,7 +477,21 @@ export function TopologyPage() {
                       count: outageImpact.size,
                     })}
               </p>
-              {outageImpact.size > 0 ? (
+              {outageImpact.size === 0 ? (
+                // Nothing depends on the failed CIs: the plain hint, also with the server analysis
+                // (ABN-01 d, frozen onboarding scenario).
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                  {t('topology.simulation.noImpact')}
+                </p>
+              ) : !outage?.preview && impact && isEnabled('topology') ? (
+                // The server analysis with the blocks of WP-297 (UI-14).
+                <div className="mt-3">
+                  <ImpactPanel
+                    impact={{ ...impact, affected: impact.impacted }}
+                    typeLabel={(type) => typeLabels.get(type) ?? type}
+                  />
+                </div>
+              ) : (
                 <ul className="mt-2 flex flex-wrap gap-1 text-xs">
                   {[...outageImpact].map((id) => (
                     <li key={id}>
@@ -410,10 +499,6 @@ export function TopologyPage() {
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                  {t('topology.simulation.noImpact')}
-                </p>
               )}
             </Card>
           ) : null}
@@ -425,8 +510,12 @@ export function TopologyPage() {
                 edges={visibleEdges}
                 dimmedNodes={outageImpact}
                 highlightedNodes={simulated.length > 0 ? new Set(simulated) : undefined}
+                spofNodes={spofIds}
               />
             </div>
+            {includeNetwork || (spofIds?.size ?? 0) > 0 ? (
+              <TopologyLegend network={includeNetwork} spof={(spofIds?.size ?? 0) > 0} />
+            ) : null}
           </Card>
 
           <Card title={t('topology.nodeList')}>
@@ -434,45 +523,113 @@ export function TopologyPage() {
               {t('topology.nodeListHint')}
             </p>
             <ul className="space-y-2 text-sm">
-              {data.nodes.map((node) => (
-                <li
-                  key={node.id}
-                  className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
-                >
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/cmdb/${node.id}`)}
-                    className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              {data.nodes.map((node) =>
+                isProjectedNode(node) ? (
+                  // A projected subnet or VLAN is no CI: no page, no
+                  // simulation, no focus (IMP-11).
+                  <li
+                    key={node.id}
+                    className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
                   >
-                    {node.name}
-                  </button>
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Badge variant="info">{typeLabels.get(node.ci_type) ?? node.ci_type}</Badge>
-                    <Badge variant={getStatusBadgeVariant(node.status)}>
-                      {t(getStatusTranslationKey(node.status))}
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      {node.name}
+                    </span>
+                    <Badge variant="neutral">
+                      {t(`topology.nodeKinds.${nodeKindOf(node)}`, nodeKindOf(node))}
                     </Badge>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-pressed={simulated.includes(node.id)}
-                      onClick={() => toggleSimulated(node.id)}
+                  </li>
+                ) : (
+                  <li
+                    key={node.id}
+                    className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/cmdb/${node.id}`)}
+                      className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                     >
-                      {simulated.includes(node.id)
-                        ? t('topology.simulation.remove')
-                        : simulated.length > 0
-                          ? t('topology.simulation.add')
-                          : t('topology.simulation.simulate')}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => updateParam('root', node.id)}>
-                      {t('topology.focus')}
-                    </Button>
-                  </span>
-                </li>
-              ))}
+                      {node.name}
+                    </button>
+                    <span className="flex flex-wrap items-center gap-2">
+                      {spofIds?.has(node.id) ? (
+                        <Badge variant="warning">{t('impact.spofBadge')}</Badge>
+                      ) : null}
+                      <Badge variant="info">
+                        {typeLabels.get(node.ci_type ?? '') ?? node.ci_type}
+                      </Badge>
+                      <Badge variant={getStatusBadgeVariant(node.status ?? '')}>
+                        {t(getStatusTranslationKey(node.status ?? ''))}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-pressed={simulated.includes(node.id)}
+                        onClick={() => toggleSimulated(node.id)}
+                      >
+                        {simulated.includes(node.id)
+                          ? t('topology.simulation.remove')
+                          : simulated.length > 0
+                            ? t('topology.simulation.add')
+                            : t('topology.simulation.simulate')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => updateParam('root', node.id)}
+                      >
+                        {t('topology.focus')}
+                      </Button>
+                    </span>
+                  </li>
+                ),
+              )}
             </ul>
           </Card>
         </>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * TopologyLegend explains the marks of the graph (WP-818): a CI in the color
+ * of its status, the projected subnets and VLANs (IMP-11) in their own color
+ * and smaller, and the SPOF of the affected services.
+ */
+function TopologyLegend({ network, spof }: { network: boolean; spof: boolean }) {
+  const { t } = useTranslation();
+  const swatch = (color: string, size: number) => (
+    <span
+      aria-hidden="true"
+      className="inline-block rounded-full"
+      style={{ backgroundColor: color, width: size, height: size }}
+    />
+  );
+  return (
+    <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-800">
+      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+        {t('topology.legend.title')}
+      </p>
+      <ul aria-label={t('topology.legend.title')} className="mt-1 flex flex-wrap gap-4 text-xs">
+        <li className="flex items-center gap-2">
+          {swatch(statusColors.active!, 12)}
+          {t('topology.legend.ci')}
+        </li>
+        {network
+          ? (['subnet', 'vlan'] as const).map((kind) => (
+              <li key={kind} className="flex items-center gap-2">
+                {swatch(projectedNodeStyles[kind].color, 9)}
+                {t(`topology.legend.${kind}`)}
+              </li>
+            ))
+          : null}
+        {spof ? (
+          <li className="flex items-center gap-2">
+            {swatch(SPOF_COLOR, 13)}
+            {t('topology.legend.spof')}
+          </li>
+        ) : null}
+      </ul>
     </div>
   );
 }

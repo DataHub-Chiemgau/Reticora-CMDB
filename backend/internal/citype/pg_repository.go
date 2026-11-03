@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"reflect"
 	"slices"
 	"strings"
@@ -778,16 +779,27 @@ func (r *PGRepository) TypeCategory(ctx context.Context, orgID, id string) (stri
 		return category, nil
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT COALESCE(category, '') FROM ci_type WHERE id = $1`, id).Scan(&category)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("read ci type category: %w", err)
-		}
-		return nil
+		var err error
+		category, err = typeCategoryTx(ctx, tx, id)
+		return err
 	})
 	return category, err
+}
+
+// typeCategoryTx is TypeCategory in tx (CheckComposition, WP-252).
+func typeCategoryTx(ctx context.Context, tx pgx.Tx, id string) (string, error) {
+	var category string
+	if !api.IsUUID(id) {
+		return category, nil
+	}
+	err := tx.QueryRow(ctx, `SELECT COALESCE(category, '') FROM ci_type WHERE id = $1`, id).Scan(&category)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read ci type category: %w", err)
+	}
+	return category, nil
 }
 
 // ListSetFields implements FieldLister (WP-709, MET-16): one layer per
@@ -806,80 +818,137 @@ func (r *PGRepository) ListSetFields(ctx context.Context, orgID, id string) ([][
 // set its definitions by sort_order and key; of the sets of an ancestor
 // only the inheritable set attributes count (WP-248).
 func (r *PGRepository) TypeChainSets(ctx context.Context, orgID, id string) ([]Type, [][]Field, error) {
+	chain, sets, _, err := r.typeChainLayers(ctx, orgID, id)
+	return chain, sets, err
+}
+
+// typeChainLayers is TypeChainSets with the rule scope of the chain
+// (WP-257) read in the same statement: the IDs of the chain's types, of
+// their active sets (per type in position order) and whether an active
+// catalog rule the organization sees targets one of them. The resolution
+// reads the catalog rules only then, so a write without rules costs no
+// statement more (TestIngestStatementBudget).
+func (r *PGRepository) typeChainLayers(ctx context.Context, orgID, id string) ([]Type, [][]Field, ruleScope, error) {
 	chain := []Type{}
 	var sets [][]Field
+	var scope ruleScope
 	if !api.IsUUID(id) {
-		return chain, sets, nil
+		return chain, sets, scope, nil
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE((
-				SELECT jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key)
-				FROM attribute_definition a WHERE a.ci_type_id = c.id), '[]'::jsonb),
-			COALESCE((
-				SELECT jsonb_agg(l.defs ORDER BY l.position, l.set_id) FROM (
-					SELECT cs.position, cs.attribute_set_id AS set_id,
-						jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key) AS defs
-					FROM ci_type_attribute_set cs
-					JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
-					JOIN attribute_definition a ON a.attribute_set_id = s.id
-					WHERE cs.ci_type_id = c.id
-					GROUP BY cs.position, cs.attribute_set_id) l), '[]'::jsonb)
-			FROM ci_type_ancestors($1::uuid) c ORDER BY c.level`, id)
-		if err != nil {
-			return fmt.Errorf("read ci type chain: %w", err)
-		}
-		type level struct {
-			typ  Type
-			sets []json.RawMessage
-		}
-		var levels []level
-		for rows.Next() {
-			var lv level
-			var defs, setDefs []byte
-			if err = rows.Scan(&lv.typ.ID, &defs, &setDefs); err != nil {
-				rows.Close()
-				return fmt.Errorf("scan ci type chain: %w", err)
-			}
-			attrs, aerr := attributesFromJSON(defs)
-			if aerr != nil {
-				rows.Close()
-				return aerr
-			}
-			for i := range attrs {
-				lv.typ.Fields = append(lv.typ.Fields, attrs[i].Field())
-			}
-			if err = json.Unmarshal(setDefs, &lv.sets); err != nil {
-				rows.Close()
-				return fmt.Errorf("decode set definitions: %w", err)
-			}
-			levels = append(levels, lv)
-		}
-		rows.Close()
-		if rerr := rows.Err(); rerr != nil {
-			return rerr
-		}
-		for i := range levels {
-			chain = append(chain, levels[i].typ)
-			own := i == len(levels)-1
-			for _, raw := range levels[i].sets {
-				attrs, aerr := attributesFromJSON(raw)
-				if aerr != nil {
-					return aerr
-				}
-				var layer []Field
-				for j := range attrs {
-					if own || attrs[j].Inheritable {
-						layer = append(layer, attrs[j].Field())
-					}
-				}
-				if len(layer) > 0 {
-					sets = append(sets, layer)
-				}
-			}
-		}
-		return nil
+		var err error
+		chain, sets, scope, err = typeChainSetsTx(ctx, tx, id, nil)
+		return err
 	})
-	return chain, sets, err
+	return chain, sets, scope, err
+}
+
+// typeChainSetsTx is typeChainLayers in tx, in one statement: the chain,
+// its set layers and its rule scope (WP-257). override, when set, replaces
+// the stored set list of one type of the chain by the list it is about to
+// get (checkSetAssignmentTx, WP-709), so the check composes the new list
+// before it is written (CheckComposition, WP-252); the rule scope then
+// names the sets of that list.
+func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOverride) ([]Type, [][]Field, ruleScope, error) {
+	chain := []Type{}
+	var sets [][]Field
+	var scope ruleScope
+	if !api.IsUUID(id) {
+		return chain, sets, scope, nil
+	}
+	assignments, args := "ci_type_attribute_set", []any{id}
+	if override != nil {
+		setIDs, positions := []string{}, []int64{}
+		for _, a := range override.sets {
+			setIDs = append(setIDs, a.AttributeSetID)
+			positions = append(positions, int64(a.Position))
+		}
+		assignments = `(SELECT o.ci_type_id, o.attribute_set_id, o.position FROM ci_type_attribute_set o
+				WHERE o.ci_type_id <> $2::uuid
+				UNION ALL
+				SELECT $2::uuid, x.set_id, x.pos::integer FROM unnest($3::uuid[], $4::bigint[]) AS x (set_id, pos))`
+		args = append(args, override.typeID, setIDs, positions)
+	}
+	rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE((
+			SELECT jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key)
+			FROM attribute_definition a WHERE a.ci_type_id = c.id), '[]'::jsonb),
+		COALESCE((
+			SELECT jsonb_agg(l.defs ORDER BY l.position, l.set_id) FROM (
+				SELECT cs.position, cs.attribute_set_id AS set_id,
+					jsonb_agg(to_jsonb(a) ORDER BY a.sort_order, a.key) AS defs
+				FROM `+assignments+` cs
+				JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
+				JOIN attribute_definition a ON a.attribute_set_id = s.id
+				WHERE cs.ci_type_id = c.id
+				GROUP BY cs.position, cs.attribute_set_id) l), '[]'::jsonb),
+		COALESCE((
+			SELECT array_agg(cs.attribute_set_id::text ORDER BY cs.position, cs.attribute_set_id)
+			FROM `+assignments+` cs
+			JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
+			WHERE cs.ci_type_id = c.id), '{}'::text[]),
+		EXISTS (SELECT 1 FROM metamodel_rule m WHERE m.is_active AND (m.ci_type_id = c.id
+			OR m.attribute_set_id IN (SELECT cs.attribute_set_id FROM `+assignments+` cs
+				JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
+				WHERE cs.ci_type_id = c.id)))
+		FROM ci_type_ancestors($1::uuid) c ORDER BY c.level`, args...)
+	if err != nil {
+		return nil, nil, scope, fmt.Errorf("read ci type chain: %w", err)
+	}
+	type level struct {
+		typ  Type
+		sets []json.RawMessage
+	}
+	var levels []level
+	for rows.Next() {
+		var lv level
+		var defs, setDefs []byte
+		var setIDs []string
+		var ruled bool
+		if err = rows.Scan(&lv.typ.ID, &defs, &setDefs, &setIDs, &ruled); err != nil {
+			rows.Close()
+			return nil, nil, scope, fmt.Errorf("scan ci type chain: %w", err)
+		}
+		attrs, aerr := attributesFromJSON(defs)
+		if aerr != nil {
+			rows.Close()
+			return nil, nil, scope, aerr
+		}
+		for i := range attrs {
+			lv.typ.Fields = append(lv.typ.Fields, attrs[i].Field())
+		}
+		if err = json.Unmarshal(setDefs, &lv.sets); err != nil {
+			rows.Close()
+			return nil, nil, scope, fmt.Errorf("decode set definitions: %w", err)
+		}
+		scope.types = append(scope.types, lv.typ.ID)
+		scope.sets = append(scope.sets, setIDs...)
+		scope.active = scope.active || ruled
+		levels = append(levels, lv)
+	}
+	rows.Close()
+	if rerr := rows.Err(); rerr != nil {
+		return nil, nil, scope, rerr
+	}
+	for i := range levels {
+		chain = append(chain, levels[i].typ)
+		own := i == len(levels)-1
+		for _, raw := range levels[i].sets {
+			attrs, aerr := attributesFromJSON(raw)
+			if aerr != nil {
+				return nil, nil, scope, aerr
+			}
+			var layer []Field
+			for j := range attrs {
+				if own || attrs[j].Inheritable {
+					layer = append(layer, attrs[j].Field())
+				}
+			}
+			if len(layer) > 0 {
+				sets = append(sets, layer)
+			}
+		}
+	}
+	return chain, sets, scope, nil
 }
 
 // TypeSubtree implements Repository: id and every descendant the
@@ -907,19 +976,6 @@ func (r *PGRepository) TypeSubtree(ctx context.Context, orgID, id string) ([]Typ
 		return rows.Err()
 	})
 	return out, err
-}
-
-// extraColumns scans a row whose columns surround those of another
-// scanner: before precede them, after follow them.
-type extraColumns struct {
-	row           interface{ Scan(dest ...any) error }
-	before, after []any
-}
-
-func (e extraColumns) Scan(dest ...any) error {
-	all := make([]any, 0, len(e.before)+len(dest)+len(e.after))
-	all = append(append(append(all, e.before...), dest...), e.after...)
-	return e.row.Scan(all...)
 }
 
 // attributeRowJSON is a row of attribute_definition as to_jsonb renders it.
@@ -1312,6 +1368,9 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 				return moveErr
 			}
 		}
+		if cerr := checkInstanceCompositionTx(ctx, tx, ciID, out.Name); cerr != nil {
+			return cerr
+		}
 		action, changes := "ci_instance_field.created", map[string]any{"after": out}
 		if before != nil {
 			action, changes = "ci_instance_field.updated", map[string]any{"before": before, "after": out}
@@ -1322,6 +1381,23 @@ func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID stri
 		return nil, fmt.Errorf("not found")
 	}
 	return out, err
+}
+
+// checkInstanceCompositionTx composes the CI with its written instance
+// definition name (CheckComposition with CIID, WP-252): an instance
+// definition refines an attribute of the same key of another layer as the
+// last layer (MET-16) and must compose with it. A conflict of that key is
+// a 422 on name with the code of the conflict; the transaction is rolled
+// back, nothing is stored or audited.
+func checkInstanceCompositionTx(ctx context.Context, tx pgx.Tx, ciID, name string) error {
+	conflicts, err := CheckComposition(ctx, tx, CompositionScope{CIID: ciID})
+	if err != nil {
+		return err
+	}
+	if c := firstConflict(conflicts, func(key string) bool { return key == name }); c != nil {
+		return &api.FieldError{Field: "name", Message: c.Error(), Code: c.Code, Status: http.StatusUnprocessableEntity}
+	}
+	return nil
 }
 
 // DeleteInstanceField removes an instance field definition by name.
