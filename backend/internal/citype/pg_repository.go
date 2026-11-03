@@ -193,7 +193,7 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 			}
 		}
 		if typ.ParentTypeID != "" {
-			if err := checkSubtreeCompositionTx(ctx, tx, typ.ID); err != nil {
+			if err := checkSubtreeCompositionTx(ctx, tx, typ.ID, "parent_type_id"); err != nil {
 				return err
 			}
 			var ierr error
@@ -284,7 +284,10 @@ func typeDBError(err error) error {
 // over their changed subtrees (WP-708). A new lifecycle model must be
 // visible (checkLifecycleModelTx); after a change of the model or of the
 // parent the CIs of the subtree keep a state of their effective ci model
-// (checkLifecycleStatesTx, MET-06, LCY-02).
+// (checkLifecycleStatesTx, MET-06, LCY-02). A new category changes the
+// organization's global attributes that apply (MET-13, WP-255): the type
+// and its subtypes stay composable with them, otherwise a 422 on category
+// and nothing is stored.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
 	if !api.IsUUID(id) {
 		return nil, fmt.Errorf("not found")
@@ -402,10 +405,17 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 				return lerr
 			}
 		}
+		if !parentChanged && req.Category != nil && *req.Category != before.Category {
+			// The organization's global attributes that apply after the
+			// new category (MET-13, WP-255) with the type and its subtypes.
+			if cerr := checkSubtreeCompositionTx(ctx, tx, id, "category"); cerr != nil {
+				return cerr
+			}
+		}
 		if parentChanged {
 			// The moved subtree with the organization's layer; the database
 			// composed system base and chain while regenerating it.
-			if cerr := checkSubtreeCompositionTx(ctx, tx, id); cerr != nil {
+			if cerr := checkSubtreeCompositionTx(ctx, tx, id, "parent_type_id"); cerr != nil {
 				return cerr
 			}
 			if uerr := checkInheritedUniqueTx(ctx, tx, id); uerr != nil {
@@ -574,7 +584,7 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 			return fmt.Errorf("clone attribute sets of ci type: %w", err)
 		}
 		if src.ParentTypeID != "" || len(sets.AttributeSets) > 0 {
-			if cerr := checkSubtreeCompositionTx(ctx, tx, cloneID); cerr != nil {
+			if cerr := checkSubtreeCompositionTx(ctx, tx, cloneID, "parent_type_id"); cerr != nil {
 				return cerr
 			}
 		}
@@ -720,7 +730,8 @@ func (r *PGRepository) Versions(ctx context.Context, orgID, id string) ([]Type, 
 // on every attribute validation of a CI write (ResolveFields), also in the
 // ingest record transaction, which reads no ci_type rows (budget of
 // TestIngestStatementBudget): each level carries its ID and its
-// definitions only; GetByID and TypeSubtree read the type columns. A type
+// definitions only; GetByID, TypeSubtree and TypeCategory read the type
+// columns. A type
 // the organization does not see has an empty chain.
 func (r *PGRepository) TypeChain(ctx context.Context, orgID, id string) ([]Type, error) {
 	out := []Type{}
@@ -754,6 +765,29 @@ func (r *PGRepository) TypeChain(ctx context.Context, orgID, id string) ([]Type,
 		return rows.Err()
 	})
 	return out, err
+}
+
+// TypeCategory implements FieldLister (WP-255): the category of a type the
+// organization sees, "" for an unknown type or one without category.
+// ResolveFields reads it only while a global attribute of the
+// organization is restricted to categories, so the ingest reads no type
+// row otherwise (TestIngestStatementBudget).
+func (r *PGRepository) TypeCategory(ctx context.Context, orgID, id string) (string, error) {
+	var category string
+	if !api.IsUUID(id) {
+		return category, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT COALESCE(category, '') FROM ci_type WHERE id = $1`, id).Scan(&category)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read ci type category: %w", err)
+		}
+		return nil
+	})
+	return category, err
 }
 
 // ListSetFields implements FieldLister (WP-709, MET-16): one layer per
@@ -913,6 +947,10 @@ type attributeRowJSON struct {
 	GroupName       *string         `json:"group_name"`
 	SortOrder       int             `json:"sort_order"`
 	Unit            *string         `json:"unit"`
+	// AppliesTo and its lists (WP-255); type and set rows are all.
+	AppliesTo           string   `json:"applies_to"`
+	AppliesToCategories []string `json:"applies_to_categories"`
+	AppliesToTypeIDs    []string `json:"applies_to_type_ids"`
 }
 
 // attributesFromJSON decodes a JSON array of attribute_definition rows the
@@ -938,6 +976,7 @@ func attributesFromJSON(raw []byte) ([]AttributeDefinition, error) {
 			MultiValue: row.MultiValue, Searchable: row.Searchable, Unique: row.IsUnique, UniqueScope: row.UniqueScope,
 			Inheritable: row.Inheritable, ReferenceTarget: str(row.ReferenceTarget), Group: str(row.GroupName),
 			Order: row.SortOrder, Unit: str(row.Unit),
+			AppliesTo: row.AppliesTo, AppliesToCategories: row.AppliesToCategories, AppliesToTypeIDs: row.AppliesToTypeIDs,
 		}
 		if err := json.Unmarshal(row.DisplayName, &d.DisplayName); err != nil {
 			return nil, fmt.Errorf("decode display_name: %w", err)
@@ -956,6 +995,7 @@ func attributesFromJSON(raw []byte) ([]AttributeDefinition, error) {
 			}
 		}
 		d.IsSystem = d.OrganizationID == ""
+		d.normalizeAppliesTo()
 		out = append(out, d)
 	}
 	return out, nil
@@ -1092,14 +1132,16 @@ func findAttributeTx(ctx context.Context, tx pgx.Tx, typeID, key string) (*Attri
 	return d, nil
 }
 
-// DeleteField removes a field definition by name: of the type, otherwise
-// the organization's global one.
+// DeleteField removes a field definition by name: of the type, or with
+// typeID "" the organization's global one (WP-255: a type path does not
+// fall back to a global field of the same name, which applies to other
+// types as well). After the commit the index job drops the indexes of the
+// definition, as DeleteAttributeDefinition does (DB-04); the key index of
+// WP-607 goes only when no definition uses the key any more.
 func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name string) error {
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	var deleted *AttributeDefinition
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		before, err := findAttributeTx(ctx, tx, typeID, name)
-		if errors.Is(err, ErrAttributeNotFound) {
-			before, err = findAttributeTx(ctx, tx, "", name)
-		}
 		if errors.Is(err, ErrAttributeNotFound) {
 			return fmt.Errorf("not found")
 		}
@@ -1113,8 +1155,13 @@ func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name stri
 		if cmd.RowsAffected() == 0 {
 			return fmt.Errorf("not found")
 		}
+		deleted = before
 		return recordAttributeAudit(ctx, tx, orgID, before, nil)
 	})
+	if err == nil {
+		r.scheduleIndex(ctx, orgID, deleted, nil)
+	}
+	return err
 }
 
 func listFieldsTx(ctx context.Context, tx pgx.Tx, typeID string) ([]Field, error) {

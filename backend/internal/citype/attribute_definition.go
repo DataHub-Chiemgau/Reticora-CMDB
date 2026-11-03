@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -57,8 +58,16 @@ type AttributeDefinition struct {
 	Order           int                         `json:"order"`
 	Unit            string                      `json:"unit,omitempty"`
 	IsSystem        bool                        `json:"is_system"`
-	CreatedAt       time.Time                   `json:"created_at"`
-	UpdatedAt       time.Time                   `json:"updated_at"`
+	// AppliesTo restricts an organization's global attribute (MET-13,
+	// WP-255): "all" (every type), "categories" (types whose category is
+	// in AppliesToCategories) or "types" (the types in AppliesToTypeIDs and
+	// their subtypes). System globals and type or set definitions are
+	// "all". It is neither composed nor materialized.
+	AppliesTo           string    `json:"applies_to"`
+	AppliesToCategories []string  `json:"applies_to_categories"`
+	AppliesToTypeIDs    []string  `json:"applies_to_type_ids"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // AttributeDefinitionPatch changes a definition; key, CI type, attribute
@@ -82,13 +91,29 @@ type AttributeDefinitionPatch struct {
 	Group           *string                     `json:"group,omitempty"`
 	Order           *int                        `json:"order,omitempty"`
 	Unit            *string                     `json:"unit,omitempty"`
+	// AppliesTo and its lists restrict an organization's global attribute
+	// (WP-255); a change of the mode drops the lists of the former mode
+	// unless the request sends them.
+	AppliesTo           *string  `json:"applies_to,omitempty"`
+	AppliesToCategories []string `json:"applies_to_categories,omitempty"`
+	AppliesToTypeIDs    []string `json:"applies_to_type_ids,omitempty"`
 }
+
+// Applicability modes of a global attribute (MET-13, WP-255).
+const (
+	AppliesToAll        = "all"
+	AppliesToCategories = "categories"
+	AppliesToTypes      = "types"
+)
 
 // AttributeFilter narrows the definition list.
 type AttributeFilter struct {
 	CITypeID       string
 	AttributeSetID string
 	Scope          string
+	// ApplicableTo selects the definitions of a CI type and the global
+	// definitions that apply to it (WP-255).
+	ApplicableTo string
 }
 
 // Attribute definition errors.
@@ -117,7 +142,7 @@ type AttributeDefinitionStore interface {
 // Field is the legacy field view of the definition (/ci-types/{id}/fields).
 func (d *AttributeDefinition) Field() Field {
 	multiValue := d.MultiValue
-	return Field{
+	f := Field{
 		ID: d.ID, CITypeID: d.CITypeID, Scope: d.Scope, Name: d.Key,
 		Label: d.DisplayName.WithFallback(d.Key)["en"], Description: d.Description,
 		DataType: d.DataType, Required: d.Required, DefaultValue: defaultString(d.Default),
@@ -125,6 +150,10 @@ func (d *AttributeDefinition) Field() Field {
 		Validation: d.legacyValidation(), Conditional: d.Conditional, ReferenceTarget: d.ReferenceTarget,
 		IsSystem: d.IsSystem, MultiValue: &multiValue, Inheritable: d.Inheritable,
 	}
+	if d.Scope == "global" {
+		f.AppliesTo, f.AppliesToCategories, f.AppliesToTypeIDs = d.AppliesTo, d.AppliesToCategories, d.AppliesToTypeIDs
+	}
+	return f
 }
 
 // legacyValidation is the validation in the structure composition and the
@@ -178,6 +207,9 @@ func (d *AttributeDefinition) Validate() error {
 		}
 		d.Required = d.Required || required
 	}
+	if err := d.validateAppliesTo(); err != nil {
+		return err
+	}
 	if err := fieldmeta.ValidateDefinition(d.definition()); err != nil {
 		return &api.FieldError{Field: definitionField(err), Message: err.Error()}
 	}
@@ -191,6 +223,92 @@ func (d *AttributeDefinition) Validate() error {
 		if err := fieldmeta.ValidateValue(d.definition(), value); err != nil {
 			return &api.FieldError{Field: "default", Message: err.Error()}
 		}
+	}
+	return nil
+}
+
+// validateAppliesTo checks and normalizes the applicability (MET-13,
+// WP-255): only an organization's global attribute can be restricted, the
+// list of the mode is not empty and the other one is (400 otherwise); a
+// type ID that is no UUID is a 422 on applies_to_type_ids, like an unknown
+// type (checkAppliesToTypesTx). Categories are trimmed, both lists
+// deduplicated.
+func (d *AttributeDefinition) validateAppliesTo() error {
+	if d.AppliesTo == "" {
+		d.AppliesTo = AppliesToAll
+	}
+	switch d.AppliesTo {
+	case AppliesToAll, AppliesToCategories, AppliesToTypes:
+	default:
+		return &api.FieldError{Field: "applies_to", Message: "applies_to must be all, categories or types"}
+	}
+	categories := make([]string, 0, len(d.AppliesToCategories))
+	for _, c := range d.AppliesToCategories {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			return &api.FieldError{Field: "applies_to_categories", Message: "a category must not be empty"}
+		}
+		if !slices.Contains(categories, c) {
+			categories = append(categories, c)
+		}
+	}
+	typeIDs := make([]string, 0, len(d.AppliesToTypeIDs))
+	for _, id := range d.AppliesToTypeIDs {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if !api.IsUUID(id) {
+			return errAppliesToType()
+		}
+		if !slices.Contains(typeIDs, id) {
+			typeIDs = append(typeIDs, id)
+		}
+	}
+	d.AppliesToCategories, d.AppliesToTypeIDs = categories, typeIDs
+	restricted := d.AppliesTo != AppliesToAll || len(categories) > 0 || len(typeIDs) > 0
+	if restricted && (d.Scope != "global" || d.IsSystem) {
+		return &api.FieldError{Field: "applies_to", Message: "only an organization's global attributes can be restricted"}
+	}
+	wantCategories, wantTypes := d.AppliesTo == AppliesToCategories, d.AppliesTo == AppliesToTypes
+	switch {
+	case wantCategories && len(categories) == 0:
+		return &api.FieldError{Field: "applies_to_categories", Message: "applies_to categories needs at least one category"}
+	case wantTypes && len(typeIDs) == 0:
+		return &api.FieldError{Field: "applies_to_type_ids", Message: "applies_to types needs at least one ci type"}
+	case !wantCategories && len(categories) > 0:
+		return &api.FieldError{Field: "applies_to_categories", Message: "applies_to_categories needs applies_to categories"}
+	case !wantTypes && len(typeIDs) > 0:
+		return &api.FieldError{Field: "applies_to_type_ids", Message: "applies_to_type_ids needs applies_to types"}
+	}
+	return nil
+}
+
+// errAppliesToType refuses a type ID of applies_to_type_ids that is
+// neither a type of the organization nor a system type (422).
+func errAppliesToType() error {
+	return &api.FieldError{Field: "applies_to_type_ids", Message: "ci type not found",
+		Status: http.StatusUnprocessableEntity}
+}
+
+// checkAppliesToTypesTx resolves the type IDs a definition gained over
+// before (nil: all of them) under row level security: each is a type of
+// the organization or a system type, otherwise a 422 on
+// applies_to_type_ids. IDs kept from before are not checked again, so a
+// type deleted since is ignored rather than refused.
+func checkAppliesToTypesTx(ctx context.Context, tx pgx.Tx, before, d *AttributeDefinition) error {
+	var added []string
+	for _, id := range d.AppliesToTypeIDs {
+		if before == nil || !slices.Contains(before.AppliesToTypeIDs, id) {
+			added = append(added, id)
+		}
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	var found int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM ci_type WHERE id = ANY($1::uuid[])`, added).Scan(&found); err != nil {
+		return fmt.Errorf("read applies_to types: %w", err)
+	}
+	if found != len(added) {
+		return errAppliesToType()
 	}
 	return nil
 }
@@ -247,6 +365,18 @@ func (p *AttributeDefinitionPatch) apply(d *AttributeDefinition) error {
 		d.Order = *p.Order
 	}
 	setString(&d.Unit, p.Unit)
+	if p.AppliesTo != nil {
+		if *p.AppliesTo != d.AppliesTo {
+			d.AppliesToCategories, d.AppliesToTypeIDs = nil, nil
+		}
+		d.AppliesTo = *p.AppliesTo
+	}
+	if p.AppliesToCategories != nil {
+		d.AppliesToCategories = p.AppliesToCategories
+	}
+	if p.AppliesToTypeIDs != nil {
+		d.AppliesToTypeIDs = p.AppliesToTypeIDs
+	}
 	return nil
 }
 
@@ -275,6 +405,9 @@ var attributeFields = map[string]string{
 	"attribute_definition_organization_id_fkey":     "organization_id",
 	"attribute_definition_attribute_set_id_fkey":    "attribute_set_id",
 	"attribute_definition_attribute_set_id_key_key": "key",
+	"attribute_definition_applies_to_check":         "applies_to",
+	"attribute_definition_applies_to_scope_check":   "applies_to",
+	"attribute_definition_applies_to_list_check":    "applies_to",
 }
 
 const attributeColumns = `id::text, COALESCE(organization_id::text, ''), COALESCE(ci_type_id::text, ''),
@@ -282,7 +415,7 @@ const attributeColumns = `id::text, COALESCE(organization_id::text, ''), COALESC
 	display_name, COALESCE(description, ''), data_type, required, default_value, enum_values,
 	multi_value, searchable, is_unique, unique_scope, inheritable, validation, conditional,
 	COALESCE(reference_target, ''), COALESCE(group_name, ''), sort_order, COALESCE(unit, ''),
-	created_at, updated_at`
+	applies_to, applies_to_categories, applies_to_type_ids::text[], created_at, updated_at`
 
 func scanAttribute(row pgx.Row) (*AttributeDefinition, error) {
 	var (
@@ -292,7 +425,7 @@ func scanAttribute(row pgx.Row) (*AttributeDefinition, error) {
 	if err := row.Scan(&d.ID, &d.OrganizationID, &d.CITypeID, &d.AttributeSetID, &d.Scope, &d.Key, &displayName, &d.Description,
 		&d.DataType, &d.Required, &def, &enumRaw, &d.MultiValue, &d.Searchable, &d.Unique, &d.UniqueScope,
 		&d.Inheritable, &validationRaw, &conditionRaw, &d.ReferenceTarget, &d.Group, &d.Order, &d.Unit,
-		&d.CreatedAt, &d.UpdatedAt); err != nil {
+		&d.AppliesTo, &d.AppliesToCategories, &d.AppliesToTypeIDs, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(displayName, &d.DisplayName); err != nil {
@@ -313,7 +446,32 @@ func scanAttribute(row pgx.Row) (*AttributeDefinition, error) {
 		}
 	}
 	d.IsSystem = d.OrganizationID == ""
+	d.normalizeAppliesTo()
 	return &d, nil
+}
+
+// normalizeAppliesTo renders the lists of a read definition as [] rather
+// than null and a missing mode as all.
+func (d *AttributeDefinition) normalizeAppliesTo() {
+	d.AppliesTo = appliesToMode(d.AppliesTo)
+	d.AppliesToCategories = nonNil(d.AppliesToCategories)
+	d.AppliesToTypeIDs = nonNil(d.AppliesToTypeIDs)
+}
+
+// appliesToMode is the stored mode; "" is all.
+func appliesToMode(mode string) string {
+	if mode == "" {
+		return AppliesToAll
+	}
+	return mode
+}
+
+// nonNil is a missing list as the empty array of the column default.
+func nonNil(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
 }
 
 // attributeArgs are the stored values of a definition in the column order
@@ -337,7 +495,8 @@ func attributeArgs(d *AttributeDefinition) []any {
 	}
 	return []any{d.DisplayName, nilIfEmpty(d.Description), d.DataType, d.Required, def, enum, d.MultiValue,
 		d.Searchable, d.Unique, d.UniqueScope, d.Inheritable, validation, conditional,
-		nilIfEmpty(d.ReferenceTarget), nilIfEmpty(d.Group), d.Order, nilIfEmpty(d.Unit)}
+		nilIfEmpty(d.ReferenceTarget), nilIfEmpty(d.Group), d.Order, nilIfEmpty(d.Unit),
+		appliesToMode(d.AppliesTo), nonNil(d.AppliesToCategories), nonNil(d.AppliesToTypeIDs)}
 }
 
 // insertAttributeTx inserts a definition; a type-scoped definition takes
@@ -348,8 +507,10 @@ func insertAttributeTx(ctx context.Context, tx pgx.Tx, orgID string, d *Attribut
 	created, err := scanAttribute(tx.QueryRow(ctx, `INSERT INTO attribute_definition (
 			ci_type_id, attribute_set_id, organization_id, scope, key, display_name, description, data_type,
 			required, default_value, enum_values, multi_value, searchable, is_unique, unique_scope, inheritable,
-			validation, conditional, reference_target, group_name, sort_order, unit)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+			validation, conditional, reference_target, group_name, sort_order, unit,
+			applies_to, applies_to_categories, applies_to_type_ids)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+			$23, $24, $25::uuid[])
 		RETURNING `+attributeColumns, args...))
 	if err != nil {
 		return attributeDBError(err)
@@ -364,7 +525,8 @@ func updateAttributeTx(ctx context.Context, tx pgx.Tx, d *AttributeDefinition) e
 			display_name = $2, description = $3, data_type = $4, required = $5, default_value = $6,
 			enum_values = $7, multi_value = $8, searchable = $9, is_unique = $10, unique_scope = $11,
 			inheritable = $12, validation = $13, conditional = $14, reference_target = $15,
-			group_name = $16, sort_order = $17, unit = $18
+			group_name = $16, sort_order = $17, unit = $18,
+			applies_to = $19, applies_to_categories = $20, applies_to_type_ids = $21::uuid[]
 		WHERE id = $1 RETURNING `+attributeColumns, args...))
 	if err != nil {
 		return attributeDBError(err)
@@ -433,10 +595,11 @@ func checkCompositionTx(ctx context.Context, tx pgx.Tx, key string) error {
 }
 
 // checkSubtreeCompositionTx checks the subtree of a type that got a new
-// parent (MET-06): every type in it stays composable with the
-// organization's global attributes. A conflict is a 422 on
-// parent_type_id naming the key.
-func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID string) error {
+// parent (MET-06) or a new category: every type in it stays composable
+// with the organization's global attributes that apply to it afterwards
+// (MET-13, WP-255). A conflict is a 422 on field (parent_type_id or
+// category) naming the key.
+func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID, field string) error {
 	rows, err := tx.Query(ctx, `SELECT s.id::text FROM ci_type_subtree($1::uuid) s`, typeID)
 	if err != nil {
 		return fmt.Errorf("read ci type subtree: %w", err)
@@ -448,7 +611,7 @@ func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID string) er
 	if cerr := chainCompositionTx(ctx, tx, targets, "", nil); cerr != nil {
 		var conflict *CompositionError
 		if errors.As(cerr, &conflict) {
-			return errParentComposition(cerr.Error(), conflict.Code)
+			return errTypeComposition(field, cerr.Error(), conflict.Code)
 		}
 		return cerr
 	}
@@ -457,7 +620,8 @@ func checkSubtreeCompositionTx(ctx context.Context, tx pgx.Tx, typeID string) er
 
 // chainCompositionTx composes the definitions of key ("" every key) for
 // the system base with the organization's global attributes and, for
-// each target type, with its chain root → type (MET-16, MET-06) and the
+// each target type, with the global attributes that apply to it
+// (applies_to, MET-13, WP-255), its chain root → type (MET-16, MET-06) and the
 // active sets of that chain (setLayersTx, WP-709); override replaces the
 // set list of one type (nil: the stored lists). It returns the first
 // *CompositionError.
@@ -474,11 +638,15 @@ func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key st
 		return fmt.Errorf("read global definitions: %w", err)
 	}
 	var system, org []fieldmeta.FieldDefinition
+	var orgDefs []*AttributeDefinition
+	restricted := false
 	for _, d := range globals {
 		if d.IsSystem {
 			system = append(system, d.definition())
 		} else {
 			org = append(org, d.definition())
+			orgDefs = append(orgDefs, d)
+			restricted = restricted || d.AppliesTo != AppliesToAll
 		}
 	}
 	if _, err = Compose(system, org); err != nil {
@@ -486,6 +654,14 @@ func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key st
 	}
 	if len(targets) == 0 {
 		return nil
+	}
+	// An organization's global attribute enters the composition of the
+	// types it applies to only (MET-13, WP-255).
+	var scopes map[string]typeScope
+	if restricted {
+		if scopes, err = typeScopesTx(ctx, tx, targets); err != nil {
+			return err
+		}
 	}
 	rows, err = tx.Query(ctx, `SELECT target, `+attributeColumns+` FROM (
 			SELECT tt.id::text AS target, c.level AS lvl, a.*
@@ -519,7 +695,16 @@ func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key st
 		return err
 	}
 	for _, target := range targets {
-		layers := [][]fieldmeta.FieldDefinition{system, org, typed[target]}
+		orgLayer := org
+		if restricted {
+			orgLayer = nil
+			for _, d := range orgDefs {
+				if d.appliesTo(scopes[target]) {
+					orgLayer = append(orgLayer, d.definition())
+				}
+			}
+		}
+		layers := [][]fieldmeta.FieldDefinition{system, orgLayer, typed[target]}
 		for _, layer := range sets[target] {
 			layers = append(layers, definitionsOf(layer))
 		}
@@ -528,6 +713,29 @@ func chainCompositionTx(ctx context.Context, tx pgx.Tx, targets []string, key st
 		}
 	}
 	return nil
+}
+
+// typeScopesTx reads the category and the chain root → type of each
+// target type, which decide the applicability of the organization's
+// global attributes (appliesToScope).
+func typeScopesTx(ctx context.Context, tx pgx.Tx, targets []string) (map[string]typeScope, error) {
+	rows, err := tx.Query(ctx, `SELECT tt.id::text, COALESCE(t.category, ''),
+			ARRAY(SELECT c.id::text FROM ci_type_ancestors(tt.id) c ORDER BY c.level)
+		FROM unnest($1::uuid[]) AS tt (id) JOIN ci_type t ON t.id = tt.id`, targets)
+	if err != nil {
+		return nil, fmt.Errorf("read ci type scopes: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]typeScope, len(targets))
+	for rows.Next() {
+		var id string
+		var s typeScope
+		if err = rows.Scan(&id, &s.category, &s.chain); err != nil {
+			return nil, fmt.Errorf("scan ci type scope: %w", err)
+		}
+		out[id] = s
+	}
+	return out, rows.Err()
 }
 
 // definitionsOf returns the field definitions of stored definitions.
@@ -825,7 +1033,29 @@ func attributeFilterSQL(filter AttributeFilter) (where string, args []any) {
 		args = append(args, filter.Scope)
 		conditions = append(conditions, fmt.Sprintf("scope = $%d", len(args)))
 	}
+	if filter.ApplicableTo != "" {
+		conditions = append(conditions, applicableToSQL(filter.ApplicableTo, &args))
+	}
 	return strings.Join(conditions, " AND "), args
+}
+
+// applicableToSQL selects the definitions of a type the organization sees
+// and the global definitions that apply to it (MET-13, WP-255): system
+// globals and globals with applies_to all always, categories when the
+// type's category is listed, types when the type or one of its ancestors
+// is listed. An ID that is no UUID selects nothing.
+func applicableToSQL(typeID string, args *[]any) string {
+	if !api.IsUUID(typeID) {
+		return "FALSE"
+	}
+	*args = append(*args, typeID)
+	n := len(*args)
+	return fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_type t WHERE t.id = $%[1]d::uuid)
+		AND (ci_type_id = $%[1]d::uuid OR (scope = 'global' AND (applies_to = 'all'
+			OR (applies_to = 'categories'
+				AND (SELECT t.category FROM ci_type t WHERE t.id = $%[1]d::uuid) = ANY (applies_to_categories))
+			OR (applies_to = 'types'
+				AND applies_to_type_ids && ARRAY(SELECT c.id FROM ci_type_ancestors($%[1]d::uuid) c)))))`, n)
 }
 
 // queryAttributes reads the definitions a query selects.
@@ -918,6 +1148,9 @@ func (r *PGRepository) CreateAttributeDefinition(ctx context.Context, orgID stri
 				return err
 			}
 		}
+		if err := checkAppliesToTypesTx(ctx, tx, nil, d); err != nil {
+			return err
+		}
 		if err := insertAttributeTx(ctx, tx, orgID, d); err != nil {
 			return err
 		}
@@ -946,6 +1179,9 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 		}
 		if verr := d.Validate(); verr != nil {
 			return verr
+		}
+		if terr := checkAppliesToTypesTx(ctx, tx, &before, d); terr != nil {
+			return terr
 		}
 		if uerr := updateAttributeTx(ctx, tx, d); uerr != nil {
 			return uerr

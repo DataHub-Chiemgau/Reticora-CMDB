@@ -1239,3 +1239,4 @@ OVR-02;[B];B;backend/internal/override/decide_test.go;WP-714
 IMP-11;[P2];B;backend/internal/topology/projection_integration_test.go;WP-298
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/lifecycle/model_api_integration_test.go;WP-723
 LCY-02;[P2];B;backend/internal/lifecycle/model_api_integration_test.go;WP-723
+MET-13;[P2];B;backend/internal/citype/global_attr_integration_test.go;WP-255

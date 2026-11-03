@@ -101,7 +101,9 @@ func writeAttributeError(w http.ResponseWriter, err error) {
 }
 
 // ListAttributeDefinitions handles GET /api/v1/attribute-definitions
-// (?ci_type_id=, ?attribute_set_id=, ?scope=type|global|set): a page newest first on (created_at,
+// (?ci_type_id=, ?attribute_set_id=, ?scope=type|global|set, and
+// ?applicable_to= for the definitions of a type with the global ones that
+// apply to it, WP-255): a page newest first on (created_at,
 // id) with limit (default 50, at most 200) and the signed cursor of API-02
 // (F-215).
 func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +121,8 @@ func (h *Handler) ListAttributeDefinitions(w http.ResponseWriter, r *http.Reques
 	}
 	q := r.URL.Query()
 	items, total, err := store.ListAttributeDefinitionPage(r.Context(), t.OrganizationID,
-		AttributeFilter{CITypeID: q.Get("ci_type_id"), AttributeSetID: q.Get("attribute_set_id"), Scope: q.Get("scope")}, page)
+		AttributeFilter{CITypeID: q.Get("ci_type_id"), AttributeSetID: q.Get("attribute_set_id"), Scope: q.Get("scope"),
+			ApplicableTo: q.Get("applicable_to")}, page)
 	if err != nil {
 		writeAttributeError(w, err)
 		return
@@ -690,13 +693,19 @@ func (h *Handler) UpsertField(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, f)
 }
 
-// DeleteField handles DELETE /api/v1/ci-types/{id}/fields/{name}
+// DeleteField handles DELETE /api/v1/ci-types/{id}/fields/{name}: a field
+// of the type only; a global field of the same name stays (404, WP-255).
 func (h *Handler) DeleteField(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
 		return
 	}
-	if err := h.repo.DeleteField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), chi.URLParam(r, "name")); err != nil {
+	typeID := chi.URLParam(r, "id")
+	if typeID == "" {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "field definition not found")
+		return
+	}
+	if err := h.repo.DeleteField(r.Context(), t.OrganizationID, typeID, chi.URLParam(r, "name")); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "field definition not found")
 		return
 	}

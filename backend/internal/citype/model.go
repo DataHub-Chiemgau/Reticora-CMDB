@@ -89,6 +89,13 @@ type Field struct {
 	// Inheritable: subtypes inherit the definition (MET-06); the type's own
 	// definitions apply to it either way.
 	Inheritable bool `json:"inheritable"`
+	// AppliesTo and its lists are the applicability of a global field
+	// (MET-13, WP-255; empty mode: all), read-only in the legacy view and
+	// absent for type fields. ResolveFields takes an organization's global
+	// field only for the types it applies to.
+	AppliesTo           string   `json:"applies_to,omitempty"`
+	AppliesToCategories []string `json:"applies_to_categories,omitempty"`
+	AppliesToTypeIDs    []string `json:"applies_to_type_ids,omitempty"`
 }
 
 // InstanceField is a field definition scoped to a single CI instance (spec §2).
@@ -356,10 +363,12 @@ func errParentDepth() error {
 		Message: fmt.Sprintf("a ci type chain has at most %d levels", MaxTypeChainDepth), Status: http.StatusUnprocessableEntity}
 }
 
-// errParentComposition reports definitions of the moved chain that cannot
-// be composed (MET-16); the message names the attribute key.
-func errParentComposition(msg, code string) error {
-	return &api.FieldError{Field: "parent_type_id", Message: msg, Status: http.StatusUnprocessableEntity, Code: code}
+// errTypeComposition reports definitions of a type's subtree that cannot
+// be composed (MET-16) after a change of field: parent_type_id (the moved
+// chain), or category, which changes the organization's global attributes
+// that apply (WP-255); the message names the attribute key.
+func errTypeComposition(field, msg, code string) error {
+	return &api.FieldError{Field: field, Message: msg, Status: http.StatusUnprocessableEntity, Code: code}
 }
 
 // Errors of the lifecycle model of a type (MET-01), reported on

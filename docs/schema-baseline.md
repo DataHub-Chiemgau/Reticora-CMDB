@@ -686,6 +686,20 @@ Constraint-Trigger `trg_ci_type_attribute_set_regenerate` am Ende der
 Transaktion, damit ein PUT der Liste `schema_version` je Typ höchstens einmal
 erhöht). Org-globale Attribute bleiben Laufzeitebene (E-93, E-108).
 
+Anwendbarkeit globaler Attribute (MET-13, WP-255, Migration 000204):
+`attribute_definition.applies_to` (`all` | `categories` | `types`, Standard
+`all`, `attribute_definition_applies_to_check`) mit `applies_to_categories`
+(`TEXT[]`, Werte wie `ci_type.category`) und `applies_to_type_ids` (`UUID[]`,
+Untertypen eingeschlossen; kein Fremdschlüssel, der Server prüft die IDs beim
+Schreiben). Einschränkbar sind nur Org-Globale
+(`attribute_definition_applies_to_scope_check`: `scope = 'global'` und
+`organization_id` gesetzt); die Liste des Modus ist nicht leer, die andere leer
+(`attribute_definition_applies_to_list_check`). Bestehende Zeilen stehen auf
+`all`. Materialisierung, Trigger, Indizes und RLS-Policies bleiben
+unverändert: Die Anwendbarkeit wertet die Laufzeitkomposition aus
+(`ResolveFields`, Kompositionsprüfung), Index und Eindeutigkeit bleiben
+organisationsweit.
+
 Lifecycle-Modelle (MET-01, MET-06, LCY-02, WP-263, Migration 000201): Die
 Tabellen `lifecycle_definition`, `lifecycle_state` und `lifecycle_transition`
 behalten ihre Namen. `ci_type.lifecycle_model_id` (vorher

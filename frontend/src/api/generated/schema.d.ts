@@ -5837,7 +5837,7 @@ export interface paths {
     };
     /**
      * Manage global CI field definitions
-     * @description The global fields (no CI type, MET-13): the organization's organization-wide fields, which apply to every CI type of the organization, and the read-only system fields (`is_system`).
+     * @description The global fields (no CI type, MET-13): the organization's organization-wide fields, which apply to the CI types of their `applies_to` (every type by default, WP-255), and the read-only system fields (`is_system`), which apply to every type. PUT creates a new global field with `applies_to` all and keeps the applicability of an existing one; it is changed through /attribute-definitions.
      */
     get: operations['listCiFieldsGlobal'];
     /** Manage global CI field definitions */
@@ -5859,7 +5859,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete a global CI field definition */
+    /**
+     * Delete a global CI field definition
+     * @description Deletes a global field of the organization; system fields and the fields of other organizations are 404. The index job drops its unique index `idx_attr_<id>_u` or own index, and the key index `idx_attr_key_<key>` once no definition uses the key (DB-04, WP-255). Values in the CIs' attributes stay.
+     */
     delete: operations['deleteCiFieldsGlobalName'];
     options?: never;
     head?: never;
@@ -5875,13 +5878,13 @@ export interface paths {
     };
     /**
      * List attribute definitions (MET-10)
-     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `attribute_set_id`, `scope` (type, global, set). Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
+     * @description The single source of attribute validation and indexing (DB-03): the organization's definitions and the read-only system definitions (`is_system`). Filters: `ci_type_id`, `attribute_set_id`, `scope` (type, global, set) and `applicable_to` (WP-255): the definitions of that CI type together with the global definitions that apply to it (system globals, globals with `applies_to` = all, categories listing the type's category, types listing the type or one of its ancestors); a type the organization does not see selects nothing. Pages newest first on (created_at, id) (API-02, F-215): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`.
      */
     get: operations['listAttributeDefinitions'];
     put?: never;
     /**
      * Create an attribute definition (MET-10)
-     * @description Without `ci_type_id` the definition is global (every type of the organization); with `attribute_set_id` it is an attribute of that set (scope `set`, WP-250): a set the organization does not see is 422 with `field` = `attribute_set_id`, a system set 403. A set attribute enters the composition of every type its set is assigned to and of their subtypes (MET-16, after the type chain); a searchable or unique one is indexed and checked organization-wide like a global attribute. Creating, changing or deleting a type's or a set's definition regenerates the `attribute_schema` of the types concerned and raises their `schema_version` when the schema changes. A definition that cannot be composed with the system base, the organization's global attributes, a type chain or the sets of a type (data type, empty value set or range) is 422 with `field` = `key` and the code of the conflict. Requires ci_attribute:manage.
+     * @description Without `ci_type_id` the definition is global (every type of the organization); with `attribute_set_id` it is an attribute of that set (scope `set`, WP-250): a set the organization does not see is 422 with `field` = `attribute_set_id`, a system set 403. A set attribute enters the composition of every type its set is assigned to and of their subtypes (MET-16, after the type chain); a searchable or unique one is indexed and checked organization-wide like a global attribute. Creating, changing or deleting a type's or a set's definition regenerates the `attribute_schema` of the types concerned and raises their `schema_version` when the schema changes. A definition that cannot be composed with the system base, the organization's global attributes, a type chain or the sets of a type (data type, empty value set or range) is 422 with `field` = `key` and the code of the conflict. A global definition of the organization can be restricted with `applies_to` (MET-13, WP-255); it is then composed and enforced only for the types it applies to. Requires ci_attribute:manage.
      */
     post: operations['createAttributeDefinition'];
     delete?: never;
@@ -5910,7 +5913,7 @@ export interface paths {
     head?: never;
     /**
      * Update an attribute definition
-     * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409. A definition that cannot be composed with the other layers of its key (MET-16) is 422 with `field` = `key` and a `code`.
+     * @description Key, CI type and scope are immutable; system definitions are read-only (403). Changing `searchable`, `unique` or `unique_scope` queues an `attribute.index` job that builds the index concurrently (DB-04); making an attribute unique while active CIs share a value is 409. A definition that cannot be composed with the other layers of its key (MET-16) is 422 with `field` = `key` and a `code`; this includes a change of `applies_to`, `applies_to_categories` or `applies_to_type_ids` that extends a global definition to a type with a conflicting definition (MET-13, WP-255). A change of the applicability rebuilds no index and raises no `schema_version`.
      */
     patch: operations['updateAttributeDefinition'];
     trace?: never;
@@ -6047,7 +6050,7 @@ export interface paths {
     head?: never;
     /**
      * Update a CI type
-     * @description `parent_type_id` moves the type below another type of the organization or a system type (MET-06); an empty string makes it a root. An unknown parent and one of another organization are both 422 on `parent_type_id`, a cycle is 409, a chain of more than 6 types (including the moved subtree) is 422, a deactivated parent is 422 on `parent_type_id` (MET-05), and a moved subtree whose attribute definitions cannot be composed is 422 naming the attribute key. An unknown CI type, or a system type, is 404. A lifecycle model the organization does not see is 422 on `lifecycle_model_id`. A change of `lifecycle_model_id` or `parent_type_id` after which CIs of the type or of its subtypes carry lifecycle states their new effective model (nearest model of the type chain that applies to `ci`) does not contain is 409 with the field and `state_counts` (state and number of CIs); nothing is changed (MET-06, LCY-02).
+     * @description `parent_type_id` moves the type below another type of the organization or a system type (MET-06); an empty string makes it a root. An unknown parent and one of another organization are both 422 on `parent_type_id`, a cycle is 409, a chain of more than 6 types (including the moved subtree) is 422, a deactivated parent is 422 on `parent_type_id` (MET-05), and a moved subtree whose attribute definitions cannot be composed is 422 naming the attribute key. A new `category` changes the organization's global attributes that apply to the type (`applies_to`, MET-13, WP-255): when the type or a subtype cannot be composed with them, the change is 422 on `category` naming the key and nothing is stored. An unknown CI type, or a system type, is 404. A lifecycle model the organization does not see is 422 on `lifecycle_model_id`. A change of `lifecycle_model_id` or `parent_type_id` after which CIs of the type or of its subtypes carry lifecycle states their new effective model (nearest model of the type chain that applies to `ci`) does not contain is 409 with the field and `state_counts` (state and number of CIs); nothing is changed (MET-06, LCY-02).
      */
     patch: operations['updateCiTypesId'];
     trace?: never;
@@ -6123,7 +6126,7 @@ export interface paths {
     get: operations['listCiTypesIdFields'];
     /**
      * Manage CI type field definitions
-     * @description Creates or updates a field of a CI type of the organization (legacy view of attribute_definition). System CI types (`is_system`, no organization) are read-only for tenants until inheritance (MET-06): a field on them is refused with 422 on `ci_type_id`; organization-wide fields (PUT /api/v1/ci-fields/global) apply to every CI type including the system types. An unknown CI type, or one of another organization, is 404.
+     * @description Creates or updates a field of a CI type of the organization (legacy view of attribute_definition). System CI types (`is_system`, no organization) are read-only for tenants until inheritance (MET-06): a field on them is refused with 422 on `ci_type_id`; organization-wide fields (PUT /api/v1/ci-fields/global) apply to every CI type including the system types unless `applies_to` restricts them (WP-255). An unknown CI type, or one of another organization, is 404.
      */
     put: operations['putCiTypesIdFields'];
     post?: never;
@@ -6143,7 +6146,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete a CI type field definition */
+    /**
+     * Delete a CI type field definition
+     * @description Deletes a field of the type only; a global field of the same name is not reached (404, WP-255). The index job drops the indexes of the deleted definition (DB-04). Values in the CIs' attributes stay.
+     */
     delete: operations['deleteCiTypesIdFieldsName'];
     options?: never;
     head?: never;
@@ -8154,11 +8160,21 @@ export interface components {
       order: number;
       unit?: string;
       is_system: boolean;
+      applies_to: components['schemas']['AttributeAppliesTo'];
+      /** @description The categories (`ci_type.category`) of applies_to categories; empty otherwise. */
+      applies_to_categories: string[];
+      /** @description The CI types of applies_to types, their subtypes included; empty otherwise. IDs of types deleted since are kept and match nothing. */
+      applies_to_type_ids: string[];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
     };
+    /**
+     * @description The applicability of a global attribute of the organization (MET-13, WP-255): `all` (default) every CI type, `categories` the types whose `category` is in `applies_to_categories`, `types` the types in `applies_to_type_ids` and their subtypes (type chain, MET-06). Only an organization's global definition (scope global) can be restricted, otherwise 400; the list of the mode must not be empty and the other list must be (400); a type ID that is neither a type of the organization nor a system type is 422 on `applies_to_type_ids`. A changed mode drops the lists of the former mode unless the request sends them. `required`, validation and default of a restricted global apply only to the CIs of the types it applies to; indexes and uniqueness stay organization-wide. System globals and type or set definitions are always `all`.
+     * @enum {string}
+     */
+    AttributeAppliesTo: 'all' | 'categories' | 'types';
     /** @description The validation of an attribute definition (MET-10): a rule AST of MET-45 or the legacy structure. Requests may send either; the server checks the rule with backend/internal/rules (an invalid rule is 400 on the field validation), stores it as the AST and answers the AST, also for definitions stored in the legacy structure. A required rule makes the definition required. CI writes are validated against it (422). */
     AttributeValidation:
       components['schemas']['rule'] | components['schemas']['AttributeValidationLegacy'];
@@ -8212,6 +8228,9 @@ export interface components {
       group?: string;
       order?: number;
       unit?: string;
+      applies_to?: components['schemas']['AttributeAppliesTo'];
+      applies_to_categories?: string[];
+      applies_to_type_ids?: string[];
     };
     /** @description A named, reusable group of attribute definitions (MET-16, WP-250). Its attributes are attribute definitions with scope `set`. */
     AttributeSet: {
@@ -8285,6 +8304,9 @@ export interface components {
       group?: string;
       order?: number;
       unit?: string;
+      applies_to?: components['schemas']['AttributeAppliesTo'];
+      applies_to_categories?: string[];
+      applies_to_type_ids?: string[];
     };
     /** @description A label per language (MET-01). */
     LocalizedText: {
@@ -28554,6 +28576,9 @@ export interface operations {
               };
               reference_target?: string;
               is_system?: boolean;
+              applies_to?: components['schemas']['AttributeAppliesTo'];
+              applies_to_categories?: string[];
+              applies_to_type_ids?: string[];
             }[];
             total?: number;
             limit?: number;
@@ -28622,6 +28647,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listAttributeDefinitions: {
@@ -28630,6 +28656,8 @@ export interface operations {
         ci_type_id?: string;
         attribute_set_id?: string;
         scope?: 'type' | 'global' | 'set';
+        /** @description A CI type ID: its definitions and the global definitions that apply to it (MET-13, WP-255). */
+        applicable_to?: string;
         /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
@@ -29304,6 +29332,7 @@ export interface operations {
         };
         content?: never;
       };
+      404: components['responses']['NotFound'];
     };
   };
   listCiTypesIdVersions: {
