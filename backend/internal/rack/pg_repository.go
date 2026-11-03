@@ -217,7 +217,6 @@ func (r *PGRepository) UpdateRack(ctx context.Context, orgID, id string, req Upd
 		if req.Notes != nil {
 			sets = append(sets, fmt.Sprintf("notes = $%d", pos))
 			args = append(args, nilIfEmpty(*req.Notes))
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {

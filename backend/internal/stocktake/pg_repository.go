@@ -267,7 +267,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if req.TotalExpected != nil {
 			setClauses = append(setClauses, fmt.Sprintf("total_expected = $%d", argPos))
 			args = append(args, *req.TotalExpected)
-			argPos++
 		}
 
 		if len(setClauses) == 0 {

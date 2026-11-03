@@ -128,7 +128,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 		if req.ValidityMonths != nil {
 			sets = append(sets, fmt.Sprintf("validity_months = $%d", pos))
 			args = append(args, *req.ValidityMonths)
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {

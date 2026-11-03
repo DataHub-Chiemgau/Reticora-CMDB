@@ -453,7 +453,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if req.Notes != nil {
 			sets = append(sets, fmt.Sprintf("notes = $%d", pos))
 			args = append(args, *req.Notes)
-			pos++
 		}
 
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
