@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000205_templates
+Stand: Migration 000208_ip_reservation
 
 ## Prüfung
 
@@ -734,6 +734,14 @@ fremden CI-Typ, eine fremde Klonquelle und eine fremde Attributdefinition mit
 `switch`, `router`, `firewall`, `access_point`, `hypervisor`, `storage`, `ups`,
 `pdu`) mit veröffentlichter Version 1 ohne Items (E-37). Das CI hat keine
 Template-Spalten; die Zuordnung folgt mit `ci_template` (WP-710).
+
+IP-Reservierungen (NET-09, WP-299, Migration 000208): `ip_address` erhält
+`reserved_until` (`timestamptz`, informativ, keine automatische Freigabe) und
+`reserved_by` (`uuid`, Surrogat des reservierenden Nutzers ohne Fremdschlüssel,
+Konvention 16 wie `ci_change.actor_id`). Eine Reservierung ist eine Zeile mit
+`type = 'reserved'`, `subnet_id` und ohne `interface_id`; VRF, Client und
+Standort setzen `trg_ip_address_vrf` und `ip_address_scope`. RLS, Policies und
+Indizes von `ip_address` bleiben unverändert.
 
 ## Tabellen, RLS und Policies
 

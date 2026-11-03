@@ -64,12 +64,18 @@ type IPAddress struct {
 	// VRF and interface (NET-03).
 	VRFID string `json:"vrf_id"`
 	// Type is discovered, reserved, static or dhcp (NET-03).
-	Type        string    `json:"type"`
-	DNSName     string    `json:"dns_name,omitempty"`
-	Description string    `json:"description,omitempty"`
-	LastSeenAt  *string   `json:"last_seen_at,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Type        string  `json:"type"`
+	DNSName     string  `json:"dns_name,omitempty"`
+	Description string  `json:"description,omitempty"`
+	LastSeenAt  *string `json:"last_seen_at,omitempty"`
+	// ReservedUntil is the informative end of a reservation (NET-09); no
+	// automatic release follows it. ReservedBy is the surrogate id of the
+	// reserving user (convention 16). Both are set only by POST
+	// /subnets/{id}/reservations, never by POST or PATCH /ips.
+	ReservedUntil *time.Time `json:"reserved_until,omitempty"`
+	ReservedBy    string     `json:"reserved_by,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // CreateIPAddressRequest is the payload for creating an IP address.

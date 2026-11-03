@@ -7412,13 +7412,13 @@ export interface paths {
     };
     /**
      * List the IP reservations of a subnet
-     * @description Planned (E-38); WP-299 implements the operation.
+     * @description Lists the addresses of type reserved of the subnet (NET-09), the newest first. The page follows the cursor contract (API-02); total counts the reservations of the subnet.
      */
     get: operations['listSubnetReservations'];
     put?: never;
     /**
      * Reserve an IP address in a subnet
-     * @description Planned (E-38); WP-299 implements the operation.
+     * @description Stores the address as an IP address of type reserved in the subnet, without interface (NET-09). The VRF, client and site come from the subnet; reserved_by is the calling user. reserved_until is informative, nothing releases the reservation when it passes. An address the VRF of the subnet already holds (on an interface, as another reservation or another address without interface) is a conflict.
      */
     post: operations['createSubnetReservation'];
     delete?: never;
@@ -7434,7 +7434,7 @@ export interface paths {
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
-        /** @description IP address identifier. */
+        /** @description IP address identifier of the reservation. */
         ip_id: string;
       };
       cookie?: never;
@@ -7444,7 +7444,7 @@ export interface paths {
     post?: never;
     /**
      * Release an IP reservation of a subnet
-     * @description Planned (E-38); WP-299 implements the operation.
+     * @description Deletes the reservation. An address of another subnet or of another type than reserved is not found.
      */
     delete: operations['deleteSubnetReservation'];
     options?: never;
@@ -13016,10 +13016,27 @@ export interface components {
       description?: string;
       /** Format: date-time */
       last_seen_at?: string;
+      /**
+       * Format: date-time
+       * @description Informative end of a reservation (NET-09); set only by POST /api/v1/subnets/{id}/reservations, no automatic release.
+       */
+      readonly reserved_until?: string;
+      /** @description Surrogate id of the user who made the reservation; set only by POST /api/v1/subnets/{id}/reservations. */
+      readonly reserved_by?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    IPReservationCreateRequest: {
+      /** @description Bare IP address (no prefix length) within the CIDR of the subnet. */
+      address: string;
+      description?: string;
+      /**
+       * Format: date-time
+       * @description Informative end of the reservation (RFC 3339).
+       */
+      reserved_until?: string;
     };
     CreateIPAddressRequest: {
       subnet_id?: string;
@@ -32624,12 +32641,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the IP reservations of a subnet. The page follows the cursor contract (API-02); the item schema comes with WP-299. */
+      /** @description Paginated list of the reservations of the subnet. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAddressListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -32647,20 +32666,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['IPReservationCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-299. */
+      /** @description Created reservation. */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      409: components['responses']['Conflict'];
     };
   };
   deleteSubnetReservation: {
@@ -32670,20 +32695,21 @@ export interface operations {
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
-        /** @description IP address identifier. */
+        /** @description IP address identifier of the reservation. */
         ip_id: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Deleted. */
+      /** @description Released. */
       204: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];

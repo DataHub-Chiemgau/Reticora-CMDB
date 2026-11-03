@@ -27,6 +27,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/subnets/{id}", h.UpdateSubnet)
 	r.Delete("/api/v1/subnets/{id}", h.DeleteSubnet)
 	r.Get("/api/v1/subnets/{id}/addresses", h.ListSubnetAddresses)
+	r.Get("/api/v1/subnets/{id}/reservations", h.ListReservations)
+	r.Post("/api/v1/subnets/{id}/reservations", h.CreateReservation)
+	r.Delete("/api/v1/subnets/{id}/reservations/{ip_id}", h.DeleteReservation)
 
 	// ips is the catalog path (API-05); ip-addresses stays until its
 	// sunset (API-01).

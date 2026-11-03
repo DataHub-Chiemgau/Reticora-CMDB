@@ -295,18 +295,23 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 // --- IP Addresses ---
 
 const ipCols = `id::text, organization_id::text, COALESCE(subnet_id::text,''), COALESCE(interface_id::text,''),
-	address::text, vrf_id::text, type, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at, created_at, updated_at`
+	address::text, vrf_id::text, type, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at,
+	reserved_until, COALESCE(reserved_by::text,''), created_at, updated_at`
 
 func scanIP(s scanner) (*IPAddress, error) {
 	a := &IPAddress{}
 	var lastSeen *time.Time
 	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Type,
-		&a.DNSName, &a.Description, &lastSeen, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.DNSName, &a.Description, &lastSeen, &a.ReservedUntil, &a.ReservedBy, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if lastSeen != nil {
 		s := lastSeen.UTC().Format(time.RFC3339)
 		a.LastSeenAt = &s
+	}
+	if a.ReservedUntil != nil {
+		until := a.ReservedUntil.UTC()
+		a.ReservedUntil = &until
 	}
 	a.CreatedAt = a.CreatedAt.UTC()
 	a.UpdatedAt = a.UpdatedAt.UTC()

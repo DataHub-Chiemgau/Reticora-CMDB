@@ -484,6 +484,10 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/cis/{id}/contacts":          {"", `{"contact_id":"<id:/api/v1/contacts>"}`},
 	"POST /api/v1/cis/{id}/interfaces":        {"", `{"name":"eth0"}`},
 	"POST /api/v1/cis/{id}/type":              {"", `{"ci_type_id":"<citype2>"}`},
+	// IP reservations (WP-299): an address of the created subnet; the
+	// release names the reservation the sub-create returned.
+	"POST /api/v1/subnets/{id}/reservations":           {"", `{"address":"10.205.0.20"}`},
+	"DELETE /api/v1/subnets/{id}/reservations/{ip_id}": {"/api/v1/subnets/<id:/api/v1/subnets>/reservations/<id:/api/v1/ip-reservations>", ""},
 	// Templates (WP-251): the clone needs a key; version 1 of the created
 	// template is published after POST …/versions added the draft 2, which
 	// the PUT then fills.
@@ -541,6 +545,7 @@ var auditRouteSubCreates = []struct{ route, collection string }{
 	{"POST /api/v1/keys/{id}/issue", ""},
 	{"POST /api/v1/workflows/{id}/runs", "/api/v1/workflow-runs"},
 	{"POST /api/v1/cis/{id}/merge", ""},
+	{"POST /api/v1/subnets/{id}/reservations", "/api/v1/ip-reservations"},
 }
 
 // TestEveryWriteRouteAuditedOnPostgreSQL runs every write route of the

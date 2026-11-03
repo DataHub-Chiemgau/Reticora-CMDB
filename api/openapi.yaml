@@ -15115,20 +15115,26 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/subnets/{id}/reservations:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listSubnetReservations
       tags: [IPAM]
       summary: List the IP reservations of a subnet
-      description: Planned (E-38); WP-299 implements the operation.
+      description: >-
+        Lists the addresses of type reserved of the subnet (NET-09), the newest
+        first. The page follows the cursor contract (API-02); total counts the
+        reservations of the subnet.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the IP reservations of a subnet. The page follows the cursor contract (API-02); the item schema comes with WP-299.
+          description: Paginated list of the reservations of the subnet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddressListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -15141,10 +15147,26 @@ paths:
       operationId: createSubnetReservation
       tags: [IPAM]
       summary: Reserve an IP address in a subnet
-      description: Planned (E-38); WP-299 implements the operation.
+      description: >-
+        Stores the address as an IP address of type reserved in the subnet,
+        without interface (NET-09). The VRF, client and site come from the
+        subnet; reserved_by is the calling user. reserved_until is informative,
+        nothing releases the reservation when it passes. An address the VRF of
+        the subnet already holds (on an interface, as another reservation or
+        another address without interface) is a conflict.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IPReservationCreateRequest'
       responses:
         '201':
-          description: Created. The request and response schemas come with WP-299.
+          description: Created reservation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -15153,11 +15175,10 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/subnets/{id}/reservations/{ip_id}:
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: ip_id
@@ -15165,15 +15186,19 @@ paths:
         required: true
         schema:
           type: string
-        description: IP address identifier.
+        description: IP address identifier of the reservation.
     delete:
       operationId: deleteSubnetReservation
       tags: [IPAM]
       summary: Release an IP reservation of a subnet
-      description: Planned (E-38); WP-299 implements the operation.
+      description: >-
+        Deletes the reservation. An address of another subnet or of another
+        type than reserved is not found.
       responses:
         '204':
-          description: Deleted.
+          description: Released.
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24358,12 +24383,35 @@ components:
         last_seen_at:
           type: string
           format: date-time
+        reserved_until:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Informative end of a reservation (NET-09); set only by POST /api/v1/subnets/{id}/reservations, no automatic release.
+        reserved_by:
+          type: string
+          readOnly: true
+          description: Surrogate id of the user who made the reservation; set only by POST /api/v1/subnets/{id}/reservations.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    IPReservationCreateRequest:
+      type: object
+      required: [address]
+      properties:
+        address:
+          type: string
+          description: Bare IP address (no prefix length) within the CIDR of the subnet.
+        description:
+          type: string
+        reserved_until:
+          type: string
+          format: date-time
+          description: Informative end of the reservation (RFC 3339).
 
     CreateIPAddressRequest:
       type: object
