@@ -26,7 +26,9 @@ type Repository interface {
 	Create(ctx context.Context, d *Document) error
 	// CreateWithLinks creates the document and its links in one transaction
 	// (E-61 option 1); the links get the document's id. A link fails like
-	// LinkDocument, and then no document is created.
+	// LinkDocument, and then no document is created. With links the
+	// transaction also writes document.created and one document.linked per
+	// link (WP-851).
 	CreateWithLinks(ctx context.Context, d *Document, links []DocumentLink) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Document, error)
 	// SetStorage stores the blob location, size and MIME type after an
@@ -167,13 +169,18 @@ func (r *MemoryRepository) Create(_ context.Context, d *Document) error {
 	return nil
 }
 
-// CreateWithLinks checks every link against the registry before anything
-// is stored, then creates the document and its links; the memory profile
-// has no target tables to check further.
+// CreateWithLinks checks every link like the PostgreSQL repository before
+// anything is stored (entity type in the registry: 422, entity id a UUID:
+// 400), so a failing link leaves no document; then it creates the document
+// and its links. The memory profile has no target tables to check further
+// and keeps no audit trail.
 func (r *MemoryRepository) CreateWithLinks(ctx context.Context, d *Document, links []DocumentLink) error {
 	for i := range links {
 		if err := checkEntityType(links[i].EntityType); err != nil {
 			return err
+		}
+		if !api.IsUUID(links[i].EntityID) {
+			return errInvalidEntityID
 		}
 	}
 	if err := r.Create(ctx, d); err != nil {

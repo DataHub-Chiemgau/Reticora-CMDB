@@ -3100,7 +3100,10 @@ paths:
         lies outside the caller's scope 404, and nothing is created. A document
         without links is org-wide, so a principal restricted to some clients,
         sites or teams needs at least one link, otherwise 403 (E-09, E-11), and
-        so does a link whose target lies outside its write scope.
+        so does a link whose target lies outside its write scope. With links
+        the audit log records document.created with the new document and one
+        document.linked per link (link_id, entity_type, entity_id) in the
+        transaction of the creation.
       requestBody:
         required: true
         content:

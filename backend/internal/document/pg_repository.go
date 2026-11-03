@@ -258,9 +258,10 @@ func (r *PGRepository) Create(ctx context.Context, d *Document) error {
 // rolls the document back. For a principal restricted in the client, site
 // or team scope the links must also be writable (WITH CHECK of
 // document_link), and the deferred trigger document_scoped_insert_linked
-// refuses a document left without a link (403). The links get no
-// document.linked entries: they are part of the creation, which the route
-// audit records with its fields.
+// refuses a document left without a link (403). With links the
+// transaction ends with the entries document.created and one
+// document.linked per link (WP-851, recordCreateAudit); without links the
+// route audit records the creation.
 func (r *PGRepository) CreateWithLinks(ctx context.Context, d *Document, links []DocumentLink) error {
 	for i := range links {
 		if err := checkEntityType(links[i].EntityType); err != nil {
@@ -287,7 +288,10 @@ func (r *PGRepository) CreateWithLinks(ctx context.Context, d *Document, links [
 				return err
 			}
 		}
-		return nil
+		if len(links) == 0 {
+			return nil
+		}
+		return recordCreateAudit(ctx, tx, d, links)
 	})
 }
 

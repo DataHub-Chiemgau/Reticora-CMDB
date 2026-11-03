@@ -14,10 +14,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Audit actions of the link routes (WP-267, MGT-01): written by the
-// repository in the transaction of the change, so the route audit (WP-133)
-// adds no second entry.
+// Audit actions of the link routes (WP-267, MGT-01) and of a creation with
+// links (WP-851, E-61 option 1): written by the repository in the
+// transaction of the change, so the route audit (WP-133) adds no second
+// entry.
 const (
+	ActionCreated  = "document.created"
 	ActionLinked   = "document.linked"
 	ActionUnlinked = "document.unlinked"
 )
@@ -135,14 +137,49 @@ func targetVisible(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
 // recordLinkAudit writes document.linked or document.unlinked as the last
 // step of the transaction (WP-267). Record marks the request as audited.
 func recordLinkAudit(ctx context.Context, tx pgx.Tx, action string, link *DocumentLink) error {
-	actorID, actorType := "", "system"
-	if user := strings.TrimSpace(tenant.FromContext(ctx).UserID); user != "" {
-		actorType = "user"
-		if audit.IsUUID(user) {
-			actorID = user
-		}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, linkAuditEntry(ctx, action, link)); err != nil {
+		return fmt.Errorf("audit %s: %w", action, err)
 	}
-	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+	return nil
+}
+
+// recordCreateAudit writes document.created with the new document and one
+// document.linked per link, in this order, right before the commit of the
+// transaction (WP-851, convention 20): the creation and its links fail or
+// commit together with their entries. The entries mark the request as
+// audited, so the route audit of POST /api/v1/documents writes none of its
+// own; a creation without links keeps the route entry.
+func recordCreateAudit(ctx context.Context, tx pgx.Tx, d *Document, links []DocumentLink) error {
+	// The entries capture copies: the caller may change d and links before
+	// the commit.
+	after := *d
+	after.Tags = append([]string{}, d.Tags...)
+	actorID, actorType := auditActor(ctx)
+	entries := make([]audit.Entry, 0, 1+len(links))
+	entries = append(entries, audit.Entry{
+		OrganizationID: d.OrganizationID,
+		ActorID:        actorID,
+		ActorType:      actorType,
+		Action:         ActionCreated,
+		ResourceType:   "document",
+		ResourceID:     d.ID,
+		Changes:        map[string]any{"after": &after},
+	})
+	for i := range links {
+		entries = append(entries, linkAuditEntry(ctx, ActionLinked, &links[i]))
+	}
+	return database.BeforeCommit(ctx, func() error {
+		if _, err := audit.NewPGRecorder().RecordMany(ctx, tx, entries); err != nil {
+			return fmt.Errorf("audit %s: %w", ActionCreated, err)
+		}
+		return nil
+	})
+}
+
+// linkAuditEntry is the entry document.linked or document.unlinked of link.
+func linkAuditEntry(ctx context.Context, action string, link *DocumentLink) audit.Entry {
+	actorID, actorType := auditActor(ctx)
+	return audit.Entry{
 		OrganizationID: link.OrganizationID,
 		ActorID:        actorID,
 		ActorType:      actorType,
@@ -154,8 +191,18 @@ func recordLinkAudit(ctx context.Context, tx pgx.Tx, action string, link *Docume
 			"entity_type": link.EntityType,
 			"entity_id":   link.EntityID,
 		},
-	}); err != nil {
-		return fmt.Errorf("audit %s: %w", action, err)
 	}
-	return nil
+}
+
+// auditActor names the user of the request (actor id only when it is a
+// UUID), or the system without one.
+func auditActor(ctx context.Context) (actorID, actorType string) {
+	user := strings.TrimSpace(tenant.FromContext(ctx).UserID)
+	if user == "" {
+		return "", "system"
+	}
+	if audit.IsUUID(user) {
+		actorID = user
+	}
+	return actorID, "user"
 }

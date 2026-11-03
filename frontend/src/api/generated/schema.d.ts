@@ -1435,7 +1435,7 @@ export interface paths {
     put?: never;
     /**
      * Create a document metadata record
-     * @description links creates the document and its links in one transaction (E-61, option 1). Each target is checked like POST /api/v1/documents/{id}/links: an unknown entity_type answers 422, a target that does not exist or lies outside the caller's scope 404, and nothing is created. A document without links is org-wide, so a principal restricted to some clients, sites or teams needs at least one link, otherwise 403 (E-09, E-11), and so does a link whose target lies outside its write scope.
+     * @description links creates the document and its links in one transaction (E-61, option 1). Each target is checked like POST /api/v1/documents/{id}/links: an unknown entity_type answers 422, a target that does not exist or lies outside the caller's scope 404, and nothing is created. A document without links is org-wide, so a principal restricted to some clients, sites or teams needs at least one link, otherwise 403 (E-09, E-11), and so does a link whose target lies outside its write scope. With links the audit log records document.created with the new document and one document.linked per link (link_id, entity_type, entity_id) in the transaction of the creation.
      */
     post: operations['createDocument'];
     delete?: never;
