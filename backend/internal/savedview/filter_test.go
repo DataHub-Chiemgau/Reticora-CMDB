@@ -73,6 +73,36 @@ func TestCompileSQLAssetKindUsesCustomFields(t *testing.T) {
 	}
 }
 
+// Tags of CIs are assignments of the tag catalog (ci_tag, WP-281); assets
+// keep the array in custom_fields until WP-755. Every tag is required.
+func TestCompileSQLTags(t *testing.T) {
+	spec := FilterSpec{EntityKind: "ci", Tags: []string{"prod", "dmz"}}
+	where, args, err := spec.CompileSQL("ci", []any{"org"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND t.key = $2) AND " +
+		"EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND t.key = $3)"
+	if where != want {
+		t.Fatalf("ci tags: got %s", where)
+	}
+	if len(args) != 3 || args[1] != "prod" || args[2] != "dmz" {
+		t.Fatalf("ci tag args: %v", args)
+	}
+	if strings.Contains(where, "attributes") {
+		t.Fatalf("ci tags must not read attributes: %s", where)
+	}
+
+	spec = FilterSpec{EntityKind: "asset", Tags: []string{"prod"}}
+	where, args, err = spec.CompileSQL("asset", []any{"org"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if where != "asset.custom_fields->'tags' ? $2" || len(args) != 2 || args[1] != "prod" {
+		t.Fatalf("asset tags: %s %v", where, args)
+	}
+}
+
 func TestCompileSQLRelationshipPredicates(t *testing.T) {
 	spec := FilterSpec{EntityKind: "ci", LacksRelationship: "backed_up_by", UpstreamOf: "00000000-0000-0000-0000-0000000000aa"}
 	where, _, err := spec.CompileSQL("ci", []any{"org"}, 2)

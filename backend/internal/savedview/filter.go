@@ -166,10 +166,13 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 			AND fv.override_value IS NOT NULL AND fv.discovered_value IS NOT NULL
 			AND fv.override_value IS DISTINCT FROM fv.discovered_value)`)
 	}
-	if len(f.Tags) > 0 {
-		// Tags live in the dynamic JSONB attribute bag (array of strings).
-		for _, tag := range f.Tags {
-			p := next()
+	// Each tag is required (AND). CIs carry the keys of the tag catalog
+	// (ci_tag, WP-281); assets keep the array in custom_fields until WP-755.
+	for _, tag := range f.Tags {
+		p := next()
+		if table == "ci" {
+			add(fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND t.key = %s)`, p), tag)
+		} else {
 			add(fmt.Sprintf(`%s->'tags' ? %s`, jsonbCol, p), tag)
 		}
 	}

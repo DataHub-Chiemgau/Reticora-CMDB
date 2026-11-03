@@ -689,7 +689,8 @@ func (h *Handler) stripInstanceFields(ctx context.Context, orgID, ciID string, a
 // audited CI row. A failed statement does, because it aborted the record's
 // transaction.
 func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) error {
-	if h.provenance == nil || ciID == "" {
+	// Tags are no field value (WP-281).
+	if h.provenance == nil || ciID == "" || fieldName == ci.LegacyTagsKey {
 		return nil
 	}
 	if _, err := h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt); err != nil && database.TxFailed(ctx) {
@@ -711,6 +712,7 @@ func (h *Handler) recordDiscoveredMany(ctx context.Context, orgID, ciID string, 
 	if h.provenance == nil || ciID == "" {
 		return nil
 	}
+	values = withoutLegacyTags(values)
 	if many, ok := h.provenance.(manyProvenance); ok {
 		if err := many.RecordDiscoveredMany(ctx, orgID, ciID, values, source, observedAt); err != nil && database.TxFailed(ctx) {
 			return err
@@ -1880,6 +1882,9 @@ type batchProvenance interface {
 func (h *Handler) recordDiscoveredBatch(ctx context.Context, orgID string, batch []override.DiscoveredValues) error {
 	if h.provenance == nil || len(batch) == 0 {
 		return nil
+	}
+	for i := range batch {
+		batch[i].Values = withoutLegacyTags(batch[i].Values)
 	}
 	if many, ok := h.provenance.(batchProvenance); ok {
 		if err := many.RecordDiscoveredBatch(ctx, orgID, batch); err != nil && database.TxFailed(ctx) {

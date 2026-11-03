@@ -3,6 +3,8 @@ package ci
 import (
 	"context"
 	"errors"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -338,6 +340,96 @@ func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, sc
 	return checkReferences(ctx, s.references, orgID, defs, scope, values, patch, existing)
 }
 
+// LegacyTagsKey is the deprecated attribute that writes the tag assignment
+// of a CI until the sunset (E-125, WP-281).
+const LegacyTagsKey = "tags"
+
+// LegacyTagsError reports a value of attributes.tags that is no array of
+// strings (400 on the field attributes.tags).
+type LegacyTagsError struct{}
+
+// validation: a fixed rule text.
+func (*LegacyTagsError) Error() string {
+	return "attributes.tags must be an array of strings"
+}
+
+// ExtractLegacyTags takes the deprecated attributes.tags out of attrs (E-125,
+// WP-281): it returns attrs without the key (nil when nothing else is left)
+// and the tag list the write gives the CI, the original texts in their
+// order. nil means attrs has no tags: the assignment stays; JSON null
+// yields an empty list, which removes it (merge patch). A value that is no
+// array of strings is a *LegacyTagsError. attrs itself is not changed. The
+// repositories write the list to ci_tag in the transaction of the CI write
+// with the key rule of TagKey; missing catalog tags are created there.
+func ExtractLegacyTags(attrs map[string]any) (rest map[string]any, tags *[]string, err error) {
+	raw, ok := attrs[LegacyTagsKey]
+	if !ok {
+		return attrs, nil, nil
+	}
+	list := []string{}
+	switch v := raw.(type) {
+	case nil:
+	case []string:
+		list = append(list, v...)
+	case []any:
+		for _, element := range v {
+			text, isString := element.(string)
+			if !isString {
+				return nil, nil, &LegacyTagsError{}
+			}
+			list = append(list, text)
+		}
+	default:
+		return nil, nil, &LegacyTagsError{}
+	}
+	rest = make(map[string]any, len(attrs)-1)
+	for k, v := range attrs {
+		if k != LegacyTagsKey {
+			rest[k] = v
+		}
+	}
+	if len(rest) == 0 {
+		rest = nil
+	}
+	return rest, &list, nil
+}
+
+// tagKeyInvalid are the runs of characters a tag key does not have.
+var tagKeyInvalid = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+// TagKey is the catalog key of a tag text, the key rule of migration 000218
+// (tag_normalize_key): lower case, every run of other characters than a-z,
+// 0-9, _ and - becomes _, leading _ and - are removed, at most 63
+// characters. "" is no key; such a text is left out.
+func TagKey(text string) string {
+	key := strings.TrimLeft(tagKeyInvalid.ReplaceAllString(strings.ToLower(text), "_"), "_-")
+	if len(key) > 63 {
+		key = key[:63]
+	}
+	return key
+}
+
+// tagKeys returns the sorted keys of the tag texts without duplicates and
+// for each key its first text (the display name of a new catalog tag).
+func tagKeys(texts []string) (keys, names []string) {
+	first := map[string]string{}
+	keys = []string{}
+	for _, text := range texts {
+		key := TagKey(text)
+		if _, seen := first[key]; key == "" || seen {
+			continue
+		}
+		first[key] = text
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	names = make([]string, len(keys))
+	for i, key := range keys {
+		names[i] = first[key]
+	}
+	return keys, names
+}
+
 // List returns paginated CIs filtered by the given parameters.
 func (s *Service) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	return s.repo.List(ctx, orgID, filter, page)
@@ -361,6 +453,18 @@ func (s *Service) Create(ctx context.Context, item *Item) error {
 func (s *Service) create(ctx context.Context, item *Item) error {
 	if err := s.allowActive(ctx, item.OrganizationID); err != nil {
 		return err
+	}
+	// attributes.tags is the deprecated write of the tag assignment
+	// (E-125): it goes to ci_tag, not into the attributes.
+	rest, legacy, tagsErr := ExtractLegacyTags(item.Attributes)
+	if tagsErr != nil {
+		return tagsErr
+	}
+	if legacy != nil {
+		if rest == nil {
+			rest = map[string]any{}
+		}
+		item.Attributes, item.LegacyTags = rest, legacy
 	}
 	if err := CheckReservedKeys("attributes", item.Attributes); err != nil {
 		return err
@@ -439,6 +543,15 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 	// null clears a nullable field; on a required one it is refused (CI-04).
 	if err := req.nullViolations(); err != nil {
 		return nil, err
+	}
+	// attributes.tags replaces the tag assignment (E-125, merge patch: null
+	// removes it).
+	rest, legacy, tagsErr := ExtractLegacyTags(req.Attributes)
+	if tagsErr != nil {
+		return nil, tagsErr
+	}
+	if legacy != nil {
+		req.Attributes, req.LegacyTags = rest, legacy
 	}
 	if err := CheckReservedKeys("attributes", req.Attributes); err != nil {
 		return nil, err

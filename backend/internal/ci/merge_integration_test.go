@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,10 @@ import (
 // overrides open an override_conflict review; the victim is soft-deleted
 // with merged_into_id and GET on it answers 301; a snapshot with 30 days and
 // a tombstone with 12 months are recorded; a merge of a CI another merge
-// holds (lock or done) is 409.
+// holds (lock or done) is 409. The tags of both are united through ci_tag
+// (WP-281): the victim's assignments move (Moved["tags"]), the one the
+// survivor has already is removed from the victim into the snapshot, and
+// attributes carry no tags.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestMergeAgainstPostgres(t *testing.T) {
@@ -50,9 +54,14 @@ func TestMergeAgainstPostgres(t *testing.T) {
 	victim := f.CI(t, f.OrgA, f.Client1, "merge-victim")
 	other := f.CI(t, f.OrgA, f.Client1, "merge-other")
 	asset := f.Asset(t, f.OrgA, f.Client1, "MRG-1")
-	exec(`UPDATE ci SET asset_id = $2, serial_number = 'SN-MERGE-1', attributes = '{"tags": ["b"], "rack": "R1"}' WHERE id = $1`, victim, asset)
+	exec(`UPDATE ci SET asset_id = $2, serial_number = 'SN-MERGE-1', attributes = '{"rack": "R1"}' WHERE id = $1`, victim, asset)
 	exec(`UPDATE asset SET ci_id = $1 WHERE id = $2`, victim, asset)
-	exec(`UPDATE ci SET attributes = '{"tags": ["a"]}' WHERE id = $1`, survivor)
+	tagA, tagB, tagShared := f.ID(), f.ID(), f.ID()
+	exec(`INSERT INTO tag (id, organization_id, key, display_name) VALUES
+		($1, $4, 'merge-a', '{"de": "a", "en": "a"}'), ($2, $4, 'merge-b', '{"de": "b", "en": "b"}'),
+		($3, $4, 'merge-shared', '{"de": "s", "en": "s"}')`, tagA, tagB, tagShared, f.OrgA)
+	exec(`INSERT INTO ci_tag (organization_id, ci_id, tag_id) VALUES ($1, $2, $3), ($1, $2, $5), ($1, $4, $6), ($1, $4, $5)`,
+		f.OrgA, survivor, tagA, victim, tagShared, tagB)
 	exec(`INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type) VALUES
 		($1, $2, $3, 'depends_on'), ($1, $4, $3, 'depends_on'), ($1, $2, $4, 'depends_on'), ($1, $2, $5, 'connected_to')`,
 		f.OrgA, victim, other, survivor, other)
@@ -101,8 +110,16 @@ func TestMergeAgainstPostgres(t *testing.T) {
 		res.OverrideConflicts[0] != "model" || res.Moved["interfaces"] != 1 || res.Moved["contacts"] != 1 || res.Moved["documents"] != 1 {
 		t.Errorf("merge result: %+v", res)
 	}
-	if tags, _ := res.Survivor.Attributes["tags"].([]any); len(tags) != 2 || res.Survivor.Attributes["rack"] != "R1" {
+	if _, ok := res.Survivor.Attributes["tags"]; ok || res.Survivor.Attributes["rack"] != "R1" {
 		t.Errorf("merged attributes: %v", res.Survivor.Attributes)
+	}
+	if got := strings.Join(res.Survivor.Tags, ","); got != "merge-a,merge-b,merge-shared" || res.Moved["tags"] != 1 {
+		t.Errorf("merged tags %q, moved %d", got, res.Moved["tags"])
+	}
+	var victimTags, survivorTags int
+	if err = f.Admin.QueryRow(bg, `SELECT (SELECT count(*) FROM ci_tag WHERE ci_id = $1), (SELECT count(*) FROM ci_tag WHERE ci_id = $2)`,
+		victim, survivor).Scan(&victimTags, &survivorTags); err != nil || victimTags != 0 || survivorTags != 3 {
+		t.Errorf("tag assignments: victim %d, survivor %d, %v", victimTags, survivorTags, err)
 	}
 	if d := time.Until(res.TombstoneUntil); d < 360*24*time.Hour {
 		t.Errorf("tombstone until %v", res.TombstoneUntil)
@@ -166,6 +183,22 @@ func TestMergeAgainstPostgres(t *testing.T) {
 	}
 	if err = json.Unmarshal(snapshot, &snap); err != nil || snap.Victim["id"] != victim || len(snap.Changed) == 0 || len(snap.Removed) < 3 {
 		t.Errorf("snapshot: %v changed %d removed %d", err, len(snap.Changed), len(snap.Removed))
+	}
+	// The duplicate of the victim is removed into the snapshot, the moved
+	// assignment is kept in its state before.
+	tagRows := map[string]string{}
+	for _, list := range []struct {
+		name string
+		rows []map[string]any
+	}{{"removed", snap.Removed}, {"changed", snap.Changed}} {
+		for _, r := range list.rows {
+			if row, _ := r["row"].(map[string]any); r["table"] == "ci_tag" && row["ci_id"] == victim {
+				tagRows[row["tag_id"].(string)] = list.name
+			}
+		}
+	}
+	if len(tagRows) != 2 || tagRows[tagShared] != "removed" || tagRows[tagB] != "changed" {
+		t.Errorf("tag rows of the snapshot: %v", tagRows)
 	}
 }
 

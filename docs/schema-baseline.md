@@ -953,6 +953,44 @@ Teilindizes `idx_ticket_sla_response_open` (`organization_id`,
 (`organization_id`, `resolution_due_at`) WHERE `resolved_at` und
 `resolution_breach_notified_at` NULL (Lauf aus WP-769).
 
+Tag-Katalog und Tag-Zuordnung (CI-07, CI-08, CI-12, WP-281, E-125, Migration
+000218): `tag` ist der Katalog einer Organisation (`organization_id` NOT NULL,
+ON DELETE CASCADE): `key` (`tag_key_check`: `^[a-z0-9][a-z0-9_-]{0,62}$`),
+`display_name` (`jsonb`, `tag_display_name_i18n` wie
+`ci_type_display_name_i18n`: nur `de`/`en`), optional `color`
+(`tag_color_check`: `^#[0-9a-f]{6}$`), `is_system` (Standard false),
+`created_at`, `updated_at` (Trigger `trg_tag_updated_at`). Schlüssel
+`tag_organization_key_key` (`organization_id`, `key`) und
+`tag_id_organization_key` (`id`, `organization_id`); entitätsspezifische
+Spalten gibt es nicht. RLS mit ENABLE/FORCE und der Policy `tag_isolation`
+(FOR ALL, `app.org_id`), TRUNCATE-Schutz `reticora_truncate_guard`. Den
+System-Tag `archived` (de „Archiviert“, en „Archived“, `is_system`) legt die
+Migration für jede Organisation an, für neue Organisationen der Trigger
+`trg_organization_default_tags` (AFTER INSERT auf `organization`, Funktion
+`organization_default_tags`, setzt `app.org_id` wie
+`organization_default_vrf`). `tag_normalize_key(text)` ist die Key-Regel
+(Kleinschreibung, andere Zeichen als `a-z`, `0-9`, `_`, `-` werden `_`,
+führende `_`/`-` entfallen, höchstens 63 Zeichen; `ci.TagKey`). `ci_tag`
+ordnet Tags CIs zu (`id` PRIMARY KEY, `organization_id`, `ci_id`, `tag_id`,
+`client_id`, `site_id`, `created_by` ohne Fremdschlüssel, `created_at`):
+`ci_tag_ci_fkey` (`ci_id`, `organization_id`) → `ci` (`id`,
+`organization_id`) ON DELETE CASCADE (K19), `ci_tag_tag_fkey` (`tag_id`,
+`organization_id`) → `tag` (`id`, `organization_id`) ohne ON-DELETE-Aktion
+(zugeordnete Tags lassen sich nicht löschen, die Organisation schon),
+`ci_tag_ci_id_tag_id_key` (`ci_id`, `tag_id`), Index `idx_ci_tag_org_tag`
+(`organization_id`, `tag_id`). `client_id` und `site_id` setzt
+`derive_ci_scope('ci_id')` (`ci_tag_scope`); `propagate_ci_scope()` (Fassung
+aus 000209) leitet sie bei Client- oder Site-Wechsel des CI neu ab. Policies
+wie `ci_template` (`ci_tag_isolation`, `ci_tag_scoped_update`,
+`ci_tag_scoped_delete`), TRUNCATE-Schutz `reticora_truncate_guard`.
+`ci_field_value_no_tags` (`field_name <> 'tags'`) schließt `tags` als
+Feldwert aus. Die Datenmigration übernimmt den wirksamen Wert jedes CI
+(Override aus `ci_field_value`, sonst `ci.attributes.tags`, nur
+String-Elemente) nach `ci_tag`, entfernt `attributes.tags` und die Feldwerte
+`tags` ohne Änderung von `version`, `schema_version` und `updated_at`, schließt
+offene `override_conflict`-Reviews zu `tags`, entfernt `tags` aus offenen
+Merge-Snapshots und normalisiert `saved_view.filter_spec.tags` von CI-Sichten.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -989,6 +1027,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_merge` | ja | ja | ci_merge_isolation (ALL), ci_merge_scoped_delete (DELETE), ci_merge_scoped_update (UPDATE) |
 | `ci_relationship` | ja | ja | ci_relationship_isolation (ALL), ci_relationship_scoped_delete (DELETE), ci_relationship_scoped_update (UPDATE) |
 | `ci_snapshot` | ja | ja | ci_snapshot_isolation (ALL), ci_snapshot_scoped_delete (DELETE), ci_snapshot_scoped_update (UPDATE) |
+| `ci_tag` | ja | ja | ci_tag_isolation (ALL), ci_tag_scoped_delete (DELETE), ci_tag_scoped_update (UPDATE) |
 | `ci_template` | ja | ja | ci_template_isolation (ALL), ci_template_scoped_delete (DELETE), ci_template_scoped_update (UPDATE) |
 | `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
 | `ci_type_attribute_set` | ja | ja | ci_type_attribute_set_isolation_delete (DELETE), ci_type_attribute_set_isolation_insert (INSERT), ci_type_attribute_set_isolation_select (SELECT), ci_type_attribute_set_isolation_update (UPDATE) |
@@ -1089,6 +1128,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `stock_scan` | ja | ja | stock_scan_tenant_isolation (ALL) |
 | `stocktake` | ja | ja | stocktake_tenant_isolation (ALL) |
 | `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |
+| `tag` | ja | ja | tag_isolation (ALL) |
 | `team` | ja | ja | team_tenant_isolation (ALL) |
 | `team_member` | ja | ja | team_member_isolation (ALL) |
 | `template` | ja | ja | template_isolation_delete (DELETE), template_isolation_insert (INSERT), template_isolation_select (SELECT), template_isolation_update (UPDATE) |
