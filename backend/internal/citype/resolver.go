@@ -11,6 +11,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // FieldLister is the subset of Repository needed to resolve the attribute
@@ -61,25 +62,32 @@ type FieldLister interface {
 // instance definitions in one statement where the lister offers it
 // (ciLayerLister); without it (MemoryRepository) a CI has no templates.
 func ResolveFields(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error) {
-	return resolveFields(ctx, r, orgID, ciTypeID, ciID, nil)
+	defs, _, err := resolveFields(ctx, r, orgID, ciTypeID, ciID, nil)
+	return defs, err
 }
 
+// templateSource returns the template layer of a CI in place of the stored
+// one (ResolveFieldsWithTemplates) and the rule scope of its versions.
+type templateSource func(ctx context.Context) ([][]templateItem, ruleScope, error)
+
 // resolveFields is ResolveFields; templates, when set, returns the template
-// layer in place of the stored one (ResolveFieldsWithTemplates).
+// layer in place of the stored one (ResolveFieldsWithTemplates). It also
+// returns the rule scope of the CI (WP-257), read with the layers.
 func resolveFields(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID string,
-	templates func(ctx context.Context) ([][]templateItem, error)) ([]fieldmeta.FieldDefinition, error) {
-	layers, err := compositionLayers(ctx, r, orgID, ciTypeID, ciID, layerSource{templates: templates})
+	templates templateSource) ([]fieldmeta.FieldDefinition, ruleScope, error) {
+	layers, rs, err := compositionLayers(ctx, r, orgID, ciTypeID, ciID, layerSource{templates: templates})
 	if err != nil {
-		return nil, err
+		return nil, rs, err
 	}
-	return Compose(layers...)
+	defs, err := Compose(layers...)
+	return defs, rs, err
 }
 
 // layerSource adjusts where compositionLayers takes two layers from.
 type layerSource struct {
 	// templates, when set, returns the template layer in place of the
 	// stored ci_template rows of the CI.
-	templates func(ctx context.Context) ([][]templateItem, error)
+	templates templateSource
 	// everyGlobal: without a type the organization layer holds every
 	// global attribute of the organization, whatever it applies to; the
 	// check of the global layers (CheckComposition without a type). With
@@ -94,25 +102,27 @@ type layerSource struct {
 // position order (WP-709) → one layer per template in position order
 // (WP-710; the item's definition where no lower layer has the key, then
 // its overrides) → the instance definitions of the CI (MET-14). Layers
-// without a type or a CI are empty.
+// without a type or a CI are empty. It also returns the rule scope of the
+// CI (WP-257), read with the chain and the template layer.
 func compositionLayers(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID string,
-	src layerSource) ([][]fieldmeta.FieldDefinition, error) {
+	src layerSource) ([][]fieldmeta.FieldDefinition, ruleScope, error) {
 	templates := src.templates
+	var rs ruleScope
 	globals, err := r.ListGlobalFields(ctx, orgID)
 	if err != nil {
-		return nil, err
+		return nil, rs, err
 	}
 	var chain []Type
 	var setLayers [][]Field
 	scope := typeScope{}
 	if ciTypeID != "" {
-		if chain, setLayers, err = chainAndSets(ctx, r, orgID, ciTypeID); err != nil {
-			return nil, err
+		if chain, setLayers, rs, err = chainAndSets(ctx, r, orgID, ciTypeID); err != nil {
+			return nil, rs, err
 		}
 		scope = scopeOfChain(chain)
 		if slices.ContainsFunc(globals, func(f Field) bool { return !f.IsSystem && f.AppliesTo == AppliesToCategories }) {
 			if scope.category, err = r.TypeCategory(ctx, orgID, ciTypeID); err != nil {
-				return nil, err
+				return nil, rs, err
 			}
 		}
 	}
@@ -143,24 +153,26 @@ func compositionLayers(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID
 	var (
 		instanceFields []InstanceField
 		assigned       [][]templateItem
+		versions       ruleScope
 	)
 	cl, combined := r.(ciLayerLister)
 	switch {
 	case templates != nil:
-		if assigned, err = templates(ctx); err != nil {
-			return nil, err
+		if assigned, versions, err = templates(ctx); err != nil {
+			return nil, rs, err
 		}
 		if ciID != "" {
 			instanceFields, err = r.ListInstanceFields(ctx, orgID, ciID)
 		}
 	case ciID != "" && combined:
-		instanceFields, assigned, err = cl.ciLayers(ctx, orgID, ciID)
+		instanceFields, assigned, versions, err = cl.ciLayers(ctx, orgID, ciID)
 	case ciID != "":
 		instanceFields, err = r.ListInstanceFields(ctx, orgID, ciID)
 	}
 	if err != nil {
-		return nil, err
+		return nil, rs, err
 	}
+	rs.versions, rs.active = versions.versions, rs.active || versions.active
 	var instance []fieldmeta.FieldDefinition
 	for i := range instanceFields {
 		instance = append(instance, instanceFields[i].Definition())
@@ -168,10 +180,10 @@ func compositionLayers(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID
 	layers := append([][]fieldmeta.FieldDefinition{system, org, typed}, sets...)
 	templateLayer, err := templateLayers(layers, assigned)
 	if err != nil {
-		return nil, err
+		return nil, rs, err
 	}
 	layers = append(layers, templateLayer...)
-	return append(layers, instance), nil
+	return append(layers, instance), rs, nil
 }
 
 // CompositionScope is what CheckComposition composes (WP-252):
@@ -261,11 +273,12 @@ func (l *txLister) check(ctx context.Context, scope CompositionScope) ([]*Compos
 	src := layerSource{everyGlobal: true}
 	if scope.TemplateVersionIDs != nil {
 		ids := scope.TemplateVersionIDs
-		src.templates = func(ctx context.Context) ([][]templateItem, error) {
-			return templateVersionLayersTx(ctx, l.tx, ids)
+		src.templates = func(ctx context.Context) ([][]templateItem, ruleScope, error) {
+			layers, err := templateVersionLayersTx(ctx, l.tx, ids)
+			return layers, ruleScope{}, err
 		}
 	}
-	layers, err := compositionLayers(ctx, l, orgID, typeID, scope.CIID, src)
+	layers, _, err := compositionLayers(ctx, l, orgID, typeID, scope.CIID, src)
 	if err != nil {
 		return nil, err
 	}
@@ -286,20 +299,20 @@ func (l *txLister) ListGlobalFields(ctx context.Context, _ string) ([]Field, err
 	return l.globals, nil
 }
 
-// TypeChainSets implements chainSetLister.
-func (l *txLister) TypeChainSets(ctx context.Context, _, typeID string) ([]Type, [][]Field, error) {
+// typeChainLayers implements chainSetLister.
+func (l *txLister) typeChainLayers(ctx context.Context, _, typeID string) ([]Type, [][]Field, ruleScope, error) {
 	return typeChainSetsTx(ctx, l.tx, typeID, l.override)
 }
 
 // TypeChain implements FieldLister.
 func (l *txLister) TypeChain(ctx context.Context, orgID, typeID string) ([]Type, error) {
-	chain, _, err := l.TypeChainSets(ctx, orgID, typeID)
+	chain, _, _, err := l.typeChainLayers(ctx, orgID, typeID)
 	return chain, err
 }
 
 // ListSetFields implements FieldLister.
 func (l *txLister) ListSetFields(ctx context.Context, orgID, typeID string) ([][]Field, error) {
-	_, sets, err := l.TypeChainSets(ctx, orgID, typeID)
+	_, sets, _, err := l.typeChainLayers(ctx, orgID, typeID)
 	return sets, err
 }
 
@@ -310,12 +323,12 @@ func (l *txLister) TypeCategory(ctx context.Context, _, typeID string) (string, 
 
 // ListInstanceFields implements FieldLister.
 func (l *txLister) ListInstanceFields(ctx context.Context, orgID, ciID string) ([]InstanceField, error) {
-	fields, _, err := ciLayersTx(ctx, l.tx, orgID, ciID)
+	fields, _, _, err := ciLayersTx(ctx, l.tx, orgID, ciID)
 	return fields, err
 }
 
 // ciLayers implements ciLayerLister.
-func (l *txLister) ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, error) {
+func (l *txLister) ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, ruleScope, error) {
 	return ciLayersTx(ctx, l.tx, orgID, ciID)
 }
 
@@ -368,24 +381,145 @@ func (f *Field) appliesTo(s typeScope) bool {
 	return appliesToScope(f.AppliesTo, f.AppliesToCategories, f.AppliesToTypeIDs, s)
 }
 
-// chainSetLister is a FieldLister that reads the type chain and its set
-// layers in one statement (PGRepository.TypeChainSets).
+// chainSetLister is a FieldLister that reads the type chain, its set
+// layers and its rule scope in one statement (PGRepository.TypeChainSets).
 type chainSetLister interface {
-	TypeChainSets(ctx context.Context, orgID, typeID string) ([]Type, [][]Field, error)
+	typeChainLayers(ctx context.Context, orgID, typeID string) ([]Type, [][]Field, ruleScope, error)
 }
 
-// chainAndSets returns the type chain and the set layers of typeID, in one
-// read where the lister offers it.
-func chainAndSets(ctx context.Context, r FieldLister, orgID, typeID string) ([]Type, [][]Field, error) {
+// chainAndSets returns the type chain, the set layers and the rule scope
+// of typeID, in one read where the lister offers it. Without it the scope
+// names the chain only and no rules (MemoryRepository keeps none).
+func chainAndSets(ctx context.Context, r FieldLister, orgID, typeID string) ([]Type, [][]Field, ruleScope, error) {
 	if cs, ok := r.(chainSetLister); ok {
-		return cs.TypeChainSets(ctx, orgID, typeID)
+		return cs.typeChainLayers(ctx, orgID, typeID)
 	}
+	var rs ruleScope
 	chain, err := r.TypeChain(ctx, orgID, typeID)
+	if err != nil {
+		return nil, nil, rs, err
+	}
+	for i := range chain {
+		rs.types = append(rs.types, chain[i].ID)
+	}
+	sets, err := r.ListSetFields(ctx, orgID, typeID)
+	return chain, sets, rs, err
+}
+
+// ruleScope is what the catalog rules of a CI target (WP-257, E-111): the
+// types of its chain root → type, the active sets of each type in chain
+// and position order, the template versions of the CI in position order,
+// and whether an active rule the organization sees targets one of them.
+// It is read with the layers, so a resolution without rules reads none.
+type ruleScope struct {
+	types, sets, versions []string
+	active                bool
+}
+
+// ResolveRules returns the active catalog rules (metamodel_rule, WP-716)
+// that apply to a CI of ciTypeID (WP-257, MET-10) in a fixed order: the
+// rules of the type chain from the root to the type (WP-248), then those
+// of the sets of each type of the chain by position (WP-250), then those
+// of the CI's template versions by position (ci_template, WP-710); within
+// one target by key. They are read through RuleStore.ActiveRules, so a
+// lister without a RuleStore (MemoryRepository) has no rules. Unlike the
+// field definitions they are not composed: every rule applies, AND-ed with
+// the attribute rules (ci.Service).
+func ResolveRules(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID string) ([]fieldmeta.CatalogRule, error) {
+	var rs ruleScope
+	if ciTypeID != "" {
+		var err error
+		if _, _, rs, err = chainAndSets(ctx, r, orgID, ciTypeID); err != nil {
+			return nil, err
+		}
+	}
+	if cl, ok := r.(ciLayerLister); ok && ciID != "" {
+		_, _, versions, err := cl.ciLayers(ctx, orgID, ciID)
+		if err != nil {
+			return nil, err
+		}
+		rs.versions, rs.active = versions.versions, rs.active || versions.active
+	}
+	return catalogRules(ctx, r, orgID, &rs)
+}
+
+// ResolveFieldsAndRules returns what ResolveFields and ResolveRules return
+// in one pass over the layers: the rule scope is read with the chain and
+// the template layer, the rules with one statement more only when an
+// active rule targets the CI (NFR-03, WP-333). templates, when set,
+// replaces the stored template list as in ResolveFieldsWithTemplates.
+func ResolveFieldsAndRules(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID string,
+	templates templateSource) ([]fieldmeta.FieldDefinition, []fieldmeta.CatalogRule, error) {
+	defs, rs, err := resolveFields(ctx, r, orgID, ciTypeID, ciID, templates)
 	if err != nil {
 		return nil, nil, err
 	}
-	sets, err := r.ListSetFields(ctx, orgID, typeID)
-	return chain, sets, err
+	catalog, err := catalogRules(ctx, r, orgID, &rs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return defs, catalog, nil
+}
+
+// catalogRules reads the active rules of the scope through the RuleStore
+// of r and orders them by target: type chain, sets, template versions.
+func catalogRules(ctx context.Context, r FieldLister, orgID string, rs *ruleScope) ([]fieldmeta.CatalogRule, error) {
+	store, ok := r.(RuleStore)
+	if !ok || !rs.active {
+		return nil, nil
+	}
+	rank := map[string]int{}
+	for _, id := range slices.Concat(rs.types, rs.sets, rs.versions) {
+		if _, seen := rank[id]; !seen {
+			rank[id] = len(rank)
+		}
+	}
+	found, err := store.ActiveRules(ctx, orgID, RuleTargets{CITypeIDs: rs.types, AttributeSetIDs: rs.sets, TemplateVersionIDs: rs.versions})
+	if err != nil {
+		return nil, err
+	}
+	target := func(m *MetamodelRule) int {
+		for _, id := range []string{m.CITypeID, m.AttributeSetID, m.TemplateVersionID} {
+			if pos, known := rank[id]; known && id != "" {
+				return pos
+			}
+		}
+		return len(rank)
+	}
+	slices.SortStableFunc(found, func(a, b MetamodelRule) int { return target(&a) - target(&b) })
+	out := make([]fieldmeta.CatalogRule, 0, len(found))
+	for i := range found {
+		rule, cerr := found[i].catalogRule()
+		if cerr != nil {
+			return nil, cerr
+		}
+		out = append(out, rule)
+	}
+	return out, nil
+}
+
+// catalogRule is the neutral form of a stored rule (fieldmeta.CatalogRule)
+// with its condition and value rule parsed.
+func (m *MetamodelRule) catalogRule() (fieldmeta.CatalogRule, error) {
+	out := fieldmeta.CatalogRule{Key: m.Key, AttributeKey: m.AttributeKey, Kind: m.Kind}
+	if len(m.Message) > 0 {
+		out.Message = map[string]string(m.Message)
+	}
+	if !isJSONNull(m.Condition) {
+		cond, err := rules.ParseCondition(m.Condition)
+		if err != nil {
+			return out, fmt.Errorf("rule %s: condition: %w", m.Key, err)
+		}
+		out.Condition = &cond
+	}
+	if !isJSONNull(m.AST) {
+		ast, err := rules.Parse(m.AST)
+		if err != nil {
+			return out, fmt.Errorf("rule %s: ast: %w", m.Key, err)
+		}
+		out.AST = &ast
+	}
+	return out, nil
 }
 
 // chainDefinitions lists the definitions of a chain root → type in layer
@@ -413,4 +547,43 @@ func (r *PGRepository) ResolveFields(ctx context.Context, orgID, ciTypeID, ciID 
 // ResolveFields implements ci.FieldResolver for the in-memory repository.
 func (r *MemoryRepository) ResolveFields(ctx context.Context, orgID, ciTypeID, ciID string) ([]fieldmeta.FieldDefinition, error) {
 	return ResolveFields(ctx, r, orgID, ciTypeID, ciID)
+}
+
+// ResolveRules implements ci.RuleResolver for the PostgreSQL repository
+// (WP-257).
+func (r *PGRepository) ResolveRules(ctx context.Context, orgID, ciTypeID, ciID string) ([]fieldmeta.CatalogRule, error) {
+	return ResolveRules(ctx, r, orgID, ciTypeID, ciID)
+}
+
+// ResolveFieldsAndRules implements ci.RuleResolver for the PostgreSQL
+// repository; templates, when set, is the template list a write leaves
+// the CI with (as in ResolveFieldsWithTemplates).
+func (r *PGRepository) ResolveFieldsAndRules(ctx context.Context, orgID, ciTypeID, ciID string,
+	templates *[]CITemplate) ([]fieldmeta.FieldDefinition, []fieldmeta.CatalogRule, error) {
+	var source templateSource
+	if templates != nil {
+		source = r.templateList(orgID, ciTypeID, *templates)
+	}
+	return ResolveFieldsAndRules(ctx, r, orgID, ciTypeID, ciID, source)
+}
+
+// ResolveRules implements ci.RuleResolver for the in-memory repository:
+// without a database there is no rule catalog, so there are no rules.
+func (r *MemoryRepository) ResolveRules(ctx context.Context, orgID, ciTypeID, ciID string) ([]fieldmeta.CatalogRule, error) {
+	return ResolveRules(ctx, r, orgID, ciTypeID, ciID)
+}
+
+// ErrTemplatesNeedDatabase: the in-memory repository keeps no template
+// assignments (WP-710).
+var ErrTemplatesNeedDatabase = errors.New("template assignments need the database")
+
+// ResolveFieldsAndRules implements ci.RuleResolver for the in-memory
+// repository: the field definitions and no rules; a template list is
+// refused (ErrTemplatesNeedDatabase).
+func (r *MemoryRepository) ResolveFieldsAndRules(ctx context.Context, orgID, ciTypeID, ciID string,
+	templates *[]CITemplate) ([]fieldmeta.FieldDefinition, []fieldmeta.CatalogRule, error) {
+	if templates != nil {
+		return nil, nil, ErrTemplatesNeedDatabase
+	}
+	return ResolveFieldsAndRules(ctx, r, orgID, ciTypeID, ciID, nil)
 }

@@ -258,6 +258,8 @@ type Service struct {
 	repo   Repository
 	limit  LimitGuard
 	fields FieldResolver
+	// catalog is fields as a RuleResolver (WP-257); nil: no catalog rules.
+	catalog RuleResolver
 	// references checks reference values against their targets (MET-12);
 	// nil: form only.
 	references fieldmeta.ReferenceLookup
@@ -285,8 +287,12 @@ func NewServiceWithLimits(repo Repository, limit LimitGuard) *Service {
 // global, CI-type and instance field metadata. Without a resolver the service
 // keeps its previous pass-through behaviour, which keeps the constructor
 // signatures stable for callers that do not manage field metadata.
+// When the resolver is also a RuleResolver (citype's repositories), the
+// active catalog rules of a CI are evaluated with its attribute rules
+// (WP-257, MET-10).
 func (s *Service) WithFieldResolver(fields FieldResolver) *Service {
 	s.fields = fields
+	s.catalog, _ = fields.(RuleResolver)
 	return s
 }
 
@@ -310,7 +316,9 @@ type writeScope struct {
 // metadata and the reference values the write sets against their targets
 // (checkReferences). templates, when set, is the template list the write
 // leaves the CI with (WP-710): the attributes are checked against the
-// schema composed with it.
+// schema composed with it. The active catalog rules of the CI (type chain,
+// sets, template versions; WP-257) apply with the attribute rules; their
+// conditions see the values after the write, typed columns included.
 func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, scope writeScope, existing, patch map[string]any,
 	templates *[]citype.CITemplate) error {
 	if s.fields == nil {
@@ -319,12 +327,12 @@ func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, sc
 		}
 		return nil
 	}
-	defs, err := resolveFieldsWith(ctx, s.fields, orgID, ciTypeID, ciID, templates)
+	defs, catalog, err := resolveWithRules(ctx, s.fields, s.catalog, orgID, ciTypeID, ciID, templates)
 	if err != nil {
 		return err
 	}
 	values := MergePatch(existing, patch)
-	if verr := validateAttributes(defs, values, patch, existing); verr != nil {
+	if verr := validateWithRules(defs, catalog, values, patch, existing); verr != nil {
 		return verr
 	}
 	return checkReferences(ctx, s.references, orgID, defs, scope, values, patch, existing)

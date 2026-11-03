@@ -1258,3 +1258,4 @@ TST-01;[B], Teilumfang [P2];B;backend/internal/citype/compose_test.go;WP-252
 NET-09;[P2];B;backend/internal/discovery/ip_reservation_conflict_integration_test.go;WP-772
 UI-14;[P2–P4, A];C;frontend/src/components/graph/ImpactPanel.test.tsx;WP-818
 AUD-08;[P2];C;backend/internal/history/snapshot_integration_test.go;WP-312
+MET-10;B/G1, Teil P2/G2;B;backend/internal/ci/rules_eval_integration_test.go;WP-257

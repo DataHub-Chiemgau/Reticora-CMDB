@@ -202,6 +202,36 @@ type Predicate struct {
 	Value any    `json:"value,omitempty"`
 }
 
+// Kinds of a catalog rule (metamodel_rule.kind, WP-716): the values of
+// CatalogRule.Kind.
+const (
+	CatalogValidation = "validation"
+	CatalogRequired   = "required"
+	CatalogReadonly   = "readonly"
+	CatalogVisible    = "visible"
+)
+
+// CatalogRule is an active rule of the rule catalog (metamodel_rule,
+// WP-716) as the evaluation sees it (WP-257, MET-10): the neutral form
+// citype.ResolveRules returns and ci evaluates, so neither package imports
+// the other for it. Condition nil means the rule always applies; AST is
+// the value rule of a validation; Message is the i18n message of the rule
+// (nil when it has none).
+type CatalogRule struct {
+	Key          string
+	AttributeKey string
+	Kind         string
+	Condition    *rules.Rule
+	AST          *rules.Rule
+	Message      map[string]string
+}
+
+// Applies reports whether the rule applies to values: it has no condition
+// or its condition holds (rules.EvaluateCondition).
+func (c *CatalogRule) Applies(values map[string]any) bool {
+	return c.Condition == nil || rules.EvaluateCondition(c.Condition, values)
+}
+
 // ReservedNames are the attribute namespaces of CI-10; no field may be
 // called like one (GLO-13).
 var ReservedNames = map[string]bool{"_overrides": true, "_observed": true, "_provenance": true, "_instance": true}

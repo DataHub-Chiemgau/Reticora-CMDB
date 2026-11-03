@@ -229,7 +229,7 @@ func templateLayers(lower [][]fieldmeta.FieldDefinition, templates [][]templateI
 // ciLayerLister reads the instance definitions and the template layers of a
 // stored CI in one statement (PGRepository).
 type ciLayerLister interface {
-	ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, error)
+	ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, ruleScope, error)
 }
 
 // ciLayers implements ciLayerLister: the instance definitions of the CI as
@@ -237,28 +237,32 @@ type ciLayerLister interface {
 // in position order) in one statement under row level security, because
 // ResolveFields runs on every CI write, also in the budgeted ingest
 // (TestIngestStatementBudget, TestRediscoverStatementBudget): the template
-// layer costs no statement more.
-func (r *PGRepository) ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, error) {
+// layer costs no statement more. The same statement reads the rule scope
+// of the templates (WP-257): the IDs of the assigned template versions in
+// position order and whether an active catalog rule targets one of them.
+func (r *PGRepository) ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, ruleScope, error) {
 	var (
 		fields    []InstanceField
 		templates [][]templateItem
+		scope     ruleScope
 	)
 	if !api.IsUUID(ciID) {
-		return fields, templates, nil
+		return fields, templates, scope, nil
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		fields, templates, err = ciLayersTx(ctx, tx, orgID, ciID)
+		fields, templates, scope, err = ciLayersTx(ctx, tx, orgID, ciID)
 		return err
 	})
-	return fields, templates, err
+	return fields, templates, scope, err
 }
 
 // ciLayersTx is ciLayers in tx, one statement (also CheckComposition,
-// WP-252).
-func ciLayersTx(ctx context.Context, tx pgx.Tx, orgID, ciID string) ([]InstanceField, [][]templateItem, error) {
+// WP-252), with the rule scope of the templates (WP-257).
+func ciLayersTx(ctx context.Context, tx pgx.Tx, orgID, ciID string) ([]InstanceField, [][]templateItem, ruleScope, error) {
+	var scope ruleScope
 	if !api.IsUUID(ciID) {
-		return nil, nil, nil
+		return nil, nil, scope, nil
 	}
 	var instanceRaw, templateRaw []byte
 	if err := tx.QueryRow(ctx, `SELECT
@@ -266,15 +270,22 @@ func ciLayersTx(ctx context.Context, tx pgx.Tx, orgID, ciID string) ([]InstanceF
 				FROM ci_instance_field_definition d
 				WHERE d.ci_id = $1 AND d.organization_id = $2 AND EXISTS (SELECT 1 FROM ci WHERE ci.id = d.ci_id)), '[]'::jsonb),
 			COALESCE((SELECT jsonb_agg(`+templateItemsJSON("ct.template_id", "ct.version")+` ORDER BY ct.position)
-				FROM ci_template ct WHERE ct.ci_id = $1), '[]'::jsonb)`, ciID, orgID).Scan(&instanceRaw, &templateRaw); err != nil {
-		return nil, nil, fmt.Errorf("list instance fields and templates: %w", err)
+				FROM ci_template ct WHERE ct.ci_id = $1), '[]'::jsonb),
+			COALESCE((SELECT array_agg(tv.id::text ORDER BY ct.position)
+				FROM ci_template ct JOIN template_version tv ON tv.template_id = ct.template_id AND tv.version = ct.version
+				WHERE ct.ci_id = $1), '{}'::text[]),
+			EXISTS (SELECT 1 FROM ci_template ct
+				JOIN template_version tv ON tv.template_id = ct.template_id AND tv.version = ct.version
+				JOIN metamodel_rule m ON m.template_version_id = tv.id AND m.is_active
+				WHERE ct.ci_id = $1)`, ciID, orgID).Scan(&instanceRaw, &templateRaw, &scope.versions, &scope.active); err != nil {
+		return nil, nil, scope, fmt.Errorf("list instance fields and templates: %w", err)
 	}
 	fields, err := instanceFieldsFromJSON(instanceRaw)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, scope, err
 	}
 	templates, err := templateLayersFromJSON(templateRaw)
-	return fields, templates, err
+	return fields, templates, scope, err
 }
 
 // templateVersionLayersTx reads the items of the template versions ids
@@ -349,8 +360,18 @@ func instanceFieldsFromJSON(raw []byte) ([]InstanceField, error) {
 // (PUT /cis/{id}/templates) writes. The list is checked like the write
 // checks it (ResolveTemplateRefsTx, 422 on templates[i]).
 func (r *PGRepository) ResolveFieldsWithTemplates(ctx context.Context, orgID, ciTypeID, ciID string, templates []CITemplate) ([]fieldmeta.FieldDefinition, error) {
-	return resolveFields(ctx, r, orgID, ciTypeID, ciID, func(ctx context.Context) ([][]templateItem, error) {
+	defs, _, err := resolveFields(ctx, r, orgID, ciTypeID, ciID, r.templateList(orgID, ciTypeID, templates))
+	return defs, err
+}
+
+// templateList returns the template layer of the list templates for
+// resolveFields: the items of the versions it names, checked like a write
+// (ResolveTemplateRefsTx), and their rule scope (WP-257), the versions in
+// list order and whether an active catalog rule targets one of them.
+func (r *PGRepository) templateList(orgID, ciTypeID string, templates []CITemplate) templateSource {
+	return func(ctx context.Context) ([][]templateItem, ruleScope, error) {
 		var out [][]templateItem
+		var scope ruleScope
 		err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 			resolved, err := ResolveTemplateRefsTx(ctx, tx, ciTypeID, templates)
 			if err != nil || len(resolved) == 0 {
@@ -362,13 +383,17 @@ func (r *PGRepository) ResolveFieldsWithTemplates(ctx context.Context, orgID, ci
 				ids[i], versions[i] = resolved[i].TemplateID, int32(resolved[i].Version) //nolint:gosec // a stored version
 			}
 			var raw []byte
-			if err = tx.QueryRow(ctx, `SELECT COALESCE(jsonb_agg(`+templateItemsJSON("r.template_id", "r.version")+` ORDER BY r.ord), '[]'::jsonb)
-				FROM unnest($1::uuid[], $2::int[]) WITH ORDINALITY AS r(template_id, version, ord)`, ids, versions).Scan(&raw); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT COALESCE(jsonb_agg(`+templateItemsJSON("r.template_id", "r.version")+` ORDER BY r.ord), '[]'::jsonb),
+					COALESCE(array_agg(tv.id::text ORDER BY r.ord), '{}'::text[]),
+					COALESCE(bool_or(EXISTS (SELECT 1 FROM metamodel_rule m WHERE m.template_version_id = tv.id AND m.is_active)), false)
+				FROM unnest($1::uuid[], $2::int[]) WITH ORDINALITY AS r(template_id, version, ord)
+				JOIN template_version tv ON tv.template_id = r.template_id AND tv.version = r.version`,
+				ids, versions).Scan(&raw, &scope.versions, &scope.active); err != nil {
 				return fmt.Errorf("read template items: %w", err)
 			}
 			out, err = templateLayersFromJSON(raw)
 			return err
 		})
-		return out, err
-	})
+		return out, scope, err
+	}
 }

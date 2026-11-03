@@ -11965,8 +11965,12 @@ export interface components {
       violations: {
         field: string;
         detail: string;
-        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty` or `length-range-empty`. */
+        /** @description Machine-readable code of the violation, set where one is defined: a composition conflict of the attribute definitions (MET-16) carries `datatype-conflict`, `enum-empty`, `range-empty` or `length-range-empty`. A violated catalog rule (WP-257, MET-10) carries the code of the rule language for a `validation` rule (e.g. `pattern`, `range.max`, `enum`), `required` for a `required` rule and `read_only` for a `readonly` rule. */
         code?: string;
+        /** @description Key of the violated catalog rule (`/api/v1/rules`, WP-257); absent for the rules of the attribute definitions. */
+        rule?: string;
+        /** @description Message of the violated catalog rule (de and/or en), when the rule has one. */
+        message?: components['schemas']['RuleMessage'];
       }[];
     };
     InterfaceInUseProblem: components['schemas']['ProblemDetail'] & {

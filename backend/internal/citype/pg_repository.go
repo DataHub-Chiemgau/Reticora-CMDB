@@ -818,28 +818,43 @@ func (r *PGRepository) ListSetFields(ctx context.Context, orgID, id string) ([][
 // set its definitions by sort_order and key; of the sets of an ancestor
 // only the inheritable set attributes count (WP-248).
 func (r *PGRepository) TypeChainSets(ctx context.Context, orgID, id string) ([]Type, [][]Field, error) {
-	chain := []Type{}
-	var sets [][]Field
-	if !api.IsUUID(id) {
-		return chain, sets, nil
-	}
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		chain, sets, err = typeChainSetsTx(ctx, tx, id, nil)
-		return err
-	})
+	chain, sets, _, err := r.typeChainLayers(ctx, orgID, id)
 	return chain, sets, err
 }
 
-// typeChainSetsTx is TypeChainSets in tx, in one statement. override, when
-// set, replaces the stored set list of one type of the chain by the list
-// it is about to get (checkSetAssignmentTx, WP-709), so the check composes
-// the new list before it is written (CheckComposition, WP-252).
-func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOverride) ([]Type, [][]Field, error) {
+// typeChainLayers is TypeChainSets with the rule scope of the chain
+// (WP-257) read in the same statement: the IDs of the chain's types, of
+// their active sets (per type in position order) and whether an active
+// catalog rule the organization sees targets one of them. The resolution
+// reads the catalog rules only then, so a write without rules costs no
+// statement more (TestIngestStatementBudget).
+func (r *PGRepository) typeChainLayers(ctx context.Context, orgID, id string) ([]Type, [][]Field, ruleScope, error) {
 	chain := []Type{}
 	var sets [][]Field
+	var scope ruleScope
 	if !api.IsUUID(id) {
-		return chain, sets, nil
+		return chain, sets, scope, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		chain, sets, scope, err = typeChainSetsTx(ctx, tx, id, nil)
+		return err
+	})
+	return chain, sets, scope, err
+}
+
+// typeChainSetsTx is typeChainLayers in tx, in one statement: the chain,
+// its set layers and its rule scope (WP-257). override, when set, replaces
+// the stored set list of one type of the chain by the list it is about to
+// get (checkSetAssignmentTx, WP-709), so the check composes the new list
+// before it is written (CheckComposition, WP-252); the rule scope then
+// names the sets of that list.
+func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOverride) ([]Type, [][]Field, ruleScope, error) {
+	chain := []Type{}
+	var sets [][]Field
+	var scope ruleScope
+	if !api.IsUUID(id) {
+		return chain, sets, scope, nil
 	}
 	assignments, args := "ci_type_attribute_set", []any{id}
 	if override != nil {
@@ -865,10 +880,19 @@ func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOve
 				JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
 				JOIN attribute_definition a ON a.attribute_set_id = s.id
 				WHERE cs.ci_type_id = c.id
-				GROUP BY cs.position, cs.attribute_set_id) l), '[]'::jsonb)
+				GROUP BY cs.position, cs.attribute_set_id) l), '[]'::jsonb),
+		COALESCE((
+			SELECT array_agg(cs.attribute_set_id::text ORDER BY cs.position, cs.attribute_set_id)
+			FROM `+assignments+` cs
+			JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
+			WHERE cs.ci_type_id = c.id), '{}'::text[]),
+		EXISTS (SELECT 1 FROM metamodel_rule m WHERE m.is_active AND (m.ci_type_id = c.id
+			OR m.attribute_set_id IN (SELECT cs.attribute_set_id FROM `+assignments+` cs
+				JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
+				WHERE cs.ci_type_id = c.id)))
 		FROM ci_type_ancestors($1::uuid) c ORDER BY c.level`, args...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read ci type chain: %w", err)
+		return nil, nil, scope, fmt.Errorf("read ci type chain: %w", err)
 	}
 	type level struct {
 		typ  Type
@@ -878,27 +902,32 @@ func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOve
 	for rows.Next() {
 		var lv level
 		var defs, setDefs []byte
-		if err = rows.Scan(&lv.typ.ID, &defs, &setDefs); err != nil {
+		var setIDs []string
+		var ruled bool
+		if err = rows.Scan(&lv.typ.ID, &defs, &setDefs, &setIDs, &ruled); err != nil {
 			rows.Close()
-			return nil, nil, fmt.Errorf("scan ci type chain: %w", err)
+			return nil, nil, scope, fmt.Errorf("scan ci type chain: %w", err)
 		}
 		attrs, aerr := attributesFromJSON(defs)
 		if aerr != nil {
 			rows.Close()
-			return nil, nil, aerr
+			return nil, nil, scope, aerr
 		}
 		for i := range attrs {
 			lv.typ.Fields = append(lv.typ.Fields, attrs[i].Field())
 		}
 		if err = json.Unmarshal(setDefs, &lv.sets); err != nil {
 			rows.Close()
-			return nil, nil, fmt.Errorf("decode set definitions: %w", err)
+			return nil, nil, scope, fmt.Errorf("decode set definitions: %w", err)
 		}
+		scope.types = append(scope.types, lv.typ.ID)
+		scope.sets = append(scope.sets, setIDs...)
+		scope.active = scope.active || ruled
 		levels = append(levels, lv)
 	}
 	rows.Close()
 	if rerr := rows.Err(); rerr != nil {
-		return nil, nil, rerr
+		return nil, nil, scope, rerr
 	}
 	for i := range levels {
 		chain = append(chain, levels[i].typ)
@@ -906,7 +935,7 @@ func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOve
 		for _, raw := range levels[i].sets {
 			attrs, aerr := attributesFromJSON(raw)
 			if aerr != nil {
-				return nil, nil, aerr
+				return nil, nil, scope, aerr
 			}
 			var layer []Field
 			for j := range attrs {
@@ -919,7 +948,7 @@ func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOve
 			}
 		}
 	}
-	return chain, sets, nil
+	return chain, sets, scope, nil
 }
 
 // TypeSubtree implements Repository: id and every descendant the

@@ -266,9 +266,9 @@ func (l layeredLister) ListInstanceFields(context.Context, string, string) ([]In
 
 // ciLayers implements ciLayerLister: the instance layer and the templates
 // of the CI (WP-710) in position order.
-func (l layeredLister) ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, error) {
+func (l layeredLister) ciLayers(ctx context.Context, orgID, ciID string) ([]InstanceField, [][]templateItem, ruleScope, error) {
 	in, err := l.ListInstanceFields(ctx, orgID, ciID)
-	return in, l.templates, err
+	return in, l.templates, ruleScope{}, err
 }
 
 // TestResolveFieldsComposesLayers: the effective fields compose system
@@ -532,7 +532,7 @@ func TestCompositionConformanceMatrix(t *testing.T) {
 					typeID = tc.lister.chain[len(tc.lister.chain)-1].ID
 				}
 				var err error
-				if layers, err = compositionLayers(context.Background(), tc.lister, "org", typeID, "ci", layerSource{}); err != nil {
+				if layers, _, err = compositionLayers(context.Background(), tc.lister, "org", typeID, "ci", layerSource{}); err != nil {
 					t.Fatal(err)
 				}
 			}
