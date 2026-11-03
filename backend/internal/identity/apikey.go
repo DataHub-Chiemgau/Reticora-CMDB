@@ -234,6 +234,7 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInf
 	if stored.ServiceAccountID != nil {
 		// The key acts as its service account (RBA-08).
 		info.OwnerID = *stored.ServiceAccountID
+		info.ServiceAccountID = *stored.ServiceAccountID
 		resolve = func() ([]Grant, error) {
 			if s.serviceAccounts == nil {
 				return nil, nil

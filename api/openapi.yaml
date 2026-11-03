@@ -15848,9 +15848,9 @@ paths:
         type layouts from the CI's type to the root; per target a layout
         with a role of the caller before the one without, then the smallest
         `priority`, then `role_id`. The caller's roles are the roles and
-        custom roles assigned to the user, whatever their scope; standard
-        roles mapped from IdP groups do not count yet (E-110, until
-        WP-725). An API key gets the layout without a role. Instance
+        custom roles assigned to the user, whatever their scope, and the
+        standard roles the IdP groups of the session map to (E-110). An
+        API key gets the layout without a role. Instance
         attributes stand in `_instance`, required fields the layout leaves
         out or shows only in a hidden section in `_required`. Requires
         ci:read; the client and site scope of the CI apply (404).

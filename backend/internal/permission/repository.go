@@ -288,6 +288,7 @@ func (r *MemoryRepository) AccessGrants(_ context.Context, orgID, userID string)
 			Permissions: toPermissions(sortedKeys(keys)),
 			Clients:     clients,
 			Sites:       append([]string(nil), a.sites...),
+			RoleID:      a.roleID,
 		})
 	}
 	return grants, nil
@@ -315,7 +316,8 @@ func (r *MemoryRepository) assignmentClients(orgID string, a assignment) ([]stri
 }
 
 // RoleGrants grants the target matrix of the named org-scope standard roles
-// (StandardRoles); the memory repository holds no per-organization roles.
+// (StandardRoles); the memory repository holds no per-organization roles, so
+// the grants carry no role id.
 func (r *MemoryRepository) RoleGrants(_ context.Context, _ string, roleNames []string) ([]identity.Grant, error) {
 	grants := make([]identity.Grant, 0, len(roleNames))
 	for _, name := range roleNames {

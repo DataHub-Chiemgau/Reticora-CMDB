@@ -359,3 +359,116 @@ func TestIdempotencyScopedByTenant(t *testing.T) {
 		t.Fatalf("expected exactly 2 handler executions, got %d", calls)
 	}
 }
+
+// staticOwners and staticServiceAccounts hand out fixed grants.
+type staticOwners []identity.Grant
+
+func (o staticOwners) AccessGrants(context.Context, string, string) ([]identity.Grant, error) {
+	return o, nil
+}
+
+type staticServiceAccounts []identity.Grant
+
+func (a staticServiceAccounts) ServiceAccountGrants(context.Context, string, string) ([]identity.Grant, error) {
+	return a, nil
+}
+
+// TestPrincipalCarriesGroupsAndServiceAccount covers WP-725 (RBA-07): a
+// session's IdP groups reach Principal.Groups; a key bound to a service
+// account names the account in Principal.ServiceAccountID and Subject while
+// its scope stays within its creator's (WP-668); a user's key leaves
+// ServiceAccountID empty. Subject and Credential keep their values (RBA-08).
+func TestPrincipalCarriesGroupsAndServiceAccount(t *testing.T) {
+	var got identity.Principal
+	handler := func(keys APIKeyAuthenticator, verifier SessionVerifier) http.Handler {
+		return Chain(AuthMiddlewareWithAPIKeys(verifier, keys), TenantMiddleware)(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				p, ok := PrincipalFromContext(r.Context())
+				if !ok {
+					t.Error("expected a principal in context")
+				}
+				got = p
+				w.WriteHeader(http.StatusNoContent)
+			}))
+	}
+	serve := func(h http.Handler, header, value string) {
+		t.Helper()
+		got = identity.Principal{}
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/cis", nil)
+		req.Header.Set(header, value)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("%s: %d %s", header, w.Code, w.Body.String())
+		}
+	}
+
+	t.Run("session with groups", func(t *testing.T) {
+		issuer := newTestIssuer(t)
+		now := time.Now().UTC()
+		token, err := issuer.Issue(identity.SessionClaims{
+			Subject: "user-725", OrganizationID: "org-725", SessionID: "sid-725",
+			Groups:   []string{"/reticora/engineer", "auditor"},
+			IssuedAt: now, ExpiresAt: now.Add(time.Hour),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		serve(handler(nil, issuer), "Authorization", "Bearer "+token)
+		if len(got.Groups) != 2 || got.Groups[0] != "/reticora/engineer" || got.Groups[1] != "auditor" {
+			t.Errorf("groups %v, want the session's groups", got.Groups)
+		}
+		if got.Subject != "user-725" || got.Credential != "session:sid-725" || got.ServiceAccountID != "" {
+			t.Errorf("session principal %+v", got)
+		}
+	})
+
+	const (
+		org     = "org-725"
+		creator = "user-creator"
+		account = "sa-725"
+		client1 = "c1-725"
+	)
+	issue := func(serviceAccount *string, creatorScope map[identity.Permission]identity.Scope) (string, *identity.StoredAPIKey) {
+		t.Helper()
+		generated, err := identity.GenerateAPIKey(identity.APIKeyEnvironmentLive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return generated.Plaintext, &identity.StoredAPIKey{ID: "k-725", OrganizationID: org, KeyHash: generated.KeyHash,
+			KeyPrefix: generated.KeyPrefix, Environment: generated.Environment, CreatedBy: creator,
+			Permissions: []identity.Permission{identity.PermCIRead}, ServiceAccountID: serviceAccount, CreatorScope: creatorScope}
+	}
+	orgWide := staticOwners{{Permissions: []identity.Permission{identity.PermCIRead}, RoleID: "role-owner"}}
+
+	t.Run("key of a service account", func(t *testing.T) {
+		sa := account
+		ceiling := map[identity.Permission]identity.Scope{identity.PermCIRead: {
+			Clients: identity.ScopeSet{IDs: []string{client1}}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}}
+		raw, stored := issue(&sa, ceiling)
+		service := identity.NewAPIKeyServiceWithStore(knownKeyStore{key: stored}).WithOwnerAccess(orgWide).
+			WithServiceAccountAccess(staticServiceAccounts{{Permissions: []identity.Permission{identity.PermCIRead}, RoleID: "role-sa"}})
+		serve(handler(service, nil), "X-API-Key", raw)
+		if got.ServiceAccountID != account || got.Subject != account || got.Type != identity.PrincipalTypeAPIKey {
+			t.Errorf("principal %+v, want service account %s as subject", got, account)
+		}
+		if got.Credential != "apikey:"+stored.KeyPrefix {
+			t.Errorf("credential %q", got.Credential)
+		}
+		if got.Scope == nil || got.Scope.Clients.All || len(got.Scope.Clients.IDs) != 1 || got.Scope.Clients.IDs[0] != client1 {
+			t.Errorf("scope %+v, want the creator's client %s (WP-668)", got.Scope, client1)
+		}
+		if len(got.Groups) != 0 {
+			t.Errorf("an API key carries no groups: %v", got.Groups)
+		}
+	})
+
+	t.Run("key of a user", func(t *testing.T) {
+		raw, stored := issue(nil, nil)
+		service := identity.NewAPIKeyServiceWithStore(knownKeyStore{key: stored}).WithOwnerAccess(orgWide)
+		serve(handler(service, nil), "X-API-Key", raw)
+		if got.ServiceAccountID != "" || got.Subject != creator {
+			t.Errorf("principal %+v, want the creator without service account", got)
+		}
+	})
+}

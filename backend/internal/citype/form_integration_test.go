@@ -21,9 +21,10 @@ import (
 // formCaller is the caller of a form request.
 type formCaller struct {
 	user   string
-	manage bool   // holds citype:manage
-	apiKey bool   // an API key instead of a user session
-	client string // restricted to this client (empty: org-wide)
+	manage bool     // holds citype:manage
+	apiKey bool     // an API key instead of a user session
+	client string   // restricted to this client (empty: org-wide)
+	groups []string // IdP groups of the session (WP-725)
 }
 
 // formCall sends GET path as caller c of organization org.
@@ -36,7 +37,7 @@ func (a *setAPI) formCall(org string, c formCaller, path string) *httptest.Respo
 	ctx := tenant.WithTenant(database.ContextWithTenantScope(context.Background(), &scope),
 		tenant.TenantInfo{OrganizationID: org, UserID: c.user})
 	p := identity.Principal{Subject: c.user, OrganizationID: org, Type: identity.PrincipalTypeUser,
-		Permissions: []identity.Permission{identity.PermCIRead}}
+		Permissions: []identity.Permission{identity.PermCIRead}, Groups: c.groups}
 	if c.apiKey {
 		p.Type = identity.PrincipalTypeAPIKey
 	}
@@ -155,12 +156,19 @@ func TestResolvedFormAgainstPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The builtin role engineer, held only through an IdP group (WP-725).
+	var engineer string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM role WHERE organization_id = $1 AND is_builtin AND scope = 'org' AND name = 'engineer'`,
+		org).Scan(&engineer); err != nil {
+		t.Fatal(err)
+	}
+
 	// Layouts of the leaf type per role, of the parent type, of both
 	// templates.
 	onLeaf := `"ci_type_id":"` + leaf.ID + `"`
 	for _, l := range []struct{ key, target, role, priority string }{
 		{"wp719-l-none", onLeaf, "", "0"}, {"wp719-l-a", onLeaf, roleA, "5"}, {"wp719-l-b", onLeaf, roleB, "1"},
-		{"wp719-l-c", onLeaf, customC, "0"}, {"wp719-l-x", onLeaf, roleX, "0"},
+		{"wp719-l-c", onLeaf, customC, "0"}, {"wp719-l-x", onLeaf, roleX, "0"}, {"wp725-l-eng", onLeaf, engineer, "0"},
 		{"wp719-p", `"ci_type_id":"` + parent.ID + `"`, "", "0"},
 		{"wp719-t1", `"template_id":"` + tpl1.ID + `"`, "", "0"}, {"wp719-t2", `"template_id":"` + tpl2.ID + `"`, "", "0"},
 	} {
@@ -214,6 +222,8 @@ func TestResolvedFormAgainstPostgres(t *testing.T) {
 		{"two roles: the smaller priority", two, ciForm(ciLeaf), "wp719-l-b"},
 		{"custom role", custom, ciForm(ciLeaf), "wp719-l-c"},
 		{"no role", none, ciForm(ciLeaf), "wp719-l-none"},
+		{"engineer through an IdP group", formCaller{user: userNone, groups: []string{"/engineer"}}, ciForm(ciLeaf), "wp725-l-eng"},
+		{"unmapped IdP group", formCaller{user: userNone, groups: []string{"wp725-unknown"}}, ciForm(ciLeaf), "wp719-l-none"},
 		{"api key", key, ciForm(ciLeaf), "wp719-l-none"},
 		{"own role_id", two, ciForm(ciLeaf) + "?role_id=" + roleA, "wp719-l-a"},
 		{"parent type", none, ciForm(ciSibling), "wp719-p"},

@@ -190,7 +190,9 @@ func (r *PGRepository) EffectivePermissions(ctx context.Context, orgID, userID s
 // scope_client_id, grants nothing (fail-closed, E-08). A team assignment
 // restricts the team dimension to its team (Grant.Teams, RBA-03, E-11); a
 // custom role assignment of a team outside the organization grants nothing.
-// Only permissions of the catalogue are returned.
+// Only permissions of the catalogue are returned. Each grant names its role
+// (Grant.RoleID for role_assignment, Grant.CustomRoleID for user_custom_role)
+// so field permissions can be attributed to it (RBA-07).
 func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) ([]identity.Grant, error) {
 	grants := make([]identity.Grant, 0)
 	// Login and refresh resolve the scope here, so no principal scope exists
@@ -199,10 +201,11 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 	scope := database.OrgWideScope(orgID, userID)
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT client_id, site_id, team_id,
+			SELECT role_id, custom_role_id, client_id, site_id, team_id,
 			       ARRAY(SELECT DISTINCT k FROM unnest(keys) AS k WHERE k IN (SELECT key FROM permission) ORDER BY k)
 			FROM (
-				SELECT COALESCE(s.client_id, ra.scope_client_id)::text AS client_id, ra.scope_site_id::text AS site_id,
+				SELECT ra.role_id::text AS role_id, NULL::text AS custom_role_id,
+				       COALESCE(s.client_id, ra.scope_client_id)::text AS client_id, ra.scope_site_id::text AS site_id,
 				       ra.scope_team_id::text AS team_id,
 				       ARRAY(
 				           SELECT rp.permission_key FROM role_permission rp
@@ -221,7 +224,8 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 				  -- A site grants within its client only.
 				  AND (ra.scope_site_id IS NULL OR s.client_id = COALESCE(ra.scope_client_id, s.client_id))
 				UNION ALL
-				SELECT CASE WHEN ucr.scope_type = 'client' THEN ucr.scope_id::text
+				SELECT NULL::text, ucr.custom_role_id::text,
+				       CASE WHEN ucr.scope_type = 'client' THEN ucr.scope_id::text
 				            WHEN ucr.scope_type = 'site' THEN s.client_id::text END,
 				       CASE WHEN ucr.scope_type = 'site' THEN ucr.scope_id::text END,
 				       CASE WHEN ucr.scope_type = 'team' THEN ucr.scope_id::text END,
@@ -241,12 +245,18 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var clientID, siteID, teamID *string
+			var roleID, customRoleID, clientID, siteID, teamID *string
 			var keys []string
-			if err := rows.Scan(&clientID, &siteID, &teamID, &keys); err != nil {
+			if err := rows.Scan(&roleID, &customRoleID, &clientID, &siteID, &teamID, &keys); err != nil {
 				return fmt.Errorf("scan role assignment: %w", err)
 			}
 			grant := identity.Grant{Permissions: toPermissions(keys)}
+			if roleID != nil {
+				grant.RoleID = *roleID
+			}
+			if customRoleID != nil {
+				grant.CustomRoleID = *customRoleID
+			}
 			if clientID != nil {
 				grant.Clients = []string{*clientID}
 			}
@@ -270,6 +280,7 @@ func (r *PGRepository) AccessGrants(ctx context.Context, orgID, userID string) (
 // organization (role_permission and role.permissions, limited to the
 // catalogue) as one org-wide grant per role. It resolves the IdP roles of a
 // session (RBA-02); roles valid only in a client or site scope are skipped.
+// Each grant carries the id of its builtin role (Grant.RoleID, RBA-07).
 func (r *PGRepository) RoleGrants(ctx context.Context, orgID string, roleNames []string) ([]identity.Grant, error) {
 	grants := make([]identity.Grant, 0, len(roleNames))
 	if len(roleNames) == 0 {
@@ -278,7 +289,7 @@ func (r *PGRepository) RoleGrants(ctx context.Context, orgID string, roleNames [
 	scope := database.OrgWideScope(orgID, "")
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT ARRAY(
+			SELECT ro.id::text, ARRAY(
 				SELECT DISTINCT k FROM (
 					SELECT rp.permission_key AS k FROM role_permission rp
 					WHERE rp.role_id = ro.id AND rp.organization_id = ro.organization_id
@@ -295,11 +306,14 @@ func (r *PGRepository) RoleGrants(ctx context.Context, orgID string, roleNames [
 		}
 		defer rows.Close()
 		for rows.Next() {
+			var roleID string
 			var keys []string
-			if err := rows.Scan(&keys); err != nil {
+			if err := rows.Scan(&roleID, &keys); err != nil {
 				return fmt.Errorf("scan standard role: %w", err)
 			}
-			grants = append(grants, identity.OrgWideGrant(toPermissions(keys)))
+			grant := identity.OrgWideGrant(toPermissions(keys))
+			grant.RoleID = roleID
+			grants = append(grants, grant)
 		}
 		return rows.Err()
 	})

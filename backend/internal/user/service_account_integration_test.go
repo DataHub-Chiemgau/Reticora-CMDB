@@ -81,6 +81,14 @@ func TestServiceAccounts(t *testing.T) {
 	if w = call(http.MethodGet, "/api/v1/service-accounts/"+sa.ID, ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), roleID) {
 		t.Errorf("get: %d %s (roles must be unchanged after the failed replacement)", w.Code, w.Body.String())
 	}
+	// Every grant names its role with the scope of the assignment (WP-725).
+	grants, grantsErr := repo.ServiceAccountGrants(bg, f.OrgA, sa.ID)
+	if grantsErr != nil || len(grants) != 1 {
+		t.Fatalf("ServiceAccountGrants: %+v, %v; want one grant", grants, grantsErr)
+	}
+	if g := grants[0]; g.RoleID != roleID || g.CustomRoleID != "" || len(g.Clients) != 1 || g.Clients[0] != f.Client1 || len(g.Sites) != 0 {
+		t.Errorf("service account grant %+v, want role %s in client 1", g, roleID)
+	}
 
 	// Webhook filter: objects of client 1 and objects without client, not
 	// client 2; every object of an event must be readable, and an event of
@@ -123,7 +131,7 @@ func TestServiceAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.OwnerID != sa.ID || len(info.Scopes) != 2 || info.Scope == nil || info.Scope.Clients.All ||
+	if info.OwnerID != sa.ID || info.ServiceAccountID != sa.ID || len(info.Scopes) != 2 || info.Scope == nil || info.Scope.Clients.All ||
 		len(info.Scope.Clients.IDs) != 1 || info.Scope.Clients.IDs[0] != f.Client1 {
 		t.Errorf("bound key info %+v scope %+v, want the account's rights in client 1", info, info.Scope)
 	}

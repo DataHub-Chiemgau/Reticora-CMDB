@@ -499,7 +499,8 @@ func assignmentGrant(ctx context.Context, tx pgx.Tx, orgID string, role ServiceA
 // grant resolution of a user at login. Like a user's site assignment
 // (permission.AccessGrants), a site assignment is confined to the client of
 // its site (RBA-03, TEN-09); a site outside the organization, or of another
-// client than scope_client_id, grants nothing (fail-closed, E-08).
+// client than scope_client_id, grants nothing (fail-closed, E-08). Each grant
+// names its role (Grant.RoleID, RBA-07).
 func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id string) ([]identity.Grant, error) {
 	grants := []identity.Grant{}
 	if !isUUID(id) {
@@ -508,7 +509,7 @@ func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id 
 	scope := database.OrgWideScope(orgID, "")
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT COALESCE(s.client_id, sar.scope_client_id)::text, sar.scope_site_id::text,
+			SELECT sar.role_id::text, COALESCE(s.client_id, sar.scope_client_id)::text, sar.scope_site_id::text,
 			       ARRAY(SELECT DISTINCT k FROM (
 			           SELECT rp.permission_key AS k FROM role_permission rp
 			            WHERE rp.role_id = sar.role_id AND rp.organization_id = sar.organization_id
@@ -527,12 +528,13 @@ func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id 
 		}
 		defer rows.Close()
 		for rows.Next() {
+			var roleID string
 			var clientID, siteID *string
 			var keys []string
-			if err := rows.Scan(&clientID, &siteID, &keys); err != nil {
+			if err := rows.Scan(&roleID, &clientID, &siteID, &keys); err != nil {
 				return fmt.Errorf("scan service account grant: %w", err)
 			}
-			grant := identity.Grant{}
+			grant := identity.Grant{RoleID: roleID}
 			for _, k := range keys {
 				grant.Permissions = append(grant.Permissions, identity.Permission(k))
 			}

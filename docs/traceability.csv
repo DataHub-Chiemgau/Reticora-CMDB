@@ -1281,3 +1281,4 @@ MGT-01;[P2];B;backend/internal/document/links_integration_test.go;WP-267
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/document/links_integration_test.go;WP-267
 MET-53;[P2];B;backend/internal/metamodel/publish_job_integration_test.go;WP-721
 MGT-01;[P2];B;backend/internal/document/entity_filter_integration_test.go;WP-811
+RBA-07;[P2];B;backend/internal/permission/scope_integration_test.go;WP-725
