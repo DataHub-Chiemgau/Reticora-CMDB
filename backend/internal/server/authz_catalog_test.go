@@ -112,9 +112,7 @@ var unroutedKeys = map[string]string{
 // unroutedUntil are the phase-2 keys of WP-245 whose first route a later
 // work package registers, with that package (E-106). A key leaves the list
 // with its first route.
-var unroutedUntil = map[string]string{
-	"field_permission:manage": "field-permissions (WP-264, WP-726)",
-}
+var unroutedUntil = map[string]string{}
 
 // TestRBA01KeysGateTheirActions covers WP-068 and WP-363 (RBA-01): the
 // actions RBA-01 names are gated by exactly their key, location:* replaces

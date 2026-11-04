@@ -23,6 +23,9 @@ DELETE /api/v1/desks/{id} desk:write
 DELETE /api/v1/discovery-scopes/{id} discovery:manage
 DELETE /api/v1/documents/{id} document:write
 DELETE /api/v1/documents/{id}/links/{link_id} document:write
+DELETE /api/v1/field-permissions/object-grants/{id} field_permission:manage
+DELETE /api/v1/field-permissions/sensitive-fields/{id} field_permission:manage
+DELETE /api/v1/field-permissions/{id} field_permission:manage
 DELETE /api/v1/forms/{id} form:write
 DELETE /api/v1/iga/connectors/{id} iga:write
 DELETE /api/v1/import-profiles/{id} import:manage
@@ -175,6 +178,9 @@ GET /api/v1/export/jobs job:read
 GET /api/v1/export/jobs/{id} job:read
 GET /api/v1/exports job:read
 GET /api/v1/exports/{id} job:read
+GET /api/v1/field-permissions field_permission:manage
+GET /api/v1/field-permissions/object-grants field_permission:manage
+GET /api/v1/field-permissions/sensitive-fields field_permission:manage
 GET /api/v1/form-submissions form:read
 GET /api/v1/form-submissions/{id} form:read
 GET /api/v1/forms form:read
@@ -351,6 +357,7 @@ PATCH /api/v1/contacts/{id} contact:write
 PATCH /api/v1/desks/{id} desk:write
 PATCH /api/v1/discovery-scopes/{id} discovery:manage
 PATCH /api/v1/documents/{id} document:write
+PATCH /api/v1/field-permissions/{id} field_permission:manage
 PATCH /api/v1/forms/{id} form:write
 PATCH /api/v1/iga/connectors/{id} iga:write
 PATCH /api/v1/import-profiles/{id} import:manage
@@ -466,6 +473,9 @@ POST /api/v1/documents/{id}/links document:write
 POST /api/v1/documents/{id}/versions document:write
 POST /api/v1/export/jobs export:run
 POST /api/v1/exports export:run
+POST /api/v1/field-permissions field_permission:manage
+POST /api/v1/field-permissions/object-grants field_permission:manage
+POST /api/v1/field-permissions/sensitive-fields field_permission:manage
 POST /api/v1/forms form:write
 POST /api/v1/forms/{id}/submissions form:write
 POST /api/v1/history/snapshots audit:read

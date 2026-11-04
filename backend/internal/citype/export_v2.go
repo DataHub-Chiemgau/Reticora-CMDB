@@ -25,9 +25,11 @@ const ExportFormatVersionV2 = 2
 // the document can be imported into another organization (WP-722); ids,
 // organization ids, generated fields, version counters, user ids and time
 // stamps of the rows are left out. System parts (organization_id NULL)
-// appear as references only (key and is_system). OmittedSections names the
-// sections a reader may not see (WP-264); it is empty here. Two exports of
-// the same state are byte-identical except for exported_at.
+// appear as references only (key and is_system). FieldGrants and
+// FieldSensitivity hold the field permissions (WP-726) with keys instead of
+// ids; they appear only for a reader who manages the field permissions,
+// otherwise they are left out and OmittedSections names them. Two exports
+// of the same state are byte-identical except for exported_at.
 type MetamodelExportV2 struct {
 	FormatVersion        int                      `json:"format_version"`
 	ExportedAt           time.Time                `json:"exported_at"`
@@ -40,6 +42,65 @@ type MetamodelExportV2 struct {
 	Rules                []ExportRuleV2           `json:"rules"`
 	Layouts              []ExportLayoutV2         `json:"layouts"`
 	LifecycleModels      []ExportLifecycleModelV2 `json:"lifecycle_models"`
+	// FieldGrants and FieldSensitivity are nil when left out for the
+	// reader (omitted_sections), an empty list when there is none.
+	FieldGrants      *[]ExportFieldGrantV2     `json:"field_grants,omitempty"`
+	FieldSensitivity *[]ExportSensitiveFieldV2 `json:"field_sensitivity,omitempty"`
+}
+
+// The sections of the field permissions in the export v2 (WP-726), as
+// omitted_sections names them.
+const (
+	SectionFieldGrants      = "field_grants"
+	SectionFieldSensitivity = "field_sensitivity"
+)
+
+// ExportFieldGrantV2 is a field grant of the export v2 (WP-726): the role
+// by name and kind (role, custom_role), the CI type and the relationship
+// type by key, the field key and the permission key of an action; empty
+// values are left out. Object grants concern single objects and are not
+// part of the metamodel.
+type ExportFieldGrantV2 struct {
+	Role             string `json:"role"`
+	RoleKind         string `json:"role_kind"`
+	ObjectKind       string `json:"object_kind"`
+	CIType           string `json:"ci_type,omitempty"`
+	FieldKey         string `json:"field_key,omitempty"`
+	RelationshipType string `json:"relationship_type,omitempty"`
+	Action           string `json:"action,omitempty"`
+	Level            string `json:"level"`
+}
+
+// ExportSensitiveFieldV2 is a sensitive field of the export v2: the object
+// kind, the CI type by key (empty: every type) and the field key.
+type ExportSensitiveFieldV2 struct {
+	ObjectKind string `json:"object_kind"`
+	CIType     string `json:"ci_type,omitempty"`
+	FieldKey   string `json:"field_key"`
+}
+
+// FieldPermissionsExportV2 is what a GrantExporter returns.
+type FieldPermissionsExportV2 struct {
+	FieldGrants []ExportFieldGrantV2
+	Sensitivity []ExportSensitiveFieldV2
+}
+
+// GrantExporter reads the field grants and sensitive fields of the
+// organization with keys instead of ids in the context's transaction, so it
+// joins the snapshot of the export v2. The server adapts the field
+// permission repository (citype does not import permission).
+type GrantExporter interface {
+	ExportFieldPermissions(ctx context.Context, orgID string) (*FieldPermissionsExportV2, error)
+}
+
+// ExportV2Grants selects the field permission sections of the export v2:
+// Exporter reads them (nil: empty sections), Readable is whether the reader
+// may see them (field_permission:manage for the whole organization).
+// Without Readable an exporter is not called, the sections are left out and
+// omitted_sections names them.
+type ExportV2Grants struct {
+	Exporter GrantExporter
+	Readable bool
 }
 
 // ExportTypeV2 is a CI type of the export v2; a system type carries no body.
@@ -301,6 +362,8 @@ type exportV2Rows struct {
 	layouts   []FormLayout
 	models    []ExportLifecycleModelV2
 	roles     []ExportRole
+	// grants are the field permissions, nil when not read.
+	grants *FieldPermissionsExportV2
 }
 
 // readAllPages reads every page of a list with offset pages of limit rows.
@@ -324,17 +387,71 @@ func readAllPages[T any](limit int, list func(page api.PaginationParams) ([]T, i
 }
 
 // BuildExportV2 reads the complete metamodel of orgID in one snapshot
-// (src.RunInSnapshot) and maps every reference onto keys.
+// (src.RunInSnapshot) and maps every reference onto keys. The field
+// permission sections are empty (no exporter); BuildExportV2WithGrants
+// fills them.
 func BuildExportV2(ctx context.Context, src ExportV2Source, models LifecycleModelReader, roles RoleReader,
 	orgID string, now time.Time) (*MetamodelExportV2, error) {
+	return BuildExportV2WithGrants(ctx, src, models, roles, ExportV2Grants{}, orgID, now)
+}
+
+// BuildExportV2WithGrants is BuildExportV2 with the field permission
+// sections of grants (WP-726): read in the same snapshot when the reader
+// may see them, left out and named in omitted_sections otherwise.
+func BuildExportV2WithGrants(ctx context.Context, src ExportV2Source, models LifecycleModelReader, roles RoleReader,
+	grants ExportV2Grants, orgID string, now time.Time) (*MetamodelExportV2, error) {
 	var rows exportV2Rows
 	err := src.RunInSnapshot(ctx, orgID, func(ctx context.Context) error {
-		return readExportV2(ctx, src, models, roles, orgID, &rows)
+		if err := readExportV2(ctx, src, models, roles, orgID, &rows); err != nil {
+			return err
+		}
+		if grants.Exporter == nil || !grants.Readable {
+			return nil
+		}
+		g, err := grants.Exporter.ExportFieldPermissions(ctx, orgID)
+		if err != nil {
+			return fmt.Errorf("list field permissions: %w", err)
+		}
+		if g == nil {
+			g = &FieldPermissionsExportV2{}
+		}
+		rows.grants = g
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return assembleExportV2(&rows, orgID, now)
+	out, err := assembleExportV2(&rows, orgID, now)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case grants.Exporter != nil && !grants.Readable:
+		out.OmittedSections = append(out.OmittedSections, SectionFieldGrants, SectionFieldSensitivity)
+	case rows.grants != nil:
+		fieldGrants, sensitivity := exportFieldPermissions(rows.grants)
+		out.FieldGrants, out.FieldSensitivity = &fieldGrants, &sensitivity
+	default:
+		out.FieldGrants, out.FieldSensitivity = &[]ExportFieldGrantV2{}, &[]ExportSensitiveFieldV2{}
+	}
+	return out, nil
+}
+
+// exportFieldPermissions returns the field permissions in a stable order:
+// grants by role kind, role, object kind, CI type and target, sensitive
+// fields by object kind, CI type and field key.
+func exportFieldPermissions(g *FieldPermissionsExportV2) ([]ExportFieldGrantV2, []ExportSensitiveFieldV2) {
+	fieldGrants := append([]ExportFieldGrantV2{}, g.FieldGrants...)
+	slices.SortStableFunc(fieldGrants, func(a, b ExportFieldGrantV2) int {
+		return cmp.Or(cmp.Compare(a.RoleKind, b.RoleKind), cmp.Compare(a.Role, b.Role), cmp.Compare(a.ObjectKind, b.ObjectKind),
+			cmp.Compare(a.CIType, b.CIType), cmp.Compare(a.FieldKey, b.FieldKey),
+			cmp.Compare(a.RelationshipType, b.RelationshipType), cmp.Compare(a.Action, b.Action), cmp.Compare(a.Level, b.Level))
+	})
+	sensitivity := append([]ExportSensitiveFieldV2{}, g.Sensitivity...)
+	slices.SortStableFunc(sensitivity, func(a, b ExportSensitiveFieldV2) int {
+		return cmp.Or(cmp.Compare(a.ObjectKind, b.ObjectKind), cmp.Compare(a.CIType, b.CIType), cmp.Compare(a.FieldKey, b.FieldKey))
+	})
+	return fieldGrants, sensitivity
 }
 
 // readExportV2 reads the rows of the export in the context's transaction.

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -25,6 +27,16 @@ type Handler struct {
 	// it answers 503.
 	lifecycleModels LifecycleModelReader
 	roles           RoleReader
+	// grants reads the field permissions of the export v2 (WP-726); nil:
+	// empty sections.
+	grants GrantExporter
+}
+
+// WithGrantExporter sets the reader of the field permissions for the
+// metamodel export v2 (WP-726).
+func (h *Handler) WithGrantExporter(g GrantExporter) *Handler {
+	h.grants = g
+	return h
 }
 
 // WithLifecycleModels sets the reader of the lifecycle models for the
@@ -707,7 +719,10 @@ func (h *Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 // download (MET-54). format_version 1 (default) is BuildExport, 2 the
 // complete export of BuildExportV2 (WP-262); another value is 400, since
 // the OpenAPI validation does not check enums. The export v2 needs the
-// database and the readers of lifecycle models and roles (503 otherwise).
+// database and the readers of lifecycle models and roles (503 otherwise);
+// its field permission sections appear only for a caller holding
+// field_permission:manage for the whole organization, otherwise
+// omitted_sections names them (WP-726).
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
@@ -728,7 +743,8 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the metamodel export v2 needs the database")
 			return
 		}
-		out, err = BuildExportV2(r.Context(), src, h.lifecycleModels, h.roles, t.OrganizationID, now)
+		grants := ExportV2Grants{Exporter: h.grants, Readable: readsFieldPermissions(r.Context())}
+		out, err = BuildExportV2WithGrants(r.Context(), src, h.lifecycleModels, h.roles, grants, t.OrganizationID, now)
 		name = "metamodel-v2-"
 	default:
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "format_version must be 1 or 2")
@@ -1174,4 +1190,22 @@ func writeFieldDefinitionError(w http.ResponseWriter, err error) {
 		return
 	}
 	api.WriteRepoError(w, err)
+}
+
+// readsFieldPermissions reports whether the principal of ctx may read the
+// field permissions (WP-726): field_permission:manage for the whole
+// organization, as the field-permissions routes require it. Without a
+// principal, with the permission only for some clients, sites or teams, or
+// for an API key restricted to some clients it is false (fail-closed).
+func readsFieldPermissions(ctx context.Context) bool {
+	p, ok := identity.PrincipalFromContext(ctx)
+	if !ok || !p.Has(identity.PermFieldPermissionManage) {
+		return false
+	}
+	if p.Scope == nil {
+		_, restricted := p.PermissionScopes[identity.PermFieldPermissionManage]
+		return !restricted && strings.TrimSpace(p.ClientScope) == ""
+	}
+	scope, held := p.ScopeFor(identity.PermFieldPermissionManage)
+	return held && scope.OrgWide()
 }

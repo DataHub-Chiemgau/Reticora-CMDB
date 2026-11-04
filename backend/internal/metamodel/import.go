@@ -50,6 +50,10 @@ const (
 	// (an unreferenced lifecycle model the target lacks, an immutable
 	// field of an existing part).
 	NoteNotImported = "not-imported"
+	// NoteFieldPermissionsSkipped: the field grants and sensitive fields of
+	// the file (field_grants, field_sensitivity, WP-726) are accepted but
+	// not taken over; phase 2 imports no field permissions (E-115).
+	NoteFieldPermissionsSkipped = "field-permissions-skipped"
 )
 
 // Actions of the parts in the import report.
@@ -477,9 +481,24 @@ func planImport(file *citype.MetamodelExportV2, target *ImportTarget) *importPla
 	p.planModels()
 	p.plan.items = append(p.plan.items, p.plan.activation...)
 	p.plan.activation = nil
+	p.noteFieldPermissions()
 	r := &p.plan.report
 	r.Unchanged = len(p.plan.items) == 0 && len(r.Conflicts) == 0
 	return p.plan
+}
+
+// noteFieldPermissions reports the field permission sections of the file
+// as not taken over (E-115): one note per section with entries, which
+// creates no item and does not keep the report from being unchanged.
+func (p *planner) noteFieldPermissions() {
+	if g := p.file.FieldGrants; g != nil && len(*g) > 0 {
+		p.note(NoteFieldPermissionsSkipped, citype.SectionFieldGrants, "",
+			fmt.Sprintf("%d field grant(s) are not imported; field permissions are managed under /api/v1/field-permissions", len(*g)))
+	}
+	if s := p.file.FieldSensitivity; s != nil && len(*s) > 0 {
+		p.note(NoteFieldPermissionsSkipped, citype.SectionFieldSensitivity, "",
+			fmt.Sprintf("%d sensitive field(s) are not imported; field permissions are managed under /api/v1/field-permissions", len(*s)))
+	}
 }
 
 // indexTarget indexes the parts of the target document by key; an

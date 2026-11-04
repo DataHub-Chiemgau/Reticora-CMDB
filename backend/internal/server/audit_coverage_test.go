@@ -476,6 +476,11 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/roles/assign", `{"user_id":"<user2>","custom_role_id":"<id:/api/v1/roles>"}`},
 	{"POST /scim/v2/Users", `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"a5-scim@example.com","active":true}`},
 	{"POST /scim/v2/Groups", `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:Group"],"displayName":"a5-group"}`},
+	// Field permissions (WP-726): a grant and an object grant of the
+	// created custom role, a sensitive field.
+	{"POST /api/v1/field-permissions", `{"custom_role_id":"<id:/api/v1/roles>","object_kind":"ci","field_key":"core.serial_number","level":"read"}`},
+	{"POST /api/v1/field-permissions/object-grants", `{"grantee_custom_role_id":"<id:/api/v1/roles>","object_kind":"ci","object_id":"<id:/api/v1/cis>","level":"write"}`},
+	{"POST /api/v1/field-permissions/sensitive-fields", `{"object_kind":"asset","field_key":"core.purchase_cost"}`},
 }
 
 // auditRouteRequests are the bodies and paths of further write routes;
@@ -501,6 +506,7 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"PUT /api/v1/templates/{id}/versions/{version}":          {"/api/v1/templates/<id:/api/v1/templates>/versions/2", `{"items":[]}`},
 	"PATCH /api/v1/rules/{id}":                               {"", `{"kind":"readonly"}`},
 	"PATCH /api/v1/layouts/{id}":                             {"", `{"priority":1}`},
+	"PATCH /api/v1/field-permissions/{id}":                   {"", `{"level":"none"}`},
 	"POST /api/v1/cis/{id}/unmerge":                          {"/api/v1/cis/<ci4>/unmerge", `{}`},
 	"PATCH /api/v1/relationship-types/{key}":                 {"/api/v1/relationship-types/a5_rel", `{"display_name":"a5 rel renamed"}`},
 	"DELETE /api/v1/relationship-types/{key}":                {"/api/v1/relationship-types/a5_rel", ""},

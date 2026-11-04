@@ -157,6 +157,12 @@ var resourceTables = map[string][]string{
 	// erasures name no row a scope could place.
 	"notifications": nil,
 	"privacy":       nil,
+	// The field permissions (WP-726) are the organization's configuration
+	// of who sees which field; only a holder of field_permission:manage
+	// for the whole organization reads them, and an object grant names an
+	// object of any client. Restricted principals never see the entries
+	// (fail-closed).
+	"field-permissions": nil,
 }
 
 // orgResources are the types whose entries are about the organization

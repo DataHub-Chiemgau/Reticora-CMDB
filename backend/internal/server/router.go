@@ -424,7 +424,6 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The field permissions (RBA-07, WP-264) resolve per principal; the
 	// handlers of WP-726 and WP-265 take this resolver.
 	fieldResolver := newFieldResolver(&repos, &opts)
-	_ = fieldResolver
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
 		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
@@ -673,7 +672,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher).
-			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}),
+			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}).
+			WithGrantExporter(fieldGrantExport{repo: repos.FieldGrants}),
+		// Administration of the field permissions (RBA-07, WP-726); a write
+		// drops the resolver's snapshot after the commit.
+		permission.NewFieldGrantHandler(repos.FieldGrants, fieldResolver),
 		draftHandler,
 		metamodelImportHandler(&repos),
 		importer.NewHandler(repos.Import),
@@ -1001,6 +1004,36 @@ func metamodelImportHandler(repos *Repositories) *metamodel.ImportHandler {
 
 // roleExport reads the role names for the layouts of the metamodel export
 // v2: the union of role (builtin, kind "role") and custom_role.
+// fieldGrantExport adapts the field permission repository to the
+// metamodel export v2 (WP-726): grants and sensitive fields with keys
+// instead of ids, read in the export's snapshot transaction.
+type fieldGrantExport struct {
+	repo permission.FieldGrantRepository
+}
+
+func (a fieldGrantExport) ExportFieldPermissions(ctx context.Context, orgID string) (*citype.FieldPermissionsExportV2, error) {
+	e, err := a.repo.Export(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := &citype.FieldPermissionsExportV2{
+		FieldGrants: make([]citype.ExportFieldGrantV2, 0, len(e.FieldGrants)),
+		Sensitivity: make([]citype.ExportSensitiveFieldV2, 0, len(e.Sensitivity)),
+	}
+	for i := range e.FieldGrants {
+		g := &e.FieldGrants[i]
+		out.FieldGrants = append(out.FieldGrants, citype.ExportFieldGrantV2{Role: g.Role, RoleKind: g.RoleKind,
+			ObjectKind: string(g.ObjectKind), CIType: g.CIType, FieldKey: g.FieldKey, RelationshipType: g.RelationshipType,
+			Action: g.Action, Level: string(g.Level)})
+	}
+	for i := range e.Sensitivity {
+		s := &e.Sensitivity[i]
+		out.Sensitivity = append(out.Sensitivity, citype.ExportSensitiveFieldV2{ObjectKind: string(s.ObjectKind), CIType: s.CIType,
+			FieldKey: s.FieldKey})
+	}
+	return out, nil
+}
+
 type roleExport struct{ repo user.Repository }
 
 func (a roleExport) ExportRoles(ctx context.Context, orgID string) ([]citype.ExportRole, error) {

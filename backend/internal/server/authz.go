@@ -61,6 +61,9 @@ var readPermissionFor = map[string]identity.Permission{
 	"contracts":            identity.PermContractRead, // contracts (MGT-12, WP-269, E-106); writes contract:write
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,
+	// Field permissions (RBA-07, WP-726, E-106): reading the configuration
+	// is managing it, like api-keys; only org_admin holds the key.
+	"field-permissions": identity.PermFieldPermissionManage,
 	// Invitations name addresses and grant roles: read and write need
 	// user:manage (TLC-03).
 	"invitations": identity.PermUserManage,
@@ -212,6 +215,8 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"ci-types": identity.PermCITypeManage,
 	"api-keys": identity.PermAPIKeyManage,
 	"ingest":   identity.PermDiscoveryIngest,
+	// Field grants, object grants and sensitive fields (WP-726).
+	"field-permissions": identity.PermFieldPermissionManage,
 	// Enterprise CMDB + asset/inventory extension write side (spec §21).
 	"ci-fields":             identity.PermCIAttributeManage,
 	"attribute-definitions": identity.PermCIAttributeManage,

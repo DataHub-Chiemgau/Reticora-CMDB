@@ -387,6 +387,11 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"locations", "location", "PATCH")
 	crud(m, v1+"jobs", "job", "DELETE")
 	crud(m, v1+"import-profiles", "import_profile", all...)
+	// Field permissions (RBA-07, WP-726): grants, object grants and
+	// sensitive fields; only the level of a grant changes.
+	crud(m, v1+"field-permissions", "field_grant", all...)
+	crud(m, v1+"field-permissions/object-grants", "object_grant", "POST", "DELETE")
+	crud(m, v1+"field-permissions/sensitive-fields", "field_sensitivity", "POST", "DELETE")
 	crud(m, "/scim/v2/Groups", "team", all...)
 	m["PUT /scim/v2/Groups/{id}"] = row("team")
 	crud(m, "/scim/v2/Users", "app_user", "POST", "PATCH")

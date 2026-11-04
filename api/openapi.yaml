@@ -14412,7 +14412,9 @@ paths:
         10 MiB, otherwise 413; another format version is 422
         `unsupported-format-version`, an unknown field 400;
         `exported_at`, `organization_id` and `omitted_sections` are
-        ignored) and compares it key by key with the metamodel of the
+        ignored; `field_grants` and `field_sensitivity` are accepted but
+        not imported, the report names them as `field-permissions-skipped`,
+        E-115) and compares it key by key with the metamodel of the
         organization, read in one snapshot. System parts and lifecycle
         models are only resolved, roles by their name, relationship types
         and `applies_to_type_keys` against the visible ones. The
@@ -14480,6 +14482,373 @@ paths:
                         $ref: '#/components/schemas/MetamodelImportReport'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/field-permissions:
+    x-phase: P2
+    get:
+      operationId: listFieldGrants
+      tags: [Metamodel]
+      summary: List field grants (RBA-07, E-38)
+      description: >-
+        The field grants of the organization (E-43): the level none, read
+        or write of a role or custom role for an object kind, optionally
+        narrowed to a CI type (and its subtypes) and to one field, one
+        relationship type or one action. Configuration of the organization,
+        paged by creation time and id with `limit` (at most 200) and the
+        signed `cursor` from `next_cursor`.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: role_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Grants of this standard role.
+        - name: custom_role_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Grants of this custom role.
+        - name: object_kind
+          in: query
+          required: false
+          schema: { type: string }
+          description: ci, asset, contract, ticket, document or relationship; another value is 400.
+        - name: ci_type_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Grants narrowed to this CI type.
+      responses:
+        '200':
+          description: One page, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldGrantListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    post:
+      operationId: createFieldGrant
+      tags: [Metamodel]
+      summary: Create a field grant (RBA-07, E-38)
+      description: >-
+        Exactly one of role_id and custom_role_id, at most one of
+        field_key, relationship_type_id and action; a CI type only for ci
+        and asset, a relationship type only for ci and relationship, an
+        action (a key of the permission catalogue) only with none or write.
+        field_key is core.<column>, attributes.<key> or _instance.<key>
+        (permission.ParseFieldKey); an unknown key is 422 on field_key, an
+        unknown or invisible CI type, relationship type or action 422, a
+        role or custom role that is unknown or of another organization 422,
+        an equal grant 409. The policies of the organization follow at once
+        (the cached snapshot is dropped after the commit).
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFieldGrantRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldGrant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/field-permissions/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    patch:
+      operationId: updateFieldGrant
+      tags: [Metamodel]
+      summary: Change the level of a field grant
+      description: >-
+        Only the level changes (an action grant stays none or write, 422
+        otherwise); an unknown id or one of another organization is 404.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFieldGrantRequest'
+      responses:
+        '200':
+          description: Field grant updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldGrant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      operationId: deleteFieldGrant
+      tags: [Metamodel]
+      summary: Delete a field grant
+      description: >-
+        An unknown id or one of another organization is 404.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/field-permissions/object-grants:
+    x-phase: P2
+    get:
+      operationId: listObjectGrants
+      tags: [Metamodel]
+      summary: List object grants (RBA-07, E-38)
+      description: >-
+        The exceptions for single objects (E-43): the level of a role,
+        custom role or team for one CI, asset, ticket, document or
+        relationship. Paged like the field grants.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: object_kind
+          in: query
+          required: false
+          schema: { type: string }
+          description: ci, asset, contract, ticket, document or relationship; another value is 400.
+        - name: object_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Grants of this object.
+        - name: grantee_role_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Grants to this standard role.
+        - name: grantee_custom_role_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Grants to this custom role.
+        - name: grantee_team_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Grants to this team.
+      responses:
+        '200':
+          description: One page, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObjectGrantListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    post:
+      operationId: createObjectGrant
+      tags: [Metamodel]
+      summary: Create an object grant (RBA-07, E-38)
+      description: >-
+        Exactly one grantee (grantee_role_id, grantee_custom_role_id,
+        grantee_team_id). The object must exist and be visible to the
+        caller (422 otherwise; contract has no table before WP-269); a
+        grantee that is unknown or of another organization is 422, an equal
+        grant 409. The grant is removed with its object.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateObjectGrantRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObjectGrant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/field-permissions/object-grants/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: deleteObjectGrant
+      tags: [Metamodel]
+      summary: Delete an object grant
+      description: >-
+        An unknown id or one of another organization is 404.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/field-permissions/sensitive-fields:
+    x-phase: P2
+    get:
+      operationId: listSensitiveFields
+      tags: [Metamodel]
+      summary: List sensitive fields (RBA-07, E-38)
+      description: >-
+        The fields marked sensitive (E-43): only a field grant with exactly
+        this field key opens them. Paged like the field grants.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: object_kind
+          in: query
+          required: false
+          schema: { type: string }
+          description: ci, asset, contract, ticket, document or relationship; another value is 400.
+        - name: ci_type_id
+          in: query
+          required: false
+          schema: { type: string }
+          description: Marks narrowed to this CI type.
+      responses:
+        '200':
+          description: One page, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SensitiveFieldListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    post:
+      operationId: createSensitiveField
+      tags: [Metamodel]
+      summary: Mark a field sensitive (RBA-07, E-38)
+      description: >-
+        Marks a field of an object kind, optionally of a CI type and its
+        subtypes, as sensitive; also system attributes and typed columns.
+        An unknown field key is 422 on field_key, an unknown or invisible
+        CI type 422, an equal mark 409.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSensitiveFieldRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SensitiveField'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/field-permissions/sensitive-fields/{id}:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    delete:
+      operationId: deleteSensitiveField
+      tags: [Metamodel]
+      summary: Remove a sensitive mark
+      description: >-
+        An unknown id or one of another organization is 404.
+        Requires field_permission:manage for the whole organization (only
+        org_admin holds it, E-106); a holder restricted to some clients,
+        sites or teams is refused with 403 as well.
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/ci-types:
     get:
@@ -14595,8 +14964,12 @@ paths:
         templates with versions, catalog rules, form layouts and lifecycle
         models — with every reference as a key instead of an id, read in
         one snapshot; system parts appear as references only (key and
-        is_system). Another format_version is 400; format 2 without the
-        database is 503.
+        is_system). The field grants and sensitive fields (`field_grants`,
+        `field_sensitivity`, WP-726) are part of format 2 only for a caller
+        holding field_permission:manage for the whole organization;
+        otherwise they are left out and `omitted_sections` names them.
+        Object grants are not exported. Another format_version is 400;
+        format 2 without the database is 503.
       parameters:
         - name: format_version
           in: query
@@ -20430,7 +20803,10 @@ components:
           type: string
         omitted_sections:
           type: array
-          description: Sections left out for the reader's permissions (WP-264); empty for now.
+          description: >-
+            Sections left out for the reader's permissions: field_grants and
+            field_sensitivity for a reader without field_permission:manage
+            for the whole organization (WP-726).
           items: { type: string }
         ci_types:
           type: array
@@ -20460,6 +20836,19 @@ components:
           type: array
           description: Sorted by key.
           items: { $ref: '#/components/schemas/MetamodelExportLifecycleModel' }
+        field_grants:
+          type: array
+          description: >-
+            The field grants with keys instead of ids (WP-726), sorted by
+            role kind, role, object kind, CI type and target; absent when
+            omitted.
+          items: { $ref: '#/components/schemas/MetamodelExportFieldGrant' }
+        field_sensitivity:
+          type: array
+          description: >-
+            The sensitive fields, sorted by object kind, CI type and field
+            key; absent when omitted.
+          items: { $ref: '#/components/schemas/MetamodelExportSensitiveField' }
     MetamodelImportDocument:
       type: object
       description: >-
@@ -20499,6 +20888,14 @@ components:
         lifecycle_models:
           type: array
           items: { $ref: '#/components/schemas/MetamodelExportLifecycleModel' }
+        field_grants:
+          type: array
+          description: Accepted but not imported (E-115); reported as field-permissions-skipped.
+          items: { $ref: '#/components/schemas/MetamodelExportFieldGrant' }
+        field_sensitivity:
+          type: array
+          description: Accepted but not imported (E-115); reported as field-permissions-skipped.
+          items: { $ref: '#/components/schemas/MetamodelExportSensitiveField' }
     MetamodelImportResult:
       type: object
       description: The answer of the import (WP-722) - the new draft (null without differences) and the report.
@@ -20561,10 +20958,184 @@ components:
             properties:
               code:
                 type: string
-                enum: [history-skipped, not-imported]
+                enum: [history-skipped, not-imported, field-permissions-skipped]
               kind: { type: string }
               key: { type: string }
               detail: { type: string }
+    MetamodelExportFieldGrant:
+      type: object
+      description: >-
+        A field grant of the metamodel export (WP-726): the role by name
+        and kind, CI type and relationship type by key, the field key and
+        the permission key of an action; empty values are left out.
+      additionalProperties: false
+      required: [role, role_kind, object_kind, level]
+      properties:
+        role: { type: string }
+        role_kind:
+          type: string
+          enum: [role, custom_role]
+        object_kind:
+          type: string
+          enum: [ci, asset, contract, ticket, document, relationship]
+        ci_type: { type: string }
+        field_key: { type: string }
+        relationship_type: { type: string }
+        action: { type: string }
+        level:
+          type: string
+          enum: [none, read, write]
+    MetamodelExportSensitiveField:
+      type: object
+      description: A sensitive field of the metamodel export (WP-726); ci_type is the key of the type.
+      additionalProperties: false
+      required: [object_kind, field_key]
+      properties:
+        object_kind:
+          type: string
+          enum: [ci, asset, contract, ticket, document, relationship]
+        ci_type: { type: string }
+        field_key: { type: string }
+    FieldPermissionObjectKind:
+      type: string
+      description: The object kind of a field permission (E-43).
+      enum: [ci, asset, contract, ticket, document, relationship]
+    FieldPermissionLevel:
+      type: string
+      description: The access level (E-43).
+      enum: [none, read, write]
+    FieldGrant:
+      type: object
+      description: >-
+        A field grant (RBA-07, E-43): the level of a role or custom role
+        for an object kind, optionally of a CI type and its subtypes, and
+        for one field, relationship type or action, or the whole kind.
+      required: [id, organization_id, role_id, custom_role_id, object_kind, ci_type_id, field_key, relationship_type_id, action, level, created_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        role_id: { type: [string, 'null'] }
+        custom_role_id: { type: [string, 'null'] }
+        object_kind: { $ref: '#/components/schemas/FieldPermissionObjectKind' }
+        ci_type_id: { type: [string, 'null'] }
+        field_key: { type: [string, 'null'] }
+        relationship_type_id: { type: [string, 'null'] }
+        relationship_type:
+          type: string
+          description: The key of the relationship type (read only).
+        action: { type: [string, 'null'] }
+        level: { $ref: '#/components/schemas/FieldPermissionLevel' }
+        created_by: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateFieldGrantRequest:
+      type: object
+      additionalProperties: false
+      required: [object_kind, level]
+      properties:
+        role_id: { type: [string, 'null'] }
+        custom_role_id: { type: [string, 'null'] }
+        object_kind: { $ref: '#/components/schemas/FieldPermissionObjectKind' }
+        ci_type_id: { type: [string, 'null'] }
+        field_key:
+          type: [string, 'null']
+          description: core.<column>, attributes.<key> or _instance.<key>.
+        relationship_type_id: { type: [string, 'null'] }
+        action:
+          type: [string, 'null']
+          description: A key of the permission catalogue.
+        level: { $ref: '#/components/schemas/FieldPermissionLevel' }
+    UpdateFieldGrantRequest:
+      type: object
+      additionalProperties: false
+      required: [level]
+      properties:
+        level: { $ref: '#/components/schemas/FieldPermissionLevel' }
+    ObjectGrant:
+      type: object
+      description: The exception for a single object (E-43) for a role, custom role or team.
+      required: [id, organization_id, grantee_role_id, grantee_custom_role_id, grantee_team_id, object_kind, object_id, level, created_by, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        grantee_role_id: { type: [string, 'null'] }
+        grantee_custom_role_id: { type: [string, 'null'] }
+        grantee_team_id: { type: [string, 'null'] }
+        object_kind: { $ref: '#/components/schemas/FieldPermissionObjectKind' }
+        object_id: { type: string }
+        level: { $ref: '#/components/schemas/FieldPermissionLevel' }
+        created_by: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+    CreateObjectGrantRequest:
+      type: object
+      additionalProperties: false
+      required: [object_kind, object_id, level]
+      properties:
+        grantee_role_id: { type: [string, 'null'] }
+        grantee_custom_role_id: { type: [string, 'null'] }
+        grantee_team_id: { type: [string, 'null'] }
+        object_kind: { $ref: '#/components/schemas/FieldPermissionObjectKind' }
+        object_id: { type: string }
+        level: { $ref: '#/components/schemas/FieldPermissionLevel' }
+    SensitiveField:
+      type: object
+      description: A field marked sensitive (E-43); only a grant with exactly its field key opens it.
+      required: [id, organization_id, object_kind, ci_type_id, field_key, created_by, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        object_kind: { $ref: '#/components/schemas/FieldPermissionObjectKind' }
+        ci_type_id: { type: [string, 'null'] }
+        field_key: { type: string }
+        created_by: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+    CreateSensitiveFieldRequest:
+      type: object
+      additionalProperties: false
+      required: [object_kind, field_key]
+      properties:
+        object_kind: { $ref: '#/components/schemas/FieldPermissionObjectKind' }
+        ci_type_id: { type: [string, 'null'] }
+        field_key: { type: string }
+    FieldGrantListResponse:
+      type: object
+      description: A cursor page of field grants (configuration, no count).
+      required: [data, limit, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/FieldGrant' }
+        limit: { type: integer }
+        has_more: { type: boolean }
+        next_cursor:
+          type: string
+          description: Opaque cursor of the next page; absent on the last one.
+    ObjectGrantListResponse:
+      type: object
+      description: A cursor page of object grants (configuration, no count).
+      required: [data, limit, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/ObjectGrant' }
+        limit: { type: integer }
+        has_more: { type: boolean }
+        next_cursor:
+          type: string
+          description: Opaque cursor of the next page; absent on the last one.
+    SensitiveFieldListResponse:
+      type: object
+      description: A cursor page of sensitive fields (configuration, no count).
+      required: [data, limit, has_more]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/SensitiveField' }
+        limit: { type: integer }
+        has_more: { type: boolean }
+        next_cursor:
+          type: string
+          description: Opaque cursor of the next page; absent on the last one.
     MetamodelExportType:
       type: object
       description: A CI type; a system type carries only key and is_system.
