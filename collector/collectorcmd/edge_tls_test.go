@@ -281,7 +281,7 @@ func TestCollectorStartedBeforeItsEnrollment(t *testing.T) {
 	const orgID, colID = "6f0b6f0e-0000-4000-8000-0000000000e1", "6f0b6f0e-0000-4000-8000-0000000000e2"
 	creds := collectorCreds(t, newAuditPKI(t), orgID, colID)
 	creds.Metadata = map[string]string{"server_url": "https://cmdb.example.com"}
-	if err := (&keystore.FileStore{Path: path}).Save(context.Background(), *creds); err != nil {
+	if err := (&keystore.FileStore{Path: path}).Save(context.Background(), creds); err != nil {
 		t.Fatal(err)
 	}
 	select {

@@ -40,7 +40,7 @@ type Source interface {
 // Updater defines the contract collector and agent processes will implement.
 type Updater interface {
 	Check(ctx context.Context, currentVersion string) (*ReleaseInfo, error)
-	Apply(ctx context.Context, release ReleaseInfo) error
+	Apply(ctx context.Context, release *ReleaseInfo) error
 }
 
 // Verifier checks the signature of a downloaded release artifact against
@@ -114,7 +114,7 @@ func (c *Checker) execPath() (string, error) {
 // The actual process restart is expected to be handled by the service manager (systemd, etc.).
 // The artifact is installed only when its signature bundle verifies; an
 // unsigned or wrongly signed release leaves the running binary untouched.
-func (c *Checker) Apply(ctx context.Context, release ReleaseInfo) error {
+func (c *Checker) Apply(ctx context.Context, release *ReleaseInfo) error {
 	if release.DownloadURL == "" {
 		return fmt.Errorf("update: download URL is required")
 	}

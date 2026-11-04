@@ -122,7 +122,7 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 			defer func() { <-sem }()
 
 			url := p.baseURL(t) + serviceRootPath
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 			if err != nil {
 				return
 			}
@@ -356,7 +356,7 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 }
 
 func (p *Plugin) redfishGet(ctx context.Context, client *http.Client, url, username, password string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return err
 	}

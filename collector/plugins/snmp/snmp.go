@@ -270,7 +270,9 @@ func buildSNMPv2cGet(community, oid string) []byte {
 	errorIndex := []byte{0x02, 0x01, 0x00}
 
 	// PDU: GetRequest-PDU (0xA0)
-	pduContent := append(requestID, errorStatus...)
+	pduContent := make([]byte, 0, len(requestID)+len(errorStatus)+len(errorIndex)+len(varbindList))
+	pduContent = append(pduContent, requestID...)
+	pduContent = append(pduContent, errorStatus...)
 	pduContent = append(pduContent, errorIndex...)
 	pduContent = append(pduContent, varbindList...)
 	pdu := append([]byte{0xA0, byte(len(pduContent))}, pduContent...)
@@ -281,7 +283,9 @@ func buildSNMPv2cGet(community, oid string) []byte {
 	communityBytes := append([]byte{0x04, byte(len(community))}, []byte(community)...)
 
 	// SNMP Message: SEQUENCE { version, community, PDU }
-	messageContent := append(version, communityBytes...)
+	messageContent := make([]byte, 0, len(version)+len(communityBytes)+len(pdu))
+	messageContent = append(messageContent, version...)
+	messageContent = append(messageContent, communityBytes...)
 	messageContent = append(messageContent, pdu...)
 
 	return asn1Sequence(messageContent)

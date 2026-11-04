@@ -32,7 +32,7 @@ type Credentials struct {
 // Store abstracts credential persistence for different runtime environments.
 type Store interface {
 	Load(ctx context.Context) (*Credentials, error)
-	Save(ctx context.Context, creds Credentials) error
+	Save(ctx context.Context, creds *Credentials) error
 	Clear(ctx context.Context) error
 }
 
@@ -68,10 +68,12 @@ func (s *FileStore) Load(ctx context.Context) (*Credentials, error) {
 }
 
 // Save writes credentials to disk with restrictive file permissions.
-func (s *FileStore) Save(ctx context.Context, creds Credentials) error {
+func (s *FileStore) Save(ctx context.Context, in *Credentials) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// The timestamp default below completes this copy, not the caller's credentials.
+	creds := *in
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

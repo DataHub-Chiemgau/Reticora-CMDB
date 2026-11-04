@@ -77,11 +77,12 @@ func (r *MemoryRepository) ListAll(_ context.Context, orgID string) ([]Type, err
 	defer r.mu.RUnlock()
 	byKey := map[string]Type{}
 	for _, t := range r.types {
-		if t.OrganizationID == "" {
+		switch t.OrganizationID {
+		case "":
 			if _, taken := byKey[t.Key]; !taken {
 				byKey[t.Key] = *t
 			}
-		} else if t.OrganizationID == orgID {
+		case orgID:
 			byKey[t.Key] = *t
 		}
 	}

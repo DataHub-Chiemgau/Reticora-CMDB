@@ -851,6 +851,7 @@ TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-625
 TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-626
 TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-627
 TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-628
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-629
 JOB-03;[B];C;backend/internal/export/cancel_integration_test.go;WP-515
 JOB-04;[B];C;backend/internal/history/snapshot_integration_test.go;WP-516
 API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517

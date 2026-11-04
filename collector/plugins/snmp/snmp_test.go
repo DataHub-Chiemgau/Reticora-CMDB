@@ -182,7 +182,7 @@ func TestCollectFromSNMPFake(t *testing.T) {
 	})
 	// The profile of the fake's sysObjectID gives the model.
 	reg := profiles.NewRegistry()
-	if err = reg.Register(profiles.Profile{Name: "fake-agent", Model: "SNMP fake", SysObjectIDs: []string{"1.3.6.1.4.1.8072.3.2.10"}}); err != nil {
+	if err = reg.Register(&profiles.Profile{Name: "fake-agent", Model: "SNMP fake", SysObjectIDs: []string{"1.3.6.1.4.1.8072.3.2.10"}}); err != nil {
 		t.Fatal(err)
 	}
 

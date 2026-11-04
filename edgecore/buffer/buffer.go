@@ -29,7 +29,7 @@ type Message struct {
 
 // Queue defines the offline buffering contract shared by edge runtimes.
 type Queue interface {
-	Enqueue(ctx context.Context, msg Message) (string, error)
+	Enqueue(ctx context.Context, msg *Message) (string, error)
 	PeekBatch(ctx context.Context, limit int) ([]Message, error)
 	Ack(ctx context.Context, ids []string) error
 	Len(ctx context.Context) (int, error)
@@ -135,10 +135,12 @@ func (b *DiskBuffer) minRetention() time.Duration {
 // Enqueue stores a message on disk and returns its durable identifier.
 // Messages are delivered in the order of their CreatedAt (the source time of
 // the data); when it is zero the enqueue time is used.
-func (b *DiskBuffer) Enqueue(ctx context.Context, msg Message) (string, error) {
+func (b *DiskBuffer) Enqueue(ctx context.Context, in *Message) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	// The defaults below complete this copy, not the caller's message.
+	msg := *in
 
 	b.mu.Lock()
 	defer b.mu.Unlock()

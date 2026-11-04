@@ -63,7 +63,7 @@ func saveCredentials(ctx context.Context, path string, creds *keystore.Credentia
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err = (&keystore.FileStore{Path: name}).Save(ctx, *creds); err != nil {
+	if err = (&keystore.FileStore{Path: name}).Save(ctx, creds); err != nil {
 		return err
 	}
 	f, err := os.Open(name)

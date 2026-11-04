@@ -249,7 +249,13 @@ sed -i 's/^version: "2"$/version: "1"/' "$d/backend/.golangci.yml"
 expect_fail schema "$d" "version 1"
 
 d="$(fixture no-followup)"
-sed -i 's#docs/plan/phase2/implementierungsplan\.md#docs/plan/elsewhere.md#g' "$d/backend/.golangci.yml"
+if grep -q 'new-from-rev' "$d/backend/.golangci.yml"; then
+    sed -i 's#docs/plan/phase2/implementierungsplan\.md#docs/plan/elsewhere.md#g' "$d/backend/.golangci.yml"
+else
+    # WP-629 removed the baseline: one put back without the follow-up
+    # reference fails.
+    sed -i 's/^  max-same-issues: 0$/&\n  new-from-rev: HEAD/' "$d/backend/.golangci.yml"
+fi
 expect_fail wiring "$d" "backend/.golangci.yml without the follow-up reference"
 
 d="$(fixture debt-step)"

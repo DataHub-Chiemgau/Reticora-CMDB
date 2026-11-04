@@ -274,7 +274,7 @@ func TestCollectorNATSLogsRefusalNotSuccess(t *testing.T) {
 	const orgID, colID = "6f0b6f0e-0000-4000-8000-0000000000c3", "6f0b6f0e-0000-4000-8000-0000000000c4"
 	colKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	credPath := filepath.Join(dir, "credentials.json")
-	if err := (&keystore.FileStore{Path: credPath}).Save(context.Background(), keystore.Credentials{
+	if err := (&keystore.FileStore{Path: credPath}).Save(context.Background(), &keystore.Credentials{
 		DeviceID:             colID,
 		ClientCertificatePEM: ca.issue(t, &colKey.PublicKey, pkix.Name{CommonName: colID, Organization: []string{orgID}}, now.Add(-time.Hour), now.Add(24*time.Hour), false),
 		ClientPrivateKeyPEM:  auditKeyPEM(t, colKey),

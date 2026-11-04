@@ -10,7 +10,7 @@ import (
 func TestRegisterAndGet(t *testing.T) {
 	r := NewRegistry()
 	p := Profile{Name: "dell-idrac", Vendor: "Dell", Protocol: "redfish"}
-	if err := r.Register(p); err != nil {
+	if err := r.Register(&p); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
@@ -25,7 +25,7 @@ func TestRegisterAndGet(t *testing.T) {
 
 func TestRegisterRequiresName(t *testing.T) {
 	r := NewRegistry()
-	if err := r.Register(Profile{Vendor: "Dell"}); err == nil {
+	if err := r.Register(&Profile{Vendor: "Dell"}); err == nil {
 		t.Error("Register without name should fail")
 	}
 }
@@ -39,8 +39,8 @@ func TestGetMissingProfile(t *testing.T) {
 
 func TestRegisterReplacesExisting(t *testing.T) {
 	r := NewRegistry()
-	r.Register(Profile{Name: "x", Vendor: "A"})
-	r.Register(Profile{Name: "x", Vendor: "B"})
+	r.Register(&Profile{Name: "x", Vendor: "A"})
+	r.Register(&Profile{Name: "x", Vendor: "B"})
 	got, _ := r.Get("x")
 	if got.Vendor != "B" {
 		t.Errorf("Vendor = %q, want replaced value B", got.Vendor)
@@ -50,7 +50,7 @@ func TestRegisterReplacesExisting(t *testing.T) {
 func TestListDeterministicOrder(t *testing.T) {
 	r := NewRegistry()
 	for _, name := range []string{"zeta", "alpha", "mid"} {
-		if err := r.Register(Profile{Name: name}); err != nil {
+		if err := r.Register(&Profile{Name: name}); err != nil {
 			t.Fatalf("Register: %v", err)
 		}
 	}
@@ -108,10 +108,10 @@ func TestLoadJSONInvalid(t *testing.T) {
 
 func TestBySysObjectIDLongestPrefixWins(t *testing.T) {
 	r := NewRegistry()
-	if err := r.Register(Profile{Name: "vendor", Vendor: "Cisco", SysObjectIDs: []string{"1.3.6.1.4.1.9"}}); err != nil {
+	if err := r.Register(&Profile{Name: "vendor", Vendor: "Cisco", SysObjectIDs: []string{"1.3.6.1.4.1.9"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Register(Profile{Name: "model", Vendor: "Cisco", Model: "Catalyst", SysObjectIDs: []string{"1.3.6.1.4.1.9.1"}}); err != nil {
+	if err := r.Register(&Profile{Name: "model", Vendor: "Cisco", Model: "Catalyst", SysObjectIDs: []string{"1.3.6.1.4.1.9.1"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,7 +142,7 @@ func TestBySysObjectIDLongestPrefixWins(t *testing.T) {
 
 func TestVendorByMAC(t *testing.T) {
 	r := NewRegistry()
-	if err := r.Register(Profile{Name: "mikrotik", Vendor: "MikroTik", OUIPrefixes: []string{"48:8F:5A"}}); err != nil {
+	if err := r.Register(&Profile{Name: "mikrotik", Vendor: "MikroTik", OUIPrefixes: []string{"48:8F:5A"}}); err != nil {
 		t.Fatal(err)
 	}
 

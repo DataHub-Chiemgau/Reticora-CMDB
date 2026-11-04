@@ -552,10 +552,6 @@ jobs:
       GOLANGCI_LINT_VERSION: v2.14.0
     steps:
       - uses: actions/checkout@v4
-        with:
-          # backend/.golangci.yml sets issues.new-from-rev, which needs the
-          # baseline commit in the local history.
-          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:

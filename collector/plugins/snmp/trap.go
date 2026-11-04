@@ -300,11 +300,11 @@ func (p *berParser) readTLV() ([]byte, error) {
 }
 
 // readTLVWithTag reads the next TLV and returns tag and content bytes.
-func (p *berParser) readTLVWithTag() (byte, []byte, error) {
+func (p *berParser) readTLVWithTag() (tag byte, content []byte, err error) {
 	if p.remaining() < 2 {
 		return 0, nil, fmt.Errorf("truncated TLV")
 	}
-	tag := p.data[p.pos]
+	tag = p.data[p.pos]
 	length, err := p.readLength()
 	if err != nil {
 		return 0, nil, err
@@ -312,7 +312,7 @@ func (p *berParser) readTLVWithTag() (byte, []byte, error) {
 	if p.remaining() < length {
 		return 0, nil, fmt.Errorf("truncated value")
 	}
-	content := p.data[p.pos : p.pos+length]
+	content = p.data[p.pos : p.pos+length]
 	p.pos += length
 	return tag, content, nil
 }

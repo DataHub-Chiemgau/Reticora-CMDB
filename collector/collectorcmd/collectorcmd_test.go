@@ -132,7 +132,7 @@ func TestLoadTLSMaterial_FromKeystore(t *testing.T) {
 	certPEM, keyPEM := selfSignedCert(t, "collector-keystore")
 
 	store := &keystore.FileStore{Path: credPath}
-	if err := store.Save(context.Background(), keystore.Credentials{
+	if err := store.Save(context.Background(), &keystore.Credentials{
 		DeviceID:             "collector-1",
 		ClientCertificatePEM: string(certPEM),
 		ClientPrivateKeyPEM:  string(keyPEM),
@@ -547,7 +547,7 @@ func (f *fakeUpdater) Check(context.Context, string) (*update.ReleaseInfo, error
 	return f.release, nil
 }
 
-func (f *fakeUpdater) Apply(_ context.Context, rel update.ReleaseInfo) error {
+func (f *fakeUpdater) Apply(_ context.Context, rel *update.ReleaseInfo) error {
 	if f.applyErr != nil {
 		return f.applyErr
 	}
@@ -902,7 +902,7 @@ func TestEnrolledIdentityWinsOverTheEnvironment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	creds := collectorCreds(t, newAuditPKI(t), orgID, colID)
 	creds.Metadata = map[string]string{"server_url": "https://cmdb.example.com"}
-	if err := (&keystore.FileStore{Path: path}).Save(context.Background(), *creds); err != nil {
+	if err := (&keystore.FileStore{Path: path}).Save(context.Background(), creds); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("RETICORA_CREDENTIALS_PATH", path)

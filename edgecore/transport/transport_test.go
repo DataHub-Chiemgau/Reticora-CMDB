@@ -102,16 +102,16 @@ func issueCertPEM(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, s
 }
 
 func TestNewMTLSRequiresClientMaterial(t *testing.T) {
-	if _, err := NewMTLS(Config{}); err == nil {
+	if _, err := NewMTLS(&Config{}); err == nil {
 		t.Fatal("expected error when client cert/key are missing, got nil")
 	}
-	if _, err := NewMTLS(Config{ClientCertPEM: []byte("x")}); err == nil {
+	if _, err := NewMTLS(&Config{ClientCertPEM: []byte("x")}); err == nil {
 		t.Fatal("expected error when client key is missing, got nil")
 	}
 }
 
 func TestNewMTLSRejectsInvalidKeyPair(t *testing.T) {
-	if _, err := NewMTLS(Config{
+	if _, err := NewMTLS(&Config{
 		ClientCertPEM: []byte("not a cert"),
 		ClientKeyPEM:  []byte("not a key"),
 	}); err == nil {
@@ -121,7 +121,7 @@ func TestNewMTLSRejectsInvalidKeyPair(t *testing.T) {
 
 func TestNewMTLSRejectsInvalidRootCAPEM(t *testing.T) {
 	pki := newTestPKI(t)
-	_, err := NewMTLS(Config{
+	_, err := NewMTLS(&Config{
 		ClientCertPEM: pki.clientPEM,
 		ClientKeyPEM:  pki.clientKey,
 		RootCAsPEM:    []byte("garbage pem"),
@@ -165,7 +165,7 @@ func TestMTLSRequestSucceedsWithValidClientCert(t *testing.T) {
 		io.WriteString(w, "ok")
 	})
 
-	tr, err := NewMTLS(Config{
+	tr, err := NewMTLS(&Config{
 		ServerName:    pki.serverName,
 		RootCAsPEM:    pki.caPEM,
 		ClientCertPEM: pki.clientPEM,
@@ -202,7 +202,7 @@ func TestMTLSRequestFailsWithWrongCA(t *testing.T) {
 
 	// Client trusts a *different* CA, so server verification must fail.
 	other := newTestPKI(t)
-	tr, err := NewMTLS(Config{
+	tr, err := NewMTLS(&Config{
 		ServerName:    pki.serverName,
 		RootCAsPEM:    other.caPEM,
 		ClientCertPEM: pki.clientPEM,
@@ -230,7 +230,7 @@ func TestMTLSRequestFailsWithUntrustedClientCert(t *testing.T) {
 
 	// Client cert signed by a different CA; server must reject it.
 	other := newTestPKI(t)
-	tr, err := NewMTLS(Config{
+	tr, err := NewMTLS(&Config{
 		ServerName:    pki.serverName,
 		RootCAsPEM:    pki.caPEM,
 		ClientCertPEM: other.clientPEM,
@@ -254,7 +254,7 @@ func TestDialContextOpensTLSConnection(t *testing.T) {
 	pki := newTestPKI(t)
 	srv := newMutualTLSServer(t, pki, func(w http.ResponseWriter, r *http.Request) {})
 
-	tr, err := NewMTLS(Config{
+	tr, err := NewMTLS(&Config{
 		ServerName:    pki.serverName,
 		RootCAsPEM:    pki.caPEM,
 		ClientCertPEM: pki.clientPEM,
@@ -283,7 +283,7 @@ func TestDialContextOpensTLSConnection(t *testing.T) {
 
 func TestDialContextHonorsCancelledContext(t *testing.T) {
 	pki := newTestPKI(t)
-	tr, err := NewMTLS(Config{
+	tr, err := NewMTLS(&Config{
 		ServerName:    pki.serverName,
 		RootCAsPEM:    pki.caPEM,
 		ClientCertPEM: pki.clientPEM,
@@ -304,7 +304,7 @@ func TestDialContextHonorsCancelledContext(t *testing.T) {
 
 func TestHTTPClientExposesConfiguredClient(t *testing.T) {
 	pki := newTestPKI(t)
-	tr, err := NewMTLS(Config{
+	tr, err := NewMTLS(&Config{
 		ServerName:    pki.serverName,
 		RootCAsPEM:    pki.caPEM,
 		ClientCertPEM: pki.clientPEM,
@@ -326,7 +326,7 @@ func TestHTTPClientExposesConfiguredClient(t *testing.T) {
 
 func TestNewMTLSDefaultTimeout(t *testing.T) {
 	pki := newTestPKI(t)
-	tr, err := NewMTLS(Config{
+	tr, err := NewMTLS(&Config{
 		ServerName:    pki.serverName,
 		ClientCertPEM: pki.clientPEM,
 		ClientKeyPEM:  pki.clientKey,

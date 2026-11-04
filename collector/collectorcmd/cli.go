@@ -160,7 +160,7 @@ func enrollAndStore(ctx context.Context, client *http.Client, serverURL, code, n
 	}
 	creds.Metadata["server_url"] = serverURL
 	creds.Metadata["name"] = name
-	if err = (&keystore.FileStore{Path: path}).Save(ctx, *creds); err != nil {
+	if err = (&keystore.FileStore{Path: path}).Save(ctx, creds); err != nil {
 		return nil, fmt.Errorf("store credentials: %w", err)
 	}
 	return creds, nil
