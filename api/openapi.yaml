@@ -859,6 +859,22 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission (https://reticora.io/problems/403,
+            ProblemDetail) or the field permissions (RBA-07, WP-265; type
+            urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields`
+            names the DTO paths): a filter on a typed column or attribute the
+            caller cannot read in every client and site scope of its role
+            assignments for one of the queried CI types (without ci_type_id
+            every type), or any such filter under an object grant none. No
+            list and no total are answered.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '422':
           description: An unknown field in filter, sort or fields (API-02).
           content:
@@ -902,7 +918,20 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/EntitlementLimit'
+          description: >-
+            Forbidden: a missing permission or the plan (ProblemDetail, see
+            EntitlementLimit: entitlement-limit for max_cis, ENT-03), or a
+            non-empty value in a field the caller may not write for the type
+            and client_id of the request (field permissions, RBA-07, WP-265;
+            type urn:reticora:problem:forbidden, FieldForbiddenProblem with
+            `fields`), checked before the validation (422) and the unique
+            check (409).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '409':
           description: >-
             Another active CI holds the value of a unique attribute (MET-15);
@@ -1041,7 +1070,22 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission (https://reticora.io/problems/403,
+            ProblemDetail) or the field permissions (RBA-07, WP-265; type
+            urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields`
+            names the DTO paths, e.g. hostname or attributes.cost_center): a
+            field of the request the caller may not read (whatever its value),
+            a readable field it may not write whose value differs from the
+            current effective value, every projected field under an object
+            grant read, or an instance attribute changed without
+            ci_instance_attribute:manage. Checked before 422, 409 and 412.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1182,7 +1226,18 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission (https://reticora.io/problems/403,
+            ProblemDetail) or the field permissions (RBA-07, WP-265; type
+            urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields`
+            names the DTO paths): the CI carries values in fields the caller
+            may not read in its current type.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -1244,7 +1299,18 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission (https://reticora.io/problems/403,
+            ProblemDetail) or the field permissions (RBA-07, WP-265; type
+            urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields`
+            names the DTO paths): survivor or victim carry values in fields
+            the caller may not read in their type.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -15484,6 +15550,21 @@ paths:
               schema: { $ref: '#/components/schemas/FieldProvenance' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: >-
+            Forbidden: the route permission (https://reticora.io/problems/403,
+            ProblemDetail) or the field permissions (RBA-07, WP-265; type
+            urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields`
+            names the field): the caller may not write the field of the path
+            (a typed column is core.<name>, an instance attribute of the CI
+            _instance.<name>, any other name attributes.<name>; name and
+            status are structural).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422':
           description: The field cannot be overridden (a structural column, an instance attribute or a computed attribute)
@@ -15517,6 +15598,21 @@ paths:
               schema: { $ref: '#/components/schemas/FieldProvenance' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: >-
+            Forbidden: the route permission (https://reticora.io/problems/403,
+            ProblemDetail) or the field permissions (RBA-07, WP-265; type
+            urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields`
+            names the field): the caller may not write the field of the path
+            (a typed column is core.<name>, an instance attribute of the CI
+            _instance.<name>, any other name attributes.<name>; name and
+            status are structural).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           description: Unknown, invisible or soft-deleted CI, or the CI has no value of the field
           content:
@@ -17170,7 +17266,17 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission (ci_instance_attribute:manage,
+            ProblemDetail) or the field permissions of _instance.<key>
+            (RBA-07, WP-265; type urn:reticora:problem:forbidden,
+            FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -17218,7 +17324,17 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission (ci_instance_attribute:manage,
+            ProblemDetail) or the field permissions of _instance.<key>
+            (RBA-07, WP-265; type urn:reticora:problem:forbidden,
+            FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -23118,6 +23234,18 @@ components:
 
     CI:
       type: object
+      description: >-
+        A configuration item as the caller may read it (field permissions,
+        RBA-07, WP-265): the typed columns manufacturer, model,
+        serial_number, hardware_uuid, management_ip, primary_mac, hostname,
+        fqdn, os_name, os_version, firmware_version and sys_object_id
+        (core.<column>), every key of attributes (attributes.<key>,
+        instance attributes _instance.<key>) and the members of asset (by
+        the field permissions of the asset) are left out when the caller
+        may not read them; sensitive fields without a grant are never
+        answered. The structural members (id, type, client, location,
+        name, status, lifecycle, health, timestamps, version) always stay;
+        version and the ETag do not depend on the visible fields.
       required: [id, organization_id, ci_type_id, name, status, attributes, is_manual, created_at, updated_at]
       properties:
         id:
@@ -27183,6 +27311,21 @@ components:
               type: array
               items: { type: string }
             current_version: { type: integer, format: int64 }
+    FieldForbiddenProblem:
+      description: >-
+        A request refused by the field permissions (RBA-07, WP-265): type
+        urn:reticora:problem:forbidden, status 403. `fields` names the DTO
+        paths of the refused fields (hostname, attributes.cost_center),
+        never their values. The route permission answers 403 with type
+        https://reticora.io/problems/403 instead.
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetail'
+        - type: object
+          required: [fields]
+          properties:
+            fields:
+              type: array
+              items: { type: string }
     UnmergeLaterMergeProblem:
       description: >-
         The unmerge is blocked by a later open merge of the survivor (F-416):

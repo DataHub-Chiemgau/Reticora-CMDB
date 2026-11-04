@@ -1,7 +1,9 @@
 package ci
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"slices"
@@ -14,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 )
 
 // BatchReader reads several CIs in one query, so graph walks resolve their
@@ -518,6 +521,11 @@ func (s *Service) create(ctx context.Context, item *Item) error {
 	if err := CheckReservedKeys("attributes", item.Attributes); err != nil {
 		return err
 	}
+	// Field permissions before the validation (403 before 422 and 409,
+	// RBA-07, WP-265).
+	if err := checkCreateFields(ctx, item); err != nil {
+		return err
+	}
 	typed := typedValues(item)
 	if err := validateTypedColumns(typed); err != nil {
 		return err
@@ -589,10 +597,6 @@ func (s *Service) allowActive(ctx context.Context, orgID string) error {
 // the mutation transaction so the recorded diff cannot race with concurrent
 // writers.
 func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) { //nolint:gocritic // signature of Repository; the update works on its own copy
-	// null clears a nullable field; on a required one it is refused (CI-04).
-	if err := req.nullViolations(); err != nil {
-		return nil, err
-	}
 	// The definitions the validation resolves are those the repository
 	// computes with (WP-717).
 	ctx = WithFieldsMemo(ctx)
@@ -604,6 +608,16 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 	}
 	if legacy != nil {
 		req.Attributes, req.LegacyTags = rest, legacy
+	}
+	// Field permissions before the validation and the If-Match (403 before
+	// 422, 409 and 412, RBA-07, WP-265).
+	checked, checkErr := s.checkUpdateFields(ctx, orgID, id, &req)
+	if checkErr != nil {
+		return nil, checkErr
+	}
+	// null clears a nullable field; on a required one it is refused (CI-04).
+	if err := req.nullViolations(); err != nil {
+		return nil, err
 	}
 	if err := CheckReservedKeys("attributes", req.Attributes); err != nil {
 		return nil, err
@@ -619,9 +633,13 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 	unique = unique && (req.Attributes != nil || req.ClientID != nil)
 	needsBefore := unique || s.fields != nil || (req.Manual != nil && (req.LocationID != nil || req.SerialNumber != nil))
 	if needsBefore {
-		before, err := s.repo.GetByID(ctx, orgID, id)
-		if err != nil {
-			return nil, err
+		before := checked
+		if before == nil {
+			read, err := s.repo.GetByID(ctx, orgID, id)
+			if err != nil {
+				return nil, err
+			}
+			before = read
 		}
 		// A manual change of an instance attribute needs its own right
 		// (MET-14, WP-256).
@@ -776,4 +794,119 @@ func (s *Service) ListChanges(ctx context.Context, orgID, ciID string, page api.
 		return []Change{}, 0, nil
 	}
 	return reader.ListChanges(ctx, orgID, ciID, page)
+}
+
+// checkCreateFields refuses a creation that sets a non-empty value in a
+// field the principal may not write for the type and client of the request
+// (RBA-07, WP-265).
+func checkCreateFields(ctx context.Context, item *Item) error {
+	var paths []string
+	for name, value := range typedValues(item) {
+		if permission.IsProjectedCIField(name) && value != "" {
+			paths = append(paths, name)
+		}
+	}
+	for key, value := range item.Attributes {
+		if value != nil && value != "" {
+			paths = append(paths, "attributes."+key)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	policy, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return err
+	}
+	return permission.CheckWrite(policy, permission.KindCI, item.CITypeID, permission.ObjectRef{ClientID: item.ClientID}, paths)
+}
+
+// updatePaths returns the projected fields an update names (DTO paths) with
+// the value each sets: the typed columns of ciProjected and every
+// attribute key of the merge patch.
+func updatePaths(req *UpdateRequest) map[string]any {
+	out := map[string]any{}
+	for name, value := range typedPatch(req) {
+		if permission.IsProjectedCIField(name) {
+			out[name] = value
+		}
+	}
+	for key, value := range req.Attributes {
+		out["attributes."+key] = value
+	}
+	return out
+}
+
+// checkUpdateFields checks the fields of an update against the field
+// policy (RBA-07, WP-265): a field the principal may not read is refused
+// whatever its value (no equality oracle), a readable field that is not
+// editable only when the update changes its effective value; for
+// attributes only the named keys count and null on a set key is a change.
+// The instance attributes of the CI are checked as _instance.<key>. It
+// returns the CI it read (nil when the policy does not restrict CIs or the
+// update names no projected field).
+func (s *Service) checkUpdateFields(ctx context.Context, orgID, id string, req *UpdateRequest) (*Item, error) {
+	sent := updatePaths(req)
+	if len(sent) == 0 {
+		return nil, nil
+	}
+	policy, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !policy.Restricted(permission.KindCI) {
+		return nil, nil
+	}
+	before, err := s.repo.GetByID(ctx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	instance := slices.Clone(before.InstanceKeys)
+	if len(req.Attributes) > 0 {
+		// An instance attribute without a value yet is one as well.
+		defs, defErr := s.instanceFields(ctx, orgID, id)
+		if defErr != nil {
+			return nil, defErr
+		}
+		for i := range defs {
+			instance = append(instance, defs[i].Name)
+		}
+	}
+	ref, opts := ciRef(before), permission.WithInstanceKeys(instance)
+	current := typedValues(before)
+	var changed []string
+	for path, value := range sent {
+		if !permission.Readable(policy, permission.KindCI, before.CITypeID, ref, path, opts) {
+			changed = append(changed, path)
+			continue
+		}
+		if key, isAttribute := strings.CutPrefix(path, "attributes."); isAttribute {
+			if attributeChanged(before.Attributes, key, value) {
+				changed = append(changed, path)
+			}
+			continue
+		}
+		old, _ := current[path].(string)
+		if next, _ := value.(string); next != old {
+			changed = append(changed, path)
+		}
+	}
+	return before, permission.CheckWrite(policy, permission.KindCI, before.CITypeID, ref, changed, opts)
+}
+
+// attributeChanged reports whether the merge patch member value of key
+// changes the attribute (RFC 7396): null removes a set key, an object
+// merges into the stored object.
+func attributeChanged(before map[string]any, key string, value any) bool {
+	old, had := before[key]
+	after, has := MergePatch(map[string]any{key: old}, map[string]any{key: value})[key]
+	if !had {
+		return value != nil
+	}
+	if !has {
+		return true
+	}
+	a, errA := json.Marshal(old)
+	b, errB := json.Marshal(after)
+	return errA != nil || errB != nil || !bytes.Equal(a, b)
 }

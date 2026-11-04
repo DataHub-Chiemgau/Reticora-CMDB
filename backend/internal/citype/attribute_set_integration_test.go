@@ -36,6 +36,8 @@ type setAPI struct {
 func newSetAPI(t *testing.T, f *scopetest.Fixture) *setAPI {
 	repo := citype.NewPGRepository(f.App)
 	mux := chi.NewRouter()
+	// The field policy source of the server router (WP-265).
+	mux.Use(fieldPolicySource())
 	citype.NewHandler(repo).RegisterRoutes(mux)
 	return &setAPI{t: t, f: f, mux: mux, repo: repo, user: f.AppUser(t, f.OrgA, "wp250-admin")}
 }

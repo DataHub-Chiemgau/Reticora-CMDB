@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -350,6 +351,8 @@ func TestHistoryChangeSetsAUD03(t *testing.T) {
 	// The request chain of the server: request and correlation id, then the
 	// request context of the audit (source, AUD-07).
 	mux := chi.NewRouter()
+	// The field policy source of the server router (WP-265).
+	mux.Use(fieldPolicySource())
 	mux.Use(middleware.RequestID, middleware.AuditRoute(http.MethodPatch, "/api/v1/cis/{id}", nil, middleware.AuditNone, ""))
 	ci.NewHandler(ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()))).RegisterRoutes(mux)
 	history.NewHandler(history.NewPGRepository(f.App)).RegisterRoutes(mux)
@@ -488,4 +491,20 @@ func TestHistoryChangeSetsAUD03(t *testing.T) {
 			t.Errorf("GET %s: %d %s, want 400 naming change_kind", path, w.Code, w.Body)
 		}
 	}
+}
+
+// phase1Resolver resolves every principal to the policy without field
+// permissions (an organization without grants).
+type phase1Resolver struct{}
+
+func (phase1Resolver) Resolve(_ context.Context, p identity.Principal) (*permission.FieldPolicy, error) { //nolint:gocritic // interface of permission.PolicyResolver
+	return permission.UnrestrictedPolicy(p.Permissions), nil
+}
+
+// fieldPolicySource is the policy source server.NewRouter puts behind the
+// route permission (permission.FieldPolicyMiddleware): a router of the test
+// that mounts the CI handler needs it, since a principal without policy
+// source is answered 500 (fail-closed, WP-265).
+func fieldPolicySource() func(http.Handler) http.Handler {
+	return permission.FieldPolicyMiddleware(phase1Resolver{})
 }

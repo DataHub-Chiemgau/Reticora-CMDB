@@ -100,6 +100,11 @@ type Item struct {
 	// projected _overrides and _observed as read with the CI (REC-12).
 	// Read-only, not part of the API.
 	Overridden map[string]*Observation `json:"-"`
+	// InstanceKeys are the keys of the instance attributes the CI holds
+	// (attributes._instance, MET-14), read before presentAttributes lays
+	// them flat into Attributes: the field permissions see them as
+	// _instance.<key> (RBA-07, WP-265). Not part of the API.
+	InstanceKeys []string `json:"-"`
 }
 
 // MarshalJSON writes the item with tags [] when it has none, so every
@@ -162,6 +167,12 @@ type AssetFacts struct {
 	WarrantyEnd    string `json:"warranty_end,omitempty"`
 	Supplier       string `json:"supplier,omitempty"`
 	InvoiceNumber  string `json:"invoice_number,omitempty"`
+	// AssetTypeID, ClientID and SiteID are the type and scope of the asset:
+	// the facts are projected by the asset's field permissions (RBA-07,
+	// WP-265). Not part of the API.
+	AssetTypeID string `json:"-"`
+	ClientID    string `json:"-"`
+	SiteID      string `json:"-"`
 }
 
 // CreateRequest is the payload for creating a CI.

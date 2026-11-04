@@ -93,6 +93,8 @@ func newAuditT7BulkEnvOn(t *testing.T, tag, natsURL string) *auditT7BulkEnv {
 		})
 	}
 	mux := chi.NewRouter()
+	// The field policy source of the server router (WP-265).
+	mux.Use(fieldPolicySource())
 	ci.NewHandler(svc).RegisterRoutes(mux)
 	jobs.NewAPIHandler(jobSvc).WithKind(ci.BulkJobKind, identity.PermCIWrite, nil).RegisterRoutes(mux)
 	return &auditT7BulkEnv{t: t, f: f, mux: mux, jobSvc: jobSvc, user: user, ctx: ctx}

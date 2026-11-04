@@ -35,6 +35,8 @@ func TestBulkAgainstPostgres(t *testing.T) {
 	jobSvc := jobs.NewService(jobs.NewPGRepository(f.App))
 	jobSvc.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1})
 	mux := chi.NewRouter()
+	// The field policy source of the server router (WP-265).
+	mux.Use(fieldPolicySource())
 	ci.NewHandler(ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithBulkJobs(jobSvc)).RegisterRoutes(mux)
 	post := func(req ci.BulkRequest) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(req)

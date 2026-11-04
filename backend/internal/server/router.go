@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
@@ -418,12 +419,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// every route is mapped.
 	// The draft service captures metamodel writes with ?draft (WP-720)
 	// and lays a draft over the form preview (E-113).
-	protected := &authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules,
-		drafts: repos.MetamodelDraft}
-
 	// The field permissions (RBA-07, WP-264) resolve per principal; the
-	// handlers of WP-726 and WP-265 take this resolver.
+	// handlers of WP-726 take this resolver. Behind the route permission
+	// FieldPolicyMiddleware puts the policy source of each request into its
+	// context: permission.PolicyFrom resolves it once, on first need
+	// (WP-265), also for POST /bff/graphql.
 	fieldResolver := newFieldResolver(&repos, &opts)
+	after := append(slices.Clone(opts.RouteMiddleware), permission.FieldPolicyMiddleware(fieldResolver))
+	protected := &authorizingRouter{Router: mux, after: after, auditor: routeAuditor(&opts), modules: opts.Modules,
+		drafts: repos.MetamodelDraft}
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
 		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
@@ -703,7 +707,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
-		override.NewHandler(repos.Override, opts.Dispatcher),
+		// The overrides follow the field permissions of the CI (WP-265).
+		override.NewHandler(repos.Override, opts.Dispatcher).WithCIs(overrideCILookup{repo: repos.CI, fields: repos.CIType}),
 		historyHandler,
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
@@ -903,6 +908,35 @@ func routeAuditor(opts *Options) middleware.RouteAuditor {
 
 // The production route auditor reads route snapshots (WP-505).
 var _ middleware.RouteSnapshotter = (*audit.PGRouteAuditor)(nil)
+
+// overrideCILookup reads the type, scope and instance attributes of a CI
+// for the field permissions of its overrides (RBA-07, WP-265): the
+// instance attributes the CI holds and those its definitions name.
+type overrideCILookup struct {
+	repo   ci.Repository
+	fields any
+}
+
+func (l overrideCILookup) FieldScope(ctx context.Context, orgID, ciID string) (*override.CIScope, error) {
+	item, err := l.repo.GetByID(ctx, orgID, ciID)
+	if errors.Is(err, ci.ErrNotFound) {
+		return nil, override.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	keys := slices.Clone(item.InstanceKeys)
+	if lister, ok := l.fields.(ci.InstanceFieldLister); ok {
+		defs, lerr := lister.ListInstanceFields(ctx, orgID, ciID)
+		if lerr != nil {
+			return nil, lerr
+		}
+		for i := range defs {
+			keys = append(keys, defs[i].Name)
+		}
+	}
+	return &override.CIScope{TypeID: item.CITypeID, ClientID: item.ClientID, SiteID: item.SiteID, InstanceKeys: keys}, nil
+}
 
 // ciHandler builds the CI handler; without the event outbox it hands CI
 // events to the webhook dispatcher directly.

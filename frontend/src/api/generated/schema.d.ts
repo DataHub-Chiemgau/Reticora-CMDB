@@ -11253,6 +11253,7 @@ export interface components {
      */
     CIDiscoverySource:
       'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'agent' | 'sweep' | 'manual' | 'import';
+    /** @description A configuration item as the caller may read it (field permissions, RBA-07, WP-265): the typed columns manufacturer, model, serial_number, hardware_uuid, management_ip, primary_mac, hostname, fqdn, os_name, os_version, firmware_version and sys_object_id (core.<column>), every key of attributes (attributes.<key>, instance attributes _instance.<key>) and the members of asset (by the field permissions of the asset) are left out when the caller may not read them; sensitive fields without a grant are never answered. The structural members (id, type, client, location, name, status, lifecycle, health, timestamps, version) always stay; version and the ETag do not depend on the visible fields. */
     CI: {
       id: string;
       organization_id: string;
@@ -13600,6 +13601,10 @@ export interface components {
       fields: string[];
       /** Format: int64 */
       current_version: number;
+    };
+    /** @description A request refused by the field permissions (RBA-07, WP-265): type urn:reticora:problem:forbidden, status 403. `fields` names the DTO paths of the refused fields (hostname, attributes.cost_center), never their values. The route permission answers 403 with type https://reticora.io/problems/403 instead. */
+    FieldForbiddenProblem: components['schemas']['ProblemDetail'] & {
+      fields: string[];
     };
     /** @description The unmerge is blocked by a later open merge of the survivor (F-416): the merge later_merge_id of later_merge_victim_id into later_merge_survivor_id is unmerged first. A later merge into a CI outside the caller's scope is named only by its victim (the survivor of this merge); later_merge_id and later_merge_survivor_id are absent. */
     UnmergeLaterMergeProblem: components['schemas']['ProblemDetail'] & {
@@ -16583,6 +16588,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a filter on a typed column or attribute the caller cannot read in every client and site scope of its role assignments for one of the queried CI types (without ci_type_id every type), or any such filter under an object grant none. No list and no total are answered. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description An unknown field in filter, sort or fields (API-02). */
       422: {
         headers: {
@@ -16643,7 +16658,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: a missing permission or the plan (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis, ENT-03), or a non-empty value in a field the caller may not write for the type and client_id of the request (field permissions, RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `fields`), checked before the validation (422) and the unique check (409). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. The check covers every CI of the scope of the attribute, also those outside the client or site scope of the caller, and never names the other CI. */
       409: {
         headers: {
@@ -16780,7 +16804,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths, e.g. hostname or attributes.cost_center): a field of the request the caller may not read (whatever its value), a readable field it may not write whose value differs from the current effective value, every projected field under an object grant read, or an instance attribute changed without ci_instance_attribute:manage. Checked before 422, 409 and 412. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes; also a CI outside the client or site scope of the caller, which is never named) */
       409: {
@@ -16891,7 +16924,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): the CI carries values in fields the caller may not read in its current type. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Another active CI holds a value the CI carries of a unique attribute of the target type (MET-15): urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists. The CI keeps its type. */
       409: {
@@ -16943,7 +16985,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): survivor or victim carry values in fields the caller may not read in their type. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description One of the CIs is part of another merge. */
       409: {
@@ -34020,6 +34071,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the field): the caller may not write the field of the path (a typed column is core.<name>, an instance attribute of the CI _instance.<name>, any other name attributes.<name>; name and status are structural). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The field cannot be overridden (a structural column, an instance attribute or a computed attribute) */
       422: {
@@ -34059,6 +34120,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the field): the caller may not write the field of the path (a typed column is core.<name>, an instance attribute of the CI _instance.<name>, any other name attributes.<name>; name and status are structural). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description Unknown, invisible or soft-deleted CI, or the CI has no value of the field */
       404: {
         headers: {
@@ -36199,7 +36270,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (ci_instance_attribute:manage, ProblemDetail) or the field permissions of _instance.<key> (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The attributes changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15) */
       409: {
@@ -36259,7 +36339,16 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (ci_instance_attribute:manage, ProblemDetail) or the field permissions of _instance.<key> (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The attributes changed since the If-Match version */
       409: {

@@ -21,6 +21,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 )
 
 // composeEnv is the fixture of the WP-252 tests: the set API (setAPI) with
@@ -564,4 +565,20 @@ func (e *composeEnv) typeAttribute(typeID, key string) string {
 		e.t.Fatalf("definition %s: %v", key, err)
 	}
 	return id
+}
+
+// phase1Resolver resolves every principal to the policy without field
+// permissions (an organization without grants).
+type phase1Resolver struct{}
+
+func (phase1Resolver) Resolve(_ context.Context, p identity.Principal) (*permission.FieldPolicy, error) { //nolint:gocritic // interface of permission.PolicyResolver
+	return permission.UnrestrictedPolicy(p.Permissions), nil
+}
+
+// fieldPolicySource is the policy source server.NewRouter puts behind the
+// route permission (permission.FieldPolicyMiddleware): a router of the test
+// that mounts the CI handler needs it, since a principal without policy
+// source is answered 500 (fail-closed, WP-265).
+func fieldPolicySource() func(http.Handler) http.Handler {
+	return permission.FieldPolicyMiddleware(phase1Resolver{})
 }

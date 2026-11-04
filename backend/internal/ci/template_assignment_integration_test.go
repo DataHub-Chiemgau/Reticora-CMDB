@@ -63,6 +63,8 @@ func TestTemplateAssignmentOnPostgreSQL(t *testing.T) {
 	repo := ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox())
 	svc := ci.NewService(repo).WithFieldResolver(types)
 	mux := chi.NewRouter()
+	// The field policy source of the server router (WP-265).
+	mux.Use(fieldPolicySource())
 	ci.NewHandler(svc).RegisterRoutes(mux)
 	call := func(ctx context.Context, method, path, body string, header ...string) *httptest.ResponseRecorder {
 		t.Helper()

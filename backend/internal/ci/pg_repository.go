@@ -2183,6 +2183,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 	}
 
 	item.Overridden = overridden(item.Attributes)
+	item.InstanceKeys = instanceKeys(item.Attributes)
 	item.Attributes = presentAttributes(item.Attributes)
 	if firstSeen.Valid {
 		t := firstSeen.Time.UTC()
@@ -2485,6 +2486,21 @@ func locationError(err error) error {
 // to an asset (DB-05).
 const locationOwnedByAsset = "the location of a CI linked to an asset is the asset's location"
 
+// instanceKeys returns the sorted keys of the instance attributes of stored
+// attributes (attributes._instance, MET-14); nil without any.
+func instanceKeys(stored map[string]any) []string {
+	instance, _ := stored[NamespaceInstance].(map[string]any)
+	if len(instance) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(instance))
+	for k := range instance {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 // loadAssetFacts shows the canonical data of each linked asset on its CIs
 // (DB-05). Assets the principal cannot see are left out.
 func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
@@ -2506,7 +2522,8 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 		SELECT id::text, asset_tag, name, COALESCE(serial_number, ''), COALESCE(location_id::text, ''),
 		       COALESCE(lifecycle_state, ''), status, COALESCE(barcode, ''), COALESCE(rfid_tag, ''),
 		       COALESCE(to_char(purchase_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(warranty_end, 'YYYY-MM-DD'), ''),
-		       COALESCE(supplier, ''), COALESCE(invoice_number, '')
+		       COALESCE(supplier, ''), COALESCE(invoice_number, ''), COALESCE(asset_type_id::text, ''),
+		       COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
 		FROM asset WHERE id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		return fmt.Errorf("load asset facts: %w", err)
@@ -2515,7 +2532,8 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 	for rows.Next() {
 		var a AssetFacts
 		if err := rows.Scan(&a.ID, &a.AssetTag, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState, &a.Status,
-			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyEnd, &a.Supplier, &a.InvoiceNumber); err != nil {
+			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyEnd, &a.Supplier, &a.InvoiceNumber, &a.AssetTypeID,
+			&a.ClientID, &a.SiteID); err != nil {
 			return fmt.Errorf("scan asset facts: %w", err)
 		}
 		for _, item := range byAsset[a.ID] {
