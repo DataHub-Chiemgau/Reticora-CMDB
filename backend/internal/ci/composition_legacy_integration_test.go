@@ -13,7 +13,9 @@
 //     the parents), a parent of another client that is not org-wide and a
 //     mounted child. The before images name exactly the changed CIs; the
 //     down migration restores them and removes the rows of 000248.
-//     composition stays unchanged.
+//     composition stays unchanged. Since 000253 (WP-743) dropped
+//     composition, the transaction first brings it back with the down
+//     migration of 000253.
 //   - TestCompositionLegacyParentPath: GET /api/v1/cis/{id}/parent in the
 //     former format for a configuration child, a standalone child and a
 //     configuration grandchild (derived asset), 404 without a parent and
@@ -24,7 +26,8 @@
 //     cursor pages.
 //   - TestCompositionLegacyChildAssetWritable: without the field lock over
 //     composition (WP-841) PATCH /api/v1/assets/{id} on a former child
-//     asset writes a formerly parent-owned field (200 instead of 409).
+//     asset writes a formerly parent-owned field (200 instead of 409). The
+//     legacy row it used to seed is gone with the table (000253, WP-743).
 //
 // Retest:
 //
@@ -75,6 +78,8 @@ func TestCompositionLegacyTakeover(t *testing.T) {
 			t.Fatalf("%s: %v", query, execErr)
 		}
 	}
+	// composition in the state 000248 ran against (dropped by 000253).
+	exec(readMigration(t, "000253_drop_composition.down.sql"))
 	newCI := func(name, client, location string) string {
 		t.Helper()
 		id := f.ID()
@@ -504,14 +509,12 @@ func TestCompositionLegacyAssetChildren(t *testing.T) {
 func TestCompositionLegacyChildAssetWritable(t *testing.T) {
 	w := newCompWorld(t)
 	f := w.f
-	parent := w.asset(t, "LEG-LOCK-PARENT", "SN-LEG-LOCK-PARENT", f.Client1, w.room1)
+	w.asset(t, "LEG-LOCK-PARENT", "SN-LEG-LOCK-PARENT", f.Client1, w.room1)
 	child := w.asset(t, "LEG-LOCK-CHILD", "", f.Client1, "")
-	// A legacy row naming the asset as composition child; before WP-841 the
-	// asset handler answered 409 for the parent-owned fields of such an asset.
-	if _, err := f.Admin.Exec(w.bg, `INSERT INTO composition (organization_id, parent_asset_id, child_asset_id, configuration_only)
-		VALUES ($1, $2, $3, true)`, f.OrgA, parent, child); err != nil {
-		t.Fatal(err)
-	}
+	// Before WP-841 the asset handler answered 409 for the parent-owned
+	// fields of an asset a composition row named as child. The table is
+	// dropped (000253, WP-743), so no such row can be seeded any more; the
+	// PATCH of those fields stays writable.
 	repo := asset.NewPGRepository(f.App)
 	mux := chi.NewRouter()
 	asset.NewHandler(repo).RegisterRoutes(mux)

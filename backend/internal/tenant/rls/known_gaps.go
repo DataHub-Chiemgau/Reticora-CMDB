@@ -102,11 +102,6 @@ var DerivedScopeTables = map[string]DerivedScope{
 		Reason:   "a building carries its site; the site determines the client",
 		TestFile: "internal/tenantapi/tenantapi_scope_integration_test.go", TestName: "TestTenantRepositoryClientScope",
 	},
-	"composition": {
-		Path:     "parent_asset_id, child_asset_id -> asset, child_ci_id -> ci (composition.compositionVisible)",
-		Reason:   "a composition row links two items and is visible only when both are",
-		TestFile: "internal/composition/composition_scope_integration_test.go", TestName: "TestCompositionRepositoryClientScope",
-	},
 	"form_submission": {
 		Path:     "form_id -> form_def, ci_id -> ci, ticket_id -> ticket (form.submissionVisible)",
 		Reason:   "a submission is visible only when its form, CI and ticket are",
@@ -383,7 +378,6 @@ const (
 		"the successor references with the organization"
 	refWP287 = "stock_scan is replaced by the stocktake scans of WP-287 (K19); " +
 		"the successor references with the organization"
-	refWP743 = "composition and asset.parent_asset_id are dropped by WP-743 (K19)"
 	refWP758 = "quantity_item is dropped by WP-758 (E-40, K19); its successor references with the organization"
 )
 
@@ -406,7 +400,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"ai_conversation.user_id":                        {Constraint: "ai_conversation_user_id_fkey", Target: "app_user", Reason: refG1},
 	"ai_message.conversation_id":                     {Constraint: "ai_message_conversation_id_fkey", Target: "ai_conversation", Reason: refG1},
 	"api_key.rotated_from":                           {Constraint: "api_key_rotated_from_fkey", Target: "api_key", Reason: refG1},
-	"asset.parent_asset_id":                          {Constraint: "asset_parent_asset_id_fkey", Target: "asset", Reason: refWP743},
 	"asset_location.asset_id":                        {Constraint: "asset_location_asset_id_fkey", Target: "asset", Reason: refG1},
 	"assignment.asset_id":                            {Constraint: "assignment_asset_id_fkey", Target: "asset", Reason: refWP275},
 	"assignment.assigned_by":                         {Constraint: "assignment_assigned_by_fkey", Target: "app_user", Reason: refWP275},
@@ -434,9 +427,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"collector_enrollment_code.used_by_collector_id": {Constraint: "collector_enrollment_code_used_by_collector_id_fkey", Target: "collector", Reason: refG1},
 	"compliance_result.ci_id":                        {Constraint: "compliance_result_ci_id_fkey", Target: "ci", Reason: refG1},
 	"compliance_result.rule_id":                      {Constraint: "compliance_result_rule_id_fkey", Target: "compliance_rule", Reason: refG1},
-	"composition.child_asset_id":                     {Constraint: "composition_child_asset_id_fkey", Target: "asset", Reason: refWP743},
-	"composition.child_ci_id":                        {Constraint: "composition_child_ci_id_fkey", Target: "ci", Reason: refWP743},
-	"composition.parent_asset_id":                    {Constraint: "composition_parent_asset_id_fkey", Target: "asset", Reason: refWP743},
 	"contact.pii_subject_id":                         {Constraint: "contact_pii_subject_id_fkey", Target: "pii_subject", Reason: refG1},
 	"discovery_job.collector_id":                     {Constraint: "discovery_job_collector_id_fkey", Target: "collector", Reason: refG1},
 	"discovery_result.job_id":                        {Constraint: "discovery_result_job_id_fkey", Target: "discovery_job", Reason: refG1},

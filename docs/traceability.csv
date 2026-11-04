@@ -80,7 +80,6 @@ TEN-06;[B];B;backend/internal/monitoring/monitoring_scope_integration_test.go;WP
 TEN-06;[B];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
 TEN-06;[B];B;backend/internal/assignment/assignment_scope_integration_test.go;WP-017
 TEN-06;[B];B;backend/internal/reservation/reservation_scope_integration_test.go;WP-017
-TEN-06;[B];B;backend/internal/composition/composition_scope_integration_test.go;WP-017
 AST-01;[P2];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
 MGT-11;[P5];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
 TEN-06;[B];B;backend/internal/movement/movement_scope_integration_test.go;WP-018
@@ -1435,3 +1434,4 @@ STK-01;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/consumable/stock_integration_test.go;WP-283
 GQL-03;[P2];C;backend/internal/graphqlbff/assets_test.go;WP-311
 SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_assets_integration_test.go;WP-309
+AST-05;[P2];B;backend/internal/composition/quarantine_integration_test.go;WP-743

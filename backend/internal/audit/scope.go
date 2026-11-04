@@ -85,7 +85,6 @@ var resourceTables = map[string][]string{
 	"clients":                   {"client"},
 	"collectors":                {"collector", "collector_enrollment_code"},
 	"compliance":                {"compliance_rule"},
-	"compositions":              {"composition"},
 	"consumables":               {"consumable"},
 	"contacts":                  {"contact"},
 	"contracts":                 {"contract"},
@@ -165,6 +164,10 @@ var resourceTables = map[string][]string{
 	// object of any client. Restricted principals never see the entries
 	// (fail-closed).
 	"field-permissions": nil,
+	// The table composition is dropped (WP-743, migration 000253): the
+	// entries of the former composition routes name no row any more.
+	// Restricted principals no longer see them (fail-closed).
+	"compositions": nil,
 }
 
 // orgResources are the types whose entries are about the organization
@@ -194,7 +197,6 @@ var scopeParents = map[string]map[string]string{
 	"assignment":      {"asset_id": "asset", "ci_id": "ci"},
 	"building":        {"site_id": "site"},
 	"cable":           {"source_interface_id": "network_interface", "target_interface_id": "network_interface"},
-	"composition":     {"parent_asset_id": "asset", "child_ci_id": "ci", "child_asset_id": "asset"},
 	"reservation":     {"asset_id": "asset", "quantity_item_id": "quantity_item", "ticket_id": "ticket", "order_id": "internal_order"},
 	"role_assignment": {"scope_client_id": "client", "scope_site_id": "site"},
 	// The policy of the ledger filters client and site of the booking

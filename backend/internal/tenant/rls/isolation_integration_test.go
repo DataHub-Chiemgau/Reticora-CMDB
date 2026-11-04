@@ -87,7 +87,7 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 			return
 		}
 		for _, table := range []string{
-			"ci_relationship", "composition", "asset", "ci", "ci_type", "relationship_type", "organization",
+			"ci_relationship", "asset", "ci", "ci_type", "relationship_type", "organization",
 		} {
 			column := "organization_id"
 			if table == "organization" {

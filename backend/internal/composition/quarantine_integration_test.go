@@ -19,6 +19,12 @@ import (
 // rows. It works inside one transaction that is always rolled back: it first
 // undoes the constraints and the quarantine table of the migrated schema,
 // seeds the inconsistent rows, then executes the migration sections.
+//
+// Migration 000253 (WP-743) dropped composition; the tests create the table
+// in the state of 000055 themselves (composition000055).
+// TestMigration253DropSavesAndRestoresRows covers that drop: every row and
+// every asset.parent_asset_id go to migration_quarantine, and its down
+// migration brings table and rows back.
 
 const (
 	quarOrgA   = "dddd4444-0000-4000-8000-000000000001"
@@ -34,6 +40,33 @@ const (
 	quarRelOK  = "dddd4444-0000-4000-8000-0000000000b1"
 	quarRel    = "dddd4444-0000-4000-8000-0000000000b2"
 )
+
+// composition000055 is the table composition as migration 000055 created it,
+// the state before the composite foreign keys of 000056.
+const composition000055 = `
+	CREATE TABLE composition (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		organization_id UUID NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+		parent_asset_id UUID NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+		child_ci_id UUID REFERENCES ci(id) ON DELETE CASCADE,
+		child_asset_id UUID REFERENCES asset(id) ON DELETE CASCADE,
+		role TEXT,
+		position TEXT,
+		configuration_only BOOLEAN NOT NULL DEFAULT true,
+		independently_serialized BOOLEAN NOT NULL DEFAULT false,
+		independently_assignable BOOLEAN NOT NULL DEFAULT false,
+		independently_locatable BOOLEAN NOT NULL DEFAULT false,
+		independently_lifecycle_managed BOOLEAN NOT NULL DEFAULT false,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		CONSTRAINT composition_child_check CHECK (
+			(child_ci_id IS NOT NULL AND child_asset_id IS NULL) OR
+			(child_ci_id IS NULL AND child_asset_id IS NOT NULL)
+		)
+	);
+	CREATE UNIQUE INDEX idx_composition_unique_child_ci ON composition(parent_asset_id, child_ci_id) WHERE child_ci_id IS NOT NULL;
+	CREATE UNIQUE INDEX idx_composition_unique_child_asset ON composition(parent_asset_id, child_asset_id) WHERE child_asset_id IS NOT NULL;
+	CREATE INDEX idx_composition_parent ON composition(parent_asset_id);`
 
 // migrationSection returns the text of a migration file from the line that
 // starts with begin up to, but excluding, the line that starts with end ("" =
@@ -114,14 +147,12 @@ func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 	exec("undo later references", dropLaterReferences)
 	exec("undo 000056 references", `
 		ALTER TABLE ci_relationship DISABLE TRIGGER ci_relationship_scope;
-		ALTER TABLE composition DROP CONSTRAINT composition_child_asset_tenant_fkey;
-		ALTER TABLE composition DROP CONSTRAINT composition_child_ci_tenant_fkey;
-		ALTER TABLE composition DROP CONSTRAINT composition_parent_tenant_fkey;
 		ALTER TABLE ci_relationship DROP CONSTRAINT ci_relationship_target_tenant_fkey;
 		ALTER TABLE ci_relationship DROP CONSTRAINT ci_relationship_source_tenant_fkey;
 		ALTER TABLE asset DROP CONSTRAINT asset_id_organization_key;
 		ALTER TABLE ci DROP CONSTRAINT ci_id_organization_key;
 		DROP TABLE migration_quarantine;`)
+	exec("composition of 000055", composition000055)
 
 	// Org A owns one consistent composition and relationship each, plus one
 	// composition and one relationship that point into org B.
@@ -229,10 +260,18 @@ func TestMigration56DownWithoutQuarantineTable(t *testing.T) {
 	}
 
 	// Legacy schema state at version 56: the composite keys of 000056
-	// exist, migration_quarantine does not, and the foreign keys of later
-	// migrations that depend on those keys do not exist yet either.
+	// exist (composition with its tenant keys, created here because 000253
+	// dropped it), migration_quarantine does not, and the foreign keys of
+	// later migrations that depend on those keys do not exist yet either.
 	if _, err = tx.Exec(ctx, dropLaterReferences+`
-		DROP TABLE migration_quarantine;`); err != nil {
+		DROP TABLE migration_quarantine;`+composition000055+`
+		ALTER TABLE composition
+			ADD CONSTRAINT composition_parent_tenant_fkey
+			FOREIGN KEY (parent_asset_id, organization_id) REFERENCES asset (id, organization_id) ON DELETE CASCADE,
+			ADD CONSTRAINT composition_child_ci_tenant_fkey
+			FOREIGN KEY (child_ci_id, organization_id) REFERENCES ci (id, organization_id) ON DELETE CASCADE,
+			ADD CONSTRAINT composition_child_asset_tenant_fkey
+			FOREIGN KEY (child_asset_id, organization_id) REFERENCES asset (id, organization_id) ON DELETE CASCADE;`); err != nil {
 		t.Fatalf("legacy schema state: %v", err)
 	}
 	const keys000056 = `SELECT count(*) FROM pg_constraint WHERE conname IN (
@@ -262,4 +301,128 @@ func TestMigration56DownWithoutQuarantineTable(t *testing.T) {
 	if n := count(`SELECT count(*) FROM composition`); n != compositions {
 		t.Errorf("composition rows after down = %d, want %d", n, compositions)
 	}
+}
+
+// TestMigration253DropSavesAndRestoresRows covers WP-743 (AST-05, E-26):
+// migration 000253 saves every composition row, role and position included,
+// and every set asset.parent_asset_id in migration_quarantine before it
+// drops the table, the cycle function and the column; its down migration
+// rebuilds them and restores the rows unchanged. The test brings the table
+// back with the down migration, seeds rows, then runs up and down again,
+// all in one transaction that is rolled back.
+func TestMigration253DropSavesAndRestoresRows(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	ctx := context.Background()
+	admin, err := database.NewMaintenancePool(ctx, dsn)
+	if err != nil {
+		t.Fatalf("maintenance pool: %v", err)
+	}
+	t.Cleanup(admin.Close)
+
+	tx, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	exec := func(step, sql string, args ...any) {
+		t.Helper()
+		if _, execErr := tx.Exec(ctx, sql, args...); execErr != nil {
+			t.Fatalf("%s: %v", step, execErr)
+		}
+	}
+	text := func(sql string, args ...any) string {
+		t.Helper()
+		var v *string
+		if scanErr := tx.QueryRow(ctx, sql, args...).Scan(&v); scanErr != nil {
+			t.Fatalf("%s: %v", sql, scanErr)
+		}
+		if v == nil {
+			return ""
+		}
+		return *v
+	}
+	migration := func(file string) string {
+		t.Helper()
+		raw, readErr := os.ReadFile("../../migrations/" + file)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", file, readErr)
+		}
+		return string(raw)
+	}
+	up, down := migration("000253_drop_composition.up.sql"), migration("000253_drop_composition.down.sql")
+
+	const (
+		org     = "dddd4444-0000-4000-8000-000000000253"
+		ciType  = "dddd4444-0000-4000-8000-0000000253e1"
+		childCI = "dddd4444-0000-4000-8000-0000000253c1"
+		parent  = "dddd4444-0000-4000-8000-0000000253a1"
+		child   = "dddd4444-0000-4000-8000-0000000253a2"
+		compCI  = "dddd4444-0000-4000-8000-0000000253f1"
+		compAst = "dddd4444-0000-4000-8000-0000000253f2"
+	)
+	const (
+		compositions = `SELECT jsonb_agg(to_jsonb(c) ORDER BY c.id)::text FROM composition c WHERE c.organization_id = $1`
+		parents      = `SELECT jsonb_agg(jsonb_build_object('id', a.id, 'parent_asset_id', a.parent_asset_id,
+			'version', a.version, 'updated_at', a.updated_at) ORDER BY a.id)::text FROM asset a WHERE a.organization_id = $1`
+		quarantined = `SELECT jsonb_agg(q.row_data ORDER BY q.row_data->>'id')::text FROM migration_quarantine q
+			WHERE q.migration = '000253' AND q.source_table = $2 AND q.organization_id = $1`
+	)
+
+	exec("000253 down (composition back)", down)
+	for _, s := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO organization (id, name, slug) VALUES ($1, 'Drop 253', 'quarantine-253')`, []any{org}},
+		{`INSERT INTO ci_type (id, organization_id, key, name) VALUES ($1, $2, 'quarantine-253', 'Server')`, []any{ciType, org}},
+		{`INSERT INTO ci (id, organization_id, ci_type_id, name) VALUES ($1, $2, $3, 'child-ci')`, []any{childCI, org, ciType}},
+		{`INSERT INTO asset (id, organization_id, asset_tag, name) VALUES ($1, $3, 'Q253-P', 'parent'), ($2, $3, 'Q253-C', 'child')`, []any{parent, child, org}},
+		{`UPDATE asset SET parent_asset_id = $1 WHERE id = $2`, []any{parent, child}},
+		{`INSERT INTO composition (id, organization_id, parent_asset_id, child_ci_id, role, position)
+			VALUES ($1, $2, $3, $4, 'psu', 'slot 2')`, []any{compCI, org, parent, childCI}},
+		{`INSERT INTO composition (id, organization_id, parent_asset_id, child_asset_id, configuration_only, independently_locatable)
+			VALUES ($1, $2, $3, $4, false, true)`, []any{compAst, org, parent, child}},
+	} {
+		exec("seed", s.sql, s.args...)
+	}
+	compsBefore, parentsBefore := text(compositions, org), text(parents, org)
+	if compsBefore == "" || parentsBefore == "" {
+		t.Fatal("seed rows missing")
+	}
+
+	exec("000253 up", up)
+	if got := text(quarantined, org, "composition"); got != compsBefore {
+		t.Errorf("quarantined composition rows = %s, want %s", got, compsBefore)
+	}
+	wantAsset := text(`SELECT jsonb_build_array(jsonb_build_object('id', $1::uuid, 'parent_asset_id', $2::uuid))::text`, child, parent)
+	if got := text(quarantined, org, "asset"); got != wantAsset {
+		t.Errorf("quarantined asset values = %s, want %s", got, wantAsset)
+	}
+	if got := text(`SELECT concat_ws(',', to_regclass('composition')::text,
+		to_regprocedure('reject_composition_cycle()')::text,
+		(SELECT attname::text FROM pg_attribute WHERE attrelid = 'asset'::regclass AND attname = 'parent_asset_id' AND NOT attisdropped))`); got != "" {
+		t.Errorf("objects left after 000253 up: %s", got)
+	}
+
+	exec("000253 down", down)
+	if got := text(compositions, org); got != compsBefore {
+		t.Errorf("composition rows after down = %s, want %s", got, compsBefore)
+	}
+	if got := text(parents, org); got != parentsBefore {
+		t.Errorf("asset rows after down = %s, want %s", got, parentsBefore)
+	}
+	if got := text(`SELECT count(*)::text FROM migration_quarantine WHERE migration = '000253'`); got != "0" {
+		t.Errorf("quarantine entries of 000253 after down = %s, want 0", got)
+	}
+	// The rebuilt cycle trigger refuses a cycle again.
+	exec("savepoint", `SAVEPOINT cycle`)
+	if _, err = tx.Exec(ctx, `INSERT INTO composition (organization_id, parent_asset_id, child_asset_id) VALUES ($1, $2, $3)`,
+		org, child, parent); err == nil {
+		t.Error("cycle parent -> child -> parent accepted after down")
+	}
+	exec("rollback to savepoint", `ROLLBACK TO SAVEPOINT cycle`)
 }
