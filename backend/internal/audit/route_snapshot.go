@@ -418,7 +418,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/iga/jml-policies":            "iga_lifecycle_policy",
 		"POST /api/v1/relationship-types":          "relationship_type",
 		"POST /api/v1/reservations":                "reservation",
-		"POST /api/v1/stock-movements":             "asset_movement",
+		"POST /api/v1/stock-movements":             "stock_movement",
 		"POST /api/v1/stocktakes/{id}/scans":       "stock_scan",
 		"POST /api/v1/subnets/{id}/reservations":   "ip_address",
 		"POST /api/v1/teams/{id}/members":          "team_member",

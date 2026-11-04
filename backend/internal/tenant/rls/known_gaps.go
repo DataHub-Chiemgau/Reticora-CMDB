@@ -93,7 +93,7 @@ type DerivedScope struct {
 // only shrinks.
 var DerivedScopeTables = map[string]DerivedScope{
 	"asset_movement": {
-		Path: "asset_id -> asset, quantity_item_id -> quantity_item (movement.movementVisible)",
+		Path: "asset_id -> asset, quantity_item_id -> quantity_item (no reader since WP-744; the ledger stock_movement carries client_id and site_id)",
 		Reason: "a movement belongs to its item; from_location_id and to_location_id are history, " +
 			"the visibility follows the item's client and site",
 		TestFile: "internal/movement/movement_scope_integration_test.go", TestName: "TestMovementRepositoryClientScope",
@@ -381,8 +381,6 @@ const (
 		"rest of SR-03, fixed before GA (E-137, WP-329)"
 	refWP274Movement = "asset_movement is replaced by the ledger stock_movement (WP-274, K19); " +
 		"the successor references with the organization"
-	refWP274Stock = "the former stock_movement is replaced by the ledger of WP-274 (K19); " +
-		"the successor references with the organization"
 	refWP275 = "assignment is replaced by the assignment service over stock_movement (WP-275, K19); " +
 		"the successor references with the organization"
 	refWP287 = "stock_scan is replaced by the stocktake scans of WP-287 (K19); " +
@@ -508,7 +506,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"service_account_role.role_id":                   {Constraint: "service_account_role_role_id_fkey", Target: "role", Reason: refG1},
 	"service_account_role.scope_site_id":             {Constraint: "service_account_role_scope_site_id_fkey", Target: "site", Reason: refG1},
 	"site.id":                                        {Constraint: "site_location_fkey", Target: "location", Reason: refLocationNode},
-	"stock_movement.consumable_id":                   {Constraint: "stock_movement_consumable_id_fkey", Target: "consumable", Reason: refWP274Stock},
 	"stock_scan.asset_id":                            {Constraint: "stock_scan_asset_id_fkey", Target: "asset", Reason: refWP287},
 	"stock_scan.ci_id":                               {Constraint: "stock_scan_ci_id_fkey", Target: "ci", Reason: refWP287},
 	"stock_scan.scanned_by":                          {Constraint: "stock_scan_scanned_by_fkey", Target: "app_user", Reason: refWP287},

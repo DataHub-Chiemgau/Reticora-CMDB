@@ -56,7 +56,10 @@ var dependencies = []dependency{
 	{DependencyCI, `EXISTS (SELECT 1 FROM ci WHERE ci.location_id = $1)`},
 	{DependencyAsset, `EXISTS (SELECT 1 FROM asset a WHERE a.location_id = $1)`},
 	{DependencyQuantityItem, `EXISTS (SELECT 1 FROM quantity_item q WHERE q.location_id = $1)`},
-	{DependencyAssetMovement, `EXISTS (SELECT 1 FROM asset_movement m WHERE m.from_location_id = $1 OR m.to_location_id = $1)`},
+	// Movements of the ledger stock_movement count under the kind of the
+	// former asset_movement until WP-842 drops it (WP-744).
+	{DependencyAssetMovement, `(EXISTS (SELECT 1 FROM asset_movement m WHERE m.from_location_id = $1 OR m.to_location_id = $1)
+		OR EXISTS (SELECT 1 FROM stock_movement m WHERE m.from_location_id = $1 OR m.to_location_id = $1))`},
 	{DependencyRackMount, `EXISTS (SELECT 1 FROM rack_mount rm WHERE rm.rack_id = $1)`},
 	{DependencyRoleAssignment, `EXISTS (SELECT 1 FROM role_assignment ra WHERE ra.scope_site_id = $1)`},
 	{DependencyCIAttribute, ciAttributeReference},
@@ -125,6 +128,8 @@ var referenceKinds = map[string]string{
 	"room":                 DependencyLocation,
 	"rack":                 DependencyLocation,
 	"service_account_role": DependencyRoleAssignment,
+	// The ledger reports the kind of the former asset_movement (WP-744).
+	"stock_movement": DependencyAssetMovement,
 }
 
 // DependencyError reports the kinds of objects that still reference a

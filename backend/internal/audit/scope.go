@@ -135,7 +135,7 @@ var resourceTables = map[string][]string{
 	"sites":                     {"site"},
 	"slas":                      {"sla"},
 	"business-calendars":        {"business_calendar"},
-	"stock-movements":           {"asset_movement"},
+	"stock-movements":           {"stock_movement"},
 	"stocktakes":                {"stocktake"},
 	"subnets":                   {"subnet"},
 	"suppliers":                 {"supplier"},
@@ -189,15 +189,19 @@ var orgResources = map[string]bool{
 // (or not all of them), the columns naming rows that do: the row is
 // visible only when every row it names is.
 var scopeParents = map[string]map[string]string{
-	"asset_location": {"asset_id": "asset"},
-	"asset_movement": {"asset_id": "asset", "quantity_item_id": "quantity_item", "from_location_id": "location",
-		"to_location_id": "location", "ticket_id": "ticket", "order_id": "internal_order", "document_id": "document"},
+	"asset_location":  {"asset_id": "asset"},
 	"assignment":      {"asset_id": "asset", "ci_id": "ci"},
 	"building":        {"site_id": "site"},
 	"cable":           {"source_interface_id": "network_interface", "target_interface_id": "network_interface"},
 	"composition":     {"parent_asset_id": "asset", "child_ci_id": "ci", "child_asset_id": "asset"},
 	"reservation":     {"asset_id": "asset", "quantity_item_id": "quantity_item", "ticket_id": "ticket", "order_id": "internal_order"},
 	"role_assignment": {"scope_client_id": "client", "scope_site_id": "site"},
+	// The policy of the ledger filters client and site of the booking
+	// (WP-744); the referenced objects must be visible as well, as for
+	// asset_movement before.
+	"stock_movement": {"asset_id": "asset", "consumable_id": "consumable", "quantity_item_id": "quantity_item",
+		"from_location_id": "location", "to_location_id": "location", "ticket_id": "ticket", "order_id": "internal_order",
+		"document_id": "document"},
 }
 
 // scopedGrants are the tables whose scope_type and scope_id name the client

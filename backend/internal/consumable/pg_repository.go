@@ -31,11 +31,6 @@ func scanConsumable(s pgx.Row) (*Consumable, error) {
 	return c, nil
 }
 
-// stockMovementVisible restricts stock movements to visible consumables: the
-// consumable policy filters the subquery, while stock_movement carries no
-// client column yet (WP-025).
-const stockMovementVisible = "EXISTS (SELECT 1 FROM consumable WHERE consumable.id = stock_movement.consumable_id)"
-
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Consumable, int, error) {
 	out := []Consumable{}
 	var total int
@@ -195,11 +190,18 @@ func (r *PGRepository) AddMovement(ctx context.Context, m *Movement) (*Consumabl
 		if c.StockLevel+delta < 0 {
 			return fmt.Errorf("insufficient stock")
 		}
+		// The ledger stock_movement (WP-744) books in as receipt and out as
+		// retrieval, the reference as notes; its trigger derives the client
+		// of the consumable, and the policy refuses a row outside the scope.
+		movementType := "receipt"
+		if m.Direction == "out" {
+			movementType = "retrieval"
+		}
 		if insertErr := tx.QueryRow(ctx, `
-			INSERT INTO stock_movement (organization_id, consumable_id, direction, quantity, reason, reference, actor_id)
-			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7,'')::uuid)
+			INSERT INTO stock_movement (organization_id, item_kind, consumable_id, movement_type, quantity, reason, notes, actor_id)
+			VALUES ($1, 'consumable', $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7,'')::uuid)
 			RETURNING id::text, created_at
-		`, m.OrganizationID, m.ConsumableID, m.Direction, m.Quantity, m.Reason, m.Reference, m.ActorID).
+		`, m.OrganizationID, m.ConsumableID, movementType, m.Quantity, m.Reason, m.Reference, m.ActorID).
 			Scan(&m.ID, &m.CreatedAt); insertErr != nil {
 			return insertErr
 		}
@@ -213,16 +215,21 @@ func (r *PGRepository) ListMovements(ctx context.Context, orgID, consumableID st
 	out := []Movement{}
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1"
+		// The consumable movements of the ledger; the policy of
+		// stock_movement applies the caller's client and site scope.
+		where := "organization_id = $1 AND item_kind = 'consumable'"
 		args := []any{orgID}
 		if consumableID != "" {
 			where += " AND consumable_id = $2"
 			args = append(args, consumableID)
 		}
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_movement WHERE "+stockMovementVisible+" AND "+where, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_movement WHERE "+where, args...).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, consumable_id::text, direction, quantity, COALESCE(reason,''), COALESCE(reference,''), COALESCE(actor_id::text,''), created_at FROM stock_movement WHERE `+stockMovementVisible+` AND `+where+fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), append(args, page.Limit, page.Offset)...)
+		rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, consumable_id::text,
+			CASE movement_type WHEN 'receipt' THEN 'in' ELSE 'out' END, quantity, COALESCE(reason,''), COALESCE(notes,''),
+			COALESCE(actor_id::text,''), created_at FROM stock_movement WHERE `+where+
+			fmt.Sprintf(" ORDER BY occurred_at DESC, created_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), append(args, page.Limit, page.Offset)...)
 		if err != nil {
 			return err
 		}

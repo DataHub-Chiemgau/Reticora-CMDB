@@ -200,8 +200,8 @@ func Seed(t *testing.T, tag string) *Fixture {
 }
 
 // appendOnlyTables refuse UPDATE and DELETE through a trigger (migrations
-// 000049, 000055, 000056).
-var appendOnlyTables = []string{"audit_log", "asset_movement", "disposal_record"}
+// 000049, 000055, 000056, 000242).
+var appendOnlyTables = []string{"audit_log", "asset_movement", "stock_movement", "disposal_record"}
 
 // deleteAppendOnly removes the fixture rows of the append-only tables under
 // session_replication_role = replica, which skips their guard triggers.

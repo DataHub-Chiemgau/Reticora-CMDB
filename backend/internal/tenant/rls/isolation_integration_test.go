@@ -58,7 +58,7 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 
 	// asset.organization_id is NO ACTION rather than ON DELETE CASCADE, so the
 	// fixture tears its rows down explicitly, child tables first.
-	// The append-only guards on audit_log and asset_movement deliberately block
+	// The append-only guards on audit_log, asset_movement and stock_movement deliberately block
 	// deletion, so their rows are removed under session_replication_role =
 	// replica, which skips triggers for this session only and therefore cannot
 	// race with other packages sharing the database. Everything else is
@@ -76,7 +76,7 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 			t.Errorf("lift append-only guards: %v", err)
 			return
 		}
-		for _, table := range []string{"asset_movement", "audit_log"} {
+		for _, table := range []string{"asset_movement", "stock_movement", "audit_log"} {
 			if _, err := conn.Exec(ctx,
 				`DELETE FROM `+table+` WHERE organization_id IN ($1::uuid, $2::uuid)`, orgA, orgB); err != nil {
 				t.Errorf("cleanup %s: %v", table, err)
@@ -305,5 +305,33 @@ func TestAssetMovementIsAppendOnly(t *testing.T) {
 	if _, err := pool.Exec(ctx,
 		`DELETE FROM asset_movement WHERE organization_id = $1`, orgA); err == nil {
 		t.Fatal("expected asset_movement DELETE to be rejected")
+	}
+}
+
+// TestStockMovementIsAppendOnly asserts the canonical ledger (WP-744,
+// migration 000242) cannot be rewritten: UPDATE and DELETE fail for the
+// application role, the booked row stays.
+func TestStockMovementIsAppendOnly(t *testing.T) {
+	dsn := testDatabaseURL(t)
+	ctx := context.Background()
+	seed(t, ctx, dsn)
+	pool := scoped(t, ctx, orgA)
+
+	var id string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type)
+		 VALUES ($1, 'asset', $2, 'receipt') RETURNING id::text`, orgA, assetA).Scan(&id); err != nil {
+		t.Fatalf("record movement: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`UPDATE stock_movement SET movement_type = 'disposal' WHERE id = $1`, id); err == nil {
+		t.Fatal("expected stock_movement UPDATE to be rejected")
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM stock_movement WHERE id = $1`, id); err == nil {
+		t.Fatal("expected stock_movement DELETE to be rejected")
+	}
+	var movementType string
+	if err := pool.QueryRow(ctx, `SELECT movement_type FROM stock_movement WHERE id = $1`, id).Scan(&movementType); err != nil || movementType != "receipt" {
+		t.Fatalf("movement after the refused writes: %q, %v; want receipt", movementType, err)
 	}
 }

@@ -1410,3 +1410,5 @@ OVR-03;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304
 UI-11;[P2];C;frontend/src/components/metamodel/MigrateDialog.test.tsx;WP-800
 AST-03;[P2];B;backend/internal/discovery/asset_link_integration_test.go;WP-741
 AST-04;[P2];B;backend/internal/discovery/asset_link_integration_test.go;WP-741
+STK-04;[P2];B;backend/internal/movement/movement_integration_test.go;WP-744
+AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-744
